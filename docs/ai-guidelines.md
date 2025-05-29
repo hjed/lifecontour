@@ -2,7 +2,7 @@
 
 ## Project Context
 
-This document provides guidelines for AI assistants working on the Personal CRM & Journal System. The system is a TypeScript/Node.js application that integrates personal data from multiple sources and provides both MCP (Model Context Protocol) and web interfaces. It uses JSON API standard for REST endpoints, Jest for testing, includes contact tags with Google sync, album integration with journal entries and events, name-based person matching, and nginx proxy support.
+This document provides guidelines for AI assistants working on the Personal CRM & Journal System. The system is a TypeScript/Node.js 24 application that integrates personal data from multiple sources and provides both MCP (Model Context Protocol) and web interfaces. It uses JSON API standard for REST endpoints, comprehensive testing with Jest/Storybook/Playwright, Tailwind CSS for styling, Australian English localisation, contact tags with Google sync, album integration with journal entries and events, name-based person matching, and nginx proxy support.
 
 ### Key Principles
 1. **Privacy First**: All personal data stays local unless explicitly synced
@@ -68,6 +68,797 @@ export class GoogleIntegrationService {
     }
   }
 }
+```
+
+## Testing Strategy
+
+### Three-Layer Testing Approach
+
+**1. Unit Tests (Jest)**
+```typescript
+// contacts/domain/entities/__tests__/Contact.test.ts
+import { Contact } from '../Contact';
+import { Email } from '../value-objects/Email';
+
+describe('Contact Entity', () => {
+  it('should create contact with valid email', () => {
+    const email = Email.create('john@example.com');
+    const contact = Contact.create({
+      name: 'John Smith',
+      email: email.getValue()
+    });
+
+    expect(contact.isSuccess()).toBe(true);
+    expect(contact.getValue().getName()).toBe('John Smith');
+  });
+
+  it('should reject invalid email format', () => {
+    const email = Email.create('invalid-email');
+    expect(email.isFailure()).toBe(true);
+  });
+});
+```
+
+**2. Component Tests (Storybook with shadcn/ui)**
+```typescript
+// components/ContactCard.stories.ts
+import type { Meta, StoryObj } from '@storybook/react';
+import { within, userEvent, expect } from '@storybook/test';
+import { ContactCard } from './ContactCard';
+
+const meta: Meta<typeof ContactCard> = {
+  title: 'Components/ContactCard',
+  component: ContactCard,
+  parameters: {
+    layout: 'centered',
+    docs: {
+      description: {
+        component: 'A contact card component built with shadcn/ui components, featuring Australian localisation and accessibility support.',
+      },
+    },
+  },
+  tags: ['autodocs'],
+  argTypes: {
+    onEdit: { action: 'edit' },
+    onDelete: { action: 'delete' },
+  },
+};
+
+export default meta;
+type Story = StoryObj<typeof meta>;
+
+export const Default: Story = {
+  args: {
+    contact: {
+      id: '1',
+      name: 'Sarah Wilson',
+      email: 'sarah@example.com',
+      phone: '0400 123 456',
+      company: 'Melbourne Tech Solutions',
+      tags: [
+        { id: '1', name: 'Work', colour: '#3b82f6' },
+        { id: '2', name: 'Important', colour: '#ef4444' },
+      ],
+    },
+  },
+};
+
+export const WithManyTags: Story = {
+  args: {
+    contact: {
+      id: '2',
+      name: 'James Chen',
+      email: 'james@startup.com.au',
+      phone: '0412 987 654',
+      company: 'Sydney Innovation Hub',
+      tags: [
+        { id: '1', name: 'Family', colour: '#10b981' },
+        { id: '2', name: 'Sydney', colour: '#f59e0b' },
+        { id: '3', name: 'Photography', colour: '#8b5cf6' },
+        { id: '4', name: 'Travel', colour: '#06b6d4' },
+        { id: '5', name: 'Work', colour: '#3b82f6' },
+      ],
+    },
+  },
+};
+
+export const MinimalContact: Story = {
+  args: {
+    contact: {
+      id: '3',
+      name: 'Alex Thompson',
+      tags: [],
+    },
+  },
+};
+
+// Interaction testing with shadcn/ui components
+export const InteractiveCard: Story = {
+  args: Default.args,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+
+    // Test dropdown menu interaction
+    const menuButton = canvas.getByRole('button', { name: /open menu/i });
+    await userEvent.click(menuButton);
+
+    // Verify menu items appear
+    await expect(canvas.getByText('Edit Contact')).toBeInTheDocument();
+    await expect(canvas.getByText('Move to Bin')).toBeInTheDocument();
+
+    // Test edit action
+    const editButton = canvas.getByText('Edit Contact');
+    await userEvent.click(editButton);
+  },
+};
+
+// Accessibility testing
+export const AccessibilityTest: Story = {
+  args: Default.args,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+
+    // Test keyboard navigation
+    const menuButton = canvas.getByRole('button', { name: /open menu/i });
+    menuButton.focus();
+    await userEvent.keyboard('{Enter}');
+
+    // Verify ARIA attributes
+    expect(menuButton).toHaveAttribute('aria-expanded');
+
+    // Test screen reader content
+    const srText = canvas.getByText('Open menu');
+    expect(srText).toHaveClass('sr-only');
+  },
+};
+```
+
+**3. End-to-End Tests (Playwright)**
+```typescript
+// tests/e2e/contact-management.spec.ts
+import { test, expect } from '@playwright/test';
+
+test.describe('Contact Management', () => {
+  test('should create and manage contact with tags', async ({ page }) => {
+    await page.goto('/contacts');
+
+    // Create new contact
+    await page.click('[data-testid="add-contact-button"]');
+    await page.fill('[data-testid="contact-name"]', 'Sarah Wilson');
+    await page.fill('[data-testid="contact-email"]', 'sarah@example.com');
+
+    // Add tags
+    await page.click('[data-testid="add-tag-button"]');
+    await page.fill('[data-testid="tag-input"]', 'Work');
+    await page.press('[data-testid="tag-input"]', 'Enter');
+
+    await page.click('[data-testid="save-contact"]');
+
+    // Verify contact appears in list
+    await expect(page.locator('[data-testid="contact-list"]')).toContainText('Sarah Wilson');
+    await expect(page.locator('[data-testid="contact-tags"]')).toContainText('Work');
+
+    // Test Australian date formatting
+    const dateElement = page.locator('[data-testid="contact-created-date"]');
+    await expect(dateElement).toMatch(/\d{2}\/\d{2}\/\d{4}/); // DD/MM/YYYY format
+  });
+});
+```
+
+## Frontend Development Standards
+
+### shadcn/ui Component Guidelines
+
+**Use shadcn/ui components with proper TypeScript integration:**
+```typescript
+// components/ContactCard.tsx
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { MoreHorizontal, Mail, Phone, Building } from 'lucide-react';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+
+interface ContactCardProps {
+  contact: Contact;
+  onEdit: (contact: Contact) => void;
+  onDelete: (contact: Contact) => void;
+}
+
+export function ContactCard({ contact, onEdit, onDelete }: ContactCardProps) {
+  return (
+    <Card className="w-full">
+      <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+        <div className="space-y-1">
+          <CardTitle className="text-lg">{contact.name}</CardTitle>
+          {contact.company && (
+            <CardDescription className="flex items-center gap-1">
+              <Building className="h-3 w-3" />
+              {contact.company}
+            </CardDescription>
+          )}
+        </div>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button variant="ghost" className="h-8 w-8 p-0">
+              <MoreHorizontal className="h-4 w-4" />
+              <span className="sr-only">Open menu</span>
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuItem onClick={() => onEdit(contact)}>
+              Edit Contact
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              onClick={() => onDelete(contact)}
+              className="text-destructive"
+            >
+              Move to Bin
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </CardHeader>
+
+      <CardContent className="space-y-3">
+        {contact.email && (
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <Mail className="h-3 w-3" />
+            {contact.email}
+          </div>
+        )}
+
+        {contact.phone && (
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <Phone className="h-3 w-3" />
+            {contact.phone}
+          </div>
+        )}
+
+        {contact.tags.length > 0 && (
+          <div className="flex flex-wrap gap-1">
+            {contact.tags.map((tag) => (
+              <Badge
+                key={tag.id}
+                variant="secondary"
+                className="text-xs"
+                style={{ backgroundColor: tag.colour }}
+              >
+                {tag.name}
+              </Badge>
+            ))}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+```
+
+**Form components with shadcn/ui and Zod validation:**
+```typescript
+// components/ContactForm.tsx
+import { zodResolver } from '@hookform/resolvers/zod';
+import { useForm } from 'react-hook-form';
+import { z } from 'zod';
+import { Button } from '@/components/ui/button';
+import {
+  Form,
+  FormControl,
+  FormDescription,
+  FormField,
+  FormItem,
+  FormLabel,
+  FormMessage,
+} from '@/components/ui/form';
+import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import { Badge } from '@/components/ui/badge';
+import { X } from 'lucide-react';
+
+const contactFormSchema = z.object({
+  name: z.string().min(1, 'Name is required').max(255),
+  email: z.string().email('Invalid email address').optional().or(z.literal('')),
+  phone: z.string().optional(),
+  company: z.string().optional(),
+  notes: z.string().optional(),
+  tags: z.array(z.string()).default([]),
+});
+
+type ContactFormValues = z.infer<typeof contactFormSchema>;
+
+interface ContactFormProps {
+  contact?: Contact;
+  availableTags: Tag[];
+  onSubmit: (values: ContactFormValues) => void;
+  onCancel: () => void;
+}
+
+export function ContactForm({ contact, availableTags, onSubmit, onCancel }: ContactFormProps) {
+  const form = useForm<ContactFormValues>({
+    resolver: zodResolver(contactFormSchema),
+    defaultValues: {
+      name: contact?.name ?? '',
+      email: contact?.email ?? '',
+      phone: contact?.phone ?? '',
+      company: contact?.company ?? '',
+      notes: contact?.notes ?? '',
+      tags: contact?.tags.map(t => t.id) ?? [],
+    },
+  });
+
+  const selectedTags = form.watch('tags');
+
+  const addTag = (tagId: string) => {
+    if (!selectedTags.includes(tagId)) {
+      form.setValue('tags', [...selectedTags, tagId]);
+    }
+  };
+
+  const removeTag = (tagId: string) => {
+    form.setValue('tags', selectedTags.filter(id => id !== tagId));
+  };
+
+  return (
+    <Form {...form}>
+      <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
+        <FormField
+          control={form.control}
+          name="name"
+          render={({ field }) => (
+            <FormItem>
+              <FormLabel>Name</FormLabel>
+              <FormControl>
+                <Input placeholder="Enter contact name" {...field} />
+              </FormControl>
+              <FormMessage />
+            </FormItem>
+          )}
+        />
+
+        <FormField
+          control={form.control}
+          name="email"
+          render={({ field }) => (
+            <FormItem>
+              <FormLabel>Email Address</FormLabel>
+              <FormControl>
+                <Input
+                  type="email"
+                  placeholder="contact@example.com"
+                  {...field}
+                />
+              </FormControl>
+              <FormMessage />
+            </FormItem>
+          )}
+        />
+
+        <FormField
+          control={form.control}
+          name="phone"
+          render={({ field }) => (
+            <FormItem>
+              <FormLabel>Phone Number</FormLabel>
+              <FormControl>
+                <Input
+                  type="tel"
+                  placeholder="0400 000 000"
+                  {...field}
+                />
+              </FormControl>
+              <FormDescription>
+                Australian mobile or landline number
+              </FormDescription>
+              <FormMessage />
+            </FormItem>
+          )}
+        />
+
+        <FormField
+          control={form.control}
+          name="company"
+          render={({ field }) => (
+            <FormItem>
+              <FormLabel>Organisation</FormLabel>
+              <FormControl>
+                <Input placeholder="Company or organisation name" {...field} />
+              </FormControl>
+              <FormMessage />
+            </FormItem>
+          )}
+        />
+
+        <div className="space-y-3">
+          <FormLabel>Tags</FormLabel>
+          <Select onValueChange={addTag}>
+            <SelectTrigger>
+              <SelectValue placeholder="Add a tag" />
+            </SelectTrigger>
+            <SelectContent>
+              {availableTags
+                .filter(tag => !selectedTags.includes(tag.id))
+                .map((tag) => (
+                  <SelectItem key={tag.id} value={tag.id}>
+                    <div className="flex items-center gap-2">
+                      <div
+                        className="h-3 w-3 rounded-full"
+                        style={{ backgroundColor: tag.colour }}
+                      />
+                      {tag.name}
+                    </div>
+                  </SelectItem>
+                ))}
+            </SelectContent>
+          </Select>
+
+          {selectedTags.length > 0 && (
+            <div className="flex flex-wrap gap-2">
+              {selectedTags.map((tagId) => {
+                const tag = availableTags.find(t => t.id === tagId);
+                if (!tag) return null;
+
+                return (
+                  <Badge
+                    key={tag.id}
+                    variant="secondary"
+                    className="flex items-center gap-1"
+                    style={{ backgroundColor: tag.colour }}
+                  >
+                    {tag.name}
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="h-auto p-0 text-inherit hover:bg-transparent"
+                      onClick={() => removeTag(tag.id)}
+                    >
+                      <X className="h-3 w-3" />
+                    </Button>
+                  </Badge>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        <FormField
+          control={form.control}
+          name="notes"
+          render={({ field }) => (
+            <FormItem>
+              <FormLabel>Notes</FormLabel>
+              <FormControl>
+                <Textarea
+                  placeholder="Additional notes about this contact"
+                  className="resize-none"
+                  {...field}
+                />
+              </FormControl>
+              <FormMessage />
+            </FormItem>
+          )}
+        />
+
+        <div className="flex justify-end gap-3">
+          <Button type="button" variant="outline" onClick={onCancel}>
+            Cancel
+          </Button>
+          <Button type="submit">
+            {contact ? 'Update Contact' : 'Create Contact'}
+          </Button>
+        </div>
+      </form>
+    </Form>
+  );
+}
+```
+
+### Tailwind CSS Guidelines
+
+**shadcn/ui theme customisation for Australian preferences:**
+```typescript
+// tailwind.config.js
+import type { Config } from 'tailwindcss';
+
+const config: Config = {
+  darkMode: ['class'],
+  content: [
+    './pages/**/*.{ts,tsx}',
+    './components/**/*.{ts,tsx}',
+    './app/**/*.{ts,tsx}',
+    './src/**/*.{ts,tsx}',
+  ],
+  theme: {
+    container: {
+      center: true,
+      padding: '2rem',
+      screens: {
+        '2xl': '1400px',
+      },
+    },
+    extend: {
+      colors: {
+        border: 'hsl(var(--border))',
+        input: 'hsl(var(--input))',
+        ring: 'hsl(var(--ring))',
+        background: 'hsl(var(--background))',
+        foreground: 'hsl(var(--foreground))',
+        primary: {
+          DEFAULT: 'hsl(var(--primary))',
+          foreground: 'hsl(var(--primary-foreground))',
+        },
+        secondary: {
+          DEFAULT: 'hsl(var(--secondary))',
+          foreground: 'hsl(var(--secondary-foreground))',
+        },
+        destructive: {
+          DEFAULT: 'hsl(var(--destructive))',
+          foreground: 'hsl(var(--destructive-foreground))',
+        },
+        muted: {
+          DEFAULT: 'hsl(var(--muted))',
+          foreground: 'hsl(var(--muted-foreground))',
+        },
+        accent: {
+          DEFAULT: 'hsl(var(--accent))',
+          foreground: 'hsl(var(--accent-foreground))',
+        },
+        popover: {
+          DEFAULT: 'hsl(var(--popover))',
+          foreground: 'hsl(var(--popover-foreground))',
+        },
+        card: {
+          DEFAULT: 'hsl(var(--card))',
+          foreground: 'hsl(var(--card-foreground))',
+        },
+        // Australian-themed colours
+        'aussie-gold': '#FFD700',
+        'aussie-green': '#00A86B',
+        'aussie-blue': '#0047AB',
+      },
+      borderRadius: {
+        lg: 'var(--radius)',
+        md: 'calc(var(--radius) - 2px)',
+        sm: 'calc(var(--radius) - 4px)',
+      },
+      keyframes: {
+        'accordion-down': {
+          from: { height: '0' },
+          to: { height: 'var(--radix-accordion-content-height)' },
+        },
+        'accordion-up': {
+          from: { height: 'var(--radix-accordion-content-height)' },
+          to: { height: '0' },
+        },
+      },
+      animation: {
+        'accordion-down': 'accordion-down 0.2s ease-out',
+        'accordion-up': 'accordion-up 0.2s ease-out',
+      },
+    },
+  },
+  plugins: [require('tailwindcss-animate')],
+} satisfies Config;
+
+export default config;
+```
+
+**Storybook integration with shadcn/ui:**
+```typescript
+// components/ContactCard.stories.ts
+import type { Meta, StoryObj } from '@storybook/react';
+import { ContactCard } from './ContactCard';
+
+const meta: Meta<typeof ContactCard> = {
+  title: 'Components/ContactCard',
+  component: ContactCard,
+  parameters: {
+    layout: 'centered',
+  },
+  tags: ['autodocs'],
+  argTypes: {
+    onEdit: { action: 'edit' },
+    onDelete: { action: 'delete' },
+  },
+};
+
+export default meta;
+type Story = StoryObj<typeof meta>;
+
+export const Default: Story = {
+  args: {
+    contact: {
+      id: '1',
+      name: 'Sarah Wilson',
+      email: 'sarah@example.com',
+      phone: '0400 123 456',
+      company: 'Melbourne Tech Solutions',
+      tags: [
+        { id: '1', name: 'Work', colour: '#3b82f6' },
+        { id: '2', name: 'Melbourne', colour: '#10b981' },
+      ],
+    },
+  },
+};
+
+export const WithManyTags: Story = {
+  args: {
+    contact: {
+      id: '2',
+      name: 'James Chen',
+      email: 'james@startup.com.au',
+      phone: '0412 987 654',
+      company: 'Sydney Innovation Hub',
+      tags: [
+        { id: '1', name: 'Work', colour: '#3b82f6' },
+        { id: '2', name: 'Sydney', colour: '#f59e0b' },
+        { id: '3', name: 'Startup', colour: '#8b5cf6' },
+        { id: '4', name: 'Tech', colour: '#06b6d4' },
+        { id: '5', name: 'Important', colour: '#ef4444' },
+      ],
+    },
+  },
+};
+
+export const MinimalContact: Story = {
+  args: {
+    contact: {
+      id: '3',
+      name: 'Alex Thompson',
+      tags: [],
+    },
+  },
+};
+```
+
+**Responsive design with mobile-first approach:**
+```typescript
+// Use Tailwind's responsive prefixes
+<div className="
+  grid grid-cols-1 gap-4
+  sm:grid-cols-2 sm:gap-6
+  lg:grid-cols-3 lg:gap-8
+  xl:grid-cols-4
+">
+  {contacts.map(contact => (
+    <ContactCard key={contact.id} contact={contact} />
+  ))}
+</div>
+```
+
+**Dark mode support:**
+```typescript
+// tailwind.config.js
+module.exports = {
+  darkMode: 'class', // Enable class-based dark mode
+  theme: {
+    extend: {
+      colors: {
+        border: 'hsl(var(--border))',
+        background: 'hsl(var(--background))',
+        foreground: 'hsl(var(--foreground))',
+        // ... other semantic colours
+      }
+    }
+  }
+};
+
+// Use semantic colour classes
+<div className="bg-background text-foreground border-border">
+  <h1 className="text-primary">Welcome</h1>
+  <p className="text-muted-foreground">Subtitle text</p>
+</div>
+```
+
+### Australian English Localisation
+
+**Set up react-intl with Australian locale:**
+```typescript
+// lib/i18n.ts
+import { createIntl, createIntlCache } from 'react-intl';
+import { enAU } from 'date-fns/locale';
+
+// Australian English messages
+const messages = {
+  'contact.create.title': 'Create Contact',
+  'contact.edit.title': 'Edit Contact',
+  'contact.delete.confirm': 'Are you sure you want to delete this contact?',
+  'contact.tags.label': 'Tags',
+  'contact.email.label': 'Email Address',
+  'contact.phone.label': 'Phone Number',
+  'contact.company.label': 'Organisation', // Australian spelling
+  'contact.notes.label': 'Notes',
+  'date.created': 'Created on {date}',
+  'date.updated': 'Last updated on {date}',
+  'sync.status.syncing': 'Synchronising...', // Australian spelling
+  'sync.status.complete': 'Synchronisation complete',
+  'colour.picker.label': 'Choose Colour', // Australian spelling
+};
+
+const cache = createIntlCache();
+export const intl = createIntl({
+  locale: 'en-AU',
+  messages,
+}, cache);
+```
+
+**Australian date and time formatting:**
+```typescript
+// utils/dateFormat.ts
+import { format, parseISO } from 'date-fns';
+import { enAU } from 'date-fns/locale';
+
+export function formatAustralianDate(date: string | Date): string {
+  const dateObj = typeof date === 'string' ? parseISO(date) : date;
+  return format(dateObj, 'dd/MM/yyyy', { locale: enAU }); // DD/MM/YYYY
+}
+
+export function formatAustralianDateTime(date: string | Date): string {
+  const dateObj = typeof date === 'string' ? parseISO(date) : date;
+  return format(dateObj, 'dd/MM/yyyy h:mm a', { locale: enAU }); // DD/MM/YYYY 2:30 PM
+}
+
+export function formatAustralianTime(date: string | Date): string {
+  const dateObj = typeof date === 'string' ? parseISO(date) : date;
+  return format(dateObj, 'h:mm a', { locale: enAU }); // 2:30 PM
+}
+
+// Usage in components
+<time dateTime={contact.createdAt}>
+  {formatAustralianDate(contact.createdAt)}
+</time>
+```
+
+**Australian spelling and terminology:**
+```typescript
+// constants/terminology.ts
+export const AUSTRALIAN_TERMS = {
+  // Spelling
+  colour: 'colour', // not 'color'
+  centre: 'centre', // not 'center'
+  realise: 'realise', // not 'realize'
+  organise: 'organise', // not 'organize'
+  synchronise: 'synchronise', // not 'synchronize'
+
+  // Business terms
+  company: 'organisation', // or 'company'
+  mobile: 'mobile', // not 'cell phone'
+  postcode: 'postcode', // not 'zip code'
+
+  // UI terms
+  trash: 'bin', // delete icon
+  settings: 'preferences', // or 'settings'
+} as const;
+
+// Use in components
+<Button variant="destructive">
+  <Trash2 className="h-4 w-4" />
+  Move to Bin
+</Button>
+```
+
+**Currency and number formatting:**
+```typescript
+// utils/currency.ts
+export function formatAustralianCurrency(amount: number): string {
+  return new Intl.NumberFormat('en-AU', {
+    style: 'currency',
+    currency: 'AUD',
+  }).format(amount);
+}
+
+// Usage: $1,234.56 AUD
 ```
 
 ## Development Standards
@@ -969,7 +1760,7 @@ export const config = ConfigSchema.parse({
 **Dockerfile Best Practices:**
 ```dockerfile
 # Use specific Node.js version for reproducibility
-FROM node:18.17-alpine AS builder
+FROM node:24-alpine AS builder
 
 # Create non-root user for security
 RUN addgroup -g 1001 -S nodejs
@@ -989,7 +1780,7 @@ COPY --chown=nextjs:nodejs . .
 RUN npm run build
 
 # Production stage
-FROM node:18.17-alpine AS runner
+FROM node:24-alpine AS runner
 WORKDIR /app
 
 # Copy user from builder stage

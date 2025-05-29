@@ -15,6 +15,8 @@ The Personal CRM & Journal System is a TypeScript/Node.js application designed t
 - **Standardized Integrations**: Integration sub-domains with clear boundaries
 - **Agile Development**: Feature-complete iterations delivering incremental value
 - **Proxy-Ready**: Support deployment behind nginx reverse proxy
+- **Australian Localisation**: Native Australian English interface and formatting
+- **Comprehensive Testing**: Multi-layer testing strategy with visual and E2E coverage
 
 ## High-Level Architecture (Domain-Driven with Integration Sub-Domains)
 
@@ -539,7 +541,7 @@ CREATE TABLE contact_interactions (
 ## Technology Stack
 
 ### Backend
-- **Runtime**: Node.js 18+
+- **Runtime**: Node.js 24 (current LTS)
 - **Language**: TypeScript 5+ with strict mode
 - **Database**: SQLite with Drizzle ORM or Prisma
 - **Web Framework**: Express.js or Fastify
@@ -549,16 +551,27 @@ CREATE TABLE contact_interactions (
 - **Validation**: Zod for runtime validation and schema generation
 - **Logging**: Winston with structured logging
 - **Observability**: OpenTelemetry for tracing, metrics, and correlation
-- **Testing**: Jest with TypeScript support and coverage reporting
+- **Testing**: Multi-layer testing strategy (Jest + Storybook + Playwright)
 - **Code Quality**: ESLint with strict rules, Prettier, and architectural linting
 
 ### Frontend
 - **Framework**: React 18+ with Next.js or Vite
 - **Language**: TypeScript
-- **Styling**: Tailwind CSS or Styled Components
+- **Styling**: Tailwind CSS with utility-first approach
 - **State Management**: Zustand or Redux Toolkit
-- **Forms**: React Hook Form
-- **UI Components**: Radix UI or Chakra UI
+- **Forms**: React Hook Form with Zod validation
+- **UI Components**: Radix UI or Headless UI (Tailwind compatible)
+- **Localisation**: Australian English (en-AU) with react-intl
+- **Date/Time**: date-fns with en-AU locale for Australian formatting
+
+### Testing Strategy
+- **Unit Tests**: Jest with TypeScript support and 80%+ coverage
+- **Component Tests**: Storybook for isolated component testing and documentation
+- **Visual Testing**: Storybook with visual regression testing
+- **Integration Tests**: Jest for API endpoints and service integration
+- **End-to-End Tests**: Playwright for complete user workflows
+- **Accessibility Testing**: Storybook accessibility addon and axe-core
+- **Performance Testing**: Lighthouse CI and custom performance metrics
 
 ### External APIs & Libraries
 - **Google APIs**: Official `googleapis` npm package with TypeScript support
@@ -647,13 +660,13 @@ CREATE TABLE contact_interactions (
 #### Multi-Stage Dockerfile
 ```dockerfile
 # Build stage
-FROM node:18-alpine AS builder
+FROM node:24-alpine AS builder
 WORKDIR /app
 COPY package*.json ./
 RUN npm ci --only=production
 
 # Runtime stage
-FROM node:18-alpine AS runtime
+FROM node:24-alpine AS runtime
 WORKDIR /app
 COPY --from=builder /app/node_modules ./node_modules
 COPY . .

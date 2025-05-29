@@ -4,11 +4,13 @@
 A TypeScript/Node.js based personal CRM and journal system with MCP protocol support, web interface, and integrations with Google Calendar, Google Contacts, and Immich for photos. Uses SQLite as the database, JSON API standard for REST endpoints, and Jest for testing. Features include contact tags with Google sync, album integration with journal entries and events, name-based person matching, and nginx proxy support.
 
 ## Prerequisites
-- Node.js 18+ and npm/yarn
+- Node.js 24 (current LTS) and npm/yarn
 - Google Cloud Console account for API access
 - Immich instance running
 - Nginx reverse proxy (for production)
 - Basic understanding of TypeScript, SQLite, and REST APIs
+- Playwright for end-to-end testing
+- Modern browser for Storybook development
 
 ## Agile Development Approach
 Tasks are organized by **feature iterations** that deliver end-to-end value incrementally. Each iteration includes domain logic, API endpoints, basic UI, and integration where applicable.
@@ -30,10 +32,10 @@ Tasks are organized by **feature iterations** that deliver end-to-end value incr
 ## Iteration 1: Basic Contact Management (MVP)
 
 ### ITER1-001: Project Foundation 🟡
-**Description:** Set up project foundation with domain-driven architecture and tooling
+**Description:** Set up project foundation with domain-driven architecture and comprehensive tooling
 **Dependencies:** None
 **Acceptance Criteria:**
-- [ ] Initialize npm project with TypeScript 5+ strict mode
+- [ ] Initialize npm project with Node.js 24 and TypeScript 5+ strict mode
 - [ ] Configure tsconfig.json with strict settings, path mapping, and decorators
 - [ ] Set up comprehensive ESLint with architectural boundary rules
 - [ ] Configure Prettier with consistent formatting rules
@@ -43,7 +45,13 @@ Tasks are organized by **feature iterations** that deliver end-to-end value incr
 - [ ] Configure OpenTelemetry auto-instrumentation
 - [ ] Set up structured logging with Winston
 - [ ] Configure nginx proxy support (trust proxy headers)
-- [ ] Add package.json scripts for build, dev, test, lint, format
+- [ ] Set up Tailwind CSS with PostCSS configuration
+- [ ] Configure Australian English localisation (react-intl with en-AU)
+- [ ] Set up date-fns with Australian locale for date/time formatting
+- [ ] Initialize Storybook for component development and testing
+- [ ] Configure Playwright for end-to-end testing
+- [ ] Set up Jest with multi-layer testing configuration
+- [ ] Add package.json scripts for build, dev, test, lint, format, storybook
 - [ ] Create .gitignore and .dockerignore files
 - [ ] Configure Zod for runtime validation and schema generation
 
@@ -77,18 +85,22 @@ Tasks are organized by **feature iterations** that deliver end-to-end value incr
 - [ ] Add integration tests for all endpoints
 
 ### ITER1-004: Basic Contact UI �
-**Description:** Create basic web interface for contact management
+**Description:** Create basic web interface for contact management with Australian localisation
 **Dependencies:** ITER1-003
 **Acceptance Criteria:**
-- [ ] Set up React/Next.js project with TypeScript
+- [ ] Set up React/Next.js project with TypeScript and Tailwind CSS
 - [ ] Configure JSON API client for backend communication
-- [ ] Create contact list view with search and filtering
-- [ ] Implement contact creation and editing forms
-- [ ] Add tag management UI (create, assign, remove tags)
-- [ ] Implement basic responsive design
-- [ ] Add error handling and loading states
+- [ ] Implement Australian English interface (en-AU locale, DD/MM/YYYY dates)
+- [ ] Create contact list view with search and filtering using Tailwind components
+- [ ] Implement contact creation and editing forms with Zod validation
+- [ ] Add tag management UI (create, assign, remove tags) with colour coding
+- [ ] Implement responsive design using Tailwind's mobile-first approach
+- [ ] Add error handling and loading states with proper Australian English messaging
+- [ ] Create Storybook stories for all UI components
+- [ ] Add accessibility testing with Storybook a11y addon
 - [ ] Configure development environment with hot reloading
-- [ ] Add basic end-to-end tests with Playwright or Cypress
+- [ ] Add comprehensive end-to-end tests with Playwright
+- [ ] Implement visual regression testing with Storybook
 - [ ] Deploy working MVP with Docker and nginx proxy
 
 ---
@@ -310,18 +322,24 @@ Tasks are organized by **feature iterations** that deliver end-to-end value incr
 ## Iteration 7: Advanced Features and Future Protocols
 
 ### ITER7-001: Testing and Quality Assurance �
-**Description:** Comprehensive testing suite for all iterations
+**Description:** Comprehensive three-layer testing suite for all iterations
 **Dependencies:** ITER6-003
 **Acceptance Criteria:**
-- [ ] Set up Jest testing framework with domain isolation
-- [ ] Write unit tests for all domain entities and services
-- [ ] Create integration tests for all API endpoints
-- [ ] Implement end-to-end tests for complete user workflows
-- [ ] Add performance tests for sync operations
-- [ ] Create test data factories and fixtures
-- [ ] Set up continuous integration with automated testing
-- [ ] Achieve 80%+ code coverage across all domains
+- [ ] Enhance Jest testing framework with domain isolation and 80%+ coverage
+- [ ] Write comprehensive unit tests for all domain entities and services
+- [ ] Create integration tests for all API endpoints and external services
+- [ ] Expand Storybook stories for all UI components with interaction testing
+- [ ] Implement visual regression testing with Storybook and Chromatic
+- [ ] Add accessibility testing with Storybook a11y addon and axe-core
+- [ ] Create comprehensive end-to-end tests with Playwright for all user workflows
+- [ ] Add cross-browser testing (Chrome, Firefox, Safari) with Playwright
+- [ ] Implement performance tests for sync operations and API endpoints
+- [ ] Add mobile responsiveness testing with Playwright
+- [ ] Create test data factories and fixtures for all domains
+- [ ] Set up continuous integration with automated testing pipeline
 - [ ] Add security testing and vulnerability scanning
+- [ ] Implement load testing for production readiness
+- [ ] Create testing documentation and best practices guide
 
 ### ITER7-002: Performance and Security 🔴
 **Description:** Production readiness with performance optimization and security hardening
