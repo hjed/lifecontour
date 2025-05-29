@@ -1,0 +1,393 @@
+# Personal CRM & Journal System - Task List
+
+## Project Overview
+A TypeScript/Node.js based personal CRM and journal system with MCP protocol support, web interface, and integrations with Google Calendar, Google Contacts, and Immich for photos. Uses SQLite as the database, JSON API standard for REST endpoints, and Jest for testing. Features include contact tags with Google sync, album integration with journal entries and events, name-based person matching, and nginx proxy support.
+
+## Prerequisites
+- Node.js 18+ and npm/yarn
+- Google Cloud Console account for API access
+- Immich instance running
+- Nginx reverse proxy (for production)
+- Basic understanding of TypeScript, SQLite, and REST APIs
+
+## Agile Development Approach
+Tasks are organized by **feature iterations** that deliver end-to-end value incrementally. Each iteration includes domain logic, API endpoints, basic UI, and integration where applicable.
+
+**Complexity Scale:**
+- 🟢 Simple (1-2 hours)
+- 🟡 Medium (3-6 hours)
+- 🔴 Complex (1-2 days)
+- 🟣 Epic (3+ days)
+
+**Development Principles:**
+- Each iteration delivers working, testable functionality
+- Features are built end-to-end (domain → API → UI)
+- Integration sub-domains are developed separately from core domains
+- Continuous integration and deployment from iteration 1
+
+---
+
+## Iteration 1: Basic Contact Management (MVP)
+
+### ITER1-001: Project Foundation 🟡
+**Description:** Set up project foundation with domain-driven architecture and tooling
+**Dependencies:** None
+**Acceptance Criteria:**
+- [ ] Initialize npm project with TypeScript 5+ strict mode
+- [ ] Configure tsconfig.json with strict settings, path mapping, and decorators
+- [ ] Set up comprehensive ESLint with architectural boundary rules
+- [ ] Configure Prettier with consistent formatting rules
+- [ ] Set up pre-commit hooks with husky and lint-staged
+- [ ] Create domain-driven folder structure (core domains + integration sub-domains)
+- [ ] Set up dependency injection container (tsyringe or similar)
+- [ ] Configure OpenTelemetry auto-instrumentation
+- [ ] Set up structured logging with Winston
+- [ ] Configure nginx proxy support (trust proxy headers)
+- [ ] Add package.json scripts for build, dev, test, lint, format
+- [ ] Create .gitignore and .dockerignore files
+- [ ] Configure Zod for runtime validation and schema generation
+
+### ITER1-002: Contacts Domain Core 🟡
+**Description:** Build contacts domain with tags support
+**Dependencies:** ITER1-001
+**Acceptance Criteria:**
+- [ ] Create contacts database schema (contacts, tags, contact_tags tables)
+- [ ] Implement Contact and Tag domain entities with business logic
+- [ ] Create ContactRepository and TagRepository adapters using Drizzle ORM
+- [ ] Implement ContactApplicationService with use cases (create, update, assign tags)
+- [ ] Add comprehensive error handling and validation with Zod
+- [ ] Create domain events (ContactCreated, TagAssigned)
+- [ ] Add OpenTelemetry instrumentation for domain operations
+- [ ] Write unit tests for domain logic and adapters
+- [ ] Set up database migrations and seed data
+
+### ITER1-003: Contacts REST API �
+**Description:** Create JSON API compliant REST endpoints for contacts
+**Dependencies:** ITER1-002
+**Acceptance Criteria:**
+- [ ] Set up tsoa for automatic OpenAPI generation
+- [ ] Create ContactController with JSON API compliant endpoints
+- [ ] Implement CRUD operations (GET, POST, PUT, DELETE)
+- [ ] Add tag management endpoints (assign/remove tags)
+- [ ] Implement input validation using Zod schemas
+- [ ] Add authentication middleware (basic setup)
+- [ ] Configure nginx proxy compatibility (trust headers, CORS)
+- [ ] Add OpenTelemetry instrumentation for API endpoints
+- [ ] Generate comprehensive OpenAPI/Swagger documentation
+- [ ] Add integration tests for all endpoints
+
+### ITER1-004: Basic Contact UI �
+**Description:** Create basic web interface for contact management
+**Dependencies:** ITER1-003
+**Acceptance Criteria:**
+- [ ] Set up React/Next.js project with TypeScript
+- [ ] Configure JSON API client for backend communication
+- [ ] Create contact list view with search and filtering
+- [ ] Implement contact creation and editing forms
+- [ ] Add tag management UI (create, assign, remove tags)
+- [ ] Implement basic responsive design
+- [ ] Add error handling and loading states
+- [ ] Configure development environment with hot reloading
+- [ ] Add basic end-to-end tests with Playwright or Cypress
+- [ ] Deploy working MVP with Docker and nginx proxy
+
+---
+
+## Iteration 2: Google Contacts Integration
+
+### ITER2-001: Google Integration Sub-Domain 🟡
+**Description:** Create Google integration sub-domain with standardized interfaces
+**Dependencies:** ITER1-004
+**Acceptance Criteria:**
+- [ ] Create google-integration sub-domain structure
+- [ ] Set up Google OAuth 2.0 authentication with token refresh
+- [ ] Implement GoogleSyncState entity for tracking sync metadata
+- [ ] Create GoogleSyncStateRepository using Drizzle ORM
+- [ ] Set up official `googleapis` library with TypeScript support
+- [ ] Implement GoogleContactsClient using People API v1
+- [ ] Add comprehensive error handling and rate limiting
+- [ ] Create sync state database tables
+- [ ] Add OpenTelemetry instrumentation for Google API calls
+
+### ITER2-002: Contact Tags and Google Sync �
+**Description:** Implement bidirectional contact and tag synchronization with Google
+**Dependencies:** ITER2-001
+**Acceptance Criteria:**
+- [ ] Implement GoogleContactsAdapter with bidirectional sync
+- [ ] Map Google contact groups to local tags
+- [ ] Handle tag creation, updates, and deletions
+- [ ] Implement conflict resolution for contacts and tags
+- [ ] Add sync scheduling and manual sync triggers
+- [ ] Create sync status monitoring and reporting
+- [ ] Handle Google API rate limiting and quotas
+- [ ] Add comprehensive logging for sync operations
+- [ ] Implement incremental sync with etags
+- [ ] Add sync health checks and error recovery
+
+### ITER2-003: Google Sync UI 🟡
+**Description:** Add Google sync management to contact UI
+**Dependencies:** ITER2-002
+**Acceptance Criteria:**
+- [ ] Add Google authentication flow to UI
+- [ ] Create sync status dashboard
+- [ ] Implement manual sync triggers
+- [ ] Add conflict resolution UI for contacts and tags
+- [ ] Show sync history and error logs
+- [ ] Add Google account management
+- [ ] Implement sync progress indicators
+- [ ] Add tag mapping configuration UI
+
+---
+
+## Iteration 3: Basic Journal System
+
+### ITER3-001: Journal Domain Core 🟡
+**Description:** Build journal domain with album linking support
+**Dependencies:** ITER2-003
+**Acceptance Criteria:**
+- [ ] Create journal database schema (journal_entries table with album references)
+- [ ] Implement JournalEntry domain entity with business logic
+- [ ] Create JournalRepository adapter using Drizzle ORM
+- [ ] Implement JournalApplicationService with use cases (create, update, link albums)
+- [ ] Add mood tracking and sentiment analysis
+- [ ] Create domain events (JournalEntryCreated, AlbumLinked)
+- [ ] Add OpenTelemetry instrumentation for journal operations
+- [ ] Write unit tests for journal domain logic
+
+### ITER3-002: Journal REST API 🟡
+**Description:** Create JSON API endpoints for journal management
+**Dependencies:** ITER3-001
+**Acceptance Criteria:**
+- [ ] Create JournalController with JSON API compliant endpoints
+- [ ] Implement CRUD operations for journal entries
+- [ ] Add mood tracking endpoints
+- [ ] Implement search and filtering capabilities
+- [ ] Add album linking endpoints
+- [ ] Generate OpenAPI documentation for journal endpoints
+- [ ] Add integration tests for journal API
+
+### ITER3-003: Journal UI 🔴
+**Description:** Build journal management interface
+**Dependencies:** ITER3-002
+**Acceptance Criteria:**
+- [ ] Create journal entry list view with search and filtering
+- [ ] Implement rich text journal entry editor
+- [ ] Add mood tracking interface
+- [ ] Create journal entry detail view
+- [ ] Add album linking UI (when albums are available)
+- [ ] Implement journal analytics dashboard
+- [ ] Add export functionality for journal entries
+
+---
+
+## Iteration 4: Calendar Integration
+
+### ITER4-001: Calendar Domain Core 🟡
+**Description:** Build calendar domain with Google Calendar integration
+**Dependencies:** ITER3-003
+**Acceptance Criteria:**
+- [ ] Create calendar database schema (events table with album references)
+- [ ] Implement Event domain entity with business logic
+- [ ] Create EventRepository adapter using Drizzle ORM
+- [ ] Implement CalendarApplicationService with use cases
+- [ ] Add recurring event support and time zone handling
+- [ ] Create domain events (EventCreated, AlbumLinked)
+- [ ] Add OpenTelemetry instrumentation for calendar operations
+- [ ] Write unit tests for calendar domain logic
+
+### ITER4-002: Google Calendar Integration 🔴
+**Description:** Extend Google integration sub-domain for calendar sync
+**Dependencies:** ITER4-001
+**Acceptance Criteria:**
+- [ ] Implement GoogleCalendarClient using Calendar API v3
+- [ ] Add calendar sync to GoogleIntegrationService
+- [ ] Handle recurring events and time zones
+- [ ] Implement bidirectional calendar sync
+- [ ] Add conflict resolution for calendar events
+- [ ] Support multiple Google calendars
+- [ ] Add webhook support for real-time sync
+- [ ] Implement calendar-specific sync state management
+
+### ITER4-003: Calendar API and UI 🔴
+**Description:** Build calendar REST API and user interface
+**Dependencies:** ITER4-002
+**Acceptance Criteria:**
+- [ ] Create CalendarController with JSON API endpoints
+- [ ] Implement calendar view components (month, week, day)
+- [ ] Add event creation and editing interface
+- [ ] Implement Google Calendar sync UI
+- [ ] Add meeting preparation features
+- [ ] Create calendar analytics views
+- [ ] Add album linking for events
+- [ ] Implement calendar export functionality
+
+---
+
+## Iteration 5: Photo Albums and Immich Integration
+
+### ITER5-001: Immich Integration Sub-Domain 🟡
+**Description:** Create Immich integration sub-domain for album and person management
+**Dependencies:** ITER4-003
+**Acceptance Criteria:**
+- [ ] Create immich-integration sub-domain structure
+- [ ] Set up Immich API client with authentication
+- [ ] Implement ImmichSyncState entity for tracking sync metadata
+- [ ] Create ImmichSyncStateRepository using Drizzle ORM
+- [ ] Implement album and person data fetching from Immich
+- [ ] Add comprehensive error handling and rate limiting
+- [ ] Create sync state database tables for Immich
+- [ ] Add OpenTelemetry instrumentation for Immich API calls
+
+### ITER5-002: Album and Person Matching 🔴
+**Description:** Implement album integration and name-based person matching
+**Dependencies:** ITER5-001
+**Acceptance Criteria:**
+- [ ] Create Album and Person domain entities
+- [ ] Implement name-based person-to-contact matching (no facial recognition)
+- [ ] Add manual person-to-contact linking interface
+- [ ] Link albums to journal entries and calendar events automatically
+- [ ] Create confidence scoring for name-based matches
+- [ ] Implement album sync with Immich
+- [ ] Add person matching UI with manual confirmation
+- [ ] Create album browsing and linking interface
+
+### ITER5-003: Photo Integration UI 🔴
+**Description:** Build photo album interface and contact linking
+**Dependencies:** ITER5-002
+**Acceptance Criteria:**
+- [ ] Create album browsing interface
+- [ ] Implement photo viewing with thumbnails
+- [ ] Add person-to-contact linking UI
+- [ ] Create album linking for journal entries and events
+- [ ] Add photo search and filtering
+- [ ] Implement album management features
+- [ ] Add Immich sync status and controls
+- [ ] Create photo-based contact discovery
+
+---
+
+## Iteration 6: MCP Protocol Support
+
+### ITER6-001: MCP Server Foundation 🟡
+**Description:** Implement MCP (Model Context Protocol) server for AI integration
+**Dependencies:** ITER5-003
+**Acceptance Criteria:**
+- [ ] Set up MCP server framework and protocol implementation
+- [ ] Implement basic MCP message handling and connection management
+- [ ] Add authentication and security for MCP connections
+- [ ] Create MCP tool registration system
+- [ ] Add OpenTelemetry instrumentation for MCP operations
+- [ ] Document MCP server setup and configuration
+- [ ] Implement health checks for MCP server
+
+### ITER6-002: MCP Tools Implementation 🔴
+**Description:** Create MCP tools for all domains (contacts, journal, calendar, photos)
+**Dependencies:** ITER6-001
+**Acceptance Criteria:**
+- [ ] Implement contact search, creation, and management tools
+- [ ] Create journal entry tools with mood tracking and search
+- [ ] Add calendar event tools with meeting preparation
+- [ ] Implement photo album and person linking tools
+- [ ] Create cross-domain analytics and reporting tools
+- [ ] Add data export and import tools via MCP
+- [ ] Implement relationship analysis and insights tools
+- [ ] Create comprehensive MCP tool documentation
+
+### ITER6-003: MCP Integration Testing 🟡
+**Description:** Test and validate MCP integration with AI assistants
+**Dependencies:** ITER6-002
+**Acceptance Criteria:**
+- [ ] Create MCP client test suite
+- [ ] Test integration with popular AI assistants
+- [ ] Validate tool functionality and performance
+- [ ] Create MCP usage examples and tutorials
+- [ ] Add error handling and recovery testing
+- [ ] Document best practices for AI assistant integration
+- [ ] Implement MCP tool versioning and compatibility
+
+---
+
+## Iteration 7: Advanced Features and Future Protocols
+
+### ITER7-001: Testing and Quality Assurance �
+**Description:** Comprehensive testing suite for all iterations
+**Dependencies:** ITER6-003
+**Acceptance Criteria:**
+- [ ] Set up Jest testing framework with domain isolation
+- [ ] Write unit tests for all domain entities and services
+- [ ] Create integration tests for all API endpoints
+- [ ] Implement end-to-end tests for complete user workflows
+- [ ] Add performance tests for sync operations
+- [ ] Create test data factories and fixtures
+- [ ] Set up continuous integration with automated testing
+- [ ] Achieve 80%+ code coverage across all domains
+- [ ] Add security testing and vulnerability scanning
+
+### ITER7-002: Performance and Security 🔴
+**Description:** Production readiness with performance optimization and security hardening
+**Dependencies:** ITER7-001
+**Acceptance Criteria:**
+- [ ] Implement comprehensive security measures (input sanitization, SQL injection protection)
+- [ ] Add data encryption at rest and in transit
+- [ ] Optimize database queries and add caching layers
+- [ ] Implement rate limiting and DDoS protection
+- [ ] Add comprehensive audit logging
+- [ ] Create backup and disaster recovery procedures
+- [ ] Set up monitoring and alerting systems
+- [ ] Implement GDPR compliance features
+- [ ] Add performance monitoring and optimization
+
+### ITER7-003: Future Protocol Extensions 🟣
+**Description:** CardDAV, CalDAV, and Home Assistant integration
+**Dependencies:** ITER7-002
+**Acceptance Criteria:**
+- [ ] Implement CardDAV protocol for contact synchronization
+- [ ] Add CalDAV protocol for calendar synchronization
+- [ ] Create Home Assistant integration for smart home automation
+- [ ] Support standard vCard and iCal formats
+- [ ] Add protocol discovery mechanisms
+- [ ] Test compatibility with standard clients (iOS, Android, Thunderbird)
+- [ ] Create comprehensive protocol documentation
+- [ ] Implement MQTT support for Home Assistant
+
+---
+
+## Agile Development Guide for AI Assistants
+
+### Development Principles
+1. **Feature-Complete Iterations** - Each iteration delivers working, testable functionality
+2. **End-to-End Development** - Build domain → API → UI for each feature
+3. **Integration Sub-Domains** - Keep integrations separate from core business logic
+4. **Continuous Deployment** - Deploy and test after each iteration
+5. **User Feedback** - Validate features with real usage before moving to next iteration
+
+### Getting Started
+1. **Start with Iteration 1** - Basic contact management provides foundation
+2. **Check dependencies** - Each iteration builds on previous ones
+3. **Follow acceptance criteria** - All criteria must be met before marking complete
+4. **Deploy and test** - Each iteration should result in working software
+5. **Refer to architecture.md** - For system design decisions and integration patterns
+6. **Follow ai-guidelines.md** - For coding standards and domain-driven patterns
+
+### Iteration Tracking
+
+Use this section to track progress:
+
+```
+Iteration 1 (Contact MVP): [ ] ITER1-001 [ ] ITER1-002 [ ] ITER1-003 [ ] ITER1-004
+Iteration 2 (Google Sync): [ ] ITER2-001 [ ] ITER2-002 [ ] ITER2-003
+Iteration 3 (Journal): [ ] ITER3-001 [ ] ITER3-002 [ ] ITER3-003
+Iteration 4 (Calendar): [ ] ITER4-001 [ ] ITER4-002 [ ] ITER4-003
+Iteration 5 (Photos): [ ] ITER5-001 [ ] ITER5-002 [ ] ITER5-003
+Iteration 6 (MCP): [ ] ITER6-001 [ ] ITER6-002 [ ] ITER6-003
+Iteration 7 (Advanced): [ ] ITER7-001 [ ] ITER7-002 [ ] ITER7-003
+```
+
+### Value Delivery Timeline
+- **Iteration 1**: Working contact management system with tags
+- **Iteration 2**: Google Contacts sync with bidirectional tag sync
+- **Iteration 3**: Journal system with mood tracking
+- **Iteration 4**: Calendar integration with Google Calendar sync
+- **Iteration 5**: Photo albums with person-contact linking
+- **Iteration 6**: AI integration via MCP protocol
+- **Iteration 7**: Production-ready with advanced protocols
