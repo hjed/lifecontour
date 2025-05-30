@@ -11,25 +11,37 @@ This document outlines the technology choices, implementation details, and devel
 - **Build Tool**: tsc or esbuild for production builds
 
 ### Web Framework and API
-- **Web Framework**: Express.js or Fastify
+- **Web Framework**: Fastify (chosen for better TypeScript support and performance)
 - **API Standard**: JSON API specification compliance
-- **API Documentation**: tsoa or @nestjs/swagger for automatic OpenAPI generation
+- **API Documentation**: @fastify/swagger for automatic OpenAPI generation
 - **Request Validation**: Zod for runtime validation and schema generation
-- **Middleware**: CORS, helmet, compression, rate limiting
+- **Middleware**: CORS, helmet, compression, rate limiting via Fastify plugins
 
 ### Database and ORM
 - **Database**: SQLite with WAL mode for better concurrency
-- **ORM Options**:
-  - **Drizzle ORM**: Lightweight, type-safe, SQL-like syntax
-  - **Prisma**: Feature-rich with excellent TypeScript support
-- **Migrations**: Version-controlled schema migrations
-- **Connection Pooling**: better-sqlite3 or sqlite3 with pooling
+- **ORM**: Drizzle ORM (chosen for lightweight, type-safe, SQL-like syntax that works well with AI assistants)
+- **Migrations**: Drizzle Kit for automatic migration generation and management
+- **Connection Pooling**: better-sqlite3 with pooling
+- **Schema Management**: TypeScript-first schema definition with automatic type inference
+
+### Database Migrations (Drizzle Kit)
+- **Migration Tool**: Drizzle Kit - official migration tool for Drizzle ORM
+- **Generation**: Automatic migration generation from schema changes
+- **Versioning**: Git-tracked migration files with timestamps
+- **Commands**:
+  - `drizzle-kit generate` - Generate migrations from schema changes
+  - `drizzle-kit migrate` - Apply pending migrations
+  - `drizzle-kit studio` - Visual database browser and editor
+- **AI Benefits**:
+  - Clear, readable SQL migration files
+  - TypeScript schema definitions that AI assistants understand well
+  - Automatic type safety between schema and queries
 
 ### Authentication and Security
-- **Authentication**: OAuth 2.0 (Google), JWT for sessions
-- **Session Management**: JWT with refresh token rotation
-- **Password Hashing**: bcrypt or argon2 for any local passwords
-- **API Security**: Rate limiting, input sanitization, CORS configuration
+- **Authentication**: NextAuth.js with Google OAuth 2.0 (chosen for Next.js integration and AI assistant familiarity)
+- **Session Management**: NextAuth.js built-in session management with JWT
+- **Password Hashing**: NextAuth.js handles authentication, bcrypt for any additional local passwords
+- **API Security**: Rate limiting, input sanitization, CORS configuration via Fastify plugins
 
 ### Logging and Observability
 - **Logging**: Winston with structured logging (JSON format)
@@ -46,20 +58,20 @@ This document outlines the technology choices, implementation details, and devel
 ## Frontend Technology Stack
 
 ### Framework and Language
-- **Framework**: React 18+ with Next.js or Vite
+- **Framework**: Next.js 14+ with React 18+ (chosen for full-stack capabilities and AI assistant familiarity)
 - **Language**: TypeScript with strict mode
-- **Build Tool**: Vite (fast) or Next.js (full-stack)
-- **Module Bundler**: Built-in with chosen framework
+- **Build Tool**: Next.js built-in (Turbopack/Webpack)
+- **Module Bundler**: Built-in with Next.js
 
 ### Styling and UI
 - **Styling**: Tailwind CSS with utility-first approach
-- **UI Components**: Radix UI or Headless UI (Tailwind compatible)
-- **Icons**: Lucide React or Heroicons
+- **UI Components**: shadcn/ui (chosen for excellent AI assistant support and Radix UI foundation)
+- **Icons**: Lucide React (included with shadcn/ui)
 - **Responsive Design**: Mobile-first approach with Tailwind breakpoints
 
 ### State Management
-- **State Management**: Zustand (lightweight) or Redux Toolkit (complex state)
-- **Server State**: TanStack Query (React Query) for API state
+- **State Management**: Zustand (chosen for simplicity and AI assistant familiarity)
+- **Server State**: TanStack Query (React Query) for API state caching
 - **Form State**: React Hook Form with Zod validation
 - **Local Storage**: Zustand persist middleware
 
@@ -70,7 +82,7 @@ This document outlines the technology choices, implementation details, and devel
 - **Currency**: Australian Dollar (AUD) formatting
 
 ### Development Tools
-- **Hot Reload**: Built-in with Vite or Next.js
+- **Hot Reload**: Built-in with Next.js
 - **Type Checking**: TypeScript compiler with strict mode
 - **Linting**: ESLint with TypeScript and React rules
 - **Formatting**: Prettier with consistent configuration
@@ -155,12 +167,32 @@ This document outlines the technology choices, implementation details, and devel
 - **Formatting**: Prettier with consistent configuration
 - **Type Checking**: TypeScript strict mode with no implicit any
 - **Pre-commit Hooks**: Husky with lint-staged for quality gates
+- **Dependency Injection**: tsyringe (chosen for decorator patterns and AI assistant compatibility)
 
 ### Build and Development
-- **Package Manager**: npm or pnpm for dependency management
-- **Build Scripts**: Standardized npm scripts for common tasks
+- **Package Manager**: pnpm (chosen for efficiency and monorepo support)
+- **Monorepo**: pnpm workspaces for frontend/backend organization
+- **Build Tools**:
+  - Frontend: Next.js built-in build system (Turbopack/Webpack)
+  - Backend: esbuild for fast TypeScript compilation
+- **Build Scripts**: Standardized pnpm scripts for common tasks
 - **Environment Management**: dotenv for environment configuration
 - **Hot Reload**: Fast development with hot module replacement
+
+### Monorepo Structure (AI-Optimized)
+```
+personal-management-system/
+├── apps/
+│   ├── frontend/          # Next.js application
+│   └── backend/           # Fastify API server
+├── packages/
+│   ├── shared/            # Shared TypeScript types and utilities
+│   ├── database/          # Drizzle schema, migrations, and seed data
+│   └── ui/                # Shared UI components (if needed)
+├── docker/                # Multi-container Docker configurations
+├── docs/                  # Architecture and development documentation
+└── tools/                 # Development tools and scripts
+```
 
 ### Documentation
 - **API Documentation**: Automatic OpenAPI/Swagger generation
@@ -173,6 +205,22 @@ This document outlines the technology choices, implementation details, and devel
 - **Branching**: GitFlow or GitHub Flow for feature development
 - **CI/CD**: GitHub Actions or similar for automated testing and deployment
 - **Code Review**: Pull request reviews with automated checks
+
+## Deployment Strategy
+
+### Container Architecture
+- **Strategy**: Multi-container deployment (chosen for better separation of concerns)
+- **Frontend Container**: Next.js application with nginx for static serving
+- **Backend Container**: Fastify API server
+- **Database**: SQLite with volume mounting for persistence
+- **Reverse Proxy**: nginx for routing and SSL termination
+- **Orchestration**: Docker Compose for development, production-ready orchestration
+
+### Container Benefits for AI Development
+- **Isolation**: Clear separation between frontend and backend for AI assistants
+- **Scalability**: Independent scaling of frontend and backend services
+- **Development**: Consistent environments across development and production
+- **Debugging**: Easier to isolate and debug individual services
 
 ## Configuration Management
 
@@ -212,6 +260,32 @@ This document outlines the technology choices, implementation details, and devel
 - **Error Tracking**: Structured error logging and alerting
 - **Performance Monitoring**: Response time and throughput monitoring
 - **Resource Usage**: Memory and CPU usage monitoring
+
+## Final Technology Stack Summary (AI-Optimized)
+
+### Core Technology Decisions
+| Component | Choice | AI Optimization Reason |
+|-----------|--------|------------------------|
+| **Package Manager** | pnpm | Monorepo support, efficiency, AI assistant familiarity |
+| **Backend Framework** | Fastify | Better TypeScript support, cleaner patterns |
+| **Frontend Framework** | Next.js 14+ | Extensive AI training data, full-stack capabilities |
+| **UI Components** | shadcn/ui + Tailwind | Excellent AI assistant support, component patterns |
+| **Database** | SQLite + Drizzle ORM | Explicit SQL syntax, type-safe, AI-friendly |
+| **Migrations** | Drizzle Kit | Automatic generation, clear SQL files |
+| **State Management** | Zustand | Simple patterns, predictable state flow |
+| **Authentication** | NextAuth.js | Standard Next.js patterns, Google OAuth |
+| **Dependency Injection** | tsyringe | Clear decorator patterns, TypeScript support |
+| **API Documentation** | @fastify/swagger | Native Fastify integration |
+| **Testing** | Jest + Storybook + Playwright | Well-established patterns |
+| **Project Structure** | Monorepo (pnpm workspaces) | Full context for AI assistants |
+| **Deployment** | Multi-container Docker | Clear separation of concerns |
+
+### Key AI Development Benefits
+1. **Explicit Patterns**: All choices favor explicit over implicit behavior
+2. **TypeScript First**: Strong typing throughout the entire stack
+3. **Standard Conventions**: Using well-established patterns AI assistants know
+4. **Clear Separation**: Monorepo with clear domain boundaries
+5. **Minimal Magic**: Reduced abstraction layers for better AI understanding
 
 ## Related Documents
 
