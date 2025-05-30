@@ -15,7 +15,6 @@ The Personal CRM & Journal System is a TypeScript/Node.js application designed t
 - **Standardized Integrations**: Integration sub-domains with clear boundaries
 - **Agile Development**: Feature-complete iterations delivering incremental value
 - **Proxy-Ready**: Support deployment behind nginx reverse proxy
-- **Australian Localisation**: Native Australian English interface and formatting
 - **Comprehensive Testing**: Multi-layer testing strategy with visual and E2E coverage
 
 ## Architecture Documentation
@@ -137,8 +136,8 @@ Future features, extensibility plans, and long-term vision:
 
 ## Key Architectural Principles
 
-1. **Domain Isolation**: Each domain is self-contained with its own entities, services, and adapters
-2. **Single Responsibility**: Each adapter has a single, well-defined responsibility
+1. **Domain Isolation**: Each domain is self-contained with its own entities, components, and adapters
+2. **Single Responsibility**: Each component or adapter has a single, well-defined responsibility
 3. **Cross-Domain Operations**: Handled explicitly in the sync domain
 4. **API Separation**: REST and MCP adapters are separate from domain logic
 

@@ -89,10 +89,12 @@ This document outlines the technology choices, implementation details, and devel
 - **Authentication**: API key or session-based authentication
 
 ### MCP Protocol
-- **MCP Implementation**: Latest MCP specification
-- **Transport**: WebSocket or HTTP transport
-- **Tool Registration**: Dynamic tool registration and discovery
+- **MCP Implementation**: `@modelcontextprotocol/sdk` - Official MCP SDK
+- **Transport**: Streamable HTTP Transport for web-compatible integration
+- **Server Framework**: MCP Server with HTTP-based client connections
+- **Tool Registration**: Dynamic tool registration and discovery via SDK
 - **Resource Management**: Efficient resource handling and caching
+- **Authentication**: OAuth based authentication
 
 ### HTTP and Networking
 - **HTTP Client**: Axios with interceptors for observability

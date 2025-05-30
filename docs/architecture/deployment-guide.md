@@ -121,6 +121,8 @@ services:
       - NODE_ENV=production
       - DATABASE_PATH=/app/data/production.db
       - PORT=3000
+      - MCP_PORT=3001
+      - MCP_HOST=0.0.0.0
     volumes:
       - app-data:/app/data
       - app-logs:/app/logs
@@ -225,6 +227,16 @@ http {
             proxy_pass http://app;
         }
 
+        # MCP server endpoint (if exposed via proxy)
+        location /mcp/ {
+            limit_req zone=api burst=10 nodelay;
+            proxy_pass http://app:3001/;
+            proxy_http_version 1.1;
+            proxy_set_header Upgrade $http_upgrade;
+            proxy_set_header Connection 'upgrade';
+            proxy_cache_bypass $http_upgrade;
+        }
+
         # Health check endpoint
         location /health {
             proxy_pass http://app;
@@ -284,6 +296,15 @@ export const contactsCreated = meter.createCounter('contacts_created_total', {
 
 export const syncOperations = meter.createHistogram('sync_operation_duration', {
   description: 'Duration of sync operations',
+  unit: 'ms',
+});
+
+export const mcpToolCalls = meter.createCounter('mcp_tool_calls_total', {
+  description: 'Total number of MCP tool calls',
+});
+
+export const mcpToolDuration = meter.createHistogram('mcp_tool_duration', {
+  description: 'Duration of MCP tool executions',
   unit: 'ms',
 });
 ```
@@ -372,6 +393,10 @@ GOOGLE_CLIENT_SECRET=your-google-client-secret
 IMMICH_API_URL=https://your-immich-instance.com
 IMMICH_API_KEY=your-immich-api-key
 
+# MCP Server
+MCP_PORT=3001
+MCP_HOST=localhost
+
 # Observability
 LOG_LEVEL=info
 JAEGER_ENDPOINT=http://jaeger:14268/api/traces
@@ -401,6 +426,10 @@ const configSchema = z.object({
     apiUrl: z.string().url(),
     apiKey: z.string(),
   }),
+  mcp: z.object({
+    port: z.coerce.number().default(3001),
+    host: z.string().default('localhost'),
+  }),
 });
 
 export const config = configSchema.parse({
@@ -415,6 +444,10 @@ export const config = configSchema.parse({
   immich: {
     apiUrl: process.env.IMMICH_API_URL,
     apiKey: process.env.IMMICH_API_KEY,
+  },
+  mcp: {
+    port: process.env.MCP_PORT,
+    host: process.env.MCP_HOST,
   },
 });
 ```

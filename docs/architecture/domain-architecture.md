@@ -30,14 +30,16 @@ This document provides detailed information about the domain-driven architecture
 ### 2. API Adapters (Driving Adapters)
 
 #### MCP Server Adapter
-- **Framework**: Custom implementation following MCP specification
+- **Framework**: `@modelcontextprotocol/sdk` with Streamable HTTP Transport
 - **Architecture Role**: Driving adapter that calls into domain use cases
+- **Transport**: HTTP-based for web-compatible AI client integration
 - **Responsibilities**:
-  - Tool registration and execution
-  - Resource management
-  - Authentication and authorization
-  - Request/response formatting
+  - Tool registration and execution via MCP SDK
+  - Resource management and caching
+  - HTTP-based authentication and session management
+  - Request/response formatting per MCP specification
   - Dependency injection into domain services
+  - Connection management for multiple AI clients
 
 #### REST API Server Adapter
 - **Framework**: Express.js or Fastify
