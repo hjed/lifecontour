@@ -1,6 +1,7 @@
 # Testing Patterns - Personal CRM & Journal System
 
-This document provides detailed testing examples and patterns for the Personal CRM & Journal System.
+This document provides detailed testing examples and patterns for the Personal
+CRM & Journal System.
 
 ## Jest Configuration
 
@@ -11,23 +12,23 @@ module.exports = {
   testEnvironment: 'node',
   roots: ['<rootDir>/src', '<rootDir>/tests'],
   testMatch: ['**/__tests__/**/*.ts', '**/?(*.)+(spec|test).ts'],
-  collectCoverageFrom: [
-    'src/**/*.ts',
-    '!src/**/*.d.ts',
-    '!src/types/**/*'
-  ],
+  collectCoverageFrom: ['src/**/*.ts', '!src/**/*.d.ts', '!src/types/**/*'],
   coverageThreshold: {
     global: {
       branches: 80,
       functions: 80,
       lines: 80,
-      statements: 80
-    }
-  }
+      statements: 80,
+    },
+  },
 };
 ```
 
 ## Unit Testing Patterns
+
+- define each case using `define`
+- clear mocks in an `afterEach`
+- only one `it` per bottom level `describe`
 
 ### Domain Entity Testing
 
@@ -42,7 +43,7 @@ describe('Contact Entity', () => {
       const email = Email.create('john@example.com');
       const contact = Contact.create({
         name: 'John Smith',
-        email: email.getValue()
+        email: email.getValue(),
       });
 
       expect(contact.isSuccess()).toBe(true);
@@ -54,7 +55,7 @@ describe('Contact Entity', () => {
     it('should reject', () => {
       const result = Contact.create({
         name: 'John Smith',
-        email: 'invalid-email'
+        email: 'invalid-email',
       });
 
       expect(result.isFailure()).toBe(true);
@@ -66,9 +67,9 @@ describe('Contact Entity', () => {
 
 ### Application Component Layer Testing
 
-* define each case using `define`
-* clear mocks in an `afterEach`
-* only one `it` per bottom level `describe`
+- define each case using `define`
+- clear mocks in an `afterEach`
+- only one `it` per bottom level `describe`
 
 ## Component Testing with Storybook
 
@@ -87,7 +88,8 @@ const meta: Meta<typeof ContactCard> = {
     layout: 'centered',
     docs: {
       description: {
-        component: 'Contact card with Australian localization and accessibility support.',
+        component:
+          'Contact card with Australian localization and accessibility support.',
       },
     },
   },
@@ -117,11 +119,11 @@ export const InteractiveTest: Story = {
   args: Default.args,
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
-    
+
     // Test dropdown menu
     const menuButton = canvas.getByRole('button', { name: /open menu/i });
     await userEvent.click(menuButton);
-    
+
     await expect(canvas.getByText('Edit Contact')).toBeInTheDocument();
     await expect(canvas.getByText('Move to Bin')).toBeInTheDocument();
   },
@@ -137,7 +139,9 @@ export const InteractiveTest: Story = {
 import { test, expect } from '@playwright/test';
 
 test.describe('Contact Management', () => {
-  test('should create and manage contact with Australian formatting', async ({ page }) => {
+  test('should create and manage contact with Australian formatting', async ({
+    page,
+  }) => {
     await page.goto('/contacts');
 
     // Create new contact
@@ -154,9 +158,13 @@ test.describe('Contact Management', () => {
     await page.click('[data-testid="save-contact"]');
 
     // Verify contact appears with Australian formatting
-    await expect(page.locator('[data-testid="contact-list"]')).toContainText('Sarah Wilson');
-    await expect(page.locator('[data-testid="contact-tags"]')).toContainText('Work');
-    
+    await expect(page.locator('[data-testid="contact-list"]')).toContainText(
+      'Sarah Wilson'
+    );
+    await expect(page.locator('[data-testid="contact-tags"]')).toContainText(
+      'Work'
+    );
+
     // Test Australian date formatting (DD/MM/YYYY)
     const dateElement = page.locator('[data-testid="contact-created-date"]');
     await expect(dateElement).toMatch(/\d{2}\/\d{2}\/\d{4}/);
@@ -165,12 +173,14 @@ test.describe('Contact Management', () => {
   test('should handle sync errors gracefully', async ({ page }) => {
     // Mock network failure
     await page.route('**/api/sync/google', route => route.abort());
-    
+
     await page.goto('/contacts');
     await page.click('[data-testid="sync-google-button"]');
-    
+
     // Should show error message
-    await expect(page.locator('[data-testid="error-message"]')).toContainText('Sync failed');
+    await expect(page.locator('[data-testid="error-message"]')).toContainText(
+      'Sync failed'
+    );
     await expect(page.locator('[data-testid="retry-button"]')).toBeVisible();
   });
 });
@@ -198,7 +208,7 @@ describe('SqlContactRepository Integration', () => {
   it('should persist and retrieve contacts', async () => {
     const contact = Contact.create({
       name: 'John Doe',
-      email: 'john@example.com'
+      email: 'john@example.com',
     }).getValue();
 
     await repository.save(contact);
@@ -255,7 +265,7 @@ export class ContactBuilder {
     return Contact.create({
       name: this.data.name || 'Test Contact',
       email: this.data.email || 'test@example.com',
-      ...this.data
+      ...this.data,
     }).getValue();
   }
 }
