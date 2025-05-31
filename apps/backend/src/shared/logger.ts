@@ -84,24 +84,30 @@ export class LoggerService {
   }
 
   // Convenience methods
-  error(message: string, meta?: any) {
+  error(message: string, meta?: Record<string, unknown>) {
     this._logger.error(message, meta);
   }
 
-  warn(message: string, meta?: any) {
+  warn(message: string, meta?: Record<string, unknown>) {
     this._logger.warn(message, meta);
   }
 
-  info(message: string, meta?: any) {
+  info(message: string, meta?: Record<string, unknown>) {
     this._logger.info(message, meta);
   }
 
-  debug(message: string, meta?: any) {
+  debug(message: string, meta?: Record<string, unknown>) {
     this._logger.debug(message, meta);
   }
 
   // Structured logging for API requests
-  logRequest(method: string, url: string, statusCode: number, responseTime: number, meta?: any) {
+  logRequest(
+    method: string,
+    url: string,
+    statusCode: number,
+    responseTime: number,
+    meta?: Record<string, unknown>
+  ) {
     this._logger.info('API Request', {
       method,
       url,
@@ -112,7 +118,7 @@ export class LoggerService {
   }
 
   // Structured logging for errors
-  logError(error: Error, context?: string, meta?: any) {
+  logError(error: Error, context?: string, meta?: Record<string, unknown>) {
     this._logger.error('Application Error', {
       message: error.message,
       stack: error.stack,
@@ -122,7 +128,7 @@ export class LoggerService {
   }
 
   // Structured logging for database operations
-  logDatabase(operation: string, table: string, duration: number, meta?: any) {
+  logDatabase(operation: string, table: string, duration: number, meta?: Record<string, unknown>) {
     this._logger.debug('Database Operation', {
       operation,
       table,
@@ -138,7 +144,7 @@ export class LoggerService {
     url: string,
     statusCode: number,
     duration: number,
-    meta?: any
+    meta?: Record<string, unknown>
   ) {
     this._logger.info('External API Call', {
       service,
