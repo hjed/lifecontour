@@ -1,2 +1,0 @@
-# Run lint-staged for pre-commit hooks
-pnpm lint-staged
