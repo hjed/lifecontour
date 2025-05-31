@@ -3,9 +3,9 @@
 ## Project Context
 
 This document provides essential guidelines for AI assistants working on the
-Personal CRM & Journal System. The system is a TypeScript/Node.js application
-that integrates personal data from multiple sources with both MCP (Model Context
-Protocol) and web interfaces.
+Personal CRM & Journal System. The system uses a Python FastAPI backend with
+PostgreSQL database and TypeScript/React frontend, integrating personal data
+from multiple sources with both MCP (Model Context Protocol) and web interfaces.
 
 Refer to the [architecture document](./architecture.md) for a high-level
 overview of the system architecture and navigation.
@@ -14,33 +14,28 @@ Tasks can be found in the [tasks document](./tasks.md).
 
 ### Key Technologies
 
-- **Backend**: TypeScript/Node.js 24, SQLite database
-- **Frontend**: React with shadcn/ui components, Tailwind CSS
+- **Backend**: Python 3.11+ with FastAPI, PostgreSQL database
+- **Frontend**: Next.js with React, shadcn/ui components, Tailwind CSS
 - **APIs**: JSON API standard for REST endpoints, MCP for AI integration
-- **Testing**: Jest (unit), Storybook (components), Playwright (e2e)
+- **Testing**: pytest (backend), React Testing Library (frontend), Playwright (e2e)
 - **Integrations**: Google Calendar/Contacts, Immich photos
 - **Deployment**: Docker with nginx proxy support
-- **Localization**: Australian English
 
 ### Core Principles
 
-1. **Type Safety**: Leverage TypeScript's strict type system
-2. **Domain-Driven Architecture**: Core domains with separate integration
-   sub-domains
-3. **Agile Development**: Feature-complete iterations delivering incremental
-   value. Future proof without over-engineering.
-4. **Integration Isolation**: External integrations in separate sub-domains
-5. **AI-Friendly**: Design APIs and data structures for easy AI consumption
-6. **Clear Boundaries**: Clear separation between each domain and between core
-   and integration domains.
+1. **Clear Language Separation**: Python backend, TypeScript frontend
+2. **AI-Optimized**: Design for AI assistant understanding over performance
+3. **Domain-Driven Architecture**: Core domains with separate integration sub-domains
+4. **Agile Development**: Feature-complete iterations delivering incremental value
+5. **Explicit Patterns**: No magic, everything readable and understandable
+6. **Simple Dependencies**: Standard libraries over complex abstractions
 
 ## Agile Development Approach
 
 ### Feature-Complete Iterations
 
 - Each iteration delivers working, testable functionality end-to-end
-- Build domain logic → adapters → application services → API endpoints → basic
-  UI
+- Build domain logic → database queries → API endpoints → basic UI
 - Deploy and test after each iteration
 - Integration sub-domains developed separately from core domains
 - Architecture can evolve - check technology choices with user before acting
@@ -48,34 +43,29 @@ Tasks can be found in the [tasks document](./tasks.md).
 ### Development Sequence
 
 1. **Documentation** - document any planned changes, confirm design decisions
-   for itteration.
-2. **Domain logic** - entities, value objects, business rules and their unit
-   tests
-3. **Adapters** - database repositories, external API clients and their tests,
-   including integration tests
-4. **API endpoints** - REST controllers with JSON API compliance
-5. **Basic UI** - functional interface using shadcn/ui
-6. **Tests** - unit, integration, and end-to-end all working. Coverage complete
+2. **Backend domain logic** - Python business logic with clear, simple patterns. Use test driven development.
+3. **Database operations** - Explicit SQL queries with SQLAlchemy Core in Repository adapters.
+4. **API endpoints** - FastAPI controllers with JSON API compliance
+5. **Frontend UI** - Next.js interface using shadcn/ui
+6. **Tests** - pytest (backend), React Testing Library (frontend), Playwright (e2e)
 7. **Deploy and validate** - ensure feature works in real environment
 
 ## Testing Strategy
 
-### Three-Layer Testing Approach
+### Multi-Language Testing Approach
 
-1. **Unit Tests (Jest)** - Domain entities, value objects, and business logic
-2. **Component Tests (Storybook)** - React components with shadcn/ui integration
-3. **End-to-End Tests (Playwright)** - Full user workflows and Australian
-   localization
+1. **Backend Tests (pytest)** - Domain logic, database operations, API endpoints
+2. **Frontend Tests (React Testing Library)** - Components with shadcn/ui integration
+3. **End-to-End Tests (Playwright)** - Full user workflows and Australian localization
 
 ### Testing Requirements
 
-- **Coverage**: Minimum 80% code coverage for all domains
+- **Coverage**: Focus on critical business logic rather than arbitrary percentages
 - **Australian Localization**: Test date formats (DD/MM/YYYY)
 - **Accessibility**: ARIA attributes, keyboard navigation, screen reader support
-- **shadcn/ui Integration**: Component interactions, theming, responsive design
+- **Clear Separation**: Independent test suites for backend and frontend
 
-_See [Testing Patterns](./examples/testing-patterns.md) for detailed examples
-and implementation guides._
+_See [Testing Patterns](./examples/testing-patterns.md) for detailed examples._
 
 ## Frontend Development Standards
 
@@ -123,55 +113,76 @@ shadcn/ui implementation examples._
 
 ### Code Organization
 
-#### Folder Structure
+#### Project Structure (Clear Language Separation)
 
 ```
-src/
-├── api/                          # API Adapters (REST & MCP)
-├── contacts/                     # Contacts Core Domain
-│   ├── domain/                   # Entities, value objects, services
-│   ├── adapters/                 # SQL repositories, event publishers
-│   └── application/              # Use cases, application components
-├── calendar/                     # Calendar Core Domain
-├── journal/                      # Journal Core Domain
-├── photos/                       # Photos Core Domain
-├── google-integration/           # Google Integration Sub-Domain
-├── immich-integration/           # Immich Integration Sub-Domain
-└── shared/                       # Database, events, config, proxy utils
+personal-management-system/
+├── backend/                      # Python FastAPI application
+│   ├── app/
+|   |   |── core/                 # Core Domain Logic
+|   |   |   |── contacts/        # Contact Domain Logic
+|   |   |   |   |── adapters/    # Interfaces with apis, sql, events, etc
+|   |   |   |   |   |── api/     # External API clients
+|   |   |   |   |   |── sql/     # Database repositories
+|   |   |   |   |   |── events/  # Event publishing and receiving adapters
+|   |   |   |   |── models/      # Domain models
+|   |   |   |── calendar/        # Calendar Domain Logic
+|   |   |   |── journal/         # Journal Domain Logic
+|   |   |── infrastructure/      # Common code for Database, Events, etc.
+│   │   ├── api/                 # FastAPI route handlers
+│   │   |   ├── dtos/            # Pydantic models
+│   │   ├── migrations/          # SQL queries and migrations
+│   │   └── integrations/        # External Sub-Domains
+│   │       ├── google/          # Google Integration Sub-Domain
+│   │       └── immich/          # Immich Integration Sub-Domain
+│   ├── tests/                    # pytest test suite
+│   |   ├── unit/                 # Unit tests
+│   │   ├── integration/          # Integration tests
+│   │   └── e2e/                  # End-to-end tests
+│   └── pyproject.toml            # UV dependencies
+├── frontend/                     # Next.js TypeScript application
+│   ├── src/
+│   │   ├── app/                  # Next.js app router
+│   │   ├── components/           # React components
+│   │   ├── lib/                  # Utilities and API clients
+│   │   └── types/                # TypeScript interfaces
+│   ├── tests/                    # React Testing Library tests
+│   └── package.json              # pnpm dependencies
+|── docker-compose.yml            # Multi-container setup
+|── docs/                         # All documentation
+|   ├── architecture/             # Architecture documentation
+|   ├── examples/                 # Code examples and patterns
+|   ├── ai-guidelines.md          # AI assistant guidelines
+|   ├── tasks.md                  # Task tracking and agile development
+|   └── ...                       # Other documentation
 ```
 
 #### Naming Conventions
 
-- **Files**: kebab-case (`contact-service.ts`)
-- **Classes**: PascalCase (`ContactService`)
-- **Functions/Variables**: camelCase (`getUserContacts`)
-- **Constants**: UPPER_SNAKE_CASE (`MAX_RETRY_ATTEMPTS`)
+- **Python Files**: snake_case (`fetch_contacts.py`)
+- **TypeScript Files**: kebab-case (`contact-service.ts`)
+- **Classes**: PascalCase (`FetchContactComponent`)
+- **Functions/Variables**: camelCase (TS), snake_case (Python)
+- **Constants**: UPPER_SNAKE_CASE
 
-### Domain-Driven Architecture Patterns
+### Backend Development (Python)
 
-#### Key Architectural Rules
+#### Key Patterns
 
-1. **Core domains** (contacts, calendar, journal, photos) contain only business
-   logic
-2. **Integration sub-domains** (google-integration, immich-integration) handle
-   external systems
-3. **Adapters** within domains can only access their own domain's business logic
-4. **Cross-domain communication** happens through application services and
-   events
-5. **Integration sub-domains** can access multiple core domains via their
-   application services
+- **Explicit SQL**: Use SQLAlchemy Core with raw SQL queries
+- **Simple Components**: Clear business logic without complex abstractions
+- **Pydantic Models**: Type-safe request/response validation
+- **Standard Libraries**: Prefer built-in libraries over external dependencies
+- **Clear Separation**: Keep domain logic separate from API and database concerns
+- **Use Type Hints**: Always use type hints for better code understanding.
 
-#### Essential Patterns
+#### Database Operations
 
-- **Entities**: Rich domain objects with identity and business logic
-- **Value Objects**: Immutable objects representing domain concepts (Email,
-  PhoneNumber)
-- **Application Components**: Orchestrate use cases and coordinate between
-  domains
-- **Adapters**: Implement external dependencies (SQL repositories, API clients)
+- **Queries**: Explicit SQL with SQLAlchemy text() for readability
+- **Migrations**: Alembic with clear, readable SQL migration files
+- **Connections**: Simple connection management, no complex pooling
 
-_See [Domain Architecture](./examples/domain-architecture.md) for detailed
-implementation patterns and examples._
+_See [Domain Architecture](./examples/domain-architecture.md) for detailed patterns._
 
 ## Essential Development Practices
 
@@ -184,39 +195,36 @@ implementation patterns and examples._
 
 ### Database Operations
 
-- Use transactions for multi-table operations
-- Always use prepared statements to prevent SQL injection
-- Implement proper connection pooling and lifecycle management
+- **Explicit Queries**: Use SQLAlchemy Core with text() for readable SQL
+- **Transactions**: Use database transactions for multi-table operations
+- **Security**: Always use parameterized queries to prevent SQL injection
+- **Simple Connections**: Direct connection management, avoid complex pooling
 
 ### API Design
 
 - **JSON API Compliance**: Follow JSON API specification for REST endpoints
-- **Input Validation**: Use Zod schemas for all request validation
+- **Input Validation**: Use Pydantic models for all request validation
 - **Error Responses**: Return structured JSON API error format
-- **Pagination**: Implement cursor-based pagination for large datasets
+- **Pagination**: Implement simple pagination for large datasets
 
 ### MCP Implementation
 
-- Structure MCP tools with consistent interfaces - following the specification
-- Make responses AI-friendly with context and summaries, not raw database data
-- Provide search context and metadata in responses
+- **Python MCP SDK**: Use official Python MCP SDK for server implementation
+- **AI-Friendly Responses**: Provide context and summaries, not raw database data
+- **Clear Interfaces**: Structure MCP tools with consistent, simple interfaces
 
 ### Security & Performance
 
-- **Logging**: Use structured logging with appropriate levels (error, warn,
-  info, debug)
-- **Security**: Never log sensitive data, validate/sanitize inputs, use
-  environment variables for secrets
-- **Performance**: Index frequently queried columns, implement pagination, use
-  connection pooling
-- **Testing**: 80% coverage threshold, mock external integrations, test error
-  scenarios
+- **Logging**: Use Python standard library logging with clear levels
+- **Security**: Never log sensitive data, validate inputs, use environment variables
+- **Performance**: Focus on readability over optimization
+- **Testing**: Focus on critical business logic, mock external integrations
 
 ## Reference Documentation
 
 For detailed implementation examples and patterns, see:
 
-- **[Testing Patterns](./examples/testing-patterns.md)** - Jest, Storybook, and
+- **[Testing Patterns](./examples/testing-patterns.md)** - PyTest, Jest, Storybook, and
   Playwright examples
 - **[Component Patterns](./examples/component-patterns.md)** - shadcn/ui
   implementation guides

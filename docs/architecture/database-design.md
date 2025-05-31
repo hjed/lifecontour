@@ -1,314 +1,286 @@
 # Database Design - Personal CRM & Journal System
 
-This document details the database schema, data relationships, and data layer implementation for the Personal CRM & Journal System.
+This document outlines the database approach and initial schema for the Personal CRM & Journal System. The design will evolve through agile iterations as features are implemented.
 
-## SQLite Database Schema
+## PostgreSQL Database Approach
 
-### Core Data Tables
+### Design Philosophy
+- **Iterative Schema Development**: Start with core tables, expand as features are built
+- **PostgreSQL Features**: Leverage JSON columns, full-text search, and advanced indexing
+- **Explicit SQL**: Use SQLAlchemy Core with readable SQL queries
+- **Migration-Driven**: Schema changes through Alembic migrations
+
+### Initial Core Tables (Iteration 1)
 
 #### Contacts Table
 ```sql
 CREATE TABLE contacts (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT NOT NULL,
-    email TEXT,
-    phone TEXT,
-    company TEXT,
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name VARCHAR(255) NOT NULL,
+    email VARCHAR(255),
+    phone VARCHAR(50),
     notes TEXT,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    is_deleted BOOLEAN DEFAULT FALSE
+    tags JSONB DEFAULT '[]',
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 ```
 
-#### Tags Table
+#### Basic Indexing (Iteration 1)
 ```sql
-CREATE TABLE tags (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT UNIQUE NOT NULL,
-    color TEXT,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-);
-```
-
-#### Contact Tags Relationship
-```sql
-CREATE TABLE contact_tags (
-    contact_id INTEGER NOT NULL,
-    tag_id INTEGER NOT NULL,
-    PRIMARY KEY (contact_id, tag_id),
-    FOREIGN KEY (contact_id) REFERENCES contacts(id),
-    FOREIGN KEY (tag_id) REFERENCES tags(id)
-);
-```
-
-#### Events Table
-```sql
-CREATE TABLE events (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    title TEXT NOT NULL,
-    description TEXT,
-    start_time DATETIME NOT NULL,
-    end_time DATETIME NOT NULL,
-    location TEXT,
-    attendees TEXT, -- JSON array
-    linked_album_id TEXT, -- Reference to Immich album
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    is_deleted BOOLEAN DEFAULT FALSE
-);
-```
-
-#### Journal Entries Table
-```sql
-CREATE TABLE journal_entries (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    title TEXT,
-    content TEXT NOT NULL,
-    mood INTEGER, -- 1-10 scale
-    related_contacts TEXT, -- JSON array of contact IDs
-    related_events TEXT, -- JSON array of event IDs
-    linked_album_id TEXT, -- Reference to Immich album
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    is_deleted BOOLEAN DEFAULT FALSE
-);
-```
-
-### Photo and Album Tables
-
-#### Photos Table (Metadata Only)
-```sql
-CREATE TABLE photos (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    immich_id TEXT UNIQUE NOT NULL,
-    filename TEXT NOT NULL,
-    path TEXT NOT NULL,
-    taken_at DATETIME,
-    related_contacts TEXT, -- JSON array of contact IDs
-    related_events TEXT, -- JSON array of event IDs
-    tags TEXT, -- JSON array
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-);
-```
-
-#### Albums Table (From Immich)
-```sql
-CREATE TABLE albums (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    immich_album_id TEXT UNIQUE NOT NULL,
-    name TEXT NOT NULL,
-    description TEXT,
-    thumbnail_path TEXT,
-    photo_count INTEGER DEFAULT 0,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-);
-```
-
-#### Immich Persons Table (Name-Based Only)
-```sql
-CREATE TABLE immich_persons (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    immich_person_id TEXT UNIQUE NOT NULL,
-    name TEXT,
-    thumbnail_path TEXT,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-);
-```
-
-#### Person to Contact Matching Table
-```sql
-CREATE TABLE person_contact_matches (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    immich_person_id INTEGER NOT NULL,
-    contact_id INTEGER NOT NULL,
-    match_method TEXT NOT NULL, -- 'manual', 'name'
-    confidence_score REAL, -- 0.0 to 1.0 for name matching
-    verified BOOLEAN DEFAULT FALSE,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (immich_person_id) REFERENCES immich_persons(id),
-    FOREIGN KEY (contact_id) REFERENCES contacts(id),
-    UNIQUE(immich_person_id, contact_id)
-);
-```
-
-### Integration and Sync Tables
-
-#### Google Integration Sync State
-```sql
-CREATE TABLE google_sync_state (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    entity_type TEXT NOT NULL, -- 'contact', 'event', 'tag'
-    local_id TEXT NOT NULL,
-    google_id TEXT NOT NULL,
-    etag TEXT,
-    last_synced DATETIME DEFAULT CURRENT_TIMESTAMP,
-    sync_status TEXT DEFAULT 'synced', -- 'synced', 'pending', 'error'
-    UNIQUE(entity_type, local_id)
-);
-```
-
-#### Immich Integration Sync State
-```sql
-CREATE TABLE immich_sync_state (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    entity_type TEXT NOT NULL, -- 'album', 'person', 'photo'
-    local_id TEXT NOT NULL,
-    immich_id TEXT NOT NULL,
-    last_synced DATETIME DEFAULT CURRENT_TIMESTAMP,
-    sync_status TEXT DEFAULT 'synced', -- 'synced', 'pending', 'error'
-    UNIQUE(entity_type, local_id)
-);
-```
-
-#### Contact Interactions Table
-```sql
-CREATE TABLE contact_interactions (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    contact_id INTEGER NOT NULL,
-    interaction_type TEXT NOT NULL, -- email, call, meeting, etc.
-    description TEXT,
-    occurred_at DATETIME NOT NULL,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (contact_id) REFERENCES contacts(id)
-);
-```
-
-## Indexing Strategy
-
-### Performance Indexes
-```sql
--- Contact search optimization
-CREATE INDEX idx_contacts_name ON contacts(name);
+-- Essential indexes for contact operations
+CREATE INDEX idx_contacts_name ON contacts USING gin(to_tsvector('english', name));
 CREATE INDEX idx_contacts_email ON contacts(email);
-CREATE INDEX idx_contacts_phone ON contacts(phone);
-CREATE INDEX idx_contacts_company ON contacts(company);
-
--- Event time-based queries
-CREATE INDEX idx_events_start_time ON events(start_time);
-CREATE INDEX idx_events_end_time ON events(end_time);
-CREATE INDEX idx_events_date_range ON events(start_time, end_time);
-
--- Journal entry search
-CREATE INDEX idx_journal_created_at ON journal_entries(created_at);
-CREATE INDEX idx_journal_mood ON journal_entries(mood);
-
--- Photo metadata search
-CREATE INDEX idx_photos_taken_at ON photos(taken_at);
-CREATE INDEX idx_photos_immich_id ON photos(immich_id);
-
--- Sync state queries
-CREATE INDEX idx_google_sync_entity_type ON google_sync_state(entity_type);
-CREATE INDEX idx_google_sync_status ON google_sync_state(sync_status);
-CREATE INDEX idx_immich_sync_entity_type ON immich_sync_state(entity_type);
-CREATE INDEX idx_immich_sync_status ON immich_sync_state(sync_status);
-
--- Contact interactions
-CREATE INDEX idx_interactions_contact_id ON contact_interactions(contact_id);
-CREATE INDEX idx_interactions_occurred_at ON contact_interactions(occurred_at);
-CREATE INDEX idx_interactions_type ON contact_interactions(interaction_type);
+CREATE INDEX idx_contacts_tags ON contacts USING gin(tags);
+CREATE INDEX idx_contacts_created_at ON contacts(created_at);
 ```
 
-### Full-Text Search Indexes
+## Future Tables (Later Iterations)
+
+### Calendar and Events (Iteration 2)
 ```sql
--- Journal content search
-CREATE VIRTUAL TABLE journal_fts USING fts5(
-    title, content,
-    content='journal_entries',
-    content_rowid='id'
+-- To be implemented when calendar features are added
+CREATE TABLE events (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    title VARCHAR(255) NOT NULL,
+    description TEXT,
+    start_time TIMESTAMP WITH TIME ZONE NOT NULL,
+    end_time TIMESTAMP WITH TIME ZONE NOT NULL,
+    location TEXT,
+    attendees JSONB DEFAULT '[]',
+    metadata JSONB DEFAULT '{}',
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
+```
 
--- Contact search
-CREATE VIRTUAL TABLE contacts_fts USING fts5(
-    name, email, company, notes,
-    content='contacts',
-    content_rowid='id'
+### Journal System (Iteration 3)
+```sql
+-- To be implemented when journal features are added
+CREATE TABLE journal_entries (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    title VARCHAR(255),
+    content TEXT NOT NULL,
+    mood INTEGER CHECK (mood >= 1 AND mood <= 10),
+    metadata JSONB DEFAULT '{}',
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 ```
 
-## Data Relationships
-
-### Entity Relationships
-- **Contacts** ↔ **Tags**: Many-to-many through `contact_tags`
-- **Contacts** ↔ **Interactions**: One-to-many
-- **Contacts** ↔ **Immich Persons**: Many-to-many through `person_contact_matches`
-- **Events** → **Albums**: One-to-one via `linked_album_id`
-- **Journal Entries** → **Albums**: One-to-one via `linked_album_id`
-- **Photos** ↔ **Contacts**: Many-to-many via JSON arrays
-- **Photos** ↔ **Events**: Many-to-many via JSON arrays
-
-### JSON Field Structures
-
-#### Event Attendees
-```json
-[
-  {
-    "email": "john@example.com",
-    "name": "John Doe",
-    "response": "accepted"
-  }
-]
+### Photo Integration (Iteration 4)
+```sql
+-- To be implemented when Immich integration is added
+CREATE TABLE photo_metadata (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    immich_id VARCHAR(255) UNIQUE NOT NULL,
+    filename VARCHAR(255) NOT NULL,
+    taken_at TIMESTAMP WITH TIME ZONE,
+    metadata JSONB DEFAULT '{}',
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
 ```
 
-#### Related Contacts/Events Arrays
-```json
-[123, 456, 789]  // Array of entity IDs
+### External Integration Tables (Later Iterations)
+
+#### Google Sync State (When Google Integration Added)
+```sql
+-- To be implemented when Google sync features are added
+CREATE TABLE google_sync_state (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    entity_type VARCHAR(50) NOT NULL,
+    local_id UUID NOT NULL,
+    google_id VARCHAR(255) NOT NULL,
+    etag VARCHAR(255),
+    last_synced TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    sync_status VARCHAR(20) DEFAULT 'synced',
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    UNIQUE(entity_type, local_id)
+);
 ```
 
-#### Photo Tags
-```json
-["family", "vacation", "birthday"]
+#### Contact Interactions (When Interaction Tracking Added)
+```sql
+-- To be implemented when interaction tracking is added
+CREATE TABLE contact_interactions (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    contact_id UUID NOT NULL REFERENCES contacts(id),
+    interaction_type VARCHAR(50) NOT NULL,
+    description TEXT,
+    occurred_at TIMESTAMP WITH TIME ZONE NOT NULL,
+    metadata JSONB DEFAULT '{}',
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
 ```
+
+## PostgreSQL Features and Patterns
+
+### JSON Column Usage
+```sql
+-- Flexible metadata storage
+UPDATE contacts SET tags = tags || '["work"]'::jsonb WHERE id = ?;
+
+-- Query JSON data
+SELECT * FROM contacts WHERE tags @> '["family"]';
+
+-- Extract JSON values
+SELECT name, tags->>'work' as work_info FROM contacts;
+```
+
+### Full-Text Search (PostgreSQL)
+```sql
+-- Add search vector column (when needed)
+ALTER TABLE contacts ADD COLUMN search_vector tsvector;
+
+-- Update search vector
+UPDATE contacts SET search_vector =
+    to_tsvector('english', coalesce(name,'') || ' ' || coalesce(email,'') || ' ' || coalesce(notes,''));
+
+-- Create GIN index for fast search
+CREATE INDEX idx_contacts_search ON contacts USING gin(search_vector);
+
+-- Search query
+SELECT * FROM contacts
+WHERE search_vector @@ plainto_tsquery('english', 'john smith');
+```
+
+### Advanced Indexing (Added as Needed)
+```sql
+-- Partial indexes for active records
+CREATE INDEX idx_contacts_active ON contacts(created_at) WHERE updated_at > NOW() - INTERVAL '1 year';
+
+-- Composite indexes for common queries
+CREATE INDEX idx_contacts_name_email ON contacts(name, email);
+
+-- JSON indexes for tag queries
+CREATE INDEX idx_contacts_tags_gin ON contacts USING gin(tags);
+```
+
+## Migration Strategy
+
+### Alembic Migration Approach
+```python
+# Example migration for contacts table
+"""Create contacts table
+
+Revision ID: 001_create_contacts
+Revises:
+Create Date: 2024-01-01 10:00:00.000000
+
+"""
+from alembic import op
+import sqlalchemy as sa
+from sqlalchemy.dialects import postgresql
+
+def upgrade():
+    op.create_table('contacts',
+        sa.Column('id', postgresql.UUID(), server_default=sa.text('gen_random_uuid()'), nullable=False),
+        sa.Column('name', sa.VARCHAR(length=255), nullable=False),
+        sa.Column('email', sa.VARCHAR(length=255), nullable=True),
+        sa.Column('phone', sa.VARCHAR(length=50), nullable=True),
+        sa.Column('notes', sa.TEXT(), nullable=True),
+        sa.Column('tags', postgresql.JSONB(astext_type=sa.Text()), server_default='[]', nullable=True),
+        sa.Column('created_at', sa.TIMESTAMP(timezone=True), server_default=sa.text('now()'), nullable=True),
+        sa.Column('updated_at', sa.TIMESTAMP(timezone=True), server_default=sa.text('now()'), nullable=True),
+        sa.PrimaryKeyConstraint('id')
+    )
+
+    # Create basic indexes
+    op.create_index('idx_contacts_name', 'contacts', [sa.text('to_tsvector(\'english\', name)')], postgresql_using='gin')
+    op.create_index('idx_contacts_email', 'contacts', ['email'])
+    op.create_index('idx_contacts_tags', 'contacts', ['tags'], postgresql_using='gin')
+
+def downgrade():
+    op.drop_table('contacts')
+```
+
+### Iterative Schema Evolution
+- **Iteration 1**: Basic contacts table with essential fields
+- **Iteration 2**: Add calendar/events tables when calendar features implemented
+- **Iteration 3**: Add journal tables when journal features implemented
+- **Iteration 4**: Add photo/Immich integration tables when photo features implemented
+- **Future**: Add additional tables as features are developed
 
 ## Data Layer Implementation
 
-### Repository Pattern
+### Repository Pattern (Python)
 Each domain implements repositories following the Repository pattern:
 
-```typescript
-interface ContactRepository {
-  findById(id: number): Promise<Contact | null>;
-  findByEmail(email: string): Promise<Contact | null>;
-  search(query: string): Promise<Contact[]>;
-  save(contact: Contact): Promise<Contact>;
-  delete(id: number): Promise<void>;
-}
+```python
+# Abstract repository interface
+from abc import ABC, abstractmethod
+from typing import List, Optional
+from uuid import UUID
+
+class ContactRepository(ABC):
+    @abstractmethod
+    async def find_by_id(self, contact_id: UUID) -> Optional[Contact]:
+        pass
+
+    @abstractmethod
+    async def find_by_email(self, email: str) -> Optional[Contact]:
+        pass
+
+    @abstractmethod
+    async def search(self, query: str) -> List[Contact]:
+        pass
+
+    @abstractmethod
+    async def save(self, contact: Contact) -> Contact:
+        pass
+
+    @abstractmethod
+    async def delete(self, contact_id: UUID) -> None:
+        pass
 ```
 
-### Transaction Management
-- Use SQLite transactions for multi-table operations
-- Implement transaction coordination for cross-domain operations
-- Rollback strategies for failed operations
+### SQLAlchemy Core Implementation
+```python
+# Example repository implementation
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncConnection
 
-### Migration Strategy
-- Version-controlled database migrations
-- Forward and backward migration support
-- Data preservation during schema changes
-- Automated migration testing
+class PostgreSQLContactRepository(ContactRepository):
+    def __init__(self, connection: AsyncConnection):
+        self.conn = connection
+
+    async def find_by_id(self, contact_id: UUID) -> Optional[Contact]:
+        query = text("SELECT * FROM contacts WHERE id = :id")
+        result = await self.conn.execute(query, {"id": contact_id})
+        row = result.fetchone()
+        return Contact.from_row(row) if row else None
+
+    async def search(self, query: str) -> List[Contact]:
+        search_query = text("""
+            SELECT * FROM contacts
+            WHERE search_vector @@ plainto_tsquery('english', :query)
+            ORDER BY ts_rank(search_vector, plainto_tsquery('english', :query)) DESC
+        """)
+        result = await self.conn.execute(search_query, {"query": query})
+        return [Contact.from_row(row) for row in result.fetchall()]
+```
 
 ## Performance Considerations
 
-### Query Optimization
-- Use prepared statements for repeated queries
+### Query Optimization (PostgreSQL)
+- Use parameterized queries for security and performance
 - Implement query result caching where appropriate
-- Optimize JOIN operations with proper indexing
-- Use EXPLAIN QUERY PLAN for performance analysis
+- Leverage PostgreSQL-specific features (JSONB, full-text search)
+- Use EXPLAIN ANALYZE for performance analysis
+- Add indexes incrementally based on actual usage patterns
 
 ### Connection Management
-- Connection pooling for concurrent access
-- Proper connection lifecycle management
-- Timeout and retry strategies
-- Connection health monitoring
+- Use asyncpg connection pooling for concurrent access
+- Proper async connection lifecycle management
+- Timeout and retry strategies for external integrations
+- Connection health monitoring in application health checks
 
-### Data Archival
-- Soft delete strategy with `is_deleted` flags
-- Periodic cleanup of old sync state records
-- Archive old journal entries and interactions
-- Maintain referential integrity during archival
+### Data Growth Strategy
+- Start simple with single table approach
+- Add partitioning when data volume requires it
+- Implement archival strategies as needed
+- Monitor query performance and add indexes incrementally
 
 ## Related Documents
 

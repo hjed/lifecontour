@@ -60,11 +60,13 @@ This document provides detailed information about the domain-driven architecture
 Each domain follows the same internal structure:
 ```
 domain/
-├── entities/          # Domain entities (Contact, Event, etc.)
-├── value-objects/     # Value objects (Email, PhoneNumber, etc.)
-├── services/          # Domain services (business logic)
+├── models/           # Domain models
 ├── events/           # Domain events
-└── ports/            # Interfaces for external dependencies
+|── adpters/          # Interfaces for external dependencies
+|   ├── sql/              # Database adapters
+|   ├── http/             # External API adapters
+|   ├── events/           # Event publishing adapters
+|   └── cache/            # Caching adapters (optional)
 ```
 
 #### Contacts Domain
@@ -122,7 +124,7 @@ domain/
 ### 4. Adapter Layer (Driven Adapters)
 
 #### Adapter Structure
-Each domain has its own adapters that implement the ports defined by the domain:
+Each domain has its own adapters that implement external infrastructure needs:
 ```
 domain/adapters/
 ├── sql/              # Database adapters
@@ -198,102 +200,6 @@ domain/adapters/
 
 ## Project Structure
 
-### Domain-Driven Architecture with Integration Sub-Domains
-```
-src/
-├── api/                          # API Adapters (Driving)
-│   ├── rest/                     # REST API adapters (nginx proxy compatible)
-│   │   ├── contacts/             # Contact REST endpoints
-│   │   ├── calendar/             # Calendar REST endpoints
-│   │   ├── journal/              # Journal REST endpoints
-│   │   ├── photos/               # Photos REST endpoints
-│   │   └── shared/               # Shared REST utilities, proxy config
-│   └── mcp/                      # MCP adapters
-│       ├── contacts/             # Contact MCP tools
-│       ├── calendar/             # Calendar MCP tools
-│       ├── journal/              # Journal MCP tools
-│       ├── photos/               # Photos MCP tools
-│       └── server.ts             # MCP server setup
-├── contacts/                     # Contacts Core Domain
-│   ├── domain/                   # Domain layer
-│   │   ├── entities/             # Contact, ContactInteraction, Tag
-│   │   ├── value-objects/        # Email, PhoneNumber, Address
-│   │   ├── services/             # ContactDuplicationService, TagService
-│   │   └── events/               # ContactCreated, TagAssigned, etc.
-│   ├── adapters/                 # All external dependencies
-│   │   ├── sql/                  # SqlContactRepository, SqlTagRepository
-│   │   └── events/               # ContactEventPublisher
-│   └── application/              # Use cases and application services
-│       ├── use-cases/            # CreateContact, AssignTag, etc.
-│       └── ContactApplicationService.ts
-├── calendar/                     # Calendar Core Domain
-│   ├── domain/
-│   │   ├── entities/             # Event, Reminder, Album (reference)
-│   │   ├── value-objects/        # DateTime, Duration, Location
-│   │   ├── services/             # ConflictDetectionService, AlbumLinkService
-│   │   └── events/               # EventCreated, AlbumLinked, etc.
-│   ├── adapters/
-│   │   ├── sql/                  # SqlEventRepository
-│   │   └── events/               # EventEventPublisher
-│   └── application/
-│       ├── use-cases/            # CreateEvent, LinkToAlbum, etc.
-│       └── CalendarApplicationService.ts
-├── journal/                      # Journal Core Domain
-│   ├── domain/
-│   │   ├── entities/             # JournalEntry, Album (reference)
-│   │   ├── value-objects/        # Mood, Sentiment
-│   │   ├── services/             # SentimentAnalysisService, AlbumLinkService
-│   │   └── events/               # JournalEntryCreated, AlbumLinked, etc.
-│   ├── adapters/
-│   │   ├── sql/                  # SqlJournalRepository
-│   │   └── events/               # JournalEventPublisher
-│   └── application/
-│       ├── use-cases/            # CreateJournalEntry, LinkToAlbum, etc.
-│       └── JournalApplicationService.ts
-├── photos/                       # Photos Core Domain
-│   ├── domain/
-│   │   ├── entities/             # Photo, Album, Person
-│   │   ├── value-objects/        # AlbumId, PersonName
-│   │   ├── services/             # AlbumService, PersonService
-│   │   └── events/               # AlbumCreated, PersonLinked, etc.
-│   ├── adapters/
-│   │   ├── sql/                  # SqlPhotoRepository, SqlAlbumRepository
-│   │   └── events/               # PhotoEventPublisher
-│   └── application/
-│       ├── use-cases/            # CreateAlbum, LinkPerson, etc.
-│       └── PhotoApplicationService.ts
-├── google-integration/           # Google Integration Sub-Domain
-│   ├── domain/
-│   │   ├── entities/             # GoogleSyncState, GoogleContact, GoogleEvent
-│   │   ├── services/             # GoogleSyncService, TagSyncService
-│   │   └── events/               # GoogleSyncCompleted, TagSynced, etc.
-│   ├── adapters/
-│   │   ├── google-api/           # GoogleContactsClient, GoogleCalendarClient
-│   │   ├── sql/                  # GoogleSyncStateRepository
-│   │   └── events/               # GoogleEventPublisher
-│   └── application/
-│       ├── use-cases/            # SyncGoogleContacts, SyncTags, etc.
-│       └── GoogleIntegrationService.ts
-├── immich-integration/           # Immich Integration Sub-Domain
-│   ├── domain/
-│   │   ├── entities/             # ImmichAlbum, ImmichPerson, PersonMatch
-│   │   ├── services/             # NameMatchingService, AlbumSyncService
-│   │   └── events/               # AlbumSynced, PersonMatched, etc.
-│   ├── adapters/
-│   │   ├── immich-api/           # ImmichClient
-│   │   ├── sql/                  # ImmichSyncStateRepository
-│   │   └── events/               # ImmichEventPublisher
-│   └── application/
-│       ├── use-cases/            # SyncAlbums, MatchPersonsByName, etc.
-│       └── ImmichIntegrationService.ts
-└── shared/                       # Shared Infrastructure
-    ├── database/                 # Database connection, migrations
-    ├── events/                   # Event infrastructure
-    ├── types/                    # Shared types and interfaces
-    ├── utils/                    # Utility functions
-    ├── config/                   # Configuration management
-    └── proxy/                    # Nginx proxy utilities and middleware
-```
 
 ## Key Architectural Principles
 

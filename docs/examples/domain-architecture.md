@@ -1,308 +1,68 @@
-# Domain Architecture Patterns
+# Domain Architecture Guidelines
 
-This document provides detailed examples of domain-driven design patterns for the Personal CRM & Journal System.
+## Python Backend Domain Patterns
 
-## Domain Entity Pattern
+### Domain Layer Guidelines (Ports & Adapters)
+- **Domain Entities**: Pure Python classes with business logic, no framework dependencies
+- **Domain Components**: Business logic that doesn't belong to a single entity
+- **Adapters**: Classes supply the domains infrastructure needs such as sql repositories
+- **Value Objects**: Immutable objects representing domain concepts
+- **Domain Events**: Pure Python classes representing business events
+- **No Framework Dependencies**: Domain layer must be framework-agnostic
 
-```typescript
-// contacts/domain/entities/Contact.ts
-export class Contact {
-  constructor(
-    private readonly id: ContactId,
-    private name: string,
-    private email?: Email,
-    private phone?: PhoneNumber
-  ) {}
+### Application Layer Guidelines
+- **Use Cases**: Orchestrate domain operations, no business logic
+- **Application Services**: Coordinate between domain and infrastructure
+- **Command/Query Objects**: Simple data structures for input/output
+- **Dependency Injection**: Inject ports (interfaces), not concrete implementations
+- **Transaction Management**: Handle database transactions at this layer
 
-  public updateEmail(email: Email): void {
-    if (!this.canUpdateEmail(email)) {
-      throw new Error('Cannot update email: validation failed');
-    }
-    this.email = email;
-  }
+### Infrastructure Layer Guidelines (Adapters)
+- **Repository Adapters**: Implement domain-defined repository ports
+- **API Adapters**: Implement external service ports (Google, Immich)
+- **Database Adapters**: Use SQLAlchemy Core, implement repository interfaces
+- **Framework Integration**: Pydantic models for FastAPI, not domain
+- **Dependency Direction**: Infrastructure depends on domain ports, never reverse
+- **Error Translation**: Convert infrastructure errors to domain exceptions
 
-  private canUpdateEmail(email: Email): boolean {
-    return email.isValid() && !this.isEmailTaken(email);
-  }
+### Validation Strategy (Layered)
+- **Domain Layer**: Business rule validation in entities/domain services
+- **Application Layer**: Use case validation and authorization
+- **Infrastructure Layer**: Pydantic models for API input/output validation
+- **Database Layer**: Database constraints as final safety net
 
-  public toSnapshot(): ContactSnapshot {
-    return {
-      id: this.id.value,
-      name: this.name,
-      email: this.email?.value,
-      phone: this.phone?.value
-    };
-  }
+### External Integration Guidelines
+- Create separate modules for each external service
+- Use standard HTTP libraries (requests) for API calls
+- Implement proper error handling and retries
+- Use environment variables for API credentials
+- Add logging for debugging integration issues
+- Map external data to internal models
+- Handle rate limiting and API quotas gracefully
 
-  public static fromSnapshot(snapshot: ContactSnapshot): Contact {
-    return new Contact(
-      ContactId.create(snapshot.id),
-      snapshot.name,
-      snapshot.email ? Email.create(snapshot.email) : undefined,
-      snapshot.phone ? PhoneNumber.create(snapshot.phone) : undefined
-    );
-  }
-}
-```
+### Application Service Guidelines
+- Keep application services focused on orchestration
+- Validate input using Pydantic models
+- Implement business rule validation
+- Use database transactions for consistency
+- Add comprehensive logging for operations
+- Handle errors gracefully with meaningful messages
+- Keep services stateless and testable
 
-## Value Object Pattern
+### Error Handling Guidelines
+- Create custom exception classes for domain errors
+- Use meaningful error messages for debugging
+- Include context information in error messages
+- Log errors with appropriate severity levels
+- Handle exceptions at appropriate boundaries
+- Return user-friendly error responses from APIs
+- Use standard HTTP status codes for API errors
 
-```typescript
-// contacts/domain/value-objects/Email.ts
-export class Email {
-  private constructor(private readonly value: string) {}
-
-  public static create(value: string): Email {
-    if (!this.isValidEmail(value)) {
-      throw new Error(`Invalid email: ${value}`);
-    }
-    return new Email(value);
-  }
-
-  private static isValidEmail(value: string): boolean {
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    return emailRegex.test(value);
-  }
-
-  public getValue(): string {
-    return this.value;
-  }
-
-  public equals(other: Email): boolean {
-    return this.value === other.value;
-  }
-}
-```
-
-## Repository Interface (Port)
-
-```typescript
-// contacts/domain/ports/ContactRepository.ts
-export interface ContactRepository {
-  save(contact: Contact): Promise<void>;
-  findById(id: ContactId): Promise<Contact | null>;
-  findByEmail(email: Email): Promise<Contact | null>;
-  findAll(criteria?: ContactSearchCriteria): Promise<Contact[]>;
-  delete(id: ContactId): Promise<void>;
-}
-```
-
-## SQL Repository Adapter
-
-```typescript
-// contacts/adapters/sql/SqlContactRepository.ts
-import { drizzle } from 'drizzle-orm/better-sqlite3';
-import { eq, and } from 'drizzle-orm';
-import { trace } from '@opentelemetry/api';
-
-@injectable()
-export class SqlContactRepository implements ContactRepository {
-  private tracer = trace.getTracer('contacts-repository');
-
-  constructor(
-    @inject('Database') private db: ReturnType<typeof drizzle>,
-    @inject('Logger') private logger: Logger
-  ) {}
-
-  async save(contact: Contact): Promise<void> {
-    return this.tracer.startActiveSpan('contact.save', async (span) => {
-      const snapshot = contact.toSnapshot();
-      
-      try {
-        await this.db.insert(contactsTable)
-          .values({
-            id: snapshot.id,
-            name: snapshot.name,
-            email: snapshot.email,
-            phone: snapshot.phone,
-            updatedAt: new Date()
-          })
-          .onConflictDoUpdate({
-            target: contactsTable.id,
-            set: {
-              name: snapshot.name,
-              email: snapshot.email,
-              phone: snapshot.phone,
-              updatedAt: new Date()
-            }
-          });
-
-        this.logger.info('Contact saved', { contactId: snapshot.id });
-      } catch (error) {
-        span.recordException(error as Error);
-        throw new ContactRepositoryError('Failed to save contact', error);
-      } finally {
-        span.end();
-      }
-    });
-  }
-
-  async findById(id: ContactId): Promise<Contact | null> {
-    const rows = await this.db.select()
-      .from(contactsTable)
-      .where(and(
-        eq(contactsTable.id, id.value),
-        eq(contactsTable.isDeleted, false)
-      ));
-
-    const row = rows[0];
-    return row ? this.mapRowToContact(row) : null;
-  }
-
-  private mapRowToContact(row: ContactRow): Contact {
-    return Contact.fromSnapshot({
-      id: row.id,
-      name: row.name,
-      email: row.email,
-      phone: row.phone
-    });
-  }
-}
-```
-
-## Application Component Pattern
-
-```typescript
-// contacts/application/ContactApplicationService.ts
-@injectable()
-export class CreateContact {
-  constructor(
-    @inject('ContactRepository') private contactRepo: ContactRepository,
-    @inject('EventBus') private eventBus: EventBus,
-    @inject('Logger') private logger: Logger
-  ) {}
-
-  async createContact(command: CreateContactCommand): Promise<ContactId> {
-    // Input validation
-    const validation = CreateContactSchema.safeParse(command);
-    if (!validation.success) {
-      throw new ValidationError('Invalid contact data', validation.error);
-    }
-
-    // Check for duplicates
-    if (command.email) {
-      const existing = await this.contactRepo.findByEmail(Email.create(command.email));
-      if (existing) {
-        throw new DuplicateContactError('Contact with this email already exists');
-      }
-    }
-
-    // Create domain entity
-    const contact = new Contact(
-      ContactId.generate(),
-      command.name,
-      command.email ? Email.create(command.email) : undefined,
-      command.phone ? PhoneNumber.create(command.phone) : undefined
-    );
-
-    // Save to repository
-    await this.contactRepo.save(contact);
-
-    // Publish domain event
-    await this.eventBus.publish(new ContactCreated(contact.getId(), contact.getName()));
-
-    this.logger.info('Contact created', { contactId: contact.getId().value });
-    return contact.getId();
-  }
-}
-```
-
-## External API Adapter
-
-```typescript
-// google-integration/adapters/google-api/GoogleContactsAdapter.ts
-import { google, people_v1 } from 'googleapis';
-import { trace } from '@opentelemetry/api';
-
-@injectable()
-export class GoogleContactsAdapter implements GoogleContactsService {
-  private tracer = trace.getTracer('google-contacts-adapter');
-  private peopleApi: people_v1.People;
-
-  constructor(
-    @inject('GoogleAuth') private auth: GoogleAuth,
-    @inject('Logger') private logger: Logger
-  ) {
-    this.peopleApi = google.people({ version: 'v1', auth: this.auth });
-  }
-
-  async syncContacts(): Promise<GoogleContact[]> {
-    return this.tracer.startActiveSpan('google.contacts.sync', async (span) => {
-      try {
-        const response = await this.peopleApi.people.connections.list({
-          resourceName: 'people/me',
-          personFields: 'names,emailAddresses,phoneNumbers,metadata',
-          pageSize: 1000,
-          sortOrder: 'LAST_MODIFIED_DESCENDING'
-        });
-
-        const contacts = response.data.connections?.map(this.mapGoogleContact) || [];
-        
-        this.logger.info('Google contacts synced', { count: contacts.length });
-        return contacts;
-      } catch (error) {
-        span.recordException(error as Error);
-        throw new GoogleContactsError('Failed to sync contacts', error);
-      } finally {
-        span.end();
-      }
-    });
-  }
-
-  private mapGoogleContact(person: people_v1.Schema$Person): GoogleContact {
-    return {
-      id: person.resourceName!,
-      name: person.names?.[0]?.displayName || '',
-      email: person.emailAddresses?.[0]?.value,
-      phone: person.phoneNumbers?.[0]?.value,
-      etag: person.etag
-    };
-  }
-}
-```
-
-## Domain Events
-
-```typescript
-// contacts/domain/events/ContactCreated.ts
-export class ContactCreated implements DomainEvent {
-  public readonly type = 'ContactCreated';
-  public readonly occurredAt = new Date();
-
-  constructor(
-    public readonly contactId: ContactId,
-    public readonly contactName: string
-  ) {}
-}
-
-// shared/events/EventBus.ts
-export interface EventBus {
-  publish(event: DomainEvent): Promise<void>;
-  subscribe<T extends DomainEvent>(
-    eventType: string,
-    handler: (event: T) => Promise<void>
-  ): void;
-}
-```
-
-## Error Handling
-
-```typescript
-// contacts/domain/errors/ContactErrors.ts
-export class ContactRepositoryError extends Error {
-  constructor(
-    message: string,
-    public readonly cause?: Error
-  ) {
-    super(message);
-    this.name = 'ContactRepositoryError';
-  }
-}
-
-export class DuplicateContactError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = 'DuplicateContactError';
-  }
-}
-```
+### Logging Guidelines
+- Use Python standard library logging
+- Include structured logging with context
+- Log at appropriate levels (DEBUG, INFO, WARNING, ERROR)
+- Include correlation IDs for request tracing
+- Log business operations for audit trails
+- Avoid logging sensitive information
+- Use consistent log message formats

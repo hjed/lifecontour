@@ -1,6 +1,6 @@
 # Security & Performance - Personal CRM & Journal System
 
-This document covers security considerations, performance optimization strategies, and operational best practices for the Personal CRM & Journal System.
+This document covers security considerations, performance optimization strategies, and operational best practices for the Python FastAPI backend with Next.js frontend.
 
 ## Security Considerations
 
@@ -15,35 +15,46 @@ This document covers security considerations, performance optimization strategie
 #### API Security
 - **API Key Authentication**: Secure API key generation and rotation for MCP
 - **Role-Based Access Control**: Granular permissions for different user roles
-- **Request Validation**: Comprehensive input validation using Zod schemas
+- **Request Validation**: Comprehensive input validation using Pydantic models
 - **Rate Limiting**: Configurable rate limits per endpoint and user
 
-#### Session Management
-```typescript
-// JWT Configuration
-const jwtConfig = {
-  accessTokenExpiry: '15m',
-  refreshTokenExpiry: '7d',
-  algorithm: 'HS256',
-  issuer: 'personal-crm',
-  audience: 'personal-crm-users'
-};
+#### Session Management (Python Backend)
+```python
+# JWT Configuration
+from datetime import timedelta
 
-// Secure cookie settings
-const cookieOptions = {
-  httpOnly: true,
-  secure: process.env.NODE_ENV === 'production',
-  sameSite: 'strict' as const,
-  maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
-};
+JWT_CONFIG = {
+    "access_token_expire_minutes": 15,
+    "refresh_token_expire_days": 7,
+    "algorithm": "HS256",
+    "issuer": "personal-crm",
+    "audience": "personal-crm-users"
+}
+
+# FastAPI security
+from fastapi.security import HTTPBearer
+from fastapi import Depends, HTTPException, status
+
+security = HTTPBearer()
+
+async def get_current_user(token: str = Depends(security)):
+    """Validate JWT token and return current user."""
+    try:
+        payload = jwt.decode(token.credentials, SECRET_KEY, algorithms=[JWT_CONFIG["algorithm"]])
+        user_id = payload.get("sub")
+        if user_id is None:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED)
+        return user_id
+    except JWTError:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED)
 ```
 
 ### Data Protection
 
 #### Encryption at Rest
-- **Database Encryption**: SQLite encryption using SQLCipher for sensitive data
+- **Database Encryption**: PostgreSQL encryption with encrypted volumes
 - **File System**: Encrypted volumes for database and log files
-- **Backup Encryption**: Encrypted backups with separate key management
+- **Backup Encryption**: Encrypted PostgreSQL backups with separate key management
 - **Key Management**: Secure key storage and rotation procedures
 
 #### Encryption in Transit
@@ -52,20 +63,44 @@ const cookieOptions = {
 - **API Communications**: Encrypted connections to external APIs
 - **Internal Communications**: TLS for container-to-container communication
 
-#### Input Validation and Sanitization
-```typescript
-// Input validation schema
-const contactSchema = z.object({
-  name: z.string().min(1).max(255).trim(),
-  email: z.string().email().optional(),
-  phone: z.string().regex(/^\+?[\d\s\-\(\)]+$/).optional(),
-  notes: z.string().max(10000).optional()
-});
+#### Input Validation and Sanitization (Python Backend)
+```python
+# Pydantic validation models
+from pydantic import BaseModel, validator, EmailStr
+import re
 
-// SQL injection prevention
-const sanitizeInput = (input: string): string => {
-  return input.replace(/[<>\"'%;()&+]/g, '');
-};
+class ContactCreate(BaseModel):
+    name: str
+    email: Optional[EmailStr] = None
+    phone: Optional[str] = None
+    notes: Optional[str] = None
+
+    @validator('name')
+    def validate_name(cls, v):
+        if not v or len(v.strip()) == 0:
+            raise ValueError('Name is required')
+        if len(v) > 255:
+            raise ValueError('Name too long')
+        return v.strip()
+
+    @validator('phone')
+    def validate_phone(cls, v):
+        if v and not re.match(r'^\+?[\d\s\-\(\)]+$', v):
+            raise ValueError('Invalid phone format')
+        return v
+
+    @validator('notes')
+    def validate_notes(cls, v):
+        if v and len(v) > 10000:
+            raise ValueError('Notes too long')
+        return v
+
+# SQL injection prevention (using parameterized queries)
+from sqlalchemy import text
+
+# ✅ Safe - parameterized query
+query = text("SELECT * FROM contacts WHERE name = :name")
+result = await conn.execute(query, {"name": user_input})
 ```
 
 #### XSS Protection
@@ -77,25 +112,46 @@ const sanitizeInput = (input: string): string => {
 ### Privacy and Compliance
 
 #### Data Minimization
-- **Local Storage**: SQLite database for minimal external data exposure
+- **Local Storage**: PostgreSQL database for controlled data exposure
 - **Selective Sync**: User control over which data syncs with external services
 - **Data Retention**: Configurable retention policies for different data types
 - **Audit Logging**: Comprehensive audit trail for data access and modifications
 
-#### Access Controls
-```typescript
-// Permission-based access control
-enum Permission {
-  READ_CONTACTS = 'read:contacts',
-  WRITE_CONTACTS = 'write:contacts',
-  READ_JOURNAL = 'read:journal',
-  WRITE_JOURNAL = 'write:journal',
-  ADMIN_SYSTEM = 'admin:system'
-}
+#### Access Controls (Python Backend)
+```python
+# Permission-based access control
+from enum import Enum
+from typing import List
 
-const checkPermission = (user: User, permission: Permission): boolean => {
-  return user.permissions.includes(permission);
-};
+class Permission(Enum):
+    READ_CONTACTS = "read:contacts"
+    WRITE_CONTACTS = "write:contacts"
+    READ_JOURNAL = "read:journal"
+    WRITE_JOURNAL = "write:journal"
+    ADMIN_SYSTEM = "admin:system"
+
+class User:
+    def __init__(self, user_id: str, permissions: List[Permission]):
+        self.user_id = user_id
+        self.permissions = permissions
+
+def check_permission(user: User, required_permission: Permission) -> bool:
+    """Check if user has required permission."""
+    return required_permission in user.permissions
+
+# FastAPI dependency for permission checking
+from fastapi import Depends, HTTPException, status
+
+def require_permission(permission: Permission):
+    """Decorator to require specific permission for endpoint."""
+    def permission_checker(current_user: User = Depends(get_current_user)):
+        if not check_permission(current_user, permission):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Permission {permission.value} required"
+            )
+        return current_user
+    return permission_checker
 ```
 
 ## Performance Considerations
@@ -104,60 +160,88 @@ const checkPermission = (user: User, permission: Permission): boolean => {
 
 #### Query Performance
 - **Indexing Strategy**: Comprehensive indexing for frequently queried columns
-- **Query Optimization**: Use of EXPLAIN QUERY PLAN for performance analysis
+- **Query Optimization**: Use of EXPLAIN ANALYZE for PostgreSQL performance analysis
 - **Prepared Statements**: Parameterized queries for better performance and security
 - **Connection Pooling**: Efficient database connection management
 
-#### SQLite Optimization
+#### PostgreSQL Optimization
 ```sql
--- Performance pragmas
-PRAGMA journal_mode = WAL;
-PRAGMA synchronous = NORMAL;
-PRAGMA cache_size = 10000;
-PRAGMA temp_store = MEMORY;
-PRAGMA mmap_size = 268435456; -- 256MB
+-- Performance configuration
+-- postgresql.conf settings
+shared_buffers = 256MB
+effective_cache_size = 1GB
+work_mem = 4MB
+maintenance_work_mem = 64MB
+checkpoint_completion_target = 0.9
+wal_buffers = 16MB
+default_statistics_target = 100
 ```
 
-#### Query Patterns
-```typescript
-// Efficient pagination
-const getContactsPaginated = async (page: number, limit: number) => {
-  const offset = (page - 1) * limit;
-  return db.select()
-    .from(contacts)
-    .limit(limit)
-    .offset(offset)
-    .orderBy(contacts.name);
-};
+#### Query Patterns (Python)
+```python
+# Efficient pagination
+from sqlalchemy import text
 
-// Optimized search with FTS
-const searchContacts = async (query: string) => {
-  return db.select()
-    .from(contacts)
-    .innerJoin(contactsFts, eq(contacts.id, contactsFts.rowid))
-    .where(sql`contacts_fts MATCH ${query}`);
-};
+async def get_contacts_paginated(conn, page: int, limit: int):
+    offset = (page - 1) * limit
+    query = text("""
+        SELECT id, name, email, phone, created_at, updated_at
+        FROM contacts
+        ORDER BY name
+        LIMIT :limit OFFSET :offset
+    """)
+    result = await conn.execute(query, {"limit": limit, "offset": offset})
+    return result.fetchall()
+
+# Optimized search with PostgreSQL full-text search
+async def search_contacts(conn, search_query: str):
+    query = text("""
+        SELECT id, name, email, phone,
+               ts_rank(search_vector, plainto_tsquery(:query)) as rank
+        FROM contacts
+        WHERE search_vector @@ plainto_tsquery(:query)
+        ORDER BY rank DESC
+    """)
+    result = await conn.execute(query, {"query": search_query})
+    return result.fetchall()
 ```
 
 ### Caching Strategy
 
 #### Application-Level Caching
-- **In-Memory Cache**: Redis or Node.js Map for frequently accessed data
+- **In-Memory Cache**: Redis or Python dict for frequently accessed data
 - **Cache Invalidation**: Event-driven cache invalidation on data changes
 - **Cache Warming**: Proactive cache population for critical data
 - **Cache Metrics**: Monitoring cache hit rates and performance
 
-#### HTTP Caching
-```typescript
-// Cache headers for static content
-app.use('/static', express.static('public', {
-  maxAge: '1y',
-  etag: true,
-  lastModified: true
-}));
+#### HTTP Caching (FastAPI)
+```python
+# Cache headers for static content
+from fastapi import FastAPI, Response
+from fastapi.staticfiles import StaticFiles
 
-// API response caching
-app.get('/api/contacts', cache('5 minutes'), getContacts);
+app = FastAPI()
+
+# Static files with caching
+app.mount("/static", StaticFiles(directory="static"), name="static")
+
+# API response caching with custom headers
+@app.get("/api/contacts")
+async def get_contacts(response: Response):
+    # Set cache headers
+    response.headers["Cache-Control"] = "public, max-age=300"  # 5 minutes
+    response.headers["ETag"] = generate_etag(contacts_data)
+
+    return contacts_data
+
+# Simple in-memory cache
+from functools import lru_cache
+from typing import List
+
+@lru_cache(maxsize=128)
+async def get_cached_contacts() -> List[dict]:
+    """Cache frequently accessed contact data."""
+    return await fetch_contacts_from_db()
 ```
 
 #### Browser Caching
@@ -174,19 +258,36 @@ app.get('/api/contacts', cache('5 minutes'), getContacts);
 - **Session Storage**: External session storage for multi-instance deployments
 - **Database Scaling**: Read replicas and connection pooling strategies
 
-#### Resource Optimization
-```typescript
-// Memory management
-const memoryMonitor = () => {
-  const usage = process.memoryUsage();
-  if (usage.heapUsed > 500 * 1024 * 1024) { // 500MB threshold
-    logger.warn('High memory usage detected', { usage });
-    // Trigger garbage collection or cleanup
-    global.gc?.();
-  }
-};
+#### Resource Optimization (Python)
+```python
+# Memory management
+import psutil
+import gc
+import logging
 
-setInterval(memoryMonitor, 60000); // Check every minute
+logger = logging.getLogger(__name__)
+
+def monitor_memory():
+    """Monitor memory usage and trigger cleanup if needed."""
+    memory = psutil.virtual_memory()
+    if memory.percent > 80:  # 80% threshold
+        logger.warning(f"High memory usage detected: {memory.percent}%")
+        # Trigger garbage collection
+        gc.collect()
+
+    return {
+        "memory_percent": memory.percent,
+        "available_mb": memory.available // 1024 // 1024
+    }
+
+# Background task for monitoring
+import asyncio
+
+async def memory_monitor_task():
+    """Background task to monitor system resources."""
+    while True:
+        monitor_memory()
+        await asyncio.sleep(60)  # Check every minute
 ```
 
 #### Performance Monitoring
@@ -203,23 +304,44 @@ setInterval(memoryMonitor, 60000); // Check every minute
 - **Batch Operations**: Bulk operations to reduce API calls
 - **Connection Reuse**: HTTP keep-alive for external API calls
 
-#### External Service Integration
-```typescript
-// Optimized Google API client
-const googleClient = new google.auth.OAuth2({
-  clientId: config.google.clientId,
-  clientSecret: config.google.clientSecret
-});
+#### External Service Integration (Python)
+```python
+# Optimized Google API client
+from google.auth.transport.requests import Request
+from google.oauth2.credentials import Credentials
+import requests
+import asyncio
 
-// Request batching for Google APIs
-const batchRequests = async (requests: any[]) => {
-  const batch = google.batch({
-    auth: googleClient
-  });
+class GoogleAPIClient:
+    def __init__(self, credentials: Credentials):
+        self.credentials = credentials
+        self.session = requests.Session()
 
-  requests.forEach(request => batch.add(request));
-  return batch.exec();
-};
+    async def batch_requests(self, requests_data: list):
+        """Batch multiple API requests for efficiency."""
+        tasks = []
+        for request_data in requests_data:
+            task = asyncio.create_task(self._make_request(request_data))
+            tasks.append(task)
+
+        return await asyncio.gather(*tasks)
+
+    async def _make_request(self, request_data: dict):
+        """Make individual API request with retry logic."""
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                response = self.session.get(
+                    request_data['url'],
+                    headers={'Authorization': f'Bearer {self.credentials.token}'},
+                    timeout=30
+                )
+                response.raise_for_status()
+                return response.json()
+            except requests.RequestException as e:
+                if attempt == max_retries - 1:
+                    raise
+                await asyncio.sleep(2 ** attempt)  # Exponential backoff
 ```
 
 #### Image and Media Optimization
@@ -230,27 +352,62 @@ const batchRequests = async (requests: any[]) => {
 
 ## Monitoring and Alerting
 
-### Performance Metrics
-```typescript
-// Custom performance metrics
-const performanceMetrics = {
-  apiResponseTime: new Histogram({
-    name: 'api_response_time_seconds',
-    help: 'API response time in seconds',
-    labelNames: ['method', 'route', 'status']
-  }),
+### Performance Metrics (Python)
+```python
+# Custom performance metrics with logging
+import time
+import logging
+from functools import wraps
+from typing import Dict, Any
 
-  databaseQueryTime: new Histogram({
-    name: 'database_query_time_seconds',
-    help: 'Database query execution time',
-    labelNames: ['operation', 'table']
-  }),
+logger = logging.getLogger(__name__)
 
-  activeConnections: new Gauge({
-    name: 'active_database_connections',
-    help: 'Number of active database connections'
-  })
-};
+class PerformanceMetrics:
+    def __init__(self):
+        self.metrics = {
+            "api_response_times": [],
+            "database_query_times": [],
+            "active_connections": 0
+        }
+
+    def record_api_response_time(self, method: str, route: str, duration: float, status: int):
+        """Record API response time."""
+        self.metrics["api_response_times"].append({
+            "method": method,
+            "route": route,
+            "duration": duration,
+            "status": status,
+            "timestamp": time.time()
+        })
+        logger.info(f"API {method} {route} - {duration:.3f}s - {status}")
+
+    def record_db_query_time(self, operation: str, table: str, duration: float):
+        """Record database query time."""
+        self.metrics["database_query_times"].append({
+            "operation": operation,
+            "table": table,
+            "duration": duration,
+            "timestamp": time.time()
+        })
+        logger.debug(f"DB {operation} {table} - {duration:.3f}s")
+
+# Performance monitoring decorator
+def monitor_performance(operation_type: str = "api"):
+    def decorator(func):
+        @wraps(func)
+        async def wrapper(*args, **kwargs):
+            start_time = time.time()
+            try:
+                result = await func(*args, **kwargs)
+                duration = time.time() - start_time
+                logger.info(f"{operation_type} {func.__name__} completed in {duration:.3f}s")
+                return result
+            except Exception as e:
+                duration = time.time() - start_time
+                logger.error(f"{operation_type} {func.__name__} failed after {duration:.3f}s: {e}")
+                raise
+        return wrapper
+    return decorator
 ```
 
 ### Health Monitoring
@@ -267,24 +424,29 @@ const performanceMetrics = {
 
 ## Security Hardening
 
-### Container Security
+### Container Security (Python Backend)
 ```dockerfile
 # Security-focused Dockerfile additions
-FROM node:24-alpine
+FROM python:3.11-slim
 
 # Create non-root user
-RUN addgroup -g 1001 -S nodejs && \
-    adduser -S nextjs -u 1001
+RUN adduser --disabled-password --gecos '' appuser
 
 # Remove unnecessary packages
-RUN apk del --purge wget curl
+RUN apt-get update && apt-get remove -y wget curl && \
+    apt-get autoremove -y && apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
 
 # Set secure file permissions
-COPY --chown=nextjs:nodejs . .
+COPY --chown=appuser:appuser . .
 RUN chmod -R 755 /app && \
-    chmod -R 644 /app/src
+    chmod -R 644 /app/app
 
-USER nextjs
+# Switch to non-root user
+USER appuser
+
+# Security scanning
+LABEL security.scan="enabled"
 ```
 
 ### Network Security

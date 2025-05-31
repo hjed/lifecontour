@@ -1,16 +1,17 @@
 # Personal CRM & Journal System - Task List
 
 ## Project Overview
-A TypeScript/Node.js based personal CRM and journal system with MCP protocol support, web interface, and integrations with Google Calendar, Google Contacts, and Immich for photos. Uses SQLite as the database, JSON API standard for REST endpoints, and Jest for testing. Features include contact tags with Google sync, album integration with journal entries and events, name-based person matching, and nginx proxy support.
+A Python FastAPI backend with Next.js frontend personal CRM and journal system with MCP protocol support, web interface, and integrations with Google Calendar, Google Contacts, and Immich for photos. Uses PostgreSQL as the database, JSON API standard for REST endpoints, and pytest/React Testing Library for testing. Features include contact tags with Google sync, album integration with journal entries and events, name-based person matching, and nginx proxy support.
 
 ## Prerequisites
-- Node.js 24 (current LTS) and npm/yarn
+- Python 3.11+ with UV for dependency management
+- Node.js 18+ with pnpm for frontend dependencies
 - Google Cloud Console account for API access
 - Immich instance running
+- PostgreSQL database
+- Docker and Docker Compose
 - Nginx reverse proxy (for production)
-- Basic understanding of TypeScript, SQLite, and REST APIs
-- Playwright for end-to-end testing
-- Modern browser for Storybook development
+- Basic understanding of Python, FastAPI, PostgreSQL, and REST APIs
 
 ## Agile Development Approach
 Tasks are organized by **feature iterations** that deliver end-to-end value incrementally. Each iteration includes domain logic, API endpoints, basic UI, and integration where applicable.
@@ -32,76 +33,69 @@ Tasks are organized by **feature iterations** that deliver end-to-end value incr
 ## Iteration 1: Basic Contact Management (MVP)
 
 ### ITER1-001: Project Foundation 🟡
-**Description:** Set up project foundation with domain-driven architecture and comprehensive tooling
+**Description:** Set up project foundation with clear backend/frontend separation
 **Dependencies:** None
 **Acceptance Criteria:**
-- [ ] Initialize npm project with Node.js 24 and TypeScript 5+ strict mode
-- [ ] Configure tsconfig.json with strict settings, path mapping, and decorators
-- [ ] Set up comprehensive ESLint with architectural boundary rules
-- [ ] Configure Prettier with consistent formatting rules
-- [ ] Set up pre-commit hooks with husky and lint-staged
-- [ ] Create domain-driven folder structure (core domains + integration sub-domains)
-- [ ] Set up dependency injection container (tsyringe or similar)
-- [ ] Configure OpenTelemetry auto-instrumentation
-- [ ] Set up structured logging with Winston
-- [ ] Configure nginx proxy support (trust proxy headers)
-- [ ] Set up Tailwind CSS with PostCSS configuration
-- [ ] Configure Australian English localisation (react-intl with en-AU)
-- [ ] Set up date-fns with Australian locale for date/time formatting
-- [ ] Initialize Storybook for component development and testing
-- [ ] Configure Playwright for end-to-end testing
-- [ ] Set up Jest with multi-layer testing configuration
-- [ ] Add package.json scripts for build, dev, test, lint, format, storybook
-- [ ] Create .gitignore and .dockerignore files
-- [ ] Configure Zod for runtime validation and schema generation
+- [ ] Initialize Python backend with UV and pyproject.toml
+- [ ] Set up FastAPI with Python 3.11+ and type hints
+- [ ] Configure PostgreSQL database with Docker Compose
+- [ ] Set up Python linting (ruff), formatting (black), type checking (mypy)
+- [ ] Initialize Next.js frontend with TypeScript and pnpm
+- [ ] Configure separate ESLint/Prettier for frontend
+- [ ] Create clear project structure (backend/, frontend/, docker-compose.yml)
+- [ ] Set up SQLAlchemy Core with explicit SQL queries
+- [ ] Configure Alembic for database migrations
+- [ ] Set up Python standard library logging
+- [ ] Configure nginx proxy support
+- [ ] Set up Tailwind CSS and shadcn/ui for frontend
+- [ ] Configure Australian English localisation (en-AU)
+- [ ] Set up pytest for backend testing
+- [ ] Configure React Testing Library for frontend testing
+- [ ] Set up Playwright for end-to-end testing
+- [ ] Create Docker containers for backend, frontend, database
+- [ ] Add development scripts and documentation
 
 ### ITER1-002: Contacts Domain Core 🟡
-**Description:** Build contacts domain with tags support
+**Description:** Build contacts domain with tags support (Python backend)
 **Dependencies:** ITER1-001
 **Acceptance Criteria:**
-- [ ] Create contacts database schema (contacts, tags, contact_tags tables)
-- [ ] Implement Contact and Tag domain entities with business logic
-- [ ] Create ContactRepository and TagRepository adapters using Drizzle ORM
-- [ ] Implement ContactApplicationService with use cases (create, update, assign tags)
-- [ ] Add comprehensive error handling and validation with Zod
-- [ ] Create domain events (ContactCreated, TagAssigned)
-- [ ] Add OpenTelemetry instrumentation for domain operations
-- [ ] Write unit tests for domain logic and adapters
-- [ ] Set up database migrations and seed data
+- [ ] Create PostgreSQL schema (contacts, tags, contact_tags tables)
+- [ ] Write explicit SQL queries using SQLAlchemy Core text()
+- [ ] Implement Contact and Tag Pydantic models for validation
+- [ ] Create ContactService with clear business logic (create, update, assign tags)
+- [ ] Add comprehensive error handling and validation
+- [ ] Set up Alembic database migrations
+- [ ] Write pytest unit tests for domain logic
+- [ ] Add database seed data for development
 
 ### ITER1-003: Contacts REST API �
-**Description:** Create JSON API compliant REST endpoints for contacts
+**Description:** Create JSON API compliant FastAPI endpoints
 **Dependencies:** ITER1-002
 **Acceptance Criteria:**
-- [ ] Set up tsoa for automatic OpenAPI generation
-- [ ] Create ContactController with JSON API compliant endpoints
+- [ ] Create FastAPI ContactController with automatic OpenAPI docs
 - [ ] Implement CRUD operations (GET, POST, PUT, DELETE)
 - [ ] Add tag management endpoints (assign/remove tags)
-- [ ] Implement input validation using Zod schemas
-- [ ] Add authentication middleware (basic setup)
-- [ ] Configure nginx proxy compatibility (trust headers, CORS)
-- [ ] Add OpenTelemetry instrumentation for API endpoints
-- [ ] Generate comprehensive OpenAPI/Swagger documentation
-- [ ] Add integration tests for all endpoints
+- [ ] Implement input validation using Pydantic models
+- [ ] Add basic authentication middleware
+- [ ] Configure CORS for frontend integration
+- [ ] Add comprehensive pytest integration tests for all endpoints
+- [ ] Generate automatic Swagger documentation
 
 ### ITER1-004: Basic Contact UI �
-**Description:** Create basic web interface for contact management with Australian localisation
+**Description:** Create Next.js frontend for contact management
 **Dependencies:** ITER1-003
 **Acceptance Criteria:**
-- [ ] Set up React/Next.js project with TypeScript and Tailwind CSS
-- [ ] Configure JSON API client for backend communication
+- [ ] Set up Next.js with TypeScript, Tailwind CSS, and shadcn/ui
+- [ ] Configure API client for FastAPI backend communication
 - [ ] Implement Australian English interface (en-AU locale, DD/MM/YYYY dates)
-- [ ] Create contact list view with search and filtering using Tailwind components
-- [ ] Implement contact creation and editing forms with Zod validation
-- [ ] Add tag management UI (create, assign, remove tags) with colour coding
-- [ ] Implement responsive design using Tailwind's mobile-first approach
-- [ ] Add error handling and loading states with proper Australian English messaging
-- [ ] Create Storybook stories for all UI components
-- [ ] Add accessibility testing with Storybook a11y addon
-- [ ] Configure development environment with hot reloading
+- [ ] Create contact list view with search and filtering
+- [ ] Implement contact creation and editing forms with validation
+- [ ] Add tag management UI with colour coding
+- [ ] Implement responsive design with mobile-first approach
+- [ ] Add error handling and loading states
+- [ ] Write React Testing Library tests for components
 - [ ] Add comprehensive end-to-end tests with Playwright
-- [ ] Implement visual regression testing with Storybook
-- [ ] Deploy working MVP with Docker and nginx proxy
+- [ ] Deploy working MVP with Docker Compose
 
 ---
 

@@ -1,67 +1,90 @@
 # Deployment Guide - Personal CRM & Journal System
 
-This document covers deployment architecture, infrastructure setup, containerization, and operational considerations for the Personal CRM & Journal System.
+This document covers deployment architecture, infrastructure setup, containerization, and operational considerations for the Python FastAPI backend with Next.js frontend.
 
 ## Deployment Architecture Overview
 
 ### Development Environment
-- Local SQLite database
+- PostgreSQL database in Docker container
+- Python backend with UV dependency management
+- Next.js frontend with pnpm
 - Environment-based configuration
-- Hot reloading for development
+- Hot reloading for both backend and frontend
 - Mock external services for testing
 - Docker Compose for consistent development setup
 
 ### Production Environment
 - **Reverse Proxy**: Nginx proxy handling SSL termination and load balancing
-- **Containerized Deployment**: Docker containers with multi-stage builds
+- **Multi-Container Deployment**: Separate containers for backend, frontend, database
 - **Orchestration**: Docker Compose or Kubernetes
-- **Database**: SQLite with persistent volume mounts
+- **Database**: PostgreSQL with persistent volume mounts and backups
 - **Configuration**: Environment variables and secrets management
-- **Health Checks**: Built-in health endpoints accessible through proxy
+- **Health Checks**: Built-in health endpoints for all services
 - **Monitoring**: Prometheus metrics and log aggregation
-- **Backup**: Automated SQLite backup to external storage
-- **CI/CD**: GitHub Actions or similar for automated deployment
+- **Backup**: Automated PostgreSQL backup to external storage
+- **CI/CD**: GitHub Actions with separate backend/frontend pipelines
 
 ## Docker Configuration
 
-### Multi-Stage Dockerfile
+### Backend Dockerfile (Python FastAPI)
 
 ```dockerfile
-# Build stage
-FROM node:24-alpine AS builder
+# Backend Dockerfile
+FROM python:3.11-slim AS backend
+
+WORKDIR /app
+
+# Install UV
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /bin/uv
+
+# Copy dependency files
+COPY pyproject.toml uv.lock ./
+
+# Install dependencies
+RUN uv sync --frozen
+
+# Copy application code
+COPY app/ ./app/
+
+# Create non-root user
+RUN adduser --disabled-password --gecos '' appuser
+USER appuser
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+  CMD curl -f http://localhost:8000/health || exit 1
+
+# Expose port
+EXPOSE 8000
+
+# Start application
+CMD ["uv", "run", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+```
+
+### Frontend Dockerfile (Next.js)
+
+```dockerfile
+# Frontend Dockerfile
+FROM node:18-alpine AS frontend
+
 WORKDIR /app
 
 # Copy package files
-COPY package*.json ./
-COPY tsconfig.json ./
+COPY package.json pnpm-lock.yaml ./
 
-# Install dependencies
-RUN npm ci --only=production && npm cache clean --force
+# Install pnpm and dependencies
+RUN npm install -g pnpm && pnpm install --frozen-lockfile
 
 # Copy source code
-COPY src/ ./src/
-COPY public/ ./public/
+COPY . .
 
 # Build application
-RUN npm run build
-
-# Runtime stage
-FROM node:24-alpine AS runtime
-WORKDIR /app
+RUN pnpm build
 
 # Create non-root user
 RUN addgroup -g 1001 -S nodejs && \
     adduser -S nextjs -u 1001
 
-# Copy built application
-COPY --from=builder /app/dist ./dist
-COPY --from=builder /app/node_modules ./node_modules
-COPY --from=builder /app/package.json ./package.json
-
-# Create data directory for SQLite
-RUN mkdir -p /app/data && chown -R nextjs:nodejs /app/data
-
-# Switch to non-root user
 USER nextjs
 
 # Health check
@@ -72,7 +95,7 @@ HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
 EXPOSE 3000
 
 # Start application
-CMD ["npm", "start"]
+CMD ["pnpm", "start"]
 ```
 
 ### Docker Compose Configuration
@@ -82,20 +105,46 @@ CMD ["npm", "start"]
 version: '3.8'
 
 services:
-  app:
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_DB: personal_crm_dev
+      POSTGRES_USER: dev_user
+      POSTGRES_PASSWORD: dev_password
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_dev_data:/var/lib/postgresql/data
+
+  backend:
     build:
-      context: .
-      target: builder
+      context: ./backend
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend:/app
+    environment:
+      - DATABASE_URL=postgresql://dev_user:dev_password@postgres:5432/personal_crm_dev
+      - ENVIRONMENT=development
+    depends_on:
+      - postgres
+    command: uv run uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
     ports:
       - "3000:3000"
     volumes:
-      - .:/app
+      - ./frontend:/app
       - /app/node_modules
-      - ./data:/app/data
     environment:
-      - NODE_ENV=development
-      - DATABASE_PATH=/app/data/dev.db
-    command: npm run dev
+      - NEXT_PUBLIC_API_URL=http://localhost:8000
+    depends_on:
+      - backend
+    command: pnpm dev
 
   nginx:
     image: nginx:alpine
@@ -104,7 +153,11 @@ services:
     volumes:
       - ./nginx/dev.conf:/etc/nginx/nginx.conf
     depends_on:
-      - app
+      - backend
+      - frontend
+
+volumes:
+  postgres_dev_data:
 ```
 
 #### Production (docker-compose.prod.yml)
@@ -112,26 +165,56 @@ services:
 version: '3.8'
 
 services:
-  app:
-    build:
-      context: .
-      target: runtime
+  postgres:
+    image: postgres:15-alpine
     restart: unless-stopped
     environment:
-      - NODE_ENV=production
-      - DATABASE_PATH=/app/data/production.db
-      - PORT=3000
+      POSTGRES_DB: personal_crm_prod
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+    volumes:
+      - postgres_prod_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER} -d personal_crm_prod"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      - DATABASE_URL=postgresql://${DB_USER}:${DB_PASSWORD}@postgres:5432/personal_crm_prod
+      - ENVIRONMENT=production
       - MCP_PORT=3001
       - MCP_HOST=0.0.0.0
     volumes:
-      - app-data:/app/data
-      - app-logs:/app/logs
+      - backend-logs:/app/logs
+    depends_on:
+      - postgres
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      - NEXT_PUBLIC_API_URL=https://your-domain.com/api
+    depends_on:
+      - backend
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 40s
 
   nginx:
     image: nginx:alpine
@@ -143,27 +226,32 @@ services:
       - ./ssl:/etc/nginx/ssl
       - nginx-logs:/var/log/nginx
     depends_on:
-      - app
+      - backend
+      - frontend
     restart: unless-stopped
 
   backup:
-    image: alpine:latest
+    image: postgres:15-alpine
     volumes:
-      - app-data:/data
+      - postgres_prod_data:/var/lib/postgresql/data
       - backup-storage:/backup
+    environment:
+      - PGPASSWORD=${DB_PASSWORD}
     command: |
       sh -c "
         while true; do
-          cp /data/production.db /backup/backup-$(date +%Y%m%d-%H%M%S).db
-          find /backup -name '*.db' -mtime +7 -delete
+          pg_dump -h postgres -U ${DB_USER} personal_crm_prod > /backup/backup-$(date +%Y%m%d-%H%M%S).sql
+          find /backup -name '*.sql' -mtime +7 -delete
           sleep 86400
         done
       "
+    depends_on:
+      - postgres
     restart: unless-stopped
 
 volumes:
-  app-data:
-  app-logs:
+  postgres_prod_data:
+  backend-logs:
   nginx-logs:
   backup-storage:
 ```
@@ -177,8 +265,12 @@ events {
 }
 
 http {
-    upstream app {
-        server app:3000;
+    upstream backend {
+        server backend:8000;
+    }
+
+    upstream frontend {
+        server frontend:3000;
     }
 
     # Rate limiting
@@ -215,44 +307,50 @@ http {
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
 
-        # API routes with rate limiting
+        # Backend API routes with rate limiting
         location /api/ {
             limit_req zone=api burst=20 nodelay;
-            proxy_pass http://app;
+            proxy_pass http://backend/;
         }
 
         # Authentication routes with stricter rate limiting
         location /api/auth/ {
             limit_req zone=auth burst=5 nodelay;
-            proxy_pass http://app;
+            proxy_pass http://backend/api/auth/;
         }
 
         # MCP server endpoint (if exposed via proxy)
         location /mcp/ {
             limit_req zone=api burst=10 nodelay;
-            proxy_pass http://app:3001/;
+            proxy_pass http://backend:3001/;
             proxy_http_version 1.1;
             proxy_set_header Upgrade $http_upgrade;
             proxy_set_header Connection 'upgrade';
             proxy_cache_bypass $http_upgrade;
         }
 
-        # Health check endpoint
-        location /health {
-            proxy_pass http://app;
+        # Backend health check endpoint
+        location /api/health {
+            proxy_pass http://backend/health;
             access_log off;
         }
 
-        # Static files (if served by nginx)
-        location /static/ {
-            alias /app/public/;
+        # Frontend health check endpoint
+        location /health {
+            proxy_pass http://frontend/health;
+            access_log off;
+        }
+
+        # Static files (served by Next.js)
+        location /_next/static/ {
+            proxy_pass http://frontend;
             expires 1y;
             add_header Cache-Control "public, immutable";
         }
 
-        # Main application
+        # Main frontend application
         location / {
-            proxy_pass http://app;
+            proxy_pass http://frontend;
             proxy_http_version 1.1;
             proxy_set_header Upgrade $http_upgrade;
             proxy_set_header Connection 'upgrade';
@@ -264,128 +362,101 @@ http {
 
 ## Observability and Monitoring
 
-### OpenTelemetry Integration
+### Python Backend Observability
 
-#### Tracing Configuration
-```typescript
-// src/observability/tracing.ts
-import { NodeSDK } from '@opentelemetry/sdk-node';
-import { getNodeAutoInstrumentations } from '@opentelemetry/auto-instrumentations-node';
-import { JaegerExporter } from '@opentelemetry/exporter-jaeger';
+#### Logging Configuration
+```python
+# app/observability/logging.py
+import logging
+import sys
+from typing import Dict, Any
 
-const sdk = new NodeSDK({
-  traceExporter: new JaegerExporter({
-    endpoint: process.env.JAEGER_ENDPOINT || 'http://localhost:14268/api/traces',
-  }),
-  instrumentations: [getNodeAutoInstrumentations()],
-});
+def setup_logging(level: str = "INFO") -> None:
+    """Configure structured logging for the application."""
+    logging.basicConfig(
+        level=getattr(logging, level.upper()),
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        handlers=[
+            logging.StreamHandler(sys.stdout),
+            logging.FileHandler('/app/logs/app.log')
+        ]
+    )
 
-sdk.start();
+def log_business_event(event_name: str, context: Dict[str, Any]) -> None:
+    """Log business events with structured context."""
+    logger = logging.getLogger("business_events")
+    logger.info(f"Business Event: {event_name}", extra=context)
 ```
 
-#### Custom Metrics
-```typescript
-// src/observability/metrics.ts
-import { metrics } from '@opentelemetry/api';
+#### Health Checks
+```python
+# app/api/health.py
+from fastapi import APIRouter
+from sqlalchemy import text
+from app.database import get_db_connection
+import psutil
+import time
 
-const meter = metrics.getMeter('personal-crm', '1.0.0');
+router = APIRouter()
 
-export const contactsCreated = meter.createCounter('contacts_created_total', {
-  description: 'Total number of contacts created',
-});
+@router.get("/health")
+async def health_check():
+    """Comprehensive health check for all services."""
+    start_time = time.time()
 
-export const syncOperations = meter.createHistogram('sync_operation_duration', {
-  description: 'Duration of sync operations',
-  unit: 'ms',
-});
-
-export const mcpToolCalls = meter.createCounter('mcp_tool_calls_total', {
-  description: 'Total number of MCP tool calls',
-});
-
-export const mcpToolDuration = meter.createHistogram('mcp_tool_duration', {
-  description: 'Duration of MCP tool executions',
-  unit: 'ms',
-});
-```
-
-### Logging Configuration
-```typescript
-// src/observability/logger.ts
-import winston from 'winston';
-
-export const logger = winston.createLogger({
-  level: process.env.LOG_LEVEL || 'info',
-  format: winston.format.combine(
-    winston.format.timestamp(),
-    winston.format.errors({ stack: true }),
-    winston.format.json()
-  ),
-  defaultMeta: { service: 'personal-crm' },
-  transports: [
-    new winston.transports.File({ filename: 'logs/error.log', level: 'error' }),
-    new winston.transports.File({ filename: 'logs/combined.log' }),
-    new winston.transports.Console({
-      format: winston.format.simple()
-    })
-  ],
-});
-```
-
-### Health Checks
-```typescript
-// src/api/health.ts
-import { Request, Response } from 'express';
-import { database } from '../database';
-
-export async function healthCheck(req: Request, res: Response) {
-  const health = {
-    status: 'healthy',
-    timestamp: new Date().toISOString(),
-    checks: {
-      database: await checkDatabase(),
-      memory: checkMemory(),
-      uptime: process.uptime(),
+    health_status = {
+        "status": "healthy",
+        "timestamp": time.time(),
+        "checks": {
+            "database": await check_database(),
+            "memory": check_memory(),
+            "disk": check_disk_space(),
+            "uptime": time.time() - start_time
+        }
     }
-  };
 
-  const isHealthy = Object.values(health.checks).every(check =>
-    typeof check === 'object' ? check.status === 'healthy' : true
-  );
+    is_healthy = all(
+        check.get("status") == "healthy"
+        for check in health_status["checks"].values()
+        if isinstance(check, dict)
+    )
 
-  res.status(isHealthy ? 200 : 503).json(health);
-}
+    return health_status
 
-async function checkDatabase() {
-  try {
-    await database.raw('SELECT 1');
-    return { status: 'healthy' };
-  } catch (error) {
-    return { status: 'unhealthy', error: error.message };
-  }
-}
+async def check_database():
+    """Check database connectivity."""
+    try:
+        async with get_db_connection() as conn:
+            await conn.execute(text("SELECT 1"))
+        return {"status": "healthy"}
+    except Exception as e:
+        return {"status": "unhealthy", "error": str(e)}
 
-function checkMemory() {
-  const usage = process.memoryUsage();
-  return {
-    status: usage.heapUsed < 500 * 1024 * 1024 ? 'healthy' : 'warning',
-    heapUsed: usage.heapUsed,
-    heapTotal: usage.heapTotal,
-  };
-}
+def check_memory():
+    """Check memory usage."""
+    memory = psutil.virtual_memory()
+    return {
+        "status": "healthy" if memory.percent < 80 else "warning",
+        "usage_percent": memory.percent,
+        "available_mb": memory.available // 1024 // 1024
+    }
 ```
 
 ## Environment Configuration
 
-### Environment Variables
+### Backend Environment Variables
 ```bash
+# Python Backend (.env)
+# Database
+DATABASE_URL=postgresql://user:password@postgres:5432/personal_crm_prod
+
 # Application
-NODE_ENV=production
-PORT=3000
-DATABASE_PATH=/app/data/production.db
+ENVIRONMENT=production
+LOG_LEVEL=INFO
+DEBUG=false
 
 # Authentication
-JWT_SECRET=your-jwt-secret
+JWT_SECRET=your-jwt-secret-key
 GOOGLE_CLIENT_ID=your-google-client-id
 GOOGLE_CLIENT_SECRET=your-google-client-secret
 
@@ -395,61 +466,66 @@ IMMICH_API_KEY=your-immich-api-key
 
 # MCP Server
 MCP_PORT=3001
-MCP_HOST=localhost
-
-# Observability
-LOG_LEVEL=info
-JAEGER_ENDPOINT=http://jaeger:14268/api/traces
-PROMETHEUS_ENDPOINT=http://prometheus:9090
+MCP_HOST=0.0.0.0
 
 # Security
-CORS_ORIGIN=https://your-domain.com
-RATE_LIMIT_WINDOW_MS=900000
-RATE_LIMIT_MAX_REQUESTS=100
+CORS_ORIGINS=["https://your-domain.com"]
+RATE_LIMIT_REQUESTS_PER_MINUTE=60
+```
+
+### Frontend Environment Variables
+```bash
+# Next.js Frontend (.env.local)
+NEXT_PUBLIC_API_URL=https://your-domain.com/api
+NEXT_PUBLIC_ENVIRONMENT=production
+
+# Authentication (if needed on frontend)
+NEXTAUTH_URL=https://your-domain.com
+NEXTAUTH_SECRET=your-nextauth-secret
 ```
 
 ### Configuration Management
-```typescript
-// src/config/index.ts
-import { z } from 'zod';
+```python
+# app/config.py
+from pydantic import BaseSettings, validator
+from typing import List
 
-const configSchema = z.object({
-  nodeEnv: z.enum(['development', 'test', 'production']),
-  port: z.coerce.number().default(3000),
-  databasePath: z.string(),
-  jwtSecret: z.string(),
-  google: z.object({
-    clientId: z.string(),
-    clientSecret: z.string(),
-  }),
-  immich: z.object({
-    apiUrl: z.string().url(),
-    apiKey: z.string(),
-  }),
-  mcp: z.object({
-    port: z.coerce.number().default(3001),
-    host: z.string().default('localhost'),
-  }),
-});
+class Settings(BaseSettings):
+    # Database
+    database_url: str
 
-export const config = configSchema.parse({
-  nodeEnv: process.env.NODE_ENV,
-  port: process.env.PORT,
-  databasePath: process.env.DATABASE_PATH,
-  jwtSecret: process.env.JWT_SECRET,
-  google: {
-    clientId: process.env.GOOGLE_CLIENT_ID,
-    clientSecret: process.env.GOOGLE_CLIENT_SECRET,
-  },
-  immich: {
-    apiUrl: process.env.IMMICH_API_URL,
-    apiKey: process.env.IMMICH_API_KEY,
-  },
-  mcp: {
-    port: process.env.MCP_PORT,
-    host: process.env.MCP_HOST,
-  },
-});
+    # Application
+    environment: str = "development"
+    log_level: str = "INFO"
+    debug: bool = False
+
+    # Authentication
+    jwt_secret: str
+    google_client_id: str
+    google_client_secret: str
+
+    # External Services
+    immich_api_url: str
+    immich_api_key: str
+
+    # MCP Server
+    mcp_port: int = 3001
+    mcp_host: str = "0.0.0.0"
+
+    # Security
+    cors_origins: List[str] = ["http://localhost:3000"]
+    rate_limit_requests_per_minute: int = 60
+
+    @validator('cors_origins', pre=True)
+    def parse_cors_origins(cls, v):
+        if isinstance(v, str):
+            return [x.strip() for x in v.split(',')]
+        return v
+
+    class Config:
+        env_file = ".env"
+
+settings = Settings()
 ```
 
 ## CI/CD Pipeline
@@ -464,22 +540,50 @@ on:
     branches: [main]
 
 jobs:
-  test:
+  test-backend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install UV
+        run: pip install uv
+
+      - name: Install dependencies
+        run: cd backend && uv sync
+
+      - name: Run backend tests
+        run: cd backend && uv run pytest
+
+      - name: Run backend linting
+        run: cd backend && uv run ruff check && uv run black --check .
+
+  test-frontend:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: '24'
-          cache: 'npm'
+          node-version: '18'
+          cache: 'pnpm'
+          cache-dependency-path: 'frontend/pnpm-lock.yaml'
 
-      - run: npm ci
-      - run: npm run lint
-      - run: npm run test
-      - run: npm run build
+      - name: Install dependencies
+        run: cd frontend && pnpm install --frozen-lockfile
+
+      - name: Run frontend tests
+        run: cd frontend && pnpm test
+
+      - name: Run frontend linting
+        run: cd frontend && pnpm lint
+
+      - name: Build frontend
+        run: cd frontend && pnpm build
 
   deploy:
-    needs: test
+    needs: [test-backend, test-frontend]
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/main'
 
@@ -488,39 +592,42 @@ jobs:
 
       - name: Deploy to production
         run: |
-          # Deploy using your preferred method
-          # Docker, SSH, or cloud provider CLI
+          # Deploy using Docker Compose
+          docker-compose -f docker-compose.prod.yml up -d --build
 ```
 
 ## Backup and Recovery
 
-### Database Backup Strategy
+### PostgreSQL Backup Strategy
 ```bash
 #!/bin/bash
 # scripts/backup.sh
 
 BACKUP_DIR="/backup"
-DB_PATH="/app/data/production.db"
+DB_HOST="postgres"
+DB_NAME="personal_crm_prod"
+DB_USER="${DB_USER}"
 TIMESTAMP=$(date +%Y%m%d-%H%M%S)
-BACKUP_FILE="$BACKUP_DIR/backup-$TIMESTAMP.db"
+BACKUP_FILE="$BACKUP_DIR/backup-$TIMESTAMP.sql"
 
 # Create backup
-cp "$DB_PATH" "$BACKUP_FILE"
+PGPASSWORD="${DB_PASSWORD}" pg_dump -h "$DB_HOST" -U "$DB_USER" "$DB_NAME" > "$BACKUP_FILE"
 
 # Compress backup
 gzip "$BACKUP_FILE"
 
 # Clean old backups (keep 30 days)
-find "$BACKUP_DIR" -name "*.db.gz" -mtime +30 -delete
+find "$BACKUP_DIR" -name "*.sql.gz" -mtime +30 -delete
 
 echo "Backup completed: $BACKUP_FILE.gz"
 ```
 
 ### Recovery Procedures
-1. **Database Recovery**: Restore from latest backup
-2. **Configuration Recovery**: Restore environment variables
+1. **Database Recovery**: Restore from latest PostgreSQL backup using `pg_restore`
+2. **Configuration Recovery**: Restore environment variables and secrets
 3. **Container Recovery**: Restart containers with health checks
-4. **Data Validation**: Verify data integrity after recovery
+4. **Data Validation**: Verify data integrity and application functionality
+5. **Service Verification**: Test all integrations (Google, Immich, MCP)
 
 ## Related Documents
 

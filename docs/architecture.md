@@ -2,20 +2,20 @@
 
 ## System Overview
 
-The Personal CRM & Journal System is a TypeScript/Node.js application designed to centralize personal relationship management and journaling with intelligent AI integration through the MCP (Model Context Protocol).
+The Personal CRM & Journal System is a Python FastAPI backend with Next.js frontend designed to centralize personal relationship management and journaling with intelligent AI integration through the MCP (Model Context Protocol).
 
 ### Core Objectives
 - **Unified Personal Data**: Centralize contacts, calendar events, journal entries, and photos
 - **AI Integration**: Provide rich context to AI assistants through MCP protocol
 - **Multi-Interface**: Support both programmatic (MCP) and human (web) interfaces
-- **Privacy-First**: Local SQLite storage with controlled external integrations
+- **Privacy-First**: PostgreSQL storage with controlled external integrations
 - **Standard Protocols**: JSON API for REST, CardDAV/CalDAV for interoperability
 - **Smart Album Integration**: Link Immich albums to journal entries and events
 - **Name-Based Matching**: Link contacts to Immich people by name or manual confirmation
-- **Standardized Integrations**: Integration sub-domains with clear boundaries
+- **Clear Language Separation**: Python backend, TypeScript frontend for AI clarity
 - **Agile Development**: Feature-complete iterations delivering incremental value
 - **Proxy-Ready**: Support deployment behind nginx reverse proxy
-- **Comprehensive Testing**: Multi-layer testing strategy with visual and E2E coverage
+- **AI-Optimized**: Explicit patterns and readable code over performance optimization
 
 ## Architecture Documentation
 
@@ -30,10 +30,10 @@ Detailed domain-driven design, component architecture, and project structure inc
 
 ### 🗄️ **[Database Design](./architecture/database-design.md)**
 Complete database schema, relationships, and data layer implementation:
-- SQLite database schema and table structures
-- Indexing strategies and performance optimization
+- PostgreSQL database schema and table structures
+- Indexing strategies and query optimization
 - Data relationships and JSON field structures
-- Migration and backup strategies
+- Alembic migrations and backup strategies
 
 ### 🛠️ **[Technology Stack](./architecture/technology-stack.md)**
 Technology choices, implementation details, and development tools:
@@ -70,15 +70,15 @@ Future features, extensibility plans, and long-term vision:
                     │           Client Interfaces         │
                     │  ┌─────────────┐ ┌─────────────────┐ │
                     │  │MCP Protocol │ │  Web Interface  │ │
-                    │  │(AI Clients) │ │ (React/Next.js) │ │
+                    │  │(AI Clients) │ │   (Next.js)     │ │
                     │  └─────────────┘ └─────────────────┘ │
                     └─────────────────┬───────────────────┘
                                       │
               ┌───────────────────────┼───────────────────────┐
-              │                  API Adapters                │
+              │                  API Layer                   │
               │  ┌─────────────────┐ │ ┌─────────────────────┐ │
-              │  │   MCP Server    │ │ │   REST API Server   │ │
-              │  │   Adapter       │ │ │     Adapter         │ │
+              │  │   MCP Server    │ │ │   FastAPI Server    │ │
+              │  │  (Python SDK)   │ │ │   (JSON API)        │ │
               │  │                 │ │ │   (Nginx Proxy      │ │
               │  │                 │ │ │    Compatible)      │ │
               │  └─────────────────┘ │ └─────────────────────┘ │
@@ -121,17 +121,6 @@ Future features, extensibility plans, and long-term vision:
     │  │ └─────────────┘ │              │ └─────────────────────────┘ │ │
     │  └─────────────────┘              └─────────────────────────────┘ │
     └─────────────────────────────────────────────────────────────────┘
-                                    │
-                    ┌─────────────────────────────────────┐
-                    │         Infrastructure              │
-                    │  ┌─────────────────────────────────┐ │
-                    │  │        SQLite Database          │ │
-                    │  │  ┌─────┐ ┌─────┐ ┌─────┐ ┌────┐ │ │
-                    │  │  │Core │ │Sync │ │Tags │ │Alb.│ │ │
-                    │  │  │Data │ │State│ │     │ │    │ │ │
-                    │  │  │  └─────┘ └─────┘ └─────┘ └────┘ │ │
-                    │  └─────────────────────────────────┘ │
-                    └─────────────────────────────────────┘
 ```
 
 ## Key Architectural Principles
