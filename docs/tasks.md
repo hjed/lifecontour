@@ -63,17 +63,23 @@ Tasks are organized by **feature iterations** that deliver end-to-end value incr
 **Final Status:** All tests passing, all linting passing, all type checking passing. Project foundation is complete and ready for ITER1-002.
 
 ### ITER1-002: Contacts Domain Core 🟡
-**Description:** Build contacts domain with tags support (Python backend)
+**Description:** Build contacts domain with structured tags and contact methods support (Python backend)
 **Dependencies:** ITER1-001
 **Acceptance Criteria:**
-- [ ] Create PostgreSQL schema (contacts, tags, contact_tags tables)
-- [ ] Write explicit SQL queries using SQLAlchemy Core text()
-- [ ] Implement Contact and Tag Pydantic models for validation
-- [ ] Create ContactService with clear business logic (create, update, assign tags)
-- [ ] Add comprehensive error handling and validation
-- [ ] Set up Alembic database migrations
-- [ ] Write pytest unit tests for domain logic
-- [ ] Add database seed data for development
+- [ ] Create PostgreSQL schema (contacts, contact_methods, contact_addresses, contact_notes, tags, contact_tags, contact_history tables)
+- [ ] Write explicit SQL queries using SQLAlchemy Core text() with proper joins
+- [ ] Implement Contact, Tag, ContactMethod, ContactAddress, ContactNote Pydantic models for validation
+- [ ] Create domain entities with business logic (Contact, Tag, ContactMethod, ContactAddress, ContactNote)
+- [ ] Implement repository interfaces with connection injection (ContactRepository, TagRepository, ContactHistoryRepository)
+- [ ] Create ContactService with dependency injection and transaction management
+- [ ] Implement simple dependency injection container with constructor injection pattern
+- [ ] Add comprehensive error handling with custom exceptions and HTTP status codes
+- [ ] Implement business rule validation (email uniqueness, tag limits, primary methods)
+- [ ] Set up contact history tracking for all changes
+- [ ] Create domain events (ContactCreated, ContactUpdated, TagAssigned, etc.)
+- [ ] Set up Alembic database migrations (single migration for all tables)
+- [ ] Write pytest unit tests for domain logic (no database dependencies)
+- [ ] Add database seed data for development and e2e testing (separate datasets)
 
 ### ITER1-003: Contacts REST API �
 **Description:** Create JSON API compliant FastAPI endpoints

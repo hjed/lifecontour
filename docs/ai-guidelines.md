@@ -186,6 +186,14 @@ personal-management-system/
 - **Type Ignores**: Use `# type: ignore[specific-error]` sparingly with specific error codes
 - **Pydantic Models**: Use `str` instead of `PostgresDsn` for database URLs to avoid validation complexity
 
+#### Business Rules and Validation
+
+- **Domain-Specific Rules**: See [Domain Architecture](./architecture/domain-architecture.md) for detailed business rules
+- **Validation Patterns**: Use Pydantic models for input validation
+- **Error Handling**: Custom exceptions with HTTP status codes and AI-friendly messages
+- **Transaction Management**: Handle transactions at the domain/business layer
+- **History Tracking**: All entity changes recorded with domain events
+
 #### Database Operations
 
 - **Queries**: Explicit SQL with SQLAlchemy text() for readability
@@ -202,13 +210,25 @@ _See [Domain Architecture](./examples/domain-architecture.md) for detailed patte
 - Always handle errors explicitly with try/catch blocks
 - Use structured logging for error context
 - Return result objects: `{ success: boolean, data?: T, error?: string }`
+- Include HTTP status codes in domain exceptions for API layer
+- Provide AI-friendly error messages with context
+
+_See [Domain Architecture](./architecture/domain-architecture.md) for specific exception patterns._
 
 ### Database Operations
 
 - **Explicit Queries**: Use SQLAlchemy Core with text() for readable SQL
-- **Transactions**: Use database transactions for multi-table operations
+- **Connection Management**: Pass connections into repositories for transaction control
+- **Transactions**: Manage at domain/business layer, not repository layer
 - **Security**: Always use parameterized queries to prevent SQL injection
-- **Simple Connections**: Direct connection management, avoid complex pooling
+
+### Dependency Injection
+
+- **Pattern**: Constructor injection with typed interfaces
+- **Repositories**: Receive database connections as constructor parameters
+- **Services**: Receive repository interfaces as constructor parameters
+- **Simple Container**: Use basic factory pattern, avoid complex DI frameworks
+- **Type Safety**: All dependencies typed with interfaces for clarity
 
 ### API Design
 

@@ -30,13 +30,32 @@ CREATE TABLE contacts (
 CREATE TABLE contact_methods (
     id SERIAL PRIMARY KEY,
     contact_id INTEGER NOT NULL REFERENCES contacts(id) ON DELETE CASCADE,
-    method_type VARCHAR(20) NOT NULL CHECK (method_type IN ('email', 'phone', 'address')),
+    method_type VARCHAR(20) NOT NULL CHECK (method_type IN ('email', 'phone')),
     value TEXT NOT NULL,
     label VARCHAR(50), -- e.g., 'work', 'home', 'mobile'
     is_primary BOOLEAN DEFAULT FALSE,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     UNIQUE(contact_id, method_type, is_primary) WHERE is_primary = TRUE
+);
+```
+
+#### Contact Addresses Table
+```sql
+CREATE TABLE contact_addresses (
+    id SERIAL PRIMARY KEY,
+    contact_id INTEGER NOT NULL REFERENCES contacts(id) ON DELETE CASCADE,
+    label VARCHAR(50), -- e.g., 'home', 'work', 'billing'
+    street_line_1 VARCHAR(255) NOT NULL,
+    street_line_2 VARCHAR(255),
+    locality VARCHAR(100), -- city/town
+    region VARCHAR(100), -- state/province/region
+    postal_code VARCHAR(20),
+    country_code VARCHAR(2) NOT NULL, -- ISO 3166-1 alpha-2
+    is_primary BOOLEAN DEFAULT FALSE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    UNIQUE(contact_id, is_primary) WHERE is_primary = TRUE
 );
 ```
 
@@ -104,6 +123,12 @@ CREATE INDEX idx_contact_methods_contact_id ON contact_methods(contact_id);
 CREATE INDEX idx_contact_methods_type ON contact_methods(method_type);
 CREATE INDEX idx_contact_methods_value ON contact_methods(value);
 CREATE INDEX idx_contact_methods_primary ON contact_methods(contact_id, method_type) WHERE is_primary = TRUE;
+
+-- Contact addresses indexes
+CREATE INDEX idx_contact_addresses_contact_id ON contact_addresses(contact_id);
+CREATE INDEX idx_contact_addresses_country ON contact_addresses(country_code);
+CREATE INDEX idx_contact_addresses_locality ON contact_addresses(locality);
+CREATE INDEX idx_contact_addresses_primary ON contact_addresses(contact_id) WHERE is_primary = TRUE;
 
 -- Contact notes indexes
 CREATE INDEX idx_contact_notes_contact_id ON contact_notes(contact_id);
@@ -297,7 +322,25 @@ def upgrade():
         sa.Column('is_primary', sa.Boolean(), server_default='false', nullable=True),
         sa.Column('created_at', sa.TIMESTAMP(timezone=True), server_default=sa.text('now()'), nullable=True),
         sa.Column('updated_at', sa.TIMESTAMP(timezone=True), server_default=sa.text('now()'), nullable=True),
-        sa.CheckConstraint("method_type IN ('email', 'phone', 'address')", name='valid_method_type'),
+        sa.CheckConstraint("method_type IN ('email', 'phone')", name='valid_method_type'),
+        sa.ForeignKeyConstraint(['contact_id'], ['contacts.id'], ondelete='CASCADE'),
+        sa.PrimaryKeyConstraint('id')
+    )
+
+    # Create contact_addresses table
+    op.create_table('contact_addresses',
+        sa.Column('id', sa.Integer(), nullable=False),
+        sa.Column('contact_id', sa.Integer(), nullable=False),
+        sa.Column('label', sa.VARCHAR(length=50), nullable=True),
+        sa.Column('street_line_1', sa.VARCHAR(length=255), nullable=False),
+        sa.Column('street_line_2', sa.VARCHAR(length=255), nullable=True),
+        sa.Column('locality', sa.VARCHAR(length=100), nullable=True),
+        sa.Column('region', sa.VARCHAR(length=100), nullable=True),
+        sa.Column('postal_code', sa.VARCHAR(length=20), nullable=True),
+        sa.Column('country_code', sa.VARCHAR(length=2), nullable=False),
+        sa.Column('is_primary', sa.Boolean(), server_default='false', nullable=True),
+        sa.Column('created_at', sa.TIMESTAMP(timezone=True), server_default=sa.text('now()'), nullable=True),
+        sa.Column('updated_at', sa.TIMESTAMP(timezone=True), server_default=sa.text('now()'), nullable=True),
         sa.ForeignKeyConstraint(['contact_id'], ['contacts.id'], ondelete='CASCADE'),
         sa.PrimaryKeyConstraint('id')
     )
@@ -305,6 +348,11 @@ def upgrade():
     # Create unique constraint for primary methods
     op.create_index('idx_contact_methods_unique_primary', 'contact_methods',
                    ['contact_id', 'method_type'], unique=True,
+                   postgresql_where=sa.text('is_primary = true'))
+
+    # Create unique constraint for primary addresses
+    op.create_index('idx_contact_addresses_unique_primary', 'contact_addresses',
+                   ['contact_id'], unique=True,
                    postgresql_where=sa.text('is_primary = true'))
 
     # Create contact_notes table
@@ -356,6 +404,7 @@ def downgrade():
     op.drop_table('contact_history')
     op.drop_table('contact_tags')
     op.drop_table('contact_notes')
+    op.drop_table('contact_addresses')
     op.drop_table('contact_methods')
     op.drop_table('tags')
     op.drop_table('contacts')
@@ -439,108 +488,14 @@ class ContactHistoryRepository(ABC):
 ```
 
 ### SQLAlchemy Core Implementation
-```python
-# Example repository implementation
-from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncConnection
 
-class PostgreSQLContactRepository(ContactRepository):
-    def __init__(self, connection: AsyncConnection):
-        self.conn = connection
+- **Connection Injection**: Repositories receive AsyncConnection in constructor
+- **Explicit Queries**: Use SQLAlchemy text() with parameterized queries
+- **Complex Joins**: Handle contact aggregates with LEFT JOINs for methods, notes, tags
+- **Transaction Management**: Handled at service layer, repositories use provided connection
+- **Type Safety**: Return domain models, not database rows
 
-    async def find_by_id(self, contact_id: int) -> Optional[Contact]:
-        query = text("""
-            SELECT c.*,
-                   cm.id as method_id, cm.method_type, cm.value as method_value,
-                   cm.label as method_label, cm.is_primary,
-                   cn.id as note_id, cn.content as note_content, cn.created_at as note_created_at,
-                   t.id as tag_id, t.name as tag_name, t.color as tag_color
-            FROM contacts c
-            LEFT JOIN contact_methods cm ON c.id = cm.contact_id
-            LEFT JOIN contact_notes cn ON c.id = cn.contact_id
-            LEFT JOIN contact_tags ct ON c.id = ct.contact_id
-            LEFT JOIN tags t ON ct.tag_id = t.id
-            WHERE c.id = :id
-        """)
-        result = await self.conn.execute(query, {"id": contact_id})
-        rows = result.fetchall()
-        return Contact.from_rows(rows) if rows else None
-
-    async def find_by_email(self, email: str) -> Optional[Contact]:
-        query = text("""
-            SELECT DISTINCT c.id FROM contacts c
-            JOIN contact_methods cm ON c.id = cm.contact_id
-            WHERE cm.method_type = 'email' AND cm.value = :email
-        """)
-        result = await self.conn.execute(query, {"email": email})
-        row = result.fetchone()
-        if row:
-            return await self.find_by_id(row.id)
-        return None
-
-    async def search(self, query: str) -> List[Contact]:
-        search_query = text("""
-            SELECT DISTINCT c.id FROM contacts c
-            LEFT JOIN contact_methods cm ON c.id = cm.contact_id
-            LEFT JOIN contact_notes cn ON c.id = cn.contact_id
-            WHERE to_tsvector('english',
-                COALESCE(c.first_name, '') || ' ' ||
-                COALESCE(c.last_name, '') || ' ' ||
-                COALESCE(c.nick_name, '') || ' ' ||
-                COALESCE(cm.value, '') || ' ' ||
-                COALESCE(cn.content, '')
-            ) @@ plainto_tsquery('english', :query)
-            ORDER BY ts_rank(to_tsvector('english',
-                COALESCE(c.first_name, '') || ' ' || COALESCE(c.last_name, '')
-            ), plainto_tsquery('english', :query)) DESC
-        """)
-        result = await self.conn.execute(search_query, {"query": query})
-        contact_ids = [row.id for row in result.fetchall()]
-
-        # Fetch full contact details for each ID
-        contacts = []
-        for contact_id in contact_ids:
-            contact = await self.find_by_id(contact_id)
-            if contact:
-                contacts.append(contact)
-        return contacts
-
-    async def save(self, contact: Contact) -> Contact:
-        # Implementation would handle INSERT/UPDATE logic with transaction management
-        # This is a simplified example - full implementation would be more complex
-        if contact.id is None:
-            # Insert new contact
-            query = text("""
-                INSERT INTO contacts (first_name, last_name, middle_name, nick_name)
-                VALUES (:first_name, :last_name, :middle_name, :nick_name)
-                RETURNING id
-            """)
-            result = await self.conn.execute(query, {
-                "first_name": contact.first_name,
-                "last_name": contact.last_name,
-                "middle_name": contact.middle_name,
-                "nick_name": contact.nick_name
-            })
-            contact.id = result.fetchone().id
-        else:
-            # Update existing contact
-            query = text("""
-                UPDATE contacts
-                SET first_name = :first_name, last_name = :last_name,
-                    middle_name = :middle_name, nick_name = :nick_name,
-                    updated_at = NOW()
-                WHERE id = :id
-            """)
-            await self.conn.execute(query, {
-                "id": contact.id,
-                "first_name": contact.first_name,
-                "last_name": contact.last_name,
-                "middle_name": contact.middle_name,
-                "nick_name": contact.nick_name
-            })
-
-        return contact
-```
+_See [Domain Architecture](./domain-architecture.md) for detailed repository patterns and examples._
 
 ## Performance Considerations
 

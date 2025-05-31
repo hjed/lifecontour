@@ -70,9 +70,9 @@ domain/
 ```
 
 #### Contacts Domain
-- **Entities**: Contact, Tag, ContactMethod, ContactNote
-- **Value Objects**: Email, PhoneNumber, Address, TagName
-- **Domain Services**: ContactValidationService, TagHierarchyService, ContactHistoryService
+- **Entities**: Contact, Tag, ContactMethod, ContactNote, ContactAddress
+- **Value Objects**: Email, PhoneNumber, Address, TagName, CountryCode
+- **Domain Services**: ContactValidationService, TagHierarchyService, ContactHistoryService, AddressValidationService
 - **Ports**: ContactRepository, TagRepository, ContactHistoryRepository, ContactEventPublisher
 - **Business Rules**:
   - Contact name validation (first_name required)
@@ -80,8 +80,11 @@ domain/
   - Tag naming constraints (alphanumeric, -, _, & only)
   - Maximum 25 tags per contact
   - Primary contact method enforcement (one primary per type)
+  - Primary address enforcement (one primary per contact)
+  - Address validation (street_line_1 and country_code required)
+  - Country code validation (ISO 3166-1 alpha-2 format)
   - Contact history tracking for all changes
-- **Domain Events**: ContactCreated, ContactUpdated, ContactDeleted, TagAssigned, TagRemoved, ContactMethodAdded, ContactNoteAdded
+- **Domain Events**: ContactCreated, ContactUpdated, ContactDeleted, TagAssigned, TagRemoved, ContactMethodAdded, ContactNoteAdded, ContactAddressAdded
 
 #### Calendar Domain
 - **Entities**: Event, Reminder
