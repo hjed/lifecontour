@@ -70,15 +70,18 @@ domain/
 ```
 
 #### Contacts Domain
-- **Entities**: Contact, ContactInteraction
-- **Value Objects**: Email, PhoneNumber, Address
-- **Domain Services**: ContactDuplicationService, RelationshipService
-- **Ports**: ContactRepository, GoogleContactsService, ContactEventPublisher
+- **Entities**: Contact, Tag, ContactMethod, ContactNote
+- **Value Objects**: Email, PhoneNumber, Address, TagName
+- **Domain Services**: ContactValidationService, TagHierarchyService, ContactHistoryService
+- **Ports**: ContactRepository, TagRepository, ContactHistoryRepository, ContactEventPublisher
 - **Business Rules**:
-  - Contact uniqueness validation
-  - Relationship mapping logic
-  - Interaction tracking rules
-  - Privacy and consent management
+  - Contact name validation (first_name required)
+  - Email uniqueness validation
+  - Tag naming constraints (alphanumeric, -, _, & only)
+  - Maximum 25 tags per contact
+  - Primary contact method enforcement (one primary per type)
+  - Contact history tracking for all changes
+- **Domain Events**: ContactCreated, ContactUpdated, ContactDeleted, TagAssigned, TagRemoved, ContactMethodAdded, ContactNoteAdded
 
 #### Calendar Domain
 - **Entities**: Event, Reminder
@@ -135,11 +138,20 @@ domain/adapters/
 
 #### Contacts Domain Adapters
 - **SqlContactRepository**: Implements ContactRepository port
-  - Drizzle ORM or Prisma for type-safe database operations
+  - SQLAlchemy Core with explicit SQL queries for type safety
+  - Handles complex joins for contact methods, notes, and tags
   - Connection pooling and transaction management
   - Query optimization with proper indexing
   - OpenTelemetry instrumentation for database spans
-- **GoogleContactsAdapter**: Implements GoogleContactsService port
+- **SqlTagRepository**: Implements TagRepository port
+  - Hierarchical tag management with parent-child relationships
+  - Tag uniqueness enforcement and validation
+  - Efficient queries for tag trees and contact associations
+- **SqlContactHistoryRepository**: Implements ContactHistoryRepository port
+  - Change tracking for all contact-related entities
+  - Audit trail with field-level change detection
+  - Integration with domain events for automatic history recording
+- **GoogleContactsAdapter**: Implements GoogleContactsService port (Future iteration)
   - Official `googleapis` library with People API v1
   - OAuth 2.0 authentication with token refresh
   - Incremental sync with conflict resolution
@@ -148,6 +160,7 @@ domain/adapters/
 - **ContactEventPublisher**: Implements ContactEventPublisher port
   - Domain event publishing with correlation IDs
   - Event serialization and structured logging
+  - Integration with contact history for audit trails
 
 #### Calendar Domain Adapters
 - **SqlEventRepository**: Implements EventRepository port

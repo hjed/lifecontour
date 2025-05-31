@@ -1,0 +1,187 @@
+# Personal CRM & Journal System
+
+A personal relationship management and journaling system with AI integration through the MCP (Model Context Protocol). Built with Python FastAPI backend, Next.js frontend, and PostgreSQL database.
+
+## 🚀 Quick Start
+
+### Prerequisites
+
+- Python 3.11+ with [UV](https://github.com/astral-sh/uv) for dependency management
+- Node.js 18+ with [pnpm](https://pnpm.io/) for frontend dependencies
+- Docker and Docker Compose
+- PostgreSQL database
+
+### Development Setup
+
+1. **Clone and setup:**
+   ```bash
+   git clone <repository-url>
+   cd personal-management-system
+   ./scripts/dev.sh setup
+   ```
+
+2. **Start the database:**
+   ```bash
+   docker-compose up database -d
+   ```
+
+3. **Run database migrations:**
+   ```bash
+   cd backend
+   alembic upgrade head
+   cd ..
+   ```
+
+4. **Start development servers:**
+   ```bash
+   ./scripts/dev.sh start
+   ```
+
+5. **Access the application:**
+   - Frontend: http://localhost:3000
+   - Backend API: http://localhost:8000
+   - API Documentation: http://localhost:8000/api/docs
+
+### Production Deployment
+
+```bash
+# Start all services with nginx proxy
+docker-compose up -d
+
+# Access via nginx proxy
+# Frontend: http://localhost
+# Backend API: http://localhost/api
+```
+
+## 🏗️ Architecture
+
+### Technology Stack
+
+- **Backend**: Python 3.11+ with FastAPI, SQLAlchemy Core, PostgreSQL
+- **Frontend**: Next.js 14 with TypeScript, Tailwind CSS, shadcn/ui
+- **Database**: PostgreSQL with Alembic migrations
+- **Deployment**: Docker with nginx reverse proxy
+- **Testing**: pytest (backend), Jest + React Testing Library (frontend), Playwright (e2e)
+
+### Project Structure
+
+```
+personal-management-system/
+├── backend/                 # Python FastAPI application
+│   ├── app/
+│   │   ├── core/           # Domain logic (contacts, calendar, journal)
+│   │   ├── infrastructure/ # Database, logging, configuration
+│   │   ├── api/           # FastAPI controllers and DTOs
+│   │   └── integrations/  # External services (Google, Immich)
+│   ├── tests/             # pytest test suite
+│   └── pyproject.toml     # UV dependencies
+├── frontend/              # Next.js TypeScript application
+│   ├── src/
+│   │   ├── app/          # Next.js app router
+│   │   ├── components/   # React components (shadcn/ui)
+│   │   └── lib/          # Utilities and API clients
+│   ├── tests/            # Jest and Playwright tests
+│   └── package.json      # pnpm dependencies
+├── docker/               # Docker configurations
+├── docs/                 # Documentation
+└── docker-compose.yml    # Multi-container setup
+```
+
+## 📋 Features
+
+### Current (Iteration 1 - Foundation)
+- ✅ **Project Foundation**: Python FastAPI + Next.js with full development setup
+- ✅ **Database**: PostgreSQL with Alembic migrations
+- ✅ **Testing**: Comprehensive test setup (pytest, Jest, Playwright)
+- ✅ **Development Tools**: Linting, formatting, type checking
+- ✅ **Docker**: Multi-container setup with nginx proxy
+
+### Planned Features
+- **Contacts Management**: Personal and professional contacts with tags
+- **Google Integration**: Bidirectional sync with Google Contacts and Calendar
+- **Journal System**: Personal journaling with mood tracking and album linking
+- **Photo Integration**: Immich integration with person-to-contact matching
+- **AI Integration**: MCP protocol support for AI assistant access
+- **Advanced Features**: CardDAV/CalDAV protocols, Home Assistant integration
+
+## 🧪 Development
+
+### Running Tests
+
+```bash
+# All tests
+./scripts/dev.sh test
+
+# Backend only
+cd backend && pytest
+
+# Frontend only
+cd frontend && pnpm test
+
+# End-to-end tests
+cd frontend && pnpm test:e2e
+```
+
+### Code Quality
+
+```bash
+# Check linting
+./scripts/dev.sh lint
+
+# Fix linting issues
+./scripts/dev.sh lint-fix
+```
+
+### Database Operations
+
+```bash
+cd backend
+
+# Create migration
+alembic revision --autogenerate -m "Description"
+
+# Apply migrations
+alembic upgrade head
+
+# Rollback
+alembic downgrade -1
+```
+
+## 📚 Documentation
+
+- **[Architecture Overview](docs/architecture.md)** - System design and patterns
+- **[AI Guidelines](docs/ai-guidelines.md)** - Development guidelines for AI assistants
+- **[Task Management](docs/tasks.md)** - Agile development roadmap
+- **[Backend README](backend/README.md)** - Python FastAPI backend details
+- **[Frontend README](frontend/README.md)** - Next.js frontend details
+
+## 🔧 Configuration
+
+### Environment Variables
+
+**Backend** (`.env`):
+```bash
+DATABASE_URL=postgresql://postgres:postgres@localhost:5432/personal_management
+DEBUG=true
+SECRET_KEY=your-secret-key
+GOOGLE_CLIENT_ID=your-google-client-id
+IMMICH_BASE_URL=http://your-immich-instance
+```
+
+**Frontend** (`.env.local`):
+```bash
+BACKEND_URL=http://localhost:8000
+NODE_ENV=development
+```
+
+## 🤝 Contributing
+
+This project follows agile development principles with feature-complete iterations. See [tasks.md](docs/tasks.md) for the current roadmap and [ai-guidelines.md](docs/ai-guidelines.md) for development standards.
+
+## 📄 License
+
+AGPL v3 - See [LICENSE](LICENSE) for details.
+
+---
+
+**Personal Management System** - Centralize your personal data with AI integration

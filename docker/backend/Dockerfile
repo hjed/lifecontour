@@ -1,74 +1,78 @@
-# Backend Dockerfile
-FROM node:24-alpine AS base
+# Backend Dockerfile - Python FastAPI
+FROM python:3.11-slim AS base
 
-# Install pnpm
-RUN npm install -g pnpm@9.12.0
+# Set environment variables
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    curl \
+    gcc \
+    libpq-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install UV for dependency management
+RUN pip install uv
 
 # Set working directory
 WORKDIR /app
 
-# Copy package files for dependency installation
-COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
-COPY packages/shared/package.json ./packages/shared/
-COPY packages/database/package.json ./packages/database/
-COPY apps/backend/package.json ./apps/backend/
+# Copy dependency files
+COPY pyproject.toml ./
 
 # Install dependencies
-RUN pnpm install --frozen-lockfile --prod=false
+RUN uv pip install --system -e .[dev]
 
 # Copy source code
-COPY packages/shared ./packages/shared
-COPY packages/database ./packages/database
-COPY apps/backend ./apps/backend
-COPY tsconfig.json ./
-
-# Build shared packages first
-RUN pnpm --filter @personal-management/shared build
-RUN pnpm --filter @personal-management/database build
-
-# Build backend
-RUN pnpm --filter @personal-management/backend build
+COPY app ./app
+COPY alembic.ini ./
 
 # Production stage
-FROM node:24-alpine AS production
+FROM python:3.11-slim AS production
 
-# Install pnpm and curl for healthcheck
-RUN npm install -g pnpm@9.12.0 && \
-    apk add --no-cache curl
+# Set environment variables
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    curl \
+    libpq-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install UV for dependency management
+RUN pip install uv
 
 # Create app user
-RUN addgroup -g 1001 -S nodejs && \
-    adduser -S backend -u 1001
+RUN groupadd -r appuser && useradd -r -g appuser appuser
 
 # Set working directory
 WORKDIR /app
 
-# Copy package files
-COPY package.json pnpm-workspace.yaml ./
-COPY packages/shared/package.json ./packages/shared/
-COPY packages/database/package.json ./packages/database/
-COPY apps/backend/package.json ./apps/backend/
+# Copy dependency files
+COPY pyproject.toml ./
 
 # Install production dependencies only
-RUN pnpm install --frozen-lockfile --prod
+RUN uv pip install --system .
 
-# Copy built application
-COPY --from=base --chown=backend:nodejs /app/packages/shared/dist ./packages/shared/dist
-COPY --from=base --chown=backend:nodejs /app/packages/database/dist ./packages/database/dist
-COPY --from=base --chown=backend:nodejs /app/apps/backend/dist ./apps/backend/dist
-
-# Create data directory for SQLite database
-RUN mkdir -p /data && chown backend:nodejs /data
+# Copy application code
+COPY --chown=appuser:appuser app ./app
+COPY --chown=appuser:appuser alembic.ini ./
 
 # Switch to non-root user
-USER backend
+USER appuser
 
 # Expose port
-EXPOSE 3001
+EXPOSE 8000
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
-  CMD curl -f http://localhost:3001/health || exit 1
+  CMD curl -f http://localhost:8000/api/health || exit 1
 
 # Start the application
-CMD ["node", "apps/backend/dist/index.js"]
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

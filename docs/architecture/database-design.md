@@ -15,24 +15,111 @@ This document outlines the database approach and initial schema for the Personal
 #### Contacts Table
 ```sql
 CREATE TABLE contacts (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    name VARCHAR(255) NOT NULL,
-    email VARCHAR(255),
-    phone VARCHAR(50),
-    notes TEXT,
-    tags JSONB DEFAULT '[]',
+    id SERIAL PRIMARY KEY,
+    first_name VARCHAR(100) NOT NULL,
+    last_name VARCHAR(100),
+    middle_name VARCHAR(100),
+    nick_name VARCHAR(100),
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+```
+
+#### Contact Methods Table
+```sql
+CREATE TABLE contact_methods (
+    id SERIAL PRIMARY KEY,
+    contact_id INTEGER NOT NULL REFERENCES contacts(id) ON DELETE CASCADE,
+    method_type VARCHAR(20) NOT NULL CHECK (method_type IN ('email', 'phone', 'address')),
+    value TEXT NOT NULL,
+    label VARCHAR(50), -- e.g., 'work', 'home', 'mobile'
+    is_primary BOOLEAN DEFAULT FALSE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    UNIQUE(contact_id, method_type, is_primary) WHERE is_primary = TRUE
+);
+```
+
+#### Contact Notes Table
+```sql
+CREATE TABLE contact_notes (
+    id SERIAL PRIMARY KEY,
+    contact_id INTEGER NOT NULL REFERENCES contacts(id) ON DELETE CASCADE,
+    content TEXT NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+```
+
+#### Tags Table
+```sql
+CREATE TABLE tags (
+    id SERIAL PRIMARY KEY,
+    name VARCHAR(100) NOT NULL UNIQUE,
+    parent_id INTEGER REFERENCES tags(id) ON DELETE SET NULL,
+    color VARCHAR(7), -- Hex color code
+    description TEXT,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    CONSTRAINT tag_name_format CHECK (name ~ '^[a-zA-Z0-9_&-]+$')
+);
+```
+
+#### Contact Tags Junction Table
+```sql
+CREATE TABLE contact_tags (
+    id SERIAL PRIMARY KEY,
+    contact_id INTEGER NOT NULL REFERENCES contacts(id) ON DELETE CASCADE,
+    tag_id INTEGER NOT NULL REFERENCES tags(id) ON DELETE CASCADE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    UNIQUE(contact_id, tag_id)
+);
+```
+
+#### Contact History Table
+```sql
+CREATE TABLE contact_history (
+    id SERIAL PRIMARY KEY,
+    entity_type VARCHAR(50) NOT NULL, -- 'contact', 'contact_method', 'contact_note', 'contact_tag'
+    entity_id INTEGER NOT NULL,
+    action VARCHAR(20) NOT NULL CHECK (action IN ('created', 'updated', 'deleted')),
+    field_name VARCHAR(100), -- specific field that changed (for updates)
+    old_value TEXT,
+    new_value TEXT,
+    changed_by VARCHAR(100), -- user identifier (for future auth)
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 ```
 
 #### Basic Indexing (Iteration 1)
 ```sql
 -- Essential indexes for contact operations
-CREATE INDEX idx_contacts_name ON contacts USING gin(to_tsvector('english', name));
-CREATE INDEX idx_contacts_email ON contacts(email);
-CREATE INDEX idx_contacts_tags ON contacts USING gin(tags);
-CREATE INDEX idx_contacts_created_at ON contacts(created_at);
+CREATE INDEX idx_contacts_first_name ON contacts USING gin(to_tsvector('english', first_name));
+CREATE INDEX idx_contacts_last_name ON contacts USING gin(to_tsvector('english', last_name));
+CREATE INDEX idx_contacts_full_name ON contacts USING gin(to_tsvector('english',
+    COALESCE(first_name, '') || ' ' || COALESCE(last_name, '') || ' ' || COALESCE(nick_name, '')));
+
+-- Contact methods indexes
+CREATE INDEX idx_contact_methods_contact_id ON contact_methods(contact_id);
+CREATE INDEX idx_contact_methods_type ON contact_methods(method_type);
+CREATE INDEX idx_contact_methods_value ON contact_methods(value);
+CREATE INDEX idx_contact_methods_primary ON contact_methods(contact_id, method_type) WHERE is_primary = TRUE;
+
+-- Contact notes indexes
+CREATE INDEX idx_contact_notes_contact_id ON contact_notes(contact_id);
+CREATE INDEX idx_contact_notes_content ON contact_notes USING gin(to_tsvector('english', content));
+
+-- Tags indexes
+CREATE INDEX idx_tags_name ON tags(name);
+CREATE INDEX idx_tags_parent_id ON tags(parent_id);
+
+-- Contact tags indexes
+CREATE INDEX idx_contact_tags_contact_id ON contact_tags(contact_id);
+CREATE INDEX idx_contact_tags_tag_id ON contact_tags(tag_id);
+
+-- History indexes
+CREATE INDEX idx_contact_history_entity ON contact_history(entity_type, entity_id);
+CREATE INDEX idx_contact_history_created_at ON contact_history(created_at);
 ```
 
 ## Future Tables (Later Iterations)
@@ -161,37 +248,116 @@ CREATE INDEX idx_contacts_tags_gin ON contacts USING gin(tags);
 
 ### Alembic Migration Approach
 ```python
-# Example migration for contacts table
-"""Create contacts table
+# Example migration for contacts domain tables
+"""Create contacts domain tables
 
-Revision ID: 001_create_contacts
+Revision ID: 001_create_contacts_domain
 Revises:
 Create Date: 2024-01-01 10:00:00.000000
 
 """
 from alembic import op
 import sqlalchemy as sa
-from sqlalchemy.dialects import postgresql
 
 def upgrade():
+    # Create contacts table
     op.create_table('contacts',
-        sa.Column('id', postgresql.UUID(), server_default=sa.text('gen_random_uuid()'), nullable=False),
-        sa.Column('name', sa.VARCHAR(length=255), nullable=False),
-        sa.Column('email', sa.VARCHAR(length=255), nullable=True),
-        sa.Column('phone', sa.VARCHAR(length=50), nullable=True),
-        sa.Column('notes', sa.TEXT(), nullable=True),
-        sa.Column('tags', postgresql.JSONB(astext_type=sa.Text()), server_default='[]', nullable=True),
+        sa.Column('id', sa.Integer(), nullable=False),
+        sa.Column('first_name', sa.VARCHAR(length=100), nullable=False),
+        sa.Column('last_name', sa.VARCHAR(length=100), nullable=True),
+        sa.Column('middle_name', sa.VARCHAR(length=100), nullable=True),
+        sa.Column('nick_name', sa.VARCHAR(length=100), nullable=True),
         sa.Column('created_at', sa.TIMESTAMP(timezone=True), server_default=sa.text('now()'), nullable=True),
         sa.Column('updated_at', sa.TIMESTAMP(timezone=True), server_default=sa.text('now()'), nullable=True),
         sa.PrimaryKeyConstraint('id')
     )
 
-    # Create basic indexes
-    op.create_index('idx_contacts_name', 'contacts', [sa.text('to_tsvector(\'english\', name)')], postgresql_using='gin')
-    op.create_index('idx_contacts_email', 'contacts', ['email'])
-    op.create_index('idx_contacts_tags', 'contacts', ['tags'], postgresql_using='gin')
+    # Create tags table
+    op.create_table('tags',
+        sa.Column('id', sa.Integer(), nullable=False),
+        sa.Column('name', sa.VARCHAR(length=100), nullable=False),
+        sa.Column('parent_id', sa.Integer(), nullable=True),
+        sa.Column('color', sa.VARCHAR(length=7), nullable=True),
+        sa.Column('description', sa.TEXT(), nullable=True),
+        sa.Column('created_at', sa.TIMESTAMP(timezone=True), server_default=sa.text('now()'), nullable=True),
+        sa.Column('updated_at', sa.TIMESTAMP(timezone=True), server_default=sa.text('now()'), nullable=True),
+        sa.ForeignKeyConstraint(['parent_id'], ['tags.id'], ondelete='SET NULL'),
+        sa.PrimaryKeyConstraint('id'),
+        sa.UniqueConstraint('name'),
+        sa.CheckConstraint("name ~ '^[a-zA-Z0-9_&-]+$'", name='tag_name_format')
+    )
+
+    # Create contact_methods table
+    op.create_table('contact_methods',
+        sa.Column('id', sa.Integer(), nullable=False),
+        sa.Column('contact_id', sa.Integer(), nullable=False),
+        sa.Column('method_type', sa.VARCHAR(length=20), nullable=False),
+        sa.Column('value', sa.TEXT(), nullable=False),
+        sa.Column('label', sa.VARCHAR(length=50), nullable=True),
+        sa.Column('is_primary', sa.Boolean(), server_default='false', nullable=True),
+        sa.Column('created_at', sa.TIMESTAMP(timezone=True), server_default=sa.text('now()'), nullable=True),
+        sa.Column('updated_at', sa.TIMESTAMP(timezone=True), server_default=sa.text('now()'), nullable=True),
+        sa.CheckConstraint("method_type IN ('email', 'phone', 'address')", name='valid_method_type'),
+        sa.ForeignKeyConstraint(['contact_id'], ['contacts.id'], ondelete='CASCADE'),
+        sa.PrimaryKeyConstraint('id')
+    )
+
+    # Create unique constraint for primary methods
+    op.create_index('idx_contact_methods_unique_primary', 'contact_methods',
+                   ['contact_id', 'method_type'], unique=True,
+                   postgresql_where=sa.text('is_primary = true'))
+
+    # Create contact_notes table
+    op.create_table('contact_notes',
+        sa.Column('id', sa.Integer(), nullable=False),
+        sa.Column('contact_id', sa.Integer(), nullable=False),
+        sa.Column('content', sa.TEXT(), nullable=False),
+        sa.Column('created_at', sa.TIMESTAMP(timezone=True), server_default=sa.text('now()'), nullable=True),
+        sa.Column('updated_at', sa.TIMESTAMP(timezone=True), server_default=sa.text('now()'), nullable=True),
+        sa.ForeignKeyConstraint(['contact_id'], ['contacts.id'], ondelete='CASCADE'),
+        sa.PrimaryKeyConstraint('id')
+    )
+
+    # Create contact_tags junction table
+    op.create_table('contact_tags',
+        sa.Column('id', sa.Integer(), nullable=False),
+        sa.Column('contact_id', sa.Integer(), nullable=False),
+        sa.Column('tag_id', sa.Integer(), nullable=False),
+        sa.Column('created_at', sa.TIMESTAMP(timezone=True), server_default=sa.text('now()'), nullable=True),
+        sa.ForeignKeyConstraint(['contact_id'], ['contacts.id'], ondelete='CASCADE'),
+        sa.ForeignKeyConstraint(['tag_id'], ['tags.id'], ondelete='CASCADE'),
+        sa.PrimaryKeyConstraint('id'),
+        sa.UniqueConstraint('contact_id', 'tag_id')
+    )
+
+    # Create contact_history table
+    op.create_table('contact_history',
+        sa.Column('id', sa.Integer(), nullable=False),
+        sa.Column('entity_type', sa.VARCHAR(length=50), nullable=False),
+        sa.Column('entity_id', sa.Integer(), nullable=False),
+        sa.Column('action', sa.VARCHAR(length=20), nullable=False),
+        sa.Column('field_name', sa.VARCHAR(length=100), nullable=True),
+        sa.Column('old_value', sa.TEXT(), nullable=True),
+        sa.Column('new_value', sa.TEXT(), nullable=True),
+        sa.Column('changed_by', sa.VARCHAR(length=100), nullable=True),
+        sa.Column('created_at', sa.TIMESTAMP(timezone=True), server_default=sa.text('now()'), nullable=True),
+        sa.CheckConstraint("action IN ('created', 'updated', 'deleted')", name='valid_action'),
+        sa.PrimaryKeyConstraint('id')
+    )
+
+    # Create all indexes (see database design document for complete list)
+    # Contact indexes
+    op.create_index('idx_contacts_first_name', 'contacts',
+                   [sa.text("to_tsvector('english', first_name)")], postgresql_using='gin')
+    op.create_index('idx_contacts_last_name', 'contacts',
+                   [sa.text("to_tsvector('english', last_name)")], postgresql_using='gin')
 
 def downgrade():
+    op.drop_table('contact_history')
+    op.drop_table('contact_tags')
+    op.drop_table('contact_notes')
+    op.drop_table('contact_methods')
+    op.drop_table('tags')
     op.drop_table('contacts')
 ```
 
@@ -208,14 +374,13 @@ def downgrade():
 Each domain implements repositories following the Repository pattern:
 
 ```python
-# Abstract repository interface
+# Abstract repository interfaces
 from abc import ABC, abstractmethod
 from typing import List, Optional
-from uuid import UUID
 
 class ContactRepository(ABC):
     @abstractmethod
-    async def find_by_id(self, contact_id: UUID) -> Optional[Contact]:
+    async def find_by_id(self, contact_id: int) -> Optional[Contact]:
         pass
 
     @abstractmethod
@@ -231,7 +396,45 @@ class ContactRepository(ABC):
         pass
 
     @abstractmethod
-    async def delete(self, contact_id: UUID) -> None:
+    async def delete(self, contact_id: int) -> None:
+        pass
+
+    @abstractmethod
+    async def get_contacts_by_tag(self, tag_id: int) -> List[Contact]:
+        pass
+
+class TagRepository(ABC):
+    @abstractmethod
+    async def find_by_id(self, tag_id: int) -> Optional[Tag]:
+        pass
+
+    @abstractmethod
+    async def find_by_name(self, name: str) -> Optional[Tag]:
+        pass
+
+    @abstractmethod
+    async def get_all(self) -> List[Tag]:
+        pass
+
+    @abstractmethod
+    async def get_children(self, parent_id: int) -> List[Tag]:
+        pass
+
+    @abstractmethod
+    async def save(self, tag: Tag) -> Tag:
+        pass
+
+    @abstractmethod
+    async def delete(self, tag_id: int) -> None:
+        pass
+
+class ContactHistoryRepository(ABC):
+    @abstractmethod
+    async def get_contact_history(self, contact_id: int) -> List[ContactHistoryEntry]:
+        pass
+
+    @abstractmethod
+    async def record_change(self, entry: ContactHistoryEntry) -> ContactHistoryEntry:
         pass
 ```
 
@@ -245,20 +448,98 @@ class PostgreSQLContactRepository(ContactRepository):
     def __init__(self, connection: AsyncConnection):
         self.conn = connection
 
-    async def find_by_id(self, contact_id: UUID) -> Optional[Contact]:
-        query = text("SELECT * FROM contacts WHERE id = :id")
+    async def find_by_id(self, contact_id: int) -> Optional[Contact]:
+        query = text("""
+            SELECT c.*,
+                   cm.id as method_id, cm.method_type, cm.value as method_value,
+                   cm.label as method_label, cm.is_primary,
+                   cn.id as note_id, cn.content as note_content, cn.created_at as note_created_at,
+                   t.id as tag_id, t.name as tag_name, t.color as tag_color
+            FROM contacts c
+            LEFT JOIN contact_methods cm ON c.id = cm.contact_id
+            LEFT JOIN contact_notes cn ON c.id = cn.contact_id
+            LEFT JOIN contact_tags ct ON c.id = ct.contact_id
+            LEFT JOIN tags t ON ct.tag_id = t.id
+            WHERE c.id = :id
+        """)
         result = await self.conn.execute(query, {"id": contact_id})
+        rows = result.fetchall()
+        return Contact.from_rows(rows) if rows else None
+
+    async def find_by_email(self, email: str) -> Optional[Contact]:
+        query = text("""
+            SELECT DISTINCT c.id FROM contacts c
+            JOIN contact_methods cm ON c.id = cm.contact_id
+            WHERE cm.method_type = 'email' AND cm.value = :email
+        """)
+        result = await self.conn.execute(query, {"email": email})
         row = result.fetchone()
-        return Contact.from_row(row) if row else None
+        if row:
+            return await self.find_by_id(row.id)
+        return None
 
     async def search(self, query: str) -> List[Contact]:
         search_query = text("""
-            SELECT * FROM contacts
-            WHERE search_vector @@ plainto_tsquery('english', :query)
-            ORDER BY ts_rank(search_vector, plainto_tsquery('english', :query)) DESC
+            SELECT DISTINCT c.id FROM contacts c
+            LEFT JOIN contact_methods cm ON c.id = cm.contact_id
+            LEFT JOIN contact_notes cn ON c.id = cn.contact_id
+            WHERE to_tsvector('english',
+                COALESCE(c.first_name, '') || ' ' ||
+                COALESCE(c.last_name, '') || ' ' ||
+                COALESCE(c.nick_name, '') || ' ' ||
+                COALESCE(cm.value, '') || ' ' ||
+                COALESCE(cn.content, '')
+            ) @@ plainto_tsquery('english', :query)
+            ORDER BY ts_rank(to_tsvector('english',
+                COALESCE(c.first_name, '') || ' ' || COALESCE(c.last_name, '')
+            ), plainto_tsquery('english', :query)) DESC
         """)
         result = await self.conn.execute(search_query, {"query": query})
-        return [Contact.from_row(row) for row in result.fetchall()]
+        contact_ids = [row.id for row in result.fetchall()]
+
+        # Fetch full contact details for each ID
+        contacts = []
+        for contact_id in contact_ids:
+            contact = await self.find_by_id(contact_id)
+            if contact:
+                contacts.append(contact)
+        return contacts
+
+    async def save(self, contact: Contact) -> Contact:
+        # Implementation would handle INSERT/UPDATE logic with transaction management
+        # This is a simplified example - full implementation would be more complex
+        if contact.id is None:
+            # Insert new contact
+            query = text("""
+                INSERT INTO contacts (first_name, last_name, middle_name, nick_name)
+                VALUES (:first_name, :last_name, :middle_name, :nick_name)
+                RETURNING id
+            """)
+            result = await self.conn.execute(query, {
+                "first_name": contact.first_name,
+                "last_name": contact.last_name,
+                "middle_name": contact.middle_name,
+                "nick_name": contact.nick_name
+            })
+            contact.id = result.fetchone().id
+        else:
+            # Update existing contact
+            query = text("""
+                UPDATE contacts
+                SET first_name = :first_name, last_name = :last_name,
+                    middle_name = :middle_name, nick_name = :nick_name,
+                    updated_at = NOW()
+                WHERE id = :id
+            """)
+            await self.conn.execute(query, {
+                "id": contact.id,
+                "first_name": contact.first_name,
+                "last_name": contact.last_name,
+                "middle_name": contact.middle_name,
+                "nick_name": contact.nick_name
+            })
+
+        return contact
 ```
 
 ## Performance Considerations

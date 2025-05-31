@@ -174,7 +174,17 @@ personal-management-system/
 - **Pydantic Models**: Type-safe request/response validation
 - **Standard Libraries**: Prefer built-in libraries over external dependencies
 - **Clear Separation**: Keep domain logic separate from API and database concerns
-- **Use Type Hints**: Always use type hints for better code understanding.
+- **Use Type Hints**: Always use type hints for better code understanding
+- **Mypy Compliance**: All code must pass mypy type checking without errors
+
+#### Type Checking Guidelines
+
+- **Function Signatures**: Always include return type annotations
+- **Parameter Types**: Use proper type hints for all function parameters
+- **Generic Types**: Use `Union[T, U]` for multiple types, `Optional[T]` for nullable
+- **Unused Parameters**: Prefix with underscore (`_param`) to indicate intentionally unused
+- **Type Ignores**: Use `# type: ignore[specific-error]` sparingly with specific error codes
+- **Pydantic Models**: Use `str` instead of `PostgresDsn` for database URLs to avoid validation complexity
 
 #### Database Operations
 

@@ -1,0 +1,213 @@
+#!/bin/bash
+
+# Development script for Personal Management System
+# Provides easy commands for common development tasks
+
+set -e
+
+# Colors for output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m' # No Color
+
+# Helper functions
+log_info() {
+    echo -e "${BLUE}[INFO]${NC} $1"
+}
+
+log_success() {
+    echo -e "${GREEN}[SUCCESS]${NC} $1"
+}
+
+log_warning() {
+    echo -e "${YELLOW}[WARNING]${NC} $1"
+}
+
+log_error() {
+    echo -e "${RED}[ERROR]${NC} $1"
+}
+
+# Check if command exists
+command_exists() {
+    command -v "$1" >/dev/null 2>&1
+}
+
+# Setup function
+setup() {
+    log_info "Setting up Personal Management System development environment..."
+    
+    # Check prerequisites
+    if ! command_exists "uv"; then
+        log_error "UV is not installed. Please install UV for Python dependency management."
+        exit 1
+    fi
+    
+    if ! command_exists "pnpm"; then
+        log_error "pnpm is not installed. Please install pnpm for frontend dependency management."
+        exit 1
+    fi
+    
+    if ! command_exists "docker"; then
+        log_warning "Docker is not installed. You'll need Docker for the full development environment."
+    fi
+    
+    # Setup backend
+    log_info "Setting up backend dependencies..."
+    cd backend
+    if [ ! -f ".env" ]; then
+        cp .env.example .env
+        log_info "Created backend .env file from example. Please configure it."
+    fi
+    uv pip install -e .[dev]
+    cd ..
+    
+    # Setup frontend
+    log_info "Setting up frontend dependencies..."
+    cd frontend
+    if [ ! -f ".env.local" ]; then
+        cp .env.example .env.local
+        log_info "Created frontend .env.local file from example. Please configure it."
+    fi
+    pnpm install
+    cd ..
+    
+    log_success "Development environment setup complete!"
+    log_info "Next steps:"
+    log_info "1. Configure your .env files"
+    log_info "2. Start the database: docker-compose up database"
+    log_info "3. Run migrations: cd backend && alembic upgrade head"
+    log_info "4. Start development: ./scripts/dev.sh start"
+}
+
+# Start development servers
+start() {
+    log_info "Starting development servers..."
+    
+    # Start backend
+    log_info "Starting backend server..."
+    cd backend
+    uvicorn app.main:app --reload --host 0.0.0.0 --port 8000 &
+    BACKEND_PID=$!
+    cd ..
+    
+    # Start frontend
+    log_info "Starting frontend server..."
+    cd frontend
+    pnpm dev &
+    FRONTEND_PID=$!
+    cd ..
+    
+    log_success "Development servers started!"
+    log_info "Backend: http://localhost:8000"
+    log_info "Frontend: http://localhost:3000"
+    log_info "API Docs: http://localhost:8000/api/docs"
+    
+    # Wait for interrupt
+    trap "kill $BACKEND_PID $FRONTEND_PID 2>/dev/null; exit" INT
+    wait
+}
+
+# Run tests
+test() {
+    log_info "Running tests..."
+    
+    # Backend tests
+    log_info "Running backend tests..."
+    cd backend
+    pytest
+    cd ..
+    
+    # Frontend tests
+    log_info "Running frontend tests..."
+    cd frontend
+    pnpm test
+    cd ..
+    
+    log_success "All tests completed!"
+}
+
+# Lint code
+lint() {
+    log_info "Running linters..."
+    
+    # Backend linting
+    log_info "Linting backend..."
+    cd backend
+    ruff check .
+    black --check .
+    mypy .
+    cd ..
+    
+    # Frontend linting
+    log_info "Linting frontend..."
+    cd frontend
+    pnpm lint
+    pnpm type-check
+    cd ..
+    
+    log_success "Linting completed!"
+}
+
+# Fix linting issues
+lint_fix() {
+    log_info "Fixing linting issues..."
+    
+    # Backend
+    cd backend
+    ruff check . --fix
+    black .
+    cd ..
+    
+    # Frontend
+    cd frontend
+    pnpm lint:fix
+    pnpm format
+    cd ..
+    
+    log_success "Linting fixes applied!"
+}
+
+# Show help
+help() {
+    echo "Personal Management System Development Script"
+    echo ""
+    echo "Usage: $0 [command]"
+    echo ""
+    echo "Commands:"
+    echo "  setup     Set up development environment"
+    echo "  start     Start development servers"
+    echo "  test      Run all tests"
+    echo "  lint      Run linters"
+    echo "  lint-fix  Fix linting issues"
+    echo "  help      Show this help message"
+    echo ""
+}
+
+# Main script logic
+case "${1:-help}" in
+    setup)
+        setup
+        ;;
+    start)
+        start
+        ;;
+    test)
+        test
+        ;;
+    lint)
+        lint
+        ;;
+    lint-fix)
+        lint_fix
+        ;;
+    help)
+        help
+        ;;
+    *)
+        log_error "Unknown command: $1"
+        help
+        exit 1
+        ;;
+esac
