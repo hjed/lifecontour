@@ -17,6 +17,8 @@ Tasks can be found in the [tasks document](./tasks.md).
 - **Backend**: Python 3.11+ with FastAPI, PostgreSQL database
 - **Frontend**: Next.js with React, shadcn/ui components, Tailwind CSS
 - **APIs**: JSON API standard for REST endpoints, MCP for AI integration
+- **Authentication**: Session-based authentication with Starlette SessionMiddleware
+- **Search**: MeiliSearch with event-driven indexing via transactional outbox pattern
 - **Testing**: pytest (backend), React Testing Library (frontend), Playwright (e2e)
 - **Integrations**: Google Calendar/Contacts, Immich photos
 - **Deployment**: Docker with nginx proxy support
@@ -141,8 +143,15 @@ personal-management-system/
 |   |   |   |── calendar/        # Calendar Domain Logic
 |   |   |   |── journal/         # Journal Domain Logic
 |   |   |── infrastructure/      # Common code for Database, Events, etc.
+|   |   |   |── search/          # MeiliSearch integration
+|   |   |   |── events/          # Outbox pattern implementation
+|   |   |   |── auth/            # Session management
 │   │   ├── api/                 # FastAPI route handlers
-│   │   |   ├── dtos/            # Pydantic models
+│   │   |   ├── auth/            # Authentication endpoints
+│   │   |   ├── contacts/        # Contact CRUD endpoints
+│   │   |   ├── search/          # Search endpoints
+│   │   |   ├── dependencies.py  # Service factories and DI
+│   │   |   └── schemas/         # Pydantic request/response models
 │   │   ├── migrations/          # SQL queries and migrations
 │   │   └── integrations/        # External Sub-Domains
 │   │       ├── google/          # Google Integration Sub-Domain
@@ -257,6 +266,8 @@ _See [Domain Architecture](./architecture/domain-architecture.md) for specific e
 ### Dependency Injection
 
 - **Pattern**: Constructor injection with typed interfaces
+- **Framework**: Use FastAPI's built-in `Depends` system for service injection
+- **Service Factories**: Create service factory functions for clean dependency management
 - **Repositories**: Receive database connections as constructor parameters
 - **Services**: Receive repository interfaces as constructor parameters
 - **Simple Container**: Use basic factory pattern, avoid complex DI frameworks
@@ -265,9 +276,22 @@ _See [Domain Architecture](./architecture/domain-architecture.md) for specific e
 ### API Design
 
 - **JSON API Compliance**: Follow JSON API specification for REST endpoints
+- **Authentication**: Session-based authentication with Starlette SessionMiddleware
 - **Input Validation**: Use Pydantic models for all request validation
 - **Error Responses**: Return structured JSON API error format
 - **Pagination**: Implement simple pagination for large datasets
+- **Search Endpoints**: Domain-specific search endpoints (e.g., `/api/contacts/search`)
+- **Global Search**: Cross-domain search endpoint (`/api/search`) designed for future expansion
+
+### Search and Event Processing
+
+- **Search Engine**: MeiliSearch with event-driven indexing
+- **Outbox Pattern**: Transactional outbox for reliable event publishing
+- **Background Processing**: FastAPI background tasks every 10 seconds
+- **Performance Target**: <50ms search response times
+- **Event Flow**: Domain Service → OutboxEventPublisher → Outbox Table → Background Task → MeiliSearch
+- **Search Features**: Typo tolerance, highlighting, faceted search, pagination
+- **Error Handling**: MeiliSearch failures cause search endpoints to fail (no graceful degradation)
 
 ### MCP Implementation
 

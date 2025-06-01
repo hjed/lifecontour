@@ -87,24 +87,29 @@ Tasks are organized by **feature iterations** that deliver end-to-end value incr
 **Final Status:** All domain logic implemented with 112 unit tests and 53 integration tests passing. ContactMethod.method_type converted to type-safe enum. Real database testing infrastructure established. All linting errors resolved (ruff passing).
 
 ### ITER1-003: Contacts REST API with Search �
-**Description:** Create JSON API compliant FastAPI endpoints with MeiliSearch integration
+**Description:** Create JSON API compliant FastAPI endpoints with MeiliSearch integration using event-driven architecture
 **Dependencies:** ITER1-002
 **Acceptance Criteria:**
 - [ ] Set up MeiliSearch Docker container and Python SDK integration
-- [ ] Implement transactional outbox pattern for event publishing
-- [ ] Create shared outbox event publisher using existing domain events
+- [ ] Implement transactional outbox pattern for reliable event publishing
+- [ ] Create OutboxEventPublisher implementing existing ContactEventPublisher interface
 - [ ] Set up FastAPI background task for outbox processing (every 10 seconds)
+- [ ] Implement session-based authentication using Starlette SessionMiddleware
+- [ ] Create authentication endpoints (login/logout) and session validation dependency
 - [ ] Create FastAPI ContactController with automatic OpenAPI docs
-- [ ] Implement CRUD operations (GET, POST, PUT, DELETE)
+- [ ] Implement CRUD operations (GET, POST, PUT, DELETE) with proper error handling
 - [ ] Add contact search endpoints using MeiliSearch (/api/contacts/search)
-- [ ] Add global search endpoint across all entities (/api/search)
+- [ ] Add global search endpoint for contacts (/api/search) - designed for future expansion
 - [ ] Add tag management endpoints (assign/remove tags)
-- [ ] Implement input validation using Pydantic models
-- [ ] Add basic authentication middleware
+- [ ] Implement comprehensive input validation using Pydantic models
 - [ ] Configure CORS for frontend integration
+- [ ] Implement event-driven MeiliSearch indexing via outbox pattern
+- [ ] Add search features: typo tolerance, highlighting, faceted search, pagination
+- [ ] Target <50ms search response times
 - [ ] Add comprehensive pytest integration tests for all endpoints including search
 - [ ] Generate automatic Swagger documentation
 - [ ] Add MeiliSearch health checks to system health endpoint
+- [ ] Create service factory functions for clean dependency injection
 
 ### ITER1-004: Contact UI with Search �
 **Description:** Create Next.js frontend for contact management with search capabilities

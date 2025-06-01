@@ -25,9 +25,9 @@ This document outlines the technology choices optimized for AI assistant underst
 - **Connection**: Direct SQLAlchemy connection (optimized for clarity)
 
 ### Authentication and Security
-- **Authentication**: python-jose + passlib (simple, explicit patterns)
-- **OAuth Integration**: google-auth for Google Calendar/Contacts
-- **Session Management**: JWT tokens with FastAPI security
+- **Authentication**: Session-based authentication with Starlette SessionMiddleware
+- **Session Management**: Secure session cookies with proper flags
+- **OAuth Integration**: google-auth for Google Calendar/Contacts (ITER2+)
 - **API Security**: FastAPI built-in security, custom rate limiting
 
 ### External Integrations
@@ -40,8 +40,11 @@ This document outlines the technology choices optimized for AI assistant underst
 ### Search and Event Processing
 - **Search Engine**: MeiliSearch 1.2+ (fast, typo-tolerant search)
 - **Search Client**: meilisearch-python (official Python SDK)
+- **Search Architecture**: Event-driven indexing via transactional outbox pattern
 - **Event Publishing**: Transactional outbox pattern with FastAPI background tasks
 - **Event Storage**: PostgreSQL outbox table (same database as main data)
+- **Background Processing**: FastAPI background tasks (every 10 seconds)
+- **Search Performance**: Target <50ms response times
 
 ### Logging and Observability
 - **Logging**: Python standard library logging (simple, clear)
@@ -97,8 +100,15 @@ personal-management-system/
 |   |   |   |── calendar/        # Calendar Domain Logic
 |   |   |   |── journal/         # Journal Domain Logic
 |   |   |── infrastructure/      # Common code for Database, Events, etc.
+|   |   |   |── search/          # MeiliSearch integration
+|   |   |   |── events/          # Outbox pattern implementation
+|   |   |   |── auth/            # Session management
 │   │   ├── api/                 # FastAPI route handlers
-│   │   |   ├── dtos/            # Pydantic models
+│   │   |   ├── auth/            # Authentication endpoints
+│   │   |   ├── contacts/        # Contact CRUD endpoints
+│   │   |   ├── search/          # Search endpoints
+│   │   |   ├── dependencies.py  # Service factories and DI
+│   │   |   └── schemas/         # Pydantic request/response models
 │   │   ├── migrations/          # SQL queries and migrations
 │   │   └── integrations/        # External Sub-Domains
 │   │       ├── google/          # Google Integration Sub-Domain

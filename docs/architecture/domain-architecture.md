@@ -42,17 +42,18 @@ This document provides detailed information about the domain-driven architecture
   - Connection management for multiple AI clients
 
 #### REST API Server Adapter
-- **Framework**: Express.js or Fastify
+- **Framework**: FastAPI with Python
 - **Standard**: JSON API specification compliance
 - **Architecture Role**: Driving adapter that calls into domain use cases
+- **Authentication**: Session-based authentication with Starlette SessionMiddleware
 - **Responsibilities**:
-  - HTTP request handling
+  - HTTP request handling with automatic OpenAPI documentation
   - JSON API response formatting
-  - Authentication middleware
-  - Input validation and sanitization
-  - Rate limiting
+  - Session-based authentication middleware
+  - Input validation with Pydantic models
+  - Rate limiting and CORS configuration
   - Error handling per JSON API spec
-  - Dependency injection into domain services
+  - Service factory functions for dependency injection
 
 ### 3. Domain Layer (Hexagonal Core)
 
@@ -160,10 +161,15 @@ domain/adapters/
   - Incremental sync with conflict resolution
   - Built-in rate limiting and retry logic
   - OpenTelemetry spans for external API calls
-- **ContactEventPublisher**: Implements ContactEventPublisher port
-  - Domain event publishing with correlation IDs
-  - Event serialization and structured logging
+- **OutboxEventPublisher**: Implements ContactEventPublisher port
+  - Transactional outbox pattern for reliable event publishing
+  - Event serialization to PostgreSQL outbox table
   - Integration with contact history for audit trails
+- **SearchIndexer**: Handles MeiliSearch indexing
+  - Event-driven indexing via outbox pattern
+  - Background processing every 10 seconds
+  - Search index management and optimization
+  - Target <50ms search response times
 
 #### Calendar Domain Adapters
 - **SqlEventRepository**: Implements EventRepository port
