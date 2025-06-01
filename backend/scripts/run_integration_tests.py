@@ -22,7 +22,10 @@ def get_docker_compose_cmd() -> list[str]:
     # Try docker compose (plugin version)
     try:
         result = subprocess.run(
-            ["docker", "compose", "--version"], check=True, capture_output=True, text=True
+            ["docker", "compose", "--version"],
+            check=True,
+            capture_output=True,
+            text=True,
         )
         if "Docker Compose" in result.stdout:
             return ["docker", "compose"]

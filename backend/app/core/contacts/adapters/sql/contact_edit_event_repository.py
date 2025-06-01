@@ -38,7 +38,9 @@ class SqlContactEditEventRepository(ContactEditEventRepository):
         # Convert string timestamp to datetime if needed
         occurred_at_value: datetime | None = None
         if event.occurred_at and isinstance(event.occurred_at, str):
-            occurred_at_value = datetime.fromisoformat(event.occurred_at.replace("Z", "+00:00"))
+            occurred_at_value = datetime.fromisoformat(
+                event.occurred_at.replace("Z", "+00:00")
+            )
             # Convert to naive datetime for PostgreSQL compatibility
             occurred_at_value = occurred_at_value.replace(tzinfo=None)
         elif isinstance(event.occurred_at, datetime):

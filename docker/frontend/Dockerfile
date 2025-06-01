@@ -8,13 +8,13 @@ RUN npm install -g pnpm@9.12.0
 WORKDIR /app
 
 # Copy package files for dependency installation
-COPY package.json ./
+COPY frontend/package.json frontend/pnpm-lock.yaml ./
 
 # Install dependencies
 RUN pnpm install --frozen-lockfile
 
 # Copy source code
-COPY . .
+COPY frontend/ .
 
 # Build application
 RUN pnpm build
@@ -32,10 +32,15 @@ RUN apk add --no-cache curl \
 WORKDIR /app
 
 # Copy package files
-COPY package.json ./
+COPY frontend/package.json frontend/pnpm-lock.yaml ./
 
 # Install production dependencies only
 RUN pnpm install --frozen-lockfile --prod
+
+# Copy scripts and set permissions as root
+COPY docker/frontend/start.sh /start.sh
+COPY docker/frontend/healthcheck.sh /healthcheck.sh
+RUN chmod +x /start.sh /healthcheck.sh
 
 # Copy built application
 COPY --from=base --chown=frontend:nodejs /app/.next/standalone ./
@@ -47,11 +52,6 @@ USER frontend
 
 # Expose port
 EXPOSE 3000
-
-# Copy scripts
-COPY docker/frontend/start.sh /start.sh
-COPY docker/frontend/healthcheck.sh /healthcheck.sh
-RUN chmod +x /start.sh /healthcheck.sh
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \

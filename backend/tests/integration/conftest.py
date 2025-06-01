@@ -27,7 +27,10 @@ def get_docker_compose_cmd() -> list[str]:
     # Try docker compose (plugin version)
     try:
         result = subprocess.run(
-            ["docker", "compose", "--version"], check=True, capture_output=True, text=True
+            ["docker", "compose", "--version"],
+            check=True,
+            capture_output=True,
+            text=True,
         )
         if "Docker Compose" in result.stdout:
             return ["docker", "compose"]
@@ -36,6 +39,7 @@ def get_docker_compose_cmd() -> list[str]:
 
     # Default to docker-compose
     return ["docker-compose"]
+
 
 # Test database URL for async operations (using port 5433 for Docker)
 ASYNC_TEST_DATABASE_URL = (
@@ -67,7 +71,9 @@ def start_test_database():
 
         # Start the container
         docker_compose_cmd = get_docker_compose_cmd()
-        backend_dir = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))  # backend directory
+        backend_dir = os.path.dirname(
+            os.path.dirname(os.path.dirname(__file__))
+        )  # backend directory
         subprocess.run(
             docker_compose_cmd + ["-f", "docker-compose.test.yml", "up", "-d"],
             cwd=backend_dir,
@@ -130,7 +136,9 @@ def stop_test_database():
     """Stop Docker PostgreSQL container."""
     try:
         docker_compose_cmd = get_docker_compose_cmd()
-        backend_dir = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))  # backend directory
+        backend_dir = os.path.dirname(
+            os.path.dirname(os.path.dirname(__file__))
+        )  # backend directory
         subprocess.run(
             docker_compose_cmd + ["-f", "docker-compose.test.yml", "down", "-v"],
             cwd=backend_dir,

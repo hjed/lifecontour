@@ -36,12 +36,12 @@ jobs:
 
       - name: Run Safety check
         run: |
-          uv pip install safety
+          uv pip install --system safety
           safety check
 
       - name: Run Bandit security linter
         run: |
-          uv pip install bandit
+          uv pip install --system bandit
           bandit -r app/ -f json -o bandit-report.json || true
 
       - name: Upload Bandit results
@@ -93,9 +93,16 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Build Docker images
+      - name: Build Backend Docker image
         run: |
+          echo "Building backend Docker image..."
           docker build -f docker/backend/Dockerfile -t backend:test .
+
+      - name: Build Frontend Docker image
+        run: |
+          echo "Building frontend Docker image..."
+          # Create public directory if it doesn't exist
+          mkdir -p frontend/public
           docker build -f docker/frontend/Dockerfile -t frontend:test .
 
       - name: Run Trivy vulnerability scanner - Backend

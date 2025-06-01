@@ -20,7 +20,9 @@ def integration_test_client():
     # Set environment variables for test database and allowed hosts
     original_db_url = os.environ.get("DATABASE_URL")
     original_allowed_hosts = os.environ.get("ALLOWED_HOSTS")
-    os.environ["DATABASE_URL"] = "postgresql://postgres:postgres@localhost:5433/personal_management_test"
+    os.environ["DATABASE_URL"] = (
+        "postgresql://postgres:postgres@localhost:5433/personal_management_test"
+    )
     os.environ["ALLOWED_HOSTS"] = '["*"]'
 
     # Clear the cached settings and database engine
