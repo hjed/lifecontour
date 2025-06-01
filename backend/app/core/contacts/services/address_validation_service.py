@@ -49,7 +49,9 @@ class AddressValidationService:
                 "postal_code", f"Invalid postal code: {postal_code}"
             ) from e
 
-    def _validate_country_specific_postal_code(self, postal_code: str, country_code: str) -> None:
+    def _validate_country_specific_postal_code(
+        self, postal_code: str, country_code: str
+    ) -> None:
         """Validate postal code using country-specific rules."""
         if country_code == "NL":
             self._validate_dutch_postal_code(postal_code)
@@ -86,7 +88,9 @@ class AddressValidationService:
                 f"Invalid Spanish postal code: {postal_code}. Must be 5 digits.",
             )
 
-    def _validate_basic_postal_code_format(self, postal_code: str, error: Exception | None = None) -> None:
+    def _validate_basic_postal_code_format(
+        self, postal_code: str, error: Exception | None = None
+    ) -> None:
         """Validate basic postal code format for countries without specific validation."""
         if not postal_code.replace(" ", "").replace("-", "").isalnum():
             message = f"Invalid postal code format: {postal_code}"
@@ -140,16 +144,60 @@ class AddressValidationService:
             return
 
         us_states = [
-            "AL", "AK", "AZ", "AR", "CA", "CO", "CT", "DE", "FL", "GA",
-            "HI", "ID", "IL", "IN", "IA", "KS", "KY", "LA", "ME", "MD",
-            "MA", "MI", "MN", "MS", "MO", "MT", "NE", "NV", "NH", "NJ",
-            "NM", "NY", "NC", "ND", "OH", "OK", "OR", "PA", "RI", "SC",
-            "SD", "TN", "TX", "UT", "VT", "VA", "WA", "WV", "WI", "WY", "DC",
+            "AL",
+            "AK",
+            "AZ",
+            "AR",
+            "CA",
+            "CO",
+            "CT",
+            "DE",
+            "FL",
+            "GA",
+            "HI",
+            "ID",
+            "IL",
+            "IN",
+            "IA",
+            "KS",
+            "KY",
+            "LA",
+            "ME",
+            "MD",
+            "MA",
+            "MI",
+            "MN",
+            "MS",
+            "MO",
+            "MT",
+            "NE",
+            "NV",
+            "NH",
+            "NJ",
+            "NM",
+            "NY",
+            "NC",
+            "ND",
+            "OH",
+            "OK",
+            "OR",
+            "PA",
+            "RI",
+            "SC",
+            "SD",
+            "TN",
+            "TX",
+            "UT",
+            "VT",
+            "VA",
+            "WA",
+            "WV",
+            "WI",
+            "WY",
+            "DC",
         ]
         if region not in us_states:
-            raise ContactValidationError(
-                "region", f"Invalid US state code: {region}"
-            )
+            raise ContactValidationError("region", f"Invalid US state code: {region}")
 
     def _validate_canadian_region(self, region: str | None) -> None:
         """Validate Canadian province/territory codes."""
@@ -157,8 +205,19 @@ class AddressValidationService:
             return
 
         ca_provinces = [
-            "AB", "BC", "MB", "NB", "NL", "NS", "NT", "NU",
-            "ON", "PE", "QC", "SK", "YT",
+            "AB",
+            "BC",
+            "MB",
+            "NB",
+            "NL",
+            "NS",
+            "NT",
+            "NU",
+            "ON",
+            "PE",
+            "QC",
+            "SK",
+            "YT",
         ]
         if region not in ca_provinces:
             raise ContactValidationError(

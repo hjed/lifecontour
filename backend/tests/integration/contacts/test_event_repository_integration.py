@@ -159,7 +159,7 @@ class TestContactEditEventRepositoryIntegration:
         """Test getting events for contact with limit."""
         # Arrange - Create multiple events for same contact
         for i in range(10):
-            day = f"{i+1:02d}" if i < 9 else "10"
+            day = f"{i + 1:02d}" if i < 9 else "10"
             event = ContactEditEvent(
                 event_id=f"event_{i}_2024-01-{day}T00:00:00",
                 event_type="ContactUpdated",
@@ -233,7 +233,7 @@ class TestContactEditEventRepositoryIntegration:
         """Test getting events by type with limit."""
         # Arrange - Create multiple events of same type
         for i in range(8):
-            day = f"{i+1:02d}"
+            day = f"{i + 1:02d}"
             event = ContactEditEvent(
                 event_id=f"contact_updated_{i}_2024-01-{day}T00:00:00",
                 event_type="ContactUpdated",

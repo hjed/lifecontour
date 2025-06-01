@@ -66,11 +66,12 @@ USER appuser
 # Expose port
 EXPOSE 8000
 
+# Copy scripts
+COPY docker/backend/start.sh /start.sh
+COPY docker/backend/healthcheck.sh /healthcheck.sh
+RUN chmod +x /start.sh /healthcheck.sh
+
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
-  CMD curl -f http://localhost:8000/api/health || exit 1
-
-# Start the application
-COPY docker/backend/start.sh /start.sh
-RUN chmod +x /start.sh
+  CMD ["/healthcheck.sh"]
 CMD ["/start.sh"]

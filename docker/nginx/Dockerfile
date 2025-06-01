@@ -19,11 +19,12 @@ USER nginx
 # Expose ports
 EXPOSE 80 443
 
+# Copy scripts
+COPY docker/nginx/start.sh /start.sh
+COPY docker/nginx/healthcheck.sh /healthcheck.sh
+RUN chmod +x /start.sh /healthcheck.sh
+
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --retries=3 \
-  CMD curl -f http://localhost:80/health || exit 1
-
-# Start nginx
-COPY docker/nginx/start.sh /start.sh
-RUN chmod +x /start.sh
+  CMD ["/healthcheck.sh"]
 CMD ["/start.sh"]

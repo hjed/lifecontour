@@ -86,7 +86,7 @@ def start_test_database():
             return True
 
         time.sleep(1)
-        print(f"  Waiting... ({i+1}/{max_retries})")
+        print(f"  Waiting... ({i + 1}/{max_retries})")
 
     print("✗ Test database failed to start within timeout")
     return False

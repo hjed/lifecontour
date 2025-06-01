@@ -3,6 +3,7 @@
 import asyncio
 from typing import Any, cast
 
+import structlog
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncConnection
 
@@ -43,6 +44,8 @@ from app.core.contacts.services.contact_validation_service import (
     ContactValidationService,
 )
 from app.core.contacts.services.tag_hierarchy_service import TagHierarchyService
+
+logger = structlog.get_logger()
 
 
 class ContactService:
@@ -88,8 +91,9 @@ class ContactService:
                     continue
                 else:
                     self._convert_integrity_error_to_domain_exception(e)
-            except Exception:
-                # Don't retry for non-transient errors
+            except Exception as e:
+                # Don't retry for non-transient errors - re-raise immediately
+                logger.error("Non-transient error in operation", error=str(e))
                 raise
 
         # Should never reach here, but just in case
@@ -100,7 +104,9 @@ class ContactService:
         """Wait before retry with exponential backoff."""
         await asyncio.sleep(0.1 * (2**attempt))
 
-    def _convert_integrity_error_to_domain_exception(self, error: IntegrityError) -> None:
+    def _convert_integrity_error_to_domain_exception(
+        self, error: IntegrityError
+    ) -> None:
         """Convert IntegrityError to appropriate domain exception."""
         error_message = str(error).lower()
 

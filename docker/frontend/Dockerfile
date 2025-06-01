@@ -48,11 +48,12 @@ USER frontend
 # Expose port
 EXPOSE 3000
 
+# Copy scripts
+COPY docker/frontend/start.sh /start.sh
+COPY docker/frontend/healthcheck.sh /healthcheck.sh
+RUN chmod +x /start.sh /healthcheck.sh
+
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
-  CMD curl -f http://localhost:3000 || exit 1
-
-# Start the application
-COPY docker/frontend/start.sh /start.sh
-RUN chmod +x /start.sh
+  CMD ["/healthcheck.sh"]
 CMD ["/start.sh"]
