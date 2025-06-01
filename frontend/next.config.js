@@ -3,22 +3,22 @@ const nextConfig = {
   experimental: {
     typedRoutes: true,
   },
-  
+
   // Enable standalone output for Docker
   output: 'standalone',
-  
+
   // API configuration
   async rewrites() {
     return [
       {
         source: '/api/:path*',
-        destination: process.env.BACKEND_URL 
+        destination: process.env.BACKEND_URL
           ? `${process.env.BACKEND_URL}/api/:path*`
           : 'http://localhost:8000/api/:path*',
       },
     ];
   },
-  
+
   // Security headers
   async headers() {
     return [
@@ -41,13 +41,13 @@ const nextConfig = {
       },
     ];
   },
-  
+
   // Image optimization
   images: {
     domains: ['localhost'],
     formats: ['image/webp', 'image/avif'],
   },
-  
+
   // Internationalization for Australian English
   i18n: {
     locales: ['en-AU'],

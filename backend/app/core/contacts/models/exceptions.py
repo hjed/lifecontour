@@ -5,6 +5,7 @@ from app.core.exceptions import DomainError
 
 class ContactDomainError(DomainError):
     """Base exception for contact domain errors."""
+
     pass
 
 
@@ -30,7 +31,7 @@ class DuplicateEmailError(ContactDomainError):
     def __init__(self, email: str, existing_contact_id: int):
         super().__init__(
             f"Email address '{email}' is already associated with contact ID {existing_contact_id}",
-            409
+            409,
         )
         self.email = email
         self.existing_contact_id = existing_contact_id
@@ -50,7 +51,7 @@ class InvalidTagNameError(ContactDomainError):
     def __init__(self, tag_name: str):
         super().__init__(
             f"Tag name '{tag_name}' contains invalid characters. Only alphanumeric, -, _, & allowed",
-            400
+            400,
         )
         self.tag_name = tag_name
 
@@ -60,8 +61,7 @@ class TooManyTagsError(ContactDomainError):
 
     def __init__(self, current_count: int, contact_id: int):
         super().__init__(
-            f"Contact {contact_id} has {current_count} tags. Maximum allowed is 25",
-            400
+            f"Contact {contact_id} has {current_count} tags. Maximum allowed is 25", 400
         )
         self.current_count = current_count
         self.contact_id = contact_id
@@ -97,7 +97,7 @@ class InvalidCountryCodeError(ContactDomainError):
     def __init__(self, country_code: str):
         super().__init__(
             f"Invalid country code: {country_code}. Must be 2 uppercase letters (ISO 3166-1 alpha-2)",
-            400
+            400,
         )
         self.country_code = country_code
 
@@ -115,7 +115,7 @@ class PrimaryMethodConflictError(ContactDomainError):
     def __init__(self, contact_id: int, method_type: str):
         super().__init__(
             f"Contact {contact_id} already has a primary {method_type}. Only one primary method per type allowed",
-            409
+            409,
         )
         self.contact_id = contact_id
         self.method_type = method_type
@@ -127,7 +127,7 @@ class PrimaryAddressConflictError(ContactDomainError):
     def __init__(self, contact_id: int):
         super().__init__(
             f"Contact {contact_id} already has a primary address. Only one primary address allowed",
-            409
+            409,
         )
         self.contact_id = contact_id
 

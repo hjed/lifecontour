@@ -1,6 +1,5 @@
 """Address validation service using pycountry and python-stdnum."""
 
-
 import pycountry
 from sqlalchemy.ext.asyncio import AsyncConnection
 
@@ -21,12 +20,12 @@ class AddressValidationService:
             if not country:
                 raise ContactValidationError(
                     "country_code",
-                    f"Invalid country code: {country_code}. Must be valid ISO 3166-1 alpha-2 code"
+                    f"Invalid country code: {country_code}. Must be valid ISO 3166-1 alpha-2 code",
                 )
         except Exception as e:
             raise ContactValidationError(
                 "country_code",
-                f"Invalid country code: {country_code}. Must be valid ISO 3166-1 alpha-2 code"
+                f"Invalid country code: {country_code}. Must be valid ISO 3166-1 alpha-2 code",
             ) from e
 
     def validate_postal_code(self, postal_code: str, country_code: str) -> None:
@@ -38,48 +37,45 @@ class AddressValidationService:
             # Import specific postal code validators based on country
             if country_code == "NL":
                 from stdnum.nl import postcode
+
                 if not postcode.is_valid(postal_code):
                     raise ContactValidationError(
-                        "postal_code",
-                        f"Invalid Dutch postal code: {postal_code}"
+                        "postal_code", f"Invalid Dutch postal code: {postal_code}"
                     )
             elif country_code == "SE":
                 from stdnum.se import postal_code as se_postal
+
                 if not se_postal.is_valid(postal_code):
                     raise ContactValidationError(
-                        "postal_code",
-                        f"Invalid Swedish postal code: {postal_code}"
+                        "postal_code", f"Invalid Swedish postal code: {postal_code}"
                     )
             elif country_code == "ES":
                 # Spanish postal codes - basic validation since stdnum.es doesn't have postcode
                 if not (postal_code.isdigit() and len(postal_code) == 5):
                     raise ContactValidationError(
                         "postal_code",
-                        f"Invalid Spanish postal code: {postal_code}. Must be 5 digits."
+                        f"Invalid Spanish postal code: {postal_code}. Must be 5 digits.",
                     )
             # Add more countries as they become available in python-stdnum
             else:
                 # For countries without specific validation, do basic format check
                 if not postal_code.replace(" ", "").replace("-", "").isalnum():
                     raise ContactValidationError(
-                        "postal_code",
-                        f"Invalid postal code format: {postal_code}"
+                        "postal_code", f"Invalid postal code format: {postal_code}"
                     )
 
         except ImportError as e:
             # If specific country module not available, do basic validation
             if not postal_code.replace(" ", "").replace("-", "").isalnum():
                 raise ContactValidationError(
-                    "postal_code",
-                    f"Invalid postal code format: {postal_code}"
+                    "postal_code", f"Invalid postal code format: {postal_code}"
                 ) from e
         except Exception as e:
             if isinstance(e, ContactValidationError):
                 raise
             # For any other validation errors, provide generic message
             raise ContactValidationError(
-                "postal_code",
-                f"Invalid postal code: {postal_code}"
+                "postal_code", f"Invalid postal code: {postal_code}"
             ) from e
 
     def validate_address_format(self, address: ContactAddress) -> None:
@@ -105,11 +101,17 @@ class AddressValidationService:
         # Australia specific rules
         if country_code == "AU":
             if address.region and address.region not in [
-                "NSW", "VIC", "QLD", "WA", "SA", "TAS", "ACT", "NT"
+                "NSW",
+                "VIC",
+                "QLD",
+                "WA",
+                "SA",
+                "TAS",
+                "ACT",
+                "NT",
             ]:
                 raise ContactValidationError(
-                    "region",
-                    f"Invalid Australian state/territory: {address.region}"
+                    "region", f"Invalid Australian state/territory: {address.region}"
                 )
 
         # US specific rules
@@ -117,37 +119,91 @@ class AddressValidationService:
             if address.region and len(address.region) == 2:
                 # Validate US state codes (basic check)
                 us_states = [
-                    "AL", "AK", "AZ", "AR", "CA", "CO", "CT", "DE", "FL", "GA",
-                    "HI", "ID", "IL", "IN", "IA", "KS", "KY", "LA", "ME", "MD",
-                    "MA", "MI", "MN", "MS", "MO", "MT", "NE", "NV", "NH", "NJ",
-                    "NM", "NY", "NC", "ND", "OH", "OK", "OR", "PA", "RI", "SC",
-                    "SD", "TN", "TX", "UT", "VT", "VA", "WA", "WV", "WI", "WY",
-                    "DC"
+                    "AL",
+                    "AK",
+                    "AZ",
+                    "AR",
+                    "CA",
+                    "CO",
+                    "CT",
+                    "DE",
+                    "FL",
+                    "GA",
+                    "HI",
+                    "ID",
+                    "IL",
+                    "IN",
+                    "IA",
+                    "KS",
+                    "KY",
+                    "LA",
+                    "ME",
+                    "MD",
+                    "MA",
+                    "MI",
+                    "MN",
+                    "MS",
+                    "MO",
+                    "MT",
+                    "NE",
+                    "NV",
+                    "NH",
+                    "NJ",
+                    "NM",
+                    "NY",
+                    "NC",
+                    "ND",
+                    "OH",
+                    "OK",
+                    "OR",
+                    "PA",
+                    "RI",
+                    "SC",
+                    "SD",
+                    "TN",
+                    "TX",
+                    "UT",
+                    "VT",
+                    "VA",
+                    "WA",
+                    "WV",
+                    "WI",
+                    "WY",
+                    "DC",
                 ]
                 if address.region not in us_states:
                     raise ContactValidationError(
-                        "region",
-                        f"Invalid US state code: {address.region}"
+                        "region", f"Invalid US state code: {address.region}"
                     )
 
         # Canada specific rules
         elif country_code == "CA":
             if address.region and len(address.region) == 2:
                 ca_provinces = [
-                    "AB", "BC", "MB", "NB", "NL", "NS", "NT", "NU", "ON", "PE", "QC", "SK", "YT"
+                    "AB",
+                    "BC",
+                    "MB",
+                    "NB",
+                    "NL",
+                    "NS",
+                    "NT",
+                    "NU",
+                    "ON",
+                    "PE",
+                    "QC",
+                    "SK",
+                    "YT",
                 ]
                 if address.region not in ca_provinces:
                     raise ContactValidationError(
                         "region",
-                        f"Invalid Canadian province/territory: {address.region}"
+                        f"Invalid Canadian province/territory: {address.region}",
                     )
 
         # Add more country-specific rules as needed
 
     async def validate_with_transaction(
-        self,
-        address: ContactAddress,
-        _transaction: AsyncConnection | None = None
+        self, address: ContactAddress, _transaction: AsyncConnection | None = None
     ) -> None:
         """Validate address with transaction context (for future database lookups)."""
         # For now, just call the regular validation

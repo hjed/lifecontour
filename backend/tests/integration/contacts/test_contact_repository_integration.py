@@ -104,7 +104,7 @@ class TestContactRepositoryIntegration:
             method_type=MethodType.EMAIL,
             value="john.doe@example.com",
             contact_id=saved_contact.id,
-            is_primary=True
+            is_primary=True,
         )
         await contact_repo.add_method(saved_contact.id, email_method)
 
@@ -137,7 +137,7 @@ class TestContactRepositoryIntegration:
             value="john@example.com",
             contact_id=saved_contact.id,
             is_primary=True,
-            label="Work"
+            label="Work",
         )
 
         # Act
@@ -161,7 +161,7 @@ class TestContactRepositoryIntegration:
             method_type=MethodType.EMAIL,
             value="duplicate@example.com",
             contact_id=saved_contact1.id,
-            is_primary=True
+            is_primary=True,
         )
         await contact_repo.add_method(saved_contact1.id, method1)
 
@@ -173,7 +173,7 @@ class TestContactRepositoryIntegration:
             method_type=MethodType.EMAIL,
             value="duplicate@example.com",
             contact_id=saved_contact2.id,
-            is_primary=True
+            is_primary=True,
         )
 
         # Act & Assert
@@ -196,7 +196,7 @@ class TestContactRepositoryIntegration:
             country_code="US",
             contact_id=saved_contact.id,
             is_primary=True,
-            label="Home"
+            label="Home",
         )
 
         # Act
@@ -221,8 +221,7 @@ class TestContactRepositoryIntegration:
         saved_contact = await contact_repo.save(contact)
 
         note = ContactNote(
-            content="This is a test note about the contact",
-            contact_id=saved_contact.id
+            content="This is a test note about the contact", contact_id=saved_contact.id
         )
 
         # Act

@@ -1,6 +1,5 @@
 """Tag hierarchy and validation service."""
 
-
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core.contacts.models.entities import Tag
@@ -22,7 +21,7 @@ class TagHierarchyService:
         self,
         name: str,
         _transaction: AsyncConnection,
-        exclude_tag_id: int | None = None
+        exclude_tag_id: int | None = None,
     ) -> None:
         """Validate that tag name is unique."""
         existing_tag = await self.tag_repo.find_by_name(name)
@@ -32,20 +31,16 @@ class TagHierarchyService:
                 raise DuplicateTagNameError(name)
 
     async def validate_parent_child_relationship(
-        self,
-        parent_id: int,
-        child_id: int,
-        transaction: AsyncConnection
+        self, parent_id: int, child_id: int, transaction: AsyncConnection
     ) -> None:
         """Validate parent-child tag relationship."""
         if parent_id == child_id:
-            raise ContactValidationError(
-                "parent_id",
-                "Tag cannot be its own parent"
-            )
+            raise ContactValidationError("parent_id", "Tag cannot be its own parent")
 
         # Check if parent exists
-        parent_tag = await self.tag_repo.find_by_id(child_id)  # Note: checking child_id for parent
+        parent_tag = await self.tag_repo.find_by_id(
+            child_id
+        )  # Note: checking child_id for parent
         if not parent_tag:
             raise TagNotFoundError(child_id)
 
@@ -53,10 +48,7 @@ class TagHierarchyService:
         await self._check_circular_reference(parent_id, child_id, transaction)
 
     async def _check_circular_reference(
-        self,
-        parent_id: int,
-        child_id: int,
-        _transaction: AsyncConnection
+        self, parent_id: int, child_id: int, _transaction: AsyncConnection
     ) -> None:
         """Check for circular references in tag hierarchy."""
         # Get all ancestors of the proposed parent
@@ -67,15 +59,14 @@ class TagHierarchyService:
             if current_id in visited:
                 # Found a cycle
                 raise ContactValidationError(
-                    "parent_id",
-                    "Circular reference detected in tag hierarchy"
+                    "parent_id", "Circular reference detected in tag hierarchy"
                 )
 
             if current_id == child_id:
                 # The child would become an ancestor of itself
                 raise ContactValidationError(
                     "parent_id",
-                    "Cannot create circular reference: child cannot be ancestor of parent"
+                    "Cannot create circular reference: child cannot be ancestor of parent",
                 )
 
             visited.add(current_id)
@@ -90,7 +81,7 @@ class TagHierarchyService:
     async def get_tag_tree(
         self,
         root_tag_id: int | None = None,
-        _transaction: AsyncConnection | None = None
+        _transaction: AsyncConnection | None = None,
     ) -> list[Tag]:
         """Get tag tree starting from root or specific tag."""
         if root_tag_id:
@@ -99,9 +90,7 @@ class TagHierarchyService:
             return await self.tag_repo.get_root_tags()
 
     async def get_tag_path(
-        self,
-        tag_id: int,
-        _transaction: AsyncConnection | None = None
+        self, tag_id: int, _transaction: AsyncConnection | None = None
     ) -> list[Tag]:
         """Get the full path from root to the specified tag."""
         path: list[Tag] = []
@@ -118,9 +107,7 @@ class TagHierarchyService:
         return path
 
     async def get_all_descendants(
-        self,
-        tag_id: int,
-        _transaction: AsyncConnection | None = None
+        self, tag_id: int, _transaction: AsyncConnection | None = None
     ) -> list[Tag]:
         """Get all descendant tags of the specified tag."""
         descendants: list[Tag] = []
@@ -132,7 +119,9 @@ class TagHierarchyService:
             descendants.append(child)
             # Recursively get descendants of each child
             if child.id:
-                child_descendants = await self.get_all_descendants(child.id, _transaction)
+                child_descendants = await self.get_all_descendants(
+                    child.id, _transaction
+                )
                 descendants.extend(child_descendants)
 
         return descendants

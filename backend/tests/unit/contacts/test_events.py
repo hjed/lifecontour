@@ -19,11 +19,7 @@ class TestContactCreated:
 
     def test_create_event_with_last_name(self):
         """Test creating ContactCreated event with last name."""
-        event = ContactCreated(
-            contact_id=1,
-            first_name="John",
-            last_name="Doe"
-        )
+        event = ContactCreated(contact_id=1, first_name="John", last_name="Doe")
 
         assert event.aggregate_id == 1
         assert event.event_type == "ContactCreated"
@@ -35,10 +31,7 @@ class TestContactCreated:
 
     def test_create_event_without_last_name(self):
         """Test creating ContactCreated event without last name."""
-        event = ContactCreated(
-            contact_id=2,
-            first_name="Jane"
-        )
+        event = ContactCreated(contact_id=2, first_name="Jane")
 
         assert event.aggregate_id == 2
         assert event.event_type == "ContactCreated"
@@ -56,13 +49,10 @@ class TestContactUpdated:
         """Test creating ContactUpdated event."""
         changed_fields = {
             "first_name": ("John", "Jonathan"),
-            "email": ("old@example.com", "new@example.com")
+            "email": ("old@example.com", "new@example.com"),
         }
 
-        event = ContactUpdated(
-            contact_id=1,
-            changed_fields=changed_fields
-        )
+        event = ContactUpdated(contact_id=1, changed_fields=changed_fields)
 
         assert event.aggregate_id == 1
         assert event.event_type == "ContactUpdated"
@@ -91,11 +81,7 @@ class TestTagAssigned:
 
     def test_create_event(self):
         """Test creating TagAssigned event."""
-        event = TagAssigned(
-            contact_id=1,
-            tag_id=2,
-            tag_name="work"
-        )
+        event = TagAssigned(contact_id=1, tag_id=2, tag_name="work")
 
         assert event.aggregate_id == 1
         assert event.event_type == "TagAssigned"
@@ -111,11 +97,7 @@ class TestTagRemoved:
 
     def test_create_event(self):
         """Test creating TagRemoved event."""
-        event = TagRemoved(
-            contact_id=1,
-            tag_id=2,
-            tag_name="work"
-        )
+        event = TagRemoved(contact_id=1, tag_id=2, tag_name="work")
 
         assert event.aggregate_id == 1
         assert event.event_type == "TagRemoved"
@@ -132,10 +114,7 @@ class TestContactMethodAdded:
     def test_create_event(self):
         """Test creating ContactMethodAdded event."""
         event = ContactMethodAdded(
-            contact_id=1,
-            method_id=2,
-            method_type="email",
-            value="test@example.com"
+            contact_id=1, method_id=2, method_type="email", value="test@example.com"
         )
 
         assert event.aggregate_id == 1
@@ -154,10 +133,7 @@ class TestContactAddressAdded:
     def test_create_event(self):
         """Test creating ContactAddressAdded event."""
         event = ContactAddressAdded(
-            contact_id=1,
-            address_id=2,
-            street_line_1="123 Main St",
-            country_code="AU"
+            contact_id=1, address_id=2, street_line_1="123 Main St", country_code="AU"
         )
 
         assert event.aggregate_id == 1
@@ -175,11 +151,7 @@ class TestContactNoteAdded:
 
     def test_create_event_short_content(self):
         """Test creating ContactNoteAdded event with short content."""
-        event = ContactNoteAdded(
-            contact_id=1,
-            note_id=2,
-            content="Short note"
-        )
+        event = ContactNoteAdded(contact_id=1, note_id=2, content="Short note")
 
         assert event.aggregate_id == 1
         assert event.event_type == "ContactNoteAdded"
@@ -192,11 +164,7 @@ class TestContactNoteAdded:
     def test_create_event_long_content_truncated(self):
         """Test creating ContactNoteAdded event with long content gets truncated."""
         long_content = "x" * 150  # 150 characters
-        event = ContactNoteAdded(
-            contact_id=1,
-            note_id=2,
-            content=long_content
-        )
+        event = ContactNoteAdded(contact_id=1, note_id=2, content=long_content)
 
         assert event.aggregate_id == 1
         assert event.event_type == "ContactNoteAdded"

@@ -46,17 +46,21 @@ class TestContactService:
         return AsyncMock()
 
     @pytest.fixture
-    def contact_service(self, mock_contact_repo, mock_tag_repo, mock_history_repo, mock_event_publisher):
+    def contact_service(
+        self, mock_contact_repo, mock_tag_repo, mock_history_repo, mock_event_publisher
+    ):
         """Create ContactService instance with mocked dependencies."""
         return ContactService(
             contact_repo=mock_contact_repo,
             tag_repo=mock_tag_repo,
             history_repo=mock_history_repo,
-            event_publisher=mock_event_publisher
+            event_publisher=mock_event_publisher,
         )
 
     @pytest.mark.asyncio
-    async def test_create_contact_success(self, contact_service, mock_contact_repo, mock_transaction):
+    async def test_create_contact_success(
+        self, contact_service, mock_contact_repo, mock_transaction
+    ):
         """Test successful contact creation."""
         # Arrange
         contact = Contact(first_name="John", last_name="Doe")
@@ -72,7 +76,9 @@ class TestContactService:
         mock_contact_repo.save.assert_called_once_with(contact)
 
     @pytest.mark.asyncio
-    async def test_create_contact_no_id_after_save_raises_error(self, contact_service, mock_contact_repo, mock_transaction):
+    async def test_create_contact_no_id_after_save_raises_error(
+        self, contact_service, mock_contact_repo, mock_transaction
+    ):
         """Test contact creation raises error when no ID after save."""
         # Arrange
         contact = Contact(first_name="John")
@@ -88,7 +94,9 @@ class TestContactService:
         assert "Contact ID is required after save" in exc_info.value.message
 
     @pytest.mark.asyncio
-    async def test_update_contact_success(self, contact_service, mock_contact_repo, mock_transaction):
+    async def test_update_contact_success(
+        self, contact_service, mock_contact_repo, mock_transaction
+    ):
         """Test successful contact update."""
         # Arrange
         contact = Contact(first_name="John", last_name="Doe", id=1)
@@ -98,14 +106,18 @@ class TestContactService:
         mock_contact_repo.save.return_value = saved_contact
 
         # Act
-        result = await contact_service.update_contact(contact, changed_fields, mock_transaction)
+        result = await contact_service.update_contact(
+            contact, changed_fields, mock_transaction
+        )
 
         # Assert
         assert result == saved_contact
         mock_contact_repo.save.assert_called_once_with(contact)
 
     @pytest.mark.asyncio
-    async def test_update_contact_no_id_raises_error(self, contact_service, mock_transaction):
+    async def test_update_contact_no_id_raises_error(
+        self, contact_service, mock_transaction
+    ):
         """Test contact update raises error when no ID."""
         # Arrange
         contact = Contact(first_name="John", id=None)
@@ -113,13 +125,17 @@ class TestContactService:
 
         # Act & Assert
         with pytest.raises(ContactValidationError) as exc_info:
-            await contact_service.update_contact(contact, changed_fields, mock_transaction)
+            await contact_service.update_contact(
+                contact, changed_fields, mock_transaction
+            )
 
         assert exc_info.value.field == "id"
         assert "Contact ID is required for updates" in exc_info.value.message
 
     @pytest.mark.asyncio
-    async def test_delete_contact_success(self, contact_service, mock_contact_repo, mock_transaction):
+    async def test_delete_contact_success(
+        self, contact_service, mock_contact_repo, mock_transaction
+    ):
         """Test successful contact deletion."""
         # Arrange
         contact = Contact(first_name="John", id=1)
@@ -132,7 +148,9 @@ class TestContactService:
         mock_contact_repo.delete.assert_called_once_with(1)
 
     @pytest.mark.asyncio
-    async def test_assign_tag_to_contact_success(self, contact_service, mock_contact_repo, mock_tag_repo, mock_transaction):
+    async def test_assign_tag_to_contact_success(
+        self, contact_service, mock_contact_repo, mock_tag_repo, mock_transaction
+    ):
         """Test successful tag assignment."""
         # Arrange
         contact = Contact(first_name="John", id=1)
@@ -148,7 +166,9 @@ class TestContactService:
         mock_contact_repo.assign_tag.assert_called_once_with(1, 2)
 
     @pytest.mark.asyncio
-    async def test_remove_tag_from_contact_success(self, contact_service, mock_contact_repo, mock_tag_repo, mock_transaction):
+    async def test_remove_tag_from_contact_success(
+        self, contact_service, mock_contact_repo, mock_tag_repo, mock_transaction
+    ):
         """Test successful tag removal."""
         # Arrange
         contact = Contact(first_name="John", id=1)
@@ -164,20 +184,17 @@ class TestContactService:
         mock_contact_repo.remove_tag.assert_called_once_with(1, 2)
 
     @pytest.mark.asyncio
-    async def test_add_contact_method_success(self, contact_service, mock_contact_repo, mock_transaction):
+    async def test_add_contact_method_success(
+        self, contact_service, mock_contact_repo, mock_transaction
+    ):
         """Test successful contact method addition."""
         # Arrange
         contact = Contact(first_name="John", id=1)
         method = ContactMethod(
-            method_type=MethodType.EMAIL,
-            value="test@example.com",
-            contact_id=1
+            method_type=MethodType.EMAIL, value="test@example.com", contact_id=1
         )
         saved_method = ContactMethod(
-            method_type=MethodType.EMAIL,
-            value="test@example.com",
-            contact_id=1,
-            id=2
+            method_type=MethodType.EMAIL, value="test@example.com", contact_id=1, id=2
         )
 
         mock_contact_repo.find_by_id.return_value = contact
@@ -192,20 +209,17 @@ class TestContactService:
         mock_contact_repo.add_method.assert_called_once_with(1, method)
 
     @pytest.mark.asyncio
-    async def test_add_contact_address_success(self, contact_service, mock_contact_repo, mock_transaction):
+    async def test_add_contact_address_success(
+        self, contact_service, mock_contact_repo, mock_transaction
+    ):
         """Test successful contact address addition."""
         # Arrange
         contact = Contact(first_name="John", id=1)
         address = ContactAddress(
-            street_line_1="123 Main St",
-            country_code="AU",
-            contact_id=1
+            street_line_1="123 Main St", country_code="AU", contact_id=1
         )
         saved_address = ContactAddress(
-            street_line_1="123 Main St",
-            country_code="AU",
-            contact_id=1,
-            id=2
+            street_line_1="123 Main St", country_code="AU", contact_id=1, id=2
         )
 
         mock_contact_repo.find_by_id.return_value = contact
@@ -219,19 +233,14 @@ class TestContactService:
         mock_contact_repo.add_address.assert_called_once_with(1, address)
 
     @pytest.mark.asyncio
-    async def test_add_contact_note_success(self, contact_service, mock_contact_repo, mock_transaction):
+    async def test_add_contact_note_success(
+        self, contact_service, mock_contact_repo, mock_transaction
+    ):
         """Test successful contact note addition."""
         # Arrange
         contact = Contact(first_name="John", id=1)
-        note = ContactNote(
-            content="This is a test note",
-            contact_id=1
-        )
-        saved_note = ContactNote(
-            content="This is a test note",
-            contact_id=1,
-            id=2
-        )
+        note = ContactNote(content="This is a test note", contact_id=1)
+        saved_note = ContactNote(content="This is a test note", contact_id=1, id=2)
 
         mock_contact_repo.find_by_id.return_value = contact
         mock_contact_repo.add_note.return_value = saved_note

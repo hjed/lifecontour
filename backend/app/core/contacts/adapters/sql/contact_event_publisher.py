@@ -20,20 +20,25 @@ class SqlContactEventPublisher(ContactEventPublisher):
     async def publish(self, event: DomainEvent) -> None:
         """Publish a domain event by storing it in the contact_edit_event table."""
         # Store event in dedicated events table
-        query = text("""
+        query = text(
+            """
             INSERT INTO contact_edit_event
             (event_id, event_type, aggregate_id, event_data, occurred_at, correlation_id)
             VALUES (:event_id, :event_type, :aggregate_id, :event_data, :occurred_at, :correlation_id)
-        """)
+        """
+        )
 
-        await self.conn.execute(query, {
-            "event_id": event.event_id,
-            "event_type": event.event_type,
-            "aggregate_id": event.aggregate_id,
-            "event_data": json.dumps(event.event_data),
-            "occurred_at": event.occurred_at,
-            "correlation_id": getattr(event, "correlation_id", None)
-        })
+        await self.conn.execute(
+            query,
+            {
+                "event_id": event.event_id,
+                "event_type": event.event_type,
+                "aggregate_id": event.aggregate_id,
+                "event_data": json.dumps(event.event_data),
+                "occurred_at": event.occurred_at,
+                "correlation_id": getattr(event, "correlation_id", None),
+            },
+        )
 
     async def publish_batch(self, events: list[DomainEvent]) -> None:
         """Publish multiple domain events."""

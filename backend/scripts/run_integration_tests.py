@@ -11,7 +11,9 @@ def run_command(cmd, cwd=None, check=True):
     """Run a command and return the result."""
     print(f"Running: {' '.join(cmd)}")
     try:
-        result = subprocess.run(cmd, cwd=cwd, check=check, capture_output=True, text=True)
+        result = subprocess.run(
+            cmd, cwd=cwd, check=check, capture_output=True, text=True
+        )
         if result.stdout:
             print(result.stdout)
         return result
@@ -28,7 +30,9 @@ def check_docker():
     """Check if Docker is available."""
     try:
         subprocess.run(["docker", "--version"], check=True, capture_output=True)
-        subprocess.run(["docker", "compose", "--version"], check=True, capture_output=True)
+        subprocess.run(
+            ["docker", "compose", "--version"], check=True, capture_output=True
+        )
         print("✓ Docker and Docker Compose are available")
         return True
     except (subprocess.CalledProcessError, FileNotFoundError):
@@ -43,8 +47,15 @@ def start_test_database():
 
     # Check if container is already running
     result = run_command(
-        ["docker", "ps", "--filter", "name=backend-postgres-test-1", "--format", "{{.Names}}"],
-        check=False
+        [
+            "docker",
+            "ps",
+            "--filter",
+            "name=backend-postgres-test-1",
+            "--format",
+            "{{.Names}}",
+        ],
+        check=False,
     )
 
     if "backend-postgres-test-1" in result.stdout:
@@ -59,8 +70,15 @@ def start_test_database():
     max_retries = 30
     for i in range(max_retries):
         result = run_command(
-            ["docker", "exec", "backend-postgres-test-1", "pg_isready", "-U", "postgres"],
-            check=False
+            [
+                "docker",
+                "exec",
+                "backend-postgres-test-1",
+                "pg_isready",
+                "-U",
+                "postgres",
+            ],
+            check=False,
         )
         if result.returncode == 0:
             print("✓ Test database is ready")
@@ -77,7 +95,10 @@ def start_test_database():
 def stop_test_database():
     """Stop the test database container."""
     print("Stopping test database...")
-    run_command(["docker", "compose", "-f", "docker-compose.test.yml", "down", "-v"], check=False)
+    run_command(
+        ["docker", "compose", "-f", "docker-compose.test.yml", "down", "-v"],
+        check=False,
+    )
     print("✓ Test database stopped")
 
 
@@ -87,11 +108,13 @@ def run_tests():
 
     # Run only integration tests
     cmd = [
-        "python", "-m", "pytest",
+        "python",
+        "-m",
+        "pytest",
         "tests/integration/",
         "-v",
         "--tb=short",
-        "-x"  # Stop on first failure
+        "-x",  # Stop on first failure
     ]
 
     result = run_command(cmd, check=False)

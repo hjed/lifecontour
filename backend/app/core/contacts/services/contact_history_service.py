@@ -21,7 +21,7 @@ class ContactHistoryService:
         contact_id: int,
         changed_fields: dict[str, Any],
         changed_by: str = "system",
-        transaction: AsyncConnection | None = None
+        transaction: AsyncConnection | None = None,
     ) -> None:
         """Record field changes to a contact."""
         for field_name, (old_value, new_value) in changed_fields.items():
@@ -31,7 +31,7 @@ class ContactHistoryService:
                 field_name=field_name,
                 old_value=str(old_value) if old_value is not None else None,
                 new_value=str(new_value) if new_value is not None else None,
-                changed_by=changed_by
+                changed_by=changed_by,
             )
             await self.history_repo.record_change(entry)
 
@@ -40,7 +40,7 @@ class ContactHistoryService:
         method_id: int,
         changed_fields: dict[str, Any],
         changed_by: str = "system",
-        transaction: AsyncConnection | None = None
+        transaction: AsyncConnection | None = None,
     ) -> None:
         """Record field changes to a contact method."""
         for field_name, (old_value, new_value) in changed_fields.items():
@@ -50,7 +50,7 @@ class ContactHistoryService:
                 field_name=field_name,
                 old_value=str(old_value) if old_value is not None else None,
                 new_value=str(new_value) if new_value is not None else None,
-                changed_by=changed_by
+                changed_by=changed_by,
             )
             await self.history_repo.record_change(entry)
 
@@ -59,7 +59,7 @@ class ContactHistoryService:
         address_id: int,
         changed_fields: dict[str, Any],
         changed_by: str = "system",
-        transaction: AsyncConnection | None = None
+        transaction: AsyncConnection | None = None,
     ) -> None:
         """Record field changes to a contact address."""
         for field_name, (old_value, new_value) in changed_fields.items():
@@ -69,7 +69,7 @@ class ContactHistoryService:
                 field_name=field_name,
                 old_value=str(old_value) if old_value is not None else None,
                 new_value=str(new_value) if new_value is not None else None,
-                changed_by=changed_by
+                changed_by=changed_by,
             )
             await self.history_repo.record_change(entry)
 
@@ -78,7 +78,7 @@ class ContactHistoryService:
         note_id: int,
         changed_fields: dict[str, Any],
         changed_by: str = "system",
-        transaction: AsyncConnection | None = None
+        transaction: AsyncConnection | None = None,
     ) -> None:
         """Record field changes to a contact note."""
         for field_name, (old_value, new_value) in changed_fields.items():
@@ -88,7 +88,7 @@ class ContactHistoryService:
                 field_name=field_name,
                 old_value=str(old_value) if old_value is not None else None,
                 new_value=str(new_value) if new_value is not None else None,
-                changed_by=changed_by
+                changed_by=changed_by,
             )
             await self.history_repo.record_change(entry)
 
@@ -98,7 +98,7 @@ class ContactHistoryService:
         tag_id: int,
         action: str,
         changed_by: str = "system",
-        transaction: AsyncConnection | None = None
+        transaction: AsyncConnection | None = None,
     ) -> None:
         """Record a tag assignment/removal as field change."""
         entry = ContactFieldHistoryEntry(
@@ -107,7 +107,7 @@ class ContactHistoryService:
             field_name="contact_id",
             old_value=None if action == "assigned" else str(contact_id),
             new_value=str(contact_id) if action == "assigned" else None,
-            changed_by=changed_by
+            changed_by=changed_by,
         )
         await self.history_repo.record_change(entry)
 
@@ -115,7 +115,7 @@ class ContactHistoryService:
         self,
         contact_id: int,
         limit: int = 50,
-        transaction: AsyncConnection | None = None
+        transaction: AsyncConnection | None = None,
     ) -> list[ContactFieldHistoryEntry]:
         """Get field history for a specific contact."""
         return await self.history_repo.get_contact_history(contact_id, limit)
@@ -124,7 +124,7 @@ class ContactHistoryService:
         self,
         entity_type: str,
         entity_id: int,
-        transaction: AsyncConnection | None = None
+        transaction: AsyncConnection | None = None,
     ) -> list[ContactFieldHistoryEntry]:
         """Get field history for a specific entity."""
         return await self.history_repo.get_entity_history(entity_type, entity_id)

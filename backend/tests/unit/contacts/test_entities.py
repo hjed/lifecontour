@@ -37,7 +37,7 @@ class TestTag:
             color="#FF0000",
             description="Work-related contacts",
             created_at=now,
-            updated_at=now
+            updated_at=now,
         )
         assert str(tag.name) == "work"
         assert tag.id == 1
@@ -49,12 +49,16 @@ class TestTag:
 
     def test_invalid_color_format_raises_error(self):
         """Test invalid color format raises ValueError."""
-        with pytest.raises(ValueError, match="Color must be a hex color code starting with #"):
+        with pytest.raises(
+            ValueError, match="Color must be a hex color code starting with #"
+        ):
             Tag(name=TagName("work"), color="FF0000")
 
     def test_invalid_color_length_raises_error(self):
         """Test invalid color length raises ValueError."""
-        with pytest.raises(ValueError, match="Color must be a 7-character hex color code"):
+        with pytest.raises(
+            ValueError, match="Color must be a 7-character hex color code"
+        ):
             Tag(name=TagName("work"), color="#FF00")
 
 
@@ -68,7 +72,7 @@ class TestContactMethod:
             value="test@example.com",
             contact_id=1,
             label="work",
-            is_primary=True
+            is_primary=True,
         )
         assert method.method_type == MethodType.EMAIL
         assert method.value == "test@example.com"
@@ -82,7 +86,7 @@ class TestContactMethod:
             method_type=MethodType.PHONE,
             value="+61 2 1234 5678",
             contact_id=1,
-            label="mobile"
+            label="mobile",
         )
         assert method.method_type == MethodType.PHONE
         assert method.value == "+61 2 1234 5678"
@@ -93,28 +97,22 @@ class TestContactMethod:
     def test_invalid_method_type_raises_error(self):
         """Test invalid method type raises ValueError."""
         with pytest.raises(ValueError, match="Invalid method type: address"):
-            ContactMethod(
-                method_type="address",
-                value="123 Main St",
-                contact_id=1
-            )
+            ContactMethod(method_type="address", value="123 Main St", contact_id=1)
 
     def test_invalid_email_value_raises_error(self):
         """Test invalid email value raises ValueError."""
         with pytest.raises(ValueError, match="Invalid email format"):
             ContactMethod(
-                method_type=MethodType.EMAIL,
-                value="invalid-email",
-                contact_id=1
+                method_type=MethodType.EMAIL, value="invalid-email", contact_id=1
             )
 
     def test_invalid_phone_value_raises_error(self):
         """Test invalid phone value raises ValueError."""
-        with pytest.raises(ValueError, match="Phone number must contain at least one digit"):
+        with pytest.raises(
+            ValueError, match="Phone number must contain at least one digit"
+        ):
             ContactMethod(
-                method_type=MethodType.PHONE,
-                value="abc-def-ghij",
-                contact_id=1
+                method_type=MethodType.PHONE, value="abc-def-ghij", contact_id=1
             )
 
     def test_label_too_long_raises_error(self):
@@ -124,7 +122,7 @@ class TestContactMethod:
                 method_type=MethodType.EMAIL,
                 value="test@example.com",
                 contact_id=1,
-                label="x" * 51
+                label="x" * 51,
             )
 
 
@@ -134,9 +132,7 @@ class TestContactAddress:
     def test_create_address_minimal(self):
         """Test creating address with minimal required fields."""
         address = ContactAddress(
-            street_line_1="123 Main St",
-            country_code="AU",
-            contact_id=1
+            street_line_1="123 Main St", country_code="AU", contact_id=1
         )
         assert address.street_line_1 == "123 Main St"
         assert address.country_code == "AU"
@@ -158,7 +154,7 @@ class TestContactAddress:
             country_code="AU",
             contact_id=1,
             label="home",
-            is_primary=True
+            is_primary=True,
         )
         assert address.street_line_1 == "123 Main St"
         assert address.street_line_2 == "Apt 4B"
@@ -172,21 +168,17 @@ class TestContactAddress:
 
     def test_invalid_country_code_raises_error(self):
         """Test invalid country code raises ValueError."""
-        with pytest.raises(ValueError, match="Country code must be 2 uppercase letters"):
+        with pytest.raises(
+            ValueError, match="Country code must be 2 uppercase letters"
+        ):
             ContactAddress(
-                street_line_1="123 Main St",
-                country_code="aus",
-                contact_id=1
+                street_line_1="123 Main St", country_code="aus", contact_id=1
             )
 
     def test_empty_street_line_1_raises_error(self):
         """Test empty street line 1 raises ValueError."""
         with pytest.raises(ValueError, match="Street line 1 is required"):
-            ContactAddress(
-                street_line_1="",
-                country_code="AU",
-                contact_id=1
-            )
+            ContactAddress(street_line_1="", country_code="AU", contact_id=1)
 
     def test_label_too_long_raises_error(self):
         """Test label too long raises ValueError."""
@@ -195,7 +187,7 @@ class TestContactAddress:
                 street_line_1="123 Main St",
                 country_code="AU",
                 contact_id=1,
-                label="x" * 51
+                label="x" * 51,
             )
 
     def test_to_address_value_object(self):
@@ -207,7 +199,7 @@ class TestContactAddress:
             region="NSW",
             postal_code="2000",
             country_code="AU",
-            contact_id=1
+            contact_id=1,
         )
         value_object = address.to_address_value_object()
         assert value_object.street_line_1 == "123 Main St"
@@ -223,10 +215,7 @@ class TestContactNote:
 
     def test_create_note(self):
         """Test creating contact note."""
-        note = ContactNote(
-            content="This is a test note",
-            contact_id=1
-        )
+        note = ContactNote(content="This is a test note", contact_id=1)
         assert note.content == "This is a test note"
         assert note.contact_id == 1
         assert note.id is None
@@ -234,18 +223,12 @@ class TestContactNote:
     def test_empty_content_raises_error(self):
         """Test empty content raises ValueError."""
         with pytest.raises(ValueError, match="Note content cannot be empty"):
-            ContactNote(
-                content="",
-                contact_id=1
-            )
+            ContactNote(content="", contact_id=1)
 
     def test_whitespace_only_content_raises_error(self):
         """Test whitespace-only content raises ValueError."""
         with pytest.raises(ValueError, match="Note content cannot be empty"):
-            ContactNote(
-                content="   ",
-                contact_id=1
-            )
+            ContactNote(content="   ", contact_id=1)
 
 
 class TestContact:
@@ -274,7 +257,7 @@ class TestContact:
             nick_name="Johnny",
             id=1,
             created_at=now,
-            updated_at=now
+            updated_at=now,
         )
         assert contact.first_name == "John"
         assert contact.last_name == "Doe"
@@ -305,7 +288,9 @@ class TestContact:
             Contact(first_name="John", last_name="x" * 101)
 
         # Test middle_name too long
-        with pytest.raises(ValueError, match="Middle name cannot exceed 100 characters"):
+        with pytest.raises(
+            ValueError, match="Middle name cannot exceed 100 characters"
+        ):
             Contact(first_name="John", middle_name="x" * 101)
 
         # Test nick_name too long
@@ -323,11 +308,7 @@ class TestContact:
         assert contact.get_full_name() == "John Doe"
 
         # All names
-        contact = Contact(
-            first_name="John",
-            middle_name="Michael",
-            last_name="Doe"
-        )
+        contact = Contact(first_name="John", middle_name="Michael", last_name="Doe")
         assert contact.get_full_name() == "John Michael Doe"
 
     def test_get_display_name(self):
@@ -337,11 +318,7 @@ class TestContact:
         assert contact.get_display_name() == "John Doe"
 
         # With nick name - returns nick name
-        contact = Contact(
-            first_name="John",
-            last_name="Doe",
-            nick_name="Johnny"
-        )
+        contact = Contact(first_name="John", last_name="Doe", nick_name="Johnny")
         assert contact.get_display_name() == "Johnny"
 
     def test_get_primary_email(self):
@@ -352,21 +329,25 @@ class TestContact:
         assert contact.get_primary_email() is None
 
         # Non-primary email - returns None
-        contact.methods.append(ContactMethod(
-            method_type=MethodType.EMAIL,
-            value="test@example.com",
-            contact_id=1,
-            is_primary=False
-        ))
+        contact.methods.append(
+            ContactMethod(
+                method_type=MethodType.EMAIL,
+                value="test@example.com",
+                contact_id=1,
+                is_primary=False,
+            )
+        )
         assert contact.get_primary_email() is None
 
         # Primary email - returns email
-        contact.methods.append(ContactMethod(
-            method_type=MethodType.EMAIL,
-            value="primary@example.com",
-            contact_id=1,
-            is_primary=True
-        ))
+        contact.methods.append(
+            ContactMethod(
+                method_type=MethodType.EMAIL,
+                value="primary@example.com",
+                contact_id=1,
+                is_primary=True,
+            )
+        )
         assert contact.get_primary_email() == "primary@example.com"
 
     def test_get_primary_phone(self):
@@ -377,21 +358,25 @@ class TestContact:
         assert contact.get_primary_phone() is None
 
         # Non-primary phone - returns None
-        contact.methods.append(ContactMethod(
-            method_type=MethodType.PHONE,
-            value="+61 2 1234 5678",
-            contact_id=1,
-            is_primary=False
-        ))
+        contact.methods.append(
+            ContactMethod(
+                method_type=MethodType.PHONE,
+                value="+61 2 1234 5678",
+                contact_id=1,
+                is_primary=False,
+            )
+        )
         assert contact.get_primary_phone() is None
 
         # Primary phone - returns phone
-        contact.methods.append(ContactMethod(
-            method_type=MethodType.PHONE,
-            value="+61 412 345 678",
-            contact_id=1,
-            is_primary=True
-        ))
+        contact.methods.append(
+            ContactMethod(
+                method_type=MethodType.PHONE,
+                value="+61 412 345 678",
+                contact_id=1,
+                is_primary=True,
+            )
+        )
         assert contact.get_primary_phone() == "+61 412 345 678"
 
     def test_get_primary_address(self):
@@ -402,12 +387,14 @@ class TestContact:
         assert contact.get_primary_address() is None
 
         # Non-primary address - returns None
-        contact.addresses.append(ContactAddress(
-            street_line_1="123 Main St",
-            country_code="AU",
-            contact_id=1,
-            is_primary=False
-        ))
+        contact.addresses.append(
+            ContactAddress(
+                street_line_1="123 Main St",
+                country_code="AU",
+                contact_id=1,
+                is_primary=False,
+            )
+        )
         assert contact.get_primary_address() is None
 
         # Primary address - returns address
@@ -415,7 +402,7 @@ class TestContact:
             street_line_1="456 Primary St",
             country_code="AU",
             contact_id=1,
-            is_primary=True
+            is_primary=True,
         )
         contact.addresses.append(primary_address)
         assert contact.get_primary_address() == primary_address

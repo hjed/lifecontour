@@ -22,9 +22,7 @@ class TestTagRepositoryIntegration:
         """Test saving a new tag to database."""
         # Arrange
         tag = Tag(
-            name=TagName("work"),
-            color="#FF0000",
-            description="Work-related contacts"
+            name=TagName("work"), color="#FF0000", description="Work-related contacts"
         )
 
         # Act
@@ -179,10 +177,7 @@ class TestTagRepositoryIntegration:
         saved_parent = await tag_repo.save(parent_tag)
 
         # Create child tag
-        child_tag = Tag(
-            name=TagName("client"),
-            parent_id=saved_parent.id
-        )
+        child_tag = Tag(name=TagName("client"), parent_id=saved_parent.id)
 
         # Act
         saved_child = await tag_repo.save(child_tag)

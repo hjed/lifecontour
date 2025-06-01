@@ -75,7 +75,9 @@ class TestPhoneNumber:
 
     def test_phone_without_digits_raises_error(self):
         """Test phone number without digits raises ValueError."""
-        with pytest.raises(ValueError, match="Phone number must contain at least one digit"):
+        with pytest.raises(
+            ValueError, match="Phone number must contain at least one digit"
+        ):
             PhoneNumber("abc-def-ghij")
 
 
@@ -98,14 +100,16 @@ class TestCountryCode:
     def test_invalid_country_code_format_raises_error(self):
         """Test invalid country code format raises ValueError."""
         invalid_codes = [
-            "A",      # Too short
-            "ABC",    # Too long
-            "au",     # Lowercase
-            "A1",     # Contains number
-            "A-",     # Contains special character
+            "A",  # Too short
+            "ABC",  # Too long
+            "au",  # Lowercase
+            "A1",  # Contains number
+            "A-",  # Contains special character
         ]
         for invalid_code in invalid_codes:
-            with pytest.raises(ValueError, match="Country code must be 2 uppercase letters"):
+            with pytest.raises(
+                ValueError, match="Country code must be 2 uppercase letters"
+            ):
                 CountryCode(invalid_code)
 
 
@@ -114,10 +118,7 @@ class TestAddress:
 
     def test_valid_address_minimal(self):
         """Test valid address with minimal required fields."""
-        address = Address(
-            street_line_1="123 Main St",
-            country_code=CountryCode("AU")
-        )
+        address = Address(street_line_1="123 Main St", country_code=CountryCode("AU"))
         assert address.street_line_1 == "123 Main St"
         assert address.country_code.value == "AU"
         assert address.street_line_2 is None
@@ -133,7 +134,7 @@ class TestAddress:
             locality="Sydney",
             region="NSW",
             postal_code="2000",
-            country_code=CountryCode("AU")
+            country_code=CountryCode("AU"),
         )
         assert address.street_line_1 == "123 Main St"
         assert address.street_line_2 == "Apt 4B"
@@ -145,34 +146,29 @@ class TestAddress:
     def test_empty_street_line_1_raises_error(self):
         """Test empty street line 1 raises ValueError."""
         with pytest.raises(ValueError, match="Street line 1 is required"):
-            Address(
-                street_line_1="",
-                country_code=CountryCode("AU")
-            )
+            Address(street_line_1="", country_code=CountryCode("AU"))
 
     def test_whitespace_only_street_line_1_raises_error(self):
         """Test whitespace-only street line 1 raises ValueError."""
         with pytest.raises(ValueError, match="Street line 1 is required"):
-            Address(
-                street_line_1="   ",
-                country_code=CountryCode("AU")
-            )
+            Address(street_line_1="   ", country_code=CountryCode("AU"))
 
     def test_field_length_validation(self):
         """Test field length validation."""
         # Test street_line_1 too long
-        with pytest.raises(ValueError, match="Street line 1 cannot exceed 255 characters"):
-            Address(
-                street_line_1="x" * 256,
-                country_code=CountryCode("AU")
-            )
+        with pytest.raises(
+            ValueError, match="Street line 1 cannot exceed 255 characters"
+        ):
+            Address(street_line_1="x" * 256, country_code=CountryCode("AU"))
 
         # Test street_line_2 too long
-        with pytest.raises(ValueError, match="Street line 2 cannot exceed 255 characters"):
+        with pytest.raises(
+            ValueError, match="Street line 2 cannot exceed 255 characters"
+        ):
             Address(
                 street_line_1="123 Main St",
                 street_line_2="x" * 256,
-                country_code=CountryCode("AU")
+                country_code=CountryCode("AU"),
             )
 
         # Test locality too long
@@ -180,7 +176,7 @@ class TestAddress:
             Address(
                 street_line_1="123 Main St",
                 locality="x" * 101,
-                country_code=CountryCode("AU")
+                country_code=CountryCode("AU"),
             )
 
         # Test region too long
@@ -188,7 +184,7 @@ class TestAddress:
             Address(
                 street_line_1="123 Main St",
                 region="x" * 101,
-                country_code=CountryCode("AU")
+                country_code=CountryCode("AU"),
             )
 
         # Test postal_code too long
@@ -196,16 +192,13 @@ class TestAddress:
             Address(
                 street_line_1="123 Main St",
                 postal_code="x" * 21,
-                country_code=CountryCode("AU")
+                country_code=CountryCode("AU"),
             )
 
     def test_format_single_line(self):
         """Test single line address formatting."""
         # Minimal address
-        address = Address(
-            street_line_1="123 Main St",
-            country_code=CountryCode("AU")
-        )
+        address = Address(street_line_1="123 Main St", country_code=CountryCode("AU"))
         assert address.format_single_line() == "123 Main St, AU"
 
         # Complete address
@@ -215,7 +208,7 @@ class TestAddress:
             locality="Sydney",
             region="NSW",
             postal_code="2000",
-            country_code=CountryCode("AU")
+            country_code=CountryCode("AU"),
         )
         expected = "123 Main St, Apt 4B, Sydney, NSW, 2000, AU"
         assert address.format_single_line() == expected
@@ -259,7 +252,9 @@ class TestTagName:
             "tag\\backslash",
         ]
         for invalid_name in invalid_names:
-            with pytest.raises(ValueError, match="Tag name contains invalid characters"):
+            with pytest.raises(
+                ValueError, match="Tag name contains invalid characters"
+            ):
                 TagName(invalid_name)
 
     def test_tag_name_too_long_raises_error(self):

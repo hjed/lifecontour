@@ -7,7 +7,7 @@ export default function HomePage() {
         <h1 className='text-4xl font-bold tracking-tight'>
           Personal Management System
         </h1>
-        <p className='text-muted-foreground mt-2'>
+        <p className='mt-2 text-muted-foreground'>
           Your personal CRM and journal with AI integration
         </p>
       </div>

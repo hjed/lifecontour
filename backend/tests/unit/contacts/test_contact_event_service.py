@@ -28,14 +28,12 @@ class TestContactEventService:
         return ContactEventService(mock_event_repo)
 
     @pytest.mark.asyncio
-    async def test_record_domain_event(self, service, mock_event_repo, mock_transaction):
+    async def test_record_domain_event(
+        self, service, mock_event_repo, mock_transaction
+    ):
         """Test recording a domain event."""
         # Arrange
-        domain_event = ContactCreated(
-            contact_id=1,
-            first_name="John",
-            last_name="Doe"
-        )
+        domain_event = ContactCreated(contact_id=1, first_name="John", last_name="Doe")
 
         # Act
         await service.record_domain_event(domain_event, mock_transaction)
@@ -65,34 +63,40 @@ class TestContactEventService:
                 event_type="ContactCreated",
                 aggregate_id=1,
                 event_data={"first_name": "John"},
-                occurred_at="2024-01-01T00:00:00Z"
+                occurred_at="2024-01-01T00:00:00Z",
             ),
             ContactEditEvent(
                 event_id="event-2",
                 event_type="ContactUpdated",
                 aggregate_id=1,
                 event_data={"first_name": "Jane"},
-                occurred_at="2024-01-02T00:00:00Z"
-            )
+                occurred_at="2024-01-02T00:00:00Z",
+            ),
         ]
         mock_event_repo.get_events_for_contact.return_value = expected_events
 
         # Act
-        result = await service.get_contact_events(1, limit=50, transaction=mock_transaction)
+        result = await service.get_contact_events(
+            1, limit=50, transaction=mock_transaction
+        )
 
         # Assert
         assert result == expected_events
         mock_event_repo.get_events_for_contact.assert_called_once_with(1, 50)
 
     @pytest.mark.asyncio
-    async def test_get_contact_events_with_custom_limit(self, service, mock_event_repo, mock_transaction):
+    async def test_get_contact_events_with_custom_limit(
+        self, service, mock_event_repo, mock_transaction
+    ):
         """Test getting events for a contact with custom limit."""
         # Arrange
         expected_events = []
         mock_event_repo.get_events_for_contact.return_value = expected_events
 
         # Act
-        result = await service.get_contact_events(1, limit=10, transaction=mock_transaction)
+        result = await service.get_contact_events(
+            1, limit=10, transaction=mock_transaction
+        )
 
         # Assert
         assert result == expected_events
@@ -108,34 +112,40 @@ class TestContactEventService:
                 event_type="ContactCreated",
                 aggregate_id=1,
                 event_data={"first_name": "John"},
-                occurred_at="2024-01-01T00:00:00Z"
+                occurred_at="2024-01-01T00:00:00Z",
             ),
             ContactEditEvent(
                 event_id="event-2",
                 event_type="ContactCreated",
                 aggregate_id=2,
                 event_data={"first_name": "Jane"},
-                occurred_at="2024-01-02T00:00:00Z"
-            )
+                occurred_at="2024-01-02T00:00:00Z",
+            ),
         ]
         mock_event_repo.get_events_by_type.return_value = expected_events
 
         # Act
-        result = await service.get_events_by_type("ContactCreated", limit=50, transaction=mock_transaction)
+        result = await service.get_events_by_type(
+            "ContactCreated", limit=50, transaction=mock_transaction
+        )
 
         # Assert
         assert result == expected_events
         mock_event_repo.get_events_by_type.assert_called_once_with("ContactCreated", 50)
 
     @pytest.mark.asyncio
-    async def test_get_events_by_type_with_custom_limit(self, service, mock_event_repo, mock_transaction):
+    async def test_get_events_by_type_with_custom_limit(
+        self, service, mock_event_repo, mock_transaction
+    ):
         """Test getting events by type with custom limit."""
         # Arrange
         expected_events = []
         mock_event_repo.get_events_by_type.return_value = expected_events
 
         # Act
-        result = await service.get_events_by_type("ContactUpdated", limit=25, transaction=mock_transaction)
+        result = await service.get_events_by_type(
+            "ContactUpdated", limit=25, transaction=mock_transaction
+        )
 
         # Assert
         assert result == expected_events

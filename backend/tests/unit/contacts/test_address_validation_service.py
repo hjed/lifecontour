@@ -85,9 +85,7 @@ class TestAddressValidationService:
     def test_validate_address_format_valid_address(self, service):
         """Test valid address format."""
         address = ContactAddress(
-            street_line_1="123 Main St",
-            country_code="AU",
-            contact_id=1
+            street_line_1="123 Main St", country_code="AU", contact_id=1
         )
         service.validate_address_format(address)  # Should not raise
 
@@ -111,9 +109,7 @@ class TestAddressValidationService:
     def test_validate_address_format_invalid_country_raises_error(self, service):
         """Test invalid country code raises error."""
         address = ContactAddress(
-            street_line_1="123 Main St",
-            country_code="XX",
-            contact_id=1
+            street_line_1="123 Main St", country_code="XX", contact_id=1
         )
 
         with pytest.raises(ContactValidationError) as exc_info:
@@ -127,7 +123,7 @@ class TestAddressValidationService:
             street_line_1="123 Main St",
             country_code="NL",
             postal_code="1234AB",
-            contact_id=1
+            contact_id=1,
         )
         service.validate_address_format(address)  # Should not raise
 
@@ -137,7 +133,7 @@ class TestAddressValidationService:
             street_line_1="123 Main St",
             country_code="NL",
             postal_code="invalid",
-            contact_id=1
+            contact_id=1,
         )
 
         with pytest.raises(ContactValidationError) as exc_info:
@@ -148,20 +144,16 @@ class TestAddressValidationService:
     def test_validate_country_specific_rules_au_valid_state(self, service):
         """Test Australian state validation."""
         address = ContactAddress(
-            street_line_1="123 Main St",
-            country_code="AU",
-            region="NSW",
-            contact_id=1
+            street_line_1="123 Main St", country_code="AU", region="NSW", contact_id=1
         )
         service.validate_address_format(address)  # Should not raise
 
-    def test_validate_country_specific_rules_au_invalid_state_raises_error(self, service):
+    def test_validate_country_specific_rules_au_invalid_state_raises_error(
+        self, service
+    ):
         """Test invalid Australian state raises error."""
         address = ContactAddress(
-            street_line_1="123 Main St",
-            country_code="AU",
-            region="XX",
-            contact_id=1
+            street_line_1="123 Main St", country_code="AU", region="XX", contact_id=1
         )
 
         with pytest.raises(ContactValidationError) as exc_info:
@@ -173,20 +165,16 @@ class TestAddressValidationService:
     def test_validate_country_specific_rules_us_valid_state(self, service):
         """Test US state validation."""
         address = ContactAddress(
-            street_line_1="123 Main St",
-            country_code="US",
-            region="CA",
-            contact_id=1
+            street_line_1="123 Main St", country_code="US", region="CA", contact_id=1
         )
         service.validate_address_format(address)  # Should not raise
 
-    def test_validate_country_specific_rules_us_invalid_state_raises_error(self, service):
+    def test_validate_country_specific_rules_us_invalid_state_raises_error(
+        self, service
+    ):
         """Test invalid US state raises error."""
         address = ContactAddress(
-            street_line_1="123 Main St",
-            country_code="US",
-            region="XX",
-            contact_id=1
+            street_line_1="123 Main St", country_code="US", region="XX", contact_id=1
         )
 
         with pytest.raises(ContactValidationError) as exc_info:
@@ -198,20 +186,16 @@ class TestAddressValidationService:
     def test_validate_country_specific_rules_ca_valid_province(self, service):
         """Test Canadian province validation."""
         address = ContactAddress(
-            street_line_1="123 Main St",
-            country_code="CA",
-            region="ON",
-            contact_id=1
+            street_line_1="123 Main St", country_code="CA", region="ON", contact_id=1
         )
         service.validate_address_format(address)  # Should not raise
 
-    def test_validate_country_specific_rules_ca_invalid_province_raises_error(self, service):
+    def test_validate_country_specific_rules_ca_invalid_province_raises_error(
+        self, service
+    ):
         """Test invalid Canadian province raises error."""
         address = ContactAddress(
-            street_line_1="123 Main St",
-            country_code="CA",
-            region="XX",
-            contact_id=1
+            street_line_1="123 Main St", country_code="CA", region="XX", contact_id=1
         )
 
         with pytest.raises(ContactValidationError) as exc_info:
@@ -224,8 +208,6 @@ class TestAddressValidationService:
     async def test_validate_with_transaction(self, service):
         """Test validation with transaction context."""
         address = ContactAddress(
-            street_line_1="123 Main St",
-            country_code="AU",
-            contact_id=1
+            street_line_1="123 Main St", country_code="AU", contact_id=1
         )
         await service.validate_with_transaction(address)  # Should not raise

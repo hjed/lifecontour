@@ -25,7 +25,7 @@ class TestContactFieldHistoryRepositoryIntegration:
             field_name="first_name",
             old_value="John",
             new_value="Jane",
-            changed_by="test_user"
+            changed_by="test_user",
         )
 
         # Act
@@ -51,7 +51,7 @@ class TestContactFieldHistoryRepositoryIntegration:
             field_name="nick_name",
             old_value=None,
             new_value="Johnny",
-            changed_by="system"
+            changed_by="system",
         )
 
         # Act
@@ -68,7 +68,7 @@ class TestContactFieldHistoryRepositoryIntegration:
             field_name="nick_name",
             old_value="Johnny",
             new_value=None,
-            changed_by="system"
+            changed_by="system",
         )
 
         # Act
@@ -89,7 +89,7 @@ class TestContactFieldHistoryRepositoryIntegration:
                 field_name="first_name",
                 old_value="John",
                 new_value="Jane",
-                changed_by="user1"
+                changed_by="user1",
             ),
             ContactFieldHistoryEntry(
                 entity_type="contact",
@@ -97,7 +97,7 @@ class TestContactFieldHistoryRepositoryIntegration:
                 field_name="last_name",
                 old_value="Doe",
                 new_value="Smith",
-                changed_by="user1"
+                changed_by="user1",
             ),
             ContactFieldHistoryEntry(
                 entity_type="contact",
@@ -105,8 +105,8 @@ class TestContactFieldHistoryRepositoryIntegration:
                 field_name="email",
                 old_value="john@example.com",
                 new_value="jane@example.com",
-                changed_by="user1"
-            )
+                changed_by="user1",
+            ),
         ]
 
         # Act
@@ -136,7 +136,7 @@ class TestContactFieldHistoryRepositoryIntegration:
                 field_name="first_name",
                 old_value="John",
                 new_value="Jane",
-                changed_by="user1"
+                changed_by="user1",
             ),
             ContactFieldHistoryEntry(
                 entity_type="contact",
@@ -144,7 +144,7 @@ class TestContactFieldHistoryRepositoryIntegration:
                 field_name="last_name",
                 old_value="Doe",
                 new_value="Smith",
-                changed_by="user1"
+                changed_by="user1",
             ),
             ContactFieldHistoryEntry(
                 entity_type="contact",
@@ -152,8 +152,8 @@ class TestContactFieldHistoryRepositoryIntegration:
                 field_name="first_name",
                 old_value="Bob",
                 new_value="Robert",
-                changed_by="user2"
-            )
+                changed_by="user2",
+            ),
         ]
 
         for entry in entries:
@@ -183,7 +183,7 @@ class TestContactFieldHistoryRepositoryIntegration:
                 field_name=f"field_{i}",
                 old_value=f"old_{i}",
                 new_value=f"new_{i}",
-                changed_by="system"
+                changed_by="system",
             )
             await history_repo.record_change(entry)
 
@@ -207,7 +207,7 @@ class TestContactFieldHistoryRepositoryIntegration:
                 field_name="first_name",
                 old_value="John",
                 new_value="Jane",
-                changed_by="user1"
+                changed_by="user1",
             ),
             ContactFieldHistoryEntry(
                 entity_type="contact",
@@ -215,7 +215,7 @@ class TestContactFieldHistoryRepositoryIntegration:
                 field_name="first_name",
                 old_value="Jane",
                 new_value="Janet",
-                changed_by="user2"
+                changed_by="user2",
             ),
             ContactFieldHistoryEntry(
                 entity_type="contact",
@@ -223,8 +223,8 @@ class TestContactFieldHistoryRepositoryIntegration:
                 field_name="last_name",
                 old_value="Doe",
                 new_value="Smith",
-                changed_by="user1"
-            )
+                changed_by="user1",
+            ),
         ]
 
         for entry in entries:
@@ -255,7 +255,7 @@ class TestContactFieldHistoryRepositoryIntegration:
                 field_name="first_name",
                 old_value="John",
                 new_value="Jane",
-                changed_by="user1"
+                changed_by="user1",
             ),
             ContactFieldHistoryEntry(
                 entity_type="contact",
@@ -263,7 +263,7 @@ class TestContactFieldHistoryRepositoryIntegration:
                 field_name="last_name",
                 old_value="Doe",
                 new_value="Smith",
-                changed_by="user1"
+                changed_by="user1",
             ),
             ContactFieldHistoryEntry(
                 entity_type="contact",
@@ -271,8 +271,8 @@ class TestContactFieldHistoryRepositoryIntegration:
                 field_name="email",
                 old_value="old@example.com",
                 new_value="new@example.com",
-                changed_by="user2"
-            )
+                changed_by="user2",
+            ),
         ]
 
         for entry in entries:
@@ -302,7 +302,7 @@ class TestContactFieldHistoryRepositoryIntegration:
                 field_name="first_name",
                 old_value="John",
                 new_value="Jane",
-                changed_by="system"
+                changed_by="system",
             ),
             ContactFieldHistoryEntry(
                 entity_type="contact_method",
@@ -310,7 +310,7 @@ class TestContactFieldHistoryRepositoryIntegration:
                 field_name="value",
                 old_value="old@example.com",
                 new_value="new@example.com",
-                changed_by="system"
+                changed_by="system",
             ),
             ContactFieldHistoryEntry(
                 entity_type="contact_tag",
@@ -318,8 +318,8 @@ class TestContactFieldHistoryRepositoryIntegration:
                 field_name="tag_id",
                 old_value=None,
                 new_value="5",
-                changed_by="system"
-            )
+                changed_by="system",
+            ),
         ]
 
         # Act

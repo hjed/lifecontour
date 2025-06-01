@@ -15,9 +15,12 @@ class SqlContactFieldHistoryRepository(ContactFieldHistoryRepository):
     def __init__(self, connection: AsyncConnection):
         self.conn = connection
 
-    async def get_contact_history(self, contact_id: int, limit: int = 50) -> list[ContactFieldHistoryEntry]:
+    async def get_contact_history(
+        self, contact_id: int, limit: int = 50
+    ) -> list[ContactFieldHistoryEntry]:
         """Get field history for a specific contact."""
-        query = text("""
+        query = text(
+            """
             SELECT id, entity_type, entity_id, field_name, old_value, new_value,
                    changed_by, created_at
             FROM contact_field_history
@@ -34,8 +37,11 @@ class SqlContactFieldHistoryRepository(ContactFieldHistoryRepository):
                    ))
             ORDER BY created_at DESC
             LIMIT :limit
-        """)
-        result = await self.conn.execute(query, {"contact_id": contact_id, "limit": limit})
+        """
+        )
+        result = await self.conn.execute(
+            query, {"contact_id": contact_id, "limit": limit}
+        )
 
         entries = []
         for row in result.fetchall():
@@ -47,25 +53,28 @@ class SqlContactFieldHistoryRepository(ContactFieldHistoryRepository):
                 new_value=row.new_value,
                 changed_by=row.changed_by,
                 id=row.id,
-                created_at=row.created_at.isoformat() if row.created_at else None
+                created_at=row.created_at.isoformat() if row.created_at else None,
             )
             entries.append(entry)
 
         return entries
 
-    async def get_entity_history(self, entity_type: str, entity_id: int) -> list[ContactFieldHistoryEntry]:
+    async def get_entity_history(
+        self, entity_type: str, entity_id: int
+    ) -> list[ContactFieldHistoryEntry]:
         """Get field history for a specific entity."""
-        query = text("""
+        query = text(
+            """
             SELECT id, entity_type, entity_id, field_name, old_value, new_value,
                    changed_by, created_at
             FROM contact_field_history
             WHERE entity_type = :entity_type AND entity_id = :entity_id
             ORDER BY created_at DESC
-        """)
-        result = await self.conn.execute(query, {
-            "entity_type": entity_type,
-            "entity_id": entity_id
-        })
+        """
+        )
+        result = await self.conn.execute(
+            query, {"entity_type": entity_type, "entity_id": entity_id}
+        )
 
         entries = []
         for row in result.fetchall():
@@ -77,35 +86,44 @@ class SqlContactFieldHistoryRepository(ContactFieldHistoryRepository):
                 new_value=row.new_value,
                 changed_by=row.changed_by,
                 id=row.id,
-                created_at=row.created_at.isoformat() if row.created_at else None
+                created_at=row.created_at.isoformat() if row.created_at else None,
             )
             entries.append(entry)
 
         return entries
 
-    async def record_change(self, entry: ContactFieldHistoryEntry) -> ContactFieldHistoryEntry:
+    async def record_change(
+        self, entry: ContactFieldHistoryEntry
+    ) -> ContactFieldHistoryEntry:
         """Record a field change in history."""
-        query = text("""
+        query = text(
+            """
             INSERT INTO contact_field_history
             (entity_type, entity_id, field_name, old_value, new_value, changed_by)
             VALUES (:entity_type, :entity_id, :field_name, :old_value, :new_value, :changed_by)
             RETURNING id, created_at
-        """)
-        result = await self.conn.execute(query, {
-            "entity_type": entry.entity_type,
-            "entity_id": entry.entity_id,
-            "field_name": entry.field_name,
-            "old_value": entry.old_value,
-            "new_value": entry.new_value,
-            "changed_by": entry.changed_by
-        })
+        """
+        )
+        result = await self.conn.execute(
+            query,
+            {
+                "entity_type": entry.entity_type,
+                "entity_id": entry.entity_id,
+                "field_name": entry.field_name,
+                "old_value": entry.old_value,
+                "new_value": entry.new_value,
+                "changed_by": entry.changed_by,
+            },
+        )
         row = result.fetchone()
         entry.id = row.id
         entry.created_at = row.created_at.isoformat() if row.created_at else None
 
         return entry
 
-    async def record_multiple_changes(self, entries: list[ContactFieldHistoryEntry]) -> list[ContactFieldHistoryEntry]:
+    async def record_multiple_changes(
+        self, entries: list[ContactFieldHistoryEntry]
+    ) -> list[ContactFieldHistoryEntry]:
         """Record multiple field changes in history."""
         saved_entries = []
         for entry in entries:
@@ -113,20 +131,27 @@ class SqlContactFieldHistoryRepository(ContactFieldHistoryRepository):
             saved_entries.append(saved_entry)
         return saved_entries
 
-    async def get_field_history(self, entity_id: int, field_name: str, entity_type: str = "contact") -> list[ContactFieldHistoryEntry]:
+    async def get_field_history(
+        self, entity_id: int, field_name: str, entity_type: str = "contact"
+    ) -> list[ContactFieldHistoryEntry]:
         """Get history for a specific field of an entity."""
-        query = text("""
+        query = text(
+            """
             SELECT id, entity_type, entity_id, field_name, old_value, new_value,
                    changed_by, created_at
             FROM contact_field_history
             WHERE entity_type = :entity_type AND entity_id = :entity_id AND field_name = :field_name
             ORDER BY created_at DESC
-        """)
-        result = await self.conn.execute(query, {
-            "entity_type": entity_type,
-            "entity_id": entity_id,
-            "field_name": field_name
-        })
+        """
+        )
+        result = await self.conn.execute(
+            query,
+            {
+                "entity_type": entity_type,
+                "entity_id": entity_id,
+                "field_name": field_name,
+            },
+        )
 
         entries = []
         for row in result.fetchall():
@@ -138,26 +163,29 @@ class SqlContactFieldHistoryRepository(ContactFieldHistoryRepository):
                 new_value=row.new_value,
                 changed_by=row.changed_by,
                 id=row.id,
-                created_at=row.created_at.isoformat() if row.created_at else None
+                created_at=row.created_at.isoformat() if row.created_at else None,
             )
             entries.append(entry)
 
         return entries
 
-    async def get_changes_by_user(self, changed_by: str, limit: int = 50) -> list[ContactFieldHistoryEntry]:
+    async def get_changes_by_user(
+        self, changed_by: str, limit: int = 50
+    ) -> list[ContactFieldHistoryEntry]:
         """Get changes made by a specific user."""
-        query = text("""
+        query = text(
+            """
             SELECT id, entity_type, entity_id, field_name, old_value, new_value,
                    changed_by, created_at
             FROM contact_field_history
             WHERE changed_by = :changed_by
             ORDER BY created_at DESC
             LIMIT :limit
-        """)
-        result = await self.conn.execute(query, {
-            "changed_by": changed_by,
-            "limit": limit
-        })
+        """
+        )
+        result = await self.conn.execute(
+            query, {"changed_by": changed_by, "limit": limit}
+        )
 
         entries = []
         for row in result.fetchall():
@@ -169,7 +197,7 @@ class SqlContactFieldHistoryRepository(ContactFieldHistoryRepository):
                 new_value=row.new_value,
                 changed_by=row.changed_by,
                 id=row.id,
-                created_at=row.created_at.isoformat() if row.created_at else None
+                created_at=row.created_at.isoformat() if row.created_at else None,
             )
             entries.append(entry)
 

@@ -12,17 +12,20 @@ Next.js TypeScript frontend for the Personal CRM & Journal System with shadcn/ui
 ### Development Setup
 
 1. **Install dependencies:**
+
    ```bash
    pnpm install
    ```
 
 2. **Set up environment:**
+
    ```bash
    cp .env.example .env.local
    # Edit .env.local with your configuration
    ```
 
 3. **Start development server:**
+
    ```bash
    pnpm dev
    ```

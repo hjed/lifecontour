@@ -12,7 +12,9 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine, create_async_engine
 
 # Test database URL for async operations (using port 5433 for Docker)
-ASYNC_TEST_DATABASE_URL = "postgresql+asyncpg://postgres:postgres@localhost:5433/personal_management_test"
+ASYNC_TEST_DATABASE_URL = (
+    "postgresql+asyncpg://postgres:postgres@localhost:5433/personal_management_test"
+)
 
 
 def start_test_database():
@@ -20,10 +22,17 @@ def start_test_database():
     try:
         # Check if container is already running
         result = subprocess.run(
-            ["docker", "ps", "--filter", "name=backend-postgres-test-1", "--format", "{{.Names}}"],
+            [
+                "docker",
+                "ps",
+                "--filter",
+                "name=backend-postgres-test-1",
+                "--format",
+                "{{.Names}}",
+            ],
             capture_output=True,
             text=True,
-            check=True
+            check=True,
         )
 
         if "backend-postgres-test-1" in result.stdout:
@@ -34,7 +43,7 @@ def start_test_database():
         subprocess.run(
             ["docker", "compose", "-f", "docker-compose.test.yml", "up", "-d"],
             cwd=os.path.dirname(os.path.dirname(__file__)),  # backend directory
-            check=True
+            check=True,
         )
 
         # Wait for database to be ready
@@ -42,9 +51,16 @@ def start_test_database():
         for _i in range(max_retries):
             try:
                 result = subprocess.run(
-                    ["docker", "exec", "backend-postgres-test-1", "pg_isready", "-U", "postgres"],
+                    [
+                        "docker",
+                        "exec",
+                        "backend-postgres-test-1",
+                        "pg_isready",
+                        "-U",
+                        "postgres",
+                    ],
                     capture_output=True,
-                    check=True
+                    check=True,
                 )
                 if result.returncode == 0:
                     print("Test database is ready")
@@ -67,7 +83,7 @@ def stop_test_database():
         subprocess.run(
             ["docker", "compose", "-f", "docker-compose.test.yml", "down", "-v"],
             cwd=os.path.dirname(os.path.dirname(__file__)),  # backend directory
-            check=True
+            check=True,
         )
         print("Test database stopped")
     except subprocess.CalledProcessError as e:
@@ -104,7 +120,9 @@ async def async_engine(setup_test_database) -> AsyncGenerator[AsyncEngine, None]
 
 
 @pytest_asyncio.fixture(scope="function")
-async def async_connection(async_engine: AsyncEngine) -> AsyncGenerator[AsyncConnection, None]:
+async def async_connection(
+    async_engine: AsyncEngine,
+) -> AsyncGenerator[AsyncConnection, None]:
     """Create async database connection with transaction rollback."""
     async with async_engine.begin() as conn:
         # Drop tables if they exist (in reverse dependency order)
@@ -118,7 +136,9 @@ async def async_connection(async_engine: AsyncEngine) -> AsyncGenerator[AsyncCon
         await conn.execute(text("DROP TABLE IF EXISTS tags CASCADE"))
 
         # Create tables
-        await conn.execute(text("""
+        await conn.execute(
+            text(
+                """
             CREATE TABLE contacts (
                 id SERIAL PRIMARY KEY,
                 first_name VARCHAR(100) NOT NULL,
@@ -128,9 +148,13 @@ async def async_connection(async_engine: AsyncEngine) -> AsyncGenerator[AsyncCon
                 created_at TIMESTAMP DEFAULT NOW(),
                 updated_at TIMESTAMP DEFAULT NOW()
             )
-        """))
+        """
+            )
+        )
 
-        await conn.execute(text("""
+        await conn.execute(
+            text(
+                """
             CREATE TABLE contact_methods (
                 id SERIAL PRIMARY KEY,
                 contact_id INTEGER NOT NULL REFERENCES contacts(id) ON DELETE CASCADE,
@@ -141,21 +165,33 @@ async def async_connection(async_engine: AsyncEngine) -> AsyncGenerator[AsyncCon
                 created_at TIMESTAMP DEFAULT NOW(),
                 updated_at TIMESTAMP DEFAULT NOW()
             )
-        """))
+        """
+            )
+        )
 
-        await conn.execute(text("""
+        await conn.execute(
+            text(
+                """
             CREATE UNIQUE INDEX contact_methods_primary_unique
             ON contact_methods (contact_id, method_type)
             WHERE is_primary = true
-        """))
+        """
+            )
+        )
 
-        await conn.execute(text("""
+        await conn.execute(
+            text(
+                """
             CREATE UNIQUE INDEX contact_methods_email_unique
             ON contact_methods (value)
             WHERE method_type = 'email'
-        """))
+        """
+            )
+        )
 
-        await conn.execute(text("""
+        await conn.execute(
+            text(
+                """
             CREATE TABLE contact_addresses (
                 id SERIAL PRIMARY KEY,
                 contact_id INTEGER NOT NULL REFERENCES contacts(id) ON DELETE CASCADE,
@@ -170,15 +206,23 @@ async def async_connection(async_engine: AsyncEngine) -> AsyncGenerator[AsyncCon
                 created_at TIMESTAMP DEFAULT NOW(),
                 updated_at TIMESTAMP DEFAULT NOW()
             )
-        """))
+        """
+            )
+        )
 
-        await conn.execute(text("""
+        await conn.execute(
+            text(
+                """
             CREATE UNIQUE INDEX contact_addresses_primary_unique
             ON contact_addresses (contact_id)
             WHERE is_primary = true
-        """))
+        """
+            )
+        )
 
-        await conn.execute(text("""
+        await conn.execute(
+            text(
+                """
             CREATE TABLE contact_notes (
                 id SERIAL PRIMARY KEY,
                 contact_id INTEGER NOT NULL REFERENCES contacts(id) ON DELETE CASCADE,
@@ -186,9 +230,13 @@ async def async_connection(async_engine: AsyncEngine) -> AsyncGenerator[AsyncCon
                 created_at TIMESTAMP DEFAULT NOW(),
                 updated_at TIMESTAMP DEFAULT NOW()
             )
-        """))
+        """
+            )
+        )
 
-        await conn.execute(text("""
+        await conn.execute(
+            text(
+                """
             CREATE TABLE tags (
                 id SERIAL PRIMARY KEY,
                 name VARCHAR(100) NOT NULL UNIQUE,
@@ -198,17 +246,25 @@ async def async_connection(async_engine: AsyncEngine) -> AsyncGenerator[AsyncCon
                 created_at TIMESTAMP DEFAULT NOW(),
                 updated_at TIMESTAMP DEFAULT NOW()
             )
-        """))
+        """
+            )
+        )
 
-        await conn.execute(text("""
+        await conn.execute(
+            text(
+                """
             CREATE TABLE contact_tags (
                 contact_id INTEGER NOT NULL REFERENCES contacts(id) ON DELETE CASCADE,
                 tag_id INTEGER NOT NULL REFERENCES tags(id) ON DELETE CASCADE,
                 PRIMARY KEY (contact_id, tag_id)
             )
-        """))
+        """
+            )
+        )
 
-        await conn.execute(text("""
+        await conn.execute(
+            text(
+                """
             CREATE TABLE contact_field_history (
                 id SERIAL PRIMARY KEY,
                 entity_type VARCHAR(50) NOT NULL,
@@ -219,9 +275,13 @@ async def async_connection(async_engine: AsyncEngine) -> AsyncGenerator[AsyncCon
                 changed_by VARCHAR(100) DEFAULT 'system',
                 created_at TIMESTAMP DEFAULT NOW()
             )
-        """))
+        """
+            )
+        )
 
-        await conn.execute(text("""
+        await conn.execute(
+            text(
+                """
             CREATE TABLE contact_edit_event (
                 id SERIAL PRIMARY KEY,
                 event_id VARCHAR(255) NOT NULL UNIQUE,
@@ -231,7 +291,9 @@ async def async_connection(async_engine: AsyncEngine) -> AsyncGenerator[AsyncCon
                 occurred_at TIMESTAMP NOT NULL,
                 correlation_id VARCHAR(255)
             )
-        """))
+        """
+            )
+        )
 
         # Start a nested transaction for the test
         nested_trans = await conn.begin_nested()
@@ -243,7 +305,9 @@ async def async_connection(async_engine: AsyncEngine) -> AsyncGenerator[AsyncCon
 
 
 @pytest_asyncio.fixture
-async def clean_database(async_connection: AsyncConnection) -> AsyncGenerator[AsyncConnection, None]:
+async def clean_database(
+    async_connection: AsyncConnection,
+) -> AsyncGenerator[AsyncConnection, None]:
     """Provide a clean database connection for each test."""
     # Since we're using transaction rollback, each test starts with a clean state
     yield async_connection

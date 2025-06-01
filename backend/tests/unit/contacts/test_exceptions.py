@@ -1,6 +1,5 @@
 """Unit tests for contacts domain exceptions."""
 
-
 from app.core.contacts.models.exceptions import (
     ContactDomainError,
     ContactHistoryError,
@@ -68,7 +67,9 @@ class TestDuplicateEmailError:
     def test_create_error(self):
         """Test creating DuplicateEmailError."""
         error = DuplicateEmailError("test@example.com", 123)
-        expected_message = "Email address 'test@example.com' is already associated with contact ID 123"
+        expected_message = (
+            "Email address 'test@example.com' is already associated with contact ID 123"
+        )
         assert str(error) == expected_message
         assert error.message == expected_message
         assert error.status_code == 409

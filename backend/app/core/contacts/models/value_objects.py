@@ -16,7 +16,7 @@ class Email:
             raise ValueError("Email cannot be empty")
 
         # Basic email validation pattern
-        email_pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+        email_pattern = r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$"
         if not re.match(email_pattern, self.value):
             raise ValueError(f"Invalid email format: {self.value}")
 
@@ -37,7 +37,7 @@ class PhoneNumber:
 
         # Allow any format for international support
         # Just ensure it contains some digits
-        if not re.search(r'\d', self.value):
+        if not re.search(r"\d", self.value):
             raise ValueError("Phone number must contain at least one digit")
 
     def __str__(self) -> str:
@@ -56,8 +56,10 @@ class CountryCode:
             raise ValueError("Country code cannot be empty")
 
         # Must be exactly 2 uppercase letters
-        if not re.match(r'^[A-Z]{2}$', self.value):
-            raise ValueError(f"Country code must be 2 uppercase letters (ISO 3166-1 alpha-2): {self.value}")
+        if not re.match(r"^[A-Z]{2}$", self.value):
+            raise ValueError(
+                f"Country code must be 2 uppercase letters (ISO 3166-1 alpha-2): {self.value}"
+            )
 
     def __str__(self) -> str:
         return self.value
@@ -71,7 +73,7 @@ class Address:
     country_code: CountryCode
     street_line_2: str | None = None
     locality: str | None = None  # city/town
-    region: str | None = None    # state/province/region
+    region: str | None = None  # state/province/region
     postal_code: str | None = None
 
     def __post_init__(self) -> None:
@@ -128,8 +130,10 @@ class TagName:
             raise ValueError("Tag name cannot be empty")
 
         # Only alphanumeric, hyphens, underscores, and ampersands
-        if not re.match(r'^[a-zA-Z0-9_&-]+$', self.value):
-            raise ValueError(f"Tag name contains invalid characters. Only alphanumeric, -, _, & allowed: {self.value}")
+        if not re.match(r"^[a-zA-Z0-9_&-]+$", self.value):
+            raise ValueError(
+                f"Tag name contains invalid characters. Only alphanumeric, -, _, & allowed: {self.value}"
+            )
 
         if len(self.value) > 100:
             raise ValueError("Tag name cannot exceed 100 characters")

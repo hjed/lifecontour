@@ -62,11 +62,13 @@ class TestContactServiceIntegration:
             contact_repo=contact_repo,
             tag_repo=tag_repo,
             history_repo=history_repo,
-            event_publisher=event_publisher
+            event_publisher=event_publisher,
         )
 
     @pytest.mark.asyncio
-    async def test_create_contact_success(self, contact_service, clean_database: AsyncConnection):
+    async def test_create_contact_success(
+        self, contact_service, clean_database: AsyncConnection
+    ):
         """Test successful contact creation with real database."""
         # Arrange
         contact = Contact(first_name="John", last_name="Doe")
@@ -87,7 +89,9 @@ class TestContactServiceIntegration:
         assert saved_contact.last_name == "Doe"
 
     @pytest.mark.asyncio
-    async def test_create_contact_with_email_method(self, contact_service, clean_database: AsyncConnection):
+    async def test_create_contact_with_email_method(
+        self, contact_service, clean_database: AsyncConnection
+    ):
         """Test contact creation with email method."""
         # Arrange
         contact = Contact(first_name="John", last_name="Doe")
@@ -100,9 +104,11 @@ class TestContactServiceIntegration:
             method_type=MethodType.EMAIL,
             value="john.doe@example.com",
             contact_id=saved_contact.id,
-            is_primary=True
+            is_primary=True,
         )
-        saved_method = await contact_service.add_contact_method(saved_contact.id, email_method, clean_database)
+        saved_method = await contact_service.add_contact_method(
+            saved_contact.id, email_method, clean_database
+        )
 
         # Assert
         assert saved_method.id is not None
@@ -111,12 +117,16 @@ class TestContactServiceIntegration:
         assert saved_method.is_primary is True
 
         # Verify contact can be found by email
-        found_contact = await contact_service.get_contact_by_email("john.doe@example.com")
+        found_contact = await contact_service.get_contact_by_email(
+            "john.doe@example.com"
+        )
         assert found_contact is not None
         assert found_contact.id == saved_contact.id
 
     @pytest.mark.asyncio
-    async def test_create_contact_duplicate_email_raises_error(self, contact_service, clean_database: AsyncConnection):
+    async def test_create_contact_duplicate_email_raises_error(
+        self, contact_service, clean_database: AsyncConnection
+    ):
         """Test contact creation raises error for duplicate email."""
         # Arrange - Create first contact with email
         contact1 = Contact(first_name="John", last_name="Doe")
@@ -126,9 +136,11 @@ class TestContactServiceIntegration:
             method_type=MethodType.EMAIL,
             value="duplicate@example.com",
             contact_id=saved_contact1.id,
-            is_primary=True
+            is_primary=True,
         )
-        await contact_service.add_contact_method(saved_contact1.id, email_method1, clean_database)
+        await contact_service.add_contact_method(
+            saved_contact1.id, email_method1, clean_database
+        )
 
         # Create second contact
         contact2 = Contact(first_name="Jane", last_name="Smith")
@@ -139,15 +151,19 @@ class TestContactServiceIntegration:
             method_type=MethodType.EMAIL,
             value="duplicate@example.com",
             contact_id=saved_contact2.id,
-            is_primary=True
+            is_primary=True,
         )
 
         # Act & Assert
         with pytest.raises(DuplicateEmailError):
-            await contact_service.add_contact_method(saved_contact2.id, email_method2, clean_database)
+            await contact_service.add_contact_method(
+                saved_contact2.id, email_method2, clean_database
+            )
 
     @pytest.mark.asyncio
-    async def test_update_contact_success(self, contact_service, clean_database: AsyncConnection, history_repo):
+    async def test_update_contact_success(
+        self, contact_service, clean_database: AsyncConnection, history_repo
+    ):
         """Test successful contact update with field history tracking."""
         # Arrange - Create contact
         contact = Contact(first_name="John", last_name="Smith")
@@ -158,7 +174,9 @@ class TestContactServiceIntegration:
         changed_fields = {"last_name": ("Smith", "Doe")}
 
         # Act
-        result = await contact_service.update_contact(saved_contact, changed_fields, clean_database)
+        result = await contact_service.update_contact(
+            saved_contact, changed_fields, clean_database
+        )
 
         # Assert
         assert result.id == saved_contact.id
@@ -175,7 +193,9 @@ class TestContactServiceIntegration:
         assert history[0].new_value == "Doe"
 
     @pytest.mark.asyncio
-    async def test_update_contact_no_id_raises_error(self, contact_service, clean_database: AsyncConnection):
+    async def test_update_contact_no_id_raises_error(
+        self, contact_service, clean_database: AsyncConnection
+    ):
         """Test contact update raises error when no ID."""
         # Arrange
         contact = Contact(first_name="John", id=None)
@@ -183,12 +203,16 @@ class TestContactServiceIntegration:
 
         # Act & Assert
         with pytest.raises(ContactValidationError) as exc_info:
-            await contact_service.update_contact(contact, changed_fields, clean_database)
+            await contact_service.update_contact(
+                contact, changed_fields, clean_database
+            )
 
         assert exc_info.value.field == "id"
 
     @pytest.mark.asyncio
-    async def test_delete_contact_success(self, contact_service, clean_database: AsyncConnection):
+    async def test_delete_contact_success(
+        self, contact_service, clean_database: AsyncConnection
+    ):
         """Test successful contact deletion."""
         # Arrange - Create contact
         contact = Contact(first_name="John", last_name="Doe")
@@ -202,14 +226,18 @@ class TestContactServiceIntegration:
         assert deleted_contact is None
 
     @pytest.mark.asyncio
-    async def test_delete_contact_not_found_raises_error(self, contact_service, clean_database: AsyncConnection):
+    async def test_delete_contact_not_found_raises_error(
+        self, contact_service, clean_database: AsyncConnection
+    ):
         """Test contact deletion raises error when contact not found."""
         # Act & Assert
         with pytest.raises(ContactNotFoundError):
             await contact_service.delete_contact(999, clean_database)
 
     @pytest.mark.asyncio
-    async def test_assign_tag_to_contact_success(self, contact_service, tag_repo, clean_database: AsyncConnection, history_repo):
+    async def test_assign_tag_to_contact_success(
+        self, contact_service, tag_repo, clean_database: AsyncConnection, history_repo
+    ):
         """Test successful tag assignment with real database."""
         # Arrange - Create contact and tag
         contact = Contact(first_name="John", last_name="Doe")
@@ -219,7 +247,9 @@ class TestContactServiceIntegration:
         saved_tag = await tag_repo.save(tag)
 
         # Act
-        await contact_service.assign_tag_to_contact(saved_contact.id, saved_tag.id, clean_database)
+        await contact_service.assign_tag_to_contact(
+            saved_contact.id, saved_tag.id, clean_database
+        )
 
         # Assert - Verify tag assignment
         contact_with_tags = await contact_service.get_contact_by_id(saved_contact.id)
@@ -235,7 +265,14 @@ class TestContactServiceIntegration:
         assert tag_history[0].new_value == str(saved_contact.id)
 
     @pytest.mark.asyncio
-    async def test_comprehensive_contact_workflow(self, contact_service, tag_repo, clean_database: AsyncConnection, history_repo, event_repo):
+    async def test_comprehensive_contact_workflow(
+        self,
+        contact_service,
+        tag_repo,
+        clean_database: AsyncConnection,
+        history_repo,
+        event_repo,
+    ):
         """Test comprehensive contact workflow with all features."""
         # Create contact
         contact = Contact(first_name="John", last_name="Doe", middle_name="William")
@@ -248,9 +285,11 @@ class TestContactServiceIntegration:
             value="john.doe@example.com",
             contact_id=saved_contact.id,
             is_primary=True,
-            label="Work"
+            label="Work",
         )
-        saved_email = await contact_service.add_contact_method(saved_contact.id, email_method, clean_database)
+        saved_email = await contact_service.add_contact_method(
+            saved_contact.id, email_method, clean_database
+        )
         assert saved_email.id is not None
 
         # Add phone method
@@ -259,9 +298,11 @@ class TestContactServiceIntegration:
             value="+1-555-123-4567",
             contact_id=saved_contact.id,
             is_primary=True,
-            label="Mobile"
+            label="Mobile",
         )
-        saved_phone = await contact_service.add_contact_method(saved_contact.id, phone_method, clean_database)
+        saved_phone = await contact_service.add_contact_method(
+            saved_contact.id, phone_method, clean_database
+        )
         assert saved_phone.id is not None
 
         # Add address
@@ -274,17 +315,21 @@ class TestContactServiceIntegration:
             country_code="US",
             contact_id=saved_contact.id,
             is_primary=True,
-            label="Home"
+            label="Home",
         )
-        saved_address = await contact_service.add_contact_address(saved_contact.id, address, clean_database)
+        saved_address = await contact_service.add_contact_address(
+            saved_contact.id, address, clean_database
+        )
         assert saved_address.id is not None
 
         # Add note
         note = ContactNote(
             content="Important client - prefers email communication",
-            contact_id=saved_contact.id
+            contact_id=saved_contact.id,
         )
-        saved_note = await contact_service.add_contact_note(saved_contact.id, note, clean_database)
+        saved_note = await contact_service.add_contact_note(
+            saved_contact.id, note, clean_database
+        )
         assert saved_note.id is not None
 
         # Create and assign tags
@@ -293,13 +338,19 @@ class TestContactServiceIntegration:
         saved_work_tag = await tag_repo.save(work_tag)
         saved_client_tag = await tag_repo.save(client_tag)
 
-        await contact_service.assign_tag_to_contact(saved_contact.id, saved_work_tag.id, clean_database)
-        await contact_service.assign_tag_to_contact(saved_contact.id, saved_client_tag.id, clean_database)
+        await contact_service.assign_tag_to_contact(
+            saved_contact.id, saved_work_tag.id, clean_database
+        )
+        await contact_service.assign_tag_to_contact(
+            saved_contact.id, saved_client_tag.id, clean_database
+        )
 
         # Update contact
         saved_contact.nick_name = "Johnny"
         changed_fields = {"nick_name": (None, "Johnny")}
-        await contact_service.update_contact(saved_contact, changed_fields, clean_database)
+        await contact_service.update_contact(
+            saved_contact, changed_fields, clean_database
+        )
 
         # Verify final state
         final_contact = await contact_service.get_contact_by_id(saved_contact.id)
@@ -313,7 +364,9 @@ class TestContactServiceIntegration:
         assert len(final_contact.tags) == 2
 
         # Verify contact can be found by email
-        found_by_email = await contact_service.get_contact_by_email("john.doe@example.com")
+        found_by_email = await contact_service.get_contact_by_email(
+            "john.doe@example.com"
+        )
         assert found_by_email.id == saved_contact.id
 
         # Verify field history tracking

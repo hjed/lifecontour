@@ -1,6 +1,7 @@
 """Repository interfaces for the contacts domain."""
 
 from abc import ABC, abstractmethod
+from typing import Any
 
 from .entities import Contact, ContactAddress, ContactMethod, ContactNote, Tag
 from .events import DomainEvent
@@ -60,7 +61,9 @@ class ContactRepository(ABC):
         pass
 
     @abstractmethod
-    async def add_address(self, contact_id: int, address: ContactAddress) -> ContactAddress:
+    async def add_address(
+        self, contact_id: int, address: ContactAddress
+    ) -> ContactAddress:
         """Add a contact address."""
         pass
 
@@ -151,7 +154,7 @@ class ContactFieldHistoryEntry:
         new_value: str | None = None,
         changed_by: str | None = None,
         id: int | None = None,
-        created_at: str | None = None
+        created_at: str | None = None,
     ):
         self.id = id
         self.entity_type = entity_type
@@ -171,10 +174,10 @@ class ContactEditEvent:
         event_id: str,
         event_type: str,
         aggregate_id: int,
-        event_data: dict[str, any],
+        event_data: dict[str, Any],
         occurred_at: str | None = None,
         correlation_id: str | None = None,
-        id: int | None = None
+        id: int | None = None,
     ):
         self.id = id
         self.event_id = event_id
@@ -189,17 +192,23 @@ class ContactFieldHistoryRepository(ABC):
     """Repository interface for field-level change history operations."""
 
     @abstractmethod
-    async def get_contact_history(self, contact_id: int, limit: int = 50) -> list[ContactFieldHistoryEntry]:
+    async def get_contact_history(
+        self, contact_id: int, limit: int = 50
+    ) -> list[ContactFieldHistoryEntry]:
         """Get field history for a specific contact."""
         pass
 
     @abstractmethod
-    async def get_entity_history(self, entity_type: str, entity_id: int) -> list[ContactFieldHistoryEntry]:
+    async def get_entity_history(
+        self, entity_type: str, entity_id: int
+    ) -> list[ContactFieldHistoryEntry]:
         """Get field history for a specific entity."""
         pass
 
     @abstractmethod
-    async def record_change(self, entry: ContactFieldHistoryEntry) -> ContactFieldHistoryEntry:
+    async def record_change(
+        self, entry: ContactFieldHistoryEntry
+    ) -> ContactFieldHistoryEntry:
         """Record a field change in history."""
         pass
 
@@ -213,12 +222,16 @@ class ContactEditEventRepository(ABC):
         pass
 
     @abstractmethod
-    async def get_events_for_contact(self, contact_id: int, limit: int = 50) -> list[ContactEditEvent]:
+    async def get_events_for_contact(
+        self, contact_id: int, limit: int = 50
+    ) -> list[ContactEditEvent]:
         """Get edit events for a specific contact."""
         pass
 
     @abstractmethod
-    async def get_events_by_type(self, event_type: str, limit: int = 50) -> list[ContactEditEvent]:
+    async def get_events_by_type(
+        self, event_type: str, limit: int = 50
+    ) -> list[ContactEditEvent]:
         """Get events by type."""
         pass
 

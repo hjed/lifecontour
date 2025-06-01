@@ -32,11 +32,13 @@ class Tag:
 
     def __post_init__(self) -> None:
         """Validate tag properties."""
-        if self.color and not self.color.startswith('#'):
+        if self.color and not self.color.startswith("#"):
             raise ValueError("Color must be a hex color code starting with #")
 
         if self.color and len(self.color) != 7:
-            raise ValueError("Color must be a 7-character hex color code (e.g., #FF0000)")
+            raise ValueError(
+                "Color must be a 7-character hex color code (e.g., #FF0000)"
+            )
 
 
 @dataclass
@@ -88,13 +90,14 @@ class ContactAddress:
         """Validate contact address."""
         # Create Address value object to validate
         from .value_objects import CountryCode
+
         Address(
             street_line_1=self.street_line_1,
             country_code=CountryCode(self.country_code),
             street_line_2=self.street_line_2,
             locality=self.locality,
             region=self.region,
-            postal_code=self.postal_code
+            postal_code=self.postal_code,
         )
 
         if self.label and len(self.label) > 50:
@@ -103,13 +106,14 @@ class ContactAddress:
     def to_address_value_object(self) -> Address:
         """Convert to Address value object."""
         from .value_objects import CountryCode
+
         return Address(
             street_line_1=self.street_line_1,
             country_code=CountryCode(self.country_code),
             street_line_2=self.street_line_2,
             locality=self.locality,
             region=self.region,
-            postal_code=self.postal_code
+            postal_code=self.postal_code,
         )
 
 

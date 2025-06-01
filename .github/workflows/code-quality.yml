@@ -1,0 +1,160 @@
+name: Code Quality
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+
+jobs:
+  sonarcloud:
+    name: SonarCloud Analysis
+    runs-on: ubuntu-latest
+    if: github.event.repository.private == false
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Shallow clones should be disabled for better analysis
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.11"
+
+      - name: Install UV
+        uses: astral-sh/setup-uv@v3
+        with:
+          version: "0.4.18"
+
+      - name: Install backend dependencies
+        working-directory: ./backend
+        run: uv pip install --system -e .[dev]
+
+      - name: Run backend tests with coverage
+        working-directory: ./backend
+        env:
+          DATABASE_URL: sqlite:///./test.db
+          TESTING: true
+        run: pytest --cov=app --cov-report=xml
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "18"
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v2
+        with:
+          version: "9.12.0"
+
+      - name: Install frontend dependencies
+        working-directory: ./frontend
+        run: pnpm install --frozen-lockfile
+
+      - name: Run frontend tests with coverage
+        working-directory: ./frontend
+        run: pnpm test:coverage
+
+      - name: SonarCloud Scan
+        uses: SonarSource/sonarcloud-github-action@master
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+
+  complexity-analysis:
+    name: Code Complexity Analysis
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.11"
+
+      - name: Install analysis tools
+        run: |
+          pip install radon xenon
+
+      - name: Run complexity analysis
+        working-directory: ./backend
+        run: |
+          echo "## Backend Complexity Analysis" >> ../complexity-report.md
+          echo "### Cyclomatic Complexity" >> ../complexity-report.md
+          radon cc app/ --show-complexity --min B >> ../complexity-report.md || true
+          echo "### Maintainability Index" >> ../complexity-report.md
+          radon mi app/ --show >> ../complexity-report.md || true
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "18"
+
+      - name: Install frontend analysis tools
+        run: npm install -g complexity-report
+
+      - name: Run frontend complexity analysis
+        working-directory: ./frontend
+        run: |
+          echo "## Frontend Complexity Analysis" >> ../complexity-report.md
+          find src -name "*.ts" -o -name "*.tsx" | head -10 | xargs complexity-report --format markdown >> ../complexity-report.md || true
+
+      - name: Comment complexity report
+        uses: actions/github-script@v6
+        if: github.event_name == 'pull_request'
+        with:
+          script: |
+            const fs = require('fs');
+            try {
+              const report = fs.readFileSync('complexity-report.md', 'utf8');
+              github.rest.issues.createComment({
+                issue_number: context.issue.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body: `## Code Complexity Report\n\n${report}`
+              });
+            } catch (error) {
+              console.log('No complexity report found or error reading file');
+            }
+
+  documentation-check:
+    name: Documentation Check
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Check for README updates
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            # Check if code changes require README updates
+            git diff --name-only origin/${{ github.base_ref }}...HEAD | grep -E '\.(py|ts|tsx|js|jsx)$' > changed_files.txt || true
+            if [ -s changed_files.txt ]; then
+              echo "Code changes detected. Checking if documentation was updated..."
+              git diff --name-only origin/${{ github.base_ref }}...HEAD | grep -E '(README|docs/)' > doc_changes.txt || true
+              if [ ! -s doc_changes.txt ]; then
+                echo "⚠️ Code changes detected but no documentation updates found."
+                echo "Consider updating README.md or docs/ if your changes affect usage or architecture."
+              else
+                echo "✅ Documentation updates found."
+              fi
+            fi
+          fi
+
+      - name: Check for broken links in documentation
+        run: |
+          # Simple check for broken internal links in markdown files
+          find docs/ -name "*.md" -exec grep -l "\[.*\](" {} \; | while read file; do
+            echo "Checking links in $file"
+            grep -o '\[.*\]([^)]*\.md[^)]*)' "$file" | while read link; do
+              target=$(echo "$link" | sed 's/.*(\([^)]*\)).*/\1/')
+              if [ ! -f "docs/$target" ] && [ ! -f "$target" ]; then
+                echo "⚠️ Potentially broken link in $file: $target"
+              fi
+            done
+          done

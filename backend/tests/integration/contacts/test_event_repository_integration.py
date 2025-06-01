@@ -27,10 +27,10 @@ class TestContactEditEventRepositoryIntegration:
                 "contact_id": 1,
                 "first_name": "John",
                 "last_name": "Doe",
-                "occurred_at": "2024-01-01T00:00:00Z"
+                "occurred_at": "2024-01-01T00:00:00Z",
             },
             occurred_at="2024-01-01T00:00:00Z",
-            correlation_id="correlation-123"
+            correlation_id="correlation-123",
         )
 
         # Act
@@ -58,9 +58,9 @@ class TestContactEditEventRepositoryIntegration:
             event_data={
                 "contact_id": 2,
                 "changed_fields": {"first_name": ["John", "Jane"]},
-                "occurred_at": "2024-01-02T00:00:00Z"
+                "occurred_at": "2024-01-02T00:00:00Z",
             },
-            occurred_at="2024-01-02T00:00:00Z"
+            occurred_at="2024-01-02T00:00:00Z",
         )
 
         # Act
@@ -69,7 +69,10 @@ class TestContactEditEventRepositoryIntegration:
         # Assert
         assert saved_event.id is not None
         assert saved_event.correlation_id is None
-        assert saved_event.event_data["changed_fields"]["first_name"] == ["John", "Jane"]
+        assert saved_event.event_data["changed_fields"]["first_name"] == [
+            "John",
+            "Jane",
+        ]
 
     @pytest.mark.asyncio
     async def test_store_event_complex_data(self, event_repo):
@@ -81,14 +84,11 @@ class TestContactEditEventRepositoryIntegration:
                 "type": "email",
                 "value": "john@example.com",
                 "is_primary": True,
-                "metadata": {
-                    "verified": False,
-                    "source": "manual_entry"
-                }
+                "metadata": {"verified": False, "source": "manual_entry"},
             },
             "tags": ["work", "client", "important"],
             "numbers": [1, 2, 3.14, -5],
-            "occurred_at": "2024-01-01T00:00:00Z"
+            "occurred_at": "2024-01-01T00:00:00Z",
         }
 
         event = ContactEditEvent(
@@ -96,7 +96,7 @@ class TestContactEditEventRepositoryIntegration:
             event_type="ContactMethodAdded",
             aggregate_id=1,
             event_data=complex_data,
-            occurred_at="2024-01-01T00:00:00Z"
+            occurred_at="2024-01-01T00:00:00Z",
         )
 
         # Act
@@ -118,22 +118,25 @@ class TestContactEditEventRepositoryIntegration:
                 event_type="ContactCreated",
                 aggregate_id=1,
                 event_data={"contact_id": 1, "first_name": "John"},
-                occurred_at="2024-01-01T00:00:00Z"
+                occurred_at="2024-01-01T00:00:00Z",
             ),
             ContactEditEvent(
                 event_id="contact_updated_1_2024-01-02T00:00:00",
                 event_type="ContactUpdated",
                 aggregate_id=1,
-                event_data={"contact_id": 1, "changed_fields": {"last_name": ["Doe", "Smith"]}},
-                occurred_at="2024-01-02T00:00:00Z"
+                event_data={
+                    "contact_id": 1,
+                    "changed_fields": {"last_name": ["Doe", "Smith"]},
+                },
+                occurred_at="2024-01-02T00:00:00Z",
             ),
             ContactEditEvent(
                 event_id="contact_created_2_2024-01-03T00:00:00",
                 event_type="ContactCreated",
                 aggregate_id=2,
                 event_data={"contact_id": 2, "first_name": "Jane"},
-                occurred_at="2024-01-03T00:00:00Z"
-            )
+                occurred_at="2024-01-03T00:00:00Z",
+            ),
         ]
 
         for event in events:
@@ -162,7 +165,7 @@ class TestContactEditEventRepositoryIntegration:
                 event_type="ContactUpdated",
                 aggregate_id=1,
                 event_data={"contact_id": 1, "field": f"value_{i}"},
-                occurred_at=f"2024-01-{day}T00:00:00Z"
+                occurred_at=f"2024-01-{day}T00:00:00Z",
             )
             await event_repo.store_event(event)
 
@@ -185,29 +188,29 @@ class TestContactEditEventRepositoryIntegration:
                 event_type="ContactCreated",
                 aggregate_id=1,
                 event_data={"contact_id": 1},
-                occurred_at="2024-01-01T00:00:00Z"
+                occurred_at="2024-01-01T00:00:00Z",
             ),
             ContactEditEvent(
                 event_id="contact_created_2_2024-01-02T00:00:00",
                 event_type="ContactCreated",
                 aggregate_id=2,
                 event_data={"contact_id": 2},
-                occurred_at="2024-01-02T00:00:00Z"
+                occurred_at="2024-01-02T00:00:00Z",
             ),
             ContactEditEvent(
                 event_id="contact_updated_1_2024-01-03T00:00:00",
                 event_type="ContactUpdated",
                 aggregate_id=1,
                 event_data={"contact_id": 1},
-                occurred_at="2024-01-03T00:00:00Z"
+                occurred_at="2024-01-03T00:00:00Z",
             ),
             ContactEditEvent(
                 event_id="tag_assigned_1_2024-01-04T00:00:00",
                 event_type="TagAssigned",
                 aggregate_id=1,
                 event_data={"contact_id": 1, "tag_id": 5},
-                occurred_at="2024-01-04T00:00:00Z"
-            )
+                occurred_at="2024-01-04T00:00:00Z",
+            ),
         ]
 
         for event in events:
@@ -236,7 +239,7 @@ class TestContactEditEventRepositoryIntegration:
                 event_type="ContactUpdated",
                 aggregate_id=i + 1,
                 event_data={"contact_id": i + 1},
-                occurred_at=f"2024-01-{day}T00:00:00Z"
+                occurred_at=f"2024-01-{day}T00:00:00Z",
             )
             await event_repo.store_event(event)
 
@@ -260,7 +263,7 @@ class TestContactEditEventRepositoryIntegration:
                 aggregate_id=1,
                 event_data={"contact_id": 1},
                 occurred_at="2024-01-01T00:00:00Z",
-                correlation_id=correlation_id
+                correlation_id=correlation_id,
             ),
             ContactEditEvent(
                 event_id="contact_created_2_2024-01-02T00:00:00",
@@ -268,7 +271,7 @@ class TestContactEditEventRepositoryIntegration:
                 aggregate_id=2,
                 event_data={"contact_id": 2},
                 occurred_at="2024-01-02T00:00:00Z",
-                correlation_id=correlation_id
+                correlation_id=correlation_id,
             ),
             ContactEditEvent(
                 event_id="contact_created_3_2024-01-03T00:00:00",
@@ -276,15 +279,17 @@ class TestContactEditEventRepositoryIntegration:
                 aggregate_id=3,
                 event_data={"contact_id": 3},
                 occurred_at="2024-01-03T00:00:00Z",
-                correlation_id="different-correlation"
-            )
+                correlation_id="different-correlation",
+            ),
         ]
 
         for event in events:
             await event_repo.store_event(event)
 
         # Act
-        correlated_events = await event_repo.get_events_by_correlation_id(correlation_id)
+        correlated_events = await event_repo.get_events_by_correlation_id(
+            correlation_id
+        )
 
         # Assert
         assert len(correlated_events) == 2
@@ -306,22 +311,22 @@ class TestContactEditEventRepositoryIntegration:
                 event_type="ContactCreated",
                 aggregate_id=1,
                 event_data={"contact_id": 1},
-                occurred_at="2024-01-01T00:00:00Z"
+                occurred_at="2024-01-01T00:00:00Z",
             ),
             ContactEditEvent(
                 event_id="event_2",
                 event_type="ContactUpdated",
                 aggregate_id=1,
                 event_data={"contact_id": 1},
-                occurred_at="2024-01-03T00:00:00Z"
+                occurred_at="2024-01-03T00:00:00Z",
             ),
             ContactEditEvent(
                 event_id="event_3",
                 event_type="ContactUpdated",
                 aggregate_id=1,
                 event_data={"contact_id": 1},
-                occurred_at="2024-01-02T00:00:00Z"
-            )
+                occurred_at="2024-01-02T00:00:00Z",
+            ),
         ]
 
         for event in events:
