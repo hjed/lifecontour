@@ -51,9 +51,6 @@ jobs:
       - name: Run Ruff (formatting check)
         run: ruff format --check .
 
-      - name: Run Black (formatting check)
-        run: black --check .
-
       - name: Run MyPy (type checking)
         run: mypy .
 
@@ -196,7 +193,13 @@ jobs:
         run: pnpm type-check
 
       - name: Run Prettier check
-        run: pnpm format:check
+        run: |
+          echo "Running Prettier check..."
+          # List files that will be checked
+          echo "Files to be checked:"
+          find . -name "*.js" -o -name "*.ts" -o -name "*.tsx" -o -name "*.json" -o -name "*.md" | grep -v node_modules | head -10
+          # Run prettier check
+          pnpm format:check || (echo "Prettier check failed. Running format to see differences..." && pnpm format && exit 1)
 
   frontend-test:
     name: Frontend Tests

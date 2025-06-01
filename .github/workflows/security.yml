@@ -34,10 +34,11 @@ jobs:
       - name: Install dependencies
         run: uv pip install --system -e .[dev]
 
-      - name: Run Safety check
+      - name: Run pip-audit security check
         run: |
-          uv pip install --system safety
-          safety check
+          uv pip install --system pip-audit
+          # Run pip-audit for dependency vulnerability scanning
+          pip-audit --progress-spinner=off
 
       - name: Run Bandit security linter
         run: |
