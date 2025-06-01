@@ -84,20 +84,10 @@ class ContactService:
             except IntegrityError as e:
                 last_exception = e
                 if attempt < max_retries - 1:
-                    # Wait before retry with exponential backoff
-                    await asyncio.sleep(0.1 * (2**attempt))
+                    await self._wait_before_retry(attempt)
                     continue
                 else:
-                    # Convert to domain exception on final failure
-                    if "unique" in str(e).lower():
-                        if "email" in str(e).lower():
-                            raise DuplicateEmailError("Email already exists", 0) from e
-                        elif "primary" in str(e).lower():
-                            if "method" in str(e).lower():
-                                raise PrimaryMethodConflictError(0, "unknown") from e
-                            elif "address" in str(e).lower():
-                                raise PrimaryAddressConflictError(0) from e
-                    raise
+                    self._convert_integrity_error_to_domain_exception(e)
             except Exception:
                 # Don't retry for non-transient errors
                 raise
@@ -105,6 +95,27 @@ class ContactService:
         # Should never reach here, but just in case
         if last_exception:
             raise last_exception
+
+    async def _wait_before_retry(self, attempt: int) -> None:
+        """Wait before retry with exponential backoff."""
+        await asyncio.sleep(0.1 * (2**attempt))
+
+    def _convert_integrity_error_to_domain_exception(self, error: IntegrityError) -> None:
+        """Convert IntegrityError to appropriate domain exception."""
+        error_message = str(error).lower()
+
+        if "unique" not in error_message:
+            raise error
+
+        if "email" in error_message:
+            raise DuplicateEmailError("Email already exists", 0) from error
+        elif "primary" in error_message:
+            if "method" in error_message:
+                raise PrimaryMethodConflictError(0, "unknown") from error
+            elif "address" in error_message:
+                raise PrimaryAddressConflictError(0) from error
+
+        raise error
 
     async def create_contact(
         self, contact: Contact, transaction: AsyncConnection

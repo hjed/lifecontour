@@ -4,16 +4,14 @@ FROM nginx:alpine
 # Copy nginx configuration
 COPY docker/nginx/nginx.conf /etc/nginx/nginx.conf
 
-# Create SSL directory
-RUN mkdir -p /etc/nginx/ssl
+# Create SSL directory and set permissions
+RUN mkdir -p /etc/nginx/ssl \
+    && chown -R nginx:nginx /var/cache/nginx \
+    && chown -R nginx:nginx /var/log/nginx \
+    && chown -R nginx:nginx /etc/nginx/conf.d
 
 # Copy SSL certificates (if available)
 # COPY docker/nginx/ssl/ /etc/nginx/ssl/
-
-# Create nginx user and set permissions
-RUN chown -R nginx:nginx /var/cache/nginx && \
-    chown -R nginx:nginx /var/log/nginx && \
-    chown -R nginx:nginx /etc/nginx/conf.d
 
 # Switch to non-root user
 USER nginx
@@ -26,4 +24,6 @@ HEALTHCHECK --interval=30s --timeout=10s --retries=3 \
   CMD curl -f http://localhost:80/health || exit 1
 
 # Start nginx
-CMD ["nginx", "-g", "daemon off;"]
+COPY docker/nginx/start.sh /start.sh
+RUN chmod +x /start.sh
+CMD ["/start.sh"]

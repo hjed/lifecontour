@@ -22,15 +22,11 @@ RUN pnpm build
 # Production stage
 FROM node:24-alpine AS production
 
-# Install curl for healthcheck
-RUN apk add --no-cache curl
-
-# Install pnpm
-RUN npm install -g pnpm@9.12.0
-
-# Create app user
-RUN addgroup -g 1001 -S nodejs && \
-    adduser -S frontend -u 1001
+# Install curl, pnpm, and create app user
+RUN apk add --no-cache curl \
+    && npm install -g pnpm@9.12.0 \
+    && addgroup -g 1001 -S nodejs \
+    && adduser -S frontend -u 1001
 
 # Set working directory
 WORKDIR /app
@@ -57,4 +53,6 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
   CMD curl -f http://localhost:3000 || exit 1
 
 # Start the application
-CMD ["node", "server.js"]
+COPY docker/frontend/start.sh /start.sh
+RUN chmod +x /start.sh
+CMD ["/start.sh"]

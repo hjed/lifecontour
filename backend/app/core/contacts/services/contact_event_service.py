@@ -18,7 +18,7 @@ class ContactEventService:
         self.event_repo = event_repo
 
     async def record_domain_event(
-        self, event: DomainEvent, transaction: AsyncConnection | None = None
+        self, event: DomainEvent, _transaction: AsyncConnection | None = None
     ) -> None:
         """Record a domain event."""
         edit_event = ContactEditEvent(
@@ -48,7 +48,7 @@ class ContactEventService:
         self,
         contact_id: int,
         limit: int = 50,
-        transaction: AsyncConnection | None = None,
+        _transaction: AsyncConnection | None = None,
     ) -> list[ContactEditEvent]:
         """Get domain events for a specific contact."""
         return await self.event_repo.get_events_for_contact(contact_id, limit)
@@ -57,7 +57,7 @@ class ContactEventService:
         self,
         event_type: str,
         limit: int = 50,
-        transaction: AsyncConnection | None = None,
+        _transaction: AsyncConnection | None = None,
     ) -> list[ContactEditEvent]:
         """Get events by type."""
         return await self.event_repo.get_events_by_type(event_type, limit)

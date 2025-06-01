@@ -2,6 +2,7 @@
 
 import json
 from datetime import datetime
+from typing import Any
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
@@ -17,6 +18,12 @@ class SqlContactEditEventRepository(ContactEditEventRepository):
 
     def __init__(self, connection: AsyncConnection):
         self.conn = connection
+
+    def _parse_event_data(self, event_data: Any) -> dict[str, Any]:
+        """Parse event data from database row."""
+        if isinstance(event_data, dict):
+            return event_data
+        return json.loads(event_data) if event_data else {}
 
     async def store_event(self, event: ContactEditEvent) -> ContactEditEvent:
         """Store a contact edit event."""
@@ -79,11 +86,7 @@ class SqlContactEditEventRepository(ContactEditEventRepository):
                 event_id=row.event_id,
                 event_type=row.event_type,
                 aggregate_id=row.aggregate_id,
-                event_data=(
-                    row.event_data
-                    if isinstance(row.event_data, dict)
-                    else (json.loads(row.event_data) if row.event_data else {})
-                ),
+                event_data=self._parse_event_data(row.event_data),
                 occurred_at=occurred_at,
                 correlation_id=row.correlation_id,
                 id=row.id,
@@ -120,11 +123,7 @@ class SqlContactEditEventRepository(ContactEditEventRepository):
                 event_id=row.event_id,
                 event_type=row.event_type,
                 aggregate_id=row.aggregate_id,
-                event_data=(
-                    row.event_data
-                    if isinstance(row.event_data, dict)
-                    else (json.loads(row.event_data) if row.event_data else {})
-                ),
+                event_data=self._parse_event_data(row.event_data),
                 occurred_at=occurred_at,
                 correlation_id=row.correlation_id,
                 id=row.id,
@@ -161,11 +160,7 @@ class SqlContactEditEventRepository(ContactEditEventRepository):
                 event_id=row.event_id,
                 event_type=row.event_type,
                 aggregate_id=row.aggregate_id,
-                event_data=(
-                    row.event_data
-                    if isinstance(row.event_data, dict)
-                    else (json.loads(row.event_data) if row.event_data else {})
-                ),
+                event_data=self._parse_event_data(row.event_data),
                 occurred_at=occurred_at,
                 correlation_id=row.correlation_id,
                 id=row.id,

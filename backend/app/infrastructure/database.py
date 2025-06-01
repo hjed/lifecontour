@@ -49,8 +49,8 @@ def get_database_session() -> Generator[Session, None, None]:
 
     Provides automatic session management with proper cleanup.
     """
-    SessionLocal = get_session_factory()
-    session = SessionLocal()
+    session_local = get_session_factory()
+    session = session_local()
     try:
         yield session
     finally:

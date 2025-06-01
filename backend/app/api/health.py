@@ -5,6 +5,7 @@ Provides basic health status and detailed system health information
 including database connectivity and external service status.
 """
 
+import time
 from datetime import UTC, datetime
 from typing import Any
 
@@ -17,6 +18,17 @@ from app.infrastructure.database import check_database_connection, get_database_
 
 logger = structlog.get_logger()
 router = APIRouter()
+
+# Track application startup time
+_startup_time = time.time()
+
+
+def _get_uptime() -> str:
+    """Calculate application uptime."""
+    uptime_seconds = int(time.time() - _startup_time)
+    hours, remainder = divmod(uptime_seconds, 3600)
+    minutes, seconds = divmod(remainder, 60)
+    return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
 
 
 class HealthResponse(BaseModel):
@@ -50,13 +62,13 @@ async def health_check() -> HealthResponse:
         status="healthy",
         timestamp=datetime.now(UTC),
         version="0.1.0",
-        uptime="unknown",  # TODO: Calculate actual uptime
+        uptime=_get_uptime(),
     )
 
 
 @router.get("/health/detailed", response_model=DetailedHealthResponse)
 async def detailed_health_check(
-    db: Session = Depends(get_database_session),
+    _db: Session = Depends(get_database_session),
 ) -> DetailedHealthResponse:
     """
     Detailed health check endpoint.
@@ -85,20 +97,21 @@ async def detailed_health_check(
         }
         overall_status = "unhealthy"
 
-    # TODO: Add checks for external services (Google APIs, Immich)
+    # External service checks can be added here in the future
+    # Examples: Google Calendar API, Google Contacts API, Immich API
 
     return DetailedHealthResponse(
         status=overall_status,
         timestamp=datetime.now(UTC),
         version="0.1.0",
-        uptime="unknown",  # TODO: Calculate actual uptime
+        uptime=_get_uptime(),
         services=services,
     )
 
 
 @router.get("/health/ready")
 async def readiness_check(
-    db: Session = Depends(get_database_session),
+    _db: Session = Depends(get_database_session),
 ) -> dict[str, str]:
     """
     Kubernetes readiness probe endpoint.
