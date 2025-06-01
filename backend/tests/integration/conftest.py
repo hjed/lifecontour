@@ -11,6 +11,32 @@ import pytest_asyncio
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine, create_async_engine
 
+
+def get_docker_compose_cmd() -> list[str]:
+    """Get the appropriate docker compose command."""
+    # Try docker-compose first (standalone version)
+    try:
+        result = subprocess.run(
+            ["docker-compose", "--version"], check=True, capture_output=True, text=True
+        )
+        if "docker-compose" in result.stdout:
+            return ["docker-compose"]
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        pass
+
+    # Try docker compose (plugin version)
+    try:
+        result = subprocess.run(
+            ["docker", "compose", "--version"], check=True, capture_output=True, text=True
+        )
+        if "Docker Compose" in result.stdout:
+            return ["docker", "compose"]
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        pass
+
+    # Default to docker-compose
+    return ["docker-compose"]
+
 # Test database URL for async operations (using port 5433 for Docker)
 ASYNC_TEST_DATABASE_URL = (
     "postgresql+asyncpg://postgres:postgres@localhost:5433/personal_management_test"
@@ -35,14 +61,16 @@ def start_test_database():
             check=True,
         )
 
-        if "backend-postgres-test-1" in result.stdout:
+        if "postgres-test" in result.stdout:
             print("Test database container already running")
             return
 
         # Start the container
+        docker_compose_cmd = get_docker_compose_cmd()
+        backend_dir = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))  # backend directory
         subprocess.run(
-            ["docker", "compose", "-f", "docker-compose.test.yml", "up", "-d"],
-            cwd=os.path.dirname(os.path.dirname(__file__)),  # backend directory
+            docker_compose_cmd + ["-f", "docker-compose.test.yml", "up", "-d"],
+            cwd=backend_dir,
             check=True,
         )
 
@@ -50,11 +78,31 @@ def start_test_database():
         max_retries = 30
         for _i in range(max_retries):
             try:
+                # Get the actual container name
+                container_result = subprocess.run(
+                    [
+                        "docker",
+                        "ps",
+                        "--filter",
+                        "name=postgres-test",
+                        "--format",
+                        "{{.Names}}",
+                    ],
+                    capture_output=True,
+                    text=True,
+                    check=True,
+                )
+
+                if not container_result.stdout.strip():
+                    time.sleep(1)
+                    continue
+
+                container_name = container_result.stdout.strip()
                 result = subprocess.run(
                     [
                         "docker",
                         "exec",
-                        "backend-postgres-test-1",
+                        container_name,
                         "pg_isready",
                         "-U",
                         "postgres",
@@ -81,9 +129,11 @@ def start_test_database():
 def stop_test_database():
     """Stop Docker PostgreSQL container."""
     try:
+        docker_compose_cmd = get_docker_compose_cmd()
+        backend_dir = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))  # backend directory
         subprocess.run(
-            ["docker", "compose", "-f", "docker-compose.test.yml", "down", "-v"],
-            cwd=os.path.dirname(os.path.dirname(__file__)),  # backend directory
+            docker_compose_cmd + ["-f", "docker-compose.test.yml", "down", "-v"],
+            cwd=backend_dir,
             check=True,
         )
         print("Test database stopped")

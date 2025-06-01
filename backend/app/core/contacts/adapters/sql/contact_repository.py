@@ -243,6 +243,8 @@ class SqlContactRepository(ContactRepository):
                     },
                 )
                 row = result.fetchone()
+                if row is None:
+                    raise RuntimeError("Failed to insert contact")
                 contact.id = row.id
                 contact.created_at = row.created_at
                 contact.updated_at = row.updated_at
@@ -269,6 +271,8 @@ class SqlContactRepository(ContactRepository):
                     },
                 )
                 row = result.fetchone()
+                if row is None:
+                    raise RuntimeError("Failed to update contact")
                 contact.updated_at = row.updated_at
 
             return contact
@@ -330,6 +334,8 @@ class SqlContactRepository(ContactRepository):
                 },
             )
             row = result.fetchone()
+            if row is None:
+                raise RuntimeError("Failed to insert contact method")
             method.id = row.id
             method.contact_id = contact_id
             method.created_at = row.created_at
@@ -375,6 +381,8 @@ class SqlContactRepository(ContactRepository):
                 },
             )
             row = result.fetchone()
+            if row is None:
+                raise RuntimeError("Failed to update contact method")
             method.updated_at = row.updated_at
             return method
 
@@ -432,6 +440,8 @@ class SqlContactRepository(ContactRepository):
                 },
             )
             row = result.fetchone()
+            if row is None:
+                raise RuntimeError("Failed to insert contact address")
             address.id = row.id
             address.contact_id = contact_id
             address.created_at = row.created_at
@@ -471,6 +481,8 @@ class SqlContactRepository(ContactRepository):
                 },
             )
             row = result.fetchone()
+            if row is None:
+                raise RuntimeError("Failed to update contact address")
             address.updated_at = row.updated_at
             return address
 
@@ -500,6 +512,8 @@ class SqlContactRepository(ContactRepository):
             query, {"contact_id": contact_id, "content": note.content}
         )
         row = result.fetchone()
+        if row is None:
+            raise RuntimeError("Failed to insert contact note")
         note.id = row.id
         note.contact_id = contact_id
         note.created_at = row.created_at
@@ -520,6 +534,8 @@ class SqlContactRepository(ContactRepository):
             query, {"id": note.id, "content": note.content}
         )
         row = result.fetchone()
+        if row is None:
+            raise RuntimeError("Failed to update contact note")
         note.updated_at = row.updated_at
         return note
 

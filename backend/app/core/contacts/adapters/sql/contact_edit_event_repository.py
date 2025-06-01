@@ -36,11 +36,13 @@ class SqlContactEditEventRepository(ContactEditEventRepository):
         """
         )
         # Convert string timestamp to datetime if needed
-        occurred_at = event.occurred_at
-        if isinstance(occurred_at, str):
-            occurred_at = datetime.fromisoformat(occurred_at.replace("Z", "+00:00"))
+        occurred_at_value: datetime | None = None
+        if event.occurred_at and isinstance(event.occurred_at, str):
+            occurred_at_value = datetime.fromisoformat(event.occurred_at.replace("Z", "+00:00"))
             # Convert to naive datetime for PostgreSQL compatibility
-            occurred_at = occurred_at.replace(tzinfo=None)
+            occurred_at_value = occurred_at_value.replace(tzinfo=None)
+        elif isinstance(event.occurred_at, datetime):
+            occurred_at_value = event.occurred_at
 
         result = await self.conn.execute(
             query,
@@ -49,11 +51,13 @@ class SqlContactEditEventRepository(ContactEditEventRepository):
                 "event_type": event.event_type,
                 "aggregate_id": event.aggregate_id,
                 "event_data": json.dumps(event.event_data),
-                "occurred_at": occurred_at,
+                "occurred_at": occurred_at_value,
                 "correlation_id": event.correlation_id,
             },
         )
         row = result.fetchone()
+        if row is None:
+            raise RuntimeError("Failed to insert contact edit event")
         event.id = row.id
 
         return event

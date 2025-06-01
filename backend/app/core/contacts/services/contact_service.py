@@ -198,7 +198,7 @@ class ContactService:
 
             # Record field history
             await self.history_service.record_contact_change(
-                saved_contact.id, changed_fields, transaction=transaction
+                saved_contact.id, changed_fields, _transaction=transaction
             )
 
             # Publish event
@@ -262,7 +262,7 @@ class ContactService:
 
             # Record field history
             await self.history_service.record_tag_change(
-                contact_id, tag_id, "assigned", transaction=transaction
+                contact_id, tag_id, "assigned", _transaction=transaction
             )
 
             # Publish event
@@ -296,7 +296,7 @@ class ContactService:
 
             # Record field history
             await self.history_service.record_tag_change(
-                contact_id, tag_id, "removed", transaction=transaction
+                contact_id, tag_id, "removed", _transaction=transaction
             )
 
             # Publish event

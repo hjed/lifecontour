@@ -110,7 +110,7 @@ class TestTagRepositoryIntegration:
         saved_tag = await tag_repo.save(tag)
 
         # Act
-        found_tag = await tag_repo.find_by_name(TagName("client"))
+        found_tag = await tag_repo.find_by_name("client")
 
         # Assert
         assert found_tag is not None
@@ -122,7 +122,7 @@ class TestTagRepositoryIntegration:
     async def test_find_by_name_not_existing(self, tag_repo):
         """Test finding tag by name when it doesn't exist."""
         # Act
-        found_tag = await tag_repo.find_by_name(TagName("nonexistent"))
+        found_tag = await tag_repo.find_by_name("nonexistent")
 
         # Assert
         assert found_tag is None

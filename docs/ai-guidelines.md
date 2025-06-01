@@ -297,6 +297,48 @@ For detailed implementation examples and patterns, see:
 - **[Configuration Examples](./examples/configuration/)** - Docker, environment,
   and deployment configs
 
+## Quality Assurance Requirements
+
+### Mandatory Checks for Every Code Change
+
+**ALWAYS run the following checks for every code change:**
+
+1. **Backend Linting and Type Checking**:
+   ```bash
+   cd backend
+   mypy .
+   ruff check .
+   ruff format --check .
+   ```
+
+2. **Frontend Linting and Type Checking**:
+   ```bash
+   cd frontend
+   pnpm type-check
+   pnpm lint
+   ```
+
+3. **Integration Tests** (when backend changes affect database or API):
+   ```bash
+   cd backend
+   python scripts/run_integration_tests.py
+   ```
+
+### CI/CD Compliance
+
+- **All CI checks must pass** before considering a change complete
+- **Fix linting errors immediately** - do not ignore or suppress without justification
+- **Type errors are blocking** - all mypy and TypeScript errors must be resolved
+- **Integration tests must pass** - especially for database schema or API changes
+
+### Development Workflow
+
+1. **Make code changes**
+2. **Run linting and type checking** (see commands above)
+3. **Fix any errors** before proceeding
+4. **Run relevant tests** (unit, integration, or e2e as appropriate)
+5. **Commit only when all checks pass**
+
 ## Key Reminders
 
 1. **Check with user** before making technology choices or architectural changes
@@ -304,3 +346,4 @@ For detailed implementation examples and patterns, see:
 3. **Test thoroughly** - write tests as you build, not after. Ideally before
    implementing.
 4. **Document decisions** - update architecture docs when patterns evolve
+5. **Run linting and type checking** for every single code change - no exceptions

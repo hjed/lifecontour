@@ -116,6 +116,8 @@ class SqlContactFieldHistoryRepository(ContactFieldHistoryRepository):
             },
         )
         row = result.fetchone()
+        if row is None:
+            raise RuntimeError("Failed to insert contact field history entry")
         entry.id = row.id
         entry.created_at = row.created_at.isoformat() if row.created_at else None
 

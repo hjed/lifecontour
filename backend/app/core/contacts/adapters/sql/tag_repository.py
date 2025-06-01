@@ -40,7 +40,7 @@ class SqlTagRepository(TagRepository):
             updated_at=row.updated_at,
         )
 
-    async def find_by_name(self, name: TagName) -> Tag | None:
+    async def find_by_name(self, name: str) -> Tag | None:
         """Find a tag by name."""
         query = text(
             """
@@ -48,7 +48,7 @@ class SqlTagRepository(TagRepository):
             FROM tags WHERE name = :name
         """
         )
-        result = await self.conn.execute(query, {"name": str(name)})
+        result = await self.conn.execute(query, {"name": name})
         row = result.fetchone()
 
         if not row:
@@ -191,6 +191,8 @@ class SqlTagRepository(TagRepository):
                     },
                 )
                 row = result.fetchone()
+                if row is None:
+                    raise RuntimeError("Failed to insert tag")
                 tag.id = row.id
                 tag.created_at = row.created_at
                 tag.updated_at = row.updated_at
@@ -216,6 +218,8 @@ class SqlTagRepository(TagRepository):
                     },
                 )
                 row = result.fetchone()
+                if row is None:
+                    raise RuntimeError("Failed to update tag")
                 tag.updated_at = row.updated_at
 
             return tag

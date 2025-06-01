@@ -21,14 +21,15 @@ RUN pip install uv
 WORKDIR /app
 
 # Copy dependency files
-COPY pyproject.toml ./
+COPY backend/pyproject.toml ./
+COPY backend/README.md ./
 
 # Install dependencies
 RUN uv pip install --system -e .[dev]
 
 # Copy source code
-COPY app ./app
-COPY alembic.ini ./
+COPY backend/app ./app
+COPY backend/alembic.ini ./
 
 # Production stage
 FROM python:3.11-slim AS production
@@ -51,25 +52,26 @@ RUN apt-get update && apt-get install -y \
 WORKDIR /app
 
 # Copy dependency files
-COPY pyproject.toml ./
+COPY backend/pyproject.toml ./
+COPY backend/README.md ./
 
 # Install production dependencies only
 RUN uv pip install --system .
 
+# Copy scripts and set permissions as root
+COPY docker/backend/start.sh /start.sh
+COPY docker/backend/healthcheck.sh /healthcheck.sh
+RUN chmod +x /start.sh /healthcheck.sh
+
 # Copy application code
-COPY --chown=appuser:appuser app ./app
-COPY --chown=appuser:appuser alembic.ini ./
+COPY --chown=appuser:appuser backend/app ./app
+COPY --chown=appuser:appuser backend/alembic.ini ./
 
 # Switch to non-root user
 USER appuser
 
 # Expose port
 EXPOSE 8000
-
-# Copy scripts
-COPY docker/backend/start.sh /start.sh
-COPY docker/backend/healthcheck.sh /healthcheck.sh
-RUN chmod +x /start.sh /healthcheck.sh
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \

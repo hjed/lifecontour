@@ -7,6 +7,32 @@ import time
 from pathlib import Path
 
 
+def get_docker_compose_cmd() -> list[str]:
+    """Get the appropriate docker compose command."""
+    # Try docker-compose first (standalone version)
+    try:
+        result = subprocess.run(
+            ["docker-compose", "--version"], check=True, capture_output=True, text=True
+        )
+        if "docker-compose" in result.stdout:
+            return ["docker-compose"]
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        pass
+
+    # Try docker compose (plugin version)
+    try:
+        result = subprocess.run(
+            ["docker", "compose", "--version"], check=True, capture_output=True, text=True
+        )
+        if "Docker Compose" in result.stdout:
+            return ["docker", "compose"]
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        pass
+
+    # Default to docker-compose
+    return ["docker-compose"]
+
+
 def run_command(
     cmd: list[str], cwd: Path | None = None, check: bool = True
 ) -> subprocess.CompletedProcess[str] | subprocess.CalledProcessError:
@@ -32,10 +58,13 @@ def check_docker() -> bool:
     """Check if Docker is available."""
     try:
         subprocess.run(["docker", "--version"], check=True, capture_output=True)
-        subprocess.run(
-            ["docker", "compose", "--version"], check=True, capture_output=True
-        )
-        print("✓ Docker and Docker Compose are available")
+
+        # Check which docker compose command is available
+        docker_compose_cmd = get_docker_compose_cmd()
+        if docker_compose_cmd == ["docker-compose"]:
+            print("✓ Docker and Docker Compose (standalone) are available")
+        else:
+            print("✓ Docker and Docker Compose (plugin) are available")
         return True
     except (subprocess.CalledProcessError, FileNotFoundError):
         print("✗ Docker or Docker Compose not found")
@@ -60,22 +89,42 @@ def start_test_database() -> bool:
         check=False,
     )
 
-    if "backend-postgres-test-1" in result.stdout:
+    if "postgres-test" in result.stdout:
         print("✓ Test database container already running")
         return True
 
     # Start the container
-    run_command(["docker", "compose", "-f", "docker-compose.test.yml", "up", "-d"])
+    docker_compose_cmd = get_docker_compose_cmd()
+    run_command(docker_compose_cmd + ["-f", "docker-compose.test.yml", "up", "-d"])
 
     # Wait for database to be ready
     print("Waiting for database to be ready...")
     max_retries = 30
     for i in range(max_retries):
+        # Get the actual container name
+        container_result = run_command(
+            [
+                "docker",
+                "ps",
+                "--filter",
+                "name=postgres-test",
+                "--format",
+                "{{.Names}}",
+            ],
+            check=False,
+        )
+
+        if not container_result.stdout.strip():
+            print(f"  Container not found... ({i + 1}/{max_retries})")
+            time.sleep(1)
+            continue
+
+        container_name = container_result.stdout.strip()
         result = run_command(
             [
                 "docker",
                 "exec",
-                "backend-postgres-test-1",
+                container_name,
                 "pg_isready",
                 "-U",
                 "postgres",
@@ -97,8 +146,9 @@ def start_test_database() -> bool:
 def stop_test_database() -> None:
     """Stop the test database container."""
     print("Stopping test database...")
+    docker_compose_cmd = get_docker_compose_cmd()
     run_command(
-        ["docker", "compose", "-f", "docker-compose.test.yml", "down", "-v"],
+        docker_compose_cmd + ["-f", "docker-compose.test.yml", "down", "-v"],
         check=False,
     )
     print("✓ Test database stopped")
