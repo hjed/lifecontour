@@ -37,12 +37,9 @@ def main() -> None:
 
     # Test 1: List all tests with unit marker
     print("\n=== Testing unit marker ===")
-    result = run_command([
-        "python", "-m", "pytest",
-        "-m", "unit",
-        "--collect-only",
-        "-q"
-    ], check=False)
+    result = run_command(
+        ["python", "-m", "pytest", "-m", "unit", "--collect-only", "-q"], check=False
+    )
 
     if result.returncode == 0:
         print("✓ Unit marker tests found")
@@ -51,12 +48,10 @@ def main() -> None:
 
     # Test 2: List all tests with integration marker
     print("\n=== Testing integration marker ===")
-    result = run_command([
-        "python", "-m", "pytest",
-        "-m", "integration",
-        "--collect-only",
-        "-q"
-    ], check=False)
+    result = run_command(
+        ["python", "-m", "pytest", "-m", "integration", "--collect-only", "-q"],
+        check=False,
+    )
 
     if result.returncode == 0:
         print("✓ Integration marker tests found")
@@ -65,12 +60,18 @@ def main() -> None:
 
     # Test 3: Run a simple unit test
     print("\n=== Running unit tests ===")
-    result = run_command([
-        "python", "-m", "pytest",
-        "-m", "unit",
-        "tests/unit/test_health.py::test_health_check",
-        "-v"
-    ], check=False)
+    result = run_command(
+        [
+            "python",
+            "-m",
+            "pytest",
+            "-m",
+            "unit",
+            "tests/unit/test_health.py::test_health_check",
+            "-v",
+        ],
+        check=False,
+    )
 
     if result.returncode == 0:
         print("✓ Unit test execution successful")

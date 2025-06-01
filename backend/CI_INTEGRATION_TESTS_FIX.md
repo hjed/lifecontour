@@ -87,7 +87,16 @@ pytest
 - Integration tests run separately with Docker setup
 - Both must pass for the build to succeed
 
-### 4. Fixed MyPy Type Errors
+### 4. Fixed Health Test Database Dependencies
+
+Fixed `test_health.py` which was incorrectly acting as integration tests:
+- Created proper unit test client with mocked database dependencies
+- Added test settings that allow all hosts (fixes TrustedHostMiddleware issues)
+- Used in-memory SQLite for unit tests instead of PostgreSQL
+- Mocked `check_database_connection()` for readiness probe tests
+- Created separate integration tests for health endpoints with real database
+
+### 5. Fixed MyPy Type Errors
 
 Fixed critical mypy errors that would cause CI failures:
 - Added proper type annotations to `run_integration_tests.py`
@@ -98,8 +107,9 @@ Fixed critical mypy errors that would cause CI failures:
 ## Verification
 
 The fix has been tested and verified:
-- ✅ Unit tests run successfully with markers (35 tests selected)
+- ✅ Unit tests run successfully with markers (36 tests selected, 183 deselected)
 - ✅ Integration tests are properly marked (53 tests found)
+- ✅ Health tests now work as proper unit tests (no database dependency)
 - ✅ CI workflow syntax is valid
 - ✅ Test separation works correctly
 - ✅ MyPy type checking passes for critical files

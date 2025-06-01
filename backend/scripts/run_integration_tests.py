@@ -8,9 +8,7 @@ from pathlib import Path
 
 
 def run_command(
-    cmd: list[str],
-    cwd: Path | None = None,
-    check: bool = True
+    cmd: list[str], cwd: Path | None = None, check: bool = True
 ) -> subprocess.CompletedProcess[str] | subprocess.CalledProcessError:
     """Run a command and return the result."""
     print(f"Running: {' '.join(cmd)}")
