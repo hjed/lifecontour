@@ -1,0 +1,203 @@
+"""
+Repository for managing outbox events.
+
+Handles retrieval and processing of events from the outbox_events table
+for the background processor.
+"""
+
+import json
+from dataclasses import dataclass
+from datetime import datetime
+from typing import Any
+
+import structlog
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncConnection
+
+logger = structlog.get_logger()
+
+
+@dataclass
+class OutboxEvent:
+    """Outbox event data structure."""
+
+    id: int
+    event_id: str
+    event_type: str
+    aggregate_id: int
+    event_data: dict[str, Any]
+    occurred_at: datetime
+    processed_at: datetime | None
+    retry_count: int
+    created_at: datetime
+
+
+class OutboxRepository:
+    """Repository for outbox event operations."""
+
+    def __init__(self, connection: AsyncConnection):
+        """
+        Initialize with database connection.
+
+        Args:
+            connection: Async database connection
+        """
+        self.conn = connection
+
+    async def get_unprocessed_events(self, limit: int = 100) -> list[OutboxEvent]:
+        """
+        Get unprocessed events from the outbox.
+
+        Args:
+            limit: Maximum number of events to retrieve
+
+        Returns:
+            List of unprocessed outbox events
+        """
+        try:
+            query = text(
+                """
+                SELECT id, event_id, event_type, aggregate_id, event_data,
+                       occurred_at, processed_at, retry_count, created_at
+                FROM outbox_events
+                WHERE processed_at IS NULL
+                ORDER BY created_at ASC
+                LIMIT :limit
+                """
+            )
+
+            result = await self.conn.execute(query, {"limit": limit})
+            rows = result.fetchall()
+
+            events = []
+            for row in rows:
+                # Handle both PostgreSQL JSONB (dict) and SQLite TEXT (string)
+                event_data = row.event_data
+                if isinstance(event_data, str):
+                    event_data = json.loads(event_data)
+
+                events.append(
+                    OutboxEvent(
+                        id=row.id,
+                        event_id=row.event_id,
+                        event_type=row.event_type,
+                        aggregate_id=row.aggregate_id,
+                        event_data=event_data,
+                        occurred_at=row.occurred_at,
+                        processed_at=row.processed_at,
+                        retry_count=row.retry_count,
+                        created_at=row.created_at,
+                    )
+                )
+
+            logger.debug(
+                "Retrieved unprocessed events from outbox", event_count=len(events)
+            )
+
+            return events
+
+        except Exception as e:
+            logger.error(
+                "Failed to retrieve unprocessed events from outbox", error=str(e)
+            )
+            raise
+
+    async def mark_as_processed(self, event_id: str) -> None:
+        """
+        Mark an event as processed.
+
+        Args:
+            event_id: ID of the event to mark as processed
+        """
+        try:
+            query = text(
+                """
+                UPDATE outbox_events
+                SET processed_at = :processed_at
+                WHERE event_id = :event_id
+                """
+            )
+
+            await self.conn.execute(
+                query, {"event_id": event_id, "processed_at": datetime.utcnow()}
+            )
+
+            logger.debug("Event marked as processed", event_id=event_id)
+
+        except Exception as e:
+            logger.error(
+                "Failed to mark event as processed", event_id=event_id, error=str(e)
+            )
+            raise
+
+    async def increment_retry_count(self, event_id: str) -> None:
+        """
+        Increment the retry count for a failed event.
+
+        Args:
+            event_id: ID of the event to increment retry count
+        """
+        try:
+            query = text(
+                """
+                UPDATE outbox_events
+                SET retry_count = retry_count + 1
+                WHERE event_id = :event_id
+                """
+            )
+
+            await self.conn.execute(query, {"event_id": event_id})
+
+            logger.debug("Event retry count incremented", event_id=event_id)
+
+        except Exception as e:
+            logger.error(
+                "Failed to increment retry count", event_id=event_id, error=str(e)
+            )
+            raise
+
+    async def get_failed_events(self, max_retries: int = 3) -> list[OutboxEvent]:
+        """
+        Get events that have exceeded the maximum retry count.
+
+        Args:
+            max_retries: Maximum number of retries before considering failed
+
+        Returns:
+            List of failed outbox events
+        """
+        try:
+            query = text(
+                """
+                SELECT id, event_id, event_type, aggregate_id, event_data,
+                       occurred_at, processed_at, retry_count, created_at
+                FROM outbox_events
+                WHERE processed_at IS NULL AND retry_count >= :max_retries
+                ORDER BY created_at ASC
+                """
+            )
+
+            result = await self.conn.execute(query, {"max_retries": max_retries})
+            rows = result.fetchall()
+
+            events = []
+            for row in rows:
+                events.append(
+                    OutboxEvent(
+                        id=row.id,
+                        event_id=row.event_id,
+                        event_type=row.event_type,
+                        aggregate_id=row.aggregate_id,
+                        event_data=row.event_data,
+                        occurred_at=row.occurred_at,
+                        processed_at=row.processed_at,
+                        retry_count=row.retry_count,
+                        created_at=row.created_at,
+                    )
+                )
+
+            return events
+
+        except Exception as e:
+            logger.error("Failed to retrieve failed events from outbox", error=str(e))
+            raise

@@ -37,7 +37,7 @@ class TestContactHistoryService:
             contact_id=1,
             changed_fields=changed_fields,
             changed_by="user123",
-            transaction=mock_transaction,
+            _transaction=mock_transaction,
         )
 
         # Should record one entry per changed field
@@ -72,7 +72,7 @@ class TestContactHistoryService:
         changed_fields = {"first_name": ("John", "Jane")}
 
         await service.record_contact_change(
-            contact_id=1, changed_fields=changed_fields, transaction=mock_transaction
+            contact_id=1, changed_fields=changed_fields, _transaction=mock_transaction
         )
 
         # Check default changed_by
@@ -93,7 +93,7 @@ class TestContactHistoryService:
             method_id=1,
             changed_fields=changed_fields,
             changed_by="user123",
-            transaction=mock_transaction,
+            _transaction=mock_transaction,
         )
 
         # Should record one entry per changed field
@@ -118,7 +118,7 @@ class TestContactHistoryService:
         }
 
         await service.record_address_change(
-            address_id=1, changed_fields=changed_fields, transaction=mock_transaction
+            address_id=1, changed_fields=changed_fields, _transaction=mock_transaction
         )
 
         assert mock_history_repo.record_change.call_count == 2
@@ -135,7 +135,7 @@ class TestContactHistoryService:
         changed_fields = {"content": ("Old note", "New note")}
 
         await service.record_note_change(
-            note_id=1, changed_fields=changed_fields, transaction=mock_transaction
+            note_id=1, changed_fields=changed_fields, _transaction=mock_transaction
         )
 
         call_entry = mock_history_repo.record_change.call_args[0][0]
@@ -155,7 +155,7 @@ class TestContactHistoryService:
             tag_id=2,
             action="assigned",
             changed_by="user123",
-            transaction=mock_transaction,
+            _transaction=mock_transaction,
         )
 
         call_entry = mock_history_repo.record_change.call_args[0][0]
@@ -172,7 +172,7 @@ class TestContactHistoryService:
     ):
         """Test recording tag removal."""
         await service.record_tag_change(
-            contact_id=1, tag_id=2, action="removed", transaction=mock_transaction
+            contact_id=1, tag_id=2, action="removed", _transaction=mock_transaction
         )
 
         call_entry = mock_history_repo.record_change.call_args[0][0]
@@ -201,7 +201,7 @@ class TestContactHistoryService:
         mock_history_repo.get_contact_history.return_value = expected_entries
 
         result = await service.get_contact_history(
-            1, limit=50, transaction=mock_transaction
+            1, limit=50, _transaction=mock_transaction
         )
 
         assert result == expected_entries
@@ -225,7 +225,7 @@ class TestContactHistoryService:
         mock_history_repo.get_entity_history.return_value = expected_entries
 
         result = await service.get_entity_history(
-            "contact_method", 1, transaction=mock_transaction
+            "contact_method", 1, _transaction=mock_transaction
         )
 
         assert result == expected_entries

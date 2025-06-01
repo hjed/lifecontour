@@ -16,6 +16,7 @@ dependencies = [
     "sqlalchemy>=2.0.0",
     "alembic>=1.13.0",
     "psycopg2-binary>=2.9.0",
+    "asyncpg>=0.29.0",
     "python-multipart>=0.0.6",
     "python-jose[cryptography]>=3.3.0",
     "passlib[bcrypt]>=1.7.4",
@@ -29,6 +30,8 @@ dependencies = [
     "opentelemetry-instrumentation-httpx>=0.42b0",
     "python-stdnum>=1.20",
     "pycountry>=23.12.11",
+    "meilisearch>=0.31.0",
+    "itsdangerous>=2.1.0",
 ]
 
 [project.optional-dependencies]
@@ -140,6 +143,7 @@ markers = [
     "integration: marks tests as integration tests",
     "e2e: marks tests as end-to-end tests",
     "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+    "meilisearch: marks tests that require MeiliSearch to be running",
 ]
 
 [tool.coverage.run]
@@ -162,4 +166,9 @@ exclude_lines = [
     "if __name__ == .__main__.:",
     "class .*\\bProtocol\\):",
     "@(abc\\.)?abstractmethod",
+]
+
+[dependency-groups]
+dev = [
+    "aiosqlite>=0.21.0",
 ]

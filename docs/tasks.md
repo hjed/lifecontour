@@ -90,16 +90,16 @@ Tasks are organized by **feature iterations** that deliver end-to-end value incr
 **Description:** Create JSON API compliant FastAPI endpoints with MeiliSearch integration using event-driven architecture
 **Dependencies:** ITER1-002
 **Acceptance Criteria:**
-- [ ] Set up MeiliSearch Docker container and Python SDK integration
-- [ ] Implement transactional outbox pattern for reliable event publishing
-- [ ] Create OutboxEventPublisher implementing existing ContactEventPublisher interface
-- [ ] Set up FastAPI background task for outbox processing (every 10 seconds)
+- [X] Set up MeiliSearch Docker container and Python SDK integration
+- [X] Implement transactional outbox pattern for reliable event publishing
+- [X] Create OutboxEventPublisher implementing existing ContactEventPublisher interface
+- [X] Set up FastAPI background task for outbox processing (every 10 seconds)
 - [ ] Implement session-based authentication using Starlette SessionMiddleware
 - [ ] Create authentication endpoints (login/logout) and session validation dependency
 - [ ] Create FastAPI ContactController with automatic OpenAPI docs
 - [ ] Implement CRUD operations (GET, POST, PUT, DELETE) with proper error handling
-- [ ] Add contact search endpoints using MeiliSearch (/api/contacts/search)
-- [ ] Add global search endpoint for contacts (/api/search) - designed for future expansion
+- [X] Add contact search endpoints using MeiliSearch (/api/contacts/search)
+- [X] Add global search endpoint for contacts (/api/search) - designed for future expansion
 - [ ] Add tag management endpoints (assign/remove tags)
 - [ ] Implement comprehensive input validation using Pydantic models
 - [ ] Configure CORS for frontend integration

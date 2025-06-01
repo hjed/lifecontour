@@ -59,6 +59,21 @@ class Settings(BaseSettings):
         default=7, description="JWT refresh token expiration in days"
     )
 
+    # Search settings
+    meilisearch_url: str = Field(
+        default="http://localhost:7700", description="MeiliSearch server URL"
+    )
+    meilisearch_api_key: str = Field(default="", description="MeiliSearch API key")
+    search_index_prefix: str = Field(
+        default="pms_", description="Prefix for search indices"
+    )
+
+    # Session settings
+    session_secret_key: str = Field(
+        default="dev-session-secret-change-in-production",
+        description="Secret key for session encryption",
+    )
+
     # External services
     google_client_id: str = Field(default="", description="Google OAuth client ID")
     google_client_secret: str = Field(
