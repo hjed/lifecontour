@@ -63,9 +63,12 @@ COPY docker/backend/start.sh /start.sh
 COPY docker/backend/healthcheck.sh /healthcheck.sh
 RUN chmod +x /start.sh /healthcheck.sh
 
-# Copy application code
-COPY --chown=appuser:appuser backend/app ./app
-COPY --chown=appuser:appuser backend/alembic.ini ./
+# Copy application code and set secure permissions
+COPY backend/app ./app
+COPY backend/alembic.ini ./
+RUN chown -R appuser:appuser ./app ./alembic.ini && \
+    chmod -R 755 ./app && \
+    chmod 644 ./alembic.ini
 
 # Switch to non-root user
 USER appuser
