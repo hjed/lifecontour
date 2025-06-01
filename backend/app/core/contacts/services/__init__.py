@@ -1,0 +1,17 @@
+"""Contacts domain services."""
+
+from .address_validation_service import AddressValidationService
+from .contact_event_service import ContactEventService
+from .contact_history_service import ContactHistoryService
+from .contact_service import ContactService
+from .contact_validation_service import ContactValidationService
+from .tag_hierarchy_service import TagHierarchyService
+
+__all__ = [
+    "AddressValidationService",
+    "ContactEventService",
+    "ContactHistoryService",
+    "ContactService",
+    "ContactValidationService",
+    "TagHierarchyService",
+]

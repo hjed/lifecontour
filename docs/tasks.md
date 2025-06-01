@@ -62,24 +62,29 @@ Tasks are organized by **feature iterations** that deliver end-to-end value incr
 
 **Final Status:** All tests passing, all linting passing, all type checking passing. Project foundation is complete and ready for ITER1-002.
 
-### ITER1-002: Contacts Domain Core 🟡
+### ITER1-002: Contacts Domain Core 🟡 ✅ COMPLETED
 **Description:** Build contacts domain with structured tags and contact methods support (Python backend)
 **Dependencies:** ITER1-001
 **Acceptance Criteria:**
-- [ ] Create PostgreSQL schema (contacts, contact_methods, contact_addresses, contact_notes, tags, contact_tags, contact_history tables)
-- [ ] Write explicit SQL queries using SQLAlchemy Core text() with proper joins
-- [ ] Implement Contact, Tag, ContactMethod, ContactAddress, ContactNote Pydantic models for validation
-- [ ] Create domain entities with business logic (Contact, Tag, ContactMethod, ContactAddress, ContactNote)
-- [ ] Implement repository interfaces with connection injection (ContactRepository, TagRepository, ContactHistoryRepository)
-- [ ] Create ContactService with dependency injection and transaction management
-- [ ] Implement simple dependency injection container with constructor injection pattern
-- [ ] Add comprehensive error handling with custom exceptions and HTTP status codes
-- [ ] Implement business rule validation (email uniqueness, tag limits, primary methods)
-- [ ] Set up contact history tracking for all changes
-- [ ] Create domain events (ContactCreated, ContactUpdated, TagAssigned, etc.)
-- [ ] Set up Alembic database migrations (single migration for all tables)
-- [ ] Write pytest unit tests for domain logic (no database dependencies)
-- [ ] Add database seed data for development and e2e testing (separate datasets)
+- [x] Create PostgreSQL schema (contacts, contact_methods, contact_addresses, contact_notes, tags, contact_tags, contact_history tables)
+- [x] Write explicit SQL queries using SQLAlchemy Core text() with proper joins
+- [x] Implement Contact, Tag, ContactMethod, ContactAddress, ContactNote Pydantic models for validation
+- [x] Create domain entities with business logic (Contact, Tag, ContactMethod, ContactAddress, ContactNote)
+- [x] Implement repository interfaces with connection injection (ContactRepository, TagRepository, ContactHistoryRepository)
+- [x] Create ContactService with dependency injection and transaction management
+- [x] Implement simple dependency injection container with constructor injection pattern
+- [x] Add comprehensive error handling with custom exceptions and HTTP status codes
+- [x] Implement business rule validation (email uniqueness, tag limits, primary methods)
+- [x] Set up contact history tracking for all changes
+- [x] Create domain events (ContactCreated, ContactUpdated, TagAssigned, etc.)
+- [x] Set up Alembic database migrations (single migration for all tables)
+- [x] Write pytest unit tests for domain logic (no database dependencies)
+- [x] Add database seed data for development and e2e testing (separate datasets)
+- [x] **BONUS**: Implement comprehensive integration tests with real PostgreSQL database
+- [x] **BONUS**: Convert ContactMethod.method_type to Python enum for type safety
+- [x] **BONUS**: Add Docker PostgreSQL test infrastructure with transaction isolation
+
+**Final Status:** All domain logic implemented with 165 unit tests and 53 integration tests passing. ContactMethod.method_type converted to type-safe enum. Real database testing infrastructure established.
 
 ### ITER1-003: Contacts REST API �
 **Description:** Create JSON API compliant FastAPI endpoints
@@ -399,7 +404,7 @@ Tasks are organized by **feature iterations** that deliver end-to-end value incr
 Use this section to track progress:
 
 ```
-Iteration 1 (Contact MVP): [x] ITER1-001 [ ] ITER1-002 [ ] ITER1-003 [ ] ITER1-004
+Iteration 1 (Contact MVP): [x] ITER1-001 [x] ITER1-002 [ ] ITER1-003 [ ] ITER1-004
 Iteration 2 (Google Sync): [ ] ITER2-001 [ ] ITER2-002 [ ] ITER2-003
 Iteration 3 (Journal): [ ] ITER3-001 [ ] ITER3-002 [ ] ITER3-003
 Iteration 4 (Calendar): [ ] ITER4-001 [ ] ITER4-002 [ ] ITER4-003

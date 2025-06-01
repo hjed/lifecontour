@@ -60,6 +60,83 @@
 - Test database constraints and relationships
 - Use transactions for test isolation
 
+### Real Database Integration Testing with Docker
+
+#### Docker PostgreSQL Setup
+- Use `docker-compose.test.yml` for test database container
+- Separate test database from development database
+- Automated container lifecycle management in test fixtures
+- Health checks to ensure database readiness before tests
+
+#### Test Isolation Patterns
+- **Transaction Rollback**: Each test runs in isolated transaction
+- **Schema Recreation**: Fresh database schema for each test session
+- **Data Cleanup**: Automatic cleanup between tests
+- **Connection Management**: Proper connection pooling and cleanup
+
+#### Integration Test Structure
+```python
+@pytest.fixture(scope="session")
+async def test_database():
+    """Start test database container and create schema."""
+    # Start Docker container
+    # Wait for database readiness
+    # Create schema
+    yield connection
+    # Cleanup and stop container
+
+@pytest.fixture
+async def clean_database(test_database):
+    """Provide clean database for each test."""
+    async with test_database.begin() as transaction:
+        yield transaction
+        await transaction.rollback()
+```
+
+#### Real Database Benefits
+- **SQL Validation**: Test actual PostgreSQL SQL syntax and behavior
+- **Constraint Testing**: Verify database constraints work correctly
+- **Performance Insights**: Real query performance characteristics
+- **Production Parity**: Closer to actual deployment environment
+
+### Enum Testing Patterns
+
+#### Type-Safe Enum Usage in Tests
+- Use enum values instead of string literals in test data
+- Test enum validation in entity creation
+- Verify enum conversion at repository boundaries
+- Test enum comparisons in business logic
+
+#### Example Enum Test Patterns
+```python
+# ✅ Use enum values in tests
+method = ContactMethod(
+    method_type=MethodType.EMAIL,  # Not "email"
+    value="test@example.com",
+    contact_id=1
+)
+
+# ✅ Test enum validation
+def test_invalid_method_type_raises_error():
+    with pytest.raises(ValueError):
+        ContactMethod(
+            method_type="invalid",  # Should fail validation
+            value="test@example.com",
+            contact_id=1
+        )
+
+# ✅ Test enum comparisons
+def test_get_primary_email():
+    contact = Contact(first_name="John", last_name="Doe")
+    contact.methods.append(ContactMethod(
+        method_type=MethodType.EMAIL,
+        value="john@example.com",
+        contact_id=1,
+        is_primary=True
+    ))
+    assert contact.get_primary_email() == "john@example.com"
+```
+
 ## Mock Utilities Guidelines
 
 ### Service Mocking

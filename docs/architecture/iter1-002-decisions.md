@@ -25,7 +25,8 @@ CREATE TABLE contacts (
 - **Decision**: Separate table for phone and email with primary designation
 - **Structure**: `contact_methods` table with `method_type`, `value`, `label`, `is_primary`
 - **Constraint**: Only one primary method per type per contact
-- **Method Types**: 'email', 'phone' (addresses handled separately)
+- **Method Types**: Python enum `MethodType.EMAIL`, `MethodType.PHONE` (stored as 'email', 'phone' strings in database)
+- **Type Safety**: Enum prevents invalid method types and provides IDE autocomplete
 
 ### Contact Addresses (Structured International Format)
 - **Decision**: Separate table with structured international address format

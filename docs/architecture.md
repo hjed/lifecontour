@@ -129,6 +129,9 @@ Future features, extensibility plans, and long-term vision:
 2. **Single Responsibility**: Each component or adapter has a single, well-defined responsibility
 3. **Cross-Domain Operations**: Handled explicitly in the sync domain
 4. **API Separation**: REST and MCP adapters are separate from domain logic
+5. **Type Safety**: Python enums for domain values, comprehensive type checking
+6. **Real Database Testing**: Integration tests with Docker PostgreSQL for production parity
+7. **Test-Driven Development**: Unit and integration tests guide implementation
 
 ## Quick Start
 

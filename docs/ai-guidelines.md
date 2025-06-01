@@ -55,15 +55,27 @@ Tasks can be found in the [tasks document](./tasks.md).
 ### Multi-Language Testing Approach
 
 1. **Backend Tests (pytest)** - Domain logic, database operations, API endpoints
+   - **Unit Tests**: Fast, isolated tests for business logic
+   - **Integration Tests**: Real database operations with Docker PostgreSQL
 2. **Frontend Tests (React Testing Library)** - Components with shadcn/ui integration
 3. **End-to-End Tests (Playwright)** - Full user workflows and Australian localization
 
 ### Testing Requirements
 
 - **Coverage**: Focus on critical business logic rather than arbitrary percentages
+- **Test-Driven Development**: Write tests first, then implement functionality
+- **Real Database Testing**: Use Docker PostgreSQL for integration tests
 - **Australian Localization**: Test date formats (DD/MM/YYYY)
 - **Accessibility**: ARIA attributes, keyboard navigation, screen reader support
 - **Clear Separation**: Independent test suites for backend and frontend
+
+### Integration Testing Patterns
+
+- **Docker PostgreSQL**: Use `docker-compose.test.yml` for real database testing
+- **Transaction Isolation**: Each test runs in isolated transaction with rollback
+- **Schema Recreation**: Fresh database schema for each test session
+- **Real Constraints**: Test actual database constraints and SQL behavior
+- **Performance Validation**: Verify query performance with real data
 
 _See [Testing Patterns](./examples/testing-patterns.md) for detailed examples._
 
@@ -176,6 +188,8 @@ personal-management-system/
 - **Clear Separation**: Keep domain logic separate from API and database concerns
 - **Use Type Hints**: Always use type hints for better code understanding
 - **Mypy Compliance**: All code must pass mypy type checking without errors
+- **Python Enums**: Use enums for domain values (e.g., `MethodType.EMAIL`) for type safety
+- **Enum Conversion**: Convert between enums and strings at repository boundaries
 
 #### Type Checking Guidelines
 
@@ -185,6 +199,15 @@ personal-management-system/
 - **Unused Parameters**: Prefix with underscore (`_param`) to indicate intentionally unused
 - **Type Ignores**: Use `# type: ignore[specific-error]` sparingly with specific error codes
 - **Pydantic Models**: Use `str` instead of `PostgresDsn` for database URLs to avoid validation complexity
+
+#### Enum Usage Patterns
+
+- **Domain Values**: Use Python enums for fixed domain values (e.g., `MethodType`, `AddressType`)
+- **String Values**: Enum values should be strings for database compatibility
+- **String Conversion**: Implement `__str__()` method to return enum value
+- **Repository Conversion**: Convert enum to string when writing to database, string to enum when reading
+- **Type Safety**: Use enum comparisons in business logic (`method.type == MethodType.EMAIL`)
+- **Validation**: Validate enum values in entity `__post_init__()` methods
 
 #### Business Rules and Validation
 
@@ -199,6 +222,10 @@ personal-management-system/
 - **Queries**: Explicit SQL with SQLAlchemy text() for readability
 - **Migrations**: Alembic with clear, readable SQL migration files
 - **Connections**: Simple connection management, no complex pooling
+- **Enum Storage**: Store enums as strings in database, convert at repository layer
+- **Constraint Handling**: Use database constraints for validation, capture errors in repositories
+- **Transaction Management**: Pass transactions to repositories for business-level control
+- **Integration Testing**: Test real database operations with Docker PostgreSQL
 
 _See [Domain Architecture](./examples/domain-architecture.md) for detailed patterns._
 
@@ -212,6 +239,8 @@ _See [Domain Architecture](./examples/domain-architecture.md) for detailed patte
 - Return result objects: `{ success: boolean, data?: T, error?: string }`
 - Include HTTP status codes in domain exceptions for API layer
 - Provide AI-friendly error messages with context
+- **Exception Chaining**: Use `raise CustomError(...) from e` to preserve original error context
+- **Database Errors**: Catch `IntegrityError` and convert to domain-specific exceptions
 
 _See [Domain Architecture](./architecture/domain-architecture.md) for specific exception patterns._
 
@@ -221,6 +250,9 @@ _See [Domain Architecture](./architecture/domain-architecture.md) for specific e
 - **Connection Management**: Pass connections into repositories for transaction control
 - **Transactions**: Manage at domain/business layer, not repository layer
 - **Security**: Always use parameterized queries to prevent SQL injection
+- **Enum Handling**: Convert enums to strings for database storage, strings to enums when reading
+- **Constraint Validation**: Let database constraints validate data, catch and convert errors
+- **Integration Testing**: Use real PostgreSQL database for testing actual SQL behavior
 
 ### Dependency Injection
 

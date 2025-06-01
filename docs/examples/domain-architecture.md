@@ -8,6 +8,7 @@
 - **Adapters**: Classes supply the domains infrastructure needs such as sql repositories
 - **Value Objects**: Immutable objects representing domain concepts
 - **Domain Events**: Pure Python classes representing business events
+- **Domain Enums**: Python enums for fixed domain values with type safety
 - **No Framework Dependencies**: Domain layer must be framework-agnostic
 
 ### Application Layer Guidelines
@@ -24,6 +25,48 @@
 - **Framework Integration**: Pydantic models for FastAPI, not domain
 - **Dependency Direction**: Infrastructure depends on domain ports, never reverse
 - **Error Translation**: Convert infrastructure errors to domain exceptions
+
+### Domain Enum Patterns
+
+#### Enum Definition Guidelines
+- **String Values**: Use string values for database compatibility
+- **Descriptive Names**: Use clear, descriptive enum member names
+- **String Conversion**: Implement `__str__()` method to return enum value
+- **Domain Location**: Define enums in the same module as related entities
+
+#### Example Enum Implementation
+```python
+from enum import Enum
+
+class MethodType(Enum):
+    """Enumeration for contact method types."""
+
+    EMAIL = "email"
+    PHONE = "phone"
+
+    def __str__(self) -> str:
+        """Return the string value of the enum."""
+        return self.value
+```
+
+#### Repository Conversion Patterns
+- **Writing to Database**: Convert enum to string using `.value` property
+- **Reading from Database**: Convert string to enum using `EnumType(string_value)`
+- **Error Handling**: Handle invalid enum values gracefully
+
+#### Entity Validation Patterns
+```python
+def __post_init__(self) -> None:
+    """Validate entity with enum."""
+    if not isinstance(self.method_type, MethodType):
+        raise ValueError(f"Invalid method type: {self.method_type}")
+
+    # Type-safe business logic
+    if self.method_type == MethodType.EMAIL:
+        Email(self.value)  # Validate email format
+    elif self.method_type == MethodType.PHONE:
+        PhoneNumber(self.value)  # Validate phone format
+```
 
 ### Validation Strategy (Layered)
 - **Domain Layer**: Business rule validation in entities/domain services

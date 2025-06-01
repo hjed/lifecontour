@@ -1,4 +1,5 @@
 # Personal CRM & Journal System
+Contact and Life Management in the Age of AI.
 
 A personal relationship management and journaling system with AI integration through the MCP (Model Context Protocol). Built with Python FastAPI backend, Next.js frontend, and PostgreSQL database.
 

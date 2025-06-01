@@ -1,0 +1,405 @@
+"""Main contact service with transaction management."""
+
+import asyncio
+from typing import Any, cast
+
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncConnection
+
+from app.core.contacts.models.entities import (
+    Contact,
+    ContactAddress,
+    ContactMethod,
+    ContactNote,
+    MethodType,
+)
+from app.core.contacts.models.events import (
+    ContactAddressAdded,
+    ContactCreated,
+    ContactDeleted,
+    ContactMethodAdded,
+    ContactNoteAdded,
+    ContactUpdated,
+    TagAssigned,
+    TagRemoved,
+)
+from app.core.contacts.models.exceptions import (
+    ContactValidationError,
+    DuplicateEmailError,
+    PrimaryAddressConflictError,
+    PrimaryMethodConflictError,
+)
+from app.core.contacts.models.repositories import (
+    ContactEventPublisher,
+    ContactFieldHistoryRepository,
+    ContactRepository,
+    TagRepository,
+)
+from app.core.contacts.services.address_validation_service import (
+    AddressValidationService,
+)
+from app.core.contacts.services.contact_history_service import ContactHistoryService
+from app.core.contacts.services.contact_validation_service import (
+    ContactValidationService,
+)
+from app.core.contacts.services.tag_hierarchy_service import TagHierarchyService
+
+
+class ContactService:
+    """Main contact service with transaction management and retry logic."""
+
+    def __init__(
+        self,
+        contact_repo: ContactRepository,
+        tag_repo: TagRepository,
+        history_repo: ContactFieldHistoryRepository,
+        event_publisher: ContactEventPublisher,
+        address_validation_service: AddressValidationService | None = None,
+        contact_validation_service: ContactValidationService | None = None,
+        history_service: ContactHistoryService | None = None,
+        tag_hierarchy_service: TagHierarchyService | None = None
+    ):
+        self.contact_repo = contact_repo
+        self.tag_repo = tag_repo
+        self.history_repo = history_repo
+        self.event_publisher = event_publisher
+
+        # Initialize services with dependencies
+        self.address_validation = address_validation_service or AddressValidationService()
+        self.contact_validation = contact_validation_service or ContactValidationService(contact_repo)
+        self.history_service = history_service or ContactHistoryService(history_repo)
+        self.tag_hierarchy = tag_hierarchy_service or TagHierarchyService(tag_repo)
+
+    async def _execute_with_retry(self, operation: Any, max_retries: int = 3) -> Any:
+        """Execute operation with retry logic for transaction conflicts."""
+        last_exception = None
+
+        for attempt in range(max_retries):
+            try:
+                return await operation()
+            except IntegrityError as e:
+                last_exception = e
+                if attempt < max_retries - 1:
+                    # Wait before retry with exponential backoff
+                    await asyncio.sleep(0.1 * (2 ** attempt))
+                    continue
+                else:
+                    # Convert to domain exception on final failure
+                    if "unique" in str(e).lower():
+                        if "email" in str(e).lower():
+                            raise DuplicateEmailError("Email already exists", 0) from e
+                        elif "primary" in str(e).lower():
+                            if "method" in str(e).lower():
+                                raise PrimaryMethodConflictError(0, "unknown") from e
+                            elif "address" in str(e).lower():
+                                raise PrimaryAddressConflictError(0) from e
+                    raise
+            except Exception:
+                # Don't retry for non-transient errors
+                raise
+
+        # Should never reach here, but just in case
+        if last_exception:
+            raise last_exception
+
+    async def create_contact(self, contact: Contact, transaction: AsyncConnection) -> Contact:
+        """Create a new contact with transaction management."""
+        async def _create_operation() -> Contact:
+            # Validate email uniqueness if contact has email methods
+            for method in contact.methods:
+                if method.method_type == MethodType.EMAIL:
+                    await self.contact_validation.validate_email_uniqueness(
+                        method.value, transaction
+                    )
+
+            # Validate addresses
+            for address in contact.addresses:
+                await self.address_validation.validate_with_transaction(address, transaction)
+
+            # Save contact
+            saved_contact = await self.contact_repo.save(contact)
+
+            # Ensure contact has ID after save
+            if saved_contact.id is None:
+                raise ContactValidationError("id", "Contact ID is required after save")
+
+            # Record field history (only if there are field changes to track)
+            # For creation, we don't typically track field changes since it's all new data
+
+            # Publish event
+            event = ContactCreated(
+                saved_contact.id,
+                saved_contact.first_name,
+                saved_contact.last_name,
+                transaction=transaction
+            )
+            await self.event_publisher.publish(event)
+
+            return saved_contact
+
+        return cast(Contact, await self._execute_with_retry(_create_operation))
+
+    async def update_contact(
+        self,
+        contact: Contact,
+        changed_fields: dict[str, Any],
+        transaction: AsyncConnection
+    ) -> Contact:
+        """Update an existing contact with transaction management."""
+        if contact.id is None:
+            raise ContactValidationError("id", "Contact ID is required for updates")
+
+        async def _update_operation() -> Contact:
+            # Validate email uniqueness for any email changes
+            for method in contact.methods:
+                if method.method_type == MethodType.EMAIL:
+                    await self.contact_validation.validate_email_uniqueness(
+                        method.value, transaction, exclude_contact_id=contact.id
+                    )
+
+            # Validate addresses
+            for address in contact.addresses:
+                await self.address_validation.validate_with_transaction(address, transaction)
+
+            # Save contact
+            saved_contact = await self.contact_repo.save(contact)
+
+            # Ensure contact has ID after save
+            if saved_contact.id is None:
+                raise ContactValidationError("id", "Contact ID is required after save")
+
+            # Record field history
+            await self.history_service.record_contact_change(
+                saved_contact.id, changed_fields, transaction=transaction
+            )
+
+            # Publish event
+            event = ContactUpdated(saved_contact.id, changed_fields, transaction=transaction)
+            await self.event_publisher.publish(event)
+
+            return saved_contact
+
+        return cast(Contact, await self._execute_with_retry(_update_operation))
+
+    async def delete_contact(self, contact_id: int, transaction: AsyncConnection) -> None:
+        """Delete a contact with transaction management."""
+        async def _delete_operation() -> None:
+            # Validate contact exists
+            await self.contact_validation.validate_contact_exists(contact_id, transaction)
+
+            # Delete contact
+            await self.contact_repo.delete(contact_id)
+
+            # Record field history (deletion doesn't have field changes)
+            # Domain event will capture the deletion action
+
+            # Publish event
+            event = ContactDeleted(contact_id, transaction=transaction)
+            await self.event_publisher.publish(event)
+
+        return cast(None, await self._execute_with_retry(_delete_operation))
+
+    async def assign_tag_to_contact(
+        self,
+        contact_id: int,
+        tag_id: int,
+        transaction: AsyncConnection
+    ) -> None:
+        """Assign a tag to a contact with transaction management."""
+        async def _assign_operation() -> None:
+            # Validate contact exists
+            await self.contact_validation.validate_contact_exists(contact_id, transaction)
+
+            # Validate tag limit
+            await self.contact_validation.validate_contact_tag_limit(contact_id, transaction)
+
+            # Validate tag exists
+            tag = await self.tag_repo.find_by_id(tag_id)
+            if not tag:
+                from app.core.contacts.models.exceptions import TagNotFoundError
+                raise TagNotFoundError(tag_id)
+
+            # Assign tag
+            await self.contact_repo.assign_tag(contact_id, tag_id)
+
+            # Record field history
+            await self.history_service.record_tag_change(
+                contact_id, tag_id, "assigned", transaction=transaction
+            )
+
+            # Publish event
+            event = TagAssigned(contact_id, tag_id, str(tag.name), transaction=transaction)
+            await self.event_publisher.publish(event)
+
+        return cast(None, await self._execute_with_retry(_assign_operation))
+
+    async def remove_tag_from_contact(
+        self,
+        contact_id: int,
+        tag_id: int,
+        transaction: AsyncConnection
+    ) -> None:
+        """Remove a tag from a contact with transaction management."""
+        async def _remove_operation() -> None:
+            # Validate contact exists
+            await self.contact_validation.validate_contact_exists(contact_id, transaction)
+
+            # Get tag for event
+            tag = await self.tag_repo.find_by_id(tag_id)
+            if not tag:
+                from app.core.contacts.models.exceptions import TagNotFoundError
+                raise TagNotFoundError(tag_id)
+
+            # Remove tag
+            await self.contact_repo.remove_tag(contact_id, tag_id)
+
+            # Record field history
+            await self.history_service.record_tag_change(
+                contact_id, tag_id, "removed", transaction=transaction
+            )
+
+            # Publish event
+            event = TagRemoved(contact_id, tag_id, str(tag.name), transaction=transaction)
+            await self.event_publisher.publish(event)
+
+        return cast(None, await self._execute_with_retry(_remove_operation))
+
+    async def add_contact_method(
+        self,
+        contact_id: int,
+        method: ContactMethod,
+        transaction: AsyncConnection
+    ) -> ContactMethod:
+        """Add a contact method with transaction management."""
+        async def _add_method_operation() -> ContactMethod:
+            # Validate contact exists
+            await self.contact_validation.validate_contact_exists(contact_id, transaction)
+
+            # Validate email uniqueness if it's an email
+            if method.method_type == MethodType.EMAIL:
+                await self.contact_validation.validate_email_uniqueness(
+                    method.value, transaction
+                )
+
+            # Validate primary method constraints
+            if method.is_primary:
+                await self.contact_validation.validate_primary_method(
+                    contact_id, method.method_type, transaction
+                )
+
+            # Add method
+            saved_method = await self.contact_repo.add_method(contact_id, method)
+
+            # Ensure method has ID after save
+            if saved_method.id is None:
+                raise ContactValidationError("id", "Method ID is required after save")
+
+            # Record field history (creation doesn't have field changes)
+            # Domain event will capture the addition action
+
+            # Publish event
+            event = ContactMethodAdded(
+                contact_id, saved_method.id, method.method_type.value, method.value,
+                transaction=transaction
+            )
+            await self.event_publisher.publish(event)
+
+            return saved_method
+
+        return cast(ContactMethod, await self._execute_with_retry(_add_method_operation))
+
+    async def add_contact_address(
+        self,
+        contact_id: int,
+        address: ContactAddress,
+        transaction: AsyncConnection
+    ) -> ContactAddress:
+        """Add a contact address with transaction management."""
+        async def _add_address_operation() -> ContactAddress:
+            # Validate contact exists
+            await self.contact_validation.validate_contact_exists(contact_id, transaction)
+
+            # Validate address format
+            await self.address_validation.validate_with_transaction(address, transaction)
+
+            # Validate primary address constraints
+            if address.is_primary:
+                await self.contact_validation.validate_primary_address(contact_id, transaction)
+
+            # Add address
+            saved_address = await self.contact_repo.add_address(contact_id, address)
+
+            # Ensure address has ID after save
+            if saved_address.id is None:
+                raise ContactValidationError("id", "Address ID is required after save")
+
+            # Record field history (creation doesn't have field changes)
+            # Domain event will capture the addition action
+
+            # Publish event
+            event = ContactAddressAdded(
+                contact_id, saved_address.id, address.street_line_1, address.country_code,
+                transaction=transaction
+            )
+            await self.event_publisher.publish(event)
+
+            return saved_address
+
+        return cast(ContactAddress, await self._execute_with_retry(_add_address_operation))
+
+    async def add_contact_note(
+        self,
+        contact_id: int,
+        note: ContactNote,
+        transaction: AsyncConnection
+    ) -> ContactNote:
+        """Add a contact note with transaction management."""
+        async def _add_note_operation() -> ContactNote:
+            # Validate contact exists
+            await self.contact_validation.validate_contact_exists(contact_id, transaction)
+
+            # Add note
+            saved_note = await self.contact_repo.add_note(contact_id, note)
+
+            # Ensure note has ID after save
+            if saved_note.id is None:
+                raise ContactValidationError("id", "Note ID is required after save")
+
+            # Record field history (creation doesn't have field changes)
+            # Domain event will capture the addition action
+
+            # Publish event
+            event = ContactNoteAdded(
+                contact_id, saved_note.id, note.content,
+                transaction=transaction
+            )
+            await self.event_publisher.publish(event)
+
+            return saved_note
+
+        return cast(ContactNote, await self._execute_with_retry(_add_note_operation))
+
+    # Read operations (no transaction management needed)
+    async def get_contact_by_id(self, contact_id: int) -> Contact | None:
+        """Get a contact by ID."""
+        return await self.contact_repo.find_by_id(contact_id)
+
+    async def get_contact_by_email(self, email: str) -> Contact | None:
+        """Get a contact by email."""
+        return await self.contact_repo.find_by_email(email)
+
+    async def search_contacts(self, query: str, limit: int = 50) -> list[Contact]:
+        """Search contacts."""
+        return await self.contact_repo.search(query, limit)
+
+    async def get_all_contacts(self, limit: int = 100, offset: int = 0) -> list[Contact]:
+        """Get all contacts with pagination."""
+        return await self.contact_repo.get_all(limit, offset)
+
+    async def get_contacts_by_tag(self, tag_id: int) -> list[Contact]:
+        """Get contacts by tag."""
+        return await self.contact_repo.get_contacts_by_tag(tag_id)
+
+    async def get_contact_history(self, contact_id: int, limit: int = 50) -> list[Any]:
+        """Get contact history."""
+        return await self.history_service.get_contact_history(contact_id, limit)

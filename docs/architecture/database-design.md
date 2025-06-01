@@ -40,6 +40,8 @@ CREATE TABLE contact_methods (
 );
 ```
 
+**Note:** In the application layer, `method_type` is represented as a Python enum (`MethodType.EMAIL`, `MethodType.PHONE`) for type safety, but stored as strings in the database.
+
 #### Contact Addresses Table
 ```sql
 CREATE TABLE contact_addresses (

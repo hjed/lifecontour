@@ -27,6 +27,8 @@ dependencies = [
     "opentelemetry-instrumentation-fastapi>=0.42b0",
     "opentelemetry-instrumentation-sqlalchemy>=0.42b0",
     "opentelemetry-instrumentation-httpx>=0.42b0",
+    "python-stdnum>=1.20",
+    "pycountry>=23.12.11",
 ]
 
 [project.optional-dependencies]
@@ -35,6 +37,7 @@ dev = [
     "pytest-asyncio>=0.21.0",
     "pytest-cov>=4.1.0",
     "httpx>=0.25.0",  # for testing
+    "asyncpg>=0.29.0",  # for async PostgreSQL testing
     "ruff>=0.1.0",
     "black>=23.0.0",
     "mypy>=1.7.0",
@@ -106,6 +109,8 @@ strict_equality = true
 module = [
     "alembic.*",
     "psycopg2.*",
+    "stdnum.*",
+    "pycountry.*",
 ]
 ignore_missing_imports = true
 
@@ -116,6 +121,12 @@ testpaths = ["tests"]
 python_files = ["test_*.py", "*_test.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+filterwarnings = [
+    "ignore::pytest.PytestDeprecationWarning",
+    "ignore::DeprecationWarning",
+]
 markers = [
     "unit: marks tests as unit tests",
     "integration: marks tests as integration tests",
