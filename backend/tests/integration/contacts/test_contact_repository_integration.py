@@ -16,6 +16,7 @@ from app.core.contacts.models.exceptions import (
 )
 
 
+@pytest.mark.integration
 class TestContactRepositoryIntegration:
     """Integration tests for ContactRepository with real database."""
 

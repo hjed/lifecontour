@@ -7,6 +7,7 @@ from app.core.contacts.adapters.sql import SqlContactEditEventRepository
 from app.core.contacts.models.repositories import ContactEditEvent
 
 
+@pytest.mark.integration
 class TestContactEditEventRepositoryIntegration:
     """Integration tests for ContactEditEventRepository with real database."""
 

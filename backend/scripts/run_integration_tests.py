@@ -7,7 +7,11 @@ import time
 from pathlib import Path
 
 
-def run_command(cmd, cwd=None, check=True):
+def run_command(
+    cmd: list[str],
+    cwd: Path | None = None,
+    check: bool = True
+) -> subprocess.CompletedProcess[str] | subprocess.CalledProcessError:
     """Run a command and return the result."""
     print(f"Running: {' '.join(cmd)}")
     try:
@@ -26,7 +30,7 @@ def run_command(cmd, cwd=None, check=True):
         return e
 
 
-def check_docker():
+def check_docker() -> bool:
     """Check if Docker is available."""
     try:
         subprocess.run(["docker", "--version"], check=True, capture_output=True)
@@ -41,7 +45,7 @@ def check_docker():
         return False
 
 
-def start_test_database():
+def start_test_database() -> bool:
     """Start the test database container."""
     print("Starting test database...")
 
@@ -92,7 +96,7 @@ def start_test_database():
     return False
 
 
-def stop_test_database():
+def stop_test_database() -> None:
     """Stop the test database container."""
     print("Stopping test database...")
     run_command(
@@ -102,7 +106,7 @@ def stop_test_database():
     print("✓ Test database stopped")
 
 
-def run_tests():
+def run_tests() -> bool:
     """Run the integration tests."""
     print("Running integration tests...")
 
@@ -121,7 +125,7 @@ def run_tests():
     return result.returncode == 0
 
 
-def main():
+def main() -> None:
     """Main function."""
     print("🧪 Integration Test Runner")
     print("=" * 50)

@@ -90,7 +90,7 @@ class TestContactEventService:
     ):
         """Test getting events for a contact with custom limit."""
         # Arrange
-        expected_events = []
+        expected_events: list[ContactEditEvent] = []
         mock_event_repo.get_events_for_contact.return_value = expected_events
 
         # Act
@@ -139,7 +139,7 @@ class TestContactEventService:
     ):
         """Test getting events by type with custom limit."""
         # Arrange
-        expected_events = []
+        expected_events: list[ContactEditEvent] = []
         mock_event_repo.get_events_by_type.return_value = expected_events
 
         # Act

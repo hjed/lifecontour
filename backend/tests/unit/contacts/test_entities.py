@@ -15,6 +15,7 @@ from app.core.contacts.models.entities import (
 from app.core.contacts.models.value_objects import TagName
 
 
+@pytest.mark.unit
 class TestTag:
     """Test Tag entity."""
 
@@ -62,6 +63,7 @@ class TestTag:
             Tag(name=TagName("work"), color="#FF00")
 
 
+@pytest.mark.unit
 class TestContactMethod:
     """Test ContactMethod entity."""
 
@@ -97,7 +99,7 @@ class TestContactMethod:
     def test_invalid_method_type_raises_error(self):
         """Test invalid method type raises ValueError."""
         with pytest.raises(ValueError, match="Invalid method type: address"):
-            ContactMethod(method_type="address", value="123 Main St", contact_id=1)
+            ContactMethod(method_type="address", value="123 Main St", contact_id=1)  # type: ignore[arg-type]
 
     def test_invalid_email_value_raises_error(self):
         """Test invalid email value raises ValueError."""
@@ -126,6 +128,7 @@ class TestContactMethod:
             )
 
 
+@pytest.mark.unit
 class TestContactAddress:
     """Test ContactAddress entity."""
 
@@ -210,6 +213,7 @@ class TestContactAddress:
         assert value_object.country_code.value == "AU"
 
 
+@pytest.mark.unit
 class TestContactNote:
     """Test ContactNote entity."""
 
@@ -231,6 +235,7 @@ class TestContactNote:
             ContactNote(content="   ", contact_id=1)
 
 
+@pytest.mark.unit
 class TestContact:
     """Test Contact entity."""
 

@@ -7,6 +7,7 @@ from app.core.contacts.adapters.sql import SqlContactFieldHistoryRepository
 from app.core.contacts.models.repositories import ContactFieldHistoryEntry
 
 
+@pytest.mark.integration
 class TestContactFieldHistoryRepositoryIntegration:
     """Integration tests for ContactFieldHistoryRepository with real database."""
 

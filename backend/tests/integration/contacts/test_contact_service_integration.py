@@ -27,6 +27,7 @@ from app.core.contacts.models.value_objects import TagName
 from app.core.contacts.services import ContactService
 
 
+@pytest.mark.integration
 class TestContactServiceIntegration:
     """Integration tests for ContactService with real database."""
 

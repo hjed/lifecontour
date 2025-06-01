@@ -60,6 +60,7 @@ def start_test_database():
                         "postgres",
                     ],
                     capture_output=True,
+                    text=True,
                     check=True,
                 )
                 if result.returncode == 0:

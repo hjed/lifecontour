@@ -4,9 +4,11 @@ Unit tests for health check endpoints.
 Tests the basic health check functionality and API responses.
 """
 
+import pytest
 from fastapi.testclient import TestClient
 
 
+@pytest.mark.unit
 def test_health_check(client: TestClient) -> None:
     """Test basic health check endpoint."""
     response = client.get("/api/health")
@@ -20,6 +22,7 @@ def test_health_check(client: TestClient) -> None:
     assert "uptime" in data
 
 
+@pytest.mark.unit
 def test_liveness_check(client: TestClient) -> None:
     """Test Kubernetes liveness probe."""
     response = client.get("/api/health/live")
@@ -30,6 +33,7 @@ def test_liveness_check(client: TestClient) -> None:
     assert data["status"] == "alive"
 
 
+@pytest.mark.unit
 def test_readiness_check(client: TestClient) -> None:
     """Test Kubernetes readiness probe."""
     response = client.get("/api/health/ready")

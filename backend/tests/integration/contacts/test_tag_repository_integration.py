@@ -9,6 +9,7 @@ from app.core.contacts.models.exceptions import DuplicateTagNameError, TagNotFou
 from app.core.contacts.models.value_objects import TagName
 
 
+@pytest.mark.integration
 class TestTagRepositoryIntegration:
     """Integration tests for TagRepository with real database."""
 
