@@ -35,6 +35,13 @@ This document outlines the technology choices optimized for AI assistant underst
 - **Google APIs**: google-api-python-client (official SDK)
 - **MCP Protocol**: Official Python MCP SDK
 - **Immich Integration**: Direct REST API calls with requests
+- **Search Engine**: MeiliSearch with official Python SDK (meilisearch-python)
+
+### Search and Event Processing
+- **Search Engine**: MeiliSearch 1.2+ (fast, typo-tolerant search)
+- **Search Client**: meilisearch-python (official Python SDK)
+- **Event Publishing**: Transactional outbox pattern with FastAPI background tasks
+- **Event Storage**: PostgreSQL outbox table (same database as main data)
 
 ### Logging and Observability
 - **Logging**: Python standard library logging (simple, clear)
@@ -122,6 +129,7 @@ personal-management-system/
 - **Backend Container**: Python FastAPI with UV
 - **Frontend Container**: Next.js with pnpm
 - **Database Container**: PostgreSQL 15+
+- **Search Container**: MeiliSearch 1.2+
 - **Reverse Proxy**: nginx for routing
 
 ## Testing Strategy
@@ -156,6 +164,7 @@ personal-management-system/
 - **Backend**: Python FastAPI with UV dependencies
 - **Frontend**: Next.js with pnpm dependencies
 - **Database**: PostgreSQL 15+ with persistent volumes
+- **Search**: MeiliSearch 1.2+ with persistent volumes
 - **Proxy**: nginx for routing and SSL termination
 
 ### Development Environment
@@ -175,6 +184,8 @@ personal-management-system/
 | **UI Components** | shadcn/ui | Excellent AI support |
 | **Package Managers** | UV (backend), pnpm (frontend) | Clear separation |
 | **Database** | PostgreSQL | Production-ready, clear schemas |
+| **Search Engine** | MeiliSearch | Fast, typo-tolerant, simple API |
+| **Event Processing** | Outbox Pattern | Transactional safety, simple patterns |
 
 ### Core AI Benefits
 1. **Clear Language Separation**: Python backend, TypeScript frontend

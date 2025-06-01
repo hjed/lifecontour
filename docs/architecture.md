@@ -12,6 +12,8 @@ The Personal CRM & Journal System is a Python FastAPI backend with Next.js front
 - **Standard Protocols**: JSON API for REST, CardDAV/CalDAV for interoperability
 - **Smart Album Integration**: Link Immich albums to journal entries and events
 - **Name-Based Matching**: Link contacts to Immich people by name or manual confirmation
+- **Global Search**: Fast, typo-tolerant search across all entities with MeiliSearch
+- **Transactional Events**: Reliable event publishing with outbox pattern
 - **Clear Language Separation**: Python backend, TypeScript frontend for AI clarity
 - **Agile Development**: Feature-complete iterations delivering incremental value
 - **Proxy-Ready**: Support deployment behind nginx reverse proxy
@@ -93,7 +95,7 @@ Future features, extensibility plans, and long-term vision:
     │  │ ┌─────────┐ │ │ ┌─────────┐ │ │ ┌─────────┐ │ │┌────────┐ │  │
     │  │ │Business │ │ │ │Business │ │ │ │Business │ │ ││Business│ │  │
     │  │ │ Logic   │ │ │ │ Logic   │ │ │ │ Logic   │ │ ││ Logic  │ │  │
-    │  │ │+ Tags   │ │ │ │+ Albums │ │ │ │+ Albums │ │ ││+ Albums│ │  │
+    │  │ │+ Events │ │ │ │+ Events │ │ │ │+ Events │ │ ││+ Events│ │  │
     │  │ └─────────┘ │ │ └─────────┘ │ │ └─────────┘ │ │└────────┘ │  │
     │  │ ┌─────────┐ │ │ ┌─────────┐ │ │ ┌─────────┐ │ │┌────────┐ │  │
     │  │ │Adapters │ │ │ │Adapters │ │ │ │Adapters │ │ ││Adapters│ │  │
@@ -121,6 +123,21 @@ Future features, extensibility plans, and long-term vision:
     │  │ └─────────────┘ │              │ └─────────────────────────┘ │ │
     │  └─────────────────┘              └─────────────────────────────┘ │
     └─────────────────────────────────────────────────────────────────┘
+                                    │
+    ┌─────────────────────────────────────────────────────────────────┐
+    │                     Data & Search Layer                         │
+    │  ┌─────────────────┐ ┌─────────────────┐ ┌─────────────────────┐ │
+    │  │   PostgreSQL    │ │  Event Outbox   │ │    MeiliSearch      │ │
+    │  │                 │ │   Processing    │ │                     │ │
+    │  │ ┌─────────────┐ │ │ ┌─────────────┐ │ │ ┌─────────────────┐ │ │
+    │  │ │Main Tables  │ │ │ │Background   │ │ │ │Search Indexes   │ │ │
+    │  │ │Outbox Table │ │ │ │Tasks        │ │ │ │- contacts_index │ │ │
+    │  │ │Event Store  │ │ │ │Event Sync   │ │ │ │- global_search  │ │ │
+    │  │ └─────────────┘ │ │ └─────────────┘ │ │ │- journal_index  │ │ │
+    │  └─────────────────┘ └─────────────────┘ │ │- calendar_index │ │ │
+    │                                          │ └─────────────────┘ │ │
+    │                                          └─────────────────────┘ │
+    └─────────────────────────────────────────────────────────────────┘
 ```
 
 ## Key Architectural Principles
@@ -132,6 +149,8 @@ Future features, extensibility plans, and long-term vision:
 5. **Type Safety**: Python enums for domain values, comprehensive type checking
 6. **Real Database Testing**: Integration tests with Docker PostgreSQL for production parity
 7. **Test-Driven Development**: Unit and integration tests guide implementation
+8. **Transactional Events**: Domain events stored in outbox table within same transaction as main data
+9. **Search-First Design**: All entities indexed in MeiliSearch for fast, typo-tolerant search
 
 ## Quick Start
 

@@ -6,6 +6,7 @@ This document covers deployment architecture, infrastructure setup, containeriza
 
 ### Development Environment
 - PostgreSQL database in Docker container
+- MeiliSearch search engine in Docker container
 - Python backend with UV dependency management
 - Next.js frontend with pnpm
 - Environment-based configuration
@@ -15,9 +16,10 @@ This document covers deployment architecture, infrastructure setup, containeriza
 
 ### Production Environment
 - **Reverse Proxy**: Nginx proxy handling SSL termination and load balancing
-- **Multi-Container Deployment**: Separate containers for backend, frontend, database
+- **Multi-Container Deployment**: Separate containers for backend, frontend, database, search
 - **Orchestration**: Docker Compose or Kubernetes
 - **Database**: PostgreSQL with persistent volume mounts and backups
+- **Search Engine**: MeiliSearch with persistent volume mounts
 - **Configuration**: Environment variables and secrets management
 - **Health Checks**: Built-in health endpoints for all services
 - **Monitoring**: Prometheus metrics and log aggregation
@@ -116,6 +118,16 @@ services:
     volumes:
       - postgres_dev_data:/var/lib/postgresql/data
 
+  meilisearch:
+    image: getmeili/meilisearch:v1.2
+    environment:
+      MEILI_MASTER_KEY: dev_master_key
+      MEILI_ENV: development
+    ports:
+      - "7700:7700"
+    volumes:
+      - meilisearch_dev_data:/meili_data
+
   backend:
     build:
       context: ./backend
@@ -126,9 +138,12 @@ services:
       - ./backend:/app
     environment:
       - DATABASE_URL=postgresql://dev_user:dev_password@postgres:5432/personal_crm_dev
+      - MEILISEARCH_URL=http://meilisearch:7700
+      - MEILISEARCH_MASTER_KEY=dev_master_key
       - ENVIRONMENT=development
     depends_on:
       - postgres
+      - meilisearch
     command: uv run uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 
   frontend:
@@ -158,6 +173,7 @@ services:
 
 volumes:
   postgres_dev_data:
+  meilisearch_dev_data:
 ```
 
 #### Production (docker-compose.prod.yml)
@@ -180,6 +196,20 @@ services:
       timeout: 10s
       retries: 3
 
+  meilisearch:
+    image: getmeili/meilisearch:v1.2
+    restart: unless-stopped
+    environment:
+      MEILI_MASTER_KEY: ${MEILISEARCH_MASTER_KEY}
+      MEILI_ENV: production
+    volumes:
+      - meilisearch_prod_data:/meili_data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:7700/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
   backend:
     build:
       context: ./backend
@@ -187,6 +217,8 @@ services:
     restart: unless-stopped
     environment:
       - DATABASE_URL=postgresql://${DB_USER}:${DB_PASSWORD}@postgres:5432/personal_crm_prod
+      - MEILISEARCH_URL=http://meilisearch:7700
+      - MEILISEARCH_MASTER_KEY=${MEILISEARCH_MASTER_KEY}
       - ENVIRONMENT=production
       - MCP_PORT=3001
       - MCP_HOST=0.0.0.0
@@ -194,6 +226,7 @@ services:
       - backend-logs:/app/logs
     depends_on:
       - postgres
+      - meilisearch
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s
@@ -251,6 +284,7 @@ services:
 
 volumes:
   postgres_prod_data:
+  meilisearch_prod_data:
   backend-logs:
   nginx-logs:
   backup-storage:
@@ -459,6 +493,10 @@ DEBUG=false
 JWT_SECRET=your-jwt-secret-key
 GOOGLE_CLIENT_ID=your-google-client-id
 GOOGLE_CLIENT_SECRET=your-google-client-secret
+
+# Search Engine
+MEILISEARCH_URL=http://meilisearch:7700
+MEILISEARCH_MASTER_KEY=your-meilisearch-master-key
 
 # External Services
 IMMICH_API_URL=https://your-immich-instance.com

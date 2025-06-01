@@ -84,36 +84,46 @@ Tasks are organized by **feature iterations** that deliver end-to-end value incr
 - [x] **BONUS**: Convert ContactMethod.method_type to Python enum for type safety
 - [x] **BONUS**: Add Docker PostgreSQL test infrastructure with transaction isolation
 
-**Final Status:** All domain logic implemented with 165 unit tests and 53 integration tests passing. ContactMethod.method_type converted to type-safe enum. Real database testing infrastructure established.
+**Final Status:** All domain logic implemented with 112 unit tests and 53 integration tests passing. ContactMethod.method_type converted to type-safe enum. Real database testing infrastructure established. All linting errors resolved (ruff passing).
 
-### ITER1-003: Contacts REST API �
-**Description:** Create JSON API compliant FastAPI endpoints
+### ITER1-003: Contacts REST API with Search �
+**Description:** Create JSON API compliant FastAPI endpoints with MeiliSearch integration
 **Dependencies:** ITER1-002
 **Acceptance Criteria:**
+- [ ] Set up MeiliSearch Docker container and Python SDK integration
+- [ ] Implement transactional outbox pattern for event publishing
+- [ ] Create shared outbox event publisher using existing domain events
+- [ ] Set up FastAPI background task for outbox processing (every 10 seconds)
 - [ ] Create FastAPI ContactController with automatic OpenAPI docs
 - [ ] Implement CRUD operations (GET, POST, PUT, DELETE)
+- [ ] Add contact search endpoints using MeiliSearch (/api/contacts/search)
+- [ ] Add global search endpoint across all entities (/api/search)
 - [ ] Add tag management endpoints (assign/remove tags)
 - [ ] Implement input validation using Pydantic models
 - [ ] Add basic authentication middleware
 - [ ] Configure CORS for frontend integration
-- [ ] Add comprehensive pytest integration tests for all endpoints
+- [ ] Add comprehensive pytest integration tests for all endpoints including search
 - [ ] Generate automatic Swagger documentation
+- [ ] Add MeiliSearch health checks to system health endpoint
 
-### ITER1-004: Basic Contact UI �
-**Description:** Create Next.js frontend for contact management
+### ITER1-004: Contact UI with Search �
+**Description:** Create Next.js frontend for contact management with search capabilities
 **Dependencies:** ITER1-003
 **Acceptance Criteria:**
 - [ ] Set up Next.js with TypeScript, Tailwind CSS, and shadcn/ui
 - [ ] Configure API client for FastAPI backend communication
 - [ ] Implement Australian English interface (en-AU locale, DD/MM/YYYY dates)
-- [ ] Create contact list view with search and filtering
+- [ ] Create contact list view with MeiliSearch-powered search and filtering
+- [ ] Add global search component for searching across all entities
 - [ ] Implement contact creation and editing forms with validation
 - [ ] Add tag management UI with colour coding
+- [ ] Implement search result highlighting and typo tolerance display
+- [ ] Add search filters (by tags, date ranges, entity types)
 - [ ] Implement responsive design with mobile-first approach
 - [ ] Add error handling and loading states
-- [ ] Write React Testing Library tests for components
+- [ ] Write React Testing Library tests for components including search
 - [ ] Add comprehensive end-to-end tests with Playwright
-- [ ] Deploy working MVP with Docker Compose
+- [ ] Deploy working MVP with Docker Compose including MeiliSearch
 
 ---
 
@@ -166,38 +176,42 @@ Tasks are organized by **feature iterations** that deliver end-to-end value incr
 ## Iteration 3: Basic Journal System
 
 ### ITER3-001: Journal Domain Core 🟡
-**Description:** Build journal domain with album linking support
+**Description:** Build journal domain with album linking support and event publishing
 **Dependencies:** ITER2-003
 **Acceptance Criteria:**
 - [ ] Create journal database schema (journal_entries table with album references)
 - [ ] Implement JournalEntry domain entity with business logic
-- [ ] Create JournalRepository adapter using Drizzle ORM
+- [ ] Create JournalRepository adapter using SQLAlchemy Core
 - [ ] Implement JournalApplicationService with use cases (create, update, link albums)
 - [ ] Add mood tracking and sentiment analysis
-- [ ] Create domain events (JournalEntryCreated, AlbumLinked)
+- [ ] Create domain events using existing DomainEvent base class (JournalEntryCreated, JournalEntryUpdated, JournalEntryDeleted, AlbumLinked)
+- [ ] Integrate with shared outbox event publisher for MeiliSearch synchronization
 - [ ] Add OpenTelemetry instrumentation for journal operations
 - [ ] Write unit tests for journal domain logic
 
-### ITER3-002: Journal REST API 🟡
-**Description:** Create JSON API endpoints for journal management
+### ITER3-002: Journal REST API with Search 🟡
+**Description:** Create JSON API endpoints for journal management with search capabilities
 **Dependencies:** ITER3-001
 **Acceptance Criteria:**
 - [ ] Create JournalController with JSON API compliant endpoints
 - [ ] Implement CRUD operations for journal entries
 - [ ] Add mood tracking endpoints
-- [ ] Implement search and filtering capabilities
+- [ ] Implement MeiliSearch-powered search and filtering capabilities (/api/journal/search)
+- [ ] Add journal entries to global search index
 - [ ] Add album linking endpoints
 - [ ] Generate OpenAPI documentation for journal endpoints
-- [ ] Add integration tests for journal API
+- [ ] Add integration tests for journal API including search functionality
 
-### ITER3-003: Journal UI 🔴
-**Description:** Build journal management interface
+### ITER3-003: Journal UI with Search 🔴
+**Description:** Build journal management interface with search capabilities
 **Dependencies:** ITER3-002
 **Acceptance Criteria:**
-- [ ] Create journal entry list view with search and filtering
+- [ ] Create journal entry list view with MeiliSearch-powered search and filtering
 - [ ] Implement rich text journal entry editor
 - [ ] Add mood tracking interface
 - [ ] Create journal entry detail view
+- [ ] Add search result highlighting for journal content
+- [ ] Add mood-based filtering and search
 - [ ] Add album linking UI (when albums are available)
 - [ ] Implement journal analytics dashboard
 - [ ] Add export functionality for journal entries
@@ -207,15 +221,16 @@ Tasks are organized by **feature iterations** that deliver end-to-end value incr
 ## Iteration 4: Calendar Integration
 
 ### ITER4-001: Calendar Domain Core 🟡
-**Description:** Build calendar domain with Google Calendar integration
+**Description:** Build calendar domain with Google Calendar integration and event publishing
 **Dependencies:** ITER3-003
 **Acceptance Criteria:**
 - [ ] Create calendar database schema (events table with album references)
 - [ ] Implement Event domain entity with business logic
-- [ ] Create EventRepository adapter using Drizzle ORM
+- [ ] Create EventRepository adapter using SQLAlchemy Core
 - [ ] Implement CalendarApplicationService with use cases
 - [ ] Add recurring event support and time zone handling
-- [ ] Create domain events (EventCreated, AlbumLinked)
+- [ ] Create domain events using existing DomainEvent base class (EventCreated, EventUpdated, EventDeleted, AlbumLinked)
+- [ ] Integrate with shared outbox event publisher for MeiliSearch synchronization
 - [ ] Add OpenTelemetry instrumentation for calendar operations
 - [ ] Write unit tests for calendar domain logic
 
@@ -232,18 +247,21 @@ Tasks are organized by **feature iterations** that deliver end-to-end value incr
 - [ ] Add webhook support for real-time sync
 - [ ] Implement calendar-specific sync state management
 
-### ITER4-003: Calendar API and UI 🔴
-**Description:** Build calendar REST API and user interface
+### ITER4-003: Calendar API and UI with Search 🔴
+**Description:** Build calendar REST API and user interface with search capabilities
 **Dependencies:** ITER4-002
 **Acceptance Criteria:**
 - [ ] Create CalendarController with JSON API endpoints
+- [ ] Add MeiliSearch-powered calendar event search (/api/calendar/search)
+- [ ] Add calendar events to global search index
 - [ ] Implement calendar view components (month, week, day)
 - [ ] Add event creation and editing interface
 - [ ] Implement Google Calendar sync UI
-- [ ] Add meeting preparation features
+- [ ] Add meeting preparation features with search integration
 - [ ] Create calendar analytics views
 - [ ] Add album linking for events
 - [ ] Implement calendar export functionality
+- [ ] Add search and filtering within calendar views
 
 ---
 
@@ -304,18 +322,20 @@ Tasks are organized by **feature iterations** that deliver end-to-end value incr
 - [ ] Document MCP server setup and configuration
 - [ ] Implement health checks for MCP server
 
-### ITER6-002: MCP Tools Implementation 🔴
-**Description:** Create MCP tools for all domains (contacts, journal, calendar, photos)
+### ITER6-002: MCP Tools Implementation with Search 🔴
+**Description:** Create MCP tools for all domains with comprehensive search capabilities
 **Dependencies:** ITER6-001
 **Acceptance Criteria:**
-- [ ] Implement contact search, creation, and management tools
-- [ ] Create journal entry tools with mood tracking and search
-- [ ] Add calendar event tools with meeting preparation
-- [ ] Implement photo album and person linking tools
+- [ ] Implement contact search, creation, and management tools using MeiliSearch
+- [ ] Create global search tool across all entities (contacts, journal, calendar, photos)
+- [ ] Add advanced search tools with filters, facets, and typo tolerance
+- [ ] Create journal entry tools with mood tracking and content search
+- [ ] Add calendar event tools with meeting preparation and event search
+- [ ] Implement photo album and person linking tools with search
 - [ ] Create cross-domain analytics and reporting tools
 - [ ] Add data export and import tools via MCP
-- [ ] Implement relationship analysis and insights tools
-- [ ] Create comprehensive MCP tool documentation
+- [ ] Implement relationship analysis and insights tools using search data
+- [ ] Create comprehensive MCP tool documentation including search capabilities
 
 ### ITER6-003: MCP Integration Testing 🟡
 **Description:** Test and validate MCP integration with AI assistants
@@ -414,10 +434,10 @@ Iteration 7 (Advanced): [ ] ITER7-001 [ ] ITER7-002 [ ] ITER7-003
 ```
 
 ### Value Delivery Timeline
-- **Iteration 1**: Working contact management system with tags
+- **Iteration 1**: Working contact management system with global search and transactional events
 - **Iteration 2**: Google Contacts sync with bidirectional tag sync
-- **Iteration 3**: Journal system with mood tracking
-- **Iteration 4**: Calendar integration with Google Calendar sync
-- **Iteration 5**: Photo albums with person-contact linking
-- **Iteration 6**: AI integration via MCP protocol
+- **Iteration 3**: Journal system with mood tracking and search capabilities
+- **Iteration 4**: Calendar integration with Google Calendar sync and search
+- **Iteration 5**: Photo albums with person-contact linking and search
+- **Iteration 6**: AI integration via MCP protocol with comprehensive search tools
 - **Iteration 7**: Production-ready with advanced protocols

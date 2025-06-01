@@ -112,6 +112,27 @@ CREATE TABLE contact_history (
 );
 ```
 
+#### Event Outbox Table (Transactional Event Publishing)
+```sql
+CREATE TABLE event_outbox (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    event_id VARCHAR(255) NOT NULL UNIQUE,
+    event_type VARCHAR(100) NOT NULL,
+    aggregate_id INTEGER NOT NULL,
+    aggregate_type VARCHAR(50) NOT NULL, -- 'contact', 'journal', 'calendar', etc.
+    event_data JSONB NOT NULL,
+    occurred_at TIMESTAMP WITH TIME ZONE NOT NULL,
+    processed_at TIMESTAMP WITH TIME ZONE NULL,
+    retry_count INTEGER DEFAULT 0,
+    error_message TEXT NULL,
+    correlation_id VARCHAR(255) NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+```
+
+**Note:** The outbox table stores domain events from all domains (contacts, journal, calendar, etc.) for transactional publishing to MeiliSearch and other external systems.
+
 #### Basic Indexing (Iteration 1)
 ```sql
 -- Essential indexes for contact operations
@@ -147,6 +168,12 @@ CREATE INDEX idx_contact_tags_tag_id ON contact_tags(tag_id);
 -- History indexes
 CREATE INDEX idx_contact_history_entity ON contact_history(entity_type, entity_id);
 CREATE INDEX idx_contact_history_created_at ON contact_history(created_at);
+
+-- Event outbox indexes
+CREATE INDEX idx_event_outbox_unprocessed ON event_outbox(processed_at) WHERE processed_at IS NULL;
+CREATE INDEX idx_event_outbox_aggregate ON event_outbox(aggregate_type, aggregate_id);
+CREATE INDEX idx_event_outbox_occurred_at ON event_outbox(occurred_at);
+CREATE INDEX idx_event_outbox_retry_count ON event_outbox(retry_count) WHERE processed_at IS NULL;
 ```
 
 ## Future Tables (Later Iterations)
@@ -226,6 +253,72 @@ CREATE TABLE contact_interactions (
     metadata JSONB DEFAULT '{}',
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
+```
+
+## MeiliSearch Integration
+
+### Search Engine Architecture
+MeiliSearch runs as a separate Docker container and provides fast, typo-tolerant search across all entities. Data is synchronized from PostgreSQL using the transactional outbox pattern.
+
+### Search Indexes Structure
+```javascript
+// Contacts Index (contacts_index)
+{
+  "id": 1,
+  "first_name": "John",
+  "last_name": "Smith",
+  "full_name": "John Smith",
+  "email": "john.smith@example.com",
+  "phone": "+61 400 123 456",
+  "tags": ["work", "client"],
+  "notes_content": "Important client for project X",
+  "entity_type": "contact",
+  "created_at": "2024-01-01T10:00:00Z",
+  "updated_at": "2024-01-01T10:00:00Z"
+}
+
+// Global Search Index (global_search_index)
+{
+  "id": "contact_1",
+  "title": "John Smith",
+  "content": "john.smith@example.com +61 400 123 456 Important client",
+  "entity_type": "contact",
+  "entity_id": 1,
+  "tags": ["work", "client"],
+  "created_at": "2024-01-01T10:00:00Z"
+}
+```
+
+### Event-Driven Synchronization
+1. **Domain Event**: Contact created/updated/deleted
+2. **Outbox Storage**: Event stored in `event_outbox` table within same transaction
+3. **Background Processing**: FastAPI background task polls outbox every 10 seconds
+4. **MeiliSearch Update**: Index updated based on event type
+5. **Mark Processed**: Event marked as processed in outbox
+
+### Search Configuration
+```python
+# MeiliSearch index settings
+CONTACT_INDEX_SETTINGS = {
+    "searchableAttributes": [
+        "first_name",
+        "last_name",
+        "full_name",
+        "email",
+        "phone",
+        "notes_content"
+    ],
+    "filterableAttributes": [
+        "tags",
+        "entity_type",
+        "created_at"
+    ],
+    "sortableAttributes": [
+        "created_at",
+        "updated_at",
+        "last_name"
+    ]
+}
 ```
 
 ## PostgreSQL Features and Patterns
