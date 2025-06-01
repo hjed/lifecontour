@@ -10,15 +10,17 @@ from collections.abc import Generator
 from functools import lru_cache
 
 import structlog
-from sqlalchemy import Engine, MetaData, create_engine, text
+from sqlalchemy import Engine, create_engine, text
+from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.infrastructure.config import get_settings
+from app.infrastructure.database_metadata import metadata
+
+# Import table definitions to register them with metadata
+# This import must be after metadata is imported to avoid circular imports
 
 logger = structlog.get_logger()
-
-# SQLAlchemy metadata for table definitions
-metadata = MetaData()
 
 
 @lru_cache
@@ -34,6 +36,27 @@ def get_database_engine() -> Engine:
     )
 
     logger.info("Database engine created", url=str(settings.database_url).split("@")[0])
+    return engine
+
+
+@lru_cache
+def get_async_database_engine() -> AsyncEngine:
+    """Get cached async database engine."""
+    settings = get_settings()
+
+    # Convert postgresql:// to postgresql+asyncpg://
+    async_url = str(settings.database_url).replace(
+        "postgresql://", "postgresql+asyncpg://"
+    )
+
+    engine = create_async_engine(
+        async_url,
+        echo=settings.database_echo,
+        pool_pre_ping=True,
+        pool_recycle=300,
+    )
+
+    logger.info("Async database engine created", url=async_url.split("@")[0])
     return engine
 
 

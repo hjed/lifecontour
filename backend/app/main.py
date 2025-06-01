@@ -5,6 +5,7 @@ Main application entry point with FastAPI configuration,
 middleware setup, and route registration.
 """
 
+import asyncio
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
@@ -18,8 +19,10 @@ from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
 from opentelemetry.instrumentation.sqlalchemy import SQLAlchemyInstrumentor
 
 from app.api.health import router as health_router
+from app.api.search.controllers import router as search_router
 from app.infrastructure.config import Settings, get_settings
 from app.infrastructure.database import get_database_engine
+from app.infrastructure.events.outbox_processor import run_outbox_processor_loop
 from app.infrastructure.logging import setup_logging
 
 
@@ -45,10 +48,28 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         SQLAlchemyInstrumentor().instrument(engine=engine)
         logger.info("OpenTelemetry instrumentation enabled")
 
-    yield
+    # Start background tasks
+    outbox_task = None
+    try:
+        # Start outbox processor background task
+        outbox_task = asyncio.create_task(
+            run_outbox_processor_loop(interval_seconds=10)
+        )
+        logger.info("Outbox processor background task started")
 
-    # Cleanup
-    logger.info("Shutting down Personal Management System Backend")
+        yield
+
+    finally:
+        # Cleanup background tasks
+        if outbox_task:
+            outbox_task.cancel()
+            try:
+                await outbox_task
+            except asyncio.CancelledError:
+                pass
+            logger.info("Outbox processor background task stopped")
+
+        logger.info("Shutting down Personal Management System Backend")
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -83,6 +104,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     # Include routers
     app.include_router(health_router, prefix="/api", tags=["health"])
+    app.include_router(search_router, prefix="/api", tags=["search"])
 
     return app
 
