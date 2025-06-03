@@ -44,6 +44,7 @@ from app.core.contacts.services.contact_validation_service import (
     ContactValidationService,
 )
 from app.core.contacts.services.tag_hierarchy_service import TagHierarchyService
+from app.infrastructure.database import get_async_database_engine
 
 logger = structlog.get_logger()
 
@@ -168,7 +169,6 @@ class ContactService:
     async def update_contact(
         self,
         contact: Contact,
-        changed_fields: dict[str, Any],
         transaction: AsyncConnection,
     ) -> Contact:
         """Update an existing contact with transaction management."""
@@ -176,6 +176,15 @@ class ContactService:
             raise ContactValidationError("id", "Contact ID is required for updates")
 
         async def _update_operation() -> Contact:
+            # Get the existing contact to calculate changes
+            existing_contact = await self.contact_repo.find_by_id(contact.id)
+            if not existing_contact:
+                from app.core.contacts.models.exceptions import ContactNotFoundError
+                raise ContactNotFoundError(contact.id)
+
+            # Calculate changed fields by comparing old and new values
+            changed_fields = self._calculate_changed_fields(existing_contact, contact)
+
             # Validate email uniqueness for any email changes
             for method in contact.methods:
                 if method.method_type == MethodType.EMAIL:
@@ -196,20 +205,54 @@ class ContactService:
             if saved_contact.id is None:
                 raise ContactValidationError("id", "Contact ID is required after save")
 
-            # Record field history
-            await self.history_service.record_contact_change(
-                saved_contact.id, changed_fields, _transaction=transaction
-            )
+            # Record field history only if there are changes
+            if changed_fields:
+                await self.history_service.record_contact_change(
+                    saved_contact.id, changed_fields, _transaction=transaction
+                )
 
-            # Publish event
-            event = ContactUpdated(
-                saved_contact.id, changed_fields, transaction=transaction
-            )
-            await self.event_publisher.publish(event)
+                # Publish event only if there are changes
+                event = ContactUpdated(
+                    saved_contact.id, changed_fields, transaction=transaction
+                )
+                await self.event_publisher.publish(event)
 
             return saved_contact
 
         return cast(Contact, await self._execute_with_retry(_update_operation))
+
+    def _calculate_changed_fields(self, old_contact: Contact, new_contact: Contact) -> dict[str, Any]:
+        """Calculate the fields that have changed between two contact instances."""
+        changed_fields = {}
+
+        # Check basic contact fields
+        if old_contact.first_name != new_contact.first_name:
+            changed_fields["first_name"] = (old_contact.first_name, new_contact.first_name)
+
+        if old_contact.last_name != new_contact.last_name:
+            changed_fields["last_name"] = (old_contact.last_name, new_contact.last_name)
+
+        if old_contact.middle_name != new_contact.middle_name:
+            changed_fields["middle_name"] = (old_contact.middle_name, new_contact.middle_name)
+
+        if old_contact.nick_name != new_contact.nick_name:
+            changed_fields["nick_name"] = (old_contact.nick_name, new_contact.nick_name)
+
+        # For now, we'll track relationship changes at a high level
+        # More detailed relationship change tracking can be added later
+        if len(old_contact.methods) != len(new_contact.methods):
+            changed_fields["methods_count"] = (len(old_contact.methods), len(new_contact.methods))
+
+        if len(old_contact.addresses) != len(new_contact.addresses):
+            changed_fields["addresses_count"] = (len(old_contact.addresses), len(new_contact.addresses))
+
+        if len(old_contact.notes) != len(new_contact.notes):
+            changed_fields["notes_count"] = (len(old_contact.notes), len(new_contact.notes))
+
+        if len(old_contact.tags) != len(new_contact.tags):
+            changed_fields["tags_count"] = (len(old_contact.tags), len(new_contact.tags))
+
+        return changed_fields
 
     async def delete_contact(
         self, contact_id: int, transaction: AsyncConnection
@@ -461,3 +504,58 @@ class ContactService:
     async def get_contact_history(self, contact_id: int, limit: int = 50) -> list[Any]:
         """Get contact history."""
         return await self.history_service.get_contact_history(contact_id, limit)
+
+    # API-friendly methods that handle their own database connections
+    async def create_contact_api(self, contact: Contact) -> Contact:
+        """Create a new contact (API version with internal transaction management)."""
+        engine = get_async_database_engine()
+        async with engine.begin() as transaction:
+            return await self.create_contact(contact, transaction)
+
+    async def update_contact_api(self, contact: Contact) -> Contact:
+        """Update an existing contact (API version with internal transaction management)."""
+        engine = get_async_database_engine()
+        async with engine.begin() as transaction:
+            return await self.update_contact(contact, transaction)
+
+    async def delete_contact_api(self, contact_id: int) -> None:
+        """Delete a contact (API version with internal transaction management)."""
+        engine = get_async_database_engine()
+        async with engine.begin() as transaction:
+            await self.delete_contact(contact_id, transaction)
+
+    async def assign_tag_to_contact_api(self, contact_id: int, tag_id: int) -> None:
+        """Assign a tag to a contact (API version with internal transaction management)."""
+        engine = get_async_database_engine()
+        async with engine.begin() as transaction:
+            await self.assign_tag_to_contact(contact_id, tag_id, transaction)
+
+    async def remove_tag_from_contact_api(self, contact_id: int, tag_id: int) -> None:
+        """Remove a tag from a contact (API version with internal transaction management)."""
+        engine = get_async_database_engine()
+        async with engine.begin() as transaction:
+            await self.remove_tag_from_contact(contact_id, tag_id, transaction)
+
+    async def add_contact_method_api(
+        self, contact_id: int, method: ContactMethod
+    ) -> ContactMethod:
+        """Add a contact method (API version with internal transaction management)."""
+        engine = get_async_database_engine()
+        async with engine.begin() as transaction:
+            return await self.add_contact_method(contact_id, method, transaction)
+
+    async def add_contact_address_api(
+        self, contact_id: int, address: ContactAddress
+    ) -> ContactAddress:
+        """Add a contact address (API version with internal transaction management)."""
+        engine = get_async_database_engine()
+        async with engine.begin() as transaction:
+            return await self.add_contact_address(contact_id, address, transaction)
+
+    async def add_contact_note_api(
+        self, contact_id: int, note: ContactNote
+    ) -> ContactNote:
+        """Add a contact note (API version with internal transaction management)."""
+        engine = get_async_database_engine()
+        async with engine.begin() as transaction:
+            return await self.add_contact_note(contact_id, note, transaction)

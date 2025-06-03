@@ -18,6 +18,8 @@ from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
 from opentelemetry.instrumentation.sqlalchemy import SQLAlchemyInstrumentor
 
+from app.api.contacts.controllers import router as contacts_router
+from app.api.error_handlers import register_error_handlers
 from app.api.health import router as health_router
 from app.api.search.controllers import router as search_router
 from app.infrastructure.config import Settings, get_settings
@@ -102,9 +104,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         allow_headers=["*"],
     )
 
+    # Register error handlers
+    register_error_handlers(app)
+
     # Include routers
     app.include_router(health_router, prefix="/api", tags=["health"])
     app.include_router(search_router, prefix="/api", tags=["search"])
+    app.include_router(contacts_router, prefix="/api", tags=["contacts"])
 
     return app
 

@@ -1,12 +1,15 @@
 """
 Search API schemas for request and response models.
 
-Defines Pydantic models for search-related API endpoints.
+Defines Pydantic models for search-related API endpoints using JSON API format.
 """
 
 from typing import Any
 
 from pydantic import BaseModel, Field
+
+from app.api.common.schemas import JsonApiLinks, JsonApiMeta
+from app.api.contacts.schemas import ContactData
 
 
 class SearchRequest(BaseModel):
@@ -40,55 +43,43 @@ class GlobalSearchRequest(SearchRequest):
     )
 
 
-class SearchHit(BaseModel):
-    """Individual search result hit."""
+# JSON API compliant search response schemas
+class SearchMeta(JsonApiMeta):
+    """Search-specific meta information."""
 
-    id: int = Field(..., description="Entity ID")
-    entity_type: str = Field(..., description="Type of entity")
-    title: str | None = Field(default=None, description="Display title")
-    content: str | None = Field(default=None, description="Content snippet")
-    highlighted: dict[str, Any] | None = Field(
-        default=None, description="Highlighted fields"
-    )
-    metadata: dict[str, Any] | None = Field(
-        default=None, description="Additional metadata"
-    )
-
-
-class SearchResponse(BaseModel):
-    """Response model for search operations."""
-
-    hits: list[SearchHit] = Field(..., description="Search results")
     query: str = Field(..., description="Original search query")
-    total_hits: int = Field(..., description="Total number of matching results")
     processing_time_ms: int = Field(
         ..., description="Search processing time in milliseconds"
     )
-    limit: int = Field(..., description="Results limit used")
-    offset: int = Field(..., description="Results offset used")
     facets: dict[str, Any] | None = Field(default=None, description="Facet information")
-
-
-class ContactSearchResponse(SearchResponse):
-    """Response model for contact search operations."""
-
     available_tags: list[str] | None = Field(
         default=None, description="Available tags for filtering"
     )
-
-
-class GlobalSearchResponse(SearchResponse):
-    """Response model for global search operations."""
-
-    searched_entity_types: list[str] = Field(
-        ..., description="Entity types that were searched"
+    searched_entity_types: list[str] | None = Field(
+        default=None, description="Entity types that were searched"
     )
-    available_entity_types: list[str] = Field(
-        ..., description="All available entity types"
+    available_entity_types: list[str] | None = Field(
+        default=None, description="All available entity types"
     )
     results_by_type: dict[str, int] | None = Field(
         default=None, description="Number of results by entity type"
     )
+
+
+class ContactSearchResponse(BaseModel):
+    """JSON API compliant response for contact search operations."""
+
+    data: list[ContactData] = Field(..., description="Search results")
+    meta: SearchMeta = Field(..., description="Search metadata")
+    links: JsonApiLinks | None = Field(default=None, description="Pagination links")
+
+
+class GlobalSearchResponse(BaseModel):
+    """JSON API compliant response for global search operations."""
+
+    data: list[ContactData] = Field(..., description="Search results (contacts only for now)")
+    meta: SearchMeta = Field(..., description="Search metadata")
+    links: JsonApiLinks | None = Field(default=None, description="Pagination links")
 
 
 class SearchSuggestionsRequest(BaseModel):

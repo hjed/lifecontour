@@ -100,18 +100,20 @@ class TestContactService:
         """Test successful contact update."""
         # Arrange
         contact = Contact(first_name="John", last_name="Doe", id=1)
-        changed_fields = {"last_name": ("Smith", "Doe")}
+        existing_contact = Contact(first_name="John", last_name="Smith", id=1)
         saved_contact = Contact(first_name="John", last_name="Doe", id=1)
 
+        mock_contact_repo.find_by_id.return_value = existing_contact
         mock_contact_repo.save.return_value = saved_contact
 
         # Act
         result = await contact_service.update_contact(
-            contact, changed_fields, mock_transaction
+            contact, mock_transaction
         )
 
         # Assert
         assert result == saved_contact
+        mock_contact_repo.find_by_id.assert_called_once_with(1)
         mock_contact_repo.save.assert_called_once_with(contact)
 
     @pytest.mark.asyncio
@@ -121,12 +123,11 @@ class TestContactService:
         """Test contact update raises error when no ID."""
         # Arrange
         contact = Contact(first_name="John", id=None)
-        changed_fields = {"last_name": ("Smith", "Doe")}
 
         # Act & Assert
         with pytest.raises(ContactValidationError) as exc_info:
             await contact_service.update_contact(
-                contact, changed_fields, mock_transaction
+                contact, mock_transaction
             )
 
         assert exc_info.value.field == "id"

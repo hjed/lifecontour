@@ -9,14 +9,17 @@ import structlog
 from fastapi import APIRouter, HTTPException, Query
 from meilisearch.errors import MeilisearchError
 
+from app.api.common.schemas import JsonApiLinks
+from app.api.contacts.converters import contact_to_json_api
 from app.api.dependencies import SearchServiceDep
 from app.api.search.schemas import (
     ContactSearchResponse,
     GlobalSearchResponse,
     SearchHealthResponse,
-    SearchHit,
+    SearchMeta,
     SearchSuggestionsResponse,
 )
+from app.core.contacts.models.entities import Contact
 
 logger = structlog.get_logger()
 
@@ -53,39 +56,51 @@ def search_contacts(
             sort=sort,
         )
 
-        # Convert to API response format
-        hits = []
+        # Convert search results to Contact entities and then to JSON API format
+        contact_data = []
         for hit in results["hits"]:
-            search_hit = SearchHit(
+            # Create a minimal Contact entity from search hit
+            contact = Contact(
                 id=hit["id"],
-                entity_type="contact",
-                title=hit.get(
-                    "full_name",
-                    f"{hit.get('first_name', '')} {hit.get('last_name', '')}",
-                ).strip(),
-                content=f"Email: {hit.get('email', 'N/A')}, Phone: {hit.get('phone', 'N/A')}",
-                highlighted=hit.get("_formatted"),
-                metadata={
-                    "first_name": hit.get("first_name"),
-                    "last_name": hit.get("last_name"),
-                    "email": hit.get("email"),
-                    "phone": hit.get("phone"),
-                    "tags": hit.get("tags", []),
-                    "created_at": hit.get("created_at"),
-                    "updated_at": hit.get("updated_at"),
-                },
+                first_name=hit.get("first_name", ""),
+                last_name=hit.get("last_name"),
+                middle_name=hit.get("middle_name"),
+                nick_name=hit.get("nick_name"),
+                methods=[],  # Search results don't include full relationship data
+                addresses=[],
+                notes=[],
+                tags=[],
+                created_at=hit.get("created_at"),
+                updated_at=hit.get("updated_at"),
             )
-            hits.append(search_hit)
 
-        return ContactSearchResponse(
-            hits=hits,
+            # Convert to JSON API format
+            json_contact = contact_to_json_api(contact, include_relationships=False)
+            contact_data.append(json_contact)
+
+        # Build pagination links
+        links = JsonApiLinks(
+            self=f"/api/search/contacts?q={q}&limit={limit}&offset={offset}",
+            next=f"/api/search/contacts?q={q}&limit={limit}&offset={offset + limit}"
+                 if len(results["hits"]) == limit else None,
+            prev=f"/api/search/contacts?q={q}&limit={limit}&offset={max(0, offset - limit)}"
+                 if offset > 0 else None,
+        )
+
+        # Build search metadata
+        meta = SearchMeta(
             query=q,
-            total_hits=results.get("estimated_total_hits", 0),
+            total_count=results.get("estimated_total_hits", 0),
+            current_page=(offset // limit) + 1 if limit > 0 else 1,
             processing_time_ms=results.get("processing_time_ms", 0),
-            limit=limit,
-            offset=offset,
             facets=results.get("facet_distribution"),
             available_tags=None,  # Could be populated from facets
+        )
+
+        return ContactSearchResponse(
+            data=contact_data,
+            meta=meta,
+            links=links,
         )
 
     except MeilisearchError as e:
@@ -122,8 +137,8 @@ def global_search(
             query=q, entity_types=entity_types, limit=limit, offset=offset
         )
 
-        # Convert to API response format
-        hits = []
+        # Convert search results to Contact entities and then to JSON API format
+        contact_data = []
         results_by_type: dict[str, int] = {}
 
         for hit in results["hits"]:
@@ -132,38 +147,53 @@ def global_search(
             # Count results by type
             results_by_type[entity_type] = results_by_type.get(entity_type, 0) + 1
 
-            # Create search hit based on entity type
+            # For now, only handle contacts in global search
+            # Other entity types will be added later
             if entity_type == "contact":
-                title = hit.get(
-                    "full_name",
-                    f"{hit.get('first_name', '')} {hit.get('last_name', '')}",
-                ).strip()
-                content = f"Contact: {hit.get('email', 'N/A')}"
-            else:
-                title = hit.get("title", hit.get("name", "Unknown"))
-                content = hit.get("content", hit.get("description", ""))
+                # Create a minimal Contact entity from search hit
+                contact = Contact(
+                    id=hit["id"],
+                    first_name=hit.get("first_name", ""),
+                    last_name=hit.get("last_name"),
+                    middle_name=hit.get("middle_name"),
+                    nick_name=hit.get("nick_name"),
+                    methods=[],  # Search results don't include full relationship data
+                    addresses=[],
+                    notes=[],
+                    tags=[],
+                    created_at=hit.get("created_at"),
+                    updated_at=hit.get("updated_at"),
+                )
 
-            search_hit = SearchHit(
-                id=hit["id"],
-                entity_type=entity_type,
-                title=title,
-                content=content,
-                highlighted=hit.get("_formatted"),
-                metadata=hit,
-            )
-            hits.append(search_hit)
+                # Convert to JSON API format
+                json_contact = contact_to_json_api(contact, include_relationships=False)
+                contact_data.append(json_contact)
 
-        return GlobalSearchResponse(
-            hits=hits,
+        # Build pagination links
+        links = JsonApiLinks(
+            self=f"/api/search/global?q={q}&limit={limit}&offset={offset}",
+            next=f"/api/search/global?q={q}&limit={limit}&offset={offset + limit}"
+                 if len(results["hits"]) == limit else None,
+            prev=f"/api/search/global?q={q}&limit={limit}&offset={max(0, offset - limit)}"
+                 if offset > 0 else None,
+        )
+
+        # Build search metadata
+        meta = SearchMeta(
             query=q,
-            total_hits=results.get("estimated_total_hits", 0),
+            total_count=results.get("estimated_total_hits", 0),
+            current_page=(offset // limit) + 1 if limit > 0 else 1,
             processing_time_ms=results.get("processing_time_ms", 0),
-            limit=limit,
-            offset=offset,
             facets=results.get("facet_distribution"),
             searched_entity_types=results.get("searched_entity_types", []),
             available_entity_types=results.get("available_entity_types", []),
             results_by_type=results_by_type,
+        )
+
+        return GlobalSearchResponse(
+            data=contact_data,
+            meta=meta,
+            links=links,
         )
 
     except MeilisearchError as e:

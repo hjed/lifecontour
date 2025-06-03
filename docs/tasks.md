@@ -98,7 +98,7 @@ Tasks are organized by **feature iterations** that deliver end-to-end value incr
 - [ ] Implement session-based authentication using Starlette SessionMiddleware
 - [ ] Create authentication endpoints (login/logout) and session validation dependency
 - [ ] Create FastAPI ContactController with automatic OpenAPI docs
-- [ ] Implement CRUD operations (GET, POST, PUT, DELETE) with proper error handling
+- [X] Implement CRUD operations (GET, POST, PUT, DELETE) with proper error handling
 - [X] Add contact search endpoints using MeiliSearch (/api/contacts/search)
 - [X] Add global search endpoint for contacts (/api/search) - designed for future expansion
 - [ ] Add tag management endpoints (assign/remove tags)
