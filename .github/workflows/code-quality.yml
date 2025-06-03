@@ -107,7 +107,7 @@ jobs:
           find src -name "*.ts" -o -name "*.tsx" | head -10 | xargs complexity-report --format markdown >> ../complexity-report.md || true
 
       - name: Comment complexity report
-        uses: actions/github-script@v6
+        uses: actions/github-script@v7
         if: github.event_name == 'pull_request'
         with:
           script: |
