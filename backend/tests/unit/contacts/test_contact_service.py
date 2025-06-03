@@ -134,6 +134,47 @@ class TestContactService:
         assert "Contact ID is required for updates" in exc_info.value.message
 
     @pytest.mark.asyncio
+    async def test_update_contact_with_existing_success(
+        self, contact_service, mock_contact_repo, mock_transaction
+    ):
+        """Test successful contact update with existing contact provided."""
+        # Arrange
+        contact = Contact(first_name="John", last_name="Doe", id=1)
+        existing_contact = Contact(first_name="John", last_name="Smith", id=1)
+        saved_contact = Contact(first_name="John", last_name="Doe", id=1)
+
+        mock_contact_repo.save.return_value = saved_contact
+
+        # Act
+        result = await contact_service.update_contact_with_existing(
+            contact, existing_contact, mock_transaction
+        )
+
+        # Assert
+        assert result == saved_contact
+        # Verify that find_by_id was NOT called since we provided existing contact
+        mock_contact_repo.find_by_id.assert_not_called()
+        mock_contact_repo.save.assert_called_once_with(contact)
+
+    @pytest.mark.asyncio
+    async def test_update_contact_with_existing_no_id_raises_error(
+        self, contact_service, mock_transaction
+    ):
+        """Test contact update with existing raises error when no ID."""
+        # Arrange
+        contact = Contact(first_name="John", id=None)
+        existing_contact = Contact(first_name="John", last_name="Smith", id=1)
+
+        # Act & Assert
+        with pytest.raises(ContactValidationError) as exc_info:
+            await contact_service.update_contact_with_existing(
+                contact, existing_contact, mock_transaction
+            )
+
+        assert exc_info.value.field == "id"
+        assert "Contact ID is required for updates" in exc_info.value.message
+
+    @pytest.mark.asyncio
     async def test_delete_contact_success(
         self, contact_service, mock_contact_repo, mock_transaction
     ):

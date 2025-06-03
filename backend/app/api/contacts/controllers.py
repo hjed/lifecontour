@@ -21,6 +21,8 @@ from app.api.contacts.schemas import (
     JsonApiMeta,
 )
 from app.api.dependencies import ContactServiceDep
+from app.core.contacts.models.exceptions import ContactValidationError
+from app.core.exceptions import DomainError
 
 logger = structlog.get_logger()
 
@@ -72,6 +74,11 @@ async def list_contacts(
             links=links,
         )
 
+    except DomainError:
+        # Let domain exceptions bubble up to global error handlers
+        raise
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error("Error listing contacts", error=str(e))
         raise HTTPException(status_code=500, detail="Internal server error") from e
@@ -103,6 +110,9 @@ async def get_contact(
             included=included if included else None,
         )
 
+    except DomainError:
+        # Let domain exceptions bubble up to global error handlers
+        raise
     except HTTPException:
         raise
     except Exception as e:
@@ -123,7 +133,12 @@ async def create_contact(
     """
     try:
         # Convert from JSON API format to domain entity
-        contact = json_api_to_contact(request.data)
+        try:
+            contact = json_api_to_contact(request.data)
+        except ValueError as e:
+            # Convert ValueError from entity validation to proper domain exception
+            # This is a temporary fix - ideally the entity should raise ContactValidationError directly
+            raise ContactValidationError("contact", str(e)) from e
 
         # Create contact using service
         created_contact = await contact_service.create_contact_api(contact)
@@ -137,6 +152,11 @@ async def create_contact(
             included=included if included else None,
         )
 
+    except DomainError:
+        # Let domain exceptions bubble up to global error handlers
+        raise
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error("Error creating contact", error=str(e))
         raise HTTPException(status_code=500, detail="Internal server error") from e
@@ -155,7 +175,7 @@ async def update_contact(
     will be updated.
     """
     try:
-        # Get existing contact
+        # Get existing contact for conversion
         existing_contact = await contact_service.get_contact_by_id(contact_id)
 
         if not existing_contact:
@@ -164,8 +184,8 @@ async def update_contact(
         # Convert request to domain entity, updating the existing contact
         updated_contact = json_api_to_contact(request.data, existing_contact)
 
-        # Update contact using service (service will calculate changed fields internally)
-        saved_contact = await contact_service.update_contact_api(updated_contact)
+        # Update contact using service with existing contact to avoid duplicate retrieval
+        saved_contact = await contact_service.update_contact_with_existing_api(updated_contact, existing_contact)
 
         # Convert back to JSON API format
         contact_data = contact_to_json_api(saved_contact, include_relationships=True)
@@ -176,6 +196,9 @@ async def update_contact(
             included=included if included else None,
         )
 
+    except DomainError:
+        # Let domain exceptions bubble up to global error handlers
+        raise
     except HTTPException:
         raise
     except Exception as e:
@@ -201,6 +224,11 @@ async def delete_contact(
         # Return 204 No Content (no response body)
         return None
 
+    except DomainError:
+        # Let domain exceptions bubble up to global error handlers
+        raise
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error("Error deleting contact", contact_id=contact_id, error=str(e))
         raise HTTPException(status_code=500, detail="Internal server error") from e
@@ -233,6 +261,9 @@ async def list_contact_notes(
 
         return notes_data
 
+    except DomainError:
+        # Let domain exceptions bubble up to global error handlers
+        raise
     except HTTPException:
         raise
     except Exception as e:
@@ -261,6 +292,11 @@ async def remove_tag_from_contact(
         # Return 204 No Content (no response body)
         return None
 
+    except DomainError:
+        # Let domain exceptions bubble up to global error handlers
+        raise
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error("Error removing tag from contact", contact_id=contact_id, tag_id=tag_id, error=str(e))
         raise HTTPException(status_code=500, detail="Internal server error") from e

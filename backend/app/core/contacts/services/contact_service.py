@@ -221,6 +221,56 @@ class ContactService:
 
         return cast(Contact, await self._execute_with_retry(_update_operation))
 
+    async def update_contact_with_existing(
+        self,
+        contact: Contact,
+        existing_contact: Contact,
+        transaction: AsyncConnection,
+    ) -> Contact:
+        """Update an existing contact with transaction management, using provided existing contact."""
+        if contact.id is None:
+            raise ContactValidationError("id", "Contact ID is required for updates")
+
+        async def _update_operation() -> Contact:
+            # Calculate changed fields by comparing old and new values
+            changed_fields = self._calculate_changed_fields(existing_contact, contact)
+
+            # Validate email uniqueness for any email changes
+            for method in contact.methods:
+                if method.method_type == MethodType.EMAIL:
+                    await self.contact_validation.validate_email_uniqueness(
+                        method.value, transaction, exclude_contact_id=contact.id
+                    )
+
+            # Validate addresses
+            for address in contact.addresses:
+                await self.address_validation.validate_with_transaction(
+                    address, transaction
+                )
+
+            # Save contact
+            saved_contact = await self.contact_repo.save(contact)
+
+            # Ensure contact has ID after save
+            if saved_contact.id is None:
+                raise ContactValidationError("id", "Contact ID is required after save")
+
+            # Record field history only if there are changes
+            if changed_fields:
+                await self.history_service.record_contact_change(
+                    saved_contact.id, changed_fields, _transaction=transaction
+                )
+
+                # Publish event only if there are changes
+                event = ContactUpdated(
+                    saved_contact.id, changed_fields, transaction=transaction
+                )
+                await self.event_publisher.publish(event)
+
+            return saved_contact
+
+        return cast(Contact, await self._execute_with_retry(_update_operation))
+
     def _calculate_changed_fields(self, old_contact: Contact, new_contact: Contact) -> dict[str, Any]:
         """Calculate the fields that have changed between two contact instances."""
         changed_fields = {}
@@ -517,6 +567,12 @@ class ContactService:
         engine = get_async_database_engine()
         async with engine.begin() as transaction:
             return await self.update_contact(contact, transaction)
+
+    async def update_contact_with_existing_api(self, contact: Contact, existing_contact: Contact) -> Contact:
+        """Update an existing contact with provided existing contact (API version with internal transaction management)."""
+        engine = get_async_database_engine()
+        async with engine.begin() as transaction:
+            return await self.update_contact_with_existing(contact, existing_contact, transaction)
 
     async def delete_contact_api(self, contact_id: int) -> None:
         """Delete a contact (API version with internal transaction management)."""
