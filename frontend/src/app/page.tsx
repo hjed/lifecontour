@@ -7,7 +7,7 @@ export default function HomePage() {
         <h1 className='text-4xl font-bold tracking-tight'>
           Personal Management System
         </h1>
-        <p className='mt-2 text-muted-foreground'>
+        <p className='text-muted-foreground mt-2'>
           Your personal CRM and journal with AI integration
         </p>
       </div>
@@ -18,7 +18,7 @@ export default function HomePage() {
             <CardTitle>Contacts</CardTitle>
           </CardHeader>
           <CardContent>
-            <p className='text-sm text-muted-foreground'>
+            <p className='text-muted-foreground text-sm'>
               Manage your personal and professional contacts with tags and
               Google sync.
             </p>
@@ -30,7 +30,7 @@ export default function HomePage() {
             <CardTitle>Journal</CardTitle>
           </CardHeader>
           <CardContent>
-            <p className='text-sm text-muted-foreground'>
+            <p className='text-muted-foreground text-sm'>
               Keep track of your thoughts, experiences, and memories with mood
               tracking.
             </p>
@@ -42,7 +42,7 @@ export default function HomePage() {
             <CardTitle>Calendar</CardTitle>
           </CardHeader>
           <CardContent>
-            <p className='text-sm text-muted-foreground'>
+            <p className='text-muted-foreground text-sm'>
               Sync with Google Calendar and link events to photos and journal
               entries.
             </p>
@@ -54,7 +54,7 @@ export default function HomePage() {
             <CardTitle>Photos</CardTitle>
           </CardHeader>
           <CardContent>
-            <p className='text-sm text-muted-foreground'>
+            <p className='text-muted-foreground text-sm'>
               Connect with Immich to link photos to contacts, events, and
               journal entries.
             </p>
@@ -66,7 +66,7 @@ export default function HomePage() {
             <CardTitle>AI Integration</CardTitle>
           </CardHeader>
           <CardContent>
-            <p className='text-sm text-muted-foreground'>
+            <p className='text-muted-foreground text-sm'>
               MCP protocol support for AI assistants to access and manage your
               data.
             </p>
@@ -78,7 +78,7 @@ export default function HomePage() {
             <CardTitle>System Status</CardTitle>
           </CardHeader>
           <CardContent>
-            <p className='text-sm text-muted-foreground'>
+            <p className='text-muted-foreground text-sm'>
               Monitor system health and integration status.
             </p>
           </CardContent>
