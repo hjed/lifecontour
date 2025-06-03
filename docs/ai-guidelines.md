@@ -25,32 +25,46 @@ Tasks can be found in the [tasks document](./tasks.md).
 
 ### Core Principles
 
-1. **Clear Language Separation**: Python backend, TypeScript frontend
-2. **AI-Optimized**: Design for AI assistant understanding over performance
-3. **Domain-Driven Architecture**: Core domains with separate integration sub-domains
-4. **Agile Development**: Feature-complete iterations delivering incremental value
-5. **Explicit Patterns**: No magic, everything readable and understandable
+1. **Test-First Development**: Write tests before implementation - no exceptions
+2. **Clear Language Separation**: Python backend, TypeScript frontend
+3. **AI-Optimized**: Design for AI assistant understanding over performance
+4. **Domain-Driven Architecture**: Core domains with separate integration sub-domains
+5. **Agile Development**: Feature-complete iterations delivering incremental value
 6. **Simple Dependencies**: Standard libraries over complex abstractions
 
-## Agile Development Approach
+## Test-First Development Approach
+
+### Mandatory Test-First Workflow
+
+**EVERY feature must follow this exact sequence - no exceptions:**
+
+1. **Write Tests First** - Define expected behavior through tests before any implementation
+2. **Run Tests** - Verify they fail (red phase of TDD)
+3. **Implement Minimum Code** - Write just enough code to make tests pass (green phase)
+4. **Refactor** - Improve code while keeping tests passing (refactor phase)
+5. **Integration** - Ensure all layers work together
+6. **Deploy and Validate** - Confirm feature works in real environment
 
 ### Feature-Complete Iterations
 
 - Each iteration delivers working, testable functionality end-to-end
-- Build domain logic → database queries → API endpoints → basic UI
-- Deploy and test after each iteration
+- **Tests drive the design** - write tests to define interfaces and behavior first
+- Test each layer independently and together during development
+- Run linting, type checking, and all tests before considering any change complete
 - Integration sub-domains developed separately from core domains
 - Architecture can evolve - check technology choices with user before acting
 
-### Development Sequence
+### Test-Driven Development Sequence
 
-1. **Documentation** - document any planned changes, confirm design decisions
-2. **Backend domain logic** - Python business logic with clear, simple patterns. Use test driven development.
-3. **Database operations** - Explicit SQL queries with SQLAlchemy Core in Repository adapters.
-4. **API endpoints** - FastAPI controllers with JSON API compliance
-5. **Frontend UI** - Next.js interface using shadcn/ui
-6. **Tests** - pytest (backend), React Testing Library (frontend), Playwright (e2e)
-7. **Deploy and validate** - ensure feature works in real environment
+1. **Documentation** - Document planned changes and confirm design decisions
+2. **Write Tests** - Unit tests for domain logic, integration tests for database operations
+3. **Backend Domain Logic** - Python business logic guided by failing tests
+4. **Database Operations** - SQL queries with SQLAlchemy Core, tested with real PostgreSQL
+5. **API Endpoints** - FastAPI controllers with JSON API compliance, API tests included
+6. **Frontend UI** - Next.js interface using shadcn/ui, component tests included
+7. **MCP Tools** - AI integration via Model Context Protocol, integration tests included
+8. **End-to-End Tests** - Full user workflows with Playwright
+9. **Deploy and Validate** - Ensure feature works in real environment
 
 ## Testing Strategy
 
@@ -107,15 +121,6 @@ shadcn/ui implementation examples._
   `text-foreground`, `border-border`
 - Follow mobile-first responsive design with `sm:`, `lg:`, `xl:` prefixes
 - Leverage shadcn/ui's CSS custom properties for theming
-
-### Australian English Localisation
-
-#### Key Requirements
-
-- **Date Format**: DD/MM/YYYY (not MM/DD/YYYY) for user display. Use ISO format
-  for machine-to-machine communication.
-- **Currency**: AUD formatting with Intl.NumberFormat('en-AU')
-- **Locale**: Use 'en-AU' for react-intl and date-fns
 
 ## Development Standards
 
@@ -188,80 +193,32 @@ personal-management-system/
 
 ### Backend Development (Python)
 
-#### Key Patterns
+#### Core Development Patterns
 
-- **Explicit SQL**: Use SQLAlchemy Core with raw SQL queries
+- **Test-Driven**: Write tests first, then implement to make them pass
+- **Explicit SQL**: Use SQLAlchemy Core with raw SQL queries for readability
 - **Simple Components**: Clear business logic without complex abstractions
-- **Pydantic Models**: Type-safe request/response validation
-- **Standard Libraries**: Prefer built-in libraries over external dependencies
+- **Type Safety**: Strong type hints, mypy compliance, Pydantic models for validation
 - **Clear Separation**: Keep domain logic separate from API and database concerns
-- **Use Type Hints**: Always use type hints for better code understanding
-- **Mypy Compliance**: All code must pass mypy type checking without errors
 - **Python Enums**: Use enums for domain values (e.g., `MethodType.EMAIL`) for type safety
-- **Enum Conversion**: Convert between enums and strings at repository boundaries
 
-#### Type Checking Guidelines
+#### Database & Error Handling
 
-- **Function Signatures**: Always include return type annotations
-- **Parameter Types**: Use proper type hints for all function parameters
-- **Generic Types**: Use `Union[T, U]` for multiple types, `Optional[T]` for nullable
-- **Unused Parameters**: Prefix with underscore (`_param`) to indicate intentionally unused
-- **Type Ignores**: Use `# type: ignore[specific-error]` sparingly with specific error codes
-- **Pydantic Models**: Use `str` instead of `PostgresDsn` for database URLs to avoid validation complexity
-
-#### Enum Usage Patterns
-
-- **Domain Values**: Use Python enums for fixed domain values (e.g., `MethodType`, `AddressType`)
-- **String Values**: Enum values should be strings for database compatibility
-- **String Conversion**: Implement `__str__()` method to return enum value
-- **Repository Conversion**: Convert enum to string when writing to database, string to enum when reading
-- **Type Safety**: Use enum comparisons in business logic (`method.type == MethodType.EMAIL`)
-- **Validation**: Validate enum values in entity `__post_init__()` methods
-
-#### Business Rules and Validation
-
-- **Domain-Specific Rules**: See [Domain Architecture](./architecture/domain-architecture.md) for detailed business rules
-- **Validation Patterns**: Use Pydantic models for input validation
-- **Error Handling**: Custom exceptions with HTTP status codes and AI-friendly messages
-- **Transaction Management**: Handle transactions at the domain/business layer
-- **History Tracking**: All entity changes recorded with domain events
-
-#### Database Operations
-
-- **Queries**: Explicit SQL with SQLAlchemy text() for readability
-- **Migrations**: Alembic with clear, readable SQL migration files
-- **Connections**: Simple connection management, no complex pooling
-- **Enum Storage**: Store enums as strings in database, convert at repository layer
-- **Constraint Handling**: Use database constraints for validation, capture errors in repositories
-- **Transaction Management**: Pass transactions to repositories for business-level control
+- **Database Operations**: Explicit SQL with SQLAlchemy text(), parameterized queries for security
+- **Transaction Management**: Handle at domain/business layer, pass connections to repositories
+- **Constraint Validation**: Use database constraints, catch `IntegrityError` and convert to domain exceptions
+- **Error Handling**: Custom exceptions with HTTP status codes, exception chaining with `from e`
 - **Integration Testing**: Test real database operations with Docker PostgreSQL
 
+#### Type Checking & Validation
+
+- **Function Signatures**: Always include return type annotations for all parameters
+- **Generic Types**: Use `Union[T, U]` for multiple types, `Optional[T]` for nullable
+- **Type Ignores**: Use `# type: ignore[specific-error]` sparingly with specific error codes
+- **Pydantic Models**: Use for input validation, `str` instead of `PostgresDsn` for database URLs
+- **Mypy Compliance**: All code must pass mypy type checking without any errors after every change
+
 _See [Domain Architecture](./examples/domain-architecture.md) for detailed patterns._
-
-## Essential Development Practices
-
-### Error Handling
-
-- Create custom error classes with meaningful names and context
-- Always handle errors explicitly with try/catch blocks
-- Use structured logging for error context
-- Return result objects: `{ success: boolean, data?: T, error?: string }`
-- Include HTTP status codes in domain exceptions for API layer
-- Provide AI-friendly error messages with context
-- **Exception Chaining**: Use `raise CustomError(...) from e` to preserve original error context
-- **Database Errors**: Catch `IntegrityError` and convert to domain-specific exceptions
-
-_See [Domain Architecture](./architecture/domain-architecture.md) for specific exception patterns._
-
-### Database Operations
-
-- **Explicit Queries**: Use SQLAlchemy Core with text() for readable SQL
-- **Connection Management**: Pass connections into repositories for transaction control
-- **Transactions**: Manage at domain/business layer, not repository layer
-- **Security**: Always use parameterized queries to prevent SQL injection
-- **Enum Handling**: Convert enums to strings for database storage, strings to enums when reading
-- **Constraint Validation**: Let database constraints validate data, catch and convert errors
-- **Integration Testing**: Use real PostgreSQL database for testing actual SQL behavior
 
 ### Dependency Injection
 
@@ -321,53 +278,47 @@ For detailed implementation examples and patterns, see:
 - **[Configuration Examples](./examples/configuration/)** - Docker, environment,
   and deployment configs
 
-## Quality Assurance Requirements
+## Test-First Quality Assurance
 
-### Mandatory Checks for Every Code Change
+### Mandatory Pre-Implementation Workflow
 
-**ALWAYS run the following checks for every code change:**
+**BEFORE writing any implementation code:**
 
-1. **Backend Linting and Type Checking**:
-   ```bash
-   cd backend
-   mypy .
-   ruff check .
-   ruff format --check .
-   ```
+1. **Write Tests First** - Define expected behavior through tests
+2. **Run Tests** - Verify they fail appropriately (red phase)
+3. **Write Minimum Implementation** - Make tests pass (green phase)
+4. **Refactor** - Improve code while keeping tests passing
+5. **Run All Quality Checks** - Ensure no regressions
 
-2. **Frontend Linting and Type Checking**:
-   ```bash
-   cd frontend
-   pnpm type-check
-   pnpm lint
-   ```
+### Mandatory Quality Checks
 
-3. **Integration Tests** (when backend changes affect database or API):
-   ```bash
-   cd backend
-   python scripts/run_integration_tests.py
-   ```
+**Run these checks after every code change - no failures acceptable:**
+
+```bash
+# Backend
+cd backend
+mypy .
+ruff check .
+ruff format --check .
+python scripts/run_integration_tests.py
+
+# Frontend
+cd frontend
+pnpm type-check
+pnpm lint
+```
 
 ### CI/CD Compliance
 
-- **All CI checks must pass** before considering a change complete
-- **Fix linting errors immediately** - do not ignore or suppress without justification
+- **All tests must pass** before considering any change complete
 - **Type errors are blocking** - all mypy and TypeScript errors must be resolved
-- **Integration tests must pass** - especially for database schema or API changes
+- **Fix linting errors immediately** - no suppressions without justification
+- **Integration tests required** for database schema or API changes
 
-### Development Workflow
+## Essential Reminders
 
-1. **Make code changes**
-2. **Run linting and type checking** (see commands above)
-3. **Fix any errors** before proceeding
-4. **Run relevant tests** (unit, integration, or e2e as appropriate)
-5. **Commit only when all checks pass**
-
-## Key Reminders
-
-1. **Check with user** before making technology choices or architectural changes
-2. **Start simple** - implement core functionality before optimizations
-3. **Test thoroughly** - write tests as you build, not after. Ideally before
-   implementing.
+1. **Tests First** - Write tests before implementation, always
+2. **Check with user** before making technology or architectural changes
+3. **Start simple** - implement core functionality before optimizations
 4. **Document decisions** - update architecture docs when patterns evolve
-5. **Run linting and type checking** for every single code change - no exceptions
+5. **Quality checks mandatory** - run linting, type checking, and tests for every change

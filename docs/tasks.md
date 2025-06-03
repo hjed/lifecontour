@@ -111,7 +111,6 @@ Tasks are organized by **feature iterations** that deliver end-to-end value incr
 - [ ] Generate automatic Swagger documentation
 - [ ] Add MeiliSearch health checks to system health endpoint
 - [ ] Create service factory functions for clean dependency injection
-- [ ] Create service factory functions for clean dependency injection
 
 ### ITER1-004: Contact UI with Search �
 **Description:** Create Next.js frontend for contact management with search capabilities
@@ -131,6 +130,21 @@ Tasks are organized by **feature iterations** that deliver end-to-end value incr
 - [ ] Write React Testing Library tests for components including search
 - [ ] Add comprehensive end-to-end tests with Playwright
 - [ ] Deploy working MVP with Docker Compose including MeiliSearch
+
+### ITER1-005: Contact MCP Tools 🟡
+**Description:** Implement MCP (Model Context Protocol) server foundation and contact tools for AI integration
+**Dependencies:** ITER1-004
+**Acceptance Criteria:**
+- [ ] Set up MCP server framework and protocol implementation
+- [ ] Implement basic MCP message handling and connection management
+- [ ] Add authentication and security for MCP connections
+- [ ] Create MCP tool registration system
+- [ ] Implement contact search, creation, and management tools using MeiliSearch
+- [ ] Add OpenTelemetry instrumentation for MCP operations
+- [ ] Document MCP server setup and configuration
+- [ ] Implement health checks for MCP server
+- [ ] Create MCP client test suite for contact tools
+- [ ] Add comprehensive MCP tool documentation
 
 ---
 
@@ -178,6 +192,20 @@ Tasks are organized by **feature iterations** that deliver end-to-end value incr
 - [ ] Implement sync progress indicators
 - [ ] Add tag mapping configuration UI
 
+### ITER2-004: Google Sync MCP Tools 🟡
+**Description:** Extend MCP tools with Google sync capabilities and global search
+**Dependencies:** ITER2-003
+**Acceptance Criteria:**
+- [ ] Add Google sync management tools to MCP interface
+- [ ] Implement global search tool across all entities (contacts, journal, calendar, photos)
+- [ ] Add advanced search tools with filters, facets, and typo tolerance
+- [ ] Create sync status monitoring and control tools via MCP
+- [ ] Add conflict resolution tools for Google sync via MCP
+- [ ] Implement data export and import tools via MCP
+- [ ] Add Google authentication management via MCP
+- [ ] Create comprehensive search capabilities documentation
+- [ ] Test MCP integration with AI assistants for sync operations
+
 ---
 
 ## Iteration 3: Basic Journal System
@@ -222,6 +250,20 @@ Tasks are organized by **feature iterations** that deliver end-to-end value incr
 - [ ] Add album linking UI (when albums are available)
 - [ ] Implement journal analytics dashboard
 - [ ] Add export functionality for journal entries
+
+### ITER3-004: Journal MCP Tools 🟡
+**Description:** Add journal management and search tools to MCP interface
+**Dependencies:** ITER3-003
+**Acceptance Criteria:**
+- [ ] Implement journal entry creation and management tools via MCP
+- [ ] Add journal search tools with mood tracking and content search
+- [ ] Create mood analysis and sentiment tracking tools
+- [ ] Add journal entry linking tools for albums and events
+- [ ] Implement journal analytics and insights tools
+- [ ] Add journal export and import capabilities via MCP
+- [ ] Create journal search with date range and mood filtering
+- [ ] Add journal entry summarization tools for AI assistants
+- [ ] Test journal MCP tools with AI assistant workflows
 
 ---
 
@@ -270,6 +312,20 @@ Tasks are organized by **feature iterations** that deliver end-to-end value incr
 - [ ] Implement calendar export functionality
 - [ ] Add search and filtering within calendar views
 
+### ITER4-004: Calendar MCP Tools 🟡
+**Description:** Add calendar management and search tools to MCP interface
+**Dependencies:** ITER4-003
+**Acceptance Criteria:**
+- [ ] Implement calendar event creation and management tools via MCP
+- [ ] Add calendar event search with date range and content filtering
+- [ ] Create meeting preparation tools with search integration
+- [ ] Add Google Calendar sync management via MCP
+- [ ] Implement calendar analytics and scheduling insights tools
+- [ ] Add calendar event linking tools for albums and contacts
+- [ ] Create recurring event management tools
+- [ ] Add calendar export and import capabilities via MCP
+- [ ] Test calendar MCP tools with AI assistant scheduling workflows
+
 ---
 
 ## Iteration 5: Photo Albums and Immich Integration
@@ -313,56 +369,27 @@ Tasks are organized by **feature iterations** that deliver end-to-end value incr
 - [ ] Add Immich sync status and controls
 - [ ] Create photo-based contact discovery
 
----
-
-## Iteration 6: MCP Protocol Support
-
-### ITER6-001: MCP Server Foundation 🟡
-**Description:** Implement MCP (Model Context Protocol) server for AI integration
+### ITER5-004: Photo MCP Tools 🟡
+**Description:** Add photo album and person linking tools to MCP interface
 **Dependencies:** ITER5-003
 **Acceptance Criteria:**
-- [ ] Set up MCP server framework and protocol implementation
-- [ ] Implement basic MCP message handling and connection management
-- [ ] Add authentication and security for MCP connections
-- [ ] Create MCP tool registration system
-- [ ] Add OpenTelemetry instrumentation for MCP operations
-- [ ] Document MCP server setup and configuration
-- [ ] Implement health checks for MCP server
-
-### ITER6-002: MCP Tools Implementation with Search 🔴
-**Description:** Create MCP tools for all domains with comprehensive search capabilities
-**Dependencies:** ITER6-001
-**Acceptance Criteria:**
-- [ ] Implement contact search, creation, and management tools using MeiliSearch
-- [ ] Create global search tool across all entities (contacts, journal, calendar, photos)
-- [ ] Add advanced search tools with filters, facets, and typo tolerance
-- [ ] Create journal entry tools with mood tracking and content search
-- [ ] Add calendar event tools with meeting preparation and event search
-- [ ] Implement photo album and person linking tools with search
-- [ ] Create cross-domain analytics and reporting tools
-- [ ] Add data export and import tools via MCP
-- [ ] Implement relationship analysis and insights tools using search data
-- [ ] Create comprehensive MCP tool documentation including search capabilities
-
-### ITER6-003: MCP Integration Testing 🟡
-**Description:** Test and validate MCP integration with AI assistants
-**Dependencies:** ITER6-002
-**Acceptance Criteria:**
-- [ ] Create MCP client test suite
-- [ ] Test integration with popular AI assistants
-- [ ] Validate tool functionality and performance
-- [ ] Create MCP usage examples and tutorials
-- [ ] Add error handling and recovery testing
-- [ ] Document best practices for AI assistant integration
-- [ ] Implement MCP tool versioning and compatibility
+- [ ] Implement photo album browsing and search tools via MCP
+- [ ] Add person-to-contact linking tools with confidence scoring
+- [ ] Create album linking tools for journal entries and calendar events
+- [ ] Add photo search and filtering capabilities via MCP
+- [ ] Implement Immich sync management tools
+- [ ] Add photo-based contact discovery and matching tools
+- [ ] Create album analytics and insights tools
+- [ ] Add relationship analysis tools using photo data
+- [ ] Test photo MCP tools with AI assistant workflows for memory recall
 
 ---
 
-## Iteration 7: Advanced Features and Future Protocols
+## Iteration 6: Advanced Features and Future Protocols
 
-### ITER7-001: Testing and Quality Assurance �
+### ITER6-001: Testing and Quality Assurance �
 **Description:** Comprehensive three-layer testing suite for all iterations
-**Dependencies:** ITER6-003
+**Dependencies:** ITER5-004
 **Acceptance Criteria:**
 - [ ] Enhance Jest testing framework with domain isolation and 80%+ coverage
 - [ ] Write comprehensive unit tests for all domain entities and services
@@ -380,9 +407,9 @@ Tasks are organized by **feature iterations** that deliver end-to-end value incr
 - [ ] Implement load testing for production readiness
 - [ ] Create testing documentation and best practices guide
 
-### ITER7-002: Performance and Security 🔴
+### ITER6-002: Performance and Security 🔴
 **Description:** Production readiness with performance optimization and security hardening
-**Dependencies:** ITER7-001
+**Dependencies:** ITER6-001
 **Acceptance Criteria:**
 - [ ] Implement comprehensive security measures (input sanitization, SQL injection protection)
 - [ ] Add data encryption at rest and in transit
@@ -394,9 +421,9 @@ Tasks are organized by **feature iterations** that deliver end-to-end value incr
 - [ ] Implement GDPR compliance features
 - [ ] Add performance monitoring and optimization
 
-### ITER7-003: Future Protocol Extensions 🟣
+### ITER6-003: Future Protocol Extensions 🟣
 **Description:** CardDAV, CalDAV, and Home Assistant integration
-**Dependencies:** ITER7-002
+**Dependencies:** ITER6-002
 **Acceptance Criteria:**
 - [ ] Implement CardDAV protocol for contact synchronization
 - [ ] Add CalDAV protocol for calendar synchronization
@@ -413,10 +440,11 @@ Tasks are organized by **feature iterations** that deliver end-to-end value incr
 
 ### Development Principles
 1. **Feature-Complete Iterations** - Each iteration delivers working, testable functionality
-2. **End-to-End Development** - Build domain → API → UI for each feature
-3. **Integration Sub-Domains** - Keep integrations separate from core business logic
-4. **Continuous Deployment** - Deploy and test after each iteration
-5. **User Feedback** - Validate features with real usage before moving to next iteration
+2. **End-to-End Development** - Build domain → API → UI → MCP tools for each feature
+3. **AI-First Approach** - MCP integration is part of each iteration, not a separate concern
+4. **Integration Sub-Domains** - Keep integrations separate from core business logic
+5. **Continuous Deployment** - Deploy and test after each iteration
+6. **User Feedback** - Validate features with real usage before moving to next iteration
 
 ### Getting Started
 1. **Start with Iteration 1** - Basic contact management provides foundation
@@ -431,20 +459,18 @@ Tasks are organized by **feature iterations** that deliver end-to-end value incr
 Use this section to track progress:
 
 ```
-Iteration 1 (Contact MVP): [x] ITER1-001 [x] ITER1-002 [ ] ITER1-003 [ ] ITER1-004
-Iteration 2 (Google Sync): [ ] ITER2-001 [ ] ITER2-002 [ ] ITER2-003
-Iteration 3 (Journal): [ ] ITER3-001 [ ] ITER3-002 [ ] ITER3-003
-Iteration 4 (Calendar): [ ] ITER4-001 [ ] ITER4-002 [ ] ITER4-003
-Iteration 5 (Photos): [ ] ITER5-001 [ ] ITER5-002 [ ] ITER5-003
-Iteration 6 (MCP): [ ] ITER6-001 [ ] ITER6-002 [ ] ITER6-003
-Iteration 7 (Advanced): [ ] ITER7-001 [ ] ITER7-002 [ ] ITER7-003
+Iteration 1 (Contact MVP): [x] ITER1-001 [x] ITER1-002 [ ] ITER1-003 [ ] ITER1-004 [ ] ITER1-005
+Iteration 2 (Google Sync): [ ] ITER2-001 [ ] ITER2-002 [ ] ITER2-003 [ ] ITER2-004
+Iteration 3 (Journal): [ ] ITER3-001 [ ] ITER3-002 [ ] ITER3-003 [ ] ITER3-004
+Iteration 4 (Calendar): [ ] ITER4-001 [ ] ITER4-002 [ ] ITER4-003 [ ] ITER4-004
+Iteration 5 (Photos): [ ] ITER5-001 [ ] ITER5-002 [ ] ITER5-003 [ ] ITER5-004
+Iteration 6 (Advanced): [ ] ITER6-001 [ ] ITER6-002 [ ] ITER6-003
 ```
 
 ### Value Delivery Timeline
-- **Iteration 1**: Working contact management system with global search and transactional events
-- **Iteration 2**: Google Contacts sync with bidirectional tag sync
-- **Iteration 3**: Journal system with mood tracking and search capabilities
-- **Iteration 4**: Calendar integration with Google Calendar sync and search
-- **Iteration 5**: Photo albums with person-contact linking and search
-- **Iteration 6**: AI integration via MCP protocol with comprehensive search tools
-- **Iteration 7**: Production-ready with advanced protocols
+- **Iteration 1**: Working contact management system with global search, transactional events, and MCP foundation
+- **Iteration 2**: Google Contacts sync with bidirectional tag sync and global MCP search tools
+- **Iteration 3**: Journal system with mood tracking, search capabilities, and journal MCP tools
+- **Iteration 4**: Calendar integration with Google Calendar sync, search, and calendar MCP tools
+- **Iteration 5**: Photo albums with person-contact linking, search, and photo MCP tools
+- **Iteration 6**: Production-ready with advanced protocols and comprehensive testing

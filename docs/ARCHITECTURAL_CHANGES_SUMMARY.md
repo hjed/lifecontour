@@ -85,10 +85,10 @@ This document summarizes the architectural changes made to incorporate MeiliSear
 - Added search result highlighting
 - Added search filters and typo tolerance display
 
-### Future Iterations (ITER3-ITER6)
+### Future Iterations (ITER3-ITER5)
 - Updated all domain tasks to include search capabilities
 - Added outbox pattern integration for all domains
-- Updated MCP tools to include comprehensive search features
+- Added MCP tools as part of each iteration (AI-first approach)
 - Maintained consistency across all iterations
 
 ## Implementation Approach
@@ -103,7 +103,7 @@ This document summarizes the architectural changes made to incorporate MeiliSear
 1. Extend outbox pattern to journal domain
 2. Add journal search capabilities
 3. Repeat for calendar and photo domains
-4. Integrate with MCP tools
+4. Add MCP tools as part of each domain iteration
 
 ### Phase 3: Optimization
 1. Fine-tune search indexes
