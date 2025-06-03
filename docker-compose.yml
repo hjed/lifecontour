@@ -23,6 +23,27 @@ services:
     networks:
       - personal-management
 
+  # MeiliSearch Search Engine
+  meilisearch:
+    image: getmeili/meilisearch:v1.2
+    container_name: personal-management-search
+    environment:
+      - MEILI_MASTER_KEY=personal_management_search_key
+      - MEILI_ENV=development
+      - MEILI_LOG_LEVEL=INFO
+    volumes:
+      - meilisearch_data:/meili_data
+    ports:
+      - "7700:7700"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:7700/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - personal-management
+
   # Python FastAPI Backend
   backend:
     build:
@@ -35,12 +56,18 @@ services:
       - LOG_LEVEL=INFO
       - CORS_ORIGINS="http://localhost:3000,http://127.0.0.1:3000,http://frontend:3000"
       - ALLOWED_HOSTS="localhost,127.0.0.1,backend"
+      - MEILISEARCH_URL=http://meilisearch:7700
+      - MEILISEARCH_API_KEY=personal_management_search_key
+      - SESSION_SECRET_KEY=personal_management_session_secret_key_change_in_production
+      - SEARCH_INDEX_PREFIX=pms_
     volumes:
       - ./backend:/app
     ports:
       - "8000:8000"
     depends_on:
       database:
+        condition: service_healthy
+      meilisearch:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
@@ -107,6 +134,8 @@ services:
 
 volumes:
   postgres_data:
+    driver: local
+  meilisearch_data:
     driver: local
   nginx_logs:
     driver: local

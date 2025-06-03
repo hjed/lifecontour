@@ -6,6 +6,7 @@ on:
   pull_request:
     branches: [ main, develop ]
 
+
 jobs:
   sonarcloud:
     name: SonarCloud Analysis
@@ -66,7 +67,9 @@ jobs:
   complexity-analysis:
     name: Code Complexity Analysis
     runs-on: ubuntu-latest
-    
+    permissions:
+      contents: read
+      pull-requests: write
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -120,31 +123,6 @@ jobs:
             } catch (error) {
               console.log('No complexity report found or error reading file');
             }
-
-  documentation-check:
-    name: Documentation Check
-    runs-on: ubuntu-latest
-    
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Check for README updates
-        run: |
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            # Check if code changes require README updates
-            git diff --name-only origin/${{ github.base_ref }}...HEAD | grep -E '\.(py|ts|tsx|js|jsx)$' > changed_files.txt || true
-            if [ -s changed_files.txt ]; then
-              echo "Code changes detected. Checking if documentation was updated..."
-              git diff --name-only origin/${{ github.base_ref }}...HEAD | grep -E '(README|docs/)' > doc_changes.txt || true
-              if [ ! -s doc_changes.txt ]; then
-                echo "⚠️ Code changes detected but no documentation updates found."
-                echo "Consider updating README.md or docs/ if your changes affect usage or architecture."
-              else
-                echo "✅ Documentation updates found."
-              fi
-            fi
-          fi
 
       - name: Check for broken links in documentation
         run: |

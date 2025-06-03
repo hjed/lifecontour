@@ -77,7 +77,7 @@ class TestContactEventService:
 
         # Act
         result = await service.get_contact_events(
-            1, limit=50, transaction=mock_transaction
+            1, limit=50, _transaction=mock_transaction
         )
 
         # Assert
@@ -95,7 +95,7 @@ class TestContactEventService:
 
         # Act
         result = await service.get_contact_events(
-            1, limit=10, transaction=mock_transaction
+            1, limit=10, _transaction=mock_transaction
         )
 
         # Assert
@@ -126,7 +126,7 @@ class TestContactEventService:
 
         # Act
         result = await service.get_events_by_type(
-            "ContactCreated", limit=50, transaction=mock_transaction
+            "ContactCreated", limit=50, _transaction=mock_transaction
         )
 
         # Assert
@@ -144,7 +144,7 @@ class TestContactEventService:
 
         # Act
         result = await service.get_events_by_type(
-            "ContactUpdated", limit=25, transaction=mock_transaction
+            "ContactUpdated", limit=25, _transaction=mock_transaction
         )
 
         # Assert
