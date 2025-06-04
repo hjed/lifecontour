@@ -25,21 +25,21 @@ env:
   # Python configuration
   PYTHON_VERSION: "3.11"
   UV_VERSION: "0.4.18"
-  
+
   # Node.js configuration
   NODE_VERSION: "18"
   PNPM_VERSION: "9.12.0"
-  
+
   # Testing configuration
   PYTEST_ARGS: "--cov=app --cov-report=xml --cov-report=term-missing"
   JEST_ARGS: "--coverage --watchAll=false"
-  
+
   # Linting configuration
   RUFF_ARGS: "check ."
   BLACK_ARGS: "--check ."
   MYPY_ARGS: "."
   ESLINT_ARGS: "--ext .ts,.tsx,.js,.jsx"
-  
+
   # Docker configuration
   DOCKER_BUILDKIT: 1
   COMPOSE_DOCKER_CLI_BUILD: 1

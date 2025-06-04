@@ -16,7 +16,7 @@ jobs:
     defaults:
       run:
         working-directory: ./backend
-    
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -63,7 +63,7 @@ jobs:
     defaults:
       run:
         working-directory: ./frontend
-    
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -94,7 +94,7 @@ jobs:
   docker-security:
     name: Docker Security Scan
     runs-on: ubuntu-latest
-    
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4

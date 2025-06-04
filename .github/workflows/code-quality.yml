@@ -12,7 +12,7 @@ jobs:
     name: SonarCloud Analysis
     runs-on: ubuntu-latest
     if: github.event.repository.private == false
-    
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4

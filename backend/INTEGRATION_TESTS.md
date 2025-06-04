@@ -52,7 +52,7 @@ If you prefer to manage the database manually:
 ### Repository Integration Tests
 
 - `test_contact_repository_integration.py` - Tests for ContactRepository SQL implementation
-- `test_tag_repository_integration.py` - Tests for TagRepository SQL implementation  
+- `test_tag_repository_integration.py` - Tests for TagRepository SQL implementation
 - `test_field_history_repository_integration.py` - Tests for ContactFieldHistoryRepository SQL implementation
 - `test_event_repository_integration.py` - Tests for ContactEditEventRepository SQL implementation
 

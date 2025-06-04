@@ -27,11 +27,11 @@ jobs:
     permissions:
       contents: read
       packages: write
-    
+
     strategy:
       matrix:
         component: [backend, frontend]
-    
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -72,7 +72,7 @@ jobs:
     needs: [test, build-and-push-images]
     permissions:
       contents: write
-    
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -93,7 +93,7 @@ jobs:
         run: |
           # Get the previous tag
           PREVIOUS_TAG=$(git describe --tags --abbrev=0 HEAD~1 2>/dev/null || echo "")
-          
+
           if [ -z "$PREVIOUS_TAG" ]; then
             # First release
             CHANGELOG=$(git log --pretty=format:"- %s" --reverse)
@@ -101,10 +101,10 @@ jobs:
             # Generate changelog since last tag
             CHANGELOG=$(git log ${PREVIOUS_TAG}..HEAD --pretty=format:"- %s" --reverse)
           fi
-          
+
           # Save changelog to file
           echo "$CHANGELOG" > changelog.txt
-          
+
           # Set output for GitHub release
           echo "changelog<<EOF" >> $GITHUB_OUTPUT
           echo "$CHANGELOG" >> $GITHUB_OUTPUT
@@ -119,24 +119,24 @@ jobs:
           release_name: Release ${{ steps.version.outputs.version }}
           body: |
             ## Changes in this release
-            
+
             ${{ steps.changelog.outputs.changelog }}
-            
+
             ## Docker Images
-            
+
             - Backend: `${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-backend:${{ steps.version.outputs.version }}`
             - Frontend: `${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-frontend:${{ steps.version.outputs.version }}`
-            
+
             ## Installation
-            
+
             ```bash
             # Clone the repository
             git clone https://github.com/${{ github.repository }}.git
             cd personal-management-system
-            
+
             # Checkout this version
             git checkout ${{ steps.version.outputs.version }}
-            
+
             # Follow setup instructions in README.md
             ```
           draft: false

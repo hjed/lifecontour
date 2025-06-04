@@ -1,0 +1,69 @@
+repos:
+  # Backend Python hooks
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.6.9
+    hooks:
+      # Run the formatter
+      - id: ruff-format
+        name: ruff format (backend)
+        files: ^backend/
+        types: [python]
+      # Run the linter
+      - id: ruff
+        name: ruff check (backend)
+        files: ^backend/
+        types: [python]
+        args: [--fix]
+
+  # Backend type checking
+  - repo: local
+    hooks:
+      - id: mypy
+        name: mypy (backend)
+        entry: bash -c 'cd backend && source .venv/bin/activate && mypy .'
+        language: system
+        files: ^backend/.*\.py$
+        pass_filenames: false
+
+  # Frontend hooks
+  - repo: local
+    hooks:
+      - id: prettier
+        name: prettier (frontend)
+        entry: bash -c 'cd frontend && pnpm format'
+        language: system
+        files: ^frontend/.*\.(js|jsx|ts|tsx|json|css|scss|md)$
+        pass_filenames: false
+
+  # Frontend ESLint
+  - repo: local
+    hooks:
+      - id: eslint
+        name: eslint (frontend)
+        entry: bash -c 'cd frontend && pnpm lint:fix'
+        language: system
+        files: ^frontend/.*\.(js|jsx|ts|tsx)$
+        pass_filenames: false
+
+  # Frontend TypeScript type checking
+  - repo: local
+    hooks:
+      - id: typescript-check
+        name: typescript check (frontend)
+        entry: bash -c 'cd frontend && pnpm type-check'
+        language: system
+        files: ^frontend/.*\.(ts|tsx)$
+        pass_filenames: false
+
+  # General hooks
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-json
+      - id: check-toml
+      - id: check-merge-conflict
+      - id: check-added-large-files
+        args: [--maxkb=1000]

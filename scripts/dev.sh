@@ -37,22 +37,22 @@ command_exists() {
 # Setup function
 setup() {
     log_info "Setting up Personal Management System development environment..."
-    
+
     # Check prerequisites
     if ! command_exists "uv"; then
         log_error "UV is not installed. Please install UV for Python dependency management."
         exit 1
     fi
-    
+
     if ! command_exists "pnpm"; then
         log_error "pnpm is not installed. Please install pnpm for frontend dependency management."
         exit 1
     fi
-    
+
     if ! command_exists "docker"; then
         log_warning "Docker is not installed. You'll need Docker for the full development environment."
     fi
-    
+
     # Setup backend
     log_info "Setting up backend dependencies..."
     cd backend
@@ -62,7 +62,7 @@ setup() {
     fi
     uv pip install -e .[dev]
     cd ..
-    
+
     # Setup frontend
     log_info "Setting up frontend dependencies..."
     cd frontend
@@ -72,7 +72,7 @@ setup() {
     fi
     pnpm install
     cd ..
-    
+
     log_success "Development environment setup complete!"
     log_info "Next steps:"
     log_info "1. Configure your .env files"
@@ -84,26 +84,26 @@ setup() {
 # Start development servers
 start() {
     log_info "Starting development servers..."
-    
+
     # Start backend
     log_info "Starting backend server..."
     cd backend
     uvicorn app.main:app --reload --host 0.0.0.0 --port 8000 &
     BACKEND_PID=$!
     cd ..
-    
+
     # Start frontend
     log_info "Starting frontend server..."
     cd frontend
     pnpm dev &
     FRONTEND_PID=$!
     cd ..
-    
+
     log_success "Development servers started!"
     log_info "Backend: http://localhost:8000"
     log_info "Frontend: http://localhost:3000"
     log_info "API Docs: http://localhost:8000/api/docs"
-    
+
     # Wait for interrupt
     trap "kill $BACKEND_PID $FRONTEND_PID 2>/dev/null; exit" INT
     wait
@@ -112,61 +112,75 @@ start() {
 # Run tests
 test() {
     log_info "Running tests..."
-    
+
     # Backend tests
     log_info "Running backend tests..."
     cd backend
     pytest
     cd ..
-    
+
     # Frontend tests
     log_info "Running frontend tests..."
     cd frontend
     pnpm test
     cd ..
-    
+
     log_success "All tests completed!"
 }
 
 # Lint code
 lint() {
     log_info "Running linters..."
-    
+
     # Backend linting
     log_info "Linting backend..."
     cd backend
     ruff check .
-    black --check .
+    ruff format --check .
     mypy .
     cd ..
-    
+
     # Frontend linting
     log_info "Linting frontend..."
     cd frontend
     pnpm lint
     pnpm type-check
     cd ..
-    
+
     log_success "Linting completed!"
 }
 
 # Fix linting issues
 lint_fix() {
     log_info "Fixing linting issues..."
-    
+
     # Backend
     cd backend
     ruff check . --fix
-    black .
+    ruff format .
     cd ..
-    
+
     # Frontend
     cd frontend
     pnpm lint:fix
     pnpm format
     cd ..
-    
+
     log_success "Linting fixes applied!"
+}
+
+# Run pre-commit hooks
+precommit() {
+    log_info "Running pre-commit hooks..."
+
+    if [ ! -f "backend/.venv/bin/pre-commit" ]; then
+        log_error "Pre-commit not found. Run './scripts/dev.sh setup' first."
+        exit 1
+    fi
+
+    backend/.venv/bin/pre-commit run --all-files
+
+    log_success "Pre-commit hooks completed!"
 }
 
 # Show help
@@ -181,6 +195,7 @@ help() {
     echo "  test      Run all tests"
     echo "  lint      Run linters"
     echo "  lint-fix  Fix linting issues"
+    echo "  precommit Run pre-commit hooks"
     echo "  help      Show this help message"
     echo ""
 }
@@ -201,6 +216,9 @@ case "${1:-help}" in
         ;;
     lint-fix)
         lint_fix
+        ;;
+    precommit)
+        precommit
         ;;
     help)
         help
