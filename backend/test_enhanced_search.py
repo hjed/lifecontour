@@ -127,9 +127,9 @@ async def test_enhanced_contact_indexing() -> bool:
             await indexer.process_event(event)
 
         # Verify database queries were made
-        assert (
-            mock_conn.execute.call_count == 4
-        ), f"Expected 4 DB queries, got {mock_conn.execute.call_count}"
+        assert mock_conn.execute.call_count == 4, (
+            f"Expected 4 DB queries, got {mock_conn.execute.call_count}"
+        )
 
         # Verify MeiliSearch indexing was called
         mock_index.add_documents.assert_called_once()
