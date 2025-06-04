@@ -294,18 +294,18 @@ For detailed implementation examples and patterns, see:
 
 **Run these checks after every code change - no failures acceptable:**
 
-```bash
-# Backend
-cd backend
-mypy .
-ruff check .
-ruff format --check .
-python scripts/run_integration_tests.py
+Use `./scripts/dev.sh lint` to run all checks at once.
 
-# Frontend
-cd frontend
-pnpm type-check
-pnpm lint
+**Note:** These are the same checks run by CI and the local dev script (`./scripts/dev.sh lint`). Pre-commit hooks auto-fix these issues before commit, while these commands verify the fixes were applied correctly.
+
+### Integration Testing
+
+**Run integration tests separately after quality checks pass:**
+
+```bash
+# Backend integration tests
+cd backend
+uv run python scripts/run_integration_tests.py
 ```
 
 ### CI/CD Compliance

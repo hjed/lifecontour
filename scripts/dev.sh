@@ -60,6 +60,14 @@ setup() {
         cp .env.example .env
         log_info "Created backend .env file from example. Please configure it."
     fi
+
+    # Create virtual environment if it doesn't exist
+    if [ ! -d ".venv" ]; then
+        log_info "Creating Python virtual environment..."
+        uv venv
+    fi
+
+    # Install dependencies
     uv pip install -e .[dev]
     cd ..
 
@@ -88,7 +96,7 @@ start() {
     # Start backend
     log_info "Starting backend server..."
     cd backend
-    uvicorn app.main:app --reload --host 0.0.0.0 --port 8000 &
+    uv run uvicorn app.main:app --reload --host 0.0.0.0 --port 8000 &
     BACKEND_PID=$!
     cd ..
 
@@ -116,7 +124,7 @@ test() {
     # Backend tests
     log_info "Running backend tests..."
     cd backend
-    pytest
+    uv run pytest
     cd ..
 
     # Frontend tests
@@ -135,9 +143,9 @@ lint() {
     # Backend linting
     log_info "Linting backend..."
     cd backend
-    ruff check .
-    ruff format --check .
-    mypy .
+    uv run ruff check .
+    uv run ruff format --check .
+    uv run mypy .
     cd ..
 
     # Frontend linting
@@ -145,6 +153,7 @@ lint() {
     cd frontend
     pnpm lint
     pnpm type-check
+    pnpm format:check
     cd ..
 
     log_success "Linting completed!"
@@ -156,8 +165,8 @@ lint_fix() {
 
     # Backend
     cd backend
-    ruff check . --fix
-    ruff format .
+    uv run ruff check . --fix
+    uv run ruff format .
     cd ..
 
     # Frontend

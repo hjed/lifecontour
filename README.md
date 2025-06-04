@@ -126,12 +126,17 @@ cd frontend && pnpm test:e2e
 ### Code Quality
 
 ```bash
-# Check linting
+# Check all quality standards (same as CI)
 ./scripts/dev.sh lint
 
-# Fix linting issues
+# Auto-fix linting issues
 ./scripts/dev.sh lint-fix
+
+# Run pre-commit hooks manually
+./scripts/dev.sh precommit
 ```
+
+See [Code Quality Standards](docs/code-quality-standards.md) for detailed information about our consolidated linting approach.
 
 ### Database Operations
 
