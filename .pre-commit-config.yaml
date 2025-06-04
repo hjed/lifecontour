@@ -1,19 +1,21 @@
 repos:
   # Backend Python hooks
-  - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.6.9
+  - repo: local
     hooks:
       # Run the formatter
       - id: ruff-format
         name: ruff format (backend)
-        files: ^backend/
-        types: [python]
+        entry: bash -c 'cd backend && uv run ruff format .'
+        language: system
+        files: ^backend/.*\.py$
+        pass_filenames: false
       # Run the linter
       - id: ruff
         name: ruff check (backend)
-        files: ^backend/
-        types: [python]
-        args: [--fix]
+        entry: bash -c 'cd backend && uv run ruff check --fix .'
+        language: system
+        files: ^backend/.*\.py$
+        pass_filenames: false
 
   # Backend type checking
   - repo: local
