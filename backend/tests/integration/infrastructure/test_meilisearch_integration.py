@@ -28,7 +28,10 @@ class TestMeiliSearchIntegration:
     def meilisearch_client(self):
         """Create a real MeiliSearch client for testing."""
         try:
-            client = MeiliSearchClient("http://localhost:7700")
+            # Use test port 7701 to connect to test MeiliSearch instance
+            client = MeiliSearchClient(
+                "http://localhost:7701", api_key="test_master_key"
+            )
             # Test connection
             health = client.health()
             if health.get("status") != "available":

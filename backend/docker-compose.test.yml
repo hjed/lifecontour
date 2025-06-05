@@ -22,5 +22,24 @@ services:
       -c log_destination=stderr
       -c logging_collector=off
 
+  meilisearch-test:
+    image: getmeili/meilisearch:v1.2
+    environment:
+      - MEILI_MASTER_KEY=test_master_key
+      - MEILI_ENV=development
+      - MEILI_LOG_LEVEL=INFO
+      - MEILI_NO_ANALYTICS=true
+    ports:
+      - "7701:7700"  # Use different port to avoid conflicts
+    volumes:
+      - meilisearch_test_data:/meili_data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:7700/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
 volumes:
   postgres_test_data:
+  meilisearch_test_data:
