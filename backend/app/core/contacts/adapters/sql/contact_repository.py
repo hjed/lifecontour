@@ -221,6 +221,13 @@ class SqlContactRepository(ContactRepository):
                 contacts.append(contact)
         return contacts
 
+    async def get_count(self) -> int:
+        """Get total count of contacts."""
+        query = text("SELECT COUNT(*) FROM contacts")
+        result = await self.conn.execute(query)
+        row = result.fetchone()
+        return row[0] if row else 0
+
     async def save(self, contact: Contact) -> Contact:
         """Save a contact (insert or update)."""
         try:

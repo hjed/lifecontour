@@ -41,10 +41,16 @@ def get_docker_compose_cmd() -> list[str]:
     return ["docker-compose"]
 
 
-# Test database URL for async operations (using port 5433 for Docker)
-ASYNC_TEST_DATABASE_URL = (
-    "postgresql+asyncpg://postgres:postgres@localhost:5433/personal_management_test"
-)
+# Test database URL for async operations (configurable via environment variables)
+def get_test_database_url() -> str:
+    """Get test database URL from environment variables or use defaults."""
+    host = os.getenv("TEST_DB_HOST", "localhost")
+    port = os.getenv("TEST_DB_PORT", "5433")
+    user = os.getenv("TEST_DB_USER", "postgres")
+    password = os.getenv("TEST_DB_PASSWORD", "postgres")
+    name = os.getenv("TEST_DB_NAME", "personal_management_test")
+
+    return f"postgresql+asyncpg://{user}:{password}@{host}:{port}/{name}"
 
 
 def start_test_database():
@@ -160,6 +166,14 @@ def event_loop():
 @pytest.fixture(scope="session", autouse=True)
 def setup_test_database():
     """Setup and teardown test database for the entire test session."""
+    # Skip Docker setup in CI - services are provided by GitHub Actions
+    if os.getenv("CI") or os.getenv("GITHUB_ACTIONS"):
+        print("Running in CI - using GitHub Actions services")
+        yield
+        return
+
+    # Local development - use Docker Compose
+    print("Running locally - starting Docker services")
     start_test_database()
     yield
     stop_test_database()
@@ -169,7 +183,7 @@ def setup_test_database():
 async def async_engine(setup_test_database) -> AsyncGenerator[AsyncEngine, None]:
     """Create async database engine for testing."""
     engine = create_async_engine(
-        ASYNC_TEST_DATABASE_URL,
+        get_test_database_url(),
         echo=False,  # Set to True for SQL debugging
         pool_pre_ping=True,
         pool_recycle=300,

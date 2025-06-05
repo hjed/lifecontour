@@ -1,0 +1,216 @@
+"""
+Contact API schemas for request and response models.
+
+Defines Pydantic models for contact-related API endpoints following
+the JSON API specification.
+"""
+
+from datetime import datetime
+from typing import Any
+
+from pydantic import BaseModel, Field
+
+from app.api.common.schemas import (
+    JsonApiCollectionResponse,
+    JsonApiCreateRequest,
+    JsonApiLinks,
+    JsonApiResponse,
+    JsonApiUpdateRequest,
+)
+
+
+# Contact Method Schemas (embedded in contact)
+class ContactMethodAttributes(BaseModel):
+    """Contact method attributes for embedding in contact resource."""
+
+    method_type: str = Field(..., description="Type of contact method (email, phone)")
+    value: str = Field(..., description="Contact method value")
+    label: str | None = Field(default=None, description="Optional label for the method")
+    is_primary: bool = Field(
+        default=False, description="Whether this is the primary method of its type"
+    )
+
+
+class ContactMethodResource(BaseModel):
+    """Contact method resource for embedding in contact."""
+
+    id: int | None = Field(default=None, description="Method ID (null for new methods)")
+    attributes: ContactMethodAttributes = Field(..., description="Method attributes")
+
+
+# Contact Address Schemas (embedded in contact)
+class ContactAddressAttributes(BaseModel):
+    """Contact address attributes for embedding in contact resource."""
+
+    label: str | None = Field(
+        default=None, description="Optional label for the address"
+    )
+    street_line_1: str = Field(..., description="First line of street address")
+    street_line_2: str | None = Field(
+        default=None, description="Second line of street address"
+    )
+    locality: str | None = Field(default=None, description="City or locality")
+    region: str | None = Field(default=None, description="State, province, or region")
+    postal_code: str | None = Field(default=None, description="Postal or ZIP code")
+    country_code: str = Field(..., description="Two-letter ISO country code")
+    is_primary: bool = Field(
+        default=False, description="Whether this is the primary address"
+    )
+
+
+class ContactAddressResource(BaseModel):
+    """Contact address resource for embedding in contact."""
+
+    id: int | None = Field(
+        default=None, description="Address ID (null for new addresses)"
+    )
+    attributes: ContactAddressAttributes = Field(..., description="Address attributes")
+
+
+# Contact Note Schemas (embedded in contact)
+class ContactNoteAttributes(BaseModel):
+    """Contact note attributes for embedding in contact resource."""
+
+    content: str = Field(..., description="Note content")
+    created_at: datetime | None = Field(
+        default=None, description="Note creation timestamp"
+    )
+    updated_at: datetime | None = Field(
+        default=None, description="Note last update timestamp"
+    )
+
+
+class ContactNoteResource(BaseModel):
+    """Contact note resource for embedding in contact."""
+
+    id: int | None = Field(default=None, description="Note ID (null for new notes)")
+    attributes: ContactNoteAttributes = Field(..., description="Note attributes")
+
+
+# Tag Schemas (for relationships)
+class TagAttributes(BaseModel):
+    """Tag attributes."""
+
+    name: str = Field(..., description="Tag name")
+    color: str | None = Field(default=None, description="Tag color (hex code)")
+    description: str | None = Field(default=None, description="Tag description")
+
+
+class TagResource(BaseModel):
+    """Tag resource following JSON API specification."""
+
+    type: str = Field(default="tags", description="Resource type")
+    id: str = Field(..., description="Resource identifier")
+    attributes: TagAttributes = Field(..., description="Tag attributes")
+    links: JsonApiLinks | None = Field(default=None, description="Resource links")
+    meta: dict[str, Any] | None = Field(default=None, description="Resource metadata")
+
+
+# Contact Schemas
+class ContactAttributes(BaseModel):
+    """Contact attributes."""
+
+    first_name: str = Field(..., description="Contact first name")
+    last_name: str | None = Field(default=None, description="Contact last name")
+    middle_name: str | None = Field(default=None, description="Contact middle name")
+    nick_name: str | None = Field(default=None, description="Contact nickname")
+    created_at: datetime | None = Field(
+        default=None, description="Contact creation timestamp"
+    )
+    updated_at: datetime | None = Field(
+        default=None, description="Contact last update timestamp"
+    )
+
+    # Embedded related data (not separate resources for REST API)
+    contact_methods: list[ContactMethodResource] = Field(
+        default_factory=list, description="Contact methods"
+    )
+    addresses: list[ContactAddressResource] = Field(
+        default_factory=list, description="Contact addresses"
+    )
+    notes: list[ContactNoteResource] = Field(
+        default_factory=list, description="Contact notes"
+    )
+
+
+class ContactRelationships(BaseModel):
+    """Contact relationships to other resources."""
+
+    tags: dict[str, Any] | None = Field(default=None, description="Related tags")
+
+
+class ContactResource(BaseModel):
+    """Contact resource following JSON API specification."""
+
+    type: str = Field(default="contacts", description="Resource type")
+    id: str = Field(..., description="Resource identifier")
+    attributes: ContactAttributes = Field(..., description="Contact attributes")
+    relationships: ContactRelationships | None = Field(
+        default=None, description="Contact relationships"
+    )
+    links: JsonApiLinks | None = Field(default=None, description="Resource links")
+    meta: dict[str, Any] | None = Field(default=None, description="Resource metadata")
+
+
+# Request/Response Models
+class ContactCreateData(BaseModel):
+    """Data for creating a new contact."""
+
+    type: str = Field(default="contacts", description="Resource type")
+    attributes: ContactAttributes = Field(
+        ..., description="Contact attributes to create"
+    )
+
+
+class ContactUpdateData(BaseModel):
+    """Data for updating an existing contact."""
+
+    type: str = Field(default="contacts", description="Resource type")
+    id: str = Field(..., description="Contact ID to update")
+    attributes: ContactAttributes = Field(
+        ..., description="Contact attributes to update"
+    )
+
+
+class ContactCreateRequest(JsonApiCreateRequest[ContactCreateData]):
+    """Request model for creating a contact."""
+
+    pass
+
+
+class ContactUpdateRequest(JsonApiUpdateRequest[ContactUpdateData]):
+    """Request model for updating a contact."""
+
+    pass
+
+
+class ContactResponse(JsonApiResponse[ContactResource]):
+    """Response model for a single contact."""
+
+    pass
+
+
+class ContactListResponse(JsonApiCollectionResponse[ContactResource]):
+    """Response model for a list of contacts."""
+
+    pass
+
+
+# Tag Assignment Schemas
+class TagAssignmentData(BaseModel):
+    """Data for assigning a tag to a contact."""
+
+    type: str = Field(default="tags", description="Resource type")
+    id: str = Field(..., description="Tag ID to assign")
+
+
+class TagAssignmentRequest(BaseModel):
+    """Request model for assigning a tag to a contact."""
+
+    data: TagAssignmentData = Field(..., description="Tag assignment data")
+
+
+class TagListResponse(JsonApiCollectionResponse[TagResource]):
+    """Response model for a list of tags."""
+
+    pass

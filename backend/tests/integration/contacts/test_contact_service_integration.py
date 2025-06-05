@@ -172,12 +172,9 @@ class TestContactServiceIntegration:
 
         # Update contact
         saved_contact.last_name = "Doe"
-        changed_fields = {"last_name": ("Smith", "Doe")}
 
         # Act
-        result = await contact_service.update_contact(
-            saved_contact, changed_fields, clean_database
-        )
+        result = await contact_service.update_contact(saved_contact, clean_database)
 
         # Assert
         assert result.id == saved_contact.id
@@ -200,13 +197,10 @@ class TestContactServiceIntegration:
         """Test contact update raises error when no ID."""
         # Arrange
         contact = Contact(first_name="John", id=None)
-        changed_fields = {"last_name": ("Smith", "Doe")}
 
         # Act & Assert
         with pytest.raises(ContactValidationError) as exc_info:
-            await contact_service.update_contact(
-                contact, changed_fields, clean_database
-            )
+            await contact_service.update_contact(contact, clean_database)
 
         assert exc_info.value.field == "id"
 
@@ -348,10 +342,7 @@ class TestContactServiceIntegration:
 
         # Update contact
         saved_contact.nick_name = "Johnny"
-        changed_fields = {"nick_name": (None, "Johnny")}
-        await contact_service.update_contact(
-            saved_contact, changed_fields, clean_database
-        )
+        await contact_service.update_contact(saved_contact, clean_database)
 
         # Verify final state
         final_contact = await contact_service.get_contact_by_id(saved_contact.id)

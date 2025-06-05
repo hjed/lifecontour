@@ -17,12 +17,17 @@ from app.main import create_app
 @pytest.fixture
 def integration_test_client():
     """Create test client for integration tests with real database setup."""
+    # Get database connection details from environment variables (for CI) or use defaults (for local)
+    host = os.environ.get("TEST_DB_HOST", "localhost")
+    port = os.environ.get("TEST_DB_PORT", "5433")
+    user = os.environ.get("TEST_DB_USER", "postgres")
+    password = os.environ.get("TEST_DB_PASSWORD", "postgres")
+    name = os.environ.get("TEST_DB_NAME", "personal_management_test")
+
     # Set environment variables for test database and allowed hosts
     original_db_url = os.environ.get("DATABASE_URL")
     original_allowed_hosts = os.environ.get("ALLOWED_HOSTS")
-    os.environ["DATABASE_URL"] = (
-        "postgresql://postgres:postgres@localhost:5433/personal_management_test"
-    )
+    os.environ["DATABASE_URL"] = f"postgresql://{user}:{password}@{host}:{port}/{name}"
     os.environ["ALLOWED_HOSTS"] = '["*"]'
 
     # Clear the cached settings and database engine

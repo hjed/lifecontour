@@ -125,6 +125,37 @@ jobs:
       run:
         working-directory: ./backend
 
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: personal_management_test
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        options: >-
+          --health-cmd "pg_isready -U postgres -d personal_management_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5433:5432
+
+      meilisearch:
+        image: getmeili/meilisearch:v1.2
+        env:
+          MEILI_MASTER_KEY: test_master_key
+          MEILI_ENV: development
+          MEILI_LOG_LEVEL: INFO
+          MEILI_NO_ANALYTICS: true
+        options: >-
+          --health-cmd "curl -f http://localhost:7700/health"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+          --health-start-period 10s
+        ports:
+          - 7701:7700
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -147,13 +178,48 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-uv-
 
+      - name: Install PostgreSQL client
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client
+
       - name: Create virtual environment and install dependencies
         run: |
           uv venv
           uv pip install -e .[dev]
 
+      - name: Wait for services to be ready
+        run: |
+          echo "Waiting for PostgreSQL..."
+          for i in {1..30}; do
+            if pg_isready -h localhost -p 5433 -U postgres; then
+              echo "PostgreSQL is ready!"
+              break
+            fi
+            echo "Waiting for PostgreSQL... ($i/30)"
+            sleep 2
+          done
+
+          echo "Waiting for MeiliSearch..."
+          for i in {1..30}; do
+            if curl -f http://localhost:7701/health; then
+              echo "MeiliSearch is ready!"
+              break
+            fi
+            echo "Waiting for MeiliSearch... ($i/30)"
+            sleep 2
+          done
+
       - name: Run integration tests
-        run: uv run python scripts/run_integration_tests.py
+        env:
+          TEST_DB_HOST: localhost
+          TEST_DB_PORT: 5433
+          TEST_DB_USER: postgres
+          TEST_DB_PASSWORD: postgres
+          TEST_DB_NAME: personal_management_test
+          MEILISEARCH_URL: http://localhost:7701
+          MEILISEARCH_API_KEY: test_master_key
+        run: uv run pytest tests/integration/ -v --tb=short
 
   frontend-lint:
     name: Frontend Linting
