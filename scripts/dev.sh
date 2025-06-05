@@ -182,12 +182,14 @@ lint_fix() {
 precommit() {
     log_info "Running pre-commit hooks..."
 
-    if [ ! -f "backend/.venv/bin/pre-commit" ]; then
+    cd backend
+    if ! uv run pre-commit --version >/dev/null 2>&1; then
         log_error "Pre-commit not found. Run './scripts/dev.sh setup' first."
         exit 1
     fi
 
-    backend/.venv/bin/pre-commit run --all-files
+    uv run pre-commit run --all-files
+    cd ..
 
     log_success "Pre-commit hooks completed!"
 }
