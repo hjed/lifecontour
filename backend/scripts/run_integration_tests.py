@@ -37,13 +37,16 @@ def get_docker_compose_cmd() -> list[str]:
 
 
 def run_command(
-    cmd: list[str], cwd: Path | None = None, check: bool = True
+    cmd: list[str],
+    cwd: Path | None = None,
+    check: bool = True,
+    env: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess[str] | subprocess.CalledProcessError:
     """Run a command and return the result."""
     print(f"Running: {' '.join(cmd)}")
     try:
         result = subprocess.run(
-            cmd, cwd=cwd, check=check, capture_output=True, text=True
+            cmd, cwd=cwd, check=check, capture_output=True, text=True, env=env
         )
         if result.stdout:
             print(result.stdout)
@@ -75,12 +78,12 @@ def check_docker() -> bool:
         return False
 
 
-def start_test_database() -> bool:
-    """Start the test database container."""
-    print("Starting test database...")
+def start_test_services() -> bool:
+    """Start the test database and MeiliSearch containers."""
+    print("Starting test services...")
 
-    # Check if container is already running
-    result = run_command(
+    # Check if containers are already running
+    postgres_result = run_command(
         [
             "docker",
             "ps",
@@ -92,16 +95,34 @@ def start_test_database() -> bool:
         check=False,
     )
 
-    if "postgres-test" in result.stdout:
-        print("✓ Test database container already running")
+    meilisearch_result = run_command(
+        [
+            "docker",
+            "ps",
+            "--filter",
+            "name=backend-meilisearch-test-1",
+            "--format",
+            "{{.Names}}",
+        ],
+        check=False,
+    )
+
+    postgres_running = "postgres-test" in postgres_result.stdout
+    meilisearch_running = "meilisearch-test" in meilisearch_result.stdout
+
+    if postgres_running and meilisearch_running:
+        print("✓ Test services already running")
         return True
 
-    # Start the container
+    # Start the containers
     docker_compose_cmd = get_docker_compose_cmd()
     run_command(docker_compose_cmd + ["-f", "docker-compose.test.yml", "up", "-d"])
 
-    # Wait for database to be ready
-    print("Waiting for database to be ready...")
+    # Wait for services to be ready
+    print("Waiting for test services to be ready...")
+
+    # Wait for database
+    print("  Checking database...")
     max_retries = 30
     for i in range(max_retries):
         # Get the actual container name
@@ -118,7 +139,7 @@ def start_test_database() -> bool:
         )
 
         if not container_result.stdout.strip():
-            print(f"  Container not found... ({i + 1}/{max_retries})")
+            print(f"    Container not found... ({i + 1}/{max_retries})")
             time.sleep(1)
             continue
 
@@ -135,31 +156,66 @@ def start_test_database() -> bool:
             check=False,
         )
         if result.returncode == 0:
-            print("✓ Test database is ready")
-            time.sleep(2)  # Give it a bit more time
-            return True
+            print("  ✓ Test database is ready")
+            break
 
         time.sleep(1)
-        print(f"  Waiting... ({i + 1}/{max_retries})")
+        print(f"    Waiting... ({i + 1}/{max_retries})")
+    else:
+        print("  ✗ Test database failed to start within timeout")
+        return False
 
-    print("✗ Test database failed to start within timeout")
-    return False
+    # Wait for MeiliSearch
+    print("  Checking MeiliSearch...")
+    for i in range(max_retries):
+        try:
+            result = run_command(
+                ["curl", "-f", "http://localhost:7701/health"],
+                check=False,
+            )
+            if result.returncode == 0:
+                print("  ✓ Test MeiliSearch is ready")
+                break
+        except Exception:
+            pass
+
+        time.sleep(1)
+        print(f"    Waiting... ({i + 1}/{max_retries})")
+    else:
+        print("  ✗ Test MeiliSearch failed to start within timeout")
+        return False
+
+    print("✓ All test services are ready")
+    time.sleep(2)  # Give services a bit more time
+    return True
 
 
-def stop_test_database() -> None:
-    """Stop the test database container."""
-    print("Stopping test database...")
+def stop_test_services() -> None:
+    """Stop the test services containers."""
+    print("Stopping test services...")
     docker_compose_cmd = get_docker_compose_cmd()
     run_command(
         docker_compose_cmd + ["-f", "docker-compose.test.yml", "down", "-v"],
         check=False,
     )
-    print("✓ Test database stopped")
+    print("✓ Test services stopped")
 
 
 def run_tests() -> bool:
     """Run the integration tests."""
     print("Running integration tests...")
+
+    # Set environment variables for test MeiliSearch configuration
+    import os
+
+    test_env = os.environ.copy()
+    test_env.update(
+        {
+            "MEILISEARCH_URL": "http://localhost:7701",
+            "MEILISEARCH_API_KEY": "test_master_key",
+            "DATABASE_URL": "postgresql://postgres:postgres@localhost:5433/personal_management_test",
+        }
+    )
 
     # Run only integration tests
     cmd = [
@@ -172,7 +228,7 @@ def run_tests() -> bool:
         "-x",  # Stop on first failure
     ]
 
-    result = run_command(cmd, check=False)
+    result = run_command(cmd, check=False, env=test_env)
     return result.returncode == 0
 
 
@@ -190,8 +246,8 @@ def main() -> None:
         sys.exit(1)
 
     try:
-        # Start database
-        if not start_test_database():
+        # Start services
+        if not start_test_services():
             sys.exit(1)
 
         # Run tests
@@ -208,9 +264,9 @@ def main() -> None:
         print("\n\n⚠️  Tests interrupted by user")
         sys.exit(1)
     finally:
-        # Always try to stop the database
+        # Always try to stop the services
         print("\n" + "=" * 50)
-        stop_test_database()
+        stop_test_services()
 
 
 if __name__ == "__main__":
