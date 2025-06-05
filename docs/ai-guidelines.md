@@ -93,6 +93,40 @@ Tasks can be found in the [tasks document](./tasks.md).
 - **Real Constraints**: Test actual database constraints and SQL behavior
 - **Performance Validation**: Verify query performance with real data
 
+### Test Organization and Fixture Usage
+
+**CRITICAL: Always use the correct test fixtures for the test type:**
+
+- **Unit Tests** (`tests/unit/`): Use `tests/conftest.py` fixtures for fast, isolated testing
+  - Uses in-memory or mock databases
+  - Fast execution, no external dependencies
+  - Suitable for business logic and API schema validation
+
+- **Integration Tests** (`tests/integration/`): Use `tests/integration/conftest.py` fixtures for real database testing
+  - Uses Docker PostgreSQL on port 5433 via `docker-compose.test.yml`
+  - Real database constraints and SQL behavior
+  - Suitable for repository operations, service layer testing, and API endpoints that need database
+
+**Common Mistake to Avoid:**
+- ❌ **Never** create custom fixtures in integration test files that duplicate conftest.py functionality
+- ❌ **Never** put integration tests that need real database in `tests/integration/**` without using proper fixtures
+- ✅ **Always** use the existing `async_connection` and `clean_database` fixtures from `tests/integration/conftest.py`
+- ✅ **Always** place API integration tests in the correct directory structure to inherit proper fixtures
+
+**Example Correct Structure:**
+(In the backend folder)
+```
+tests/
+├── conftest.py                           # Unit test fixtures (fast, mocked)
+├── unit/
+│   ├── api/test_contact_schemas.py       # Uses unit test fixtures
+│   └── contacts/test_contact_service.py  # Uses mocked dependencies
+└── integration/
+    ├── conftest.py                       # Integration fixtures (Docker DB)
+    ├── contacts/test_contact_service_integration.py  # Uses real DB
+    └── api/test_contact_endpoints.py     # Uses real DB via integration fixtures
+```
+
 _See [Testing Patterns](./examples/testing-patterns.md) for detailed examples._
 
 ## Frontend Development Standards
@@ -210,6 +244,18 @@ personal-management-system/
 - **Error Handling**: Custom exceptions with HTTP status codes, exception chaining with `from e`
 - **Integration Testing**: Test real database operations with Docker PostgreSQL
 
+#### Business Logic Patterns
+
+- **Changed Fields Calculation**: Always calculate within service layer transactions for accuracy
+  - ❌ **Wrong**: Calculate in controllers outside transaction
+  - ✅ **Correct**: Service fetches current state and calculates changes within transaction
+  - Use tuple format `(old_value, new_value)` for history service compatibility
+  - Handle None values properly: `(field or "", updated_field or "")` for optional fields
+
+- **Service Method Signatures**: Keep business logic parameters minimal
+  - ❌ **Wrong**: `update_contact(contact, changed_fields, transaction)`
+  - ✅ **Correct**: `update_contact(contact, transaction)` - service calculates changes internally
+
 #### Type Checking & Validation
 
 - **Function Signatures**: Always include return type annotations for all parameters
@@ -297,6 +343,39 @@ For detailed implementation examples and patterns, see:
 Use `./scripts/dev.sh lint` to run all checks at once.
 
 **Note:** These are the same checks run by CI and the local dev script (`./scripts/dev.sh lint`). Pre-commit hooks auto-fix these issues before commit, while these commands verify the fixes were applied correctly.
+
+### Common Integration Test Pitfalls
+
+**Service Layer Changes:**
+- When modifying service method signatures, update ALL calling tests (unit AND integration)
+- Use proper tuple format `(old_value, new_value)` for history service, not dictionaries
+
+**Type Safety in Tests:**
+- Use `# type: ignore` only in test files for intentional validation failures
+- Never use `type: ignore` in production code - fix the underlying type issue
+- Ensure service method return types match what tests expect
+
+**Database Connection Issues:**
+- Integration tests failing with "connection refused" usually means wrong fixtures
+- Check that Docker containers are using correct ports (5433 for test DB, not 5432)
+- Verify test files are in correct directory structure to inherit proper fixtures
+
+**CI Integration Test Configuration:**
+- CI uses GitHub Actions services instead of Docker Compose for databases
+- Integration test fixtures detect CI environment via `CI` or `GITHUB_ACTIONS` env vars
+- Use environment variables for database connection: `TEST_DB_HOST`, `TEST_DB_PORT`, etc.
+- Local development uses Docker Compose, CI uses GitHub Actions services on different ports
+
+### Unit Tests
+
+**Run unit tests after writing tests and before implementation:**
+
+```bash
+# Backend unit tests
+cd backend
+uv run pytest tests/unit/ -v
+```
+Run after every changes
 
 ### Integration Testing
 

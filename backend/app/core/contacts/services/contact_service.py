@@ -168,7 +168,6 @@ class ContactService:
     async def update_contact(
         self,
         contact: Contact,
-        changed_fields: dict[str, Any],
         transaction: AsyncConnection,
     ) -> Contact:
         """Update an existing contact with transaction management."""
@@ -176,40 +175,97 @@ class ContactService:
             raise ContactValidationError("id", "Contact ID is required for updates")
 
         async def _update_operation() -> Contact:
-            # Validate email uniqueness for any email changes
+            assert contact.id is not None
+            current_contact = await self.contact_repo.find_by_id(contact.id)
+            if current_contact is None:
+                raise ContactValidationError(
+                    "id", f"Contact with ID {contact.id} not found"
+                )
+
+            changed_fields = self._calculate_changed_fields(current_contact, contact)
+
             for method in contact.methods:
                 if method.method_type == MethodType.EMAIL:
                     await self.contact_validation.validate_email_uniqueness(
                         method.value, transaction, exclude_contact_id=contact.id
                     )
 
-            # Validate addresses
             for address in contact.addresses:
                 await self.address_validation.validate_with_transaction(
                     address, transaction
                 )
 
-            # Save contact
             saved_contact = await self.contact_repo.save(contact)
 
-            # Ensure contact has ID after save
             if saved_contact.id is None:
                 raise ContactValidationError("id", "Contact ID is required after save")
 
-            # Record field history
-            await self.history_service.record_contact_change(
-                saved_contact.id, changed_fields, _transaction=transaction
-            )
+            if changed_fields:
+                await self.history_service.record_contact_change(
+                    saved_contact.id, changed_fields, _transaction=transaction
+                )
 
-            # Publish event
-            event = ContactUpdated(
-                saved_contact.id, changed_fields, transaction=transaction
-            )
-            await self.event_publisher.publish(event)
+                event = ContactUpdated(
+                    saved_contact.id, changed_fields, transaction=transaction
+                )
+                await self.event_publisher.publish(event)
 
             return saved_contact
 
         return cast(Contact, await self._execute_with_retry(_update_operation))
+
+    def _calculate_changed_fields(
+        self, current_contact: Contact, updated_contact: Contact
+    ) -> dict[str, Any]:
+        """Calculate which fields have changed between current and updated contact."""
+        changed_fields = {}
+
+        # Check basic contact fields
+        if current_contact.first_name != updated_contact.first_name:
+            changed_fields["first_name"] = (
+                current_contact.first_name,
+                updated_contact.first_name,
+            )
+
+        if current_contact.last_name != updated_contact.last_name:
+            changed_fields["last_name"] = (
+                current_contact.last_name or "",
+                updated_contact.last_name or "",
+            )
+
+        if current_contact.middle_name != updated_contact.middle_name:
+            changed_fields["middle_name"] = (
+                current_contact.middle_name or "",
+                updated_contact.middle_name or "",
+            )
+
+        if current_contact.nick_name != updated_contact.nick_name:
+            changed_fields["nick_name"] = (
+                current_contact.nick_name or "",
+                updated_contact.nick_name or "",
+            )
+
+        # For methods, addresses, and notes, we'll do a simplified comparison
+        # A more sophisticated implementation could compare individual items
+        if len(current_contact.methods) != len(updated_contact.methods):
+            changed_fields["contact_methods"] = (
+                f"count:{len(current_contact.methods)}",
+                f"count:{len(updated_contact.methods)}",
+            )
+
+        if len(current_contact.addresses) != len(updated_contact.addresses):
+            changed_fields["addresses"] = (
+                f"count:{len(current_contact.addresses)}",
+                f"count:{len(updated_contact.addresses)}",
+            )
+
+        if len(current_contact.notes) != len(updated_contact.notes):
+            changed_fields["notes"] = (
+                f"count:{len(current_contact.notes)}",
+                f"count:{len(updated_contact.notes)}",
+            )
+
+        return changed_fields
 
     async def delete_contact(
         self, contact_id: int, transaction: AsyncConnection
@@ -453,6 +509,16 @@ class ContactService:
     ) -> list[Contact]:
         """Get all contacts with pagination."""
         return await self.contact_repo.get_all(limit, offset)
+
+    async def get_contacts_paginated(
+        self, limit: int = 20, offset: int = 0
+    ) -> list[Contact]:
+        """Get contacts with pagination (alias for get_all_contacts)."""
+        return await self.get_all_contacts(limit, offset)
+
+    async def get_contacts_count(self) -> int:
+        """Get total count of contacts."""
+        return await self.contact_repo.get_count()
 
     async def get_contacts_by_tag(self, tag_id: int) -> list[Contact]:
         """Get contacts by tag."""

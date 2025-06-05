@@ -5,6 +5,8 @@ Provides common test fixtures, database setup, and test utilities
 for unit, integration, and end-to-end tests.
 """
 
+from __future__ import annotations
+
 from collections.abc import Generator
 
 import pytest

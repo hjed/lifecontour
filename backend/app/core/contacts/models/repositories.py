@@ -31,6 +31,11 @@ class ContactRepository(ABC):
         pass
 
     @abstractmethod
+    async def get_count(self) -> int:
+        """Get total count of contacts."""
+        pass
+
+    @abstractmethod
     async def save(self, contact: Contact) -> Contact:
         """Save a contact (insert or update)."""
         pass

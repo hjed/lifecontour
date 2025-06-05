@@ -99,20 +99,20 @@ class TestContactService:
     ):
         """Test successful contact update."""
         # Arrange
-        contact = Contact(first_name="John", last_name="Doe", id=1)
-        changed_fields = {"last_name": ("Smith", "Doe")}
+        current_contact = Contact(first_name="John", last_name="Smith", id=1)
+        updated_contact = Contact(first_name="John", last_name="Doe", id=1)
         saved_contact = Contact(first_name="John", last_name="Doe", id=1)
 
+        mock_contact_repo.find_by_id.return_value = current_contact
         mock_contact_repo.save.return_value = saved_contact
 
         # Act
-        result = await contact_service.update_contact(
-            contact, changed_fields, mock_transaction
-        )
+        result = await contact_service.update_contact(updated_contact, mock_transaction)
 
         # Assert
         assert result == saved_contact
-        mock_contact_repo.save.assert_called_once_with(contact)
+        mock_contact_repo.find_by_id.assert_called_once_with(1)
+        mock_contact_repo.save.assert_called_once_with(updated_contact)
 
     @pytest.mark.asyncio
     async def test_update_contact_no_id_raises_error(
@@ -121,13 +121,10 @@ class TestContactService:
         """Test contact update raises error when no ID."""
         # Arrange
         contact = Contact(first_name="John", id=None)
-        changed_fields = {"last_name": ("Smith", "Doe")}
 
         # Act & Assert
         with pytest.raises(ContactValidationError) as exc_info:
-            await contact_service.update_contact(
-                contact, changed_fields, mock_transaction
-            )
+            await contact_service.update_contact(contact, mock_transaction)
 
         assert exc_info.value.field == "id"
         assert "Contact ID is required for updates" in exc_info.value.message
