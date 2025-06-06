@@ -36,6 +36,7 @@ from app.core.contacts.models.exceptions import (
     TooManyTagsError,
 )
 from app.core.exceptions import DomainError
+from app.core.search.exceptions import SearchDomainError
 
 if TYPE_CHECKING:
     from fastapi import FastAPI
@@ -134,6 +135,13 @@ async def contact_domain_error_handler(
     return await domain_error_handler(request, exc)
 
 
+async def search_domain_error_handler(
+    request: Request, exc: SearchDomainError
+) -> JSONResponse:
+    """Handle search domain errors specifically."""
+    return await domain_error_handler(request, exc)
+
+
 async def validation_error_handler(
     request: Request, exc: RequestValidationError
 ) -> JSONResponse:
@@ -202,6 +210,7 @@ def register_error_handlers(app: "FastAPI") -> None:
     """Register all error handlers with the FastAPI application."""
     # Cast handlers to the expected type
     contact_handler: ExceptionHandler = contact_domain_error_handler  # type: ignore[assignment]
+    search_handler: ExceptionHandler = search_domain_error_handler  # type: ignore[assignment]
     domain_handler: ExceptionHandler = domain_error_handler  # type: ignore[assignment]
     validation_handler: ExceptionHandler = validation_error_handler  # type: ignore[assignment]
     http_handler: ExceptionHandler = http_exception_handler  # type: ignore[assignment]
@@ -209,6 +218,7 @@ def register_error_handlers(app: "FastAPI") -> None:
 
     # Domain error handlers (most specific first)
     app.add_exception_handler(ContactDomainError, contact_handler)
+    app.add_exception_handler(SearchDomainError, search_handler)
     app.add_exception_handler(DomainError, domain_handler)
 
     # Validation error handlers

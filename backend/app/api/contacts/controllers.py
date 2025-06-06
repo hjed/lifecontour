@@ -13,6 +13,7 @@ from app.api.common.schemas import (
     PaginationParams,
     create_pagination_links,
     create_pagination_meta,
+    get_request_base_url,
 )
 from app.api.contacts.converters import (
     ContactConverter,
@@ -48,7 +49,7 @@ async def list_contacts(
     Returns a paginated list of contacts following JSON API specification.
     """
     pagination = PaginationParams(page=page, limit=limit)
-    base_url = str(request.base_url).rstrip("/")
+    base_url = get_request_base_url(request)
 
     contacts = await contact_service.get_contacts_paginated(
         offset=pagination.offset,
@@ -84,7 +85,7 @@ async def get_contact(
 
     Returns a single contact resource following JSON API specification.
     """
-    base_url = str(request.base_url).rstrip("/")
+    base_url = get_request_base_url(request)
 
     contact = await contact_service.get_contact_by_id(contact_id)
     if not contact:
@@ -107,7 +108,7 @@ async def create_contact(
 
     Creates a new contact with the provided data and returns the created resource.
     """
-    base_url = str(request.base_url).rstrip("/")
+    base_url = get_request_base_url(request)
 
     contact = ContactRequestConverter.from_create_request(contact_request.data)
 
@@ -131,7 +132,7 @@ async def update_contact(
 
     Updates the contact with the provided data and returns the updated resource.
     """
-    base_url = str(request.base_url).rstrip("/")
+    base_url = get_request_base_url(request)
 
     existing_contact = await contact_service.get_contact_by_id(contact_id)
     if not existing_contact:
@@ -217,7 +218,7 @@ async def get_contact_tags(
 
     Returns a list of tag resources assigned to the specified contact.
     """
-    base_url = str(request.base_url).rstrip("/")
+    base_url = get_request_base_url(request)
 
     existing_contact = await contact_service.get_contact_by_id(contact_id)
     if not existing_contact:

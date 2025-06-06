@@ -2,21 +2,36 @@
 Search API controllers.
 
 Handles search-related HTTP endpoints including contact search,
-global search, and search suggestions.
+global search, and search suggestions following JSON API specification.
 """
 
 import structlog
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Query, Request
 from meilisearch.errors import MeilisearchError
 
+from app.api.common.schemas import (
+    create_pagination_links,
+    create_pagination_meta,
+    get_request_base_url,
+)
+from app.api.contacts.schemas import ContactResource
 from app.api.dependencies import SearchServiceDep
 from app.api.search.schemas import (
+    ContactSearchMeta,
     ContactSearchResponse,
+    GlobalSearchMeta,
     GlobalSearchResponse,
     SearchHealthResponse,
-    SearchHit,
+    SearchResultAttributes,
+    SearchResultMeta,
+    SearchResultResource,
     SearchSuggestionsResponse,
 )
+from app.api.search.utils import (
+    calculate_pagination_offset,
+    create_contact_resource_from_search_hit,
+)
+from app.core.search.exceptions import SearchServiceUnavailableError
 
 logger = structlog.get_logger()
 
@@ -25,26 +40,29 @@ router = APIRouter(prefix="/search", tags=["search"])
 
 @router.get("/contacts", response_model=ContactSearchResponse)
 def search_contacts(
+    request: Request,
     search_service: SearchServiceDep,
     q: str = Query(..., description="Search query", min_length=1, max_length=500),
-    limit: int = Query(default=20, description="Maximum results", ge=1, le=100),
-    offset: int = Query(default=0, description="Results offset", ge=0),
+    page: int = Query(default=1, description="Page number", ge=1),
+    limit: int = Query(default=20, description="Results per page", ge=1, le=100),
     tags: list[str] | None = Query(default=None, description="Filter by tags"),
     sort: list[str] | None = Query(default=None, description="Sort criteria"),
 ) -> ContactSearchResponse:
     """
     Search contacts using MeiliSearch.
 
-    Supports full-text search across contact fields with optional filtering
-    by tags and custom sorting.
+    Supports full-text search across fields with highlighting, facets, and pagination.
+    Supports filtering by tags and custom sorting.
     """
-    try:
-        # Build filters
-        filters = {}
-        if tags:
-            filters["tags"] = tags
+    # Calculate offset from page
+    offset = calculate_pagination_offset(page, limit)
 
-        # Perform search
+    # Build filters
+    filters = {}
+    if tags:
+        filters["tags"] = tags
+
+    try:
         results = search_service.search_contacts(
             query=q,
             filters=filters if filters else None,
@@ -52,60 +70,61 @@ def search_contacts(
             offset=offset,
             sort=sort,
         )
-
-        # Convert to API response format
-        hits = []
-        for hit in results["hits"]:
-            search_hit = SearchHit(
-                id=hit["id"],
-                entity_type="contact",
-                title=hit.get(
-                    "full_name",
-                    f"{hit.get('first_name', '')} {hit.get('last_name', '')}",
-                ).strip(),
-                content=f"Email: {hit.get('email', 'N/A')}, Phone: {hit.get('phone', 'N/A')}",
-                highlighted=hit.get("_formatted"),
-                metadata={
-                    "first_name": hit.get("first_name"),
-                    "last_name": hit.get("last_name"),
-                    "email": hit.get("email"),
-                    "phone": hit.get("phone"),
-                    "tags": hit.get("tags", []),
-                    "created_at": hit.get("created_at"),
-                    "updated_at": hit.get("updated_at"),
-                },
-            )
-            hits.append(search_hit)
-
-        return ContactSearchResponse(
-            hits=hits,
-            query=q,
-            total_hits=results.get("estimated_total_hits", 0),
-            processing_time_ms=results.get("processing_time_ms", 0),
-            limit=limit,
-            offset=offset,
-            facets=results.get("facet_distribution"),
-            available_tags=None,  # Could be populated from facets
-        )
-
     except MeilisearchError as e:
         logger.error("MeiliSearch error during contact search", error=str(e), query=q)
-        raise HTTPException(
-            status_code=503, detail="Search service temporarily unavailable"
-        ) from e
-    except Exception as e:
-        logger.error("Unexpected error during contact search", error=str(e), query=q)
-        raise HTTPException(
-            status_code=500, detail="Internal server error during search"
-        ) from e
+        raise SearchServiceUnavailableError("MeiliSearch", str(e)) from e
+
+    # Convert to contact resources (same format as contact API)
+    base_url = get_request_base_url(request)
+    contact_resources = [
+        create_contact_resource_from_search_hit(hit, base_url)
+        for hit in results["hits"]
+    ]
+
+    # Build pagination metadata
+    total_count = results.get("estimated_total_hits", 0)
+    pagination_meta = create_pagination_meta(total_count, page, limit)
+
+    # Build search-specific metadata
+    search_meta = ContactSearchMeta(
+        query=q,
+        processing_time_ms=results.get("processing_time_ms", 0),
+        facets=results.get("facet_distribution"),
+        available_tags=list(
+            results.get("facet_distribution", {}).get("tags", {}).keys()
+        ),
+        total_count=pagination_meta.total_count,
+        page_count=pagination_meta.page_count,
+        current_page=pagination_meta.current_page,
+        per_page=pagination_meta.per_page,
+    )
+
+    # Build pagination links with query parameters
+    base_url = str(request.url).split("?")[0]
+    additional_params: dict[str, str | list[str]] = {"q": q}
+    if tags:
+        additional_params["tags"] = tags
+    if sort:
+        additional_params["sort"] = sort
+
+    links = create_pagination_links(
+        base_url, page, limit, total_count, additional_params
+    )
+
+    return ContactSearchResponse(
+        data=contact_resources,
+        meta=search_meta,
+        links=links,
+    )
 
 
 @router.get("/global", response_model=GlobalSearchResponse)
 def global_search(
+    request: Request,
     search_service: SearchServiceDep,
     q: str = Query(..., description="Search query", min_length=1, max_length=500),
-    limit: int = Query(default=20, description="Maximum results", ge=1, le=100),
-    offset: int = Query(default=0, description="Results offset", ge=0),
+    page: int = Query(default=1, description="Page number", ge=1),
+    limit: int = Query(default=20, description="Results per page", ge=1, le=100),
     entity_types: list[str] | None = Query(
         default=None, description="Entity types to search"
     ),
@@ -113,69 +132,100 @@ def global_search(
     """
     Perform global search across all entity types.
 
-    Searches across contacts and other entities (when implemented)
-    with unified results.
+    Returns JSON API compliant search results across contacts and other entities
+    (when implemented) with unified results.
     """
+    # Calculate offset from page
+    offset = calculate_pagination_offset(page, limit)
+
+    # Perform global search
     try:
-        # Perform global search
         results = search_service.global_search(
             query=q, entity_types=entity_types, limit=limit, offset=offset
         )
-
-        # Convert to API response format
-        hits = []
-        results_by_type: dict[str, int] = {}
-
-        for hit in results["hits"]:
-            entity_type = hit.get("entity_type", "unknown")
-
-            # Count results by type
-            results_by_type[entity_type] = results_by_type.get(entity_type, 0) + 1
-
-            # Create search hit based on entity type
-            if entity_type == "contact":
-                title = hit.get(
-                    "full_name",
-                    f"{hit.get('first_name', '')} {hit.get('last_name', '')}",
-                ).strip()
-                content = f"Contact: {hit.get('email', 'N/A')}"
-            else:
-                title = hit.get("title", hit.get("name", "Unknown"))
-                content = hit.get("content", hit.get("description", ""))
-
-            search_hit = SearchHit(
-                id=hit["id"],
-                entity_type=entity_type,
-                title=title,
-                content=content,
-                highlighted=hit.get("_formatted"),
-                metadata=hit,
-            )
-            hits.append(search_hit)
-
-        return GlobalSearchResponse(
-            hits=hits,
-            query=q,
-            total_hits=results.get("estimated_total_hits", 0),
-            processing_time_ms=results.get("processing_time_ms", 0),
-            limit=limit,
-            offset=offset,
-            facets=results.get("facet_distribution"),
-            searched_entity_types=results.get("searched_entity_types", []),
-            available_entity_types=results.get("available_entity_types", []),
-            results_by_type=results_by_type,
-        )
-
     except MeilisearchError as e:
         logger.error("MeiliSearch error during global search", error=str(e), query=q)
-        raise HTTPException(
-            status_code=503, detail="Search service temporarily unavailable"
-        ) from e
-    except Exception as e:
-        logger.error("Unexpected error during global search", error=str(e), query=q)
-        raise HTTPException(
-            status_code=500, detail="Internal server error during search"
-        ) from e
+        raise SearchServiceUnavailableError("MeiliSearch", str(e)) from e
+
+    logger.debug(
+        "Global search request",
+        query=q,
+        page=page,
+        limit=limit,
+        entity_types=entity_types,
+    )
+
+    # Convert to JSON API resource format
+    search_resources: list[ContactResource | SearchResultResource] = []
+    results_by_type: dict[str, int] = {}
+    base_url = get_request_base_url(request)
+
+    for hit in results["hits"]:
+        entity_type = hit.get("entity_type", "unknown")
+
+        # Count results by type
+        results_by_type[entity_type] = results_by_type.get(entity_type, 0) + 1
+
+        # Create composite ID
+        resource_id = f"{entity_type}-{hit['id']}"
+
+        # Create resource based on entity type
+        resource: ContactResource | SearchResultResource
+        if entity_type == "contact":
+            resource = create_contact_resource_from_search_hit(hit, base_url)
+        else:
+            # For other entity types, use SearchResultResource
+            title = hit.get("title", hit.get("name", "Unknown"))
+            content = hit.get("content", hit.get("description", ""))
+
+            resource = SearchResultResource(
+                id=resource_id,
+                attributes=SearchResultAttributes(
+                    entity_type=entity_type,
+                    title=title,
+                    content=content,
+                    highlighted=hit.get("_formatted"),
+                ),
+                meta=SearchResultMeta(
+                    original_id=hit["id"],
+                    search_metadata=hit,
+                ),
+            )
+        search_resources.append(resource)
+
+    # Build pagination metadata
+    total_count = results.get("estimated_total_hits", 0)
+    pagination_meta = create_pagination_meta(total_count, page, limit)
+
+    # Build search-specific metadata
+    search_meta = GlobalSearchMeta(
+        query=q,
+        processing_time_ms=results.get("processing_time_ms", 0),
+        facets=results.get("facet_distribution"),
+        searched_entity_types=results.get("searched_entity_types", []),
+        available_entity_types=results.get("available_entity_types", []),
+        results_by_type=results_by_type,
+        total_count=pagination_meta.total_count,
+        page_count=pagination_meta.page_count,
+        current_page=pagination_meta.current_page,
+        per_page=pagination_meta.per_page,
+    )
+
+    # Build pagination links with query parameters
+    base_url = str(request.url).split("?")[0]
+    additional_params: dict[str, str | list[str]] = {"q": q}
+    if entity_types:
+        additional_params["entity_types"] = entity_types
+
+    links = create_pagination_links(
+        base_url, page, limit, total_count, additional_params
+    )
+
+    return GlobalSearchResponse(
+        data=search_resources,
+        meta=search_meta,
+        links=links,
+    )
 
 
 @router.get("/suggestions", response_model=SearchSuggestionsResponse)
@@ -194,12 +244,18 @@ def get_search_suggestions(
         suggestions = search_service.get_search_suggestions(
             query=q, entity_type=entity_type, limit=limit
         )
-
         return SearchSuggestionsResponse(suggestions=suggestions, query=q)
-
+    except MeilisearchError as e:
+        logger.error(
+            "MeiliSearch error getting search suggestions", error=str(e), query=q
+        )
+        # For suggestions, we gracefully degrade instead of raising exceptions
+        return SearchSuggestionsResponse(suggestions=[], query=q)
     except Exception as e:
-        logger.error("Error getting search suggestions", error=str(e), query=q)
-        # For suggestions, we can gracefully degrade
+        logger.error(
+            "Unexpected error getting search suggestions", error=str(e), query=q
+        )
+        # For suggestions, we gracefully degrade instead of raising exceptions
         return SearchSuggestionsResponse(suggestions=[], query=q)
 
 
@@ -212,16 +268,24 @@ def get_search_health(search_service: SearchServiceDep) -> SearchHealthResponse:
     """
     try:
         health = search_service.get_search_health()
-
         return SearchHealthResponse(
             status=health.get("status", "unknown"),
             meilisearch_status=health.get("meilisearch_health", {}).get("status"),
             indices=health.get("indices", []),
             error=health.get("error"),
         )
-
+    except MeilisearchError as e:
+        logger.error("MeiliSearch error checking search health", error=str(e))
+        # For health checks, we return error status instead of raising exceptions
+        return SearchHealthResponse(
+            status="error",
+            meilisearch_status="unavailable",
+            indices=[],
+            error=f"MeiliSearch connection failed: {str(e)}",
+        )
     except Exception as e:
-        logger.error("Error checking search health", error=str(e))
+        logger.error("Unexpected error checking search health", error=str(e))
+        # For health checks, we return error status instead of raising exceptions
         return SearchHealthResponse(
             status="error", meilisearch_status="unknown", indices=[], error=str(e)
         )
