@@ -154,25 +154,52 @@ def create_pagination_meta(
     )
 
 
+def get_request_base_url(request: Any) -> str:
+    """Extract and normalize base URL from FastAPI request."""
+    return str(request.base_url).rstrip("/")
+
+
 def create_pagination_links(
     base_url: str,
     page: int,
     limit: int,
     total_count: int,
+    additional_params: dict[str, str | list[str]] | None = None,
 ) -> JsonApiLinks:
-    """Create pagination links."""
+    """
+    Create pagination links with optional additional query parameters.
+
+    Args:
+        base_url: Base URL for the links
+        page: Current page number
+        limit: Items per page
+        total_count: Total number of items
+        additional_params: Additional query parameters to include in links
+    """
     page_count = (total_count + limit - 1) // limit if total_count > 0 else 0
 
+    def build_url(target_page: int) -> str:
+        """Build URL with page, limit, and additional parameters."""
+        url = f"{base_url}?page={target_page}&limit={limit}"
+        if additional_params:
+            for key, value in additional_params.items():
+                if isinstance(value, list):
+                    for item in value:
+                        url += f"&{key}={item}"
+                else:
+                    url += f"&{key}={value}"
+        return url
+
     links = JsonApiLinks(
-        self=f"{base_url}?page={page}&limit={limit}",
-        first=f"{base_url}?page=1&limit={limit}" if page_count > 0 else None,
-        last=f"{base_url}?page={page_count}&limit={limit}" if page_count > 0 else None,
+        self=build_url(page),
+        first=build_url(1) if page_count > 0 else None,
+        last=build_url(page_count) if page_count > 0 else None,
     )
 
     if page > 1:
-        links.prev = f"{base_url}?page={page - 1}&limit={limit}"
+        links.prev = build_url(page - 1)
 
     if page < page_count:
-        links.next = f"{base_url}?page={page + 1}&limit={limit}"
+        links.next = build_url(page + 1)
 
     return links
