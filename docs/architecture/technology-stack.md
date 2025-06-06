@@ -25,9 +25,10 @@ This document outlines the technology choices optimized for AI assistant underst
 - **Connection**: Direct SQLAlchemy connection (optimized for clarity)
 
 ### Authentication and Security
-- **Authentication**: Session-based authentication with Starlette SessionMiddleware
-- **Session Management**: Secure session cookies with proper flags
-- **OAuth Integration**: google-auth for Google Calendar/Contacts (ITER2+)
+- **Authentication**: OAuth2-only authentication using Authlib with configurable providers
+- **OAuth Providers**: Configurable support for GitHub, Microsoft, Discord, and generic OAuth2 providers
+- **Session Management**: Secure session cookies with proper flags (post-OAuth login)
+- **No Password Storage**: Eliminates password-based authentication entirely for enhanced security
 - **API Security**: FastAPI built-in security, custom rate limiting
 
 ### External Integrations

@@ -26,6 +26,25 @@ This document covers deployment architecture, infrastructure setup, containeriza
 - **Backup**: Automated PostgreSQL backup to external storage
 - **CI/CD**: GitHub Actions with separate backend/frontend pipelines
 
+## OAuth Provider Setup
+
+### Supported OAuth Providers
+
+The system supports multiple OAuth providers for authentication. Configure at least one provider for user authentication.
+
+#### Generic OAuth2 Provider
+For other OAuth2 providers, configure the following endpoints:
+- Authorization URL: Where users are redirected to authenticate
+- Token URL: Where authorization codes are exchanged for tokens
+- User Info URL: Where user profile information is retrieved
+
+### OAuth Security Considerations
+- Use HTTPS for all OAuth callbacks in production
+- Store client secrets securely using environment variables
+- Implement PKCE (Proof Key for Code Exchange) for enhanced security
+- Validate OAuth state parameters to prevent CSRF attacks
+- Use minimal required scopes for each provider
+
 ## Docker Configuration
 
 ### Backend Dockerfile (Python FastAPI)
@@ -489,10 +508,24 @@ ENVIRONMENT=production
 LOG_LEVEL=INFO
 DEBUG=false
 
-# Authentication
-JWT_SECRET=your-jwt-secret-key
-GOOGLE_CLIENT_ID=your-google-client-id
-GOOGLE_CLIENT_SECRET=your-google-client-secret
+# Authentication (OAuth-Only)
+SESSION_SECRET=your-session-secret-key
+
+# OAuth Provider Configuration (configure at least one)
+GITHUB_CLIENT_ID=your-github-client-id
+GITHUB_CLIENT_SECRET=your-github-client-secret
+MICROSOFT_CLIENT_ID=your-microsoft-client-id
+MICROSOFT_CLIENT_SECRET=your-microsoft-client-secret
+DISCORD_CLIENT_ID=your-discord-client-id
+DISCORD_CLIENT_SECRET=your-discord-client-secret
+
+# Generic OAuth2 Provider (optional)
+OAUTH_PROVIDER_NAME=custom-provider
+OAUTH_CLIENT_ID=your-oauth-client-id
+OAUTH_CLIENT_SECRET=your-oauth-client-secret
+OAUTH_AUTHORIZATION_URL=https://provider.com/oauth/authorize
+OAUTH_TOKEN_URL=https://provider.com/oauth/token
+OAUTH_USERINFO_URL=https://provider.com/oauth/userinfo
 
 # Search Engine
 MEILISEARCH_URL=http://meilisearch:7700
@@ -537,10 +570,24 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     debug: bool = False
 
-    # Authentication
-    jwt_secret: str
-    google_client_id: str
-    google_client_secret: str
+    # Authentication (OAuth-Only)
+    session_secret: str  # For session encryption
+
+    # OAuth Provider Configuration
+    github_client_id: str = ""
+    github_client_secret: str = ""
+    microsoft_client_id: str = ""
+    microsoft_client_secret: str = ""
+    discord_client_id: str = ""
+    discord_client_secret: str = ""
+
+    # Generic OAuth2 Provider (optional)
+    oauth_provider_name: str = ""
+    oauth_client_id: str = ""
+    oauth_client_secret: str = ""
+    oauth_authorization_url: str = ""
+    oauth_token_url: str = ""
+    oauth_userinfo_url: str = ""
 
     # External Services
     immich_api_url: str
