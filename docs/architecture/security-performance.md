@@ -6,11 +6,13 @@ This document covers security considerations, performance optimization strategie
 
 ### Authentication & Authorization
 
-#### OAuth 2.0 Implementation
-- **Google Services**: OAuth 2.0 with PKCE flow for enhanced security
-- **Scope Management**: Minimal required scopes for Google APIs
-- **Token Management**: Secure storage and automatic refresh of access tokens
-- **Session Security**: JWT tokens with short expiration and refresh token rotation
+#### OAuth 2.0 Implementation (OAuth-Only Architecture)
+- **No Password Storage**: Eliminates password-based authentication entirely for enhanced security
+- **Configurable Providers**: Support for generic OAuth2 providers
+- **PKCE Flow**: OAuth 2.0 with PKCE flow for enhanced security across all providers
+- **Scope Management**: Minimal required scopes for each OAuth provider
+- **Token Management**: Secure storage and automatic refresh of OAuth access tokens
+- **Session Security**: Session-based authentication post-OAuth login with secure cookies
 
 #### API Security
 - **API Key Authentication**: Secure API key generation and rotation for MCP
@@ -20,33 +22,39 @@ This document covers security considerations, performance optimization strategie
 
 #### Session Management (Python Backend)
 ```python
-# JWT Configuration
-from datetime import timedelta
+# OAuth2 Configuration with Authlib
+from authlib.integrations.fastapi_oauth2 import OAuth2
+from authlib.integrations.starlette_client import OAuth
+from starlette.middleware.sessions import SessionMiddleware
+from fastapi import Depends, HTTPException, status, Request
 
-JWT_CONFIG = {
-    "access_token_expire_minutes": 15,
-    "refresh_token_expire_days": 7,
-    "algorithm": "HS256",
-    "issuer": "personal-crm",
-    "audience": "personal-crm-users"
+# OAuth2 provider configuration
+OAUTH_PROVIDERS = {
+    "github": {
+        "client_id": "your_github_client_id",
+        "client_secret": "your_github_client_secret",
+        "server_metadata_url": "https://github.com/.well-known/oauth_authorization_server",
+        "client_kwargs": {"scope": "user:email"}
+    },
+    "microsoft": {
+        "client_id": "your_microsoft_client_id",
+        "client_secret": "your_microsoft_client_secret",
+        "server_metadata_url": "https://login.microsoftonline.com/common/v2.0/.well-known/openid_configuration",
+        "client_kwargs": {"scope": "openid email profile"}
+    }
 }
 
-# FastAPI security
-from fastapi.security import HTTPBearer
-from fastapi import Depends, HTTPException, status
+# Session-based authentication (post-OAuth)
+async def get_current_user(request: Request):
+    """Get current user from session (post-OAuth login)."""
+    user_id = request.session.get("user_id")
+    if not user_id:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
+    return user_id
 
-security = HTTPBearer()
-
-async def get_current_user(token: str = Depends(security)):
-    """Validate JWT token and return current user."""
-    try:
-        payload = jwt.decode(token.credentials, SECRET_KEY, algorithms=[JWT_CONFIG["algorithm"]])
-        user_id = payload.get("sub")
-        if user_id is None:
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED)
-        return user_id
-    except JWTError:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED)
+async def get_current_user_optional(request: Request):
+    """Get current user from session, return None if not authenticated."""
+    return request.session.get("user_id")
 ```
 
 ### Data Protection
