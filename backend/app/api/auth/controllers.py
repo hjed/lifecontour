@@ -1,0 +1,203 @@
+"""
+Authentication API controllers.
+
+Handles OAuth authentication endpoints including authorization, callback, and logout.
+"""
+
+import structlog
+from fastapi import APIRouter, Query, Request
+from starlette.responses import RedirectResponse
+
+from app.api.auth.dependencies import OAuthServiceDep, OptionalUserDep
+from app.api.auth.schemas import (
+    AuthProviderInfo,
+    AuthProvidersResponse,
+    AuthStatusResponse,
+    LogoutResponse,
+    UserResponse,
+)
+from app.infrastructure.auth.exceptions import AuthenticationError
+from app.infrastructure.auth.models import SessionUser
+
+logger = structlog.get_logger()
+
+router = APIRouter()
+
+
+@router.get("/providers", response_model=AuthProvidersResponse)
+async def get_auth_providers(oauth_service: OAuthServiceDep) -> AuthProvidersResponse:
+    """
+    Get available OAuth providers.
+
+    Returns a list of configured OAuth providers that users can authenticate with.
+    """
+    available_providers = oauth_service.get_available_providers()
+
+    # Map provider names to display information
+    provider_info_map = {
+        "github": AuthProviderInfo(
+            name="github",
+            display_name="GitHub",
+            icon_url="https://github.com/favicon.ico",
+        ),
+        "microsoft": AuthProviderInfo(
+            name="microsoft",
+            display_name="Microsoft",
+            icon_url="https://www.microsoft.com/favicon.ico",
+        ),
+        "discord": AuthProviderInfo(
+            name="discord",
+            display_name="Discord",
+            icon_url="https://discord.com/assets/favicon.ico",
+        ),
+    }
+
+    providers = []
+    for provider_name in available_providers:
+        if provider_name in provider_info_map:
+            providers.append(provider_info_map[provider_name])
+        else:
+            # Generic provider
+            providers.append(
+                AuthProviderInfo(
+                    name=provider_name,
+                    display_name=provider_name.title(),
+                )
+            )
+
+    return AuthProvidersResponse(providers=providers)
+
+
+@router.get("/authorize/{provider}")
+async def authorize(
+    provider: str,
+    request: Request,
+    oauth_service: OAuthServiceDep,
+    redirect_url: str = Query(
+        default="/", description="URL to redirect to after authentication"
+    ),
+) -> RedirectResponse:
+    """
+    Initiate OAuth authorization flow.
+
+    Redirects the user to the OAuth provider's authorization page.
+    """
+    # Store the final redirect URL in session
+    request.session["post_auth_redirect"] = redirect_url
+
+    # Generate callback URL
+    callback_url = str(request.url_for("auth_callback", provider=provider))
+
+    # Get authorization URL from OAuth service
+    # Let domain exceptions bubble up to global handlers
+    authorization_url = await oauth_service.get_authorization_url(
+        request, provider, callback_url
+    )
+
+    logger.info(
+        "OAuth authorization initiated",
+        provider=provider,
+        redirect_url=redirect_url,
+    )
+
+    return RedirectResponse(url=authorization_url)
+
+
+@router.get("/callback/{provider}")
+async def auth_callback(
+    provider: str,
+    request: Request,
+    oauth_service: OAuthServiceDep,
+) -> RedirectResponse:
+    """
+    Handle OAuth callback.
+
+    Processes the OAuth callback, exchanges the authorization code for user information,
+    and creates a user session.
+    """
+    try:
+        # Handle OAuth callback and get user info
+        oauth_user = await oauth_service.handle_callback(request)
+
+        # Create session user
+        session_user = SessionUser.from_oauth_user(oauth_user)
+
+        # Store user in session (serialize datetime to ISO string)
+        request.session["user"] = session_user.model_dump(mode="json")
+
+        # Get redirect URL from session
+        redirect_url = request.session.pop("post_auth_redirect", "/")
+
+        logger.info(
+            "OAuth authentication successful",
+            provider=provider,
+            user_id=session_user.id,
+            email=session_user.email,
+        )
+
+        return RedirectResponse(url=redirect_url)
+
+    except Exception as e:
+        logger.error("OAuth callback failed", provider=provider, error=str(e))
+        # Redirect to error page or login page
+        error_url = f"/?error=auth_failed&provider={provider}"
+        return RedirectResponse(url=error_url)
+
+
+@router.post("/logout", response_model=LogoutResponse)
+async def logout(request: Request) -> LogoutResponse:
+    """
+    Logout current user.
+
+    Clears the user session and logs out the user.
+    """
+    user_data = request.session.get("user")
+
+    # Clear session
+    request.session.clear()
+
+    if user_data:
+        logger.info("User logged out", user_id=user_data.get("id"))
+
+    return LogoutResponse(message="Successfully logged out")
+
+
+@router.get("/me", response_model=UserResponse)
+async def get_current_user_info(user: OptionalUserDep) -> UserResponse:
+    """
+    Get current user information.
+
+    Returns the current authenticated user's information.
+    """
+    if not user:
+        raise AuthenticationError("Not authenticated")
+
+    return UserResponse(
+        id=user.id,
+        email=user.email,
+        name=user.name,
+        avatar_url=user.avatar_url,
+        provider=user.provider,
+        authenticated_at=user.authenticated_at,
+    )
+
+
+@router.get("/status", response_model=AuthStatusResponse)
+async def get_auth_status(user: OptionalUserDep) -> AuthStatusResponse:
+    """
+    Get authentication status.
+
+    Returns whether the user is authenticated and their information if available.
+    """
+    if user:
+        user_response = UserResponse(
+            id=user.id,
+            email=user.email,
+            name=user.name,
+            avatar_url=user.avatar_url,
+            provider=user.provider,
+            authenticated_at=user.authenticated_at,
+        )
+        return AuthStatusResponse(authenticated=True, user=user_response)
+    else:
+        return AuthStatusResponse(authenticated=False, user=None)

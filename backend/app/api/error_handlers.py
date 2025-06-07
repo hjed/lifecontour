@@ -37,6 +37,11 @@ from app.core.contacts.models.exceptions import (
 )
 from app.core.exceptions import DomainError
 from app.core.search.exceptions import SearchDomainError
+from app.infrastructure.auth.exceptions import (
+    AuthenticationError,
+    OAuthError,
+    UnauthorizedError,
+)
 
 if TYPE_CHECKING:
     from fastapi import FastAPI
@@ -142,6 +147,65 @@ async def search_domain_error_handler(
     return await domain_error_handler(request, exc)
 
 
+async def authentication_error_handler(
+    request: Request, exc: AuthenticationError
+) -> JSONResponse:
+    """Handle authentication errors."""
+    logger.warning("Authentication error", error=str(exc), path=request.url.path)
+
+    error = JsonApiError(
+        status="401",
+        code="AUTHENTICATION_ERROR",
+        title="Authentication Error",
+        detail=str(exc),
+    )
+
+    return JSONResponse(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        content=JsonApiErrorResponse(errors=[error]).model_dump(),
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+
+
+async def oauth_error_handler(request: Request, exc: OAuthError) -> JSONResponse:
+    """Handle OAuth errors."""
+    logger.warning(
+        "OAuth error", error=str(exc), provider=exc.provider, path=request.url.path
+    )
+
+    error = JsonApiError(
+        status="400",
+        code="OAUTH_ERROR",
+        title="OAuth Error",
+        detail=str(exc),
+        meta={"provider": exc.provider},
+    )
+
+    return JSONResponse(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        content=JsonApiErrorResponse(errors=[error]).model_dump(),
+    )
+
+
+async def unauthorized_error_handler(
+    request: Request, exc: UnauthorizedError
+) -> JSONResponse:
+    """Handle unauthorized access errors."""
+    logger.warning("Unauthorized access", error=str(exc), path=request.url.path)
+
+    error = JsonApiError(
+        status="403",
+        code="UNAUTHORIZED",
+        title="Unauthorized",
+        detail=str(exc),
+    )
+
+    return JSONResponse(
+        status_code=status.HTTP_403_FORBIDDEN,
+        content=JsonApiErrorResponse(errors=[error]).model_dump(),
+    )
+
+
 async def validation_error_handler(
     request: Request, exc: RequestValidationError
 ) -> JSONResponse:
@@ -215,6 +279,14 @@ def register_error_handlers(app: "FastAPI") -> None:
     validation_handler: ExceptionHandler = validation_error_handler  # type: ignore[assignment]
     http_handler: ExceptionHandler = http_exception_handler  # type: ignore[assignment]
     generic_handler: ExceptionHandler = generic_exception_handler
+    auth_handler: ExceptionHandler = authentication_error_handler  # type: ignore[assignment]
+    oauth_handler: ExceptionHandler = oauth_error_handler  # type: ignore[assignment]
+    unauthorized_handler: ExceptionHandler = unauthorized_error_handler  # type: ignore[assignment]
+
+    # Authentication error handlers (most specific first)
+    app.add_exception_handler(OAuthError, oauth_handler)
+    app.add_exception_handler(UnauthorizedError, unauthorized_handler)
+    app.add_exception_handler(AuthenticationError, auth_handler)
 
     # Domain error handlers (most specific first)
     app.add_exception_handler(ContactDomainError, contact_handler)

@@ -17,7 +17,9 @@ from opentelemetry import trace
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
 from opentelemetry.instrumentation.sqlalchemy import SQLAlchemyInstrumentor
+from starlette.middleware.sessions import SessionMiddleware
 
+from app.api.auth.controllers import router as auth_router
 from app.api.contacts.controllers import router as contacts_router
 from app.api.error_handlers import register_error_handlers
 from app.api.health import router as health_router
@@ -89,6 +91,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         lifespan=lifespan,
     )
 
+    # Session middleware (must be added before other middleware that uses sessions)
+    app.add_middleware(
+        SessionMiddleware,
+        secret_key=settings.session_secret_key,
+        max_age=86400 * 7,  # 7 days
+        same_site="lax",
+        https_only=not settings.debug,
+    )
+
     # Security middleware
     app.add_middleware(
         TrustedHostMiddleware,
@@ -108,6 +119,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     # Include routers
     app.include_router(health_router, prefix="/api", tags=["health"])
+    app.include_router(auth_router, prefix="/api/auth", tags=["authentication"])
     app.include_router(search_router, prefix="/api", tags=["search"])
     app.include_router(contacts_router, prefix="/api", tags=["contacts"])
 
