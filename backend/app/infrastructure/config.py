@@ -74,6 +74,38 @@ class Settings(BaseSettings):
         description="Secret key for session encryption",
     )
 
+    # OAuth Provider Configuration
+    github_client_id: str = Field(default="", description="GitHub OAuth client ID")
+    github_client_secret: str = Field(
+        default="", description="GitHub OAuth client secret"
+    )
+    microsoft_client_id: str = Field(
+        default="", description="Microsoft OAuth client ID"
+    )
+    microsoft_client_secret: str = Field(
+        default="", description="Microsoft OAuth client secret"
+    )
+    discord_client_id: str = Field(default="", description="Discord OAuth client ID")
+    discord_client_secret: str = Field(
+        default="", description="Discord OAuth client secret"
+    )
+
+    # Generic OAuth2 Provider (optional)
+    oauth_provider_name: str = Field(
+        default="", description="Generic OAuth provider name"
+    )
+    oauth_client_id: str = Field(default="", description="Generic OAuth client ID")
+    oauth_client_secret: str = Field(
+        default="", description="Generic OAuth client secret"
+    )
+    oauth_authorization_url: str = Field(
+        default="", description="Generic OAuth authorization URL"
+    )
+    oauth_token_url: str = Field(default="", description="Generic OAuth token URL")
+    oauth_userinfo_url: str = Field(
+        default="", description="Generic OAuth user info URL"
+    )
+
     # External services
     google_client_id: str = Field(default="", description="Google OAuth client ID")
     google_client_secret: str = Field(

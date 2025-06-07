@@ -95,9 +95,9 @@ Tasks are organized by **feature iterations** that deliver end-to-end value incr
 - [X] Implement transactional outbox pattern for reliable event publishing
 - [X] Create OutboxEventPublisher implementing existing ContactEventPublisher interface
 - [X] Set up FastAPI background task for outbox processing (every 10 seconds)
-- [ ] Implement OAuth2 authentication using Authlib with configurable providers
-- [ ] Create OAuth endpoints (authorize/callback/logout) and session validation dependency
-- [ ] Configure OAuth providers (GitHub, Microsoft, Discord, generic OAuth2) via config file
+- [X] Implement OAuth2 authentication using Authlib with configurable providers
+- [X] Create OAuth endpoints (authorize/callback/logout) and session validation dependency
+- [X] Configure OAuth providers (GitHub, Microsoft, Discord, generic OAuth2) via config file
 - [ ] Create FastAPI ContactController with automatic OpenAPI docs
 - [X] Implement CRUD operations (GET, POST, PUT, DELETE) with proper error handling
 - [X] Add contact search endpoints using MeiliSearch (/api/contacts/search)
