@@ -859,11 +859,13 @@ dev = [
     { name = "pytest-asyncio" },
     { name = "pytest-cov" },
     { name = "ruff" },
+    { name = "types-authlib" },
 ]
 
 [package.dev-dependencies]
 dev = [
     { name = "aiosqlite" },
+    { name = "mypy" },
     { name = "types-authlib" },
 ]
 
@@ -898,6 +900,7 @@ requires-dist = [
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.1.0" },
     { name = "sqlalchemy", specifier = ">=2.0.0" },
     { name = "structlog", specifier = ">=23.2.0" },
+    { name = "types-authlib", marker = "extra == 'dev'", specifier = ">=1.5.0.20250516" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.24.0" },
 ]
 provides-extras = ["dev"]
@@ -905,6 +908,7 @@ provides-extras = ["dev"]
 [package.metadata.requires-dev]
 dev = [
     { name = "aiosqlite", specifier = ">=0.21.0" },
+    { name = "mypy", specifier = ">=1.16.0" },
     { name = "types-authlib", specifier = ">=1.5.0.20250516" },
 ]
 
