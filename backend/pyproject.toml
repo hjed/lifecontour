@@ -43,6 +43,7 @@ dev = [
     "ruff>=0.1.0",
     "mypy>=1.7.0",
     "pre-commit>=3.5.0",
+    "types-authlib>=1.5.0.20250516",  # type stubs for authlib
 ]
 
 [build-system]
@@ -161,5 +162,6 @@ exclude_lines = [
 [dependency-groups]
 dev = [
     "aiosqlite>=0.21.0",
+    "mypy>=1.16.0",
     "types-authlib>=1.5.0.20250516",
 ]
