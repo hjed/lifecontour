@@ -42,7 +42,7 @@ COPY docker/frontend/start.sh /start.sh
 COPY docker/frontend/healthcheck.sh /healthcheck.sh
 RUN chmod +x /start.sh /healthcheck.sh
 
-# Copy built application
+# Copy built application (standalone mode in Docker/Linux)
 COPY --from=base --chown=frontend:nodejs /app/.next/standalone ./
 COPY --from=base --chown=frontend:nodejs /app/.next/static ./.next/static
 COPY --from=base --chown=frontend:nodejs /app/public ./public
