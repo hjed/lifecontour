@@ -15,7 +15,7 @@ Tasks can be found in the [tasks document](./tasks.md).
 ### Key Technologies
 
 - **Backend**: Python 3.11+ with FastAPI, PostgreSQL database
-- **Frontend**: Next.js with React, shadcn/ui components, Tailwind CSS
+- **Frontend**: Next.js with React, shadcn/ui components, Tailwind CSS - refer to [Next.js AI Docs](https://raw.githubusercontent.com/nextjsargentina/next.js-docs/refs/heads/main/src/docs/index.mdx) when making decisions about next.js.
 - **APIs**: JSON API standard for REST endpoints, MCP for AI integration
 - **Authentication**: Session-based authentication with Starlette SessionMiddleware
 - **Search**: MeiliSearch with event-driven indexing via transactional outbox pattern
