@@ -43,7 +43,8 @@ Tasks can be found in the [tasks document](./tasks.md).
 3. **Implement Minimum Code** - Write just enough code to make tests pass (green phase)
 4. **Refactor** - Improve code while keeping tests passing (refactor phase)
 5. **Integration** - Ensure all layers work together
-6. **Deploy and Validate** - Confirm feature works in real environment
+6. **Linting & Type Checking** - Ensure no linting or type errors
+7. **Deploy and Validate** - Confirm feature works in real environment
 
 ### Feature-Complete Iterations
 
@@ -127,7 +128,7 @@ tests/
     └── api/test_contact_endpoints.py     # Uses real DB via integration fixtures
 ```
 
-_See [Testing Patterns](./examples/testing-patterns.md) for detailed examples._
+_See [Testing Strategy](./architecture/testing-strategy.md) for detailed testing patterns and examples._
 
 ## Frontend Development Standards
 
@@ -146,8 +147,8 @@ _See [Testing Patterns](./examples/testing-patterns.md) for detailed examples._
 - **Dropdowns**: Include keyboard navigation and proper ARIA attributes
 - **Badges**: Use for tags with custom colors via style prop
 
-_See [Component Patterns](./examples/component-patterns.md) for detailed
-shadcn/ui implementation examples._
+_See [Frontend Design](./architecture/frontend-design.md) for detailed
+shadcn/ui implementation patterns._
 
 ### Tailwind CSS Guidelines
 
@@ -210,8 +211,12 @@ personal-management-system/
 │   └── package.json              # pnpm dependencies
 |── docker-compose.yml            # Multi-container setup
 |── docs/                         # All documentation
-|   ├── architecture/             # Architecture documentation
-|   ├── examples/                 # Code examples and patterns
+|   ├── architecture/             # Detailed architecture documentation
+|   |   ├── domain-architecture.md    # Domain patterns and implementation
+|   |   ├── testing-strategy.md       # Testing patterns and guidelines
+|   |   ├── api-design.md             # REST and MCP API patterns
+|   |   ├── frontend-design.md        # Component and UI patterns
+|   |   └── ...                       # Other architecture docs
 |   ├── ai-guidelines.md          # AI assistant guidelines
 |   ├── tasks.md                  # Task tracking and agile development
 |   └── ...                       # Other documentation
@@ -264,7 +269,7 @@ personal-management-system/
 - **Pydantic Models**: Use for input validation, `str` instead of `PostgresDsn` for database URLs
 - **Mypy Compliance**: All code must pass mypy type checking without any errors after every change
 
-_See [Domain Architecture](./examples/domain-architecture.md) for detailed patterns._
+_See [Domain Architecture](./architecture/domain-architecture.md) for detailed implementation patterns._
 
 ### Dependency Injection
 
@@ -290,11 +295,7 @@ _See [Domain Architecture](./examples/domain-architecture.md) for detailed patte
 
 - **Search Engine**: MeiliSearch with event-driven indexing
 - **Outbox Pattern**: Transactional outbox for reliable event publishing
-- **Background Processing**: FastAPI background tasks every 10 seconds
-- **Performance Target**: <50ms search response times
 - **Event Flow**: Domain Service → OutboxEventPublisher → Outbox Table → Background Task → MeiliSearch
-- **Search Features**: Typo tolerance, highlighting, faceted search, pagination
-- **Error Handling**: MeiliSearch failures cause search endpoints to fail (no graceful degradation)
 
 ### MCP Implementation
 
@@ -311,18 +312,14 @@ _See [Domain Architecture](./examples/domain-architecture.md) for detailed patte
 
 ## Reference Documentation
 
-For detailed implementation examples and patterns, see:
+For detailed implementation patterns and examples, see:
 
-- **[Testing Patterns](./examples/testing-patterns.md)** - PyTest, Jest, Storybook, and
-  Playwright examples
-- **[Component Patterns](./examples/component-patterns.md)** - shadcn/ui
-  implementation guides
-- **[Domain Architecture](./examples/domain-architecture.md)** - DDD patterns
-  and code examples
-- **[API Patterns](./examples/api-patterns.md)** - REST and MCP implementation
-  guides
-- **[Configuration Examples](./examples/configuration/)** - Docker, environment,
-  and deployment configs
+- **[Testing Strategy](./architecture/testing-strategy.md)** - Comprehensive testing patterns for PyTest, Jest, and Playwright
+- **[Frontend Design](./architecture/frontend-design.md)** - shadcn/ui component patterns and responsive design
+- **[Domain Architecture](./architecture/domain-architecture.md)** - Domain-driven design patterns and implementation
+- **[API Design](./architecture/api-design.md)** - REST and MCP API implementation patterns
+- **[Technology Stack](./architecture/technology-stack.md)** - Technology choices and configuration
+- **[Deployment Guide](./architecture/deployment-guide.md)** - Docker and deployment configuration
 
 ## Test-First Quality Assurance
 
@@ -347,10 +344,11 @@ Use `./scripts/dev.sh lint` to run all checks at once.
 ### Common Integration Test Pitfalls
 
 **Service Layer Changes:**
+
 - When modifying service method signatures, update ALL calling tests (unit AND integration)
-- Use proper tuple format `(old_value, new_value)` for history service, not dictionaries
 
 **Type Safety in Tests:**
+
 - Use `# type: ignore` only in test files for intentional validation failures
 - Never use `type: ignore` in production code - fix the underlying type issue
 - Ensure service method return types match what tests expect

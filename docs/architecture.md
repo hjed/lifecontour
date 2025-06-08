@@ -18,6 +18,7 @@ The Personal CRM & Journal System is a Python FastAPI backend with Next.js front
 - **Agile Development**: Feature-complete iterations delivering incremental value
 - **Proxy-Ready**: Support deployment behind nginx reverse proxy
 - **AI-Optimized**: Explicit patterns and readable code over performance optimization
+- **Inegrations**: Designed to support integrations with other services and protocols for best in class experience with integrations
 
 ## Architecture Documentation
 
@@ -40,9 +41,30 @@ Complete database schema, relationships, and data layer implementation:
 ### 🛠️ **[Technology Stack](./architecture/technology-stack.md)**
 Technology choices, implementation details, and development tools:
 - Backend and frontend technology selections
-- Testing strategy and quality assurance
+- High-level testing strategy and quality assurance
 - External APIs and library integrations
 - Development tools and configuration
+
+### 🧪 **[Testing Strategy](./architecture/testing-strategy.md)**
+Comprehensive testing patterns and implementation guidelines:
+- Backend testing with pytest and Docker PostgreSQL
+- Frontend testing with React Testing Library and Playwright
+- Integration testing patterns and test organization
+- Mock utilities and test data factories
+
+### 🔌 **[API Design](./architecture/api-design.md)**
+REST and MCP API implementation patterns and guidelines:
+- FastAPI REST API design with JSON API compliance
+- MCP tool structure and server implementation
+- Input validation and error handling patterns
+- Authentication and pagination guidelines
+
+### 🎨 **[Frontend Design](./architecture/frontend-design.md)**
+Component patterns and UI implementation guidelines:
+- shadcn/ui component structure and accessibility
+- Form validation with React Hook Form and Zod
+- Responsive design and Tailwind CSS patterns
+- Australian localization and performance optimization
 
 ### 🚀 **[Deployment Guide](./architecture/deployment-guide.md)**
 Infrastructure setup, containerization, and operational procedures:
@@ -159,9 +181,12 @@ For implementation details and getting started:
 1. **Start with [Domain Architecture](./architecture/domain-architecture.md)** to understand the core design patterns
 2. **Review [Database Design](./architecture/database-design.md)** for data modeling and schema
 3. **Check [Technology Stack](./architecture/technology-stack.md)** for implementation technologies
-4. **Follow [Deployment Guide](./architecture/deployment-guide.md)** for setting up the environment
-5. **Consider [Security & Performance](./architecture/security-performance.md)** for production readiness
-6. **Explore [Future Roadmap](./architecture/future-roadmap.md)** for planned enhancements
+4. **Study [Testing Strategy](./architecture/testing-strategy.md)** for test-driven development patterns
+5. **Review [API Design](./architecture/api-design.md)** for REST and MCP implementation patterns
+6. **Check [Frontend Design](./architecture/frontend-design.md)** for component and UI patterns
+7. **Follow [Deployment Guide](./architecture/deployment-guide.md)** for setting up the environment
+8. **Consider [Security & Performance](./architecture/security-performance.md)** for production readiness
+9. **Explore [Future Roadmap](./architecture/future-roadmap.md)** for planned enhancements
 
 ---
 

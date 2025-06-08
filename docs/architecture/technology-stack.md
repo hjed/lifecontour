@@ -145,16 +145,19 @@ personal-management-system/
 
 ## Testing Strategy
 
-### Backend Testing (Python)
-- **Unit Tests**: pytest with clear, simple test patterns
-- **Integration Tests**: pytest with PostgreSQL test database
-- **API Tests**: FastAPI TestClient for endpoint testing
-- **Mocking**: pytest-mock for external services
+### High-Level Testing Approach
+- **Test-Driven Development**: Write tests before implementation
+- **Multi-Layer Testing**: Unit, integration, and end-to-end testing
+- **Real Database Testing**: Docker PostgreSQL for production parity
+- **Quality Gates**: Comprehensive linting and type checking
 
-### Frontend Testing (TypeScript)
-- **Component Tests**: React Testing Library
-- **Integration Tests**: Next.js testing patterns
-- **E2E Tests**: Playwright for critical user flows
+### Technology Choices
+- **Backend**: pytest with pytest-asyncio for async testing
+- **Frontend**: React Testing Library for component testing, Playwright for E2E
+- **Database**: PostgreSQL test containers with transaction isolation
+- **Mocking**: pytest-mock for external service dependencies
+
+For detailed testing patterns, implementation guidelines, and examples, see [Testing Strategy](./testing-strategy.md).
 
 ## Development Tools
 
