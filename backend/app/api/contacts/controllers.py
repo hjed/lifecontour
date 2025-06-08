@@ -9,6 +9,7 @@ import structlog
 from fastapi import APIRouter, Depends, Query, Request, status
 from sqlalchemy.ext.asyncio import AsyncConnection
 
+from app.api.auth.dependencies import require_authentication
 from app.api.common.schemas import (
     PaginationParams,
     create_pagination_links,
@@ -33,7 +34,11 @@ from app.core.contacts.models.exceptions import ContactNotFoundError
 
 logger = structlog.get_logger()
 
-router = APIRouter(prefix="/contacts", tags=["contacts"])
+router = APIRouter(
+    prefix="/contacts",
+    tags=["contacts"],
+    dependencies=[Depends(require_authentication)],
+)
 
 
 @router.get("", response_model=ContactListResponse)

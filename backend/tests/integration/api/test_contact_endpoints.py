@@ -8,27 +8,27 @@ from app.main import create_app
 
 
 @pytest_asyncio.fixture
-async def integration_api_client(async_connection, clean_database):
+async def integration_api_client(
+    async_connection, clean_database, test_user, test_settings
+):  # noqa: ARG001
     """Create async test client for API integration tests with real database setup."""
     # Use the existing integration test fixtures for database setup
     # This ensures we use the same database configuration as other integration tests
 
+    from app.api.auth.dependencies import require_authentication
     from app.api.dependencies import get_async_db_connection
-    from app.infrastructure.config import Settings
 
     # Override the database dependency to use our test connection
     async def override_get_async_db_connection():
         yield async_connection
 
-    # Create test settings that allow all hosts for testing
-    test_settings = Settings(
-        debug=True,
-        allowed_hosts=["*"],  # Allow all hosts for testing
-        cors_origins=["*"],
-    )
+    # Override authentication to return a test user
+    def override_require_authentication():
+        return test_user
 
     app = create_app(settings=test_settings)
     app.dependency_overrides[get_async_db_connection] = override_get_async_db_connection
+    app.dependency_overrides[require_authentication] = override_require_authentication
 
     async with AsyncClient(
         transport=ASGITransport(app=app), base_url="http://testserver"
@@ -41,7 +41,7 @@ class TestContactEndpoints:
     """Integration tests for contact API endpoints."""
 
     @pytest_asyncio.fixture(autouse=True)
-    async def setup_method(self, clean_database):
+    async def setup_method(self, clean_database):  # noqa: ARG002
         """Setup method to ensure clean database for each test."""
         pass
 

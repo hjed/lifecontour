@@ -6,9 +6,10 @@ global search, and search suggestions following JSON API specification.
 """
 
 import structlog
-from fastapi import APIRouter, Query, Request
+from fastapi import APIRouter, Depends, Query, Request
 from meilisearch.errors import MeilisearchError
 
+from app.api.auth.dependencies import require_authentication
 from app.api.common.schemas import (
     create_pagination_links,
     create_pagination_meta,
@@ -35,10 +36,19 @@ from app.core.search.exceptions import SearchServiceUnavailableError
 
 logger = structlog.get_logger()
 
-router = APIRouter(prefix="/search", tags=["search"])
+# Router for authenticated search endpoints
+authenticated_router = APIRouter(
+    prefix="/search", tags=["search"], dependencies=[Depends(require_authentication)]
+)
+
+# Router for public search endpoints (like health)
+public_router = APIRouter(prefix="/search", tags=["search"])
+
+# Combined router for export
+router = APIRouter()
 
 
-@router.get("/contacts", response_model=ContactSearchResponse)
+@authenticated_router.get("/contacts", response_model=ContactSearchResponse)
 def search_contacts(
     request: Request,
     search_service: SearchServiceDep,
@@ -118,7 +128,7 @@ def search_contacts(
     )
 
 
-@router.get("/global", response_model=GlobalSearchResponse)
+@authenticated_router.get("/global", response_model=GlobalSearchResponse)
 def global_search(
     request: Request,
     search_service: SearchServiceDep,
@@ -228,7 +238,7 @@ def global_search(
     )
 
 
-@router.get("/suggestions", response_model=SearchSuggestionsResponse)
+@authenticated_router.get("/suggestions", response_model=SearchSuggestionsResponse)
 def get_search_suggestions(
     search_service: SearchServiceDep,
     q: str = Query(..., description="Partial query", min_length=1, max_length=100),
@@ -259,7 +269,7 @@ def get_search_suggestions(
         return SearchSuggestionsResponse(suggestions=[], query=q)
 
 
-@router.get("/health", response_model=SearchHealthResponse)
+@public_router.get("/health", response_model=SearchHealthResponse)
 def get_search_health(search_service: SearchServiceDep) -> SearchHealthResponse:
     """
     Get search system health status.
@@ -289,3 +299,8 @@ def get_search_health(search_service: SearchServiceDep) -> SearchHealthResponse:
         return SearchHealthResponse(
             status="error", meilisearch_status="unknown", indices=[], error=str(e)
         )
+
+
+# Include sub-routers in the main router
+router.include_router(authenticated_router)
+router.include_router(public_router)
