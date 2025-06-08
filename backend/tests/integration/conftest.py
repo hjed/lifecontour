@@ -413,3 +413,85 @@ def integration_test_client():
         restore_environment_variables(original_values)
         # Clear cache again to restore original settings
         clear_caches()
+
+
+# Shared fixtures for API integration tests with authentication
+@pytest.fixture
+def test_user():
+    """Create a test user for authentication."""
+    from app.infrastructure.auth.models import SessionUser
+
+    return SessionUser(
+        id="test-user-123",
+        email="test@example.com",
+        name="Test User",
+        avatar_url="https://example.com/avatar.jpg",
+        provider="test",
+    )
+
+
+@pytest.fixture
+def test_settings():
+    """Create test settings that allow all hosts."""
+    from app.infrastructure.config import Settings
+
+    return Settings(
+        debug=True,
+        allowed_hosts=["*"],  # Allow all hosts for testing
+        cors_origins=["*"],
+    )
+
+
+@pytest.fixture
+def authenticated_app(test_user, test_settings):
+    """Create a FastAPI app with authentication overridden for testing."""
+    from app.api.auth.dependencies import require_authentication
+    from app.main import create_app
+
+    def override_require_authentication():
+        return test_user
+
+    app = create_app(settings=test_settings)
+    app.dependency_overrides[require_authentication] = override_require_authentication
+
+    return app
+
+
+@pytest.fixture
+def mock_search_service():
+    """Create a mock search service for testing."""
+    from typing import Any
+    from unittest.mock import MagicMock
+
+    def _create_mock_service(search_results: dict[str, Any]):
+        mock_service = MagicMock()
+        mock_service.search_contacts.return_value = search_results
+        mock_service.global_search.return_value = search_results
+        return mock_service
+
+    return _create_mock_service
+
+
+@pytest.fixture
+def authenticated_search_client(authenticated_app, mock_search_service):
+    """
+    Create a test client with authentication and search service mocking.
+
+    Returns a tuple of (test_client, mock_service_factory).
+    The mock_service_factory can be called with search results to set up the mock.
+    """
+    from typing import Any
+
+    from fastapi.testclient import TestClient
+
+    from app.api.dependencies import get_search_service
+
+    def setup_search_mock(search_results: dict[str, Any]):
+        mock_service = mock_search_service(search_results)
+        authenticated_app.dependency_overrides[get_search_service] = (
+            lambda: mock_service
+        )
+        return mock_service
+
+    test_client = TestClient(authenticated_app)
+    return test_client, setup_search_mock
