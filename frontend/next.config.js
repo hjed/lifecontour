@@ -4,8 +4,8 @@ const nextConfig = {
     typedRoutes: true,
   },
 
-  // Enable standalone output for Docker
-  output: 'standalone',
+  // Enable standalone output for Docker (disabled on Windows due to symlink issues)
+  output: process.platform === 'win32' ? undefined : 'standalone',
 
   // API configuration
   async rewrites() {
