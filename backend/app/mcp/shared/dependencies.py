@@ -23,6 +23,7 @@ from app.core.contacts.services import (
     TagHierarchyService,
 )
 from app.infrastructure.database import get_async_database_engine
+from app.infrastructure.search.search_service import SearchService
 
 
 async def get_async_db_connection() -> AsyncGenerator[AsyncConnection, None]:
@@ -76,3 +77,12 @@ async def get_contact_service() -> ContactService:
             history_service=history_service,
             tag_hierarchy_service=tag_hierarchy_service,
         )
+
+
+def get_search_service() -> SearchService:
+    """
+    Get SearchService instance for MCP tools.
+
+    Creates the search service for MeiliSearch operations.
+    """
+    return SearchService()
