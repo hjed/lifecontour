@@ -63,6 +63,12 @@ class Settings(BaseSettings):
     meilisearch_url: str = Field(
         default="http://localhost:7700", description="MeiliSearch server URL"
     )
+
+    # MCP settings
+    mcp_enabled: bool = Field(default=True, description="Enable MCP server")
+    mcp_mount_path: str = Field(
+        default="/mcp-server", description="MCP server mount path"
+    )
     meilisearch_api_key: str = Field(default="", description="MeiliSearch API key")
     search_index_prefix: str = Field(
         default="pms_", description="Prefix for search indices"

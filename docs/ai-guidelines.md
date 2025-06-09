@@ -299,7 +299,11 @@ _See [Domain Architecture](./architecture/domain-architecture.md) for detailed i
 
 ### MCP Implementation
 
-- **Python MCP SDK**: Use official Python MCP SDK for server implementation
+- **FastMCP v2**: Use FastMCP v2 (jlowin/fastmcp) for MCP server implementation instead of official MCP SDK
+- **AI-Optimized Documentation**: Reference https://gofastmcp.com/llms.txt for AI-friendly documentation
+- **FastAPI Integration**: Follow https://gofastmcp.com/deployment/asgi.md for FastAPI integration patterns
+- **Domain-Based Architecture**: Organize MCP tools by domain (contacts, journal, calendar, photos) to allow future expansion
+- **Session Authentication**: Share OAuth authentication with REST API using session middleware
 - **AI-Friendly Responses**: Provide context and summaries, not raw database data
 - **Clear Interfaces**: Structure MCP tools with consistent, simple interfaces
 
