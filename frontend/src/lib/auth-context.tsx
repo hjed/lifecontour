@@ -40,7 +40,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
     try {
       setIsLoading(true);
       const response = await apiClient.getAuthStatus();
-      
+
       if (response.data?.authenticated && response.data.user) {
         setUser(response.data.user);
       } else {
@@ -56,7 +56,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
   const login = (provider: string, redirectUrl: string = '/') => {
     // Redirect to OAuth authorization endpoint
-    const authUrl = `/api/auth/authorize/${provider}?redirect_url=${encodeURIComponent(redirectUrl)}`;
+    const authUrl = `http://localhost:8000/api/auth/authorize/${provider}?redirect_url=${encodeURIComponent(redirectUrl)}`;
     window.location.href = authUrl;
   };
 
@@ -65,7 +65,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
       setIsLoading(true);
       await apiClient.logout();
       setUser(null);
-      
+
       // Redirect to login page
       window.location.href = '/auth/login';
     } catch (error) {
@@ -89,9 +89,5 @@ export function AuthProvider({ children }: AuthProviderProps) {
     checkAuthStatus,
   };
 
-  return (
-    <AuthContext.Provider value={value}>
-      {children}
-    </AuthContext.Provider>
-  );
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

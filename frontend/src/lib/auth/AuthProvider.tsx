@@ -167,7 +167,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
   // Login mutation
   const loginMutation = useMutation({
     mutationFn: async (provider: OAuthProvider): Promise<LoginResponse> => {
-      const response = await fetch(API_ENDPOINTS.AUTH.LOGIN, {
+      const response = await fetch(API_ENDPOINTS.AUTH.AUTHORIZE(provider), {
         method: 'POST',
         headers: {
           [HTTP_HEADERS.CONTENT_TYPE]: HTTP_HEADERS.APPLICATION_JSON,

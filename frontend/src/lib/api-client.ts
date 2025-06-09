@@ -1,6 +1,6 @@
 /**
  * API client for communicating with the FastAPI backend.
- * 
+ *
  * Handles authentication, error handling, and JSON API format.
  */
 
@@ -15,7 +15,7 @@ export interface ApiError {
 export interface ApiResponse<T> {
   data?: T;
   errors?: ApiError[];
-  meta?: Record<string, any>;
+  meta?: Record<string, unknown>;
   links?: Record<string, string>;
 }
 
@@ -70,8 +70,14 @@ export interface SearchResult {
 class ApiClient {
   private baseUrl: string;
 
-  constructor(baseUrl: string = 'http://localhost:8000') {
-    this.baseUrl = baseUrl;
+  constructor(baseUrl?: string) {
+    // Use relative URLs in browser environment (including tests)
+    // Use absolute URL for server-side rendering
+    if (typeof window !== 'undefined') {
+      this.baseUrl = baseUrl || '';
+    } else {
+      this.baseUrl = baseUrl || 'http://localhost:8000';
+    }
   }
 
   private async request<T>(
@@ -79,7 +85,7 @@ class ApiClient {
     options: RequestInit = {}
   ): Promise<ApiResponse<T>> {
     const url = `${this.baseUrl}${endpoint}`;
-    
+
     const defaultHeaders = {
       [HTTP_HEADERS.CONTENT_TYPE]: HTTP_HEADERS.APPLICATION_JSON,
     };
@@ -95,17 +101,19 @@ class ApiClient {
 
     try {
       const response = await fetch(url, config);
-      
+
       if (!response.ok) {
         // Handle HTTP errors
         const errorData = await response.json().catch(() => ({
-          errors: [{
-            status: response.status.toString(),
-            title: response.statusText,
-            detail: `HTTP ${response.status} error`
-          }]
+          errors: [
+            {
+              status: response.status.toString(),
+              title: response.statusText,
+              detail: `HTTP ${response.status} error`,
+            },
+          ],
         }));
-        
+
         return errorData;
       }
 
@@ -120,11 +128,14 @@ class ApiClient {
     } catch (error) {
       // Handle network errors
       return {
-        errors: [{
-          status: '0',
-          title: 'Network Error',
-          detail: error instanceof Error ? error.message : 'Unknown network error'
-        }]
+        errors: [
+          {
+            status: '0',
+            title: 'Network Error',
+            detail:
+              error instanceof Error ? error.message : 'Unknown network error',
+          },
+        ],
       };
     }
   }
@@ -134,7 +145,15 @@ class ApiClient {
     return this.request<AuthStatus>(API_ENDPOINTS.AUTH.SESSION);
   }
 
-  async getAuthProviders(): Promise<ApiResponse<{ providers: Array<{ name: string; display_name: string; icon_url?: string }> }>> {
+  async getAuthProviders(): Promise<
+    ApiResponse<{
+      providers: Array<{
+        name: string;
+        display_name: string;
+        icon_url?: string;
+      }>;
+    }>
+  > {
     return this.request('/api/auth/providers');
   }
 
@@ -145,12 +164,20 @@ class ApiClient {
   }
 
   // Contact methods
-  async getContacts(page: number = 1, limit: number = 20): Promise<ApiResponse<Contact[]>> {
+  async getContacts(
+    page: number = 1,
+    limit: number = 20,
+    search?: string
+  ): Promise<ApiResponse<Contact[]>> {
     const params = new URLSearchParams({
       page: page.toString(),
       limit: limit.toString(),
     });
-    
+
+    if (search) {
+      params.append('search', search);
+    }
+
     return this.request<Contact[]>(`${API_ENDPOINTS.CONTACTS.BASE}?${params}`);
   }
 
@@ -158,7 +185,9 @@ class ApiClient {
     return this.request<Contact>(API_ENDPOINTS.CONTACTS.BY_ID(id));
   }
 
-  async createContact(contactData: Partial<Contact['attributes']>): Promise<ApiResponse<Contact>> {
+  async createContact(
+    contactData: Partial<Contact['attributes']>
+  ): Promise<ApiResponse<Contact>> {
     return this.request<Contact>(API_ENDPOINTS.CONTACTS.BASE, {
       method: 'POST',
       body: JSON.stringify({
@@ -170,7 +199,10 @@ class ApiClient {
     });
   }
 
-  async updateContact(id: string, contactData: Partial<Contact['attributes']>): Promise<ApiResponse<Contact>> {
+  async updateContact(
+    id: string,
+    contactData: Partial<Contact['attributes']>
+  ): Promise<ApiResponse<Contact>> {
     return this.request<Contact>(API_ENDPOINTS.CONTACTS.BY_ID(id), {
       method: 'PUT',
       body: JSON.stringify({
@@ -189,37 +221,57 @@ class ApiClient {
   }
 
   // Search methods
-  async searchContacts(query: string, limit: number = 20, offset: number = 0): Promise<ApiResponse<SearchResult>> {
+  async searchContacts(
+    query: string,
+    limit: number = 20,
+    offset: number = 0
+  ): Promise<ApiResponse<SearchResult>> {
     const params = new URLSearchParams({
       q: query,
       limit: limit.toString(),
       offset: offset.toString(),
     });
-    
-    return this.request<SearchResult>(`${API_ENDPOINTS.SEARCH.CONTACTS}?${params}`);
+
+    return this.request<SearchResult>(
+      `${API_ENDPOINTS.SEARCH.CONTACTS}?${params}`
+    );
   }
 
-  async globalSearch(query: string, entityTypes?: string[]): Promise<ApiResponse<{
-    contacts: { hits: any[]; total: number };
-    journal: { hits: any[]; total: number };
-    calendar: { hits: any[]; total: number };
-  }>> {
+  async globalSearch(
+    query: string,
+    entityTypes?: string[]
+  ): Promise<
+    ApiResponse<{
+      contacts: { hits: unknown[]; total: number };
+      journal: { hits: unknown[]; total: number };
+      calendar: { hits: unknown[]; total: number };
+    }>
+  > {
     const params = new URLSearchParams({ q: query });
-    
+
     if (entityTypes) {
       params.append('entity_types', entityTypes.join(','));
     }
-    
+
     return this.request(`${API_ENDPOINTS.SEARCH.GLOBAL}?${params}`);
   }
 
-  async getSearchSuggestions(query: string): Promise<ApiResponse<{ suggestions: string[] }>> {
+  async getSearchSuggestions(
+    query: string
+  ): Promise<ApiResponse<{ suggestions: string[] }>> {
     const params = new URLSearchParams({ q: query });
     return this.request(`${API_ENDPOINTS.SEARCH.SUGGESTIONS}?${params}`);
   }
 
   // Health check
-  async getHealth(): Promise<ApiResponse<{ status: string; timestamp: string; version: string; uptime: string }>> {
+  async getHealth(): Promise<
+    ApiResponse<{
+      status: string;
+      timestamp: string;
+      version: string;
+      uptime: string;
+    }>
+  > {
     return this.request('/api/health');
   }
 }

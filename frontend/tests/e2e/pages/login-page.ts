@@ -22,7 +22,7 @@ export class LoginPage extends BasePage {
     userName: '[data-testid="user-name"]',
     loginForm: '[data-testid="login-form"]',
     authError: '[data-testid="auth-error"]',
-    authSuccess: '[data-testid="auth-success"]'
+    authSuccess: '[data-testid="auth-success"]',
   };
 
   /**
@@ -51,9 +51,11 @@ export class LoginPage extends BasePage {
    * Get list of available OAuth providers
    */
   async getAvailableProviders(): Promise<string[]> {
-    const providers = await this.page.locator(this.selectors.providerButtons).all();
+    const providers = await this.page
+      .locator(this.selectors.providerButtons)
+      .all();
     const providerNames: string[] = [];
-    
+
     for (const provider of providers) {
       const testId = await provider.getAttribute('data-testid');
       if (testId) {
@@ -61,7 +63,7 @@ export class LoginPage extends BasePage {
         providerNames.push(providerName);
       }
     }
-    
+
     return providerNames;
   }
 
@@ -80,13 +82,13 @@ export class LoginPage extends BasePage {
    */
   async performOAuthLogin(provider: string = 'github') {
     await this.clickOAuthProvider(provider);
-    
+
     // Wait for redirect to OAuth provider (mocked)
     await this.page.waitForURL('**/auth/callback**', { timeout: 5000 });
-    
+
     // Simulate successful OAuth callback
     await this.page.goto('/auth/callback?code=test-auth-code&state=test-state');
-    
+
     // Wait for redirect back to application
     await this.page.waitForURL('/', { timeout: 5000 });
   }
@@ -95,8 +97,10 @@ export class LoginPage extends BasePage {
    * Check if user is logged in
    */
   async isUserLoggedIn(): Promise<boolean> {
-    return await this.isVisible(this.selectors.userMenu) || 
-           await this.isVisible(this.selectors.userAvatar);
+    return (
+      (await this.isVisible(this.selectors.userMenu)) ||
+      (await this.isVisible(this.selectors.userAvatar))
+    );
   }
 
   /**
@@ -126,10 +130,10 @@ export class LoginPage extends BasePage {
   async logout() {
     await this.openUserMenu();
     await this.clickElement(this.selectors.logoutButton);
-    
+
     // Wait for logout to complete
     await this.waitForApiResponse('**/api/auth/logout');
-    
+
     // Should redirect to login or home page
     await this.page.waitForURL(/\/(auth\/login)?$/, { timeout: 5000 });
   }
@@ -162,7 +166,9 @@ export class LoginPage extends BasePage {
     await this.checkAccessibility();
 
     // Check OAuth provider buttons have proper labels
-    const providerButtons = await this.page.locator(this.selectors.providerButtons).all();
+    const providerButtons = await this.page
+      .locator(this.selectors.providerButtons)
+      .all();
     for (const button of providerButtons) {
       const ariaLabel = await button.getAttribute('aria-label');
       expect(ariaLabel).toBeTruthy();
@@ -178,15 +184,24 @@ export class LoginPage extends BasePage {
    */
   async testResponsiveLogin() {
     // Test mobile layout
-    await this.setViewportSize(BasePage.VIEWPORTS.MOBILE.width, BasePage.VIEWPORTS.MOBILE.height);
+    await this.setViewportSize(
+      BasePage.VIEWPORTS.MOBILE.width,
+      BasePage.VIEWPORTS.MOBILE.height
+    );
     await expect(this.page.locator(this.selectors.loginForm)).toBeVisible();
-    
+
     // Test tablet layout
-    await this.setViewportSize(BasePage.VIEWPORTS.TABLET.width, BasePage.VIEWPORTS.TABLET.height);
+    await this.setViewportSize(
+      BasePage.VIEWPORTS.TABLET.width,
+      BasePage.VIEWPORTS.TABLET.height
+    );
     await expect(this.page.locator(this.selectors.loginForm)).toBeVisible();
-    
+
     // Test desktop layout
-    await this.setViewportSize(BasePage.VIEWPORTS.DESKTOP.width, BasePage.VIEWPORTS.DESKTOP.height);
+    await this.setViewportSize(
+      BasePage.VIEWPORTS.DESKTOP.width,
+      BasePage.VIEWPORTS.DESKTOP.height
+    );
     await expect(this.page.locator(this.selectors.loginForm)).toBeVisible();
   }
 
@@ -196,10 +211,10 @@ export class LoginPage extends BasePage {
   async verifyProtectedRouteRedirection(protectedPath: string) {
     // Try to access protected route without authentication
     await this.goto(protectedPath);
-    
+
     // Should be redirected to login
     await this.page.waitForURL('**/auth/login**', { timeout: 5000 });
-    
+
     // Verify login form is shown
     await expect(this.page.locator(this.selectors.loginForm)).toBeVisible();
   }
@@ -211,7 +226,7 @@ export class LoginPage extends BasePage {
     // Refresh the page
     await this.page.reload();
     await this.waitForLoad();
-    
+
     // User should still be logged in
     expect(await this.isUserLoggedIn()).toBe(true);
   }

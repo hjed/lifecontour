@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { render, screen } from '../utils/test-utils';
 import HomePage from '@/app/page';
 
 describe('HomePage', () => {
@@ -22,13 +22,23 @@ describe('HomePage', () => {
   it('renders all feature cards', () => {
     render(<HomePage />);
 
-    // Check for all card titles
-    expect(screen.getByText('Contacts')).toBeInTheDocument();
-    expect(screen.getByText('Journal')).toBeInTheDocument();
-    expect(screen.getByText('Calendar')).toBeInTheDocument();
-    expect(screen.getByText('Photos')).toBeInTheDocument();
-    expect(screen.getByText('AI Integration')).toBeInTheDocument();
-    expect(screen.getByText('System Status')).toBeInTheDocument();
+    // Check for all card titles using more specific queries
+    expect(
+      screen.getByRole('heading', { name: 'Contacts' })
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole('heading', { name: 'Journal' })
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole('heading', { name: 'Calendar' })
+    ).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Photos' })).toBeInTheDocument();
+    expect(
+      screen.getByRole('heading', { name: 'AI Integration' })
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole('heading', { name: 'System Status' })
+    ).toBeInTheDocument();
   });
 
   it('renders contacts card with correct description', () => {
@@ -101,7 +111,7 @@ describe('HomePage', () => {
   it('renders exactly 6 feature cards', () => {
     render(<HomePage />);
 
-    // Count the number of cards by looking for card titles
+    // Count the number of cards by looking for card titles as headings
     const cardTitles = [
       'Contacts',
       'Journal',
@@ -112,7 +122,7 @@ describe('HomePage', () => {
     ];
 
     cardTitles.forEach(title => {
-      expect(screen.getByText(title)).toBeInTheDocument();
+      expect(screen.getByRole('heading', { name: title })).toBeInTheDocument();
     });
 
     // Verify we have exactly 6 cards

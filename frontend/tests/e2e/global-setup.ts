@@ -1,6 +1,6 @@
 /**
  * Global setup for Playwright tests.
- * 
+ *
  * Handles test environment setup including:
  * - API mocking configuration
  * - Test database setup
@@ -9,12 +9,12 @@
 
 import { chromium, FullConfig } from '@playwright/test';
 
-async function globalSetup(config: FullConfig) {
+async function globalSetup(_config: FullConfig) {
   console.log('🚀 Setting up Playwright test environment...');
-  
+
   // Ensure backend is running
   const backendUrl = process.env.BACKEND_URL || 'http://localhost:8000';
-  
+
   try {
     // Check if backend is available
     const response = await fetch(`${backendUrl}/api/health`);
@@ -27,7 +27,7 @@ async function globalSetup(config: FullConfig) {
     console.log('💡 Make sure to run: docker-compose up -d');
     process.exit(1);
   }
-  
+
   // Set up test authentication state
   const browser = await chromium.launch();
   const context = await browser.newContext();
@@ -47,7 +47,7 @@ async function globalSetup(config: FullConfig) {
   }
 
   await browser.close();
-  
+
   console.log('✅ Global setup completed');
 }
 

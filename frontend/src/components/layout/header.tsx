@@ -1,6 +1,6 @@
 /**
  * Main header component with navigation and global search.
- * 
+ *
  * Includes responsive navigation, user menu, and global search functionality.
  */
 
@@ -30,7 +30,7 @@ export function Header() {
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
     if (searchQuery.trim()) {
-      router.push(`/search?q=${encodeURIComponent(searchQuery.trim())}`);
+      router.push(`/search?q=${encodeURIComponent(searchQuery.trim())}` as any);
     }
   };
 
@@ -44,24 +44,27 @@ export function Header() {
   ];
 
   return (
-    <header className="border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-      <div className="container mx-auto px-4">
-        <div className="flex h-16 items-center justify-between">
+    <header className='bg-background/95 supports-[backdrop-filter]:bg-background/60 border-b backdrop-blur'>
+      <div className='container mx-auto px-4'>
+        <div className='flex h-16 items-center justify-between'>
           {/* Logo */}
-          <div className="flex items-center space-x-4">
-            <Link href="/" className="flex items-center space-x-2">
-              <span className="text-xl font-bold">Personal CRM</span>
+          <div className='flex items-center space-x-4'>
+            <Link href='/' className='flex items-center space-x-2'>
+              <span className='text-xl font-bold'>Personal CRM</span>
             </Link>
           </div>
 
           {/* Desktop Navigation */}
-          <nav className="hidden md:flex items-center space-x-6" data-testid="desktop-navigation">
-            {navigationItems.map((item) => (
+          <nav
+            className='hidden items-center space-x-6 md:flex'
+            data-testid='desktop-navigation'
+          >
+            {navigationItems.map(item => (
               <Link
                 key={item.href}
-                href={item.href}
+                href={item.href as any}
                 data-testid={item.testId}
-                className="text-sm font-medium transition-colors hover:text-primary"
+                className='hover:text-primary text-sm font-medium transition-colors'
               >
                 {item.label}
               </Link>
@@ -69,62 +72,67 @@ export function Header() {
           </nav>
 
           {/* Global Search */}
-          <div className="flex-1 max-w-md mx-4">
-            <form onSubmit={handleSearch} className="relative">
+          <div className='mx-4 max-w-md flex-1'>
+            <form onSubmit={handleSearch} className='relative'>
               <Input
-                type="search"
-                placeholder="Search contacts, journal, calendar..."
+                type='search'
+                placeholder='Search contacts, journal, calendar...'
                 value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="pl-10 pr-4"
-                data-testid="global-search-input"
-                aria-label="Global search"
+                onChange={e => setSearchQuery(e.target.value)}
+                className='pr-4 pl-10'
+                data-testid='global-search-input'
+                aria-label='Global search'
               />
-              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              <Search className='text-muted-foreground absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2' />
               <Button
-                type="submit"
-                size="sm"
-                className="absolute right-1 top-1/2 h-7 -translate-y-1/2"
-                data-testid="global-search-button"
-                aria-label="Search"
+                type='submit'
+                size='sm'
+                className='absolute top-1/2 right-1 h-7 -translate-y-1/2'
+                data-testid='global-search-button'
+                aria-label='Search'
               >
-                <Search className="h-3 w-3" />
+                <Search className='h-3 w-3' />
               </Button>
             </form>
           </div>
 
           {/* User Menu / Auth */}
-          <div className="flex items-center space-x-4">
+          <div className='flex items-center space-x-4'>
             {isAuthenticated && user ? (
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <Button
-                    variant="ghost"
-                    size="sm"
-                    className="flex items-center space-x-2"
-                    data-testid="user-menu"
-                    aria-label="User menu"
+                    variant='ghost'
+                    size='sm'
+                    className='flex items-center space-x-2'
+                    data-testid='user-menu'
+                    aria-label='User menu'
                   >
-                    <User className="h-4 w-4" />
-                    <span data-testid="user-name" className="hidden sm:inline">
+                    <User className='h-4 w-4' />
+                    <span data-testid='user-name' className='hidden sm:inline'>
                       {user.name}
                     </span>
                   </Button>
                 </DropdownMenuTrigger>
-                <DropdownMenuContent align="end">
+                <DropdownMenuContent align='end'>
                   <DropdownMenuItem disabled>
-                    <span className="text-sm text-muted-foreground">{user.email}</span>
+                    <span className='text-muted-foreground text-sm'>
+                      {user.email}
+                    </span>
                   </DropdownMenuItem>
                   <DropdownMenuSeparator />
-                  <DropdownMenuItem onClick={handleLogout} data-testid="logout-button">
-                    <LogOut className="mr-2 h-4 w-4" />
+                  <DropdownMenuItem
+                    onClick={handleLogout}
+                    data-testid='logout-button'
+                  >
+                    <LogOut className='mr-2 h-4 w-4' />
                     Logout
                   </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
             ) : (
-              <Button asChild variant="outline" size="sm">
-                <Link href="/auth/login" data-testid="login-button">
+              <Button asChild variant='outline' size='sm'>
+                <Link href='/auth/login' data-testid='login-button'>
                   Login
                 </Link>
               </Button>
@@ -132,17 +140,17 @@ export function Header() {
 
             {/* Mobile Menu Button */}
             <Button
-              variant="ghost"
-              size="sm"
-              className="md:hidden"
+              variant='ghost'
+              size='sm'
+              className='md:hidden'
               onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
-              data-testid="mobile-menu-button"
-              aria-label="Toggle mobile menu"
+              data-testid='mobile-menu-button'
+              aria-label='Toggle mobile menu'
             >
               {isMobileMenuOpen ? (
-                <X className="h-5 w-5" />
+                <X className='h-5 w-5' />
               ) : (
-                <Menu className="h-5 w-5" />
+                <Menu className='h-5 w-5' />
               )}
             </Button>
           </div>
@@ -150,14 +158,14 @@ export function Header() {
 
         {/* Mobile Navigation */}
         {isMobileMenuOpen && (
-          <nav className="md:hidden border-t py-4" data-testid="mobile-menu">
-            <div className="flex flex-col space-y-2">
-              {navigationItems.map((item) => (
+          <nav className='border-t py-4 md:hidden' data-testid='mobile-menu'>
+            <div className='flex flex-col space-y-2'>
+              {navigationItems.map(item => (
                 <Link
                   key={item.href}
-                  href={item.href}
+                  href={item.href as any}
                   data-testid={item.testId}
-                  className="px-2 py-2 text-sm font-medium transition-colors hover:text-primary"
+                  className='hover:text-primary px-2 py-2 text-sm font-medium transition-colors'
                   onClick={() => setIsMobileMenuOpen(false)}
                 >
                   {item.label}

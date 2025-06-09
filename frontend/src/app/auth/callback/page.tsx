@@ -18,14 +18,13 @@ import {
 } from '@/components/ui/card';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Skeleton } from '@/components/ui/skeleton';
-import { useAuth } from '@/lib/auth/AuthProvider';
-import { OAuthProvider } from '@/types/auth';
+import { useAuth } from '@/lib/auth-context';
 
 // Component that uses useSearchParams - needs to be wrapped in Suspense
 function CallbackContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { refreshSession } = useAuth();
+  const { checkAuthStatus } = useAuth();
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -51,18 +50,21 @@ function CallbackContent() {
         const provider = determineProvider(state);
 
         // Send callback data to backend
-        const response = await fetch('/api/auth/callback', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            code,
-            state,
-            provider,
-          }),
-          credentials: 'include',
-        });
+        const response = await fetch(
+          'http://localhost:8000/api/auth/callback',
+          {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              code,
+              state,
+              provider,
+            }),
+            credentials: 'include',
+          }
+        );
 
         if (!response.ok) {
           const errorData = await response.json();
@@ -74,7 +76,7 @@ function CallbackContent() {
         const data = await response.json();
 
         // Refresh session to get user data
-        await refreshSession();
+        await checkAuthStatus();
 
         // Redirect to intended destination or dashboard
         const redirectTo = data.redirect_url || '/';
@@ -86,20 +88,20 @@ function CallbackContent() {
     };
 
     processCallback();
-  }, [searchParams, router, refreshSession]);
+  }, [searchParams, router, checkAuthStatus]);
 
   // Determine OAuth provider from state parameter
-  const determineProvider = (state: string | null): OAuthProvider => {
+  const determineProvider = (state: string | null): string => {
     // Parse provider from state parameter (format: "provider:randomString")
     if (state && state.includes(':')) {
-      const provider = state.split(':')[0].toUpperCase();
-      if (Object.values(OAuthProvider).includes(provider as OAuthProvider)) {
-        return provider as OAuthProvider;
+      const provider = state.split(':')[0].toLowerCase();
+      if (['github', 'microsoft', 'discord'].includes(provider)) {
+        return provider;
       }
     }
 
     // Default to GitHub if state is invalid or missing
-    return OAuthProvider.GITHUB;
+    return 'github';
   };
 
   // Show error state

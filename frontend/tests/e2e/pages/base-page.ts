@@ -2,7 +2,7 @@
  * Base page object for common functionality across all pages.
  */
 
-import { Page, Locator, expect } from '@playwright/test';
+import { Page, expect } from '@playwright/test';
 
 export class BasePage {
   readonly page: Page;
@@ -65,13 +65,16 @@ export class BasePage {
    */
   async getTextContent(selector: string): Promise<string> {
     const element = await this.page.locator(selector);
-    return await element.textContent() || '';
+    return (await element.textContent()) || '';
   }
 
   /**
    * Wait for API response
    */
-  async waitForApiResponse(urlPattern: string | RegExp, timeout: number = 10000) {
+  async waitForApiResponse(
+    urlPattern: string | RegExp,
+    timeout: number = 10000
+  ) {
     return await this.page.waitForResponse(urlPattern, { timeout });
   }
 
@@ -114,9 +117,9 @@ export class BasePage {
    * Wait for loading to complete
    */
   async waitForLoadingToComplete() {
-    await this.page.waitForSelector('[data-testid="loading-spinner"]', { 
+    await this.page.waitForSelector('[data-testid="loading-spinner"]', {
       state: 'hidden',
-      timeout: 10000 
+      timeout: 10000,
     });
   }
 
@@ -124,9 +127,9 @@ export class BasePage {
    * Take screenshot for debugging
    */
   async takeScreenshot(name: string) {
-    await this.page.screenshot({ 
+    await this.page.screenshot({
       path: `test-results/screenshots/${name}.png`,
-      fullPage: true 
+      fullPage: true,
     });
   }
 
@@ -143,7 +146,7 @@ export class BasePage {
   static readonly VIEWPORTS = {
     MOBILE: { width: 375, height: 667 },
     TABLET: { width: 768, height: 1024 },
-    DESKTOP: { width: 1920, height: 1080 }
+    DESKTOP: { width: 1920, height: 1080 },
   };
 
   /**
@@ -194,7 +197,9 @@ export class BasePage {
     }
 
     // Check for form labels
-    const inputs = await this.page.locator('input[type="text"], input[type="email"], textarea').all();
+    const inputs = await this.page
+      .locator('input[type="text"], input[type="email"], textarea')
+      .all();
     for (const input of inputs) {
       const id = await input.getAttribute('id');
       if (id) {

@@ -7,18 +7,21 @@ This directory contains comprehensive Playwright end-to-end tests for the contac
 ### Test Files
 
 - **`auth.spec.ts`** - Authentication flow tests
+
   - OAuth login/logout functionality
   - Session management
   - Protected route access
   - Authentication error handling
 
 - **`contacts-list.spec.ts`** - Contact list and search tests
+
   - Contact list display
   - Search functionality with MeiliSearch
   - Filtering and pagination
   - Empty states and loading states
 
 - **`contacts-crud.spec.ts`** - Contact CRUD operations
+
   - Contact creation forms
   - Contact editing forms
   - Contact deletion
@@ -26,6 +29,7 @@ This directory contains comprehensive Playwright end-to-end tests for the contac
   - Tag management
 
 - **`global-search.spec.ts`** - Global search functionality
+
   - Global search component
   - Search across entity types
   - Search suggestions and typo tolerance
@@ -40,12 +44,14 @@ This directory contains comprehensive Playwright end-to-end tests for the contac
 ### Support Files
 
 - **`pages/`** - Page Object Models
+
   - `base-page.ts` - Common page functionality
   - `login-page.ts` - Authentication page object
   - `contacts-page.ts` - Contacts list page object
   - `contact-form-page.ts` - Contact form page object
 
 - **`fixtures/`** - Test data and setup
+
   - `test-data.ts` - Test contacts and validation cases
   - `auth-state.json` - Mock authentication state
 
@@ -57,6 +63,7 @@ This directory contains comprehensive Playwright end-to-end tests for the contac
 ### Prerequisites
 
 1. Ensure backend is running:
+
    ```bash
    docker-compose up -d
    ```

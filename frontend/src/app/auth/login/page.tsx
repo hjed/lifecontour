@@ -28,7 +28,10 @@ interface OAuthProvider {
 }
 
 // OAuth provider icons
-const providerIcons: Record<string, React.ComponentType<{ className?: string }>> = {
+const providerIcons: Record<
+  string,
+  React.ComponentType<{ className?: string }>
+> = {
   github: GitBranch,
   microsoft: User,
   discord: User,
@@ -62,7 +65,10 @@ function LoginContent() {
         const response = await apiClient.getAuthProviders();
 
         if (response.errors) {
-          setError(response.errors[0]?.detail || 'Failed to load authentication providers');
+          setError(
+            response.errors[0]?.detail ||
+              'Failed to load authentication providers'
+          );
         } else if (response.data) {
           setProviders(response.data.providers);
         }
@@ -92,33 +98,33 @@ function LoginContent() {
 
   return (
     <main className='container mx-auto flex min-h-screen items-center justify-center px-4 py-8'>
-      <Card className='w-full max-w-md' data-testid="login-form" role="form">
+      <Card className='w-full max-w-md' data-testid='login-form' role='form'>
         <CardHeader className='space-y-1 text-center'>
-          <h1 className='text-2xl font-bold tracking-tight'>
-            Welcome Back
-          </h1>
-          <CardDescription>Sign in to your Personal CRM account</CardDescription>
+          <h1 className='text-2xl font-bold tracking-tight'>Welcome Back</h1>
+          <CardDescription>
+            Sign in to your Personal CRM account
+          </CardDescription>
         </CardHeader>
 
         <CardContent className='space-y-4'>
           {/* Error message */}
           {error && (
-            <Alert variant='destructive' data-testid="auth-error">
+            <Alert variant='destructive' data-testid='auth-error'>
               <AlertDescription>{error}</AlertDescription>
             </Alert>
           )}
 
           {loading ? (
-            <div className="space-y-3">
-              <div className="h-10 bg-muted animate-pulse rounded" />
-              <div className="h-10 bg-muted animate-pulse rounded" />
+            <div className='space-y-3'>
+              <div className='bg-muted h-10 animate-pulse rounded' />
+              <div className='bg-muted h-10 animate-pulse rounded' />
             </div>
           ) : providers.length > 0 ? (
             <div className='space-y-3'>
-              <p className="text-sm text-muted-foreground text-center">
+              <p className='text-muted-foreground text-center text-sm'>
                 Choose your preferred sign-in method:
               </p>
-              {providers.map((provider) => {
+              {providers.map(provider => {
                 const IconComponent = providerIcons[provider.name] || User;
                 const isLoading = loadingProvider === provider.name;
                 const isAnyLoading = loadingProvider !== null;
@@ -136,30 +142,32 @@ function LoginContent() {
                   >
                     <IconComponent className='h-5 w-5' />
                     {isLoading ? (
-                      <span>
-                        Connecting to {provider.display_name}...
-                      </span>
+                      <span>Connecting to {provider.display_name}...</span>
                     ) : (
-                      <span>
-                        Continue with {provider.display_name}
-                      </span>
+                      <span>Continue with {provider.display_name}</span>
                     )}
                   </Button>
                 );
               })}
             </div>
           ) : (
-            <Alert data-testid="auth-error">
+            <Alert data-testid='auth-error'>
               <AlertDescription>
-                No authentication providers are currently available. Please contact your administrator.
+                No authentication providers are currently available. Please
+                contact your administrator.
               </AlertDescription>
             </Alert>
           )}
 
           {/* Privacy notice */}
           <div className='text-muted-foreground text-center text-sm'>
-            <p>By signing in, you agree to our terms of service and privacy policy.</p>
-            <p className='mt-2'>This is a private application for personal use.</p>
+            <p>
+              By signing in, you agree to our terms of service and privacy
+              policy.
+            </p>
+            <p className='mt-2'>
+              This is a private application for personal use.
+            </p>
           </div>
         </CardContent>
       </Card>

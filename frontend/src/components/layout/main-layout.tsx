@@ -1,6 +1,6 @@
 /**
  * Main layout component that wraps all pages.
- * 
+ *
  * Includes header with navigation and provides consistent layout structure.
  */
 
@@ -15,11 +15,9 @@ interface MainLayoutProps {
 
 export function MainLayout({ children }: MainLayoutProps) {
   return (
-    <div className="min-h-screen bg-background">
+    <div className='bg-background min-h-screen'>
       <Header />
-      <main className="container mx-auto px-4 py-8">
-        {children}
-      </main>
+      <main className='container mx-auto px-4 py-8'>{children}</main>
     </div>
   );
 }
