@@ -8,11 +8,11 @@
 // API Endpoints
 export const API_ENDPOINTS = {
   AUTH: {
-    LOGIN: '/api/auth/login',
+    PROVIDERS: '/api/auth/providers',
+    AUTHORIZE: (provider: string) => `/api/auth/authorize/${provider}`,
     CALLBACK: '/api/auth/callback',
     LOGOUT: '/api/auth/logout',
-    SESSION: '/api/auth/session',
-    REFRESH: '/api/auth/refresh',
+    SESSION: '/api/auth/status',
   },
   CONTACTS: {
     BASE: '/api/contacts',

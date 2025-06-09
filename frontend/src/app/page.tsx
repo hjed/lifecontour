@@ -1,8 +1,11 @@
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Header } from '@/components/layout/header';
 
 export default function HomePage() {
   return (
-    <div className='container mx-auto py-8'>
+    <>
+      <Header />
+      <div className='container mx-auto py-8'>
       <div className='mb-8'>
         <h1 className='text-4xl font-bold tracking-tight'>
           Personal Management System
@@ -85,5 +88,6 @@ export default function HomePage() {
         </Card>
       </div>
     </div>
+    </>
   );
 }

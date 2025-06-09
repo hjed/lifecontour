@@ -22,12 +22,16 @@ test.describe('Authentication Flow', () => {
     await setupApiMocks(page);
   });
 
-  test('should display login page with OAuth providers', async () => {
+  test('should display login page with OAuth providers', async ({ page, browserName }) => {
     await loginPage.navigateToLogin();
-    
+
+    // Wait for providers to load (WebKit needs more time)
+    const waitTime = browserName === 'webkit' ? 3000 : 1000;
+    await page.waitForTimeout(waitTime);
+
     // Verify login form is visible
     expect(await loginPage.isLoginFormVisible()).toBe(true);
-    
+
     // Verify OAuth providers are displayed
     expect(await loginPage.areOAuthProvidersVisible()).toBe(true);
     

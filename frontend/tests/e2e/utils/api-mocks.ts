@@ -17,18 +17,20 @@ export async function mockAuthEndpoints(page: Page) {
       status: 200,
       contentType: 'application/json',
       body: JSON.stringify({
-        providers: [
-          {
-            name: 'github',
-            display_name: 'GitHub',
-            icon_url: null
-          },
-          {
-            name: 'microsoft',
-            display_name: 'Microsoft',
-            icon_url: null
-          }
-        ]
+        data: {
+          providers: [
+            {
+              name: 'github',
+              display_name: 'GitHub',
+              icon_url: null
+            },
+            {
+              name: 'microsoft',
+              display_name: 'Microsoft',
+              icon_url: null
+            }
+          ]
+        }
       })
     });
   });

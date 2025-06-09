@@ -17,111 +17,149 @@ import {
 } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { Separator } from '@/components/ui/separator';
-import { useAuth } from '@/lib/auth/AuthProvider';
-import { OAuthProvider, OAUTH_PROVIDERS } from '@/types/auth';
-import { UI_TEXT } from '@/lib/constants';
-import { GitBranch, Key } from 'lucide-react';
+import { useAuth } from '@/lib/auth-context';
+import { apiClient } from '@/lib/api-client';
+import { GitBranch, User } from 'lucide-react';
+
+interface OAuthProvider {
+  name: string;
+  display_name: string;
+  icon_url?: string;
+}
 
 // OAuth provider icons
-const ProviderIcons = {
-  [OAuthProvider.GITHUB]: GitBranch,
-  [OAuthProvider.MICROSOFT]: Key, // Using Key as placeholder
-  [OAuthProvider.DISCORD]: Key, // Using Key as placeholder
-  [OAuthProvider.GENERIC]: Key,
+const providerIcons: Record<string, React.ComponentType<{ className?: string }>> = {
+  github: GitBranch,
+  microsoft: User,
+  discord: User,
 };
 
 // Component that uses useSearchParams - needs to be wrapped in Suspense
 function LoginContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { state, login } = useAuth();
-  const [loadingProvider, setLoadingProvider] = useState<OAuthProvider | null>(
-    null
-  );
+  const { isAuthenticated, login } = useAuth();
+  const [providers, setProviders] = useState<OAuthProvider[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [loadingProvider, setLoadingProvider] = useState<string | null>(null);
 
   // Get redirect URL from query params
   const redirectTo = searchParams.get('redirect') || '/';
 
-  // Clear loading state when auth state changes
+  // Redirect if already authenticated
   useEffect(() => {
-    if (!state.isLoading) {
-      setLoadingProvider(null);
+    if (isAuthenticated) {
+      router.replace(redirectTo as any);
     }
-  }, [state.isLoading]);
+  }, [isAuthenticated, router, redirectTo]);
+
+  // Fetch available OAuth providers
+  useEffect(() => {
+    const fetchProviders = async () => {
+      try {
+        setLoading(true);
+        const response = await apiClient.getAuthProviders();
+
+        if (response.errors) {
+          setError(response.errors[0]?.detail || 'Failed to load authentication providers');
+        } else if (response.data) {
+          setProviders(response.data.providers);
+        }
+      } catch (err) {
+        setError('Failed to load authentication providers');
+        console.error('Failed to fetch providers:', err);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    if (!isAuthenticated) {
+      fetchProviders();
+    }
+  }, [isAuthenticated]);
 
   // Handle OAuth login
-  const handleLogin = (provider: OAuthProvider) => {
-    setLoadingProvider(provider);
-    login(provider);
-    // Redirect happens in AuthProvider after successful OAuth
-    // Error handling is done in AuthProvider's onError callback
-    // Loading state will be cleared when mutation completes
+  const handleLogin = (providerName: string) => {
+    setLoadingProvider(providerName);
+    login(providerName, redirectTo);
   };
 
   // Redirect if already authenticated
-  if (state.isAuthenticated) {
-    // Type assertion for Next.js router - redirectTo is always a valid route
-    router.replace(redirectTo as never);
+  if (isAuthenticated) {
     return null;
   }
 
   return (
     <main className='container mx-auto flex min-h-screen items-center justify-center px-4 py-8'>
-      <Card className='w-full max-w-md'>
+      <Card className='w-full max-w-md' data-testid="login-form" role="form">
         <CardHeader className='space-y-1 text-center'>
           <h1 className='text-2xl font-bold tracking-tight'>
-            {UI_TEXT.WELCOME_BACK}
+            Welcome Back
           </h1>
-          <CardDescription>{UI_TEXT.SIGN_IN_DESCRIPTION}</CardDescription>
+          <CardDescription>Sign in to your Personal CRM account</CardDescription>
         </CardHeader>
 
         <CardContent className='space-y-4'>
           {/* Error message */}
-          {state.error && (
-            <Alert variant='destructive'>
-              <AlertDescription>{state.error}</AlertDescription>
+          {error && (
+            <Alert variant='destructive' data-testid="auth-error">
+              <AlertDescription>{error}</AlertDescription>
             </Alert>
           )}
 
-          {/* OAuth provider buttons */}
-          <div className='space-y-3'>
-            {Object.entries(OAUTH_PROVIDERS).map(([provider, config]) => {
-              const Icon = ProviderIcons[provider as OAuthProvider];
-              const isLoading = loadingProvider === provider;
-              const isAnyLoading = loadingProvider !== null;
+          {loading ? (
+            <div className="space-y-3">
+              <div className="h-10 bg-muted animate-pulse rounded" />
+              <div className="h-10 bg-muted animate-pulse rounded" />
+            </div>
+          ) : providers.length > 0 ? (
+            <div className='space-y-3'>
+              <p className="text-sm text-muted-foreground text-center">
+                Choose your preferred sign-in method:
+              </p>
+              {providers.map((provider) => {
+                const IconComponent = providerIcons[provider.name] || User;
+                const isLoading = loadingProvider === provider.name;
+                const isAnyLoading = loadingProvider !== null;
 
-              return (
-                <Button
-                  key={provider}
-                  variant='outline'
-                  size='lg'
-                  className='w-full justify-start gap-3'
-                  onClick={() => handleLogin(provider as OAuthProvider)}
-                  disabled={isAnyLoading}
-                  aria-label={`${UI_TEXT.CONTINUE_WITH} ${config.name}`}
-                >
-                  <Icon className='h-5 w-5' />
-                  {isLoading ? (
-                    <span>
-                      {UI_TEXT.CONNECTING_TO} {config.name}...
-                    </span>
-                  ) : (
-                    <span>
-                      {UI_TEXT.CONTINUE_WITH} {config.name}
-                    </span>
-                  )}
-                </Button>
-              );
-            })}
-          </div>
-
-          <Separator className='my-4' />
+                return (
+                  <Button
+                    key={provider.name}
+                    variant='outline'
+                    size='lg'
+                    className='w-full justify-start gap-3'
+                    onClick={() => handleLogin(provider.name)}
+                    disabled={isAnyLoading}
+                    data-testid={`oauth-provider-${provider.name}`}
+                    aria-label={`Continue with ${provider.display_name}`}
+                  >
+                    <IconComponent className='h-5 w-5' />
+                    {isLoading ? (
+                      <span>
+                        Connecting to {provider.display_name}...
+                      </span>
+                    ) : (
+                      <span>
+                        Continue with {provider.display_name}
+                      </span>
+                    )}
+                  </Button>
+                );
+              })}
+            </div>
+          ) : (
+            <Alert data-testid="auth-error">
+              <AlertDescription>
+                No authentication providers are currently available. Please contact your administrator.
+              </AlertDescription>
+            </Alert>
+          )}
 
           {/* Privacy notice */}
           <div className='text-muted-foreground text-center text-sm'>
-            <p>{UI_TEXT.PRIVACY_NOTICE}</p>
-            <p className='mt-2'>{UI_TEXT.PRIVATE_APP_NOTICE}</p>
+            <p>By signing in, you agree to our terms of service and privacy policy.</p>
+            <p className='mt-2'>This is a private application for personal use.</p>
           </div>
         </CardContent>
       </Card>

@@ -160,16 +160,16 @@ export class LoginPage extends BasePage {
    */
   async verifyLoginPageAccessibility() {
     await this.checkAccessibility();
-    
-    // Check specific login page accessibility requirements
-    const loginButton = this.page.locator(this.selectors.loginButton);
-    await expect(loginButton).toHaveAttribute('type', 'button');
-    
+
     // Check OAuth provider buttons have proper labels
     const providerButtons = await this.page.locator(this.selectors.providerButtons).all();
     for (const button of providerButtons) {
       const ariaLabel = await button.getAttribute('aria-label');
       expect(ariaLabel).toBeTruthy();
+
+      // Check that it's actually a button element
+      const tagName = await button.evaluate(el => el.tagName.toLowerCase());
+      expect(tagName).toBe('button');
     }
   }
 
