@@ -117,7 +117,7 @@ Tasks are organized by **feature iterations** that deliver end-to-end value incr
 **Description:** Create Next.js frontend for contact management with search capabilities
 **Dependencies:** ITER1-003
 **Acceptance Criteria:**
-- [ ] Set up Next.js with TypeScript, Tailwind CSS, and shadcn/ui
+- [X] Set up Next.js with TypeScript, Tailwind CSS, and shadcn/ui
 - [ ] Configure API client for FastAPI backend communication
 - [ ] Implement Australian English interface (en-AU locale, DD/MM/YYYY dates)
 - [ ] Create contact list view with MeiliSearch-powered search and filtering
@@ -127,7 +127,7 @@ Tasks are organized by **feature iterations** that deliver end-to-end value incr
 - [ ] Implement search result highlighting and typo tolerance display
 - [ ] Add search filters (by tags, date ranges, entity types)
 - [ ] Implement responsive design with mobile-first approach
-- [ ] Add error handling and loading states
+- [X] Add error handling and loading states
 - [ ] Write React Testing Library tests for components including search
 - [ ] Add comprehensive end-to-end tests with Playwright
 - [ ] Deploy working MVP with Docker Compose including MeiliSearch
@@ -136,14 +136,14 @@ Tasks are organized by **feature iterations** that deliver end-to-end value incr
 **Description:** Implement MCP (Model Context Protocol) server foundation and contact tools for AI integration
 **Dependencies:** ITER1-004
 **Acceptance Criteria:**
-- [ ] Set up MCP server framework and protocol implementation
-- [ ] Implement basic MCP message handling and connection management
-- [ ] Add authentication and security for MCP connections
+- [X] Set up MCP server framework and protocol implementation
+- [X] Implement basic MCP message handling and connection management
+- [X] Add authentication and security for MCP connections
 - [ ] Create MCP tool registration system
 - [ ] Implement contact search, creation, and management tools using MeiliSearch
 - [ ] Add OpenTelemetry instrumentation for MCP operations
 - [ ] Document MCP server setup and configuration
-- [ ] Implement health checks for MCP server
+- [X] Implement health checks for MCP server
 - [ ] Create MCP client test suite for contact tools
 - [ ] Add comprehensive MCP tool documentation
 
