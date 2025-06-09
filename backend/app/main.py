@@ -28,6 +28,7 @@ from app.infrastructure.config import Settings, get_settings
 from app.infrastructure.database import get_database_engine
 from app.infrastructure.events.outbox_processor import run_outbox_processor_loop
 from app.infrastructure.logging import setup_logging
+from app.mcp.server import create_mcp_app
 
 
 @asynccontextmanager
@@ -122,6 +123,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(auth_router, prefix="/api/auth", tags=["authentication"])
     app.include_router(search_router, prefix="/api", tags=["search"])
     app.include_router(contacts_router, prefix="/api", tags=["contacts"])
+
+    # Mount MCP server if enabled
+    if settings.mcp_enabled:
+        logger = structlog.get_logger()
+        logger.info("MCP: Mounting MCP server", mount_path=settings.mcp_mount_path)
+
+        mcp_app = create_mcp_app()
+        app.mount(settings.mcp_mount_path, mcp_app)  # type: ignore[arg-type]
+
+        logger.info(
+            "MCP: Server mounted successfully",
+            endpoint=f"{settings.mcp_mount_path}/mcp",
+        )
 
     return app
 

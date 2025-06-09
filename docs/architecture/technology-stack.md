@@ -34,7 +34,7 @@ This document outlines the technology choices optimized for AI assistant underst
 ### External Integrations
 - **HTTP Client**: requests (simple, AI-friendly patterns)
 - **Google APIs**: google-api-python-client (official SDK)
-- **MCP Protocol**: Official Python MCP SDK
+- **MCP Protocol**: FastMCP library - [FastMCP Docs](https://gofastmcp.com/llms.txt)
 - **Immich Integration**: Direct REST API calls with requests
 - **Search Engine**: MeiliSearch with official Python SDK (meilisearch-python)
 

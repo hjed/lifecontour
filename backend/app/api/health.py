@@ -14,6 +14,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
+from app.infrastructure.config import get_settings
 from app.infrastructure.database import check_database_connection, get_database_session
 
 logger = structlog.get_logger()
@@ -96,6 +97,33 @@ async def detailed_health_check(
             "error": str(e),
         }
         overall_status = "unhealthy"
+
+    # Check MCP server status
+    settings = get_settings()
+    if settings.mcp_enabled:
+        try:
+            # MCP server health check - just verify it's enabled and configured
+            services["mcp_server"] = {
+                "status": "healthy",
+                "type": "fastmcp",
+                "mount_path": settings.mcp_mount_path,
+                "enabled": "true",
+            }
+        except Exception as e:
+            logger.error("MCP server health check failed", error=str(e))
+            services["mcp_server"] = {
+                "status": "unhealthy",
+                "type": "fastmcp",
+                "error": str(e),
+                "enabled": "true",
+            }
+            overall_status = "degraded"
+    else:
+        services["mcp_server"] = {
+            "status": "disabled",
+            "type": "fastmcp",
+            "enabled": "false",
+        }
 
     # External service checks can be added here in the future
     # Examples: Google Calendar API, Google Contacts API, Immich API

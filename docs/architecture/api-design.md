@@ -41,35 +41,52 @@ This document provides comprehensive API design patterns for both REST and MCP i
 - Set appropriate headers for nginx proxy compatibility
 - Allow common development origins (localhost)
 
-## MCP Tool Guidelines
+## MCP (Model Context Protocol) Guidelines
+
+### FastMCP v2 Implementation
+
+- **Framework**: Use FastMCP v2 (jlowin/fastmcp) instead of official MCP SDK
+- **Documentation**: Reference https://gofastmcp.com/llms.txt for AI-optimized patterns
+- **Integration**: Follow https://gofastmcp.com/deployment/asgi.md for FastAPI integration
 
 ### Tool Structure
 
-- Inherit from `Tool` base class
-- Define clear `name` and `description`
-- Specify `input_schema` with required/optional parameters
-- Implement `execute` method with proper error handling
-- Return AI-friendly responses with context and summaries
-- Include search suggestions and metadata for AI assistants
+- Use `@mcp.tool` decorator on async functions
+- Define clear function names and docstrings
+- Use Pydantic `Field` with `Annotated` for parameter descriptions
+- Return JSON strings for structured data
+- Include comprehensive error handling with try/catch blocks
+- Provide AI-friendly responses with context and summaries
+
+### Domain-Based Organization
+
+- Organize tools by domain: `app/mcp/domains/{domain}/tools.py`
+- Separate schemas: `app/mcp/domains/{domain}/schemas.py`
+- Register domain tools in main server: `register_{domain}_tools(mcp)`
+- Allow future domain expansion (journal, calendar, photos)
 
 ### Response Format
 
-- Provide structured data with clear field names
-- Include summary information for AI context
-- Add error handling with meaningful error messages
-- Return metadata like total counts and search context
+- Return JSON strings with structured, AI-friendly data
+- Include contextual summaries for AI understanding
+- Provide clear error messages with helpful context
 - Use consistent field naming across all tools
+- Add metadata like IDs, tags, and relationship information
 
-### MCP Server Guidelines
+### Authentication Integration
 
-- Use official Python MCP SDK for standardized implementation
-- Initialize server with clear name and version information
-- Register tools in a centralized list for maintainability
-- Implement `list_tools` and `call_tool` handlers properly
-- Use HTTPTransport for web compatibility and AI client integration
-- Configure host and port from environment variables
-- Add comprehensive error handling and structured logging
-- Return structured responses with content array per MCP specification
+- Share OAuth session authentication with REST API
+- Use `SessionAuthMiddleware` for MCP endpoint protection
+- Validate session data: `id`, `email`, `name`, `provider`
+- Provide user context to tools via request state
+
+### Server Configuration
+
+- Mount MCP server as sub-application in FastAPI
+- Use configurable mount path (default: `/mcp-server`)
+- Enable/disable via `MCP_ENABLED` environment variable
+- Include in application health checks
+- Use Streamable HTTP transport for web compatibility
 
 ## Error Handling Guidelines
 
