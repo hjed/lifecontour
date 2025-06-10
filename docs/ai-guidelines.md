@@ -67,6 +67,17 @@ Tasks can be found in the [tasks document](./tasks.md).
 8. **End-to-End Tests** - Full user workflows with Playwright
 9. **Deploy and Validate** - Ensure feature works in real environment
 
+## Language Rules
+
+### Python
+
+- **Formatting**: ruff-format
+- **Linting**: ruff with comprehensive rule set
+- **Type Hints**: Required for all functions and methods (mypy enforced)
+- **Import Organization**: ruff handles import sorting
+- **Naming**: snake_case for variables/functions, PascalCase for classes
+- **No Inline Imports**: No `from module import specific_thing` allowed inside functions or classes
+
 ## Testing Strategy
 
 ### Multi-Language Testing Approach
@@ -370,24 +381,13 @@ Use `./scripts/dev.sh lint` to run all checks at once.
 
 ### Unit Tests
 
-**Run unit tests after writing tests and before implementation:**
+**Run unit tests after writing tests and before implementation**
 
-```bash
-# Backend unit tests
-cd backend
-uv run pytest tests/unit/ -v
-```
 Run after every changes
 
 ### Integration Testing
 
 **Run integration tests separately after quality checks pass:**
-
-```bash
-# Backend integration tests
-cd backend
-uv run python scripts/run_integration_tests.py
-```
 
 ### CI/CD Compliance
 

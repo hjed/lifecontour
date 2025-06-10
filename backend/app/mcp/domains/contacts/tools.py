@@ -22,6 +22,7 @@ from app.core.contacts.models.exceptions import (
     ContactNotFoundError,
     ContactValidationError,
 )
+from app.infrastructure.database import get_async_database_engine
 from app.mcp.domains.contacts.schemas import (
     ContactCreateRequest,
     ContactListResponse,
@@ -35,6 +36,7 @@ from app.mcp.shared.converters import (
 from app.mcp.shared.decorators import mcp_unified_error_handler
 from app.mcp.shared.dependencies import get_contact_service, get_search_service
 from app.mcp.shared.response_builders import MCPResponseBuilder
+from app.shared.dependencies import create_contact_service
 
 logger = structlog.get_logger()
 
@@ -301,9 +303,6 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
         )
 
         # Get database connection and contact service
-        from app.infrastructure.database import get_async_database_engine
-        from app.shared.dependencies import create_contact_service
-
         engine = get_async_database_engine()
         async with engine.begin() as connection:
             contact_service = create_contact_service(connection)

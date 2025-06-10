@@ -5,6 +5,7 @@ Tests the full MCP contact tools with real database and search service integrati
 """
 
 import json
+import os
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
@@ -18,6 +19,66 @@ from app.mcp.domains.contacts.tools import register_contact_tools
 
 class TestContactToolsIntegration:
     """Integration tests for MCP contact tools with real services."""
+
+    @pytest.fixture
+    async def mcp_test_environment(self, async_engine):
+        """Configure environment for MCP tools to use test database with schema."""
+        from sqlalchemy import text
+
+        from app.infrastructure.config import get_settings
+        from app.infrastructure.database import get_async_database_engine
+        from tests.integration.conftest import (
+            TEST_DATABASE_SCHEMA_STATEMENTS,
+            get_test_database_url,
+        )
+
+        # Store original environment
+        original_database_url = os.environ.get("DATABASE_URL")
+
+        # Set test database URL (convert from async to sync format for settings)
+        test_url = get_test_database_url().replace(
+            "postgresql+asyncpg://", "postgresql://"
+        )
+        os.environ["DATABASE_URL"] = test_url
+
+        # Clear caches so new settings are picked up
+        get_settings.cache_clear()
+        get_async_database_engine.cache_clear()
+
+        # Create schema in the test database
+        async with async_engine.begin() as conn:
+            # Execute each schema statement separately
+            for statement in TEST_DATABASE_SCHEMA_STATEMENTS:
+                await conn.execute(text(statement))
+
+        try:
+            yield
+        finally:
+            # Clean up schema
+            async with async_engine.begin() as conn:
+                # Drop tables in reverse order
+                drop_statements = [
+                    "DROP TABLE IF EXISTS contact_tags CASCADE",
+                    "DROP TABLE IF EXISTS contact_notes CASCADE",
+                    "DROP TABLE IF EXISTS contact_addresses CASCADE",
+                    "DROP TABLE IF EXISTS contact_methods CASCADE",
+                    "DROP TABLE IF EXISTS contact_field_history CASCADE",
+                    "DROP TABLE IF EXISTS contact_edit_event CASCADE",
+                    "DROP TABLE IF EXISTS contacts CASCADE",
+                    "DROP TABLE IF EXISTS tags CASCADE",
+                ]
+                for statement in drop_statements:
+                    await conn.execute(text(statement))
+
+            # Restore environment
+            if original_database_url is not None:
+                os.environ["DATABASE_URL"] = original_database_url
+            elif "DATABASE_URL" in os.environ:
+                del os.environ["DATABASE_URL"]
+
+            # Clear caches again to restore original settings
+            get_settings.cache_clear()
+            get_async_database_engine.cache_clear()
 
     @pytest.fixture
     def sample_contact_entity(self):
@@ -121,7 +182,7 @@ class TestContactToolsIntegration:
                 assert "No contact exists with ID" in response_data["message"]
 
     @pytest.mark.asyncio
-    async def test_create_contact_integration_real_db(self, clean_database):
+    async def test_create_contact_integration_real_db(self, mcp_test_environment):
         """Test create_contact tool with real database integration."""
         # Create MCP server and register tools
         mcp: FastMCP[None] = FastMCP("TestServer")
@@ -182,7 +243,7 @@ class TestContactToolsIntegration:
 
     @pytest.mark.asyncio
     async def test_create_contact_integration_with_phone_and_notes(
-        self, clean_database
+        self, mcp_test_environment
     ):
         """Test create_contact tool with phone and notes using real database."""
         # Create MCP server and register tools
@@ -246,7 +307,7 @@ class TestContactToolsIntegration:
             assert saved_contact.notes[0].content == "Met at conference"
 
     @pytest.mark.asyncio
-    async def test_create_contact_integration_minimal(self, clean_database):
+    async def test_create_contact_integration_minimal(self, mcp_test_environment):
         """Test create_contact tool with minimal data using real database."""
         # Create MCP server and register tools
         mcp: FastMCP[None] = FastMCP("TestServer")
