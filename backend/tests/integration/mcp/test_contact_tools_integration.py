@@ -138,45 +138,62 @@ class TestContactToolsIntegration:
             "email": "john.doe@example.com",
         }
 
-        # Use FastMCP Client for integration testing
-        async with Client(mcp) as client:
-            # Call the create_contact tool
-            result = await client.call_tool(
-                "create_contact", {"contact_data": json.dumps(contact_data)}
-            )
+        # Mock the MCP dependencies to use the test database connection
+        async def mock_get_async_db_connection():
+            yield clean_database
 
-            # Verify response structure
-            assert result is not None
-            # FastMCP client returns a list of TextContent objects
-            if isinstance(result, list) and len(result) > 0:
-                result_text = result[0].text
-            else:
-                result_text = result
-            response_data = json.loads(result_text)
+        def mock_get_contact_service_with_connection(connection):
+            return create_contact_service(connection)
 
-            # Check that we have the expected fields
-            assert "id" in response_data
-            assert "name" in response_data
-            assert "email" in response_data
-            assert "summary" in response_data
+        with (
+            patch(
+                "app.mcp.domains.contacts.tools.get_async_db_connection",
+                mock_get_async_db_connection,
+            ),
+            patch(
+                "app.mcp.domains.contacts.tools.get_contact_service_with_connection",
+                mock_get_contact_service_with_connection,
+            ),
+        ):
+            # Use FastMCP Client for integration testing
+            async with Client(mcp) as client:
+                # Call the create_contact tool
+                result = await client.call_tool(
+                    "create_contact", {"contact_data": json.dumps(contact_data)}
+                )
 
-            # Verify the data
-            assert response_data["name"] == "John Doe"
-            assert response_data["email"] == "john.doe@example.com"
-            assert "Successfully created contact" in response_data["summary"]
+                # Verify response structure
+                assert result is not None
+                # FastMCP client returns a list of TextContent objects
+                if isinstance(result, list) and len(result) > 0:
+                    result_text = result[0].text
+                else:
+                    result_text = result
+                response_data = json.loads(result_text)
 
-            # Verify the contact was actually created in the database
-            contact_id = int(response_data["id"])
-            assert contact_id > 0
+                # Check that we have the expected fields
+                assert "id" in response_data
+                assert "name" in response_data
+                assert "email" in response_data
+                assert "summary" in response_data
 
-            # Verify we can retrieve the contact using the regular service
-            contact_service = create_contact_service(clean_database)
-            saved_contact = await contact_service.get_contact_by_id(contact_id)
+                # Verify the data
+                assert response_data["name"] == "John Doe"
+                assert response_data["email"] == "john.doe@example.com"
+                assert "Successfully created contact" in response_data["summary"]
 
-            assert saved_contact is not None
-            assert saved_contact.first_name == "John"
-            assert saved_contact.last_name == "Doe"
-            assert saved_contact.get_primary_email() == "john.doe@example.com"
+                # Verify the contact was actually created in the database
+                contact_id = int(response_data["id"])
+                assert contact_id > 0
+
+                # Verify we can retrieve the contact using the regular service
+                contact_service = create_contact_service(clean_database)
+                saved_contact = await contact_service.get_contact_by_id(contact_id)
+
+                assert saved_contact is not None
+                assert saved_contact.first_name == "John"
+                assert saved_contact.last_name == "Doe"
+                assert saved_contact.get_primary_email() == "john.doe@example.com"
 
     @pytest.mark.asyncio
     async def test_create_contact_integration_with_phone_and_notes(
@@ -196,47 +213,64 @@ class TestContactToolsIntegration:
             "notes": "Met at conference",
         }
 
-        # Use FastMCP Client for integration testing
-        async with Client(mcp) as client:
-            # Call the create_contact tool
-            result = await client.call_tool(
-                "create_contact", {"contact_data": json.dumps(contact_data)}
-            )
+        # Mock the MCP dependencies to use the test database connection
+        async def mock_get_async_db_connection():
+            yield clean_database
 
-            # Verify response structure
-            assert result is not None
-            # FastMCP client returns a list of TextContent objects
-            if isinstance(result, list) and len(result) > 0:
-                result_text = result[0].text
-            else:
-                result_text = result
-            response_data = json.loads(result_text)
+        def mock_get_contact_service_with_connection(connection):
+            return create_contact_service(connection)
 
-            # Check that we have the expected fields
-            assert "id" in response_data
-            assert "name" in response_data
-            assert "email" in response_data
-            assert "phone" in response_data
-            assert "summary" in response_data
+        with (
+            patch(
+                "app.mcp.domains.contacts.tools.get_async_db_connection",
+                mock_get_async_db_connection,
+            ),
+            patch(
+                "app.mcp.domains.contacts.tools.get_contact_service_with_connection",
+                mock_get_contact_service_with_connection,
+            ),
+        ):
+            # Use FastMCP Client for integration testing
+            async with Client(mcp) as client:
+                # Call the create_contact tool
+                result = await client.call_tool(
+                    "create_contact", {"contact_data": json.dumps(contact_data)}
+                )
 
-            # Verify the data
-            assert response_data["name"] == "Jane Smith"
-            assert response_data["email"] == "jane.smith@example.com"
-            assert response_data["phone"] == "+1234567890"
-            assert "Successfully created contact" in response_data["summary"]
+                # Verify response structure
+                assert result is not None
+                # FastMCP client returns a list of TextContent objects
+                if isinstance(result, list) and len(result) > 0:
+                    result_text = result[0].text
+                else:
+                    result_text = result
+                response_data = json.loads(result_text)
 
-            # Verify the contact was actually created in the database with all data
-            contact_id = int(response_data["id"])
-            contact_service = create_contact_service(clean_database)
-            saved_contact = await contact_service.get_contact_by_id(contact_id)
+                # Check that we have the expected fields
+                assert "id" in response_data
+                assert "name" in response_data
+                assert "email" in response_data
+                assert "phone" in response_data
+                assert "summary" in response_data
 
-            assert saved_contact is not None
-            assert saved_contact.first_name == "Jane"
-            assert saved_contact.last_name == "Smith"
-            assert saved_contact.get_primary_email() == "jane.smith@example.com"
-            assert saved_contact.get_primary_phone() == "+1234567890"
-            assert len(saved_contact.notes) > 0
-            assert saved_contact.notes[0].content == "Met at conference"
+                # Verify the data
+                assert response_data["name"] == "Jane Smith"
+                assert response_data["email"] == "jane.smith@example.com"
+                assert response_data["phone"] == "+1234567890"
+                assert "Successfully created contact" in response_data["summary"]
+
+                # Verify the contact was actually created in the database with all data
+                contact_id = int(response_data["id"])
+                contact_service = create_contact_service(clean_database)
+                saved_contact = await contact_service.get_contact_by_id(contact_id)
+
+                assert saved_contact is not None
+                assert saved_contact.first_name == "Jane"
+                assert saved_contact.last_name == "Smith"
+                assert saved_contact.get_primary_email() == "jane.smith@example.com"
+                assert saved_contact.get_primary_phone() == "+1234567890"
+                assert len(saved_contact.notes) > 0
+                assert saved_contact.notes[0].content == "Met at conference"
 
     @pytest.mark.asyncio
     async def test_create_contact_integration_minimal(
@@ -252,42 +286,59 @@ class TestContactToolsIntegration:
             "first_name": "Bob",
         }
 
-        # Use FastMCP Client for integration testing
-        async with Client(mcp) as client:
-            # Call the create_contact tool
-            result = await client.call_tool(
-                "create_contact", {"contact_data": json.dumps(contact_data)}
-            )
+        # Mock the MCP dependencies to use the test database connection
+        async def mock_get_async_db_connection():
+            yield clean_database
 
-            # Verify response structure
-            assert result is not None
-            # FastMCP client returns a list of TextContent objects
-            if isinstance(result, list) and len(result) > 0:
-                result_text = result[0].text
-            else:
-                result_text = result
-            response_data = json.loads(result_text)
+        def mock_get_contact_service_with_connection(connection):
+            return create_contact_service(connection)
 
-            # Check that we have the expected fields
-            assert "id" in response_data
-            assert "name" in response_data
-            assert "summary" in response_data
+        with (
+            patch(
+                "app.mcp.domains.contacts.tools.get_async_db_connection",
+                mock_get_async_db_connection,
+            ),
+            patch(
+                "app.mcp.domains.contacts.tools.get_contact_service_with_connection",
+                mock_get_contact_service_with_connection,
+            ),
+        ):
+            # Use FastMCP Client for integration testing
+            async with Client(mcp) as client:
+                # Call the create_contact tool
+                result = await client.call_tool(
+                    "create_contact", {"contact_data": json.dumps(contact_data)}
+                )
 
-            # Verify the data
-            assert response_data["name"] == "Bob"
-            assert response_data["email"] is None
-            assert response_data["phone"] is None
-            assert "Successfully created contact" in response_data["summary"]
+                # Verify response structure
+                assert result is not None
+                # FastMCP client returns a list of TextContent objects
+                if isinstance(result, list) and len(result) > 0:
+                    result_text = result[0].text
+                else:
+                    result_text = result
+                response_data = json.loads(result_text)
 
-            # Verify the contact was actually created in the database
-            contact_id = int(response_data["id"])
-            contact_service = create_contact_service(clean_database)
-            saved_contact = await contact_service.get_contact_by_id(contact_id)
+                # Check that we have the expected fields
+                assert "id" in response_data
+                assert "name" in response_data
+                assert "summary" in response_data
 
-            assert saved_contact is not None
-            assert saved_contact.first_name == "Bob"
-            assert saved_contact.last_name is None
-            assert len(saved_contact.methods) == 0  # No email or phone provided
+                # Verify the data
+                assert response_data["name"] == "Bob"
+                assert response_data["email"] is None
+                assert response_data["phone"] is None
+                assert "Successfully created contact" in response_data["summary"]
+
+                # Verify the contact was actually created in the database
+                contact_id = int(response_data["id"])
+                contact_service = create_contact_service(clean_database)
+                saved_contact = await contact_service.get_contact_by_id(contact_id)
+
+                assert saved_contact is not None
+                assert saved_contact.first_name == "Bob"
+                assert saved_contact.last_name is None
+                assert len(saved_contact.methods) == 0  # No email or phone provided
 
     @pytest.mark.asyncio
     async def test_list_contacts_integration(self, sample_contact_entity):

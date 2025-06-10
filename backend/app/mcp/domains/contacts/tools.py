@@ -22,7 +22,6 @@ from app.core.contacts.models.exceptions import (
     ContactNotFoundError,
     ContactValidationError,
 )
-from app.infrastructure.database import get_async_database_engine
 from app.mcp.domains.contacts.schemas import (
     ContactCreateRequest,
     ContactListResponse,
@@ -34,9 +33,13 @@ from app.mcp.shared.converters import (
     SearchResultProcessor,
 )
 from app.mcp.shared.decorators import mcp_unified_error_handler
-from app.mcp.shared.dependencies import get_contact_service, get_search_service
+from app.mcp.shared.dependencies import (
+    get_async_db_connection,
+    get_contact_service,
+    get_contact_service_with_connection,
+    get_search_service,
+)
 from app.mcp.shared.response_builders import MCPResponseBuilder
-from app.shared.dependencies import create_contact_service
 
 logger = structlog.get_logger()
 
@@ -302,10 +305,9 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
             nick_name=request.nick_name,
         )
 
-        # Get database connection and contact service
-        engine = get_async_database_engine()
-        async with engine.begin() as connection:
-            contact_service = create_contact_service(connection)
+        # Get database connection and contact service using dependency injection
+        async for connection in get_async_db_connection():
+            contact_service = get_contact_service_with_connection(connection)
 
             # Create the contact first
             saved_contact = await contact_service.create_contact(contact, connection)
@@ -353,6 +355,11 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
             final_contact = await contact_service.get_contact_by_id(contact_id)
             if not final_contact:
                 raise ContactValidationError("id", "Failed to reload created contact")
+
+            break  # Exit the async generator loop
+
+        # At this point final_contact is guaranteed to be not None due to the check above
+        assert final_contact is not None
 
         # Create AI-friendly response using shared converter
         response = ContactConverter.to_contact_response(

@@ -43,6 +43,26 @@ async def get_contact_service() -> ContactService:
         return create_contact_service(connection)
 
 
+def get_contact_service_with_connection(
+    connection: AsyncConnection,
+) -> ContactService:
+    """
+    Get ContactService instance for MCP tools with a provided connection.
+
+    Creates the service with all required dependencies using the provided connection.
+    This is useful for testing and when you want to control the database connection.
+
+    Args:
+        connection: Database connection to use for the service
+
+    Returns:
+        Configured ContactService instance
+    """
+    from app.shared.dependencies import create_contact_service
+
+    return create_contact_service(connection)
+
+
 def get_search_service() -> SearchService:
     """
     Get SearchService instance for MCP tools.
