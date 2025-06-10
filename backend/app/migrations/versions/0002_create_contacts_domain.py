@@ -192,16 +192,23 @@ def upgrade() -> None:
     op.create_table(
         "contact_edit_event",
         sa.Column("id", sa.Integer(), nullable=False),
-        sa.Column("contact_id", sa.Integer(), nullable=False),
+        sa.Column("event_id", sa.VARCHAR(length=255), nullable=False),
         sa.Column("event_type", sa.VARCHAR(length=50), nullable=False),
+        sa.Column("aggregate_id", sa.Integer(), nullable=False),
         sa.Column("event_data", sa.TEXT(), nullable=False),
+        sa.Column(
+            "occurred_at",
+            sa.TIMESTAMP(timezone=True),
+            nullable=False,
+        ),
+        sa.Column("correlation_id", sa.VARCHAR(length=255), nullable=True),
         sa.Column(
             "created_at",
             sa.TIMESTAMP(timezone=True),
             server_default=sa.text("now()"),
             nullable=False,
         ),
-        sa.ForeignKeyConstraint(["contact_id"], ["contacts.id"], ondelete="CASCADE"),
+        sa.ForeignKeyConstraint(["aggregate_id"], ["contacts.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id"),
     )
 
@@ -255,9 +262,20 @@ def upgrade() -> None:
 
     # Contact edit event indexes
     op.create_index(
-        "idx_contact_edit_event_contact_id", "contact_edit_event", ["contact_id"]
+        "idx_contact_edit_event_event_id", "contact_edit_event", ["event_id"]
+    )
+    op.create_index(
+        "idx_contact_edit_event_aggregate_id", "contact_edit_event", ["aggregate_id"]
     )
     op.create_index("idx_contact_edit_event_type", "contact_edit_event", ["event_type"])
+    op.create_index(
+        "idx_contact_edit_event_occurred_at", "contact_edit_event", ["occurred_at"]
+    )
+    op.create_index(
+        "idx_contact_edit_event_correlation_id",
+        "contact_edit_event",
+        ["correlation_id"],
+    )
     op.create_index(
         "idx_contact_edit_event_created_at", "contact_edit_event", ["created_at"]
     )
@@ -267,8 +285,15 @@ def downgrade() -> None:
     """Drop contacts domain tables."""
     # Drop indexes first
     op.drop_index("idx_contact_edit_event_created_at", table_name="contact_edit_event")
+    op.drop_index(
+        "idx_contact_edit_event_correlation_id", table_name="contact_edit_event"
+    )
+    op.drop_index("idx_contact_edit_event_occurred_at", table_name="contact_edit_event")
     op.drop_index("idx_contact_edit_event_type", table_name="contact_edit_event")
-    op.drop_index("idx_contact_edit_event_contact_id", table_name="contact_edit_event")
+    op.drop_index(
+        "idx_contact_edit_event_aggregate_id", table_name="contact_edit_event"
+    )
+    op.drop_index("idx_contact_edit_event_event_id", table_name="contact_edit_event")
 
     op.drop_index(
         "idx_contact_field_history_created_at", table_name="contact_field_history"
