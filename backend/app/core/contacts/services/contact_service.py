@@ -57,10 +57,10 @@ class ContactService:
         tag_repo: TagRepository,
         history_repo: ContactFieldHistoryRepository,
         event_publisher: ContactEventPublisher,
-        address_validation_service: AddressValidationService | None = None,
-        contact_validation_service: ContactValidationService | None = None,
-        history_service: ContactHistoryService | None = None,
-        tag_hierarchy_service: TagHierarchyService | None = None,
+        address_validation_service: AddressValidationService,
+        contact_validation_service: ContactValidationService,
+        history_service: ContactHistoryService,
+        tag_hierarchy_service: TagHierarchyService,
     ):
         self.contact_repo = contact_repo
         self.tag_repo = tag_repo

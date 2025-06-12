@@ -6,6 +6,7 @@ Tests the FastMCP server configuration and initialization.
 
 from unittest.mock import patch
 
+from app.infrastructure.di.container import create_container
 from app.mcp.server import create_mcp_app, create_mcp_server
 
 
@@ -22,7 +23,8 @@ class TestMCPServer:
 
     def test_create_mcp_app(self):
         """Test MCP ASGI app creation."""
-        app = create_mcp_app()
+        container = create_container()
+        app = create_mcp_app(container)
 
         # Should create ASGI application
         assert app is not None

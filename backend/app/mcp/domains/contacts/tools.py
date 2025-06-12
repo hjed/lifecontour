@@ -9,8 +9,10 @@ import json
 from typing import Annotated
 
 import structlog
+from dishka.integrations.starlette import FromDishka, inject
 from fastmcp import FastMCP
 from pydantic import Field
+from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core.contacts.models.entities import (
     Contact,
@@ -22,6 +24,8 @@ from app.core.contacts.models.exceptions import (
     ContactNotFoundError,
     ContactValidationError,
 )
+from app.core.contacts.services import ContactService
+from app.infrastructure.search.search_service import SearchService
 from app.mcp.domains.contacts.schemas import (
     ContactCreateRequest,
     ContactListResponse,
@@ -33,12 +37,6 @@ from app.mcp.shared.converters import (
     SearchResultProcessor,
 )
 from app.mcp.shared.decorators import mcp_unified_error_handler
-from app.mcp.shared.dependencies import (
-    get_async_db_connection,
-    get_contact_service,
-    get_contact_service_with_connection,
-    get_search_service,
-)
 from app.mcp.shared.response_builders import MCPResponseBuilder
 
 logger = structlog.get_logger()
@@ -54,7 +52,9 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
 
     @mcp.tool
     @mcp_unified_error_handler("get_contact", "contact")
+    @inject
     async def get_contact(
+        contact_service: FromDishka[ContactService],
         contact_id: Annotated[
             int, Field(description="The unique identifier of the contact")
         ],
@@ -78,10 +78,7 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
         Raises:
             ContactNotFoundError: If the contact with the given ID does not exist
         """
-        # Get contact service
-        contact_service = await get_contact_service()
-
-        # Fetch contact data
+        # Fetch contact data (contact_service is automatically injected)
         contact = await contact_service.get_contact_by_id(contact_id)
 
         if contact is None:
@@ -94,7 +91,9 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
 
     @mcp.tool
     @mcp_unified_error_handler("search_contacts", "search")
+    @inject
     async def search_contacts(
+        search_service: FromDishka[SearchService],
         query: Annotated[str, Field(description="Search query for contacts")],
         limit: Annotated[
             int, Field(description="Maximum number of results", ge=1, le=50)
@@ -120,9 +119,6 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
             - Available tags for further filtering
             - Contextual summary for AI understanding
         """
-        # Get search service
-        search_service = get_search_service()
-
         # Build filters
         filters = {}
         if tags:
@@ -172,98 +168,11 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
         return MCPResponseBuilder.success_response(response)
 
     @mcp.tool
-    @mcp_unified_error_handler("global_search", "search")
-    async def global_search(
-        query: Annotated[
-            str, Field(description="Global search query across all entities")
-        ],
-        limit: Annotated[
-            int, Field(description="Maximum number of results", ge=1, le=50)
-        ] = 20,
-        entity_types: Annotated[
-            list[str] | None,
-            Field(description="Entity types to search (e.g., 'contact')"),
-        ] = None,
-    ) -> str:
-        """
-        Perform global search across all entity types for AI analysis.
-
-        Searches across all available entity types (currently contacts, with future
-        support for journal entries, calendar events, etc.) and returns unified
-        results optimized for AI consumption.
-
-        Args:
-            query: Search query string
-            limit: Maximum number of results to return (1-50)
-            entity_types: Optional list of entity types to search
-
-        Returns:
-            JSON string containing AI-friendly global search results including:
-            - Unified search results across entity types
-            - Entity type breakdown and metadata
-            - Search context and relevance information
-            - Suggestions for further exploration
-        """
-        logger.info(
-            "MCP: Global search",
-            query=query,
-            limit=limit,
-            entity_types=entity_types,
-        )
-
-        # Get search service
-        search_service = get_search_service()
-
-        # Perform global search
-        results = search_service.global_search(
-            query=query,
-            entity_types=entity_types,
-            limit=limit,
-            offset=0,
-        )
-
-        # Convert search hits to AI-friendly format using shared processor
-        search_results = SearchResultProcessor.process_global_search_hits(
-            results["hits"]
-        )
-
-        # Create global search summary using shared converter
-        total_hits = results.get("estimated_total_hits", 0)
-        processing_time = results.get("processing_time_ms", 0)
-        searched_types = results.get("searched_entity_types", ["contact"])
-        available_types = results.get("available_entity_types", ["contact"])
-
-        search_summary = SearchResponseConverter.build_global_search_summary(
-            query=query,
-            total_hits=total_hits,
-            processing_time_ms=processing_time,
-            searched_entity_types=searched_types,
-            available_entity_types=available_types,
-        )
-
-        # Create response (reusing ContactSearchResponse for now)
-        response = ContactSearchResponse(
-            results=search_results,
-            query=query,
-            total_hits=total_hits,
-            processing_time_ms=processing_time,
-            available_tags=[],  # Global search doesn't filter by tags
-            summary=search_summary,
-        )
-
-        logger.info(
-            "MCP: Global search completed",
-            query=query,
-            hits_count=len(search_results),
-            total_hits=total_hits,
-            entity_types=searched_types,
-        )
-
-        return MCPResponseBuilder.success_response(response)
-
-    @mcp.tool
     @mcp_unified_error_handler("create_contact", "management")
+    @inject
     async def create_contact(
+        contact_service: FromDishka[ContactService],
+        connection: FromDishka[AsyncConnection],
         contact_data: Annotated[
             str, Field(description="JSON string with contact data")
         ],
@@ -305,61 +214,52 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
             nick_name=request.nick_name,
         )
 
-        # Get database connection and contact service using dependency injection
-        async for connection in get_async_db_connection():
-            contact_service = get_contact_service_with_connection(connection)
+        # Create the contact first
+        saved_contact = await contact_service.create_contact(contact, connection)
 
-            # Create the contact first
-            saved_contact = await contact_service.create_contact(contact, connection)
+        # Ensure contact was created with an ID
+        if saved_contact.id is None:
+            raise ContactValidationError(
+                "id", "Contact was not assigned an ID after creation"
+            )
 
-            # Ensure contact was created with an ID
-            if saved_contact.id is None:
-                raise ContactValidationError(
-                    "id", "Contact was not assigned an ID after creation"
-                )
+        contact_id = saved_contact.id
 
-            contact_id = saved_contact.id
+        # Add contact methods if provided
+        if request.email:
+            email_method = ContactMethod(
+                method_type=MethodType.EMAIL,
+                value=request.email,
+                contact_id=contact_id,
+                is_primary=True,
+            )
+            await contact_service.add_contact_method(
+                contact_id, email_method, connection
+            )
 
-            # Add contact methods if provided
-            if request.email:
-                email_method = ContactMethod(
-                    method_type=MethodType.EMAIL,
-                    value=request.email,
-                    contact_id=contact_id,
-                    is_primary=True,
-                )
-                await contact_service.add_contact_method(
-                    contact_id, email_method, connection
-                )
+        if request.phone:
+            phone_method = ContactMethod(
+                method_type=MethodType.PHONE,
+                value=request.phone,
+                contact_id=contact_id,
+                is_primary=True,
+            )
+            await contact_service.add_contact_method(
+                contact_id, phone_method, connection
+            )
 
-            if request.phone:
-                phone_method = ContactMethod(
-                    method_type=MethodType.PHONE,
-                    value=request.phone,
-                    contact_id=contact_id,
-                    is_primary=True,
-                )
-                await contact_service.add_contact_method(
-                    contact_id, phone_method, connection
-                )
+        # Add initial note if provided
+        if request.notes:
+            note = ContactNote(
+                content=request.notes,
+                contact_id=contact_id,
+            )
+            await contact_service.add_contact_note(contact_id, note, connection)
 
-            # Add initial note if provided
-            if request.notes:
-                note = ContactNote(
-                    content=request.notes,
-                    contact_id=contact_id,
-                )
-                await contact_service.add_contact_note(contact_id, note, connection)
-
-            # Reload contact to get all methods and relationships
-            final_contact = await contact_service.get_contact_by_id(contact_id)
-            if not final_contact:
-                raise ContactValidationError("id", "Failed to reload created contact")
-
-            break  # Exit the async generator loop
-
-        # At this point final_contact is guaranteed to be not None due to the check above
-        assert final_contact is not None
+        # Reload contact to get all methods and relationships
+        final_contact = await contact_service.get_contact_by_id(contact_id)
+        if not final_contact:
+            raise ContactValidationError("id", "Failed to reload created contact")
 
         # Create AI-friendly response using shared converter
         response = ContactConverter.to_contact_response(
@@ -376,7 +276,9 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
 
     @mcp.tool
     @mcp_unified_error_handler("list_contacts", "contact")
+    @inject
     async def list_contacts(
+        contact_service: FromDishka[ContactService],
         page: Annotated[int, Field(description="Page number", ge=1)] = 1,
         limit: Annotated[int, Field(description="Contacts per page", ge=1, le=50)] = 20,
     ) -> str:
@@ -397,9 +299,6 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
             - Overall context and insights
         """
         logger.info("MCP: Listing contacts", page=page, limit=limit)
-
-        # Get contact service
-        contact_service = await get_contact_service()
 
         # Calculate offset
         offset = (page - 1) * limit
@@ -447,6 +346,69 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
             limit=limit,
             contacts_count=len(contact_responses),
             total_count=total_count,
+        )
+
+        return MCPResponseBuilder.success_response(response)
+
+    @mcp.tool
+    @mcp_unified_error_handler("global_search", "search")
+    @inject
+    async def global_search(
+        search_service: FromDishka[SearchService],
+        query: Annotated[
+            str, Field(description="Global search query across all entities")
+        ],
+        limit: Annotated[
+            int, Field(description="Maximum number of results", ge=1, le=50)
+        ] = 20,
+        entity_types: Annotated[
+            list[str] | None,
+            Field(description="Entity types to search (e.g., 'contact')"),
+        ] = None,
+    ) -> str:
+        """
+        Perform global search across all entity types for AI analysis.
+
+        Searches across all available entity types (contacts, and future entities like
+        journal entries, calendar events) with unified results and AI-friendly formatting.
+
+        Args:
+            query: Global search query string
+            limit: Maximum number of results to return (1-50)
+            entity_types: Optional list of entity types to search
+
+        Returns:
+            JSON string containing AI-friendly global search results including:
+            - Unified search results across entity types
+            - Search metadata and processing time
+            - Available entity types for context
+            - Contextual summary for AI understanding
+        """
+        logger.info(
+            "MCP: Performing global search",
+            query=query,
+            limit=limit,
+            entity_types=entity_types,
+        )
+
+        # Perform global search
+        results = search_service.global_search(
+            query=query,
+            entity_types=entity_types,
+            limit=limit,
+            offset=0,
+        )
+
+        # Convert search results to AI-friendly format using shared converter
+        response = SearchResponseConverter.to_global_search_response(
+            results, additional_context="Global search completed successfully"
+        )
+
+        logger.info(
+            "MCP: Global search completed",
+            query=query,
+            total_hits=results.get("estimated_total_hits", 0),
+            processing_time_ms=results.get("processing_time_ms", 0),
         )
 
         return MCPResponseBuilder.success_response(response)

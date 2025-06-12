@@ -9,7 +9,7 @@ from collections.abc import AsyncGenerator
 from typing import Annotated
 
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncConnection
+from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
 from app.core.contacts.adapters.sql import SqlTagRepository
 from app.core.contacts.services import ContactService
@@ -18,9 +18,10 @@ from app.infrastructure.events.outbox_event_publisher import OutboxEventPublishe
 from app.infrastructure.search.search_service import SearchService
 
 
-async def get_async_db_connection() -> AsyncGenerator[AsyncConnection, None]:
+async def get_async_db_connection(
+    engine: Annotated[AsyncEngine, Depends(get_async_database_engine)],
+) -> AsyncGenerator[AsyncConnection, None]:
     """Get async database connection for API endpoints."""
-    engine = get_async_database_engine()
     async with engine.begin() as conn:
         yield conn
 

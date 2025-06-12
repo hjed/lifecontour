@@ -10,6 +10,7 @@ from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
 import structlog
+from dishka.integrations.fastapi import setup_dishka
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
@@ -19,13 +20,9 @@ from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
 from opentelemetry.instrumentation.sqlalchemy import SQLAlchemyInstrumentor
 from starlette.middleware.sessions import SessionMiddleware
 
-from app.api.auth.controllers import router as auth_router
-from app.api.contacts.controllers import router as contacts_router
-from app.api.error_handlers import register_error_handlers
-from app.api.health import router as health_router
-from app.api.search.controllers import router as search_router
 from app.infrastructure.config import Settings, get_settings
 from app.infrastructure.database import get_database_engine
+from app.infrastructure.di.container import create_container
 from app.infrastructure.events.outbox_processor import run_outbox_processor_loop
 from app.infrastructure.logging import setup_logging
 from app.mcp.server import create_mcp_app
@@ -44,6 +41,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # Initialize database
     engine = get_database_engine()
     logger.info("Database engine initialized")
+
+    # Setup Dishka container (get from app state)
+    container = app.state.dishka_container
+    logger.info("Dishka container initialized")
 
     # Setup OpenTelemetry instrumentation
     if settings.enable_telemetry:
@@ -74,6 +75,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                 pass
             logger.info("Outbox processor background task stopped")
 
+        # Close Dishka container
+        await container.close()
+        logger.info("Dishka container closed")
+
         logger.info("Shutting down Personal Management System Backend")
 
 
@@ -91,6 +96,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         openapi_url="/api/openapi.json" if settings.debug else None,
         lifespan=lifespan,
     )
+
+    # Setup Dishka dependency injection
+    container = create_container(settings)
+    app.state.dishka_container = container  # Store for lifespan access
+    setup_dishka(container, app)
+
+    # Import routers after Dishka setup to avoid type annotation issues
+    from app.api.auth.controllers import router as auth_router
+    from app.api.contacts.controllers import router as contacts_router
+    from app.api.error_handlers import register_error_handlers
+    from app.api.health import router as health_router
+    from app.api.search.controllers import router as search_router
 
     # Session middleware (must be added before other middleware that uses sessions)
     app.add_middleware(
@@ -129,7 +146,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         logger = structlog.get_logger()
         logger.info("MCP: Mounting MCP server", mount_path=settings.mcp_mount_path)
 
-        mcp_app = create_mcp_app()
+        mcp_app = create_mcp_app(container)
         app.mount(settings.mcp_mount_path, mcp_app)  # type: ignore[arg-type]
 
         logger.info(

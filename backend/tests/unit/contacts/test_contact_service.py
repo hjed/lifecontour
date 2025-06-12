@@ -50,11 +50,28 @@ class TestContactService:
         self, mock_contact_repo, mock_tag_repo, mock_history_repo, mock_event_publisher
     ):
         """Create ContactService instance with mocked dependencies."""
+        from app.core.contacts.services import (
+            AddressValidationService,
+            ContactHistoryService,
+            ContactValidationService,
+            TagHierarchyService,
+        )
+
+        # Create service dependencies
+        address_validation_service = AddressValidationService()
+        contact_validation_service = ContactValidationService(mock_contact_repo)
+        history_service = ContactHistoryService(mock_history_repo)
+        tag_hierarchy_service = TagHierarchyService(mock_tag_repo)
+
         return ContactService(
             contact_repo=mock_contact_repo,
             tag_repo=mock_tag_repo,
             history_repo=mock_history_repo,
             event_publisher=mock_event_publisher,
+            address_validation_service=address_validation_service,
+            contact_validation_service=contact_validation_service,
+            history_service=history_service,
+            tag_hierarchy_service=tag_hierarchy_service,
         )
 
     @pytest.mark.asyncio

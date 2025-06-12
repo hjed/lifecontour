@@ -11,6 +11,7 @@ from app.core.contacts.models.entities import Contact
 from app.mcp.domains.contacts.schemas import (
     ContactResponse,
     ContactSearchResult,
+    GlobalSearchResponse,
 )
 
 
@@ -246,6 +247,55 @@ class SearchResponseConverter:
             summary_parts.append(additional_context)
 
         return ". ".join(summary_parts) + "."
+
+    @staticmethod
+    def to_global_search_response(
+        search_results: dict[str, Any], additional_context: str = ""
+    ) -> "GlobalSearchResponse":
+        """
+        Convert global search results to AI-friendly GlobalSearchResponse.
+
+        Args:
+            search_results: Global search results from SearchService
+            additional_context: Additional context to include in summary
+
+        Returns:
+            GlobalSearchResponse optimized for AI consumption
+        """
+        # Extract search metadata
+        query = search_results.get("query", "")
+        total_hits = search_results.get("estimated_total_hits", 0)
+        processing_time_ms = search_results.get("processing_time_ms", 0)
+        searched_entity_types = search_results.get("searched_entity_types", ["contact"])
+        available_entity_types = search_results.get(
+            "available_entity_types", ["contact"]
+        )
+
+        # Process search hits using shared processor
+        hits = search_results.get("hits", [])
+        search_result_objects = SearchResultProcessor.process_global_search_hits(
+            hits, additional_context
+        )
+
+        # Build AI-friendly summary
+        summary = SearchResponseConverter.build_global_search_summary(
+            query=query,
+            total_hits=total_hits,
+            processing_time_ms=processing_time_ms,
+            searched_entity_types=searched_entity_types,
+            available_entity_types=available_entity_types,
+            additional_context=additional_context,
+        )
+
+        return GlobalSearchResponse(
+            results=search_result_objects,
+            query=query,
+            total_hits=total_hits,
+            processing_time_ms=processing_time_ms,
+            searched_entity_types=searched_entity_types,
+            available_entity_types=available_entity_types,
+            summary=summary,
+        )
 
 
 class SearchResultProcessor:

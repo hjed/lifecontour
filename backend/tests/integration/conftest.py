@@ -432,11 +432,12 @@ def test_user():
 
 @pytest.fixture
 def test_settings():
-    """Create test settings that allow all hosts."""
+    """Create test settings that allow all hosts and use the correct test database."""
     from app.infrastructure.config import Settings
 
     return Settings(
         debug=True,
+        database_url=get_test_database_url(),  # Use the same database URL as other integration tests
         allowed_hosts=["*"],  # Allow all hosts for testing
         cors_origins=["*"],
     )

@@ -6,6 +6,7 @@ Controllers act as adapters between HTTP and domain services.
 """
 
 import structlog
+from dishka.integrations.fastapi import FromDishka, inject
 from fastapi import APIRouter, Depends, Query, Request, status
 from sqlalchemy.ext.asyncio import AsyncConnection
 
@@ -29,8 +30,8 @@ from app.api.contacts.schemas import (
     TagAssignmentRequest,
     TagListResponse,
 )
-from app.api.dependencies import ContactServiceDep, get_async_db_connection
 from app.core.contacts.models.exceptions import ContactNotFoundError
+from app.core.contacts.services import ContactService
 
 logger = structlog.get_logger()
 
@@ -42,9 +43,10 @@ router = APIRouter(
 
 
 @router.get("", response_model=ContactListResponse)
+@inject
 async def list_contacts(
     request: Request,
-    contact_service: ContactServiceDep,
+    contact_service: FromDishka[ContactService],
     page: int = Query(default=1, description="Page number", ge=1),
     limit: int = Query(default=20, description="Items per page", ge=1, le=100),
 ) -> ContactListResponse:
@@ -80,10 +82,11 @@ async def list_contacts(
 
 
 @router.get("/{contact_id}", response_model=ContactResponse)
+@inject
 async def get_contact(
     contact_id: int,
     request: Request,
-    contact_service: ContactServiceDep,
+    contact_service: FromDishka[ContactService],
 ) -> ContactResponse:
     """
     Get a single contact by ID.
@@ -102,11 +105,12 @@ async def get_contact(
 
 
 @router.post("", response_model=ContactResponse, status_code=status.HTTP_201_CREATED)
+@inject
 async def create_contact(
     request: Request,
     contact_request: ContactCreateRequest,
-    contact_service: ContactServiceDep,
-    connection: AsyncConnection = Depends(get_async_db_connection),
+    contact_service: FromDishka[ContactService],
+    connection: FromDishka[AsyncConnection],
 ) -> ContactResponse:
     """
     Create a new contact.
@@ -125,12 +129,13 @@ async def create_contact(
 
 
 @router.put("/{contact_id}", response_model=ContactResponse)
+@inject
 async def update_contact(
     contact_id: int,
     request: Request,
     contact_request: ContactUpdateRequest,
-    contact_service: ContactServiceDep,
-    connection: AsyncConnection = Depends(get_async_db_connection),
+    contact_service: FromDishka[ContactService],
+    connection: FromDishka[AsyncConnection],
 ) -> ContactResponse:
     """
     Update an existing contact.
@@ -155,10 +160,11 @@ async def update_contact(
 
 
 @router.delete("/{contact_id}", status_code=status.HTTP_204_NO_CONTENT)
+@inject
 async def delete_contact(
     contact_id: int,
-    contact_service: ContactServiceDep,
-    connection: AsyncConnection = Depends(get_async_db_connection),
+    contact_service: FromDishka[ContactService],
+    connection: FromDishka[AsyncConnection],
 ) -> None:
     """
     Delete a contact.
@@ -173,11 +179,12 @@ async def delete_contact(
 
 
 @router.post("/{contact_id}/tags", status_code=status.HTTP_204_NO_CONTENT)
+@inject
 async def assign_tag_to_contact(
     contact_id: int,
     tag_request: TagAssignmentRequest,
-    contact_service: ContactServiceDep,
-    connection: AsyncConnection = Depends(get_async_db_connection),
+    contact_service: FromDishka[ContactService],
+    connection: FromDishka[AsyncConnection],
 ) -> None:
     """
     Assign a tag to a contact.
@@ -194,11 +201,12 @@ async def assign_tag_to_contact(
 
 
 @router.delete("/{contact_id}/tags/{tag_id}", status_code=status.HTTP_204_NO_CONTENT)
+@inject
 async def remove_tag_from_contact(
     contact_id: int,
     tag_id: int,
-    contact_service: ContactServiceDep,
-    connection: AsyncConnection = Depends(get_async_db_connection),
+    contact_service: FromDishka[ContactService],
+    connection: FromDishka[AsyncConnection],
 ) -> None:
     """
     Remove a tag from a contact.
@@ -213,10 +221,11 @@ async def remove_tag_from_contact(
 
 
 @router.get("/{contact_id}/tags", response_model=TagListResponse)
+@inject
 async def get_contact_tags(
     contact_id: int,
     request: Request,
-    contact_service: ContactServiceDep,
+    contact_service: FromDishka[ContactService],
 ) -> TagListResponse:
     """
     Get all tags assigned to a contact.
