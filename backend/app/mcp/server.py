@@ -6,6 +6,8 @@ authentication middleware, and AI-optimized instructions.
 """
 
 import structlog
+from dishka import AsyncContainer
+from dishka.integrations.starlette import setup_dishka
 from fastmcp import FastMCP
 from starlette.middleware import Middleware
 
@@ -56,9 +58,12 @@ def create_mcp_server() -> FastMCP[None]:
     return mcp
 
 
-def create_mcp_app() -> object:
+def create_mcp_app(container: AsyncContainer) -> object:
     """
-    Create FastMCP ASGI app with authentication middleware.
+    Create FastMCP ASGI app with authentication middleware and Dishka integration.
+
+    Args:
+        container: Dishka container for dependency injection
 
     Returns:
         ASGI application ready for mounting in FastAPI
@@ -74,5 +79,10 @@ def create_mcp_app() -> object:
     # Create HTTP app with session authentication middleware
     app = mcp.http_app(path="/mcp", middleware=middleware)
 
-    logger.info("MCP: ASGI application created with authentication middleware")
+    # Set up Dishka integration with the Starlette app
+    setup_dishka(container, app)
+
+    logger.info(
+        "MCP: ASGI application created with authentication middleware and Dishka integration"
+    )
     return app

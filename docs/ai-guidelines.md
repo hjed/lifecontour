@@ -67,6 +67,17 @@ Tasks can be found in the [tasks document](./tasks.md).
 8. **End-to-End Tests** - Full user workflows with Playwright
 9. **Deploy and Validate** - Ensure feature works in real environment
 
+## Language Rules
+
+### Python
+
+- **Formatting**: ruff-format
+- **Linting**: ruff with comprehensive rule set
+- **Type Hints**: Required for all functions and methods (mypy enforced)
+- **Import Organization**: ruff handles import sorting
+- **Naming**: snake_case for variables/functions, PascalCase for classes
+- **No Inline Imports**: No `from module import specific_thing` allowed inside functions or classes
+
 ## Testing Strategy
 
 ### Multi-Language Testing Approach
@@ -271,15 +282,55 @@ personal-management-system/
 
 _See [Domain Architecture](./architecture/domain-architecture.md) for detailed implementation patterns._
 
-### Dependency Injection
+### Dependency Injection with Dishka
 
-- **Pattern**: Constructor injection with typed interfaces
-- **Framework**: Use FastAPI's built-in `Depends` system for service injection
-- **Service Factories**: Create service factory functions for clean dependency management
-- **Repositories**: Receive database connections as constructor parameters
-- **Services**: Receive repository interfaces as constructor parameters
-- **Simple Container**: Use basic factory pattern, avoid complex DI frameworks
-- **Type Safety**: All dependencies typed with interfaces for clarity
+- **Framework**: Use Dishka DI framework for clean, framework-agnostic dependency injection
+- **Pattern**: Constructor injection with typed interfaces and automatic resolution
+- **Domain-Based Providers**: Organize providers by domain (ContactProvider, CalendarProvider, etc.)
+- **Scopes**: Use APP scope for singletons, REQUEST scope for per-request objects, SESSION for websockets
+- **Type Safety**: All dependencies typed with interfaces, use `FromDishka[Type]` for injection
+- **Finalization**: Proper cleanup of resources like database connections using `yield` providers
+- **Testing**: Use Dishka's testing utilities for dependency overrides in tests
+
+#### Dishka Best Practices
+
+**Provider Organization:**
+- Create domain-specific providers: `ContactProvider`, `CalendarProvider`, `JournalProvider`
+- Use `Provider(scope=Scope.REQUEST)` for most business logic components
+- Use `Provider(scope=Scope.APP)` for configuration, singletons, and stateless services
+- Group related dependencies in the same provider class
+
+**Database Connection Management:**
+```python
+class DatabaseProvider(Provider):
+    @provide(scope=Scope.REQUEST)
+    def get_connection(self, engine: AsyncEngine) -> AsyncIterable[AsyncConnection]:
+        async with engine.begin() as conn:
+            yield conn
+```
+
+**Service and Repository Providers:**
+```python
+class ContactProvider(Provider):
+    scope = Scope.REQUEST
+
+    def __init__(self):
+        self.provide(SqlContactRepository, provides=ContactRepository)
+        self.provide(SqlTagRepository, provides=TagRepository)
+        self.provide(ContactService)
+        self.provide(ContactValidationService)
+```
+
+**FastAPI Integration:**
+- Use `FromDishka[Type]` for dependency injection in endpoints
+- Use `@inject` decorator when auto-injection is not available
+- Set up Dishka with `setup_dishka(container, app)` in app factory
+- Use proper lifespan management for container cleanup
+
+**Testing with Dishka:**
+- Override providers in tests using container's override mechanisms
+- Use separate test providers for mock dependencies
+- Maintain proper scope isolation in test fixtures
 
 ### API Design
 
@@ -303,9 +354,28 @@ _See [Domain Architecture](./architecture/domain-architecture.md) for detailed i
 - **AI-Optimized Documentation**: Reference https://gofastmcp.com/llms.txt for AI-friendly documentation
 - **FastAPI Integration**: Follow https://gofastmcp.com/deployment/asgi.md for FastAPI integration patterns
 - **Domain-Based Architecture**: Organize MCP tools by domain (contacts, journal, calendar, photos) to allow future expansion
+- **Dishka Integration**: Use Dishka dependency injection in MCP tools for consistency with REST API
 - **Session Authentication**: Share OAuth authentication with REST API using session middleware
 - **AI-Friendly Responses**: Provide context and summaries, not raw database data
 - **Clear Interfaces**: Structure MCP tools with consistent, simple interfaces
+
+#### MCP with Dishka Patterns
+
+**MCP Tool Dependency Injection:**
+```python
+@mcp.tool
+async def get_contact(
+    contact_id: Annotated[int, Field(description="Contact ID")],
+    contact_service: FromDishka[ContactService],
+) -> str:
+    """Get contact details by ID for AI analysis."""
+    # Use injected service
+```
+
+**MCP Provider Setup:**
+- Share the same Dishka container between REST API and MCP server
+- Use REQUEST scope for MCP tool dependencies
+- Ensure proper cleanup of resources after tool execution
 
 ### Security & Performance
 
@@ -370,24 +440,13 @@ Use `./scripts/dev.sh lint` to run all checks at once.
 
 ### Unit Tests
 
-**Run unit tests after writing tests and before implementation:**
+**Run unit tests after writing tests and before implementation**
 
-```bash
-# Backend unit tests
-cd backend
-uv run pytest tests/unit/ -v
-```
 Run after every changes
 
 ### Integration Testing
 
 **Run integration tests separately after quality checks pass:**
-
-```bash
-# Backend integration tests
-cd backend
-uv run python scripts/run_integration_tests.py
-```
 
 ### CI/CD Compliance
 

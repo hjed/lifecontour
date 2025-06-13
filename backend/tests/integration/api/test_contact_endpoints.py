@@ -15,25 +15,48 @@ async def integration_api_client(
     # Use the existing integration test fixtures for database setup
     # This ensures we use the same database configuration as other integration tests
 
-    from app.api.auth.dependencies import require_authentication
-    from app.api.dependencies import get_async_db_connection
+    from dishka import Provider, Scope, make_async_container, provide
+    from dishka.integrations.fastapi import setup_dishka
+    from sqlalchemy.ext.asyncio import AsyncConnection
 
-    # Override the database dependency to use our test connection
-    async def override_get_async_db_connection():
-        yield async_connection
+    from app.api.auth.dependencies import require_authentication
+    from app.infrastructure.di.contacts import ContactProvider
+
+    # Create a test provider that uses our test connection
+    class TestDatabaseProvider(Provider):
+        def __init__(self, connection: AsyncConnection):
+            super().__init__()
+            self.connection = connection
+
+        @provide(scope=Scope.REQUEST)
+        async def get_connection(self) -> AsyncConnection:
+            return self.connection
 
     # Override authentication to return a test user
     def override_require_authentication():
         return test_user
 
     app = create_app(settings=test_settings)
-    app.dependency_overrides[get_async_db_connection] = override_get_async_db_connection
+
+    # Replace the Dishka container with our test container
+    await app.state.dishka_container.close()  # Close the original container
+
+    test_container = make_async_container(
+        TestDatabaseProvider(async_connection),
+        ContactProvider(),
+    )
+    app.state.dishka_container = test_container
+    setup_dishka(test_container, app)
+
     app.dependency_overrides[require_authentication] = override_require_authentication
 
     async with AsyncClient(
         transport=ASGITransport(app=app), base_url="http://testserver"
     ) as client:
         yield client
+
+    # Clean up the test container
+    await test_container.close()
 
 
 @pytest.mark.integration

@@ -32,6 +32,7 @@ dependencies = [
     "meilisearch>=0.31.0",
     "itsdangerous>=2.1.0",
     "fastmcp>=2.3.2",
+    "dishka>=1.6.0",
 ]
 
 [project.optional-dependencies]

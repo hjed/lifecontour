@@ -191,3 +191,35 @@ class ContactListResponse(BaseModel):
     summary: str = Field(
         description="AI-friendly summary of the contact list and context"
     )
+
+
+class GlobalSearchResponse(BaseModel):
+    """
+    AI-friendly global search response format.
+
+    Provides unified search results across all entity types optimized for AI analysis.
+    """
+
+    results: list[ContactSearchResult] = Field(
+        description="List of search results across all entity types"
+    )
+
+    query: str = Field(description="Original search query")
+
+    total_hits: int = Field(description="Total number of matching results")
+
+    processing_time_ms: int = Field(
+        description="Search processing time in milliseconds"
+    )
+
+    searched_entity_types: list[str] = Field(
+        description="Entity types that were searched"
+    )
+
+    available_entity_types: list[str] = Field(
+        description="All available entity types in the system"
+    )
+
+    summary: str = Field(
+        description="AI-friendly summary of global search results and context"
+    )
