@@ -61,12 +61,15 @@ RUN if [ "$BUILD_ENV" = "development" ]; then \
 COPY docker/backend/start.sh /start.sh
 COPY docker/backend/start-dev.sh /start-dev.sh
 COPY docker/backend/healthcheck.sh /healthcheck.sh
-RUN chmod +x /start.sh /start-dev.sh /healthcheck.sh
+# Convert Windows line endings to Unix line endings and make executable
+RUN sed -i 's/\r$//' /start.sh /start-dev.sh /healthcheck.sh && \
+    chmod +x /start.sh /start-dev.sh /healthcheck.sh
 
 # Set proper permissions
 RUN chown -R appuser:appuser /app && \
     chmod -R 755 ./app && \
-    chmod 644 ./alembic.ini
+    chmod 644 ./alembic.ini && \
+    chown appuser:appuser /start.sh /start-dev.sh /healthcheck.sh
 
 # Switch to non-root user
 USER appuser
