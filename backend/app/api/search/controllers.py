@@ -6,17 +6,16 @@ global search, and search suggestions following JSON API specification.
 """
 
 import structlog
-from fastapi import APIRouter, Depends, Query, Request
+from dishka.integrations.fastapi import FromDishka, inject
+from fastapi import APIRouter, Query, Request
 from meilisearch.errors import MeilisearchError
 
-from app.api.auth.dependencies import require_authentication
 from app.api.common.schemas import (
     create_pagination_links,
     create_pagination_meta,
     get_request_base_url,
 )
 from app.api.contacts.schemas import ContactResource
-from app.api.dependencies import SearchServiceDep
 from app.api.search.schemas import (
     ContactSearchMeta,
     ContactSearchResponse,
@@ -33,13 +32,14 @@ from app.api.search.utils import (
     create_contact_resource_from_search_hit,
 )
 from app.core.search.exceptions import SearchServiceUnavailableError
+from app.infrastructure.auth.models import SessionUser
+from app.infrastructure.search.search_service import SearchService
 
 logger = structlog.get_logger()
 
+
 # Router for authenticated search endpoints
-authenticated_router = APIRouter(
-    prefix="/search", tags=["search"], dependencies=[Depends(require_authentication)]
-)
+authenticated_router = APIRouter(prefix="/search", tags=["search"])
 
 # Router for public search endpoints (like health)
 public_router = APIRouter(prefix="/search", tags=["search"])
@@ -49,9 +49,11 @@ router = APIRouter()
 
 
 @authenticated_router.get("/contacts", response_model=ContactSearchResponse)
+@inject
 def search_contacts(
     request: Request,
-    search_service: SearchServiceDep,
+    search_service: FromDishka[SearchService],
+    user: FromDishka[SessionUser],  # Require authentication
     q: str = Query(..., description="Search query", min_length=1, max_length=500),
     page: int = Query(default=1, description="Page number", ge=1),
     limit: int = Query(default=20, description="Results per page", ge=1, le=100),
@@ -129,9 +131,11 @@ def search_contacts(
 
 
 @authenticated_router.get("/global", response_model=GlobalSearchResponse)
+@inject
 def global_search(
     request: Request,
-    search_service: SearchServiceDep,
+    search_service: FromDishka[SearchService],
+    user: FromDishka[SessionUser],  # Require authentication
     q: str = Query(..., description="Search query", min_length=1, max_length=500),
     page: int = Query(default=1, description="Page number", ge=1),
     limit: int = Query(default=20, description="Results per page", ge=1, le=100),
@@ -239,8 +243,10 @@ def global_search(
 
 
 @authenticated_router.get("/suggestions", response_model=SearchSuggestionsResponse)
+@inject
 def get_search_suggestions(
-    search_service: SearchServiceDep,
+    search_service: FromDishka[SearchService],
+    user: FromDishka[SessionUser],  # Require authentication
     q: str = Query(..., description="Partial query", min_length=1, max_length=100),
     entity_type: str = Query(default="contacts", description="Entity type"),
     limit: int = Query(default=5, description="Max suggestions", ge=1, le=20),
@@ -270,7 +276,10 @@ def get_search_suggestions(
 
 
 @public_router.get("/health", response_model=SearchHealthResponse)
-def get_search_health(search_service: SearchServiceDep) -> SearchHealthResponse:
+@inject
+def get_search_health(
+    search_service: FromDishka[SearchService],
+) -> SearchHealthResponse:
     """
     Get search system health status.
 

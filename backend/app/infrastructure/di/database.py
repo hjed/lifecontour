@@ -4,13 +4,15 @@ Database providers for Dishka dependency injection.
 Provides database connections and related infrastructure with proper lifecycle management.
 """
 
-from collections.abc import AsyncIterable
+from collections.abc import AsyncIterable, Iterable
 
 from dishka import Provider, Scope, provide
+from sqlalchemy import Engine, create_engine
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine, create_async_engine
+from sqlalchemy.orm import Session
 
 from app.infrastructure.config import Settings
-from app.infrastructure.database import get_async_database_engine
+from app.infrastructure.database import get_async_database_engine, get_database_engine
 
 
 class DatabaseProvider(Provider):
@@ -50,3 +52,31 @@ class DatabaseProvider(Provider):
         """
         async with engine.begin() as conn:
             yield conn
+
+    @provide(scope=Scope.APP)
+    def get_sync_engine(self) -> Engine:
+        """Get the sync database engine (singleton for app lifetime)."""
+        if self.settings is not None:
+            # Use provided settings for testing
+            return create_engine(
+                str(self.settings.database_url),
+                echo=self.settings.database_echo,
+                pool_pre_ping=True,
+                pool_recycle=300,
+            )
+        else:
+            # Use default cached engine for production
+            return get_database_engine()
+
+    @provide(scope=Scope.REQUEST)
+    def get_sync_session(self, engine: Engine) -> Iterable[Session]:
+        """
+        Get sync database session for request scope.
+
+        Uses session with automatic cleanup.
+        """
+        session = Session(engine)
+        try:
+            yield session
+        finally:
+            session.close()

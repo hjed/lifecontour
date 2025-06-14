@@ -4,12 +4,9 @@ Unit tests for authentication requirements on API endpoints.
 Tests that endpoints require authentication without needing Docker or database.
 """
 
-from unittest.mock import Mock
-
 import pytest
 from fastapi.testclient import TestClient
 
-from app.api.dependencies import get_contact_service, get_search_service
 from app.main import create_app
 
 
@@ -18,16 +15,18 @@ class TestAuthenticationUnit:
 
     @pytest.fixture
     def client(self):
-        """Create test client with mocked dependencies."""
-        app = create_app()
+        """Create test client with test database configuration."""
+        from app.infrastructure.config import Settings
 
-        # Mock the dependencies to avoid database connections
-        mock_contact_service = Mock()
-        mock_search_service = Mock()
+        # Use test database configuration to avoid connection issues
+        test_settings = Settings(
+            debug=True,
+            database_url="postgresql+asyncpg://postgres:postgres@localhost:5433/personal_management_test",
+            allowed_hosts=["*"],
+            cors_origins=["*"],
+        )
 
-        app.dependency_overrides[get_contact_service] = lambda: mock_contact_service
-        app.dependency_overrides[get_search_service] = lambda: mock_search_service
-
+        app = create_app(settings=test_settings)
         return TestClient(app)
 
     def test_list_contacts_requires_auth(self, client):

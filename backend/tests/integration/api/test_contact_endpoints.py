@@ -8,9 +8,7 @@ from app.main import create_app
 
 
 @pytest_asyncio.fixture
-async def integration_api_client(
-    async_connection, clean_database, test_user, test_settings
-):  # noqa: ARG001
+async def integration_api_client(async_connection, clean_database, test_settings):  # noqa: ARG001
     """Create async test client for API integration tests with real database setup."""
     # Use the existing integration test fixtures for database setup
     # This ensures we use the same database configuration as other integration tests
@@ -19,7 +17,7 @@ async def integration_api_client(
     from dishka.integrations.fastapi import setup_dishka
     from sqlalchemy.ext.asyncio import AsyncConnection
 
-    from app.api.auth.dependencies import require_authentication
+    from app.infrastructure.auth.models import SessionUser
     from app.infrastructure.di.contacts import ContactProvider
 
     # Create a test provider that uses our test connection
@@ -32,9 +30,16 @@ async def integration_api_client(
         async def get_connection(self) -> AsyncConnection:
             return self.connection
 
-    # Override authentication to return a test user
-    def override_require_authentication():
-        return test_user
+        @provide(scope=Scope.REQUEST)
+        def get_session_user(self) -> SessionUser:
+            # Provide a test user for authenticated endpoints
+            return SessionUser(
+                id="test-user-123",
+                email="test@example.com",
+                name="Test User",
+                avatar_url="https://example.com/avatar.jpg",
+                provider="test",
+            )
 
     app = create_app(settings=test_settings)
 
@@ -47,8 +52,6 @@ async def integration_api_client(
     )
     app.state.dishka_container = test_container
     setup_dishka(test_container, app)
-
-    app.dependency_overrides[require_authentication] = override_require_authentication
 
     async with AsyncClient(
         transport=ASGITransport(app=app), base_url="http://testserver"

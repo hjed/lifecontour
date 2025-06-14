@@ -10,12 +10,13 @@ from datetime import UTC, datetime
 from typing import Any
 
 import structlog
-from fastapi import APIRouter, Depends, HTTPException, status
+from dishka.integrations.fastapi import FromDishka, inject
+from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from app.infrastructure.config import get_settings
-from app.infrastructure.database import check_database_connection, get_database_session
+from app.infrastructure.config import Settings
+from app.infrastructure.database import check_database_connection
 
 logger = structlog.get_logger()
 router = APIRouter()
@@ -68,8 +69,10 @@ async def health_check() -> HealthResponse:
 
 
 @router.get("/health/detailed", response_model=DetailedHealthResponse)
+@inject
 async def detailed_health_check(
-    _db: Session = Depends(get_database_session),
+    _db: FromDishka[Session],
+    settings: FromDishka[Settings],
 ) -> DetailedHealthResponse:
     """
     Detailed health check endpoint.
@@ -99,7 +102,6 @@ async def detailed_health_check(
         overall_status = "unhealthy"
 
     # Check MCP server status
-    settings = get_settings()
     if settings.mcp_enabled:
         try:
             # MCP server health check - just verify it's enabled and configured
@@ -138,8 +140,9 @@ async def detailed_health_check(
 
 
 @router.get("/health/ready")
+@inject
 async def readiness_check(
-    _db: Session = Depends(get_database_session),
+    _db: FromDishka[Session],
 ) -> dict[str, str]:
     """
     Kubernetes readiness probe endpoint.

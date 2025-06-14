@@ -5,10 +5,10 @@ Handles OAuth authentication endpoints including authorization, callback, and lo
 """
 
 import structlog
+from dishka.integrations.fastapi import FromDishka, inject
 from fastapi import APIRouter, Query, Request
 from starlette.responses import RedirectResponse
 
-from app.api.auth.dependencies import OAuthServiceDep, OptionalUserDep
 from app.api.auth.schemas import (
     AuthProviderInfo,
     AuthProvidersResponse,
@@ -16,8 +16,8 @@ from app.api.auth.schemas import (
     LogoutResponse,
     UserResponse,
 )
-from app.infrastructure.auth.exceptions import AuthenticationError
 from app.infrastructure.auth.models import SessionUser
+from app.infrastructure.auth.oauth_service import OAuthService
 
 logger = structlog.get_logger()
 
@@ -25,7 +25,10 @@ router = APIRouter()
 
 
 @router.get("/providers", response_model=AuthProvidersResponse)
-async def get_auth_providers(oauth_service: OAuthServiceDep) -> AuthProvidersResponse:
+@inject
+async def get_auth_providers(
+    oauth_service: FromDishka[OAuthService],
+) -> AuthProvidersResponse:
     """
     Get available OAuth providers.
 
@@ -69,10 +72,11 @@ async def get_auth_providers(oauth_service: OAuthServiceDep) -> AuthProvidersRes
 
 
 @router.get("/authorize/{provider}")
+@inject
 async def authorize(
     provider: str,
     request: Request,
-    oauth_service: OAuthServiceDep,
+    oauth_service: FromDishka[OAuthService],
     redirect_url: str = Query(
         default="/", description="URL to redirect to after authentication"
     ),
@@ -104,10 +108,11 @@ async def authorize(
 
 
 @router.get("/callback/{provider}")
+@inject
 async def auth_callback(
     provider: str,
     request: Request,
-    oauth_service: OAuthServiceDep,
+    oauth_service: FromDishka[OAuthService],
 ) -> RedirectResponse:
     """
     Handle OAuth callback.
@@ -163,15 +168,13 @@ async def logout(request: Request) -> LogoutResponse:
 
 
 @router.get("/me", response_model=UserResponse)
-async def get_current_user_info(user: OptionalUserDep) -> UserResponse:
+@inject
+async def get_current_user_info(user: FromDishka[SessionUser]) -> UserResponse:
     """
     Get current user information.
 
     Returns the current authenticated user's information.
     """
-    if not user:
-        raise AuthenticationError("Not authenticated")
-
     return UserResponse(
         id=user.id,
         email=user.email,
@@ -183,7 +186,8 @@ async def get_current_user_info(user: OptionalUserDep) -> UserResponse:
 
 
 @router.get("/status", response_model=AuthStatusResponse)
-async def get_auth_status(user: OptionalUserDep) -> AuthStatusResponse:
+@inject
+async def get_auth_status(user: FromDishka[SessionUser | None]) -> AuthStatusResponse:
     """
     Get authentication status.
 

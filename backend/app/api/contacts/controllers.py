@@ -7,10 +7,9 @@ Controllers act as adapters between HTTP and domain services.
 
 import structlog
 from dishka.integrations.fastapi import FromDishka, inject
-from fastapi import APIRouter, Depends, Query, Request, status
+from fastapi import APIRouter, Query, Request, status
 from sqlalchemy.ext.asyncio import AsyncConnection
 
-from app.api.auth.dependencies import require_authentication
 from app.api.common.schemas import (
     PaginationParams,
     create_pagination_links,
@@ -32,13 +31,13 @@ from app.api.contacts.schemas import (
 )
 from app.core.contacts.models.exceptions import ContactNotFoundError
 from app.core.contacts.services import ContactService
+from app.infrastructure.auth.models import SessionUser
 
 logger = structlog.get_logger()
 
 router = APIRouter(
     prefix="/contacts",
     tags=["contacts"],
-    dependencies=[Depends(require_authentication)],
 )
 
 
@@ -47,6 +46,7 @@ router = APIRouter(
 async def list_contacts(
     request: Request,
     contact_service: FromDishka[ContactService],
+    user: FromDishka[SessionUser],  # Require authentication
     page: int = Query(default=1, description="Page number", ge=1),
     limit: int = Query(default=20, description="Items per page", ge=1, le=100),
 ) -> ContactListResponse:
@@ -87,6 +87,7 @@ async def get_contact(
     contact_id: int,
     request: Request,
     contact_service: FromDishka[ContactService],
+    user: FromDishka[SessionUser],  # Require authentication
 ) -> ContactResponse:
     """
     Get a single contact by ID.
@@ -111,6 +112,7 @@ async def create_contact(
     contact_request: ContactCreateRequest,
     contact_service: FromDishka[ContactService],
     connection: FromDishka[AsyncConnection],
+    user: FromDishka[SessionUser],  # Require authentication
 ) -> ContactResponse:
     """
     Create a new contact.
@@ -136,6 +138,7 @@ async def update_contact(
     contact_request: ContactUpdateRequest,
     contact_service: FromDishka[ContactService],
     connection: FromDishka[AsyncConnection],
+    user: FromDishka[SessionUser],  # Require authentication
 ) -> ContactResponse:
     """
     Update an existing contact.
@@ -165,6 +168,7 @@ async def delete_contact(
     contact_id: int,
     contact_service: FromDishka[ContactService],
     connection: FromDishka[AsyncConnection],
+    user: FromDishka[SessionUser],  # Require authentication
 ) -> None:
     """
     Delete a contact.
@@ -185,6 +189,7 @@ async def assign_tag_to_contact(
     tag_request: TagAssignmentRequest,
     contact_service: FromDishka[ContactService],
     connection: FromDishka[AsyncConnection],
+    user: FromDishka[SessionUser],  # Require authentication
 ) -> None:
     """
     Assign a tag to a contact.
@@ -207,6 +212,7 @@ async def remove_tag_from_contact(
     tag_id: int,
     contact_service: FromDishka[ContactService],
     connection: FromDishka[AsyncConnection],
+    user: FromDishka[SessionUser],  # Require authentication
 ) -> None:
     """
     Remove a tag from a contact.
@@ -226,6 +232,7 @@ async def get_contact_tags(
     contact_id: int,
     request: Request,
     contact_service: FromDishka[ContactService],
+    user: FromDishka[SessionUser],  # Require authentication
 ) -> TagListResponse:
     """
     Get all tags assigned to a contact.

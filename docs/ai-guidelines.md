@@ -14,8 +14,8 @@ Tasks can be found in the [tasks document](./tasks.md).
 
 ### Key Technologies
 
-- **Backend**: Python 3.11+ with FastAPI, PostgreSQL database
-- **Frontend**: Next.js with React, shadcn/ui components, Tailwind CSS - refer to [Next.js AI Docs](https://raw.githubusercontent.com/nextjsargentina/next.js-docs/refs/heads/main/src/docs/index.mdx) when making decisions about next.js.
+- **Backend**: Python 3.11+ with FastAPI, PostgreSQL database, Dishka for dependency injection
+- **Frontend**: Next.js with React, shadcn/ui components, Tailwind CSS
 - **APIs**: JSON API standard for REST endpoints, MCP for AI integration
 - **Authentication**: Session-based authentication with Starlette SessionMiddleware
 - **Search**: MeiliSearch with event-driven indexing via transactional outbox pattern
@@ -351,8 +351,6 @@ class ContactProvider(Provider):
 ### MCP Implementation
 
 - **FastMCP v2**: Use FastMCP v2 (jlowin/fastmcp) for MCP server implementation instead of official MCP SDK
-- **AI-Optimized Documentation**: Reference https://gofastmcp.com/llms.txt for AI-friendly documentation
-- **FastAPI Integration**: Follow https://gofastmcp.com/deployment/asgi.md for FastAPI integration patterns
 - **Domain-Based Architecture**: Organize MCP tools by domain (contacts, journal, calendar, photos) to allow future expansion
 - **Dishka Integration**: Use Dishka dependency injection in MCP tools for consistency with REST API
 - **Session Authentication**: Share OAuth authentication with REST API using session middleware
@@ -462,3 +460,22 @@ Run after every changes
 3. **Start simple** - implement core functionality before optimizations
 4. **Document decisions** - update architecture docs when patterns evolve
 5. **Quality checks mandatory** - run linting, type checking, and tests for every change
+
+## Library Documentation
+
+### Python Backend
+
+- **FastAPI**: https://fastapi.tiangolo.com/
+- **SQLAlchemy**: https://docs.sqlalchemy.org/en/20/
+- **Dishka**: https://dishka.readthedocs.io/en/stable/_sources/index.rst.txt
+- **pytest**: https://docs.pytest.org/en/7.4.x/
+- **FastMCP**: https://gofastmcp.com/llms.txt
+
+### TypeScript Frontend
+
+- **Next.js**: https://raw.githubusercontent.com/nextjsargentina/next.js-docs/refs/heads/main/src/docs/index.mdx
+- **shadcn/ui**: https://ui.shadcn.com/
+- **Tailwind CSS**: https://tailwindcss.com/docs
+- **Jest**: https://jestjs.io/docs/getting-started
+- **React Testing Library**: https://testing-library.com/docs/react-testing-library/intro
+- **Playwright**: https://playwright.dev/docs/intro
