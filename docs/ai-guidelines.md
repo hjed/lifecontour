@@ -174,9 +174,24 @@ _See [Testing Strategy](./architecture/testing-strategy.md) for detailed testing
 ### Key Patterns
 
 - **Cards**: Use `Card`, `CardHeader`, `CardContent` for consistent layouts
-- **Forms**: Integrate with react-hook-form and Zod validation
+- **Forms**: Use `Form`, `FormField`, `FormControl`, `FormLabel`, `FormMessage` with react-hook-form and Zod validation for proper accessibility
 - **Dropdowns**: Include keyboard navigation and proper ARIA attributes
 - **Badges**: Use for tags with custom colors via style prop
+
+### Form Accessibility Guidelines
+
+- **Use Form system for validation**: Use `Form`, `FormField`, `FormControl`, `FormLabel`, `FormMessage` components for forms with validation and error handling
+- **Use standalone Input/Textarea for simple cases**: Use standalone `Input`/`Textarea` components for search fields, filters, and non-validated inputs
+- **Automatic ARIA attributes**: Form system automatically provides `aria-describedby`, `aria-invalid`, and proper ID linking
+- **Error message accessibility**: `FormMessage` components automatically have proper IDs and are linked to form controls
+- **Screen reader support**: Error messages are announced immediately when validation fails
+
+### Component Usage Patterns
+
+- **Forms with validation**: Always use the Form system (`FormField` + `FormControl` + `Input`)
+- **Search inputs**: Use standalone `Input` component
+- **Filter inputs**: Use standalone `Input` component
+- **Simple inputs without validation**: Use standalone `Input`/`Textarea` components
 
 _See [Frontend Design](./architecture/frontend-design.md) for detailed
 shadcn/ui implementation patterns._
@@ -515,6 +530,8 @@ Run after every changes
 
 ## Library Documentation
 
+Your knowledge of the current versions of libraries may be out of date - refer to their documentation for best practises.
+
 ### Python Backend
 
 - **FastAPI**: https://fastapi.tiangolo.com/
@@ -526,7 +543,7 @@ Run after every changes
 ### TypeScript Frontend
 
 - **Next.js**: https://raw.githubusercontent.com/nextjsargentina/next.js-docs/refs/heads/main/src/docs/index.mdx
-- **shadcn/ui**: https://ui.shadcn.com/
+- **shadcn/ui**: https://ui.shadcn.com/docs
 - **Tailwind CSS**: https://tailwindcss.com/docs
 - **Jest**: https://jestjs.io/docs/getting-started
 - **React Testing Library**: https://testing-library.com/docs/react-testing-library/intro

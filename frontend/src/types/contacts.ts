@@ -37,12 +37,13 @@ export interface ContactMethodResource
 
 // Contact Address Types
 export interface ContactAddressAttributes {
-  street_address: string;
-  suburb?: string;
-  state?: string;
-  postcode?: string;
-  country: string;
-  address_type?: string;
+  label?: string;
+  street_line_1: string;
+  street_line_2?: string;
+  locality?: string; // city
+  region?: string; // state
+  postal_code?: string;
+  country_code: string;
   is_primary: boolean;
 }
 
@@ -82,10 +83,14 @@ export interface TagResource
 export interface ContactAttributes {
   first_name: string;
   last_name?: string;
-  organisation?: string;
-  job_title?: string;
+  middle_name?: string;
+  nick_name?: string;
   created_at: string;
   updated_at: string;
+  // Embedded related data (not separate resources for REST API)
+  contact_methods: ContactMethodResource[];
+  addresses: ContactAddressResource[];
+  notes: ContactNoteResource[];
 }
 
 export interface ContactRelationships {
@@ -141,11 +146,11 @@ export type TagListResponse = JsonApiCollectionResponse<TagResource>;
 export interface ContactFormData {
   first_name: string;
   last_name?: string;
-  organisation?: string;
-  job_title?: string;
-  methods?: Omit<ContactMethodAttributes, 'id'>[];
-  addresses?: Omit<ContactAddressAttributes, 'id'>[];
-  notes?: Omit<ContactNoteAttributes, 'id' | 'created_at' | 'updated_at'>[];
+  middle_name?: string;
+  nick_name?: string;
+  contact_methods?: ContactMethodResource[];
+  addresses?: ContactAddressResource[];
+  notes?: ContactNoteResource[];
 }
 
 export interface ContactCreateData {
@@ -173,8 +178,6 @@ export interface TagAssignmentRequest {
 export interface ContactDisplay {
   id: string;
   name: string;
-  organisation?: string;
-  job_title?: string;
   primary_email?: string;
   primary_phone?: string;
   tags: TagAttributes[];
@@ -186,7 +189,6 @@ export interface ContactDisplay {
 export interface ContactFilters {
   search?: string;
   tags?: string[];
-  organisation?: string;
   created_after?: string;
   created_before?: string;
 }

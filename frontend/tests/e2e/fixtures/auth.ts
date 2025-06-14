@@ -83,7 +83,7 @@ export const API_PATTERNS = {
  * Mock authentication API responses for testing.
  */
 export class AuthFixtures {
-  constructor(private page: Page) {}
+  constructor(private readonly page: Page) {}
 
   /**
    * Mock session as not authenticated.
@@ -119,7 +119,7 @@ export class AuthFixtures {
   async mockLoginSuccess(provider: keyof typeof MOCK_USERS): Promise<void> {
     await this.page.route(API_PATTERNS.LOGIN, async (route: Route) => {
       const request = route.request();
-      const body = JSON.parse(request.postData() || '{}');
+      const body = JSON.parse(request.postData() ?? '{}');
 
       if (body.provider === provider) {
         await route.fulfill({

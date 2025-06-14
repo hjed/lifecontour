@@ -39,7 +39,7 @@ function CallbackContent() {
 
         // Handle OAuth errors
         if (error) {
-          throw new Error(errorDescription || `OAuth error: ${error}`);
+          throw new Error(errorDescription ?? `OAuth error: ${error}`);
         }
 
         // Validate required parameters
@@ -67,7 +67,7 @@ function CallbackContent() {
         if (!response.ok) {
           const errorData = await response.json();
           throw new Error(
-            errorData.errors?.[0]?.detail || 'Authentication failed'
+            errorData.errors?.[0]?.detail ?? 'Authentication failed'
           );
         }
 
@@ -77,7 +77,7 @@ function CallbackContent() {
         await refreshSession();
 
         // Redirect to intended destination or dashboard
-        const redirectTo = data.redirect_url || '/';
+        const redirectTo = data.redirect_url ?? '/';
         router.replace(redirectTo);
       } catch (err) {
         console.error('OAuth callback error:', err);
@@ -91,7 +91,7 @@ function CallbackContent() {
   // Determine OAuth provider from state parameter
   const determineProvider = (state: string | null): OAuthProvider => {
     // Parse provider from state parameter (format: "provider:randomString")
-    if (state && state.includes(':')) {
+    if (state?.includes(':')) {
       const provider = state.split(':')[0].toUpperCase();
       if (Object.values(OAuthProvider).includes(provider as OAuthProvider)) {
         return provider as OAuthProvider;
