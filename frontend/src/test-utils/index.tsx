@@ -9,6 +9,7 @@ import { render, RenderOptions } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { AuthProvider } from '@/lib/auth/AuthProvider';
 import { ReactElement } from 'react';
+import { ContactMethodType } from '@/types/contacts';
 
 // Test constants to avoid string duplication
 export const TEST_CONSTANTS = {
@@ -126,6 +127,93 @@ export const setupMocks = {
     jest.clearAllMocks();
     localStorage.clear();
   },
+} as const;
+
+// Contact-specific test utilities
+export const contactTestUtils = {
+  // Common beforeEach setup for contact tests
+  setupContactTest: () => {
+    jest.clearAllMocks();
+    setupMocks.windowLocation();
+  },
+
+  // Mock data factories for contacts
+  createMockContact: (overrides: Partial<any> = {}) => {
+    const baseContact = {
+      id: '1',
+      type: 'contacts',
+      attributes: {
+        first_name: 'John',
+        last_name: 'Doe',
+        middle_name: '',
+        nick_name: '',
+        created_at: '2024-01-01T00:00:00Z',
+        updated_at: '2024-01-01T00:00:00Z',
+        contact_methods: [
+          {
+            id: '1',
+            type: 'contact_methods',
+            attributes: {
+              method_type: ContactMethodType.EMAIL,
+              value: 'john@example.com',
+              label: 'Work',
+              is_primary: true,
+            },
+          },
+        ],
+        addresses: [],
+        notes: [],
+      },
+      relationships: {
+        tags: {
+          data: [],
+        },
+      },
+    };
+
+    return {
+      ...baseContact,
+      ...overrides,
+      attributes: {
+        ...baseContact.attributes,
+        ...overrides.attributes,
+      },
+    };
+  },
+
+  createMockContactsResponse: (contacts: any[] = [], total?: number) => ({
+    data:
+      contacts.length > 0 ? contacts : [contactTestUtils.createMockContact()],
+    meta: {
+      total: total ?? (contacts.length > 0 ? contacts.length : 1),
+      page: 1,
+      per_page: 20,
+      total_pages: Math.ceil(
+        (total ?? (contacts.length > 0 ? contacts.length : 1)) / 20
+      ),
+    },
+  }),
+
+  createEmptyContactsResponse: () => ({
+    data: [],
+    meta: {
+      total: 0,
+      page: 1,
+      per_page: 20,
+      total_pages: 0,
+    },
+  }),
+
+  createMockContactResponse: (contact?: any) => ({
+    data:
+      contact ||
+      contactTestUtils.createMockContact({
+        attributes: {
+          middle_name: 'William',
+          nick_name: 'Johnny',
+        },
+      }),
+  }),
 } as const;
 
 // Common test patterns

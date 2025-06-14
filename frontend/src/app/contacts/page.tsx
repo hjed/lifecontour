@@ -1,0 +1,270 @@
+/**
+ * Contact list page with search and filtering capabilities.
+ *
+ * Displays a paginated list of contacts with search functionality,
+ * tag filtering, and responsive design.
+ */
+
+'use client';
+
+import { useState, useMemo } from 'react';
+import { Plus, Search, Filter, Users } from 'lucide-react';
+import Link from 'next/link';
+import { useContacts, useSearchContacts } from '@/lib/api/contacts';
+import { ContactFilters } from '@/types/contacts';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
+import { Skeleton } from '@/components/ui/skeleton';
+import { Alert, AlertDescription } from '@/components/ui/alert';
+import { useDebounce } from '@/hooks/useDebounce';
+import { TIMEOUTS } from '@/lib/constants';
+
+export default function ContactsPage() {
+  const [searchQuery, setSearchQuery] = useState('');
+  const [filters, setFilters] = useState<ContactFilters>({});
+  const [showFilters, setShowFilters] = useState(false);
+
+  // Debounce search query to avoid excessive API calls
+  const debouncedSearchQuery = useDebounce(
+    searchQuery,
+    TIMEOUTS.DEBOUNCE_SEARCH
+  );
+
+  // Use search query if present, otherwise use regular contact list
+  const shouldUseSearch = debouncedSearchQuery.length > 0;
+
+  const {
+    data: contactsData,
+    isLoading: isLoadingContacts,
+    error: contactsError,
+  } = useContacts(filters, { enabled: !shouldUseSearch });
+
+  const {
+    data: searchData,
+    isLoading: isLoadingSearch,
+    error: searchError,
+  } = useSearchContacts(debouncedSearchQuery, {}, { enabled: shouldUseSearch });
+
+  const data = shouldUseSearch ? searchData : contactsData;
+  const isLoading = shouldUseSearch ? isLoadingSearch : isLoadingContacts;
+  const error = shouldUseSearch ? searchError : contactsError;
+
+  const totalContacts = data?.meta?.total || 0;
+
+  const displayContacts = useMemo(() => {
+    const contacts = data?.data || [];
+    return contacts.map(contact => ({
+      id: contact.id,
+      name: `${contact.attributes.first_name} ${contact.attributes.last_name || ''}`.trim(),
+      primary_email: contact.attributes.contact_methods?.find(
+        m => m.attributes.method_type === 'email' && m.attributes.is_primary
+      )?.attributes.value,
+      primary_phone: contact.attributes.contact_methods?.find(
+        m => m.attributes.method_type === 'phone' && m.attributes.is_primary
+      )?.attributes.value,
+      tags: contact.relationships?.tags?.data || [],
+      created_at: contact.attributes.created_at,
+      updated_at: contact.attributes.updated_at,
+    }));
+  }, [data?.data]);
+
+  const handleSearchChange = (value: string) => {
+    setSearchQuery(value);
+  };
+
+  const clearSearch = () => {
+    setSearchQuery('');
+    setFilters({});
+  };
+
+  if (error) {
+    return (
+      <div className='container mx-auto px-4 py-8'>
+        <Alert variant='destructive'>
+          <AlertDescription>
+            {error instanceof Error ? error.message : 'Failed to load contacts'}
+          </AlertDescription>
+        </Alert>
+      </div>
+    );
+  }
+
+  return (
+    <div className='container mx-auto px-4 py-8'>
+      {/* Header */}
+      <div className='mb-8 flex flex-col gap-4 md:flex-row md:items-center md:justify-between'>
+        <div>
+          <h1 className='text-3xl font-bold tracking-tight'>Contacts</h1>
+          <p className='text-muted-foreground'>
+            Manage your personal and professional contacts
+          </p>
+        </div>
+        <Button asChild>
+          <Link href='/contacts/new'>
+            <Plus className='mr-2 h-4 w-4' />
+            Add Contact
+          </Link>
+        </Button>
+      </div>
+
+      {/* Search and Filters */}
+      <Card className='mb-6'>
+        <CardContent className='pt-6'>
+          <div className='flex flex-col gap-4 md:flex-row'>
+            <div className='relative flex-1'>
+              <Search className='text-muted-foreground absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2' />
+              <Input
+                placeholder='Search contacts...'
+                value={searchQuery}
+                onChange={e => handleSearchChange(e.target.value)}
+                className='pl-10'
+              />
+            </div>
+            <div className='flex gap-2'>
+              <Button
+                variant='outline'
+                onClick={() => setShowFilters(!showFilters)}
+                className='shrink-0'
+              >
+                <Filter className='mr-2 h-4 w-4' />
+                Filters
+              </Button>
+              {(searchQuery || Object.keys(filters).length > 0) && (
+                <Button variant='outline' onClick={clearSearch}>
+                  Clear
+                </Button>
+              )}
+            </div>
+          </div>
+
+          {showFilters && (
+            <div className='mt-4 border-t pt-4'>
+              <div className='grid gap-4 md:grid-cols-2'>
+                {/* Tag filter would go here */}
+                <div>
+                  <span className='text-sm font-medium'>Tags</span>
+                  <p className='text-muted-foreground text-xs'>
+                    Filter by tags (coming soon)
+                  </p>
+                </div>
+                {/* Date filter would go here */}
+                <div>
+                  <span className='text-sm font-medium'>Date Range</span>
+                  <p className='text-muted-foreground text-xs'>
+                    Filter by date (coming soon)
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Results Summary */}
+      <div className='mb-4 flex items-center gap-2'>
+        <Users className='text-muted-foreground h-4 w-4' />
+        <span className='text-muted-foreground text-sm'>
+          {isLoading
+            ? 'Loading contacts...'
+            : `${totalContacts} contact${totalContacts !== 1 ? 's' : ''} found`}
+        </span>
+      </div>
+
+      {/* Contact List */}
+      {isLoading ? (
+        <div className='grid gap-4 md:grid-cols-2 lg:grid-cols-3'>
+          {Array.from({ length: 6 }).map((_, i) => (
+            <Card key={i}>
+              <CardHeader>
+                <Skeleton className='h-6 w-3/4' />
+                <Skeleton className='h-4 w-1/2' />
+              </CardHeader>
+              <CardContent>
+                <div className='space-y-2'>
+                  <Skeleton className='h-4 w-full' />
+                  <Skeleton className='h-4 w-2/3' />
+                </div>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      ) : displayContacts.length === 0 ? (
+        <Card>
+          <CardContent className='pt-6'>
+            <div className='py-8 text-center'>
+              <Users className='text-muted-foreground mx-auto mb-4 h-12 w-12' />
+              <h3 className='mb-2 text-lg font-semibold'>No contacts found</h3>
+              <p className='text-muted-foreground mb-4'>
+                {searchQuery
+                  ? `No contacts match "${searchQuery}"`
+                  : 'Get started by adding your first contact'}
+              </p>
+              <Button asChild>
+                <Link href='/contacts/new'>
+                  <Plus className='mr-2 h-4 w-4' />
+                  Add Contact
+                </Link>
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      ) : (
+        <div className='grid gap-4 md:grid-cols-2 lg:grid-cols-3'>
+          {displayContacts.map(contact => (
+            <Card
+              key={contact.id}
+              className='transition-shadow hover:shadow-md'
+            >
+              <CardHeader>
+                <CardTitle className='text-lg'>
+                  <Link
+                    href={`/contacts/${contact.id}`}
+                    className='hover:text-primary transition-colors'
+                  >
+                    {contact.name}
+                  </Link>
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className='space-y-2'>
+                  {contact.primary_email && (
+                    <p className='text-sm'>
+                      <span className='font-medium'>Email:</span>{' '}
+                      {contact.primary_email}
+                    </p>
+                  )}
+                  {contact.primary_phone && (
+                    <p className='text-sm'>
+                      <span className='font-medium'>Phone:</span>{' '}
+                      {contact.primary_phone}
+                    </p>
+                  )}
+                  {contact.tags.length > 0 && (
+                    <div className='mt-2 flex flex-wrap gap-1'>
+                      {contact.tags.slice(0, 3).map(tag => (
+                        <Badge
+                          key={tag.id}
+                          variant='secondary'
+                          className='text-xs'
+                        >
+                          {tag.attributes.name}
+                        </Badge>
+                      ))}
+                      {contact.tags.length > 3 && (
+                        <Badge variant='outline' className='text-xs'>
+                          +{contact.tags.length - 3} more
+                        </Badge>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}

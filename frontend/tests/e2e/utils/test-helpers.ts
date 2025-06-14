@@ -61,7 +61,7 @@ export const TEST_DATA = {
  * Accessibility testing utilities.
  */
 export class AccessibilityHelpers {
-  constructor(private page: Page) {}
+  constructor(private readonly page: Page) {}
 
   /**
    * Check that all buttons have proper ARIA labels.
@@ -74,7 +74,7 @@ export class AccessibilityHelpers {
       const textContent = await button.textContent();
 
       // Button should have either aria-label or visible text
-      expect(ariaLabel || textContent).toBeTruthy();
+      expect(ariaLabel ?? textContent).toBeTruthy();
     }
   }
 
@@ -130,7 +130,7 @@ export class AccessibilityHelpers {
       const isVisible = await element.isVisible();
       if (isVisible) {
         const textContent = await element.textContent();
-        if (textContent && textContent.trim()) {
+        if (textContent?.trim()) {
           // Element with text should be visible
           await expect(element).toBeVisible();
         }
@@ -143,7 +143,7 @@ export class AccessibilityHelpers {
  * Responsive design testing utilities.
  */
 export class ResponsiveHelpers {
-  constructor(private page: Page) {}
+  constructor(private readonly page: Page) {}
 
   /**
    * Test component at different viewport sizes.
@@ -201,7 +201,7 @@ export class ResponsiveHelpers {
  * Form interaction utilities.
  */
 export class FormHelpers {
-  constructor(private page: Page) {}
+  constructor(private readonly page: Page) {}
 
   /**
    * Wait for form submission to complete.

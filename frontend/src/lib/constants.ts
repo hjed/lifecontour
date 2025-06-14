@@ -135,6 +135,11 @@ export const ERROR_MESSAGES = {
   MISSING_OAUTH_PARAMS: 'Missing required OAuth parameters',
   NETWORK_ERROR: 'Network error occurred',
   UNKNOWN_ERROR: 'An unknown error occurred',
+  FETCH_FAILED: 'Failed to fetch data. Please try again.',
+  CREATE_FAILED: 'Failed to create item. Please try again.',
+  UPDATE_FAILED: 'Failed to update item. Please try again.',
+  DELETE_FAILED: 'Failed to delete item. Please try again.',
+  SEARCH_FAILED: 'Search failed. Please try again.',
 } as const;
 
 // Success Messages
@@ -143,6 +148,9 @@ export const SUCCESS_MESSAGES = {
   SIGNED_IN: 'Signed in successfully',
   PROFILE_UPDATED: 'Profile updated successfully',
   SETTINGS_SAVED: 'Settings saved successfully',
+  CONTACT_CREATED: 'Contact created successfully',
+  CONTACT_UPDATED: 'Contact updated successfully',
+  CONTACT_DELETED: 'Contact deleted successfully',
 } as const;
 
 // Validation Messages

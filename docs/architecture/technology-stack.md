@@ -78,7 +78,7 @@ This document outlines the technology choices optimized for AI assistant underst
 - **Package Manager**: pnpm (separate from backend UV setup)
 
 ### Styling and UI
-- **Styling**: Tailwind CSS
+- **Styling**: Tailwind CSS v4
 - **UI Components**: shadcn/ui (excellent AI assistant support)
 - **Icons**: Lucide React
 - **Responsive Design**: Mobile-first with Tailwind
