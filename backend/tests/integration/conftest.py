@@ -438,23 +438,22 @@ def test_settings():
     return Settings(
         debug=True,
         database_url=get_test_database_url(),  # Use the same database URL as other integration tests
+        meilisearch_url="http://localhost:7701",  # Use test MeiliSearch port
+        meilisearch_api_key="test_master_key",  # Use test API key
         allowed_hosts=["*"],  # Allow all hosts for testing
         cors_origins=["*"],
     )
 
 
 @pytest.fixture
-def authenticated_app(test_user, test_settings):
-    """Create a FastAPI app with authentication overridden for testing."""
-    from app.api.auth.dependencies import require_authentication
+def authenticated_app(test_settings):
+    """Create a FastAPI app for testing."""
     from app.main import create_app
 
-    def override_require_authentication():
-        return test_user
-
+    # Note: With Dishka, authentication is handled through the container
+    # For integration tests, we use the real authentication flow
+    # Individual tests can mock the session as needed
     app = create_app(settings=test_settings)
-    app.dependency_overrides[require_authentication] = override_require_authentication
-
     return app
 
 
@@ -474,7 +473,7 @@ def mock_search_service():
 
 
 @pytest.fixture
-def authenticated_search_client(authenticated_app, mock_search_service):
+def authenticated_search_client(test_settings, mock_search_service, test_user):
     """
     Create a test client with authentication and search service mocking.
 
@@ -483,16 +482,52 @@ def authenticated_search_client(authenticated_app, mock_search_service):
     """
     from typing import Any
 
+    from dishka import Provider, Scope, make_async_container, provide
+    from dishka.integrations.fastapi import setup_dishka
     from fastapi.testclient import TestClient
 
-    from app.api.dependencies import get_search_service
+    from app.infrastructure.auth.models import SessionUser
+    from app.infrastructure.search.search_service import SearchService
+
+    # Store the mock service so it can be updated
+    mock_search_service_instance = None
+
+    class TestAuthSearchProvider(Provider):
+        """Test provider for authenticated search client."""
+
+        @provide(scope=Scope.REQUEST)
+        def get_session_user(self) -> SessionUser:
+            from typing import cast
+
+            return cast(SessionUser, test_user)
+
+        @provide(scope=Scope.REQUEST)
+        def get_search_service(self) -> SearchService:
+            # Return the mock service if it's been set up
+            if mock_search_service_instance is not None:
+                return mock_search_service_instance
+            # Otherwise return a real service (which will fail if MeiliSearch is not available)
+            return SearchService()
 
     def setup_search_mock(search_results: dict[str, Any]):
-        mock_service = mock_search_service(search_results)
-        authenticated_app.dependency_overrides[get_search_service] = (
-            lambda: mock_service
-        )
-        return mock_service
+        """Setup search mock for testing."""
+        nonlocal mock_search_service_instance
+        mock_search_service_instance = mock_search_service(search_results)
+        return mock_search_service_instance
 
-    test_client = TestClient(authenticated_app)
+    # Create app with test settings
+    from app.main import create_app
+
+    app = create_app(settings=test_settings)
+
+    # Replace container with test container
+    test_container = make_async_container(TestAuthSearchProvider())
+    try:
+        app.state.dishka_container.close()
+    except RuntimeError:
+        pass
+    app.state.dishka_container = test_container
+    setup_dishka(test_container, app)
+
+    test_client = TestClient(app)
     return test_client, setup_search_mock

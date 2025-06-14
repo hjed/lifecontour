@@ -1,101 +1,116 @@
 """
-Unit tests for auth controller exception handling.
+Unit tests for auth provider exception handling.
 
-Tests that domain exceptions are properly raised and handled by global handlers.
+Tests that auth providers properly raise domain exceptions.
 """
 
 from datetime import UTC, datetime
-from unittest.mock import AsyncMock, Mock
+from unittest.mock import Mock
 
 import pytest
+from fastapi import HTTPException
 
-from app.api.auth.controllers import authorize, get_current_user_info
-from app.infrastructure.auth.exceptions import (
-    AuthenticationError,
-    ProviderNotConfiguredError,
-)
 from app.infrastructure.auth.models import SessionUser
+from app.infrastructure.di.auth import AuthProvider
 
 
-class TestAuthExceptionHandling:
-    """Test that auth controllers properly raise domain exceptions."""
+class TestAuthProviderExceptionHandling:
+    """Test that auth providers properly raise domain exceptions."""
 
-    async def test_get_current_user_info_raises_authentication_error(self):
-        """Test that get_current_user_info raises AuthenticationError for unauthenticated users."""
-        # Test with None user (unauthenticated)
-        with pytest.raises(AuthenticationError) as exc_info:
-            await get_current_user_info(user=None)
+    def test_auth_provider_get_current_user_with_valid_session(self):
+        """Test that auth provider works correctly with valid session."""
+        # Create mock request with valid session data
+        user_data = {
+            "id": "12345",
+            "email": "test@example.com",
+            "name": "Test User",
+            "avatar_url": "https://example.com/avatar.jpg",
+            "provider": "github",
+            "authenticated_at": datetime.now(UTC).isoformat(),
+        }
+        mock_request = Mock()
+        mock_request.session = {"user": user_data}
 
-        assert str(exc_info.value) == "Not authenticated"
+        auth_provider = AuthProvider()
 
-    async def test_get_current_user_info_success_with_authenticated_user(self):
-        """Test that get_current_user_info works correctly with authenticated user."""
-        # Create a mock authenticated user
-        user = SessionUser(
-            id="12345",
-            email="test@example.com",
-            name="Test User",
-            avatar_url="https://example.com/avatar.jpg",
-            provider="github",
-            authenticated_at=datetime.now(UTC),
-        )
+        # Should return valid SessionUser
+        result = auth_provider.get_current_user(mock_request)
+        assert isinstance(result, SessionUser)
+        assert result.id == "12345"
+        assert result.email == "test@example.com"
+        assert result.name == "Test User"
+        assert result.provider == "github"
 
-        # Should not raise any exception
-        response = await get_current_user_info(user=user)
-
-        assert response.id == "12345"
-        assert response.email == "test@example.com"
-        assert response.name == "Test User"
-        assert response.provider == "github"
-
-    async def test_authorize_lets_domain_exceptions_bubble_up(self):
-        """Test that authorize endpoint lets domain exceptions bubble up."""
-        # Create mock request and oauth service
+    def test_auth_provider_get_current_user_with_no_session(self):
+        """Test that auth provider raises HTTPException for no session."""
+        # Create mock request with no session data
         mock_request = Mock()
         mock_request.session = {}
-        mock_request.url_for.return_value = "http://localhost/callback/github"
 
-        # Mock oauth service that raises ProviderNotConfiguredError
-        mock_oauth_service = Mock()
-        mock_oauth_service.get_authorization_url = AsyncMock(
-            side_effect=ProviderNotConfiguredError("github")
-        )
+        auth_provider = AuthProvider()
 
-        # The authorize function should let the exception bubble up
-        with pytest.raises(ProviderNotConfiguredError) as exc_info:
-            await authorize(
-                provider="github",
-                request=mock_request,
-                oauth_service=mock_oauth_service,
-                redirect_url="/",
-            )
+        # Should raise HTTPException for no session
+        with pytest.raises(HTTPException) as exc_info:
+            auth_provider.get_current_user(mock_request)
 
-        assert "github" in str(exc_info.value)
+        assert exc_info.value.status_code == 401
+        assert "Authentication required" in str(exc_info.value.detail)
 
-    async def test_authorize_success_flow(self):
-        """Test that authorize endpoint works correctly in success case."""
-        # Create mock request and oauth service
+    def test_auth_provider_get_current_user_with_invalid_session(self):
+        """Test that auth provider raises HTTPException for invalid session."""
+        # Create mock request with invalid session data
+        mock_request = Mock()
+        mock_request.session = {"user": "invalid_data"}
+
+        auth_provider = AuthProvider()
+
+        # Should raise HTTPException for invalid session data
+        with pytest.raises(HTTPException) as exc_info:
+            auth_provider.get_current_user(mock_request)
+
+        assert exc_info.value.status_code == 401
+
+    def test_auth_provider_get_optional_user_with_no_session(self):
+        """Test that auth provider returns None for no session."""
+        # Create mock request with no session data
         mock_request = Mock()
         mock_request.session = {}
-        mock_request.url_for.return_value = "http://localhost/callback/github"
 
-        # Mock oauth service that returns authorization URL
-        mock_oauth_service = Mock()
-        mock_oauth_service.get_authorization_url = AsyncMock(
-            return_value="https://github.com/login/oauth/authorize?client_id=test"
-        )
+        auth_provider = AuthProvider()
 
-        # Should return RedirectResponse
-        response = await authorize(
-            provider="github",
-            request=mock_request,
-            oauth_service=mock_oauth_service,
-            redirect_url="/dashboard",
-        )
+        # Should return None for no session
+        result = auth_provider.get_optional_user(mock_request)
+        assert result is None
 
-        # Check that session was updated
-        assert mock_request.session["post_auth_redirect"] == "/dashboard"
+    def test_auth_provider_get_optional_user_with_valid_session(self):
+        """Test that auth provider returns SessionUser for valid session."""
+        # Create mock request with valid session data
+        user_data = {
+            "id": "12345",
+            "email": "test@example.com",
+            "name": "Test User",
+            "avatar_url": "https://example.com/avatar.jpg",
+            "provider": "github",
+            "authenticated_at": datetime.now(UTC).isoformat(),
+        }
+        mock_request = Mock()
+        mock_request.session = {"user": user_data}
 
-        # Check that it's a redirect response
-        assert response.status_code == 307
-        assert "github.com" in response.headers["location"]
+        auth_provider = AuthProvider()
+
+        # Should return valid SessionUser
+        result = auth_provider.get_optional_user(mock_request)
+        assert isinstance(result, SessionUser)
+        assert result.id == "12345"
+
+    def test_auth_provider_get_optional_user_with_invalid_session(self):
+        """Test that auth provider returns None for invalid session."""
+        # Create mock request with invalid session data
+        mock_request = Mock()
+        mock_request.session = {"user": "invalid_data"}
+
+        auth_provider = AuthProvider()
+
+        # Should return None for invalid session (graceful handling)
+        result = auth_provider.get_optional_user(mock_request)
+        assert result is None

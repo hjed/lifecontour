@@ -4,16 +4,9 @@ Integration tests for authentication requirements on API endpoints.
 Tests that all protected endpoints require authentication and return 401 when not authenticated.
 """
 
-from unittest.mock import Mock
-
 import pytest
 from fastapi.testclient import TestClient
 
-from app.api.dependencies import (
-    get_async_db_connection,
-    get_contact_service,
-    get_search_service,
-)
 from app.infrastructure.config import Settings
 from app.main import create_app
 
@@ -23,29 +16,19 @@ class TestAuthenticationRequirements:
 
     @pytest.fixture
     def client(self):
-        """Create test client with mocked dependencies to avoid database connections."""
-        # Create test settings that allow all hosts for testing
+        """Create test client with test database configuration."""
+        # Create test settings that use the test database
         test_settings = Settings(
             debug=True,
+            database_url="postgresql+asyncpg://postgres:postgres@localhost:5433/personal_management_test",
             allowed_hosts=["*"],  # Allow all hosts for testing
             cors_origins=["*"],
         )
 
         app = create_app(settings=test_settings)
 
-        # Mock all dependencies that might try to connect to external services
-        async def mock_db_connection():
-            yield Mock()
-
-        def mock_contact_service():
-            return Mock()
-
-        def mock_search_service():
-            return Mock()
-
-        app.dependency_overrides[get_async_db_connection] = mock_db_connection
-        app.dependency_overrides[get_contact_service] = mock_contact_service
-        app.dependency_overrides[get_search_service] = mock_search_service
+        # Note: With Dishka, dependencies are automatically handled
+        # These tests should fail with 401 before database connection is attempted
 
         return TestClient(app)
 

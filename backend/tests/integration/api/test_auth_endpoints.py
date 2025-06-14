@@ -45,6 +45,45 @@ def client(test_app):
 class TestAuthEndpoints:
     """Test authentication API endpoints."""
 
+    def _create_oauth_test_client(self, test_settings: "Settings"):
+        """Helper to create test client with OAuth service configured."""
+        from dishka import Provider, Scope, make_async_container, provide
+        from dishka.integrations.fastapi import setup_dishka
+
+        from app.infrastructure.auth.models import SessionUser
+        from app.infrastructure.auth.oauth_service import OAuthService
+        from app.infrastructure.config import Settings
+
+        class TestOAuthProvider(Provider):
+            """Test provider for OAuth service."""
+
+            @provide(scope=Scope.APP)
+            def get_oauth_service(self) -> OAuthService:
+                return OAuthService(test_settings)
+
+            @provide(scope=Scope.APP)
+            def get_settings(self) -> Settings:
+                return test_settings
+
+            @provide(scope=Scope.REQUEST)
+            def get_session_user(self) -> SessionUser | None:
+                # Return None for unauthenticated test scenarios
+                return None
+
+        # Create app with test settings
+        app = create_app(test_settings)
+
+        # Replace container with test container
+        test_container = make_async_container(TestOAuthProvider())
+        try:
+            app.state.dishka_container.close()
+        except RuntimeError:
+            pass
+        app.state.dishka_container = test_container
+        setup_dishka(test_container, app)
+
+        return TestClient(app)
+
     def test_get_auth_providers_no_providers(self):
         """Test getting available OAuth providers when none are configured."""
         # Create app with no OAuth providers
@@ -66,24 +105,7 @@ class TestAuthEndpoints:
 
     def test_get_auth_providers_with_providers(self, test_settings):
         """Test getting available OAuth providers when configured."""
-        from app.api.auth.dependencies import get_oauth_service
-        from app.infrastructure.auth.oauth_service import OAuthService
-        from app.infrastructure.config import get_settings
-
-        # Create app with test settings that have OAuth providers configured
-        app = create_app(test_settings)
-
-        # Override the OAuth service dependency to use test settings
-        def get_test_oauth_service():
-            return OAuthService(test_settings)
-
-        def get_test_settings():
-            return test_settings
-
-        app.dependency_overrides[get_oauth_service] = get_test_oauth_service
-        app.dependency_overrides[get_settings] = get_test_settings
-
-        client = TestClient(app)
+        client = self._create_oauth_test_client(test_settings)
 
         response = client.get("/api/auth/providers")
 
@@ -137,24 +159,7 @@ class TestAuthEndpoints:
 
     def test_authorize_github_provider(self, test_settings):
         """Test OAuth authorization with GitHub provider."""
-        from app.api.auth.dependencies import get_oauth_service
-        from app.infrastructure.auth.oauth_service import OAuthService
-        from app.infrastructure.config import get_settings
-
-        # Create app with test settings
-        app = create_app(test_settings)
-
-        # Override dependencies
-        def get_test_oauth_service():
-            return OAuthService(test_settings)
-
-        def get_test_settings():
-            return test_settings
-
-        app.dependency_overrides[get_oauth_service] = get_test_oauth_service
-        app.dependency_overrides[get_settings] = get_test_settings
-
-        client = TestClient(app)
+        client = self._create_oauth_test_client(test_settings)
 
         response = client.get("/api/auth/authorize/github", follow_redirects=False)
 
@@ -169,24 +174,7 @@ class TestAuthEndpoints:
 
     def test_authorize_microsoft_provider(self, test_settings):
         """Test OAuth authorization with Microsoft provider."""
-        from app.api.auth.dependencies import get_oauth_service
-        from app.infrastructure.auth.oauth_service import OAuthService
-        from app.infrastructure.config import get_settings
-
-        # Create app with test settings
-        app = create_app(test_settings)
-
-        # Override dependencies
-        def get_test_oauth_service():
-            return OAuthService(test_settings)
-
-        def get_test_settings():
-            return test_settings
-
-        app.dependency_overrides[get_oauth_service] = get_test_oauth_service
-        app.dependency_overrides[get_settings] = get_test_settings
-
-        client = TestClient(app)
+        client = self._create_oauth_test_client(test_settings)
 
         response = client.get("/api/auth/authorize/microsoft", follow_redirects=False)
 
@@ -200,24 +188,7 @@ class TestAuthEndpoints:
 
     def test_authorize_discord_provider(self, test_settings):
         """Test OAuth authorization with Discord provider."""
-        from app.api.auth.dependencies import get_oauth_service
-        from app.infrastructure.auth.oauth_service import OAuthService
-        from app.infrastructure.config import get_settings
-
-        # Create app with test settings
-        app = create_app(test_settings)
-
-        # Override dependencies
-        def get_test_oauth_service():
-            return OAuthService(test_settings)
-
-        def get_test_settings():
-            return test_settings
-
-        app.dependency_overrides[get_oauth_service] = get_test_oauth_service
-        app.dependency_overrides[get_settings] = get_test_settings
-
-        client = TestClient(app)
+        client = self._create_oauth_test_client(test_settings)
 
         response = client.get("/api/auth/authorize/discord", follow_redirects=False)
 
@@ -231,24 +202,7 @@ class TestAuthEndpoints:
 
     def test_authorize_with_redirect_url(self, test_settings):
         """Test OAuth authorization with custom redirect URL."""
-        from app.api.auth.dependencies import get_oauth_service
-        from app.infrastructure.auth.oauth_service import OAuthService
-        from app.infrastructure.config import get_settings
-
-        # Create app with test settings
-        app = create_app(test_settings)
-
-        # Override dependencies
-        def get_test_oauth_service():
-            return OAuthService(test_settings)
-
-        def get_test_settings():
-            return test_settings
-
-        app.dependency_overrides[get_oauth_service] = get_test_oauth_service
-        app.dependency_overrides[get_settings] = get_test_settings
-
-        client = TestClient(app)
+        client = self._create_oauth_test_client(test_settings)
 
         response = client.get(
             "/api/auth/authorize/github?redirect_url=/dashboard", follow_redirects=False
@@ -259,24 +213,7 @@ class TestAuthEndpoints:
 
     def test_oauth_callback_invalid_state(self, test_settings):
         """Test OAuth callback with invalid state parameter."""
-        from app.api.auth.dependencies import get_oauth_service
-        from app.infrastructure.auth.oauth_service import OAuthService
-        from app.infrastructure.config import get_settings
-
-        # Create app with test settings
-        app = create_app(test_settings)
-
-        # Override dependencies
-        def get_test_oauth_service():
-            return OAuthService(test_settings)
-
-        def get_test_settings():
-            return test_settings
-
-        app.dependency_overrides[get_oauth_service] = get_test_oauth_service
-        app.dependency_overrides[get_settings] = get_test_settings
-
-        client = TestClient(app)
+        client = self._create_oauth_test_client(test_settings)
 
         response = client.get(
             "/api/auth/callback/github?code=test_code&state=invalid_state",
@@ -290,24 +227,7 @@ class TestAuthEndpoints:
 
     def test_oauth_callback_missing_code(self, test_settings):
         """Test OAuth callback without authorization code."""
-        from app.api.auth.dependencies import get_oauth_service
-        from app.infrastructure.auth.oauth_service import OAuthService
-        from app.infrastructure.config import get_settings
-
-        # Create app with test settings
-        app = create_app(test_settings)
-
-        # Override dependencies
-        def get_test_oauth_service():
-            return OAuthService(test_settings)
-
-        def get_test_settings():
-            return test_settings
-
-        app.dependency_overrides[get_oauth_service] = get_test_oauth_service
-        app.dependency_overrides[get_settings] = get_test_settings
-
-        client = TestClient(app)
+        client = self._create_oauth_test_client(test_settings)
 
         response = client.get(
             "/api/auth/callback/github?state=test_state", follow_redirects=False
@@ -321,10 +241,7 @@ class TestAuthEndpoints:
     @patch("app.infrastructure.auth.oauth_service.OAuthService.handle_callback")
     def test_oauth_callback_success(self, mock_handle_callback, test_settings):
         """Test successful OAuth callback."""
-        from app.api.auth.dependencies import get_oauth_service
         from app.infrastructure.auth.models import OAuthUserInfo
-        from app.infrastructure.auth.oauth_service import OAuthService
-        from app.infrastructure.config import get_settings
 
         # Mock successful OAuth callback
         mock_handle_callback.return_value = OAuthUserInfo(
@@ -335,20 +252,7 @@ class TestAuthEndpoints:
             provider="github",
         )
 
-        # Create app with test settings
-        app = create_app(test_settings)
-
-        # Override dependencies
-        def get_test_oauth_service():
-            return OAuthService(test_settings)
-
-        def get_test_settings():
-            return test_settings
-
-        app.dependency_overrides[get_oauth_service] = get_test_oauth_service
-        app.dependency_overrides[get_settings] = get_test_settings
-
-        client = TestClient(app)
+        client = self._create_oauth_test_client(test_settings)
 
         # First, initiate OAuth flow to set up session
         auth_response = client.get("/api/auth/authorize/github", follow_redirects=False)
@@ -384,25 +288,9 @@ class TestAuthEndpoints:
 
     def test_cors_headers(self, test_settings):
         """Test CORS headers on auth endpoints."""
-        from app.api.auth.dependencies import get_oauth_service
-        from app.infrastructure.auth.oauth_service import OAuthService
-        from app.infrastructure.config import get_settings
-
         # Create app with test settings that include CORS origins
         test_settings.cors_origins = ["http://localhost:3000", "http://localhost:8080"]
-        app = create_app(test_settings)
-
-        # Override dependencies
-        def get_test_oauth_service():
-            return OAuthService(test_settings)
-
-        def get_test_settings():
-            return test_settings
-
-        app.dependency_overrides[get_oauth_service] = get_test_oauth_service
-        app.dependency_overrides[get_settings] = get_test_settings
-
-        client = TestClient(app)
+        client = self._create_oauth_test_client(test_settings)
 
         # Test CORS headers on a GET request with Origin header
         response = client.get(

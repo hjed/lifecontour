@@ -34,9 +34,48 @@ class ContactTestProvider(Provider):
 
     @provide(scope=Scope.REQUEST)
     def get_contact_service(self, connection: AsyncConnection) -> ContactService:
-        from app.shared.dependencies import create_contact_service
+        # Create ContactService using the same factory logic
+        from app.core.contacts.adapters.sql import (
+            SqlContactEventPublisher,
+            SqlContactFieldHistoryRepository,
+            SqlContactRepository,
+            SqlTagRepository,
+        )
+        from app.core.contacts.services import (
+            AddressValidationService,
+            ContactHistoryService,
+            ContactService,
+            ContactValidationService,
+            TagHierarchyService,
+        )
 
-        return create_contact_service(connection)
+        # Create repositories
+        contact_repository = SqlContactRepository(connection)
+        tag_repository = SqlTagRepository(connection)
+        history_repository = SqlContactFieldHistoryRepository(connection)
+        event_publisher = SqlContactEventPublisher(connection)
+
+        # Create validation services
+        contact_validation_service = ContactValidationService(contact_repository)
+        address_validation_service = AddressValidationService()
+
+        # Create history service
+        history_service = ContactHistoryService(history_repository)
+
+        # Create tag hierarchy service
+        tag_hierarchy_service = TagHierarchyService(tag_repository)
+
+        # Create and return contact service
+        return ContactService(
+            contact_repo=contact_repository,
+            tag_repo=tag_repository,
+            history_repo=history_repository,
+            event_publisher=event_publisher,
+            contact_validation_service=contact_validation_service,
+            address_validation_service=address_validation_service,
+            history_service=history_service,
+            tag_hierarchy_service=tag_hierarchy_service,
+        )
 
     @provide(scope=Scope.APP)
     def get_search_service(self) -> SearchService:
