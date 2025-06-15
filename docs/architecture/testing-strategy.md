@@ -1,6 +1,106 @@
 # Testing Strategy - Personal CRM & Journal System
 
-This document provides comprehensive testing patterns and strategies for the Personal CRM & Journal System.
+This document provides comprehensive testing patterns and strategies for the Personal CRM & Journal System with its Isolated Worker Architecture.
+
+## Testing Strategy for Isolated Worker Architecture
+
+The system's Isolated Worker Architecture requires a specialized testing approach that accounts for the distributed nature of integrations.
+
+### Three-Tier Testing Strategy
+
+#### 1. Worker Unit Tests
+**Scope**: Individual integration worker logic in isolation
+**Location**: `integration_workers/{integration_name}/tests/`
+**Execution**: `cd integration_workers/google_contacts && pytest`
+
+**Characteristics**:
+- Test worker's internal logic and business rules
+- Mock external API clients (Google, Strava, etc.)
+- Mock `core_shared` database functions
+- No Docker, Redis, or real database required
+- Fast execution for rapid development feedback
+
+**Example**:
+```python
+# integration_workers/google_contacts/tests/test_sync_service.py
+@pytest.fixture
+def mock_google_client():
+    return Mock(spec=GoogleContactsClient)
+
+@pytest.fixture
+def mock_db_session():
+    return Mock(spec=Session)
+
+def test_sync_contact_creates_new_contact(mock_google_client, mock_db_session):
+    # Test sync logic without external dependencies
+    pass
+```
+
+#### 2. Core Application Tests
+**Scope**: Core FastAPI application without integration workers
+**Location**: `backend/tests/`
+**Execution**: Standard pytest in backend directory
+
+**Characteristics**:
+- Mock ARQ task queue client (`arq.enqueue_job`)
+- Test that correct tasks are enqueued with correct parameters
+- Do NOT test worker execution - only task scheduling
+- Use existing unit/integration test patterns
+
+**Example**:
+```python
+# backend/tests/integration/api/test_sync_endpoints.py
+@pytest.fixture
+def mock_arq_client():
+    return Mock(spec=ArqRedis)
+
+async def test_trigger_google_sync_enqueues_task(client, mock_arq_client):
+    response = await client.post("/api/integrations/google/sync")
+    assert response.status_code == 202
+    mock_arq_client.enqueue_job.assert_called_once_with(
+        'sync_google_contacts',
+        user_id=123
+    )
+```
+
+#### 3. End-to-End (E2E) Integration Tests
+**Scope**: Full system including core app + workers + infrastructure
+**Location**: `tests/e2e/`
+**Execution**: Dedicated E2E test environment
+
+**Characteristics**:
+- Uses `docker-compose.e2e.yml` with all services
+- Tests complete data flow from API call to database changes
+- Polls database to verify worker execution results
+- Tests real integration between all components
+- Slower execution but comprehensive validation
+
+**Example**:
+```python
+# tests/e2e/test_google_contacts_sync.py
+async def test_google_contacts_full_sync():
+    # 1. Trigger sync via API
+    response = await api_client.post("/api/integrations/google/sync")
+    assert response.status_code == 202
+
+    # 2. Wait for worker to process
+    await asyncio.sleep(5)
+
+    # 3. Verify database changes
+    contacts = await db.execute("SELECT * FROM contacts WHERE source = 'google'")
+    assert len(contacts) > 0
+
+    # 4. Verify sync metadata
+    sync_data = await db.execute("SELECT * FROM sync_metadata WHERE integration_source = 'google_contacts'")
+    assert len(sync_data) > 0
+```
+
+### Testing Workflow
+
+1. **Worker Unit Tests**: Fast feedback during worker development
+2. **Core App Tests**: Verify task scheduling and API contracts
+3. **E2E Tests**: Validate complete system integration
+4. **Run All**: Comprehensive validation before deployment
 
 ## Backend Testing with pytest
 
