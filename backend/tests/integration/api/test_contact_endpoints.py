@@ -202,3 +202,234 @@ class TestContactEndpoints:
             note["attributes"]["content"]
             == "Met at tech conference 2024. Interested in collaboration."
         )
+
+    async def test_update_contact_with_methods_and_notes(self, integration_api_client):
+        """Test updating a contact with new methods, addresses, and notes."""
+        # First, create a contact with initial data
+        create_request = {
+            "data": {
+                "type": "contacts",
+                "attributes": {
+                    "first_name": "Bob",
+                    "last_name": "Wilson",
+                    "contact_methods": [
+                        {
+                            "type": "contact_methods",
+                            "attributes": {
+                                "method_type": "email",
+                                "value": "bob.wilson@oldcompany.com",
+                                "label": "Work",
+                                "is_primary": True,
+                            },
+                        }
+                    ],
+                    "addresses": [],
+                    "notes": [
+                        {
+                            "type": "contact_notes",
+                            "attributes": {
+                                "content": "Original note",
+                            },
+                        }
+                    ],
+                },
+            }
+        }
+
+        create_response = await integration_api_client.post(
+            "/api/contacts", json=create_request
+        )
+        assert create_response.status_code == 201
+        created_contact = create_response.json()
+        contact_id = created_contact["data"]["id"]
+
+        # Now update the contact with new methods, addresses, and notes
+        update_request = {
+            "data": {
+                "type": "contacts",
+                "id": contact_id,
+                "attributes": {
+                    "first_name": "Robert",  # Changed name
+                    "last_name": "Wilson",
+                    "contact_methods": [
+                        {
+                            "type": "contact_methods",
+                            "attributes": {
+                                "method_type": "email",
+                                "value": "robert.wilson@newcompany.com",  # New email
+                                "label": "Work",
+                                "is_primary": True,
+                            },
+                        },
+                        {
+                            "type": "contact_methods",
+                            "attributes": {
+                                "method_type": "phone",
+                                "value": "+61-3-1234-5678",  # New phone
+                                "label": "Mobile",
+                                "is_primary": False,
+                            },
+                        },
+                    ],
+                    "addresses": [
+                        {
+                            "type": "contact_addresses",
+                            "attributes": {
+                                "street_line_1": "456 New Street",  # New address
+                                "locality": "Sydney",
+                                "region": "NSW",
+                                "postal_code": "2000",
+                                "country_code": "AU",
+                                "label": "Office",
+                                "is_primary": True,
+                            },
+                        }
+                    ],
+                    "notes": [
+                        {
+                            "type": "contact_notes",
+                            "attributes": {
+                                "content": "Updated note - moved to new company",  # New note
+                            },
+                        },
+                        {
+                            "type": "contact_notes",
+                            "attributes": {
+                                "content": "Additional note about project collaboration",  # Additional note
+                            },
+                        },
+                    ],
+                },
+            }
+        }
+
+        update_response = await integration_api_client.put(
+            f"/api/contacts/{contact_id}", json=update_request
+        )
+        assert update_response.status_code == 200
+        updated_data = update_response.json()
+
+        # Verify the contact was updated correctly
+        assert updated_data["data"]["id"] == contact_id
+        assert updated_data["data"]["attributes"]["first_name"] == "Robert"
+        assert updated_data["data"]["attributes"]["last_name"] == "Wilson"
+
+        # Verify contact methods were updated (should have 2 methods now)
+        contact_methods = updated_data["data"]["attributes"]["contact_methods"]
+        assert len(contact_methods) == 2
+
+        email_method = next(
+            m for m in contact_methods if m["attributes"]["method_type"] == "email"
+        )
+        assert email_method["attributes"]["value"] == "robert.wilson@newcompany.com"
+        assert email_method["attributes"]["is_primary"] is True
+
+        phone_method = next(
+            m for m in contact_methods if m["attributes"]["method_type"] == "phone"
+        )
+        assert phone_method["attributes"]["value"] == "+61-3-1234-5678"
+        assert phone_method["attributes"]["is_primary"] is False
+
+        # Verify addresses were updated (should have 1 address now)
+        addresses = updated_data["data"]["attributes"]["addresses"]
+        assert len(addresses) == 1
+        address = addresses[0]
+        assert address["attributes"]["street_line_1"] == "456 New Street"
+        assert address["attributes"]["locality"] == "Sydney"
+        assert address["attributes"]["region"] == "NSW"
+
+        # Verify notes were updated (should have 2 notes now)
+        notes = updated_data["data"]["attributes"]["notes"]
+        assert len(notes) == 2
+        note_contents = [note["attributes"]["content"] for note in notes]
+        assert "Updated note - moved to new company" in note_contents
+        assert "Additional note about project collaboration" in note_contents
+
+        # Verify the changes persist by fetching the contact again
+        get_response = await integration_api_client.get(f"/api/contacts/{contact_id}")
+        assert get_response.status_code == 200
+        fetched_data = get_response.json()
+
+        # Verify the fetched data matches the updated data
+        assert fetched_data["data"]["attributes"]["first_name"] == "Robert"
+        assert len(fetched_data["data"]["attributes"]["contact_methods"]) == 2
+        assert len(fetched_data["data"]["attributes"]["addresses"]) == 1
+        assert len(fetched_data["data"]["attributes"]["notes"]) == 2
+
+    async def test_update_contact_replace_methods_strategy(
+        self, integration_api_client
+    ):
+        """Test that updating contact methods uses replacement strategy (not additive)."""
+        # Create a contact with 2 methods
+        create_request = {
+            "data": {
+                "type": "contacts",
+                "attributes": {
+                    "first_name": "Alice",
+                    "last_name": "Johnson",
+                    "contact_methods": [
+                        {
+                            "type": "contact_methods",
+                            "attributes": {
+                                "method_type": "email",
+                                "value": "alice@oldcompany.com",
+                                "is_primary": True,
+                            },
+                        },
+                        {
+                            "type": "contact_methods",
+                            "attributes": {
+                                "method_type": "phone",
+                                "value": "+61-2-1111-1111",
+                                "is_primary": False,
+                            },
+                        },
+                    ],
+                    "addresses": [],
+                    "notes": [],
+                },
+            }
+        }
+
+        create_response = await integration_api_client.post(
+            "/api/contacts", json=create_request
+        )
+        assert create_response.status_code == 201
+        contact_id = create_response.json()["data"]["id"]
+
+        # Update with only 1 method (should replace, not add)
+        update_request = {
+            "data": {
+                "type": "contacts",
+                "id": contact_id,
+                "attributes": {
+                    "first_name": "Alice",
+                    "last_name": "Johnson",
+                    "contact_methods": [
+                        {
+                            "type": "contact_methods",
+                            "attributes": {
+                                "method_type": "email",
+                                "value": "alice@newcompany.com",  # Different email
+                                "is_primary": True,
+                            },
+                        }
+                        # Note: No phone method in update - should be removed
+                    ],
+                    "addresses": [],
+                    "notes": [],
+                },
+            }
+        }
+
+        update_response = await integration_api_client.put(
+            f"/api/contacts/{contact_id}", json=update_request
+        )
+        assert update_response.status_code == 200
+        updated_data = update_response.json()
+
+        # Verify only 1 method remains (replacement strategy)
+        contact_methods = updated_data["data"]["attributes"]["contact_methods"]
+        assert len(contact_methods) == 1
+        assert contact_methods[0]["attributes"]["method_type"] == "email"
+        assert contact_methods[0]["attributes"]["value"] == "alice@newcompany.com"

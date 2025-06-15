@@ -417,6 +417,11 @@ class SqlContactRepository(ContactRepository):
         if result.rowcount == 0:
             raise ContactNotFoundError(method_id)
 
+    async def delete_all_methods(self, contact_id: int) -> None:
+        """Delete all contact methods for a contact."""
+        query = text("DELETE FROM contact_methods WHERE contact_id = :contact_id")
+        await self.conn.execute(query, {"contact_id": contact_id})
+
     async def add_address(
         self, contact_id: int, address: ContactAddress
     ) -> ContactAddress:
@@ -506,6 +511,11 @@ class SqlContactRepository(ContactRepository):
         if result.rowcount == 0:
             raise ContactNotFoundError(address_id)
 
+    async def delete_all_addresses(self, contact_id: int) -> None:
+        """Delete all contact addresses for a contact."""
+        query = text("DELETE FROM contact_addresses WHERE contact_id = :contact_id")
+        await self.conn.execute(query, {"contact_id": contact_id})
+
     async def add_note(self, contact_id: int, note: ContactNote) -> ContactNote:
         """Add a contact note."""
         query = text(
@@ -553,6 +563,11 @@ class SqlContactRepository(ContactRepository):
 
         if result.rowcount == 0:
             raise ContactNotFoundError(note_id)
+
+    async def delete_all_notes(self, contact_id: int) -> None:
+        """Delete all contact notes for a contact."""
+        query = text("DELETE FROM contact_notes WHERE contact_id = :contact_id")
+        await self.conn.execute(query, {"contact_id": contact_id})
 
     async def assign_tag(self, contact_id: int, tag_id: int) -> None:
         """Assign a tag to a contact."""
