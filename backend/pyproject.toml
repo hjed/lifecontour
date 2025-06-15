@@ -27,6 +27,7 @@ dependencies = [
     "opentelemetry-instrumentation-fastapi>=0.42b0",
     "opentelemetry-instrumentation-sqlalchemy>=0.42b0",
     "opentelemetry-instrumentation-httpx>=0.42b0",
+    "opentelemetry-exporter-otlp>=1.21.0",
     "python-stdnum>=1.20",
     "pycountry>=23.12.11",
     "meilisearch>=0.31.0",

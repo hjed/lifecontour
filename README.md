@@ -155,9 +155,24 @@ alembic downgrade -1
 
 ## 📚 Documentation
 
+### Core Documentation
 - **[Architecture Overview](docs/architecture.md)** - System design and patterns
 - **[AI Guidelines](docs/ai-guidelines.md)** - Development guidelines for AI assistants
 - **[Task Management](docs/tasks.md)** - Agile development roadmap
+
+### Development Guides
+- **[Code Quality Standards](docs/code-quality-standards.md)** - Linting, formatting, and testing standards
+- **[CI/CD Setup](docs/ci-cd-setup.md)** - Continuous integration and deployment
+- **[MCP Setup](docs/mcp-setup.md)** - Model Context Protocol integration
+
+### Troubleshooting
+- **[Troubleshooting Index](docs/troubleshooting/README.md)** - Complete troubleshooting guide index
+- **[Docker Development](docs/troubleshooting/docker-development.md)** - Complete Docker setup and usage
+- **[Docker Fixes](docs/troubleshooting/docker-fixes.md)** - Common Docker issues and solutions
+- **[CI Integration Tests](docs/troubleshooting/ci-integration-tests-fix.md)** - Backend CI test configuration
+- **[Frontend CI Fixes](docs/troubleshooting/frontend-ci-fixes.md)** - Frontend CI and testing issues
+
+### Component Documentation
 - **[Backend README](backend/README.md)** - Python FastAPI backend details
 - **[Frontend README](frontend/README.md)** - Next.js frontend details
 

@@ -1,5 +1,5 @@
 #!/bin/sh
 set -e
 
-# Start the application
-exec node server.js
+# Start the Next.js application in production mode
+exec pnpm start

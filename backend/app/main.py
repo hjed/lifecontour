@@ -48,11 +48,48 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     # Setup OpenTelemetry instrumentation
     if settings.enable_telemetry:
-        tracer = trace.get_tracer(__name__)
-        FastAPIInstrumentor.instrument_app(app, tracer_provider=tracer)
+        from opentelemetry.exporter.otlp.proto.http.trace_exporter import (
+            OTLPSpanExporter,
+        )
+        from opentelemetry.sdk.resources import Resource
+        from opentelemetry.sdk.trace import TracerProvider
+        from opentelemetry.sdk.trace.export import BatchSpanProcessor
+
+        # Configure resource attributes
+        resource_attrs = {"service.name": settings.otel_service_name}
+        if settings.otel_resource_attributes:
+            # Parse additional resource attributes
+            for attr in settings.otel_resource_attributes.split(","):
+                if "=" in attr:
+                    key, value = attr.strip().split("=", 1)
+                    resource_attrs[key] = value
+
+        # Set up tracer provider
+        resource = Resource.create(resource_attrs)
+        trace.set_tracer_provider(TracerProvider(resource=resource))
+
+        # Configure OTLP exporter if endpoint is provided
+        if settings.otel_exporter_otlp_endpoint:
+            otlp_exporter = OTLPSpanExporter(
+                endpoint=f"{settings.otel_exporter_otlp_endpoint}/v1/traces"
+            )
+            span_processor = BatchSpanProcessor(otlp_exporter)
+            tracer_provider = trace.get_tracer_provider()
+            if hasattr(tracer_provider, "add_span_processor"):
+                tracer_provider.add_span_processor(span_processor)
+
+        # Instrument FastAPI, HTTP clients, and SQLAlchemy
+        FastAPIInstrumentor.instrument_app(
+            app, tracer_provider=trace.get_tracer_provider()
+        )
         HTTPXClientInstrumentor().instrument()
         SQLAlchemyInstrumentor().instrument(engine=engine)
-        logger.info("OpenTelemetry instrumentation enabled")
+
+        logger.info(
+            "OpenTelemetry instrumentation enabled",
+            service_name=settings.otel_service_name,
+            endpoint=settings.otel_exporter_otlp_endpoint,
+        )
 
     # Start background tasks
     outbox_task = None

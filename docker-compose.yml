@@ -49,17 +49,20 @@ services:
     build:
       context: .
       dockerfile: docker/backend/Dockerfile
+      args:
+        BUILD_ENV: production
+        INSTALL_DEV_DEPS: "false"
     container_name: personal-management-backend
     environment:
-      - DATABASE_URL=postgresql://postgres:postgres@database:5432/personal_management
-      - DEBUG=true
-      - LOG_LEVEL=INFO
-      - CORS_ORIGINS="http://localhost:3000,http://127.0.0.1:3000,http://frontend:3000"
-      - ALLOWED_HOSTS="localhost,127.0.0.1,backend"
-      - MEILISEARCH_URL=http://meilisearch:7700
-      - MEILISEARCH_API_KEY=personal_management_search_key
-      - SESSION_SECRET_KEY=personal_management_session_secret_key_change_in_production
-      - SEARCH_INDEX_PREFIX=pms_
+      DATABASE_URL: postgresql://postgres:postgres@database:5432/personal_management
+      DEBUG: "true"
+      LOG_LEVEL: INFO
+      CORS_ORIGINS: "http://localhost:3000,http://127.0.0.1:3000,http://frontend:3000"
+      ALLOWED_HOSTS: "localhost,127.0.0.1,backend"
+      MEILISEARCH_URL: http://meilisearch:7700
+      MEILISEARCH_API_KEY: personal_management_search_key
+      SESSION_SECRET_KEY: personal_management_session_secret_key_change_in_production
+      SEARCH_INDEX_PREFIX: pms_
     volumes:
       - ./backend:/app
     ports:
@@ -82,8 +85,11 @@ services:
   # Next.js Frontend
   frontend:
     build:
-      context: ./frontend
-      dockerfile: ../docker/frontend/Dockerfile
+      context: .
+      dockerfile: docker/frontend/Dockerfile
+      args:
+        BUILD_ENV: production
+        NODE_ENV: production
     container_name: personal-management-frontend
     environment:
       - BACKEND_URL=http://backend:8000
