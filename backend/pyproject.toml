@@ -34,6 +34,7 @@ dependencies = [
     "itsdangerous>=2.1.0",
     "fastmcp>=2.3.2",
     "dishka>=1.6.0",
+    "arq>=0.25.0",
 ]
 
 [project.optional-dependencies]

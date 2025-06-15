@@ -44,6 +44,24 @@ services:
     networks:
       - personal-management
 
+  # Redis for ARQ Task Queue
+  redis:
+    image: redis:7-alpine
+    container_name: personal-management-redis
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    ports:
+      - "6380:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - personal-management
+
   # Python FastAPI Backend
   backend:
     build:
@@ -63,6 +81,7 @@ services:
       MEILISEARCH_API_KEY: personal_management_search_key
       SESSION_SECRET_KEY: personal_management_session_secret_key_change_in_production
       SEARCH_INDEX_PREFIX: pms_
+      REDIS_URL: redis://redis:6379
     volumes:
       - ./backend:/app
     ports:
@@ -71,6 +90,8 @@ services:
       database:
         condition: service_healthy
       meilisearch:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
@@ -142,6 +163,8 @@ volumes:
   postgres_data:
     driver: local
   meilisearch_data:
+    driver: local
+  redis_data:
     driver: local
   nginx_logs:
     driver: local
