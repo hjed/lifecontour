@@ -19,6 +19,7 @@ from app.core.contacts.models.value_objects import TagName
 from app.core.contacts.services import ContactService
 from app.infrastructure.search.search_service import SearchService
 from app.mcp.domains.contacts.tools import register_contact_tools
+from tests.fixtures.contact_fixtures import create_basic_contact, create_full_contact
 
 
 class ContactTestProvider(Provider):
@@ -105,37 +106,18 @@ class TestContactToolsIntegration:
     @pytest.fixture
     def sample_contact_entity(self):
         """Create a sample contact entity for testing."""
-        contact = Contact(
-            id=123,
+        # Use shared fixture factory with customized values to match original
+        return create_full_contact(
             first_name="John",
             last_name="Doe",
             middle_name="William",
             nick_name="Johnny",
-        )
-
-        # Add contact methods
-        email_method = ContactMethod(
-            id=1,
-            method_type=MethodType.EMAIL,
-            value="john@example.com",
-            is_primary=True,
+            email="john@example.com",
+            phone="+1234567890",
+            tags=["friend", "work"],
+            notes=["Great colleague and friend"],
             contact_id=123,
         )
-        phone_method = ContactMethod(
-            id=2,
-            method_type=MethodType.PHONE,
-            value="+1234567890",
-            is_primary=True,
-            contact_id=123,
-        )
-        contact.methods = [email_method, phone_method]
-
-        # Add tags
-        tag1 = Tag(id=1, name=TagName("friend"))
-        tag2 = Tag(id=2, name=TagName("work"))
-        contact.tags = [tag1, tag2]
-
-        return contact
 
     @pytest_asyncio.fixture
     async def test_container(self, clean_database: AsyncConnection):
@@ -149,6 +131,13 @@ class TestContactToolsIntegration:
         """Get contact service from test container."""
         async with test_container() as request_container:
             return await request_container.get(ContactService)
+
+    @pytest.fixture
+    def tag_repo(self, clean_database: AsyncConnection):
+        """Create real tag repository."""
+        from app.core.contacts.adapters.sql import SqlTagRepository
+
+        return SqlTagRepository(clean_database)
 
     @pytest_asyncio.fixture
     async def search_service(self, test_container):
@@ -223,7 +212,6 @@ class TestContactToolsIntegration:
     ):
         """Test create_contact tool with real database integration."""
         # Test creating a contact directly with the service
-        from app.core.contacts.models.entities import Contact, ContactMethod, MethodType
 
         # Create a test contact
         contact = Contact(
@@ -264,10 +252,7 @@ class TestContactToolsIntegration:
         """Test creating a contact with phone and notes using real database with single transaction."""
         # Test creating a contact with additional data using the new single-call approach
         from app.core.contacts.models.entities import (
-            Contact,
-            ContactMethod,
             ContactNote,
-            MethodType,
         )
 
         # Create a test contact with attached methods and notes
@@ -326,13 +311,8 @@ class TestContactToolsIntegration:
         self, contact_service: ContactService, clean_database: AsyncConnection
     ):
         """Test creating a contact with minimal data using real database."""
-        # Test creating a contact with minimal data
-        from app.core.contacts.models.entities import Contact
-
-        # Create a test contact with only required fields
-        contact = Contact(
-            first_name="Bob",
-        )
+        # Use shared fixture factory for consistent test data
+        contact = create_basic_contact(first_name="Bob", last_name=None)
 
         # Save the contact
         saved_contact = await contact_service.create_contact(contact, clean_database)
@@ -356,11 +336,9 @@ class TestContactToolsIntegration:
         self, contact_service: ContactService, clean_database: AsyncConnection
     ):
         """Test listing contacts with real database integration."""
-        # Create some test contacts
-        from app.core.contacts.models.entities import Contact
-
-        contact1 = Contact(first_name="John", last_name="Doe")
-        contact2 = Contact(first_name="Jane", last_name="Smith")
+        # Use shared fixture factory for consistent test data
+        contact1 = create_basic_contact(first_name="John", last_name="Doe")
+        contact2 = create_basic_contact(first_name="Jane", last_name="Smith")
 
         await contact_service.create_contact(contact1, clean_database)
         await contact_service.create_contact(contact2, clean_database)
@@ -419,10 +397,7 @@ class TestContactToolsIntegration:
 
         # Create a contact with methods and notes using the same pattern as the MCP tool
         from app.core.contacts.models.entities import (
-            Contact,
-            ContactMethod,
             ContactNote,
-            MethodType,
         )
 
         contact = Contact(
@@ -472,3 +447,84 @@ class TestContactToolsIntegration:
         assert saved_contact.get_primary_phone() == "+1987654321"
         assert len(saved_contact.notes) == 1
         assert saved_contact.notes[0].content == "Created via MCP tool integration test"
+
+    @pytest.mark.asyncio
+    async def test_create_contact_with_tags_integration(
+        self, contact_service: ContactService, tag_repo, clean_database: AsyncConnection
+    ):
+        """Test that create_contact tool handles tags correctly - finds existing and creates new ones."""
+        # First, create an existing tag
+
+        existing_tag = Tag(name=TagName("work"))
+        saved_existing_tag = await tag_repo.save(existing_tag)
+
+        # Now test the MCP tool pattern with both existing and new tags
+        from app.core.contacts.models.entities import (
+            Contact,
+            ContactMethod,
+            MethodType,
+        )
+
+        contact = Contact(
+            first_name="David",
+            last_name="Wilson",
+        )
+
+        # Add email method
+        email_method = ContactMethod(
+            method_type=MethodType.EMAIL,
+            value="david.wilson@example.com",
+            contact_id=0,  # Will be set when contact is saved
+            is_primary=True,
+        )
+        contact.methods.append(email_method)
+
+        # Simulate the MCP tool tag handling logic
+        tag_names = [
+            "work",
+            "client",
+            "important",
+        ]  # work exists, client and important are new
+
+        for tag_name in tag_names:
+            # Try to find existing tag by name
+            existing_tag_found = await tag_repo.find_by_name(tag_name)
+
+            if existing_tag_found:
+                # Use existing tag
+                contact.tags.append(existing_tag_found)
+            else:
+                # Create new tag
+                new_tag = Tag(name=TagName(tag_name))
+                saved_tag = await tag_repo.save(new_tag)
+                contact.tags.append(saved_tag)
+
+        # Create the contact using the service (same as MCP tool)
+        created_contact = await contact_service.create_contact(contact, clean_database)
+
+        # Verify the contact was created with all tags
+        assert created_contact.id is not None
+        assert created_contact.first_name == "David"
+        assert len(created_contact.tags) == 3
+
+        # Verify tag names
+        tag_names_created = [str(tag.name) for tag in created_contact.tags]
+        assert "work" in tag_names_created
+        assert "client" in tag_names_created
+        assert "important" in tag_names_created
+
+        # Verify the contact was actually saved to the database with tags
+        retrieved_contact = await contact_service.get_contact_by_id(created_contact.id)
+        assert retrieved_contact is not None
+        assert len(retrieved_contact.tags) == 3
+
+        retrieved_tag_names = [str(tag.name) for tag in retrieved_contact.tags]
+        assert "work" in retrieved_tag_names
+        assert "client" in retrieved_tag_names
+        assert "important" in retrieved_tag_names
+
+        # Verify that the existing "work" tag was reused (same ID)
+        work_tag_in_contact = next(
+            tag for tag in retrieved_contact.tags if str(tag.name) == "work"
+        )
+        assert work_tag_in_contact.id == saved_existing_tag.id
