@@ -386,12 +386,24 @@ async def get_contact(
 
 For detailed implementation patterns and examples, see:
 
+### Architecture and Design
 - **[Testing Strategy](./architecture/testing-strategy.md)** - Comprehensive testing patterns for PyTest, Jest, and Playwright
 - **[Frontend Design](./architecture/frontend-design.md)** - shadcn/ui component patterns and responsive design
 - **[Domain Architecture](./architecture/domain-architecture.md)** - Domain-driven design patterns and implementation
 - **[API Design](./architecture/api-design.md)** - REST and MCP API implementation patterns
 - **[Technology Stack](./architecture/technology-stack.md)** - Technology choices and configuration
 - **[Deployment Guide](./architecture/deployment-guide.md)** - Docker and deployment configuration
+
+### Development and Operations
+- **[Code Quality Standards](./code-quality-standards.md)** - Linting, formatting, and testing standards
+- **[CI/CD Setup](./ci-cd-setup.md)** - Continuous integration and deployment configuration
+- **[MCP Setup](./mcp-setup.md)** - Model Context Protocol integration guide
+
+### Troubleshooting Guides
+- **[Docker Development](./troubleshooting/docker-development.md)** - Complete Docker setup and development environment
+- **[Docker Fixes](./troubleshooting/docker-fixes.md)** - Common Docker issues and solutions
+- **[CI Integration Tests](./troubleshooting/ci-integration-tests-fix.md)** - Backend CI test configuration fixes
+- **[Frontend CI Fixes](./troubleshooting/frontend-ci-fixes.md)** - Frontend CI and testing issue solutions
 
 ## Test-First Quality Assurance
 

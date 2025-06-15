@@ -86,7 +86,7 @@ async def run_async_migrations() -> None:
     with connectable.connect() as connection:
         do_run_migrations(connection)
 
-    await connectable.dispose()  # type: ignore[func-returns-value]
+    connectable.dispose()
 
 
 def run_migrations_online() -> None:

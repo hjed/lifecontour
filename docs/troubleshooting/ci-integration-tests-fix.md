@@ -121,3 +121,9 @@ The fix has been tested and verified:
 2. Monitor the next CI run to ensure both jobs pass
 3. Consider adding more unit test markers to remaining test files
 4. Update documentation if needed
+
+## Related Documentation
+
+- [Testing Strategy](../architecture/testing-strategy.md) - Comprehensive testing patterns
+- [CI/CD Setup](../ci-cd-setup.md) - Continuous integration configuration
+- [Code Quality Standards](../code-quality-standards.md) - Linting and testing standards

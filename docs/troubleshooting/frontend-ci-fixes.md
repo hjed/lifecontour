@@ -125,3 +125,10 @@ pnpm format
 ```
 
 The frontend CI pipeline will now pass successfully with comprehensive test coverage and proper code formatting!
+
+## Related Documentation
+
+- [Testing Strategy](../architecture/testing-strategy.md) - Comprehensive testing patterns
+- [Frontend Design](../architecture/frontend-design.md) - Component patterns and testing
+- [CI/CD Setup](../ci-cd-setup.md) - Continuous integration configuration
+- [Code Quality Standards](../code-quality-standards.md) - Linting and testing standards

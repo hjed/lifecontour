@@ -18,6 +18,8 @@ class Settings(BaseSettings):
         env_file=".env",
         env_file_encoding="utf-8",
         case_sensitive=False,
+        # Prevent automatic JSON parsing for list fields
+        env_parse_none_str="",
     )
 
     # Application settings
@@ -31,13 +33,13 @@ class Settings(BaseSettings):
     # Server settings
     host: str = Field(default="0.0.0.0", description="Server host")
     port: int = Field(default=8000, description="Server port")
-    allowed_hosts: list[str] = Field(
+    allowed_hosts: str | list[str] = Field(
         default=["localhost", "127.0.0.1", "0.0.0.0"],
         description="Allowed hosts for security",
     )
 
     # CORS settings
-    cors_origins: list[str] = Field(
+    cors_origins: str | list[str] = Field(
         default=["http://localhost:3000", "http://127.0.0.1:3000"],
         description="Allowed CORS origins",
     )
@@ -124,6 +126,15 @@ class Settings(BaseSettings):
     enable_telemetry: bool = Field(
         default=False, description="Enable OpenTelemetry instrumentation"
     )
+    otel_exporter_otlp_endpoint: str = Field(
+        default="", description="OpenTelemetry OTLP exporter endpoint"
+    )
+    otel_service_name: str = Field(
+        default="personal-management-backend", description="OpenTelemetry service name"
+    )
+    otel_resource_attributes: str = Field(
+        default="", description="OpenTelemetry resource attributes"
+    )
 
     @field_validator("log_level")
     @classmethod
@@ -134,21 +145,35 @@ class Settings(BaseSettings):
             raise ValueError(f"Log level must be one of: {valid_levels}")
         return v.upper()
 
-    @field_validator("cors_origins", mode="before")
+    @field_validator("cors_origins")
     @classmethod
     def parse_cors_origins(cls, v: str | list[str]) -> list[str]:
         """Parse CORS origins from string or list."""
         if isinstance(v, str):
-            return [origin.strip() for origin in v.split(",")]
-        return v
+            # Handle comma-separated string
+            origins = [origin.strip() for origin in v.split(",") if origin.strip()]
+            return origins
+        elif isinstance(v, list):
+            # Handle list input
+            return [str(origin).strip() for origin in v if str(origin).strip()]
+        else:
+            # Handle other types by converting to string first
+            return [str(v).strip()] if str(v).strip() else []
 
-    @field_validator("allowed_hosts", mode="before")
+    @field_validator("allowed_hosts")
     @classmethod
     def parse_allowed_hosts(cls, v: str | list[str]) -> list[str]:
         """Parse allowed hosts from string or list."""
         if isinstance(v, str):
-            return [host.strip() for host in v.split(",")]
-        return v
+            # Handle comma-separated string
+            hosts = [host.strip() for host in v.split(",") if host.strip()]
+            return hosts
+        elif isinstance(v, list):
+            # Handle list input
+            return [str(host).strip() for host in v if str(host).strip()]
+        else:
+            # Handle other types by converting to string first
+            return [str(v).strip()] if str(v).strip() else []
 
 
 @lru_cache
