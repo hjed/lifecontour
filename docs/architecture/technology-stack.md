@@ -32,10 +32,13 @@ This document outlines the technology choices optimized for AI assistant underst
 - **API Security**: FastAPI built-in security, custom rate limiting
 
 ### External Integrations
-- **HTTP Client**: requests (simple, AI-friendly patterns)
+- **HTTP Client**: httpx (async-native, FastAPI compatible)
 - **Google APIs**: google-api-python-client (official SDK)
 - **MCP Protocol**: FastMCP library - [FastMCP Docs](https://gofastmcp.com/llms.txt)
-- **Immich Integration**: Direct REST API calls with requests
+- **Immich Integration**: Direct REST API calls with httpx
+- **Strava Integration**: Direct REST API calls with httpx
+- **Firefly III Integration**: Direct REST API calls with httpx
+- **Task Queue**: ARQ (asyncio-native, Redis-backed)
 - **Search Engine**: MeiliSearch with official Python SDK (meilisearch-python)
 
 ### Search and Event Processing
@@ -46,6 +49,13 @@ This document outlines the technology choices optimized for AI assistant underst
 - **Event Storage**: PostgreSQL outbox table (same database as main data)
 - **Background Processing**: FastAPI background tasks (every 10 seconds)
 - **Search Performance**: Target <50ms response times
+
+### Task Queue and Background Processing
+- **Task Queue**: ARQ (asyncio-native, Redis-backed)
+- **Queue Backend**: Redis 7+ (lightweight, battle-tested)
+- **Worker Processes**: Isolated per integration for dependency separation
+- **Task Scheduling**: Cron-like scheduling for periodic syncs
+- **Task Monitoring**: ARQ built-in monitoring and retry mechanisms
 
 ### Logging and Observability
 - **Logging**: Python standard library logging (simple, clear)
@@ -111,9 +121,12 @@ personal-management-system/
 │   │   |   ├── dependencies.py  # Service factories and DI
 │   │   |   └── schemas/         # Pydantic request/response models
 │   │   ├── migrations/          # SQL queries and migrations
-│   │   └── integrations/        # External Sub-Domains
-│   │       ├── google/          # Google Integration Sub-Domain
-│   │       └── immich/          # Immich Integration Sub-Domain
+│   │   └── mcp/                 # MCP server implementation
+│   ├── integration_workers/     # Background worker processes
+│   │   ├── google_contacts/     # Google Contacts worker
+│   │   ├── immich/              # Immich worker
+│   │   ├── strava/              # Strava worker
+│   │   └── firefly_iii/         # Firefly III worker
 │   ├── tests/                    # pytest test suite
 │   |   ├── unit/                 # Unit tests
 │   │   ├── integration/          # Integration tests
@@ -141,6 +154,8 @@ personal-management-system/
 - **Frontend Container**: Next.js with pnpm
 - **Database Container**: PostgreSQL 15+
 - **Search Container**: MeiliSearch 1.2+
+- **Queue Container**: Redis 7+ for ARQ task queue
+- **Worker Containers**: Separate containers per integration (optional)
 - **Reverse Proxy**: nginx for routing
 
 ## Testing Strategy
@@ -179,6 +194,8 @@ For detailed testing patterns, implementation guidelines, and examples, see [Tes
 - **Frontend**: Next.js with pnpm dependencies
 - **Database**: PostgreSQL 15+ with persistent volumes
 - **Search**: MeiliSearch 1.2+ with persistent volumes
+- **Queue**: Redis 7+ for task queue
+- **Workers**: Integration worker processes (optional separate containers)
 - **Proxy**: nginx for routing and SSL termination
 
 ### Development Environment

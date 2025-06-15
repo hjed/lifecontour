@@ -80,6 +80,13 @@ Security considerations and performance optimization:
 - Monitoring, alerting, and operational security
 - Compliance and privacy considerations
 
+### 🔗 **[Integration Architecture](./architecture/integration-architecture.md)**
+External service integration patterns and implementation:
+- Google Contacts, Immich, Strava, Firefly III integrations
+- Isolated Worker Architecture with dependency separation
+- ARQ task queue system with Redis
+- Sync metadata and conflict resolution patterns
+
 ### 🔮 **[Future Roadmap](./architecture/future-roadmap.md)**
 Future features, extensibility plans, and long-term vision:
 - Custom field support
@@ -127,37 +134,52 @@ Future features, extensibility plans, and long-term vision:
     └─────────────────────────────────────────────────────────────────┘
                                     │
     ┌─────────────────────────────────────────────────────────────────┐
-    │                  Integration Sub-Domains                        │
-    │  ┌─────────────────┐              ┌─────────────────────────────┐ │
-    │  │     Google      │              │          Immich             │ │
-    │  │   Integration   │              │       Integration           │ │
-    │  │                 │              │                             │ │
-    │  │ ┌─────────────┐ │              │ ┌─────────────────────────┐ │ │
-    │  │ │Sync Logic   │ │              │ │Album & Person Logic     │ │ │
-    │  │ │Tag Sync     │ │              │ │Name-Based Matching      │ │ │
-    │  │ │Contact Sync │ │              │ │Auto Contact Linking     │ │ │
-    │  │ │Calendar Sync│ │              │ │Journal/Event Albums     │ │ │
-    │  │ └─────────────┘ │              │ └─────────────────────────┘ │ │
-    │  │ ┌─────────────┐ │              │ ┌─────────────────────────┐ │ │
-    │  │ │Adapters     │ │              │ │Adapters                 │ │ │
-    │  │ │Google APIs  │ │              │ │Immich Client            │ │ │
-    │  │ │Sync State   │ │              │ │Sync State               │ │ │
-    │  │ └─────────────┘ │              │ └─────────────────────────┘ │ │
-    │  └─────────────────┘              └─────────────────────────────┘ │
+    │                    Integration Domain                           │
+    │  ┌─────────────────────────────────────────────────────────────┐ │
+    │  │                  Shared Components                          │ │
+    │  │  ┌─────────────┐ ┌─────────────┐ ┌─────────────────────────┐ │ │
+    │  │  │SyncMetadata │ │ExternalRef  │ │    ARQ Task Queue       │ │ │
+    │  │  │   Models    │ │   Models    │ │     (Redis-backed)      │ │ │
+    │  │  └─────────────┘ └─────────────┘ └─────────────────────────┘ │ │
+    │  └─────────────────────────────────────────────────────────────┘ │
+    │  ┌─────────────┐ ┌─────────────┐ ┌─────────────┐ ┌─────────────┐ │
+    │  │   Google    │ │   Immich    │ │   Strava    │ │ Firefly III │ │
+    │  │ Integration │ │ Integration │ │ Integration │ │ Integration │ │
+    │  │             │ │             │ │             │ │             │ │
+    │  │┌───────────┐│ │┌───────────┐│ │┌───────────┐│ │┌───────────┐│ │
+    │  ││Service    ││ ││Service    ││ ││Service    ││ ││Service    ││ │
+    │  ││API Client ││ ││API Client ││ ││API Client ││ ││API Client ││ │
+    │  ││Tasks      ││ ││Tasks      ││ ││Tasks      ││ ││Tasks      ││ │
+    │  │└───────────┘│ │└───────────┘│ │└───────────┘│ │└───────────┘│ │
+    │  └─────────────┘ └─────────────┘ └─────────────┘ └─────────────┘ │
     └─────────────────────────────────────────────────────────────────┘
                                     │
     ┌─────────────────────────────────────────────────────────────────┐
-    │                     Data & Search Layer                         │
+    │                Background Worker Processes                      │
+    │  ┌─────────────┐ ┌─────────────┐ ┌─────────────┐ ┌─────────────┐ │
+    │  │   Google    │ │   Immich    │ │   Strava    │ │ Firefly III │ │
+    │  │   Worker    │ │   Worker    │ │   Worker    │ │   Worker    │ │
+    │  │             │ │             │ │             │ │             │ │
+    │  │┌───────────┐│ │┌───────────┐│ │┌───────────┐│ │┌───────────┐│ │
+    │  ││Isolated   ││ ││Isolated   ││ ││Isolated   ││ ││Isolated   ││ │
+    │  ││Dependencies││ ││Dependencies││ ││Dependencies││ ││Dependencies││ │
+    │  ││ARQ Tasks  ││ ││ARQ Tasks  ││ ││ARQ Tasks  ││ ││ARQ Tasks  ││ │
+    │  │└───────────┘│ │└───────────┘│ │└───────────┘│ │└───────────┘│ │
+    │  └─────────────┘ └─────────────┘ └─────────────┘ └─────────────┘ │
+    └─────────────────────────────────────────────────────────────────┘
+                                    │
+    ┌─────────────────────────────────────────────────────────────────┐
+    │                     Data & Infrastructure Layer                 │
     │  ┌─────────────────┐ ┌─────────────────┐ ┌─────────────────────┐ │
-    │  │   PostgreSQL    │ │  Event Outbox   │ │    MeiliSearch      │ │
-    │  │                 │ │   Processing    │ │                     │ │
+    │  │   PostgreSQL    │ │     Redis       │ │    MeiliSearch      │ │
+    │  │                 │ │                 │ │                     │ │
     │  │ ┌─────────────┐ │ │ ┌─────────────┐ │ │ ┌─────────────────┐ │ │
-    │  │ │Main Tables  │ │ │ │Background   │ │ │ │Search Indexes   │ │ │
-    │  │ │Outbox Table │ │ │ │Tasks        │ │ │ │- contacts_index │ │ │
-    │  │ │Event Store  │ │ │ │Event Sync   │ │ │ │- global_search  │ │ │
-    │  │ └─────────────┘ │ │ └─────────────┘ │ │ │- journal_index  │ │ │
-    │  └─────────────────┘ └─────────────────┘ │ │- calendar_index │ │ │
-    │                                          │ └─────────────────┘ │ │
+    │  │ │Main Tables  │ │ │ │ARQ Task     │ │ │ │Search Indexes   │ │ │
+    │  │ │Outbox Table │ │ │ │Queue        │ │ │ │- contacts_index │ │ │
+    │  │ │Event Store  │ │ │ │Integration  │ │ │ │- global_search  │ │ │
+    │  │ │Sync Metadata│ │ │ │Job State    │ │ │ │- journal_index  │ │ │
+    │  │ └─────────────┘ │ │ └─────────────┘ │ │ │- calendar_index │ │ │
+    │  └─────────────────┘ └─────────────────┘ │ └─────────────────┘ │ │
     │                                          └─────────────────────┘ │
     └─────────────────────────────────────────────────────────────────┘
 ```

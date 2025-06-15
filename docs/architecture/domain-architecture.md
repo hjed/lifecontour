@@ -155,12 +155,7 @@ domain/adapters/
   - Change tracking for all contact-related entities
   - Audit trail with field-level change detection
   - Integration with domain events for automatic history recording
-- **GoogleContactsAdapter**: Implements GoogleContactsService port (Future iteration)
-  - Official `googleapis` library with People API v1
-  - OAuth 2.0 authentication with token refresh
-  - Incremental sync with conflict resolution
-  - Built-in rate limiting and retry logic
-  - OpenTelemetry spans for external API calls
+
 - **OutboxEventPublisher**: Implements ContactEventPublisher port
   - Transactional outbox pattern for reliable event publishing
   - Event serialization to PostgreSQL outbox table
@@ -177,13 +172,7 @@ domain/adapters/
   - Recurring event handling with proper indexing
   - Time zone management and conversion
   - OpenTelemetry spans for complex queries
-- **GoogleCalendarAdapter**: Implements GoogleCalendarService port
-  - Official `googleapis` library with Calendar API v3
-  - OAuth 2.0 authentication with scope management
-  - Real-time sync with webhook support
-  - Multi-calendar support with batch operations
-  - Conflict resolution strategies with proper error handling
-  - OpenTelemetry tracing for sync operations
+
 - **EventEventPublisher**: Implements EventEventPublisher port
   - Calendar event publishing with structured metadata
   - Cross-domain integration events
@@ -203,12 +192,7 @@ domain/adapters/
 - **SqlPersonMatchRepository**: Implements PersonMatchRepository port
   - Person match storage against immich's api
   - Confidence score tracking
-- **ImmichHttpAdapter**: Implements ImmichService port
-  - API key or session-based authentication
-  - Photo metadata, thumbnails, search
-  - Person recognition data retrieval
-  - Privacy controls and permissions
-  - Lazy loading and caching
+
 
 #### Cross-Domain Adapters (Sync Domain)
 - **TransactionCoordinator**: Manages distributed transactions
@@ -300,15 +284,11 @@ def __post_init__(self) -> None:
 - **Infrastructure Layer**: Pydantic models for API input/output validation
 - **Database Layer**: Database constraints as final safety net
 
-### External Integration Guidelines
+### Integration Architecture
 
-- Create separate modules for each external service
-- Use standard HTTP libraries (requests) for API calls or official SDKs where available.
-- Implement proper error handling and retries
-- Use environment variables for API credentials
-- Add logging for debugging integration issues
-- Map external data to internal models
-- Handle rate limiting and API quotas gracefully
+This system uses an **Isolated Worker Architecture** to manage integrations with external services. This pattern isolates each integration's dependencies and process space, preventing them from impacting the core application.
+
+All integration logic, patterns, and implementation details are defined in the dedicated **[Integration Architecture document](./integration-architecture.md)**. This core domain remains decoupled from the specifics of any external service.
 
 ### Application Service Guidelines
 

@@ -28,7 +28,7 @@ Tasks can be found in the [tasks document](./tasks.md).
 1. **Test-First Development**: Write tests before implementation - no exceptions
 2. **Clear Language Separation**: Python backend, TypeScript frontend
 3. **AI-Optimized**: Design for AI assistant understanding over performance
-4. **Domain-Driven Architecture**: Core domains with separate integration sub-domains
+4. **Domain-Driven Architecture**: Core domains with isolated integration workers
 5. **Agile Development**: Feature-complete iterations delivering incremental value
 6. **Simple Dependencies**: Standard libraries over complex abstractions
 
@@ -52,8 +52,28 @@ Tasks can be found in the [tasks document](./tasks.md).
 - **Tests drive the design** - write tests to define interfaces and behavior first
 - Test each layer independently and together during development
 - Run linting, type checking, and all tests before considering any change complete
-- Integration sub-domains developed separately from core domains
+- Isolated integration workers developed separately from core domains
 - Architecture can evolve - check technology choices with user before acting
+
+### AI Context Management for Integration Workers
+
+When working on integration workers, provide focused context to avoid confusion:
+
+**For Integration Worker Tasks:**
+- Provide the full contents of the specific worker directory (e.g., `integration_workers/strava/`)
+- Include relevant models from `core_shared/` package
+- Include `docs/architecture/integration-architecture.md` for patterns
+- **Do NOT** include other integration workers or core application code
+
+**Example Context for Strava Integration:**
+```
+Files to include:
+- integration_workers/strava/ (complete directory)
+- core_shared/models/ (relevant models only)
+- docs/architecture/integration-architecture.md
+```
+
+This provides complete, isolated context without noise from other integrations.
 
 ### Test-Driven Development Sequence
 
@@ -204,9 +224,29 @@ personal-management-system/
 │   │   |   ├── dependencies.py  # Service factories and DI
 │   │   |   └── schemas/         # Pydantic request/response models
 │   │   ├── migrations/          # SQL queries and migrations
-│   │   └── integrations/        # External Sub-Domains
-│   │       ├── google/          # Google Integration Sub-Domain
-│   │       └── immich/          # Immich Integration Sub-Domain
+│   │   └── mcp/                 # MCP server implementation
+│   ├── core_shared/             # Shared models, schemas, db logic (private package)
+│   │   ├── pyproject.toml
+│   │   └── core_shared/
+│   │       ├── models/          # SQLAlchemy models
+│   │       ├── database/        # Database session management
+│   │       └── exceptions/      # Shared exception classes
+│   ├── integration_workers/     # Isolated workers for each integration
+│   │   ├── google_contacts/
+│   │   │   ├── Dockerfile
+│   │   │   ├── requirements.txt
+│   │   │   ├── worker.py
+│   │   │   └── .env.example
+│   │   ├── immich/
+│   │   │   ├── Dockerfile
+│   │   │   ├── requirements.txt
+│   │   │   ├── worker.py
+│   │   │   └── .env.example
+│   │   └── strava/
+│   │       ├── Dockerfile
+│   │       ├── requirements.txt
+│   │       ├── worker.py
+│   │       └── .env.example
 │   ├── tests/                    # pytest test suite
 │   |   ├── unit/                 # Unit tests
 │   │   ├── integration/          # Integration tests
