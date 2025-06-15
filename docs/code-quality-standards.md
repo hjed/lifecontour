@@ -31,6 +31,15 @@ uv run ruff format --check . # Formatting verification
 uv run mypy .                # Type checking
 ```
 
+### Core Shared (Python)
+
+```bash
+cd core_shared
+uv run ruff check .          # Linting (code style, imports, etc.)
+uv run ruff format --check . # Formatting verification
+uv run mypy .                # Type checking
+```
+
 ### Frontend (TypeScript/React)
 
 ```bash
@@ -68,6 +77,11 @@ These tools **verify** that code is properly formatted and fail if issues exist:
 ```bash
 # Check all quality standards (same as CI)
 ./scripts/dev.sh lint
+
+# This runs linting for:
+# - Backend (backend/)
+# - Core Shared (core_shared/)
+# - Frontend (frontend/)
 
 # Auto-fix issues
 ./scripts/dev.sh lint-fix

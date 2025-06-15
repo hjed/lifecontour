@@ -140,20 +140,40 @@ async def sync_task(external_id: str):
 
 ## Core Components
 
-### 1. Shared Models
+### 1. Shared Models (core_shared package)
+
+The `core_shared` package contains SQLAlchemy models and utilities used across the main application and integration workers.
 
 #### SyncMetadata
 Tracks synchronization state between external systems and internal entities:
 
 ```python
-class SyncMetadata(BaseModel):
-    internal_id: UUID              # FK to internal entity
+from core_shared import SyncMetadata, SyncStatus
+
+class SyncMetadata(Base):
+    internal_id: int               # FK to internal entity
     integration_source: str        # 'google_contacts', 'immich', etc.
     external_id: str              # External system's ID
     last_synced_at: datetime
     version_hash: str             # SHA-256 hash for change detection
-    sync_status: SyncStatus       # SUCCESS, FAILED, IN_PROGRESS
+    sync_status: str              # SUCCESS, FAILED, IN_PROGRESS, PENDING
     error_message: Optional[str]  # Last error if failed
+    retry_count: int              # Number of retry attempts
+```
+
+#### ExternalReference
+Tracks references between internal entities and external system entities:
+
+```python
+from core_shared import ExternalReference
+
+class ExternalReference(Base):
+    internal_entity_type: str     # 'contact', 'journal_entry', etc.
+    internal_entity_id: int       # ID of internal entity
+    external_system: str          # 'google_contacts', 'immich', etc.
+    external_entity_type: str     # 'person', 'photo', 'album', etc.
+    external_entity_id: str       # External system's ID
+    reference_data: Optional[str] # Additional metadata as JSON
 ```
 
 #### ExternalReference
