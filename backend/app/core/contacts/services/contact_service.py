@@ -142,17 +142,105 @@ class ContactService:
                     address, transaction
                 )
 
-            # Save contact
+            # Save contact (basic fields only)
             saved_contact = await self.contact_repo.save(contact)
 
             # Ensure contact has ID after save
             if saved_contact.id is None:
                 raise ContactValidationError("id", "Contact ID is required after save")
 
+            contact_id = saved_contact.id
+
+            # Save contact methods if any
+            saved_methods = []
+            for method in contact.methods:
+                # Update contact_id for the method
+                method.contact_id = contact_id
+
+                # Validate primary method constraints
+                if method.is_primary:
+                    await self.contact_validation.validate_primary_method(
+                        contact_id, method.method_type, transaction
+                    )
+
+                saved_method = await self.contact_repo.add_method(contact_id, method)
+                saved_methods.append(saved_method)
+
+                # Ensure method has ID after save
+                if saved_method.id is None:
+                    raise ContactValidationError(
+                        "id", "Method ID is required after save"
+                    )
+
+                # Publish method added event
+                method_event = ContactMethodAdded(
+                    contact_id,
+                    saved_method.id,
+                    method.method_type.value,
+                    method.value,
+                    transaction=transaction,
+                )
+                await self.event_publisher.publish(method_event)
+
+            # Save contact addresses if any
+            saved_addresses = []
+            for address in contact.addresses:
+                # Update contact_id for the address
+                address.contact_id = contact_id
+
+                # Validate primary address constraints
+                if address.is_primary:
+                    await self.contact_validation.validate_primary_address(
+                        contact_id, transaction
+                    )
+
+                saved_address = await self.contact_repo.add_address(contact_id, address)
+                saved_addresses.append(saved_address)
+
+                # Ensure address has ID after save
+                if saved_address.id is None:
+                    raise ContactValidationError(
+                        "id", "Address ID is required after save"
+                    )
+
+                # Publish address added event
+                address_event = ContactAddressAdded(
+                    contact_id,
+                    saved_address.id,
+                    address.street_line_1,
+                    address.country_code,
+                    transaction=transaction,
+                )
+                await self.event_publisher.publish(address_event)
+
+            # Save contact notes if any
+            saved_notes = []
+            for note in contact.notes:
+                # Update contact_id for the note
+                note.contact_id = contact_id
+
+                saved_note = await self.contact_repo.add_note(contact_id, note)
+                saved_notes.append(saved_note)
+
+                # Ensure note has ID after save
+                if saved_note.id is None:
+                    raise ContactValidationError("id", "Note ID is required after save")
+
+                # Publish note added event
+                note_event = ContactNoteAdded(
+                    contact_id, saved_note.id, note.content, transaction=transaction
+                )
+                await self.event_publisher.publish(note_event)
+
+            # Update the saved contact with the saved related entities
+            saved_contact.methods = saved_methods
+            saved_contact.addresses = saved_addresses
+            saved_contact.notes = saved_notes
+
             # Record field history (only if there are field changes to track)
             # For creation, we don't typically track field changes since it's all new data
 
-            # Publish event
+            # Publish main contact created event
             event = ContactCreated(
                 saved_contact.id,
                 saved_contact.first_name,

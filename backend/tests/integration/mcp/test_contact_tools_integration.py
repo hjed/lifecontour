@@ -409,3 +409,67 @@ class TestContactToolsIntegration:
         assert "estimated_total_hits" in global_result
         assert "searched_entity_types" in global_result
         assert "available_entity_types" in global_result
+
+    @pytest.mark.asyncio
+    async def test_create_contact_single_transaction_integration(
+        self, contact_service: ContactService, clean_database: AsyncConnection
+    ):
+        """Test that create_contact tool uses single transaction for contact with methods and notes."""
+        # This test verifies that the refactored create_contact tool
+        # creates contacts with methods and notes in a single service call
+
+        # Create a contact with methods and notes using the same pattern as the MCP tool
+        from app.core.contacts.models.entities import (
+            Contact,
+            ContactMethod,
+            ContactNote,
+            MethodType,
+        )
+
+        contact = Contact(
+            first_name="Alice",
+            last_name="Johnson",
+        )
+
+        # Add email method (same as MCP tool)
+        email_method = ContactMethod(
+            method_type=MethodType.EMAIL,
+            value="alice.johnson@example.com",
+            contact_id=0,  # Will be set when contact is saved
+            is_primary=True,
+        )
+        contact.methods.append(email_method)
+
+        # Add phone method (same as MCP tool)
+        phone_method = ContactMethod(
+            method_type=MethodType.PHONE,
+            value="+1987654321",
+            contact_id=0,  # Will be set when contact is saved
+            is_primary=True,
+        )
+        contact.methods.append(phone_method)
+
+        # Add note (same as MCP tool)
+        note = ContactNote(
+            content="Created via MCP tool integration test",
+            contact_id=0,  # Will be set when contact is saved
+        )
+        contact.notes.append(note)
+
+        # Create the contact using the service (same as MCP tool)
+        created_contact = await contact_service.create_contact(contact, clean_database)
+
+        # Verify the contact was created with all related data
+        assert created_contact.id is not None
+        assert created_contact.first_name == "Alice"
+        assert created_contact.last_name == "Johnson"
+        assert len(created_contact.methods) == 2
+        assert len(created_contact.notes) == 1
+
+        # Verify the contact was actually saved to database
+        saved_contact = await contact_service.get_contact_by_id(created_contact.id)
+        assert saved_contact is not None
+        assert saved_contact.get_primary_email() == "alice.johnson@example.com"
+        assert saved_contact.get_primary_phone() == "+1987654321"
+        assert len(saved_contact.notes) == 1
+        assert saved_contact.notes[0].content == "Created via MCP tool integration test"
