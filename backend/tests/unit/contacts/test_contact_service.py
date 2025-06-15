@@ -111,6 +111,232 @@ class TestContactService:
         assert "Contact ID is required after save" in exc_info.value.message
 
     @pytest.mark.asyncio
+    async def test_create_contact_with_methods_success(
+        self, contact_service, mock_contact_repo, mock_transaction
+    ):
+        """Test successful contact creation with attached methods."""
+        # Arrange
+        contact = Contact(first_name="John", last_name="Doe")
+
+        # Add email method
+        email_method = ContactMethod(
+            method_type=MethodType.EMAIL,
+            value="john@example.com",
+            contact_id=0,
+            is_primary=True,
+        )
+        contact.methods.append(email_method)
+
+        # Add phone method
+        phone_method = ContactMethod(
+            method_type=MethodType.PHONE,
+            value="+1234567890",
+            contact_id=0,
+            is_primary=True,
+        )
+        contact.methods.append(phone_method)
+
+        saved_contact = Contact(first_name="John", last_name="Doe", id=1)
+        saved_email = ContactMethod(
+            method_type=MethodType.EMAIL,
+            value="john@example.com",
+            contact_id=1,
+            is_primary=True,
+            id=2,
+        )
+        saved_phone = ContactMethod(
+            method_type=MethodType.PHONE,
+            value="+1234567890",
+            contact_id=1,
+            is_primary=True,
+            id=3,
+        )
+
+        mock_contact_repo.save.return_value = saved_contact
+        mock_contact_repo.find_by_email.return_value = None  # No duplicate email
+        mock_contact_repo.add_method.side_effect = [saved_email, saved_phone]
+
+        # Act
+        result = await contact_service.create_contact(contact, mock_transaction)
+
+        # Assert
+        assert result.id == 1
+        assert result.first_name == "John"
+        assert result.last_name == "Doe"
+        assert len(result.methods) == 2
+
+        # Verify repository calls
+        mock_contact_repo.save.assert_called_once_with(contact)
+        assert mock_contact_repo.add_method.call_count == 2
+        mock_contact_repo.find_by_email.assert_called_once_with("john@example.com")
+
+    @pytest.mark.asyncio
+    async def test_create_contact_with_notes_success(
+        self, contact_service, mock_contact_repo, mock_transaction
+    ):
+        """Test successful contact creation with attached notes."""
+        # Arrange
+        contact = Contact(first_name="Jane", last_name="Smith")
+
+        # Add note
+        note = ContactNote(
+            content="Met at conference",
+            contact_id=0,
+        )
+        contact.notes.append(note)
+
+        saved_contact = Contact(first_name="Jane", last_name="Smith", id=1)
+        saved_note = ContactNote(
+            content="Met at conference",
+            contact_id=1,
+            id=2,
+        )
+
+        mock_contact_repo.save.return_value = saved_contact
+        mock_contact_repo.add_note.return_value = saved_note
+
+        # Act
+        result = await contact_service.create_contact(contact, mock_transaction)
+
+        # Assert
+        assert result.id == 1
+        assert result.first_name == "Jane"
+        assert result.last_name == "Smith"
+        assert len(result.notes) == 1
+
+        # Verify repository calls
+        mock_contact_repo.save.assert_called_once_with(contact)
+        mock_contact_repo.add_note.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_create_contact_with_methods_and_notes_success(
+        self, contact_service, mock_contact_repo, mock_transaction
+    ):
+        """Test successful contact creation with both methods and notes."""
+        # Arrange
+        contact = Contact(first_name="Bob", last_name="Wilson")
+
+        # Add email method
+        email_method = ContactMethod(
+            method_type=MethodType.EMAIL,
+            value="bob@example.com",
+            contact_id=0,
+            is_primary=True,
+        )
+        contact.methods.append(email_method)
+
+        # Add note
+        note = ContactNote(
+            content="Important client",
+            contact_id=0,
+        )
+        contact.notes.append(note)
+
+        saved_contact = Contact(first_name="Bob", last_name="Wilson", id=1)
+        saved_email = ContactMethod(
+            method_type=MethodType.EMAIL,
+            value="bob@example.com",
+            contact_id=1,
+            is_primary=True,
+            id=2,
+        )
+        saved_note = ContactNote(
+            content="Important client",
+            contact_id=1,
+            id=3,
+        )
+
+        mock_contact_repo.save.return_value = saved_contact
+        mock_contact_repo.find_by_email.return_value = None  # No duplicate email
+        mock_contact_repo.add_method.return_value = saved_email
+        mock_contact_repo.add_note.return_value = saved_note
+
+        # Act
+        result = await contact_service.create_contact(contact, mock_transaction)
+
+        # Assert
+        assert result.id == 1
+        assert result.first_name == "Bob"
+        assert result.last_name == "Wilson"
+        assert len(result.methods) == 1
+        assert len(result.notes) == 1
+
+        # Verify repository calls
+        mock_contact_repo.save.assert_called_once_with(contact)
+        mock_contact_repo.add_method.assert_called_once()
+        mock_contact_repo.add_note.assert_called_once()
+        mock_contact_repo.find_by_email.assert_called_once_with("bob@example.com")
+
+    @pytest.mark.asyncio
+    async def test_create_contact_with_method_no_id_after_save_raises_error(
+        self, contact_service, mock_contact_repo, mock_transaction
+    ):
+        """Test contact creation with method raises error when method has no ID after save."""
+        # Arrange
+        contact = Contact(first_name="John", last_name="Doe")
+
+        # Add email method
+        email_method = ContactMethod(
+            method_type=MethodType.EMAIL,
+            value="john@example.com",
+            contact_id=0,
+            is_primary=True,
+        )
+        contact.methods.append(email_method)
+
+        saved_contact = Contact(first_name="John", last_name="Doe", id=1)
+        saved_email = ContactMethod(
+            method_type=MethodType.EMAIL,
+            value="john@example.com",
+            contact_id=1,
+            is_primary=True,
+            id=None,  # No ID assigned
+        )
+
+        mock_contact_repo.save.return_value = saved_contact
+        mock_contact_repo.find_by_email.return_value = None  # No duplicate email
+        mock_contact_repo.add_method.return_value = saved_email
+
+        # Act & Assert
+        with pytest.raises(ContactValidationError) as exc_info:
+            await contact_service.create_contact(contact, mock_transaction)
+
+        assert exc_info.value.field == "id"
+        assert "Method ID is required after save" in exc_info.value.message
+
+    @pytest.mark.asyncio
+    async def test_create_contact_with_note_no_id_after_save_raises_error(
+        self, contact_service, mock_contact_repo, mock_transaction
+    ):
+        """Test contact creation with note raises error when note has no ID after save."""
+        # Arrange
+        contact = Contact(first_name="Jane", last_name="Smith")
+
+        # Add note
+        note = ContactNote(
+            content="Met at conference",
+            contact_id=0,
+        )
+        contact.notes.append(note)
+
+        saved_contact = Contact(first_name="Jane", last_name="Smith", id=1)
+        saved_note = ContactNote(
+            content="Met at conference",
+            contact_id=1,
+            id=None,  # No ID assigned
+        )
+
+        mock_contact_repo.save.return_value = saved_contact
+        mock_contact_repo.add_note.return_value = saved_note
+
+        # Act & Assert
+        with pytest.raises(ContactValidationError) as exc_info:
+            await contact_service.create_contact(contact, mock_transaction)
+
+        assert exc_info.value.field == "id"
+        assert "Note ID is required after save" in exc_info.value.message
+
+    @pytest.mark.asyncio
     async def test_update_contact_success(
         self, contact_service, mock_contact_repo, mock_transaction
     ):

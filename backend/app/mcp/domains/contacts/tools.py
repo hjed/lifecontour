@@ -206,7 +206,7 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
         data = json.loads(contact_data)
         request = ContactCreateRequest(**data)
 
-        # Create contact entity
+        # Create contact entity with methods and notes
         contact = Contact(
             first_name=request.first_name,
             last_name=request.last_name,
@@ -214,52 +214,41 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
             nick_name=request.nick_name,
         )
 
-        # Create the contact first
-        saved_contact = await contact_service.create_contact(contact, connection)
-
-        # Ensure contact was created with an ID
-        if saved_contact.id is None:
-            raise ContactValidationError(
-                "id", "Contact was not assigned an ID after creation"
-            )
-
-        contact_id = saved_contact.id
-
         # Add contact methods if provided
         if request.email:
             email_method = ContactMethod(
                 method_type=MethodType.EMAIL,
                 value=request.email,
-                contact_id=contact_id,
+                contact_id=0,  # Will be set when contact is saved
                 is_primary=True,
             )
-            await contact_service.add_contact_method(
-                contact_id, email_method, connection
-            )
+            contact.methods.append(email_method)
 
         if request.phone:
             phone_method = ContactMethod(
                 method_type=MethodType.PHONE,
                 value=request.phone,
-                contact_id=contact_id,
+                contact_id=0,  # Will be set when contact is saved
                 is_primary=True,
             )
-            await contact_service.add_contact_method(
-                contact_id, phone_method, connection
-            )
+            contact.methods.append(phone_method)
 
         # Add initial note if provided
         if request.notes:
             note = ContactNote(
                 content=request.notes,
-                contact_id=contact_id,
+                contact_id=0,  # Will be set when contact is saved
             )
-            await contact_service.add_contact_note(contact_id, note, connection)
+            contact.notes.append(note)
 
-        # Reload contact to get all methods and relationships
-        final_contact = await contact_service.get_contact_by_id(contact_id)
-        if not final_contact:
-            raise ContactValidationError("id", "Failed to reload created contact")
+        # Create the contact with all methods and notes in a single transaction
+        final_contact = await contact_service.create_contact(contact, connection)
+
+        # Ensure contact was created with an ID
+        if final_contact.id is None:
+            raise ContactValidationError(
+                "id", "Contact was not assigned an ID after creation"
+            )
 
         # Create AI-friendly response using shared converter
         response = ContactConverter.to_contact_response(

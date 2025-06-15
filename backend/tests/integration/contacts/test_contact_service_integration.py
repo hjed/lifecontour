@@ -107,6 +107,59 @@ class TestContactServiceIntegration:
         assert saved_contact.last_name == "Doe"
 
     @pytest.mark.asyncio
+    async def test_create_contact_with_methods_and_notes_single_call(
+        self, contact_service, clean_database: AsyncConnection
+    ):
+        """Test creating a contact with methods and notes in a single service call."""
+        # Arrange
+        contact = Contact(first_name="Jane", last_name="Smith")
+
+        # Add email method
+        email_method = ContactMethod(
+            method_type=MethodType.EMAIL,
+            value="jane.smith@example.com",
+            contact_id=0,  # Will be set when contact is saved
+            is_primary=True,
+        )
+        contact.methods.append(email_method)
+
+        # Add phone method
+        phone_method = ContactMethod(
+            method_type=MethodType.PHONE,
+            value="+1234567890",
+            contact_id=0,  # Will be set when contact is saved
+            is_primary=True,
+        )
+        contact.methods.append(phone_method)
+
+        # Add note
+        note = ContactNote(
+            content="Met at conference",
+            contact_id=0,  # Will be set when contact is saved
+        )
+        contact.notes.append(note)
+
+        # Act
+        result = await contact_service.create_contact(contact, clean_database)
+
+        # Assert
+        assert result.id is not None
+        assert result.first_name == "Jane"
+        assert result.last_name == "Smith"
+        assert len(result.methods) == 2
+        assert len(result.notes) == 1
+
+        # Verify contact was actually saved to database with all related data
+        saved_contact = await contact_service.get_contact_by_id(result.id)
+        assert saved_contact is not None
+        assert saved_contact.first_name == "Jane"
+        assert saved_contact.last_name == "Smith"
+        assert saved_contact.get_primary_email() == "jane.smith@example.com"
+        assert saved_contact.get_primary_phone() == "+1234567890"
+        assert len(saved_contact.notes) == 1
+        assert saved_contact.notes[0].content == "Met at conference"
+
+    @pytest.mark.asyncio
     async def test_create_contact_with_email_method(
         self, contact_service, clean_database: AsyncConnection
     ):
