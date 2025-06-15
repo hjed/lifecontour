@@ -19,11 +19,14 @@ from app.core.contacts.models.entities import (
     ContactMethod,
     ContactNote,
     MethodType,
+    Tag,
 )
 from app.core.contacts.models.exceptions import (
     ContactNotFoundError,
     ContactValidationError,
 )
+from app.core.contacts.models.repositories import TagRepository
+from app.core.contacts.models.value_objects import TagName
 from app.core.contacts.services import ContactService
 from app.infrastructure.search.search_service import SearchService
 from app.mcp.domains.contacts.schemas import (
@@ -172,6 +175,7 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
     @inject
     async def create_contact(
         contact_service: FromDishka[ContactService],
+        tag_repo: FromDishka[TagRepository],
         connection: FromDishka[AsyncConnection],
         contact_data: Annotated[
             str, Field(description="JSON string with contact data")
@@ -241,7 +245,22 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
             )
             contact.notes.append(note)
 
-        # Create the contact with all methods and notes in a single transaction
+        # Handle tags if provided - find or create tags by name
+        if request.tags:
+            for tag_name in request.tags:
+                # Try to find existing tag by name
+                existing_tag = await tag_repo.find_by_name(tag_name)
+
+                if existing_tag:
+                    # Use existing tag
+                    contact.tags.append(existing_tag)
+                else:
+                    # Create new tag
+                    new_tag = Tag(name=TagName(tag_name))
+                    saved_tag = await tag_repo.save(new_tag)
+                    contact.tags.append(saved_tag)
+
+        # Create the contact with all methods, notes, and tags in a single transaction
         final_contact = await contact_service.create_contact(contact, connection)
 
         # Ensure contact was created with an ID

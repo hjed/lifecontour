@@ -13,6 +13,7 @@ from app.core.contacts.models.entities import (
     ContactMethod,
     ContactNote,
     MethodType,
+    Tag,
 )
 from app.core.contacts.models.events import (
     ContactAddressAdded,
@@ -163,18 +164,8 @@ class ContactService:
         """
 
         async def _create_operation() -> Contact:
-            # Validate email uniqueness if contact has email methods
-            for method in contact.methods:
-                if method.method_type == MethodType.EMAIL:
-                    await self.contact_validation.validate_email_uniqueness(
-                        method.value, transaction
-                    )
-
-            # Validate addresses
-            for address in contact.addresses:
-                await self.address_validation.validate_with_transaction(
-                    address, transaction
-                )
+            # Validate contact data
+            await self._validate_contact_data(contact, transaction)
 
             # Save contact (basic fields only)
             saved_contact = await self.contact_repo.save(contact)
@@ -185,91 +176,25 @@ class ContactService:
 
             contact_id = saved_contact.id
 
-            # Save contact methods if any were provided
-            saved_methods = []
-            for method in contact.methods:
-                # Update contact_id for the method
-                method.contact_id = contact_id
-
-                # Validate primary method constraints
-                if method.is_primary:
-                    await self.contact_validation.validate_primary_method(
-                        contact_id, method.method_type, transaction
-                    )
-
-                saved_method = await self.contact_repo.add_method(contact_id, method)
-                saved_methods.append(saved_method)
-
-                # Ensure method has ID after save
-                if saved_method.id is None:
-                    raise ContactValidationError(
-                        "id", "Method ID is required after save"
-                    )
-
-                # Publish method added event
-                method_event = ContactMethodAdded(
-                    contact_id,
-                    saved_method.id,
-                    method.method_type.value,
-                    method.value,
-                    transaction=transaction,
-                )
-                await self.event_publisher.publish(method_event)
-
-            # Save contact addresses if any
-            saved_addresses = []
-            for address in contact.addresses:
-                # Update contact_id for the address
-                address.contact_id = contact_id
-
-                # Validate primary address constraints
-                if address.is_primary:
-                    await self.contact_validation.validate_primary_address(
-                        contact_id, transaction
-                    )
-
-                saved_address = await self.contact_repo.add_address(contact_id, address)
-                saved_addresses.append(saved_address)
-
-                # Ensure address has ID after save
-                if saved_address.id is None:
-                    raise ContactValidationError(
-                        "id", "Address ID is required after save"
-                    )
-
-                # Publish address added event
-                address_event = ContactAddressAdded(
-                    contact_id,
-                    saved_address.id,
-                    address.street_line_1,
-                    address.country_code,
-                    transaction=transaction,
-                )
-                await self.event_publisher.publish(address_event)
-
-            # Save contact notes if any
-            saved_notes = []
-            for note in contact.notes:
-                # Update contact_id for the note
-                note.contact_id = contact_id
-
-                saved_note = await self.contact_repo.add_note(contact_id, note)
-                saved_notes.append(saved_note)
-
-                # Ensure note has ID after save
-                if saved_note.id is None:
-                    raise ContactValidationError("id", "Note ID is required after save")
-
-                # Publish note added event
-                note_event = ContactNoteAdded(
-                    contact_id, saved_note.id, note.content, transaction=transaction
-                )
-                await self.event_publisher.publish(note_event)
+            # Save related entities using helper methods
+            saved_methods = await self._save_contact_methods(
+                contact_id, contact.methods, transaction
+            )
+            saved_addresses = await self._save_contact_addresses(
+                contact_id, contact.addresses, transaction
+            )
+            saved_notes = await self._save_contact_notes(
+                contact_id, contact.notes, transaction
+            )
+            saved_tags = await self._save_contact_tags(
+                contact_id, contact.tags, transaction
+            )
 
             # Update the saved contact with the saved related entities
             saved_contact.methods = saved_methods
             saved_contact.addresses = saved_addresses
             saved_contact.notes = saved_notes
+            saved_contact.tags = saved_tags
 
             # Record field history (only if there are field changes to track)
             # For creation, we don't typically track field changes since it's all new data
@@ -328,16 +253,10 @@ class ContactService:
 
             changed_fields = self._calculate_changed_fields(current_contact, contact)
 
-            for method in contact.methods:
-                if method.method_type == MethodType.EMAIL:
-                    await self.contact_validation.validate_email_uniqueness(
-                        method.value, transaction, exclude_contact_id=contact.id
-                    )
-
-            for address in contact.addresses:
-                await self.address_validation.validate_with_transaction(
-                    address, transaction
-                )
+            # Validate contact data
+            await self._validate_contact_data(
+                contact, transaction, exclude_contact_id=contact.id
+            )
 
             # Save basic contact fields first
             saved_contact = await self.contact_repo.save(contact)
@@ -347,128 +266,47 @@ class ContactService:
 
             contact_id = saved_contact.id
 
-            # Implement replacement strategy: only replace if new data is provided
-            # This ensures no constraint violations and preserves existing data when not updating
+            # Remove existing relations if new data is provided
+            await self._remove_existing_relations(contact_id, contact, current_contact)
 
-            # Only replace methods if new methods are provided
-            if contact.methods:
-                await self.contact_repo.delete_all_methods(contact_id)
-
-            # Only replace addresses if new addresses are provided
-            if contact.addresses:
-                await self.contact_repo.delete_all_addresses(contact_id)
-
-            # Only replace notes if new notes are provided
-            if contact.notes:
-                await self.contact_repo.delete_all_notes(contact_id)
-
-            # Save contact methods if any were provided
+            # Save related entities using helper methods (only if new data is provided)
             saved_methods = []
             if contact.methods:
-                for method in contact.methods:
-                    # Update contact_id for the method
-                    method.contact_id = contact_id
+                saved_methods = await self._save_contact_methods(
+                    contact_id, contact.methods, transaction
+                )
 
-                    # Validate primary method constraints
-                    if method.is_primary:
-                        await self.contact_validation.validate_primary_method(
-                            contact_id, method.method_type, transaction
-                        )
-
-                    saved_method = await self.contact_repo.add_method(
-                        contact_id, method
-                    )
-                    saved_methods.append(saved_method)
-
-                    # Ensure method has ID after save
-                    if saved_method.id is None:
-                        raise ContactValidationError(
-                            "id", "Method ID is required after save"
-                        )
-
-                    # Publish method added event
-                    method_event = ContactMethodAdded(
-                        contact_id,
-                        saved_method.id,
-                        method.method_type.value,
-                        method.value,
-                        transaction=transaction,
-                    )
-                    await self.event_publisher.publish(method_event)
-
-            # Save contact addresses if any were provided
             saved_addresses = []
             if contact.addresses:
-                for address in contact.addresses:
-                    # Update contact_id for the address
-                    address.contact_id = contact_id
+                saved_addresses = await self._save_contact_addresses(
+                    contact_id, contact.addresses, transaction
+                )
 
-                    # Validate primary address constraints
-                    if address.is_primary:
-                        await self.contact_validation.validate_primary_address(
-                            contact_id, transaction
-                        )
-
-                    saved_address = await self.contact_repo.add_address(
-                        contact_id, address
-                    )
-                    saved_addresses.append(saved_address)
-
-                    # Ensure address has ID after save
-                    if saved_address.id is None:
-                        raise ContactValidationError(
-                            "id", "Address ID is required after save"
-                        )
-
-                    # Publish address added event
-                    address_event = ContactAddressAdded(
-                        contact_id,
-                        saved_address.id,
-                        address.street_line_1,
-                        address.country_code,
-                        transaction=transaction,
-                    )
-                    await self.event_publisher.publish(address_event)
-
-            # Save contact notes if any were provided
             saved_notes = []
             if contact.notes:
-                for note in contact.notes:
-                    # Update contact_id for the note
-                    note.contact_id = contact_id
+                saved_notes = await self._save_contact_notes(
+                    contact_id, contact.notes, transaction
+                )
 
-                    saved_note = await self.contact_repo.add_note(contact_id, note)
-                    saved_notes.append(saved_note)
-
-                    # Ensure note has ID after save
-                    if saved_note.id is None:
-                        raise ContactValidationError(
-                            "id", "Note ID is required after save"
-                        )
-
-                    # Publish note added event
-                    note_event = ContactNoteAdded(
-                        contact_id, saved_note.id, note.content, transaction=transaction
-                    )
-                    await self.event_publisher.publish(note_event)
+            saved_tags = []
+            if contact.tags:
+                saved_tags = await self._save_contact_tags(
+                    contact_id, contact.tags, transaction
+                )
 
             # Update the saved contact with the related entities
-            # If methods/addresses/notes were provided, use the new ones
+            # If methods/addresses/notes/tags were provided, use the new ones
             # Otherwise, preserve the existing ones from the current contact
-            if contact.methods:
-                saved_contact.methods = saved_methods
-            else:
-                saved_contact.methods = current_contact.methods
-
-            if contact.addresses:
-                saved_contact.addresses = saved_addresses
-            else:
-                saved_contact.addresses = current_contact.addresses
-
-            if contact.notes:
-                saved_contact.notes = saved_notes
-            else:
-                saved_contact.notes = current_contact.notes
+            saved_contact.methods = (
+                saved_methods if contact.methods else current_contact.methods
+            )
+            saved_contact.addresses = (
+                saved_addresses if contact.addresses else current_contact.addresses
+            )
+            saved_contact.notes = (
+                saved_notes if contact.notes else current_contact.notes
+            )
+            saved_contact.tags = saved_tags if contact.tags else current_contact.tags
 
             if changed_fields:
                 await self.history_service.record_contact_change(
@@ -535,7 +373,180 @@ class ContactService:
                 f"count:{len(updated_contact.notes)}",
             )
 
+        # Check tag changes by comparing tag IDs
+        current_tag_ids = {tag.id for tag in current_contact.tags if tag.id is not None}
+        updated_tag_ids = {tag.id for tag in updated_contact.tags if tag.id is not None}
+
+        if current_tag_ids != updated_tag_ids:
+            changed_fields["tags"] = (
+                f"ids:{sorted(current_tag_ids)}",
+                f"ids:{sorted(updated_tag_ids)}",
+            )
+
         return changed_fields
+
+    async def _validate_contact_data(
+        self,
+        contact: Contact,
+        transaction: AsyncConnection,
+        exclude_contact_id: int | None = None,
+    ) -> None:
+        """Validate contact data including methods and addresses."""
+        # Validate email uniqueness if contact has email methods
+        for method in contact.methods:
+            if method.method_type == MethodType.EMAIL:
+                await self.contact_validation.validate_email_uniqueness(
+                    method.value, transaction, exclude_contact_id=exclude_contact_id
+                )
+
+        # Validate addresses
+        for address in contact.addresses:
+            await self.address_validation.validate_with_transaction(
+                address, transaction
+            )
+
+    async def _save_contact_methods(
+        self,
+        contact_id: int,
+        methods: list[ContactMethod],
+        transaction: AsyncConnection,
+    ) -> list[ContactMethod]:
+        """Save contact methods and publish events."""
+        saved_methods = []
+        for method in methods:
+            # Update contact_id for the method
+            method.contact_id = contact_id
+
+            # Validate primary method constraints
+            if method.is_primary:
+                await self.contact_validation.validate_primary_method(
+                    contact_id, method.method_type, transaction
+                )
+
+            saved_method = await self.contact_repo.add_method(contact_id, method)
+            saved_methods.append(saved_method)
+
+            # Ensure method has ID after save
+            if saved_method.id is None:
+                raise ContactValidationError("id", "Method ID is required after save")
+
+            # Publish method added event
+            method_event = ContactMethodAdded(
+                contact_id,
+                saved_method.id,
+                method.method_type.value,
+                method.value,
+                transaction=transaction,
+            )
+            await self.event_publisher.publish(method_event)
+
+        return saved_methods
+
+    async def _save_contact_addresses(
+        self,
+        contact_id: int,
+        addresses: list[ContactAddress],
+        transaction: AsyncConnection,
+    ) -> list[ContactAddress]:
+        """Save contact addresses and publish events."""
+        saved_addresses = []
+        for address in addresses:
+            # Update contact_id for the address
+            address.contact_id = contact_id
+
+            # Validate primary address constraints
+            if address.is_primary:
+                await self.contact_validation.validate_primary_address(
+                    contact_id, transaction
+                )
+
+            saved_address = await self.contact_repo.add_address(contact_id, address)
+            saved_addresses.append(saved_address)
+
+            # Ensure address has ID after save
+            if saved_address.id is None:
+                raise ContactValidationError("id", "Address ID is required after save")
+
+            # Publish address added event
+            address_event = ContactAddressAdded(
+                contact_id,
+                saved_address.id,
+                address.street_line_1,
+                address.country_code,
+                transaction=transaction,
+            )
+            await self.event_publisher.publish(address_event)
+
+        return saved_addresses
+
+    async def _save_contact_notes(
+        self, contact_id: int, notes: list[ContactNote], transaction: AsyncConnection
+    ) -> list[ContactNote]:
+        """Save contact notes and publish events."""
+        saved_notes = []
+        for note in notes:
+            # Update contact_id for the note
+            note.contact_id = contact_id
+
+            saved_note = await self.contact_repo.add_note(contact_id, note)
+            saved_notes.append(saved_note)
+
+            # Ensure note has ID after save
+            if saved_note.id is None:
+                raise ContactValidationError("id", "Note ID is required after save")
+
+            # Publish note added event
+            note_event = ContactNoteAdded(
+                contact_id, saved_note.id, note.content, transaction=transaction
+            )
+            await self.event_publisher.publish(note_event)
+
+        return saved_notes
+
+    async def _save_contact_tags(
+        self, contact_id: int, tags: list[Tag], transaction: AsyncConnection
+    ) -> list[Tag]:
+        """Save contact tags and publish events."""
+        saved_tags = []
+        for tag in tags:
+            # Ensure tag has ID
+            if tag.id is None:
+                raise ContactValidationError("id", "Tag ID is required for assignment")
+
+            # Assign tag to contact
+            await self.contact_repo.assign_tag(contact_id, tag.id)
+            saved_tags.append(tag)
+
+            # Publish tag assigned event
+            tag_event = TagAssigned(
+                contact_id, tag.id, str(tag.name), transaction=transaction
+            )
+            await self.event_publisher.publish(tag_event)
+
+        return saved_tags
+
+    async def _remove_existing_relations(
+        self, contact_id: int, contact: Contact, current_contact: Contact
+    ) -> None:
+        """Remove existing relations when updating contact."""
+        # Only replace methods if new methods are provided
+        if contact.methods:
+            await self.contact_repo.delete_all_methods(contact_id)
+
+        # Only replace addresses if new addresses are provided
+        if contact.addresses:
+            await self.contact_repo.delete_all_addresses(contact_id)
+
+        # Only replace notes if new notes are provided
+        if contact.notes:
+            await self.contact_repo.delete_all_notes(contact_id)
+
+        # Only replace tags if new tags are provided
+        if contact.tags:
+            # Remove all existing tags first
+            for current_tag in current_contact.tags:
+                if current_tag.id is not None:
+                    await self.contact_repo.remove_tag(contact_id, current_tag.id)
 
     async def delete_contact(
         self, contact_id: int, transaction: AsyncConnection
