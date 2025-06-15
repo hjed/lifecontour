@@ -218,6 +218,12 @@ test() {
     uv run pytest
     cd ..
 
+    # Core shared tests
+    log_info "Running core_shared tests..."
+    cd core_shared
+    uv run pytest
+    cd ..
+
     # Frontend tests
     log_info "Running frontend tests..."
     cd frontend
@@ -234,6 +240,14 @@ lint() {
     # Backend linting
     log_info "Linting backend..."
     cd backend
+    uv run ruff check .
+    uv run ruff format --check .
+    uv run mypy .
+    cd ..
+
+    # Core shared linting
+    log_info "Linting core_shared..."
+    cd core_shared
     uv run ruff check .
     uv run ruff format --check .
     uv run mypy .
@@ -256,6 +270,12 @@ lint_fix() {
 
     # Backend
     cd backend
+    uv run ruff check . --fix
+    uv run ruff format .
+    cd ..
+
+    # Core shared
+    cd core_shared
     uv run ruff check . --fix
     uv run ruff format .
     cd ..

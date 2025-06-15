@@ -33,6 +33,11 @@ WORKDIR /app
 
 # Copy dependency files
 COPY backend/pyproject.toml backend/README.md ./
+COPY core_shared/ /core_shared/
+
+# Install core_shared first
+RUN echo "Installing core_shared..." && \
+    uv pip install --system -e /core_shared
 
 # Install dependencies based on build environment
 RUN if [ "$INSTALL_DEV_DEPS" = "true" ]; then \

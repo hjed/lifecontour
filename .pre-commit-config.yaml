@@ -3,14 +3,14 @@ repos:
   - repo: local
     hooks:
       # Run the formatter
-      - id: ruff-format
+      - id: ruff-format-backend
         name: ruff format (backend)
         entry: bash -c 'cd backend && uv run ruff format .'
         language: system
         files: ^backend/.*\.py$
         pass_filenames: false
       # Run the linter
-      - id: ruff
+      - id: ruff-backend
         name: ruff check (backend)
         entry: bash -c 'cd backend && uv run ruff check --fix .'
         language: system
@@ -20,11 +20,39 @@ repos:
   # Backend type checking
   - repo: local
     hooks:
-      - id: mypy
+      - id: mypy-backend
         name: mypy (backend)
         entry: bash -c 'cd backend && uv run mypy .'
         language: system
         files: ^backend/.*\.py$
+        pass_filenames: false
+
+  # Core Shared Python hooks
+  - repo: local
+    hooks:
+      # Run the formatter
+      - id: ruff-format-core-shared
+        name: ruff format (core_shared)
+        entry: bash -c 'cd core_shared && uv run ruff format .'
+        language: system
+        files: ^core_shared/.*\.py$
+        pass_filenames: false
+      # Run the linter
+      - id: ruff-core-shared
+        name: ruff check (core_shared)
+        entry: bash -c 'cd core_shared && uv run ruff check --fix .'
+        language: system
+        files: ^core_shared/.*\.py$
+        pass_filenames: false
+
+  # Core Shared type checking
+  - repo: local
+    hooks:
+      - id: mypy-core-shared
+        name: mypy (core_shared)
+        entry: bash -c 'cd core_shared && uv run mypy .'
+        language: system
+        files: ^core_shared/.*\.py$
         pass_filenames: false
 
   # Frontend hooks
