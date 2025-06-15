@@ -35,9 +35,18 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 
 import { ContactForm } from '@/components/contacts/ContactForm';
+import { AuthGuard } from '@/components/auth/AuthGuard';
 import { DATE_FORMATS } from '@/lib/constants';
 
 export default function ContactDetailPage() {
+  return (
+    <AuthGuard>
+      <ContactDetailPageContent />
+    </AuthGuard>
+  );
+}
+
+function ContactDetailPageContent() {
   const params = useParams();
   const contactId = params.id as string;
 

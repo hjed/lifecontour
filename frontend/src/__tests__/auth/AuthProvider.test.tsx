@@ -63,15 +63,24 @@ describe('AuthProvider', () => {
     setupMocks.fetch();
   });
 
-  it('should render children and provide auth context', () => {
+  it('should render children and provide auth context', async () => {
+    // Mock session check to return not authenticated
+    (fetch as jest.Mock).mockResolvedValueOnce(
+      createMockResponses.sessionNotAuthenticated()
+    );
+
     renderWithProviders(<TestComponent />);
+
+    // Wait for session check to complete
+    await waitFor(() => {
+      expect(
+        screen.getByTestId(TEST_CONSTANTS.TEST_IDS.LOADING_STATUS)
+      ).toHaveTextContent('not-loading');
+    });
 
     expect(
       screen.getByTestId(TEST_CONSTANTS.TEST_IDS.AUTH_STATUS)
     ).toHaveTextContent('not-authenticated');
-    expect(
-      screen.getByTestId(TEST_CONSTANTS.TEST_IDS.LOADING_STATUS)
-    ).toHaveTextContent('not-loading');
   });
 
   it('should handle login flow successfully', async () => {

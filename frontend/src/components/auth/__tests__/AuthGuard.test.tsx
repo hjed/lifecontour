@@ -127,7 +127,7 @@ describe('AuthGuard', () => {
         </AuthGuard>
       );
 
-      expect(mockRouter.replace).not.toHaveBeenCalled();
+      expect(mockRouter.push).not.toHaveBeenCalled();
     });
   });
 
@@ -175,7 +175,7 @@ describe('AuthGuard', () => {
         </AuthGuard>
       );
 
-      expect(mockRouter.replace).not.toHaveBeenCalled();
+      expect(mockRouter.push).not.toHaveBeenCalled();
     });
   });
 
@@ -203,7 +203,7 @@ describe('AuthGuard', () => {
       );
 
       await waitFor(() => {
-        expect(mockRouter.replace).toHaveBeenCalledWith(
+        expect(mockRouter.push).toHaveBeenCalledWith(
           '/auth/login?redirect=%2Ftest-path'
         );
       });
@@ -241,7 +241,7 @@ describe('AuthGuard', () => {
       );
 
       expect(screen.getByText('Public content')).toBeInTheDocument();
-      expect(mockRouter.replace).not.toHaveBeenCalled();
+      expect(mockRouter.push).not.toHaveBeenCalled();
     });
 
     it('should handle different pathnames in redirect URL', async () => {
@@ -254,7 +254,7 @@ describe('AuthGuard', () => {
       );
 
       await waitFor(() => {
-        expect(mockRouter.replace).toHaveBeenCalledWith(
+        expect(mockRouter.push).toHaveBeenCalledWith(
           '/auth/login?redirect=%2Fcontacts%2F123'
         );
       });
@@ -283,7 +283,7 @@ describe('AuthGuard', () => {
       );
 
       await waitFor(() => {
-        expect(mockRouter.replace).toHaveBeenCalled();
+        expect(mockRouter.push).toHaveBeenCalled();
       });
     });
   });
@@ -361,7 +361,7 @@ describe('withAuth HOC', () => {
     render(<WrappedComponent testProp='public' />);
 
     expect(screen.getByText('Test Component: public')).toBeInTheDocument();
-    expect(mockRouter.replace).not.toHaveBeenCalled();
+    expect(mockRouter.push).not.toHaveBeenCalled();
   });
 
   it('should use custom fallback when provided', () => {

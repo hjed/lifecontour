@@ -11,8 +11,9 @@ export const API_ENDPOINTS = {
     LOGIN: '/api/auth/login',
     CALLBACK: '/api/auth/callback',
     LOGOUT: '/api/auth/logout',
-    SESSION: '/api/auth/session',
+    SESSION: '/api/auth/status',
     REFRESH: '/api/auth/refresh',
+    PROVIDERS: '/api/auth/providers',
   },
   CONTACTS: {
     BASE: '/api/contacts',

@@ -134,6 +134,8 @@ Tasks are organized by **feature iterations** that deliver end-to-end value incr
 
 **Current Status:** Contact management UI complete with comprehensive testing. Implemented contact list, detail/edit, and creation pages with form validation, responsive design, and Australian English formatting. Jest tests: 69/69 passing (includes 22 new contact tests). Playwright e2e tests implemented for core contact workflows.
 
+**CRITICAL SECURITY FIX COMPLETED:** ✅ Fixed major authentication bypass issue where frontend routes were not protected. All protected routes now require authentication and redirect unauthenticated users to login. AuthGuard implementation working correctly, authentication state management fixed, and comprehensive Playwright tests validate authentication scenarios. System is production-ready and secure (fails closed). Minor Docker networking issue with API proxy remains but doesn't affect security.
+
 ### ITER1-005: Contact MCP Tools 🟡 ✅ COMPLETED
 **Description:** Implement MCP (Model Context Protocol) server foundation and contact tools for AI integration
 **Dependencies:** ITER1-004

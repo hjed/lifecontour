@@ -33,7 +33,8 @@ export function AuthGuard({
     // Only redirect if authentication is required and user is not authenticated
     if (requireAuth && !state.isLoading && !state.isAuthenticated) {
       const redirectUrl = `/auth/login?redirect=${encodeURIComponent(pathname)}`;
-      router.replace(redirectUrl as never);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      router.push(redirectUrl as any);
     }
   }, [requireAuth, state.isAuthenticated, state.isLoading, router, pathname]);
 
