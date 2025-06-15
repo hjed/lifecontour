@@ -66,6 +66,11 @@ class ContactRepository(ABC):
         pass
 
     @abstractmethod
+    async def delete_all_methods(self, contact_id: int) -> None:
+        """Delete all contact methods for a contact."""
+        pass
+
+    @abstractmethod
     async def add_address(
         self, contact_id: int, address: ContactAddress
     ) -> ContactAddress:
@@ -83,6 +88,11 @@ class ContactRepository(ABC):
         pass
 
     @abstractmethod
+    async def delete_all_addresses(self, contact_id: int) -> None:
+        """Delete all contact addresses for a contact."""
+        pass
+
+    @abstractmethod
     async def add_note(self, contact_id: int, note: ContactNote) -> ContactNote:
         """Add a contact note."""
         pass
@@ -95,6 +105,11 @@ class ContactRepository(ABC):
     @abstractmethod
     async def delete_note(self, note_id: int) -> None:
         """Delete a contact note."""
+        pass
+
+    @abstractmethod
+    async def delete_all_notes(self, contact_id: int) -> None:
+        """Delete all contact notes for a contact."""
         pass
 
     @abstractmethod
