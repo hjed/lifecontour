@@ -337,6 +337,70 @@ class TestContactService:
         assert "Note ID is required after save" in exc_info.value.message
 
     @pytest.mark.asyncio
+    async def test_update_contact_with_methods_and_notes_success(
+        self, contact_service, mock_contact_repo, mock_transaction
+    ):
+        """Test successful contact update with attached methods and notes."""
+        # Arrange
+        current_contact = Contact(first_name="John", last_name="Smith", id=1)
+        updated_contact = Contact(first_name="John", last_name="Doe", id=1)
+
+        # Add email method to updated contact
+        email_method = ContactMethod(
+            method_type=MethodType.EMAIL,
+            value="john.doe@example.com",
+            contact_id=1,
+            is_primary=True,
+        )
+        updated_contact.methods.append(email_method)
+
+        # Add note to updated contact
+        note = ContactNote(
+            content="Updated contact information",
+            contact_id=1,
+        )
+        updated_contact.notes.append(note)
+
+        saved_contact = Contact(first_name="John", last_name="Doe", id=1)
+        saved_email = ContactMethod(
+            method_type=MethodType.EMAIL,
+            value="john.doe@example.com",
+            contact_id=1,
+            is_primary=True,
+            id=2,
+        )
+        saved_note = ContactNote(
+            content="Updated contact information",
+            contact_id=1,
+            id=3,
+        )
+
+        mock_contact_repo.find_by_id.return_value = current_contact
+        mock_contact_repo.save.return_value = saved_contact
+        mock_contact_repo.find_by_email.return_value = None  # No duplicate email
+        mock_contact_repo.add_method.return_value = saved_email
+        mock_contact_repo.add_note.return_value = saved_note
+
+        # Act
+        result = await contact_service.update_contact(updated_contact, mock_transaction)
+
+        # Assert
+        assert result.id == 1
+        assert result.first_name == "John"
+        assert result.last_name == "Doe"
+        assert len(result.methods) == 1
+        assert len(result.notes) == 1
+
+        # Verify repository calls
+        assert (
+            mock_contact_repo.find_by_id.call_count >= 1
+        )  # Called for validation and possibly other checks
+        mock_contact_repo.save.assert_called_once_with(updated_contact)
+        mock_contact_repo.add_method.assert_called_once()
+        mock_contact_repo.add_note.assert_called_once()
+        mock_contact_repo.find_by_email.assert_called_once_with("john.doe@example.com")
+
+    @pytest.mark.asyncio
     async def test_update_contact_success(
         self, contact_service, mock_contact_repo, mock_transaction
     ):

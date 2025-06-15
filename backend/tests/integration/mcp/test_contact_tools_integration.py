@@ -261,8 +261,8 @@ class TestContactToolsIntegration:
     async def test_create_contact_integration_with_phone_and_notes(
         self, contact_service: ContactService, clean_database: AsyncConnection
     ):
-        """Test creating a contact with phone and notes using real database."""
-        # Test creating a contact with additional data
+        """Test creating a contact with phone and notes using real database with single transaction."""
+        # Test creating a contact with additional data using the new single-call approach
         from app.core.contacts.models.entities import (
             Contact,
             ContactMethod,
@@ -270,56 +270,55 @@ class TestContactToolsIntegration:
             MethodType,
         )
 
-        # Create a test contact
+        # Create a test contact with attached methods and notes
         contact = Contact(
             first_name="Jane",
             last_name="Smith",
         )
 
-        # Save the contact
-        saved_contact = await contact_service.create_contact(contact, clean_database)
-
-        # Verify the contact was created with an ID
-        assert saved_contact.id is not None
-        contact_id = saved_contact.id
-
-        # Add email method
+        # Add email method (attached before creation)
         email_method = ContactMethod(
             method_type=MethodType.EMAIL,
             value="jane.smith@example.com",
-            contact_id=contact_id,
+            contact_id=0,  # Will be set when contact is saved
             is_primary=True,
         )
-        await contact_service.add_contact_method(
-            contact_id, email_method, clean_database
-        )
+        contact.methods.append(email_method)
 
-        # Add phone method
+        # Add phone method (attached before creation)
         phone_method = ContactMethod(
             method_type=MethodType.PHONE,
             value="+1234567890",
-            contact_id=contact_id,
+            contact_id=0,  # Will be set when contact is saved
             is_primary=True,
         )
-        await contact_service.add_contact_method(
-            contact_id, phone_method, clean_database
-        )
+        contact.methods.append(phone_method)
 
-        # Add note
+        # Add note (attached before creation)
         note = ContactNote(
             content="Met at conference",
-            contact_id=contact_id,
+            contact_id=0,  # Will be set when contact is saved
         )
-        await contact_service.add_contact_note(contact_id, note, clean_database)
+        contact.notes.append(note)
 
-        # Retrieve the contact to verify all data was added
-        retrieved_contact = await contact_service.get_contact_by_id(contact_id)
+        # Create the contact with all attached data in a single transaction
+        saved_contact = await contact_service.create_contact(contact, clean_database)
+
+        # Verify the contact was created with all data
+        assert saved_contact.id is not None
+        assert saved_contact.first_name == "Jane"
+        assert saved_contact.last_name == "Smith"
+        assert len(saved_contact.methods) == 2
+        assert len(saved_contact.notes) == 1
+
+        # Retrieve the contact to verify all data was persisted correctly
+        retrieved_contact = await contact_service.get_contact_by_id(saved_contact.id)
         assert retrieved_contact is not None
         assert retrieved_contact.first_name == "Jane"
         assert retrieved_contact.last_name == "Smith"
         assert retrieved_contact.get_primary_email() == "jane.smith@example.com"
         assert retrieved_contact.get_primary_phone() == "+1234567890"
-        assert len(retrieved_contact.notes) > 0
+        assert len(retrieved_contact.notes) == 1
         assert retrieved_contact.notes[0].content == "Met at conference"
 
     @pytest.mark.asyncio

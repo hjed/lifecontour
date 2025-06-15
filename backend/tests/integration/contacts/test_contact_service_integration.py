@@ -261,6 +261,71 @@ class TestContactServiceIntegration:
         assert history[0].new_value == "Doe"
 
     @pytest.mark.asyncio
+    async def test_update_contact_with_methods_and_notes_single_call(
+        self, contact_service, clean_database: AsyncConnection
+    ):
+        """Test that update_contact handles methods and notes in a single transaction."""
+        # Create initial contact
+        contact = Contact(first_name="Bob", last_name="Wilson")
+        saved_contact = await contact_service.create_contact(contact, clean_database)
+        assert saved_contact.id is not None
+
+        # Update contact with new methods and notes
+        updated_contact = Contact(
+            id=saved_contact.id,
+            first_name="Robert",  # Changed name
+            last_name="Wilson",
+        )
+
+        # Add email method
+        email_method = ContactMethod(
+            method_type=MethodType.EMAIL,
+            value="robert.wilson@example.com",
+            contact_id=saved_contact.id,
+            is_primary=True,
+        )
+        updated_contact.methods.append(email_method)
+
+        # Add phone method
+        phone_method = ContactMethod(
+            method_type=MethodType.PHONE,
+            value="+1555123456",
+            contact_id=saved_contact.id,
+            is_primary=True,
+        )
+        updated_contact.methods.append(phone_method)
+
+        # Add note
+        note = ContactNote(
+            content="Updated contact with new information",
+            contact_id=saved_contact.id,
+        )
+        updated_contact.notes.append(note)
+
+        # Update the contact using the service
+        final_contact = await contact_service.update_contact(
+            updated_contact, clean_database
+        )
+
+        # Verify the contact was updated with all related data
+        assert final_contact.id == saved_contact.id
+        assert final_contact.first_name == "Robert"
+        assert final_contact.last_name == "Wilson"
+        assert len(final_contact.methods) == 2
+        assert len(final_contact.notes) == 1
+
+        # Verify the contact was actually saved to database
+        retrieved_contact = await contact_service.get_contact_by_id(final_contact.id)
+        assert retrieved_contact is not None
+        assert retrieved_contact.first_name == "Robert"
+        assert retrieved_contact.get_primary_email() == "robert.wilson@example.com"
+        assert retrieved_contact.get_primary_phone() == "+1555123456"
+        assert len(retrieved_contact.notes) == 1
+        assert (
+            retrieved_contact.notes[0].content == "Updated contact with new information"
+        )
+
+    @pytest.mark.asyncio
     async def test_update_contact_no_id_raises_error(
         self, contact_service, clean_database: AsyncConnection
     ):
