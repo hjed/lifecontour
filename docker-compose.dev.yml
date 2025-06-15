@@ -168,6 +168,7 @@ services:
     environment:
       - NEXT_PUBLIC_API_URL=http://localhost:8000
       - NEXT_PUBLIC_OAUTH_PROVIDER_URL=http://localhost:4444
+      - BACKEND_URL=http://backend-dev:8000
       - NODE_ENV=development
       - WATCHPACK_POLLING=true
     volumes:

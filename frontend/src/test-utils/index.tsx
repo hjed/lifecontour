@@ -9,7 +9,11 @@ import { render, RenderOptions } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { AuthProvider } from '@/lib/auth/AuthProvider';
 import { ReactElement } from 'react';
-import { ContactMethodType } from '@/types/contacts';
+import {
+  ContactMethodType,
+  ContactResource,
+  ContactListResponse,
+} from '@/types/contacts';
 
 // Test constants to avoid string duplication
 export const TEST_CONSTANTS = {
@@ -138,10 +142,12 @@ export const contactTestUtils = {
   },
 
   // Mock data factories for contacts
-  createMockContact: (overrides: Partial<any> = {}) => {
-    const baseContact = {
+  createMockContact: (
+    overrides: Partial<ContactResource> = {}
+  ): ContactResource => {
+    const baseContact: ContactResource = {
       id: '1',
-      type: 'contacts',
+      type: 'contacts' as const,
       attributes: {
         first_name: 'John',
         last_name: 'Doe',
@@ -152,7 +158,7 @@ export const contactTestUtils = {
         contact_methods: [
           {
             id: '1',
-            type: 'contact_methods',
+            type: 'contact_methods' as const,
             attributes: {
               method_type: ContactMethodType.EMAIL,
               value: 'john@example.com',
@@ -178,10 +184,13 @@ export const contactTestUtils = {
         ...baseContact.attributes,
         ...overrides.attributes,
       },
-    };
+    } as ContactResource;
   },
 
-  createMockContactsResponse: (contacts: any[] = [], total?: number) => ({
+  createMockContactsResponse: (
+    contacts: ContactResource[] = [],
+    total?: number
+  ): ContactListResponse => ({
     data:
       contacts.length > 0 ? contacts : [contactTestUtils.createMockContact()],
     meta: {
@@ -194,7 +203,7 @@ export const contactTestUtils = {
     },
   }),
 
-  createEmptyContactsResponse: () => ({
+  createEmptyContactsResponse: (): ContactListResponse => ({
     data: [],
     meta: {
       total: 0,
@@ -204,13 +213,20 @@ export const contactTestUtils = {
     },
   }),
 
-  createMockContactResponse: (contact?: any) => ({
+  createMockContactResponse: (contact?: ContactResource) => ({
     data:
       contact ||
       contactTestUtils.createMockContact({
         attributes: {
+          first_name: 'John',
+          last_name: 'Doe',
           middle_name: 'William',
           nick_name: 'Johnny',
+          created_at: '2024-01-01T00:00:00Z',
+          updated_at: '2024-01-01T00:00:00Z',
+          contact_methods: [],
+          addresses: [],
+          notes: [],
         },
       }),
   }),
@@ -237,6 +253,66 @@ export const testPatterns = {
       `[data-testid="${TEST_CONSTANTS.TEST_IDS.ERROR_MESSAGE}"]`
     );
     expect(element).toHaveTextContent(message);
+  },
+} as const;
+
+// HomePage-specific test utilities
+export const homePageTestUtils = {
+  // Feature cards data for consistent testing
+  FEATURE_CARDS: [
+    {
+      title: 'Contacts',
+      description:
+        'Manage your personal and professional contacts with tags and Google sync.',
+    },
+    {
+      title: 'Journal',
+      description:
+        'Keep track of your thoughts, experiences, and memories with mood tracking.',
+    },
+    {
+      title: 'Calendar',
+      description:
+        'Sync with Google Calendar and link events to photos and journal entries.',
+    },
+    {
+      title: 'Photos',
+      description:
+        'Connect with Immich to link photos to contacts, events, and journal entries.',
+    },
+    {
+      title: 'AI Integration',
+      description:
+        'MCP protocol support for AI assistants to access and manage your data.',
+    },
+    {
+      title: 'System Status',
+      description: 'Monitor system health and integration status.',
+    },
+  ] as const,
+
+  // Mock authenticated session response
+  createAuthenticatedSessionMock: () => ({
+    ok: true,
+    json: async () => ({
+      authenticated: true,
+      user: {
+        id: '1',
+        email: 'test@example.com',
+        name: 'Test User',
+      },
+    }),
+  }),
+
+  // Setup common HomePage test environment
+  setupHomePageTest: () => {
+    setupMocks.clearMocks();
+    setupMocks.fetch();
+
+    // Mock authenticated session
+    (fetch as jest.Mock).mockResolvedValue(
+      homePageTestUtils.createAuthenticatedSessionMock()
+    );
   },
 } as const;
 

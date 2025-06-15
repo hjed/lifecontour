@@ -16,6 +16,7 @@ const customJestConfig = {
   ],
   moduleNameMapper: {
     '^@/(.*)$': '<rootDir>/src/$1',
+    '^next/navigation$': '<rootDir>/src/__mocks__/next/navigation.ts',
   },
   collectCoverageFrom: [
     'src/**/*.{js,jsx,ts,tsx}',

@@ -35,7 +35,7 @@ import {
 // Initial auth state
 const initialState: AuthState = {
   user: null,
-  isLoading: false,
+  isLoading: true, // Start with loading true until session check completes
   isAuthenticated: false,
   error: undefined,
 };
@@ -133,7 +133,11 @@ export function AuthProvider({ children }: AuthProviderProps) {
   const queryClient = useQueryClient();
 
   // Check session on mount
-  const { data: sessionUser } = useQuery({
+  const {
+    data: sessionUser,
+    isLoading: isSessionLoading,
+    error: sessionError,
+  } = useQuery({
     queryKey: ['auth', 'session'],
     queryFn: async (): Promise<SessionUser | null> => {
       try {
@@ -146,7 +150,8 @@ export function AuthProvider({ children }: AuthProviderProps) {
         }
 
         const data = await response.json();
-        return data.user || null;
+        // Backend returns { authenticated: boolean, user: SessionUser | null }
+        return data.authenticated ? data.user : null;
       } catch {
         return null;
       }
@@ -157,12 +162,23 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
   // Update auth state when session data changes
   useEffect(() => {
+    if (isSessionLoading) {
+      // Keep loading state while session is being checked
+      return;
+    }
+
+    if (sessionError) {
+      dispatch({ type: 'SESSION_EXPIRED' });
+      return;
+    }
+
     if (sessionUser) {
       dispatch({ type: 'SESSION_REFRESH', user: sessionUser });
-    } else if (state.isAuthenticated) {
+    } else {
+      // Session check complete, no user found
       dispatch({ type: 'SESSION_EXPIRED' });
     }
-  }, [sessionUser, state.isAuthenticated]);
+  }, [sessionUser, isSessionLoading, sessionError]);
 
   // Login mutation
   const loginMutation = useMutation({

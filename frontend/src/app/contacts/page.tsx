@@ -18,10 +18,19 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Alert, AlertDescription } from '@/components/ui/alert';
+import { AuthGuard } from '@/components/auth/AuthGuard';
 import { useDebounce } from '@/hooks/useDebounce';
 import { TIMEOUTS } from '@/lib/constants';
 
 export default function ContactsPage() {
+  return (
+    <AuthGuard>
+      <ContactsPageContent />
+    </AuthGuard>
+  );
+}
+
+function ContactsPageContent() {
   const [searchQuery, setSearchQuery] = useState('');
   const [filters, setFilters] = useState<ContactFilters>({});
   const [showFilters, setShowFilters] = useState(false);

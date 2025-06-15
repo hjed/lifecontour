@@ -14,8 +14,17 @@ import { ContactFormData } from '@/types/contacts';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { ContactForm } from '@/components/contacts/ContactForm';
+import { AuthGuard } from '@/components/auth/AuthGuard';
 
 export default function NewContactPage() {
+  return (
+    <AuthGuard>
+      <NewContactPageContent />
+    </AuthGuard>
+  );
+}
+
+function NewContactPageContent() {
   const createContactMutation = useCreateContact();
 
   const handleSubmit = async (data: ContactFormData) => {

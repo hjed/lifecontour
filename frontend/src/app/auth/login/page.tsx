@@ -9,6 +9,7 @@
 
 import { useState, useEffect, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
+import { useQuery } from '@tanstack/react-query';
 import {
   Card,
   CardContent,
@@ -19,16 +20,25 @@ import { Button } from '@/components/ui/button';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Separator } from '@/components/ui/separator';
 import { useAuth } from '@/lib/auth/AuthProvider';
-import { OAuthProvider, OAUTH_PROVIDERS } from '@/types/auth';
-import { UI_TEXT } from '@/lib/constants';
+import { OAuthProvider } from '@/types/auth';
+import { UI_TEXT, API_ENDPOINTS } from '@/lib/constants';
 import { GitBranch, Key } from 'lucide-react';
 
-// OAuth provider icons
-const ProviderIcons = {
-  [OAuthProvider.GITHUB]: GitBranch,
-  [OAuthProvider.MICROSOFT]: Key, // Using Key as placeholder
-  [OAuthProvider.DISCORD]: Key, // Using Key as placeholder
-  [OAuthProvider.GENERIC]: Key,
+// Provider interface for backend response
+interface ProviderInfo {
+  name: string;
+  display_name: string;
+  icon_url?: string;
+}
+
+// OAuth provider icons - default to Key for all providers
+const getProviderIcon = (providerName: string) => {
+  switch (providerName.toLowerCase()) {
+    case 'github':
+      return GitBranch;
+    default:
+      return Key;
+  }
 };
 
 // Component that uses useSearchParams - needs to be wrapped in Suspense
@@ -36,12 +46,25 @@ function LoginContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { state, login } = useAuth();
-  const [loadingProvider, setLoadingProvider] = useState<OAuthProvider | null>(
-    null
-  );
+  const [loadingProvider, setLoadingProvider] = useState<string | null>(null);
 
   // Get redirect URL from query params
   const redirectTo = searchParams.get('redirect') || '/';
+
+  // Fetch available providers from backend
+  const { data: providersData, isLoading: isLoadingProviders } = useQuery({
+    queryKey: ['auth', 'providers'],
+    queryFn: async (): Promise<{ providers: ProviderInfo[] }> => {
+      const response = await fetch(API_ENDPOINTS.AUTH.PROVIDERS, {
+        credentials: 'include',
+      });
+      if (!response.ok) {
+        throw new Error('Failed to fetch providers');
+      }
+      return response.json();
+    },
+    staleTime: 5 * 60 * 1000, // 5 minutes
+  });
 
   // Clear loading state when auth state changes
   useEffect(() => {
@@ -51,9 +74,9 @@ function LoginContent() {
   }, [state.isLoading]);
 
   // Handle OAuth login
-  const handleLogin = (provider: OAuthProvider) => {
-    setLoadingProvider(provider);
-    login(provider);
+  const handleLogin = (providerName: string) => {
+    setLoadingProvider(providerName);
+    login(providerName as OAuthProvider);
     // Redirect happens in AuthProvider after successful OAuth
     // Error handling is done in AuthProvider's onError callback
     // Loading state will be cleared when mutation completes
@@ -86,34 +109,44 @@ function LoginContent() {
 
           {/* OAuth provider buttons */}
           <div className='space-y-3'>
-            {Object.entries(OAUTH_PROVIDERS).map(([provider, config]) => {
-              const Icon = ProviderIcons[provider as OAuthProvider];
-              const isLoading = loadingProvider === provider;
-              const isAnyLoading = loadingProvider !== null;
+            {isLoadingProviders ? (
+              <div className='text-muted-foreground text-center'>
+                Loading providers...
+              </div>
+            ) : providersData?.providers?.length ? (
+              providersData.providers.map(provider => {
+                const Icon = getProviderIcon(provider.name);
+                const isLoading = loadingProvider === provider.name;
+                const isAnyLoading = loadingProvider !== null;
 
-              return (
-                <Button
-                  key={provider}
-                  variant='outline'
-                  size='lg'
-                  className='w-full justify-start gap-3'
-                  onClick={() => handleLogin(provider as OAuthProvider)}
-                  disabled={isAnyLoading}
-                  aria-label={`${UI_TEXT.CONTINUE_WITH} ${config.name}`}
-                >
-                  <Icon className='h-5 w-5' />
-                  {isLoading ? (
-                    <span>
-                      {UI_TEXT.CONNECTING_TO} {config.name}...
-                    </span>
-                  ) : (
-                    <span>
-                      {UI_TEXT.CONTINUE_WITH} {config.name}
-                    </span>
-                  )}
-                </Button>
-              );
-            })}
+                return (
+                  <Button
+                    key={provider.name}
+                    variant='outline'
+                    size='lg'
+                    className='w-full justify-start gap-3'
+                    onClick={() => handleLogin(provider.name)}
+                    disabled={isAnyLoading}
+                    aria-label={`${UI_TEXT.CONTINUE_WITH} ${provider.display_name}`}
+                  >
+                    <Icon className='h-5 w-5' />
+                    {isLoading ? (
+                      <span>
+                        {UI_TEXT.CONNECTING_TO} {provider.display_name}...
+                      </span>
+                    ) : (
+                      <span>
+                        {UI_TEXT.CONTINUE_WITH} {provider.display_name}
+                      </span>
+                    )}
+                  </Button>
+                );
+              })
+            ) : (
+              <div className='text-muted-foreground text-center'>
+                No authentication providers available
+              </div>
+            )}
           </div>
 
           <Separator className='my-4' />
