@@ -66,6 +66,11 @@ class Settings(BaseSettings):
         default="http://localhost:7700", description="MeiliSearch server URL"
     )
 
+    # Task queue settings
+    redis_url: str = Field(
+        default="redis://localhost:6379", description="Redis server URL for task queue"
+    )
+
     # MCP settings
     mcp_enabled: bool = Field(default=True, description="Enable MCP server")
     mcp_mount_path: str = Field(

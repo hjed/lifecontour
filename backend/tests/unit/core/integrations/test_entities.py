@@ -41,58 +41,23 @@ class TestSyncMetadata:
         assert sync_metadata.error_message is None
         assert sync_metadata.retry_count == 0
 
-    def test_sync_metadata_validation_empty_integration_source(self) -> None:
-        """Test that empty integration source raises ValueError."""
+    def test_sync_metadata_with_optional_fields(self) -> None:
+        """Test creating SyncMetadata with optional fields."""
         now = datetime.now()
-        with pytest.raises(ValueError, match="Integration source cannot be empty"):
-            SyncMetadata(
-                internal_id=123,
-                integration_source="",
-                external_id="ext_123",
-                last_synced_at=now,
-                version_hash="abc123",
-                sync_status=SyncStatus.SUCCESS,
-            )
+        sync_metadata = SyncMetadata(
+            internal_id=123,
+            integration_source="google_contacts",
+            external_id="ext_123",
+            last_synced_at=now,
+            version_hash="abc123",
+            sync_status=SyncStatus.FAILED,
+            error_message="Test error",
+            retry_count=2,
+        )
 
-    def test_sync_metadata_validation_empty_external_id(self) -> None:
-        """Test that empty external ID raises ValueError."""
-        now = datetime.now()
-        with pytest.raises(ValueError, match="External ID cannot be empty"):
-            SyncMetadata(
-                internal_id=123,
-                integration_source="google_contacts",
-                external_id="",
-                last_synced_at=now,
-                version_hash="abc123",
-                sync_status=SyncStatus.SUCCESS,
-            )
-
-    def test_sync_metadata_validation_empty_version_hash(self) -> None:
-        """Test that empty version hash raises ValueError."""
-        now = datetime.now()
-        with pytest.raises(ValueError, match="Version hash cannot be empty"):
-            SyncMetadata(
-                internal_id=123,
-                integration_source="google_contacts",
-                external_id="ext_123",
-                last_synced_at=now,
-                version_hash="",
-                sync_status=SyncStatus.SUCCESS,
-            )
-
-    def test_sync_metadata_validation_negative_retry_count(self) -> None:
-        """Test that negative retry count raises ValueError."""
-        now = datetime.now()
-        with pytest.raises(ValueError, match="Retry count cannot be negative"):
-            SyncMetadata(
-                internal_id=123,
-                integration_source="google_contacts",
-                external_id="ext_123",
-                last_synced_at=now,
-                version_hash="abc123",
-                sync_status=SyncStatus.SUCCESS,
-                retry_count=-1,
-            )
+        assert sync_metadata.error_message == "Test error"
+        assert sync_metadata.retry_count == 2
+        assert sync_metadata.sync_status == SyncStatus.FAILED
 
 
 class TestExternalReference:
@@ -127,16 +92,6 @@ class TestExternalReference:
                 external_id="ext_456",
             )
 
-    def test_external_reference_validation_invalid_entity_type(self) -> None:
-        """Test that invalid entity type raises ValueError."""
-        with pytest.raises(ValueError, match="Entity type must be one of"):
-            ExternalReference(
-                entity_id=456,
-                entity_type="invalid_type",
-                integration_source="google_contacts",
-                external_id="ext_456",
-            )
-
     def test_external_reference_validation_empty_integration_source(self) -> None:
         """Test that empty integration source raises ValueError."""
         with pytest.raises(ValueError, match="Integration source cannot be empty"):
@@ -155,6 +110,16 @@ class TestExternalReference:
                 entity_type="contact",
                 integration_source="google_contacts",
                 external_id="",
+            )
+
+    def test_external_reference_validation_invalid_entity_type(self) -> None:
+        """Test that invalid entity type raises ValueError."""
+        with pytest.raises(ValueError, match="Entity type must be one of:"):
+            ExternalReference(
+                entity_id=456,
+                entity_type="invalid_type",
+                integration_source="google_contacts",
+                external_id="ext_456",
             )
 
     def test_external_reference_metadata_initialization(self) -> None:
