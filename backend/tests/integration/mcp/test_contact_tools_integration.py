@@ -165,6 +165,7 @@ class TestContactToolsIntegration:
                 "search_contacts",
                 "global_search",
                 "create_contact",
+                "update_contact",
                 "list_contacts",
             ]
 
@@ -192,6 +193,7 @@ class TestContactToolsIntegration:
                 "search_contacts",
                 "global_search",
                 "create_contact",
+                "update_contact",
                 "list_contacts",
             ]
 
@@ -528,3 +530,94 @@ class TestContactToolsIntegration:
             tag for tag in retrieved_contact.tags if str(tag.name) == "work"
         )
         assert work_tag_in_contact.id == saved_existing_tag.id
+
+    @pytest.mark.asyncio
+    async def test_update_contact_integration(
+        self, contact_service: ContactService, tag_repo, clean_database: AsyncConnection
+    ):
+        """Test update_contact tool with real database integration."""
+        # First create a contact to update
+        original_contact = Contact(
+            first_name="Original",
+            last_name="Name",
+        )
+
+        # Add original email method
+        original_email = ContactMethod(
+            method_type=MethodType.EMAIL,
+            value="original@example.com",
+            contact_id=0,
+            is_primary=True,
+        )
+        original_contact.methods.append(original_email)
+
+        # Create original tag
+        original_tag = Tag(name=TagName("original"))
+        saved_original_tag = await tag_repo.save(original_tag)
+        original_contact.tags.append(saved_original_tag)
+
+        # Save the original contact
+        saved_contact = await contact_service.create_contact(
+            original_contact, clean_database
+        )
+        assert saved_contact.id is not None
+
+        # Now test updating the contact (simulating MCP tool behavior)
+        updated_contact = Contact(
+            id=saved_contact.id,
+            first_name="Updated",  # Changed
+            last_name="Name",  # Same
+            middle_name="Middle",  # New
+            nick_name="Nick",  # New
+        )
+
+        # Update email method (replacement strategy)
+        updated_email = ContactMethod(
+            method_type=MethodType.EMAIL,
+            value="updated@example.com",
+            contact_id=saved_contact.id,
+            is_primary=True,
+        )
+        updated_contact.methods.append(updated_email)
+
+        # Add phone method (new)
+        phone_method = ContactMethod(
+            method_type=MethodType.PHONE,
+            value="+1234567890",
+            contact_id=saved_contact.id,
+            is_primary=True,
+        )
+        updated_contact.methods.append(phone_method)
+
+        # Update tags (replacement strategy) - mix of existing and new
+        # Create a new tag for testing
+        new_tag = Tag(name=TagName("updated"))
+        saved_new_tag = await tag_repo.save(new_tag)
+        updated_contact.tags.append(saved_new_tag)
+
+        # Update the contact using the service
+        final_contact = await contact_service.update_contact(
+            updated_contact, clean_database
+        )
+
+        # Verify the contact was updated
+        assert final_contact.id == saved_contact.id
+        assert final_contact.first_name == "Updated"
+        assert final_contact.last_name == "Name"
+        assert final_contact.middle_name == "Middle"
+        assert final_contact.nick_name == "Nick"
+        assert len(final_contact.methods) == 2  # Email + Phone
+        assert len(final_contact.tags) == 1  # Only the new tag (replacement strategy)
+
+        # Verify the contact was actually updated in the database
+        retrieved_contact = await contact_service.get_contact_by_id(saved_contact.id)
+        assert retrieved_contact is not None
+        assert retrieved_contact.first_name == "Updated"
+        assert retrieved_contact.middle_name == "Middle"
+        assert retrieved_contact.nick_name == "Nick"
+        assert retrieved_contact.get_primary_email() == "updated@example.com"
+        assert retrieved_contact.get_primary_phone() == "+1234567890"
+
+        # Verify tags were replaced (not appended)
+        assert len(retrieved_contact.tags) == 1
+        assert str(retrieved_contact.tags[0].name) == "updated"

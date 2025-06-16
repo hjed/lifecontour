@@ -33,6 +33,7 @@ from app.mcp.domains.contacts.schemas import (
     ContactCreateRequest,
     ContactListResponse,
     ContactSearchResponse,
+    ContactUpdateRequest,
 )
 from app.mcp.shared.converters import (
     ContactConverter,
@@ -276,6 +277,123 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
 
         logger.info(
             "MCP: Contact created successfully",
+            contact_id=final_contact.id,
+            contact_name=final_contact.get_full_name(),
+        )
+
+        return MCPResponseBuilder.success_response(response)
+
+    @mcp.tool
+    @mcp_unified_error_handler("update_contact", "management")
+    @inject
+    async def update_contact(
+        contact_service: FromDishka[ContactService],
+        tag_repo: FromDishka[TagRepository],
+        connection: FromDishka[AsyncConnection],
+        contact_data: Annotated[
+            str, Field(description="JSON string with contact update data")
+        ],
+    ) -> str:
+        """
+        Update an existing contact for AI-managed relationship maintenance.
+
+        Updates an existing contact with validation and returns AI-friendly confirmation.
+        Supports updating contact methods, tags, and adding notes. Uses replacement
+        strategy for methods/addresses/notes - all existing ones are replaced with
+        the provided ones.
+
+        Args:
+            contact_data: JSON string containing contact update information with fields:
+                - contact_id (required): ID of the contact to update
+                - first_name (optional): Updated first name
+                - last_name (optional): Updated last name
+                - middle_name (optional): Updated middle name
+                - nick_name (optional): Updated nickname
+                - email (optional): Updated primary email address
+                - phone (optional): Updated primary phone number
+                - tags (optional): Updated tags (replaces existing tags)
+                - notes (optional): Additional notes to add
+
+        Returns:
+            JSON string containing AI-friendly contact update confirmation including:
+            - Updated contact details with changes highlighted
+            - Validation results and any warnings
+            - Contextual summary for AI understanding
+        """
+        logger.info("MCP: Updating contact", contact_data=contact_data)
+
+        # Parse contact data
+        data = json.loads(contact_data)
+        request = ContactUpdateRequest(**data)
+
+        # Get existing contact
+        existing_contact = await contact_service.get_contact_by_id(request.contact_id)
+        if not existing_contact:
+            raise ContactNotFoundError(request.contact_id)
+
+        # Create updated contact entity with only changed fields
+        updated_contact = Contact(
+            id=request.contact_id,
+            first_name=request.first_name or existing_contact.first_name,
+            last_name=request.last_name or existing_contact.last_name,
+            middle_name=request.middle_name or existing_contact.middle_name,
+            nick_name=request.nick_name or existing_contact.nick_name,
+        )
+
+        # Add contact methods if provided (replacement strategy)
+        if request.email:
+            email_method = ContactMethod(
+                method_type=MethodType.EMAIL,
+                value=request.email,
+                contact_id=request.contact_id,
+                is_primary=True,
+            )
+            updated_contact.methods.append(email_method)
+
+        if request.phone:
+            phone_method = ContactMethod(
+                method_type=MethodType.PHONE,
+                value=request.phone,
+                contact_id=request.contact_id,
+                is_primary=True,
+            )
+            updated_contact.methods.append(phone_method)
+
+        # Add additional note if provided
+        if request.notes:
+            note = ContactNote(
+                content=request.notes,
+                contact_id=request.contact_id,
+            )
+            updated_contact.notes.append(note)
+
+        # Handle tags if provided - find or create tags by name (replacement strategy)
+        if request.tags is not None:
+            for tag_name in request.tags:
+                # Try to find existing tag by name
+                existing_tag = await tag_repo.find_by_name(tag_name)
+
+                if existing_tag:
+                    # Use existing tag
+                    updated_contact.tags.append(existing_tag)
+                else:
+                    # Create new tag
+                    new_tag = Tag(name=TagName(tag_name))
+                    saved_tag = await tag_repo.save(new_tag)
+                    updated_contact.tags.append(saved_tag)
+
+        # Update the contact with all methods, notes, and tags in a single transaction
+        final_contact = await contact_service.update_contact(
+            updated_contact, connection
+        )
+
+        # Create AI-friendly response using shared converter
+        response = ContactConverter.to_contact_response(
+            final_contact, additional_context="Successfully updated contact"
+        )
+
+        logger.info(
+            "MCP: Contact updated successfully",
             contact_id=final_contact.id,
             contact_name=final_contact.get_full_name(),
         )
