@@ -164,51 +164,28 @@ class ContactService:
         """
 
         async def _create_operation() -> Contact:
-            # Validate contact data
-            await self._validate_contact_data(contact, transaction)
-
-            # Save contact (basic fields only)
-            saved_contact = await self.contact_repo.save(contact)
-
-            # Ensure contact has ID after save
-            if saved_contact.id is None:
-                raise ContactValidationError("id", "Contact ID is required after save")
-
+            # Validate and save basic contact fields
+            saved_contact = await self._validate_and_save_contact_basic_fields(
+                contact, transaction
+            )
+            # contact_id is guaranteed to be not None after _ensure_contact_has_id
             contact_id = saved_contact.id
+            assert contact_id is not None
 
-            # Save related entities using helper methods
-            saved_methods = await self._save_contact_methods(
-                contact_id, contact.methods, transaction
-            )
-            saved_addresses = await self._save_contact_addresses(
-                contact_id, contact.addresses, transaction
-            )
-            saved_notes = await self._save_contact_notes(
-                contact_id, contact.notes, transaction
-            )
-            saved_tags = await self._save_contact_tags(
-                contact_id, contact.tags, transaction
+            # Save all related entities
+            saved_entities = await self._save_all_related_entities(
+                contact_id, contact, transaction
             )
 
-            # Update the saved contact with the saved related entities
-            saved_contact.methods = saved_methods
-            saved_contact.addresses = saved_addresses
-            saved_contact.notes = saved_notes
-            saved_contact.tags = saved_tags
-
-            # Record field history (only if there are field changes to track)
-            # For creation, we don't typically track field changes since it's all new data
-
-            # Publish main contact created event
-            event = ContactCreated(
-                saved_contact.id,
-                saved_contact.first_name,
-                saved_contact.last_name,
-                transaction=transaction,
+            # Build complete contact with related entities
+            complete_contact = self._build_complete_contact(
+                saved_contact, saved_entities
             )
-            await self.event_publisher.publish(event)
 
-            return saved_contact
+            # Publish creation event
+            await self._publish_contact_created_event(complete_contact, transaction)
+
+            return complete_contact
 
         return cast(Contact, await self._execute_with_retry(_create_operation))
 
@@ -245,80 +222,36 @@ class ContactService:
 
         async def _update_operation() -> Contact:
             assert contact.id is not None
-            current_contact = await self.contact_repo.find_by_id(contact.id)
-            if current_contact is None:
-                raise ContactValidationError(
-                    "id", f"Contact with ID {contact.id} not found"
-                )
 
+            # Get current contact and calculate changes
+            current_contact = await self._get_existing_contact(contact.id)
             changed_fields = self._calculate_changed_fields(current_contact, contact)
 
-            # Validate contact data
-            await self._validate_contact_data(
+            # Validate and save basic contact fields
+            saved_contact = await self._validate_and_save_contact_basic_fields(
                 contact, transaction, exclude_contact_id=contact.id
             )
-
-            # Save basic contact fields first
-            saved_contact = await self.contact_repo.save(contact)
-
-            if saved_contact.id is None:
-                raise ContactValidationError("id", "Contact ID is required after save")
-
+            # contact_id is guaranteed to be not None after _ensure_contact_has_id
             contact_id = saved_contact.id
+            assert contact_id is not None
 
-            # Remove existing relations if new data is provided
-            await self._remove_existing_relations(contact_id, contact, current_contact)
-
-            # Save related entities using helper methods (only if new data is provided)
-            saved_methods = []
-            if contact.methods:
-                saved_methods = await self._save_contact_methods(
-                    contact_id, contact.methods, transaction
-                )
-
-            saved_addresses = []
-            if contact.addresses:
-                saved_addresses = await self._save_contact_addresses(
-                    contact_id, contact.addresses, transaction
-                )
-
-            saved_notes = []
-            if contact.notes:
-                saved_notes = await self._save_contact_notes(
-                    contact_id, contact.notes, transaction
-                )
-
-            saved_tags = []
-            if contact.tags:
-                saved_tags = await self._save_contact_tags(
-                    contact_id, contact.tags, transaction
-                )
-
-            # Update the saved contact with the related entities
-            # If methods/addresses/notes/tags were provided, use the new ones
-            # Otherwise, preserve the existing ones from the current contact
-            saved_contact.methods = (
-                saved_methods if contact.methods else current_contact.methods
+            # Handle related entities update
+            saved_entities = await self._handle_update_relations(
+                contact_id, contact, current_contact, transaction
             )
-            saved_contact.addresses = (
-                saved_addresses if contact.addresses else current_contact.addresses
-            )
-            saved_contact.notes = (
-                saved_notes if contact.notes else current_contact.notes
-            )
-            saved_contact.tags = saved_tags if contact.tags else current_contact.tags
 
+            # Build complete contact with related entities
+            complete_contact = self._build_complete_contact_for_update(
+                saved_contact, saved_entities, current_contact, contact
+            )
+
+            # Publish update events if there were changes
             if changed_fields:
-                await self.history_service.record_contact_change(
-                    saved_contact.id, changed_fields, _transaction=transaction
+                await self._publish_contact_updated_events(
+                    complete_contact, changed_fields, transaction
                 )
 
-                event = ContactUpdated(
-                    saved_contact.id, changed_fields, transaction=transaction
-                )
-                await self.event_publisher.publish(event)
-
-            return saved_contact
+            return complete_contact
 
         return cast(Contact, await self._execute_with_retry(_update_operation))
 
@@ -384,6 +317,170 @@ class ContactService:
             )
 
         return changed_fields
+
+    async def _validate_and_save_contact_basic_fields(
+        self,
+        contact: Contact,
+        transaction: AsyncConnection,
+        exclude_contact_id: int | None = None,
+    ) -> Contact:
+        """Validate contact data and save basic contact fields."""
+        # Validate contact data
+        await self._validate_contact_data(contact, transaction, exclude_contact_id)
+
+        # Save contact (basic fields only)
+        saved_contact = await self.contact_repo.save(contact)
+
+        # Ensure contact has ID after save
+        self._ensure_contact_has_id(saved_contact)
+
+        return saved_contact
+
+    def _ensure_contact_has_id(self, contact: Contact) -> None:
+        """Ensure contact has ID after save."""
+        if contact.id is None:
+            raise ContactValidationError("id", "Contact ID is required after save")
+
+    async def _get_existing_contact(self, contact_id: int) -> Contact:
+        """Get existing contact by ID, raising error if not found."""
+        current_contact = await self.contact_repo.find_by_id(contact_id)
+        if current_contact is None:
+            raise ContactValidationError(
+                "id", f"Contact with ID {contact_id} not found"
+            )
+        return current_contact
+
+    async def _save_all_related_entities(
+        self,
+        contact_id: int,
+        contact: Contact,
+        transaction: AsyncConnection,
+    ) -> dict[str, list[Any]]:
+        """Save all related entities and return them in a dictionary."""
+        saved_methods = await self._save_contact_methods(
+            contact_id, contact.methods, transaction
+        )
+        saved_addresses = await self._save_contact_addresses(
+            contact_id, contact.addresses, transaction
+        )
+        saved_notes = await self._save_contact_notes(
+            contact_id, contact.notes, transaction
+        )
+        saved_tags = await self._save_contact_tags(
+            contact_id, contact.tags, transaction
+        )
+
+        return {
+            "methods": saved_methods,
+            "addresses": saved_addresses,
+            "notes": saved_notes,
+            "tags": saved_tags,
+        }
+
+    def _build_complete_contact(
+        self, saved_contact: Contact, saved_entities: dict[str, list[Any]]
+    ) -> Contact:
+        """Build complete contact with all related entities."""
+        saved_contact.methods = saved_entities["methods"]
+        saved_contact.addresses = saved_entities["addresses"]
+        saved_contact.notes = saved_entities["notes"]
+        saved_contact.tags = saved_entities["tags"]
+        return saved_contact
+
+    async def _publish_contact_created_event(
+        self, contact: Contact, transaction: AsyncConnection
+    ) -> None:
+        """Publish contact created event."""
+        assert contact.id is not None
+        event = ContactCreated(
+            contact.id,
+            contact.first_name,
+            contact.last_name,
+            transaction=transaction,
+        )
+        await self.event_publisher.publish(event)
+
+    async def _handle_update_relations(
+        self,
+        contact_id: int,
+        contact: Contact,
+        current_contact: Contact,
+        transaction: AsyncConnection,
+    ) -> dict[str, list[Any]]:
+        """Handle updating related entities for contact update."""
+        # Remove existing relations if new data is provided
+        await self._remove_existing_relations(contact_id, contact, current_contact)
+
+        # Save new related entities (only if new data is provided)
+        saved_entities: dict[str, list[Any]] = {
+            "methods": [],
+            "addresses": [],
+            "notes": [],
+            "tags": [],
+        }
+
+        if contact.methods:
+            saved_entities["methods"] = await self._save_contact_methods(
+                contact_id, contact.methods, transaction
+            )
+
+        if contact.addresses:
+            saved_entities["addresses"] = await self._save_contact_addresses(
+                contact_id, contact.addresses, transaction
+            )
+
+        if contact.notes:
+            saved_entities["notes"] = await self._save_contact_notes(
+                contact_id, contact.notes, transaction
+            )
+
+        if contact.tags:
+            saved_entities["tags"] = await self._save_contact_tags(
+                contact_id, contact.tags, transaction
+            )
+
+        return saved_entities
+
+    def _build_complete_contact_for_update(
+        self,
+        saved_contact: Contact,
+        saved_entities: dict[str, list[Any]],
+        current_contact: Contact,
+        contact: Contact,
+    ) -> Contact:
+        """Build complete contact for update, preserving existing entities when not updated."""
+        # If methods/addresses/notes/tags were provided, use the new ones
+        # Otherwise, preserve the existing ones from the current contact
+        saved_contact.methods = (
+            saved_entities["methods"] if contact.methods else current_contact.methods
+        )
+        saved_contact.addresses = (
+            saved_entities["addresses"]
+            if contact.addresses
+            else current_contact.addresses
+        )
+        saved_contact.notes = (
+            saved_entities["notes"] if contact.notes else current_contact.notes
+        )
+        saved_contact.tags = (
+            saved_entities["tags"] if contact.tags else current_contact.tags
+        )
+        return saved_contact
+
+    async def _publish_contact_updated_events(
+        self,
+        contact: Contact,
+        changed_fields: dict[str, Any],
+        transaction: AsyncConnection,
+    ) -> None:
+        """Publish contact updated events and record history."""
+        assert contact.id is not None
+        await self.history_service.record_contact_change(
+            contact.id, changed_fields, _transaction=transaction
+        )
+
+        event = ContactUpdated(contact.id, changed_fields, transaction=transaction)
+        await self.event_publisher.publish(event)
 
     async def _validate_contact_data(
         self,
