@@ -128,11 +128,11 @@ Tasks are organized by **feature iterations** that deliver end-to-end value incr
 - [X] Add comprehensive end-to-end tests with Playwright
 - [ ] Add global search component for searching across all entities
 - [ ] Add tag management UI with colour coding (deferred)
-- [ ] Implement search result highlighting and typo tolerance display 
-- [ ] Add search filters (by tags, date ranges, entity types) 
+- [ ] Implement search result highlighting and typo tolerance display
+- [ ] Add search filters (by tags, date ranges, entity types)
 - [ ] Deploy working MVP with Docker Compose including MeiliSearch
 
-**Current Status:** Contact management UI complete with comprehensive testing. Implemented contact list, detail/edit, and creation pages with form validation, responsive design, and Australian English formatting. Jest tests: 69/69 passing (includes 22 new contact tests). Playwright e2e tests implemented for core contact workflows. 
+**Current Status:** Contact management UI complete with comprehensive testing. Implemented contact list, detail/edit, and creation pages with form validation, responsive design, and Australian English formatting. Jest tests: 69/69 passing (includes 22 new contact tests). Playwright e2e tests implemented for core contact workflows.
 
 ### ITER1-005: Contact MCP Tools 🟡 ✅ COMPLETED
 **Description:** Implement MCP (Model Context Protocol) server foundation and contact tools for AI integration

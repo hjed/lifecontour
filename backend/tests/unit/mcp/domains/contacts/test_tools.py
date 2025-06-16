@@ -51,6 +51,7 @@ class TestContactTools:
                 "search_contacts",
                 "global_search",
                 "create_contact",
+                "update_contact",
                 "list_contacts",
             ]
 
@@ -58,6 +59,76 @@ class TestContactTools:
                 assert expected_tool in tool_names, (
                     f"Tool {expected_tool} not found in registered tools"
                 )
+
+    @pytest.mark.asyncio
+    async def test_update_contact_tool_registration(self, mcp_server):
+        """Test that update_contact tool is properly registered with correct schema."""
+        async with Client(mcp_server) as client:
+            # List available tools
+            tools_response = await client.list_tools()
+
+            # Extract tools list
+            if hasattr(tools_response, "tools"):
+                tools = tools_response.tools
+            else:
+                tools = tools_response
+
+            # Find the update_contact tool
+            update_tool = None
+            for tool in tools:
+                if tool.name == "update_contact":
+                    update_tool = tool
+                    break
+
+            assert update_tool is not None, "update_contact tool not found"
+            assert update_tool.description is not None
+            assert "update" in update_tool.description.lower()
+            assert update_tool.inputSchema is not None
+
+            # Verify the tool has the expected parameter
+            properties = update_tool.inputSchema.get("properties", {})
+            assert "contact_data" in properties
+            assert properties["contact_data"]["type"] == "string"
+
+    def test_contact_update_request_schema_validation(self):
+        """Test that ContactUpdateRequest schema validates correctly."""
+        import json
+
+        from app.mcp.domains.contacts.schemas import ContactUpdateRequest
+
+        # Test valid update request with explicit construction
+        request = ContactUpdateRequest(
+            contact_id=123,
+            first_name="Updated",
+            last_name="Name",
+            email="updated@example.com",
+            tags=["work", "important"],
+        )
+        assert request.contact_id == 123
+        assert request.first_name == "Updated"
+        assert request.last_name == "Name"
+        assert request.email == "updated@example.com"
+        assert request.tags == ["work", "important"]
+
+        # Test minimal update request (only contact_id required)
+        minimal_request = ContactUpdateRequest(contact_id=456)
+        assert minimal_request.contact_id == 456
+        assert minimal_request.first_name is None
+        assert minimal_request.tags is None
+
+        # Test JSON serialization/deserialization
+        valid_data = {
+            "contact_id": 123,
+            "first_name": "Updated",
+            "last_name": "Name",
+            "email": "updated@example.com",
+            "tags": ["work", "important"],
+        }
+        json_str = json.dumps(valid_data)
+        parsed_data = json.loads(json_str)
+        # Use model_validate for proper type handling
+        parsed_request = ContactUpdateRequest.model_validate(parsed_data)
+        assert parsed_request.contact_id == 123
 
     # Note: The actual tool functionality is tested in integration tests
     # These unit tests focus on tool registration and basic structure

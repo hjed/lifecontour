@@ -116,6 +116,40 @@ AI-friendly contact creation confirmation with created contact details and valid
 }
 ```
 
+### update_contact
+
+Updates an existing contact with validation and AI-friendly confirmation.
+
+**Parameters:**
+- `contact_data` (string): JSON string containing contact update information with fields:
+  - `contact_id` (required): ID of the contact to update
+  - `first_name` (optional): Updated first name
+  - `last_name` (optional): Updated last name
+  - `middle_name` (optional): Updated middle name
+  - `nick_name` (optional): Updated nickname
+  - `email` (optional): Updated primary email address
+  - `phone` (optional): Updated primary phone number
+  - `tags` (optional): Updated tags (replaces existing tags)
+  - `notes` (optional): Additional notes to add
+
+**Returns:**
+AI-friendly contact update confirmation with updated contact details and validation results.
+
+**Example:**
+```json
+{
+  "contact_id": 123,
+  "first_name": "Jane",
+  "last_name": "Smith-Johnson",
+  "email": "jane.smith.johnson@example.com",
+  "phone": "+1987654321",
+  "tags": ["colleague", "manager"],
+  "notes": "Promoted to manager"
+}
+```
+
+**Note:** This tool uses a replacement strategy for contact methods, addresses, notes, and tags. All existing items in these categories are replaced with the provided ones.
+
 ### list_contacts
 
 Lists contacts with pagination and AI-friendly formatting.
