@@ -92,7 +92,6 @@ pytest
 Fixed `test_health.py` which was incorrectly acting as integration tests:
 - Created proper unit test client with mocked database dependencies
 - Added test settings that allow all hosts (fixes TrustedHostMiddleware issues)
-- Used in-memory SQLite for unit tests instead of PostgreSQL
 - Mocked `check_database_connection()` for readiness probe tests
 - Created separate integration tests for health endpoints with real database
 

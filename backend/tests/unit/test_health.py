@@ -24,11 +24,13 @@ def mock_db_session():
 def unit_test_client(mock_db_session):
     """Create test client with mocked database for unit tests."""
     # Create test settings that allow all hosts
+    # Unit tests should not connect to any real database
     test_settings = Settings(
         debug=True,
         allowed_hosts=["*"],  # Allow all hosts for testing
         cors_origins=["*"],
-        database_url="sqlite:///:memory:",  # Use in-memory SQLite for unit tests
+        # Use a dummy PostgreSQL URL - it won't be used due to dependency override
+        database_url="postgresql://dummy:dummy@localhost:5432/dummy",
     )
 
     app = create_app(settings=test_settings)

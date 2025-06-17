@@ -14,11 +14,13 @@ from app.main import create_app
 
 
 @pytest.fixture
-def test_settings():
+def test_settings(db_config):
     """Create test settings with OAuth providers configured."""
     return Settings(
         debug=True,
-        database_url="sqlite:///test.db",
+        database_url=db_config.get_async_url().replace(
+            "postgresql+asyncpg://", "postgresql://"
+        ),
         session_secret_key="test-session-secret",
         allowed_hosts=["*"],  # Allow all hosts for testing
         github_client_id="test_github_client_id",
@@ -84,13 +86,15 @@ class TestAuthEndpoints:
 
         return TestClient(app)
 
-    def test_get_auth_providers_no_providers(self):
+    def test_get_auth_providers_no_providers(self, db_config):
         """Test getting available OAuth providers when none are configured."""
         # Create app with no OAuth providers
         settings = Settings(
             debug=True,
             session_secret_key="test-secret",
-            database_url="sqlite:///test.db",
+            database_url=db_config.get_async_url().replace(
+                "postgresql+asyncpg://", "postgresql://"
+            ),
             allowed_hosts=["*"],  # Allow all hosts for testing
         )
         app = create_app(settings)
