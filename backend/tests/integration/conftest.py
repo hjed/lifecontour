@@ -287,6 +287,12 @@ _db_config = DatabaseConfig.from_environment()
 _docker_manager = DockerManager()
 
 
+@pytest.fixture(scope="session")
+def db_config() -> DatabaseConfig:
+    """Shared database configuration fixture for integration tests."""
+    return _db_config
+
+
 def get_test_database_url() -> str:
     """Get test database URL from environment variables or use defaults."""
     return _db_config.get_async_url()

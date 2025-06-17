@@ -196,7 +196,7 @@ domain/adapters/
 
 #### Cross-Domain Adapters (Sync Domain)
 - **TransactionCoordinator**: Manages distributed transactions
-  - SQLite transaction coordination
+  - PostgreSQL transaction coordination
   - Rollback strategies
   - Consistency guarantees
 - **EventBus**: Handles domain event distribution

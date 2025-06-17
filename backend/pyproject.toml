@@ -35,7 +35,11 @@ dependencies = [
     "fastmcp>=2.3.2",
     "dishka>=1.6.0",
     "arq>=0.25.0",
+    "core_shared",
 ]
+
+[tool.uv.sources]
+core_shared = { path = "../core_shared", editable = true }
 
 [project.optional-dependencies]
 dev = [
@@ -53,6 +57,9 @@ dev = [
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[tool.hatch.metadata]
+allow-direct-references = true
 
 [tool.hatch.build.targets.wheel]
 packages = ["app"]
@@ -109,6 +116,7 @@ module = [
     "psycopg2.*",
     "stdnum.*",
     "pycountry.*",
+    "core_shared.*",
 ]
 ignore_missing_imports = true
 
@@ -165,7 +173,6 @@ exclude_lines = [
 
 [dependency-groups]
 dev = [
-    "aiosqlite>=0.21.0",
     "mypy>=1.16.0",
     "types-authlib>=1.5.0.20250516",
 ]

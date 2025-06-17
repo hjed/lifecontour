@@ -15,10 +15,12 @@ class TestMCPFastAPIIntegration:
     """Test MCP server integration with FastAPI."""
 
     @pytest.fixture
-    def test_settings(self):
+    def test_settings(self, db_config):
         """Create test settings with MCP enabled."""
         return Settings(
-            database_url="sqlite+aiosqlite:///:memory:",
+            database_url=db_config.get_async_url().replace(
+                "postgresql+asyncpg://", "postgresql://"
+            ),
             mcp_enabled=True,
             mcp_mount_path="/mcp-server",
         )
@@ -73,11 +75,13 @@ class TestMCPFastAPIIntegration:
             404,  # Not Found (docs disabled)
         ]
 
-    def test_mcp_mount_path_configurable(self):
+    def test_mcp_mount_path_configurable(self, db_config):
         """Test that MCP mount path is configurable."""
         # Test with different mount path
         settings = Settings(
-            database_url="sqlite+aiosqlite:///:memory:",
+            database_url=db_config.get_async_url().replace(
+                "postgresql+asyncpg://", "postgresql://"
+            ),
             mcp_enabled=True,
             mcp_mount_path="/custom-mcp",
         )

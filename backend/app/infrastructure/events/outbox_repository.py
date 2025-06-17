@@ -71,7 +71,6 @@ class OutboxRepository:
 
             events = []
             for row in rows:
-                # Handle both PostgreSQL JSONB (dict) and SQLite TEXT (string)
                 event_data = row.event_data
                 if isinstance(event_data, str):
                     event_data = json.loads(event_data)

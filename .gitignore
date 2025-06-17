@@ -37,7 +37,6 @@ dmypy.json
 *.db-journal
 *.db-wal
 *.db-shm
-database.sqlite*
 postgres_data/
 
 # Node.js

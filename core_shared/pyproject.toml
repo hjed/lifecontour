@@ -1,5 +1,5 @@
 [project]
-name = "core-shared"
+name = "core_shared"
 version = "0.1.0"
 description = "Shared models and utilities for Personal Management System integrations"
 authors = [
