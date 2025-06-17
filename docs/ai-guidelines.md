@@ -113,7 +113,6 @@ This provides complete, isolated context without noise from other integrations.
 - **Coverage**: Focus on critical business logic rather than arbitrary percentages
 - **Test-Driven Development**: Write tests first, then implement functionality
 - **Real Database Testing**: Use Docker PostgreSQL for integration tests
-- **Australian Localization**: Test date formats (DD/MM/YYYY)
 - **Accessibility**: ARIA attributes, keyboard navigation, screen reader support
 - **Clear Separation**: Independent test suites for backend and frontend
 
@@ -124,13 +123,14 @@ This provides complete, isolated context without noise from other integrations.
 - **Schema Recreation**: Fresh database schema for each test session
 - **Real Constraints**: Test actual database constraints and SQL behavior
 - **Performance Validation**: Verify query performance with real data
+- **Reuse Fixtures**: Reuse test fixtures across tests as much as possible for simplicity
 
 ### Test Organization and Fixture Usage
 
 **CRITICAL: Always use the correct test fixtures for the test type:**
 
 - **Unit Tests** (`tests/unit/`): Use `tests/conftest.py` fixtures for fast, isolated testing
-  - Uses in-memory or mock databases
+  - Uses mock databases
   - Fast execution, no external dependencies
   - Suitable for business logic and API schema validation
 
@@ -166,10 +166,12 @@ _See [Testing Strategy](./architecture/testing-strategy.md) for detailed testing
 ### shadcn/ui Component Guidelines
 
 - Use shadcn/ui components with proper TypeScript interfaces
+- Minimize the use of `'use client'`, `useEffect`, and `setState`; favor React Server Components (RSC) and Next.js SSR features.
 - Implement proper accessibility with ARIA attributes and screen reader support
 - Follow responsive design patterns with mobile-first approach
 - Use semantic color classes for dark mode support: `bg-background`,
   `text-foreground`, `border-border`
+- Structure files with exported components, subcomponents, helpers, static content, and types.
 
 ### Key Patterns
 
@@ -207,9 +209,9 @@ shadcn/ui implementation patterns._
 
 ### TypeScript Configuration
 
-- Always define interfaces for API objects, database entities, configuration,
-  and MCP tools
+- Always define interfaces for API objects, database entities, and configuration
 - Use exact optional property types for better type safety
+- Keep http client usage issolated to dedicated components and resources (adapter pattern)
 
 ### Code Organization
 
@@ -338,8 +340,8 @@ personal-management-system/
 _See [Domain Architecture](./architecture/domain-architecture.md) for detailed implementation patterns._
 
 ### Dependency Injection with Dishka
-
-- **Framework**: Use Dishka DI framework for clean, framework-agnostic dependency injection
+ for clean, framework-agnostic dependency injection
+- **Framework**: Use Dishka DI framework
 - **Pattern**: Constructor injection with typed interfaces and automatic resolution
 - **Domain-Based Providers**: Organize providers by domain (ContactProvider, CalendarProvider, etc.)
 - **Scopes**: Use APP scope for singletons, REQUEST scope for per-request objects, SESSION for websockets
@@ -409,7 +411,6 @@ class ContactProvider(Provider):
 - **Domain-Based Architecture**: Organize MCP tools by domain (contacts, journal, calendar, photos) to allow future expansion
 - **Dishka Integration**: Use Dishka dependency injection in MCP tools for consistency with REST API
 - **Session Authentication**: Share OAuth authentication with REST API using session middleware
-- **AI-Friendly Responses**: Provide context and summaries, not raw database data
 - **Clear Interfaces**: Structure MCP tools with consistent, simple interfaces
 
 #### MCP with Dishka Patterns
