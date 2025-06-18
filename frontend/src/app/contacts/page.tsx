@@ -19,6 +19,7 @@ import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { AuthGuard } from '@/components/auth/AuthGuard';
+import { SearchHighlight } from '@/components/search/SearchHighlight';
 import { useDebounce } from '@/hooks/useDebounce';
 import { TIMEOUTS } from '@/lib/constants';
 
@@ -64,20 +65,47 @@ function ContactsPageContent() {
 
   const displayContacts = useMemo(() => {
     const contacts = data?.data || [];
-    return contacts.map(contact => ({
-      id: contact.id,
-      name: `${contact.attributes.first_name} ${contact.attributes.last_name || ''}`.trim(),
-      primary_email: contact.attributes.contact_methods?.find(
-        m => m.attributes.method_type === 'email' && m.attributes.is_primary
-      )?.attributes.value,
-      primary_phone: contact.attributes.contact_methods?.find(
-        m => m.attributes.method_type === 'phone' && m.attributes.is_primary
-      )?.attributes.value,
-      tags: contact.relationships?.tags?.data || [],
-      created_at: contact.attributes.created_at,
-      updated_at: contact.attributes.updated_at,
-    }));
-  }, [data?.data]);
+    return contacts.map(contact => {
+      const highlighted = contact.meta?.highlighted as Record<
+        string,
+        string
+      > | null;
+      const isSearchResult = shouldUseSearch && !!highlighted;
+
+      // Pre-compute highlighted text for performance
+      const highlightedName =
+        isSearchResult && highlighted
+          ? (highlighted.first_name || contact.attributes.first_name) +
+            (highlighted.last_name
+              ? ` ${highlighted.last_name}`
+              : contact.attributes.last_name
+                ? ` ${contact.attributes.last_name}`
+                : '')
+          : null;
+
+      return {
+        id: contact.id,
+        name: `${contact.attributes.first_name} ${contact.attributes.last_name || ''}`.trim(),
+        primary_email: contact.attributes.contact_methods?.find(
+          m => m.attributes.method_type === 'email' && m.attributes.is_primary
+        )?.attributes.value,
+        primary_phone: contact.attributes.contact_methods?.find(
+          m => m.attributes.method_type === 'phone' && m.attributes.is_primary
+        )?.attributes.value,
+        tags: contact.relationships?.tags?.data || [],
+        created_at: contact.attributes.created_at,
+        updated_at: contact.attributes.updated_at,
+        // Include search highlighting data when available
+        highlighted,
+        isSearchResult,
+        highlightedName,
+        highlightedEmail:
+          isSearchResult && highlighted ? highlighted.email : null,
+        highlightedPhone:
+          isSearchResult && highlighted ? highlighted.phone : null,
+      };
+    });
+  }, [data?.data, shouldUseSearch]);
 
   const handleSearchChange = (value: string) => {
     setSearchQuery(value);
@@ -177,7 +205,13 @@ function ContactsPageContent() {
         <span className='text-muted-foreground text-sm'>
           {isLoading
             ? 'Loading contacts...'
-            : `${totalContacts} contact${totalContacts !== 1 ? 's' : ''} found`}
+            : shouldUseSearch
+              ? `${totalContacts} contact${totalContacts !== 1 ? 's' : ''} found for "${debouncedSearchQuery}"${
+                  data?.meta?.processing_time_ms
+                    ? ` (${data.meta.processing_time_ms}ms)`
+                    : ''
+                }`
+              : `${totalContacts} contact${totalContacts !== 1 ? 's' : ''} found`}
         </span>
       </div>
 
@@ -232,7 +266,14 @@ function ContactsPageContent() {
                     href={`/contacts/${contact.id}`}
                     className='hover:text-primary transition-colors'
                   >
-                    {contact.name}
+                    {contact.isSearchResult && contact.highlightedName ? (
+                      <SearchHighlight
+                        text={contact.highlightedName}
+                        fallback={contact.name}
+                      />
+                    ) : (
+                      contact.name
+                    )}
                   </Link>
                 </CardTitle>
               </CardHeader>
@@ -241,13 +282,27 @@ function ContactsPageContent() {
                   {contact.primary_email && (
                     <p className='text-sm'>
                       <span className='font-medium'>Email:</span>{' '}
-                      {contact.primary_email}
+                      {contact.isSearchResult && contact.highlightedEmail ? (
+                        <SearchHighlight
+                          text={contact.highlightedEmail}
+                          fallback={contact.primary_email}
+                        />
+                      ) : (
+                        contact.primary_email
+                      )}
                     </p>
                   )}
                   {contact.primary_phone && (
                     <p className='text-sm'>
                       <span className='font-medium'>Phone:</span>{' '}
-                      {contact.primary_phone}
+                      {contact.isSearchResult && contact.highlightedPhone ? (
+                        <SearchHighlight
+                          text={contact.highlightedPhone}
+                          fallback={contact.primary_phone}
+                        />
+                      ) : (
+                        contact.primary_phone
+                      )}
                     </p>
                   )}
                   {contact.tags.length > 0 && (
