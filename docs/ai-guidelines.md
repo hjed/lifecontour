@@ -116,6 +116,25 @@ This provides complete, isolated context without noise from other integrations.
 - **Accessibility**: ARIA attributes, keyboard navigation, screen reader support
 - **Clear Separation**: Independent test suites for backend and frontend
 
+### Code Quality Checks
+
+**Always run quality checks before completing any task:**
+
+```bash
+# Frontend quality checks (run from frontend/)
+pnpm quality:check    # Check formatting, linting, and types
+pnpm quality:fix      # Auto-fix formatting and linting issues
+
+# Individual checks
+pnpm format:check     # Prettier formatting check
+pnpm format           # Auto-format code
+pnpm lint             # ESLint check
+pnpm lint:fix         # Auto-fix ESLint issues
+pnpm type-check       # TypeScript type checking
+```
+
+**Quality check failures must be fixed before task completion.**
+
 ### Integration Testing Patterns
 
 - **Docker PostgreSQL**: Use `docker-compose.test.yml` for real database testing
