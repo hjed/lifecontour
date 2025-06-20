@@ -26,6 +26,11 @@ class SessionAuthMiddleware(BaseHTTPMiddleware):
     endpoints and allows other requests to pass through unchanged.
     """
 
+    def __init__(self, app, disable_auth: bool = False):
+        """Initialize middleware with optional auth disabling."""
+        super().__init__(app)
+        self.disable_auth = disable_auth
+
     async def dispatch(
         self, request: Request, call_next: Callable[[Request], Awaitable[Response]]
     ) -> Response:
@@ -41,6 +46,22 @@ class SessionAuthMiddleware(BaseHTTPMiddleware):
         """
         # Only apply authentication to MCP endpoints
         if not self._is_mcp_request(request):
+            return await call_next(request)
+
+        # If authentication is disabled, create a mock user
+        if self.disable_auth:
+            from app.infrastructure.auth.models import SessionUser
+            mock_user = SessionUser(
+                id="dev-user",
+                email="dev@example.com",
+                name="Development User",
+                provider="development",
+            )
+            request.state.user = mock_user
+            logger.debug(
+                "MCP: Authentication disabled - using mock user",
+                path=request.url.path,
+            )
             return await call_next(request)
 
         # Validate session

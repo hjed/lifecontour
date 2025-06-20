@@ -137,6 +137,11 @@ class Settings(BaseSettings):
     otel_service_name: str = Field(
         default="personal-management-backend", description="OpenTelemetry service name"
     )
+
+    # Development settings
+    disable_auth: bool = Field(
+        default=False, description="Disable authentication for development/testing"
+    )
     otel_resource_attributes: str = Field(
         default="", description="OpenTelemetry resource attributes"
     )

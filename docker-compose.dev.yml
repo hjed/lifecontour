@@ -46,7 +46,7 @@ services:
       - pms-dev
 
   # Jaeger - OpenTelemetry Collector and UI
-  jaeger:
+  jaeger-dev:
     image: jaegertracing/all-in-one:1.52
     container_name: pms-jaeger-dev
     environment:
@@ -62,12 +62,13 @@ services:
     networks:
       - pms-dev
 
-  # Simple OAuth2 Provider for Testing
-  oauth-provider:
+  # Simple OAuth2 Provider for Testing (SQLite In-Memory)
+  oauth-provider-dev:
     image: oryd/hydra:v2.2.0
     container_name: pms-oauth-dev
     environment:
-      - DSN=postgres://dev_user:dev_password@postgres-dev:5432/personal_management_dev?sslmode=disable
+      # Use SQLite in-memory database
+      - DSN=sqlite://file::memory:?cache=shared
       - URLS_SELF_ISSUER=http://localhost:4444
       - URLS_CONSENT=http://localhost:3001/consent
       - URLS_LOGIN=http://localhost:3001/login
@@ -75,18 +76,20 @@ services:
       - OIDC_SUBJECT_IDENTIFIERS_SUPPORTED_TYPES=public,pairwise
       - OIDC_SUBJECT_IDENTIFIERS_PAIRWISE_SALT=some-random-salt
       - LOG_LEVEL=debug
+      - SERVE_COOKIES_SAME_SITE_MODE=Lax
+      - SERVE_COOKIES_SAME_SITE_LEGACY_WORKAROUND=true
+    volumes:
+      - ./docker/oauth-provider/init-oauth.sh:/init-oauth.sh:ro
     ports:
       - "4444:4444"  # Public port
       - "4445:4445"  # Admin port
-    depends_on:
-      postgres-dev:
-        condition: service_healthy
     networks:
       - pms-dev
-    command: serve all --dev
+    entrypoint: ["/bin/sh", "-c"]
+    command: ["/init-oauth.sh & hydra serve all --dev"]
 
   # OAuth Provider UI (for managing clients and users)
-  oauth-ui:
+  oauth-ui-dev:
     image: node:18-alpine
     container_name: pms-oauth-ui-dev
     working_dir: /app
@@ -95,13 +98,15 @@ services:
     ports:
       - "3001:3001"
     environment:
-      - HYDRA_ADMIN_URL=http://oauth-provider:4445
+      - HYDRA_ADMIN_URL=http://oauth-provider-dev:4445
       - PORT=3001
     depends_on:
-      - oauth-provider
+      - oauth-provider-dev
     networks:
       - pms-dev
     command: sh -c "npm install && npm start"
+
+
 
   # Backend (Development Mode with Hot Reload)
   backend-dev:
@@ -123,7 +128,7 @@ services:
       SESSION_SECRET_KEY: dev_session_secret_change_in_production
       SEARCH_INDEX_PREFIX: pms_dev_
       ENABLE_TELEMETRY: "true"
-      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger-dev:4318
       OTEL_SERVICE_NAME: personal-management-backend-dev
       OTEL_RESOURCE_ATTRIBUTES: "service.name=personal-management-backend-dev,service.version=0.1.0-dev"
       # OAuth Configuration for testing
@@ -131,8 +136,10 @@ services:
       OAUTH_CLIENT_ID: dev-client-id
       OAUTH_CLIENT_SECRET: dev-client-secret
       OAUTH_AUTHORIZATION_URL: http://localhost:4444/oauth2/auth
-      OAUTH_TOKEN_URL: http://oauth-provider:4444/oauth2/token
-      OAUTH_USERINFO_URL: http://oauth-provider:4444/userinfo
+      OAUTH_TOKEN_URL: http://oauth-provider-dev:4444/oauth2/token
+      OAUTH_USERINFO_URL: http://oauth-provider-dev:4444/userinfo
+      # Enable OAuth for proper testing
+      DISABLE_AUTH: "false"
     volumes:
       - ./backend:/app
       - backend_dev_cache:/app/.cache
@@ -143,7 +150,9 @@ services:
         condition: service_healthy
       meilisearch-dev:
         condition: service_healthy
-      oauth-provider:
+      jaeger-dev:
+        condition: service_started
+      oauth-provider-dev:
         condition: service_started
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
