@@ -24,12 +24,21 @@ class AuthProvider(Provider):
         return OAuthService(settings)
 
     @provide(scope=Scope.REQUEST)
-    def get_current_user(self, request: Request) -> SessionUser:
+    def get_current_user(self, request: Request, settings: Settings) -> SessionUser:
         """
         Get current authenticated user from session.
 
         Raises HTTPException if user is not authenticated.
         """
+        # If authentication is disabled, return a mock user
+        if settings.disable_auth:
+            return SessionUser(
+                id="dev-user",
+                email="dev@example.com",
+                name="Development User",
+                provider="development",
+            )
+
         user_data = request.session.get("user")
 
         if not user_data:
@@ -50,12 +59,21 @@ class AuthProvider(Provider):
             ) from e
 
     @provide(scope=Scope.REQUEST)
-    def get_optional_user(self, request: Request) -> SessionUser | None:
+    def get_optional_user(self, request: Request, settings: Settings) -> SessionUser | None:
         """
         Get current authenticated user from session if available.
 
         Returns None if user is not authenticated instead of raising an exception.
         """
+        # If authentication is disabled, return a mock user
+        if settings.disable_auth:
+            return SessionUser(
+                id="dev-user",
+                email="dev@example.com",
+                name="Development User",
+                provider="development",
+            )
+
         user_data = request.session.get("user")
 
         if not user_data:

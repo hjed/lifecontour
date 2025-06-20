@@ -58,12 +58,13 @@ def create_mcp_server() -> FastMCP[None]:
     return mcp
 
 
-def create_mcp_app(container: AsyncContainer) -> object:
+def create_mcp_app(container: AsyncContainer, disable_auth: bool = False) -> object:
     """
     Create FastMCP ASGI app with authentication middleware and Dishka integration.
 
     Args:
         container: Dishka container for dependency injection
+        disable_auth: Whether to disable authentication for development
 
     Returns:
         ASGI application ready for mounting in FastAPI
@@ -73,8 +74,8 @@ def create_mcp_app(container: AsyncContainer) -> object:
     # Create MCP server
     mcp = create_mcp_server()
 
-    # Create middleware stack
-    middleware = [Middleware(SessionAuthMiddleware)]
+    # Create middleware stack with auth configuration
+    middleware = [Middleware(SessionAuthMiddleware, disable_auth=disable_auth)]
 
     # Create HTTP app with session authentication middleware
     app = mcp.http_app(path="/mcp", middleware=middleware)

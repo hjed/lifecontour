@@ -183,7 +183,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         logger = structlog.get_logger()
         logger.info("MCP: Mounting MCP server", mount_path=settings.mcp_mount_path)
 
-        mcp_app = create_mcp_app(container)
+        mcp_app = create_mcp_app(container, disable_auth=settings.disable_auth)
         app.mount(settings.mcp_mount_path, mcp_app)  # type: ignore[arg-type]
 
         logger.info(
