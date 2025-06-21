@@ -41,6 +41,20 @@ class AuthorizeResponse(BaseModel):
     state: str = Field(..., description="OAuth state parameter")
 
 
+class CallbackRequest(BaseModel):
+    """Request model for OAuth callback."""
+
+    code: str = Field(..., description="OAuth authorization code")
+    state: str = Field(..., description="OAuth state parameter")
+    provider: str = Field(..., description="OAuth provider name")
+
+
+class CallbackResponse(BaseModel):
+    """Response model for OAuth callback."""
+
+    redirect_url: str = Field(..., description="URL to redirect to after authentication")
+
+
 class UserResponse(BaseModel):
     """Response model for user information."""
 
