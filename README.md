@@ -43,11 +43,41 @@ A personal relationship management and journaling system with AI integration thr
    - Backend API: http://localhost:8000
    - API Documentation: http://localhost:8000/api/docs
 
+### Docker Development Environment
+
+For a complete development environment with all services:
+
+```bash
+# Start complete Docker development environment
+./scripts/dev.sh docker-start
+
+# Stop Docker development environment
+./scripts/dev.sh docker-stop
+
+# Rebuild Docker images (useful when dependencies change)
+./scripts/dev.sh docker-rebuild
+
+# Rebuild specific service only
+./scripts/dev.sh docker-rebuild-service backend-dev
+```
+
+**Windows users** can use:
+```cmd
+# PowerShell
+.\scripts\dev.ps1 docker-rebuild
+
+# Batch file (simpler)
+scripts\rebuild-docker.bat dev
+```
+
 ### Production Deployment
 
 ```bash
 # Start all services with nginx proxy
 docker-compose up -d
+
+# Rebuild production images
+./scripts/dev.sh docker-rebuild-prod
 
 # Access via nginx proxy
 # Frontend: http://localhost
@@ -106,6 +136,27 @@ personal-management-system/
 - **Advanced Features**: CardDAV/CalDAV protocols, Home Assistant integration
 
 ## 🧪 Development
+
+### Docker Image Management
+
+When working with Docker, you may need to rebuild images to pick up changes:
+
+```bash
+# Rebuild all development images (when dependencies change)
+./scripts/dev.sh docker-rebuild
+
+# Rebuild specific service (faster for single service changes)
+./scripts/dev.sh docker-rebuild-service backend-dev
+
+# View Docker service status
+./scripts/dev.sh docker-status
+```
+
+**When to rebuild:**
+- After changing `pyproject.toml` or `package.json` dependencies
+- After modifying Dockerfile configurations
+- When experiencing issues with outdated cached layers
+- After pulling changes that affect Docker setup
 
 ### Running Tests
 

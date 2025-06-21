@@ -208,6 +208,91 @@ docker_test() {
     ./scripts/test-docker-env.sh
 }
 
+# Rebuild Docker images (development)
+docker_rebuild() {
+    log_info "Rebuilding Docker images for development environment..."
+
+    # Check if Docker is available
+    if ! command_exists "docker-compose"; then
+        log_error "Docker is not installed. Please install Docker first."
+        exit 1
+    fi
+
+    # Stop services first to avoid conflicts
+    log_info "Stopping existing services..."
+    docker-compose -f docker-compose.dev.yml down
+
+    # Rebuild images with no cache
+    log_info "Rebuilding backend and frontend images (no cache)..."
+    docker-compose -f docker-compose.dev.yml build --no-cache backend-dev frontend-dev
+
+    log_success "Docker images rebuilt successfully!"
+    log_info "Use './scripts/dev.sh docker-start' to start the services with new images"
+}
+
+# Rebuild Docker images (production)
+docker_rebuild_prod() {
+    log_info "Rebuilding Docker images for production environment..."
+
+    # Check if Docker is available
+    if ! command_exists "docker-compose"; then
+        log_error "Docker is not installed. Please install Docker first."
+        exit 1
+    fi
+
+    # Stop services first to avoid conflicts
+    log_info "Stopping existing services..."
+    docker-compose down
+
+    # Rebuild images with no cache
+    log_info "Rebuilding backend, frontend, and nginx images (no cache)..."
+    docker-compose build --no-cache backend frontend nginx
+
+    log_success "Production Docker images rebuilt successfully!"
+    log_info "Use 'docker-compose up -d' to start the services with new images"
+}
+
+# Rebuild specific Docker service
+docker_rebuild_service() {
+    if [ -z "$2" ]; then
+        log_error "Please specify a service name to rebuild"
+        log_info "Development services: backend-dev, frontend-dev"
+        log_info "Production services: backend, frontend, nginx"
+        exit 1
+    fi
+
+    local service="$2"
+    local compose_file="docker-compose.dev.yml"
+
+    # Determine if this is a production service
+    if [[ "$service" == "backend" || "$service" == "frontend" || "$service" == "nginx" ]]; then
+        compose_file="docker-compose.yml"
+        log_info "Rebuilding production service: $service"
+    else
+        log_info "Rebuilding development service: $service"
+    fi
+
+    # Check if Docker is available
+    if ! command_exists "docker-compose"; then
+        log_error "Docker is not installed. Please install Docker first."
+        exit 1
+    fi
+
+    # Stop the specific service
+    log_info "Stopping service: $service"
+    docker-compose -f "$compose_file" stop "$service"
+
+    # Rebuild the service with no cache
+    log_info "Rebuilding service: $service (no cache)..."
+    docker-compose -f "$compose_file" build --no-cache "$service"
+
+    # Restart the service
+    log_info "Starting service: $service"
+    docker-compose -f "$compose_file" up -d "$service"
+
+    log_success "Service $service rebuilt and restarted successfully!"
+}
+
 # Run tests
 test() {
     log_info "Running tests..."
@@ -320,17 +405,22 @@ help() {
     echo "  precommit       Run pre-commit hooks"
     echo ""
     echo "Docker Development Commands:"
-    echo "  docker-start    Start complete Docker development environment"
-    echo "  docker-stop     Stop Docker development environment"
-    echo "  docker-logs     Show logs for all services (or specify service name)"
-    echo "  docker-restart  Restart specific Docker service"
-    echo "  docker-status   Show status of Docker services"
-    echo "  docker-test     Test all Docker services are working correctly"
+    echo "  docker-start         Start complete Docker development environment"
+    echo "  docker-stop          Stop Docker development environment"
+    echo "  docker-logs          Show logs for all services (or specify service name)"
+    echo "  docker-restart       Restart specific Docker service"
+    echo "  docker-status        Show status of Docker services"
+    echo "  docker-test          Test all Docker services are working correctly"
+    echo "  docker-rebuild       Rebuild all Docker images for development (no cache)"
+    echo "  docker-rebuild-prod  Rebuild all Docker images for production (no cache)"
+    echo "  docker-rebuild-service  Rebuild specific Docker service (specify service name)"
     echo ""
     echo "Examples:"
     echo "  $0 docker-start                    # Start full Docker environment"
     echo "  $0 docker-logs backend-dev         # Show backend logs only"
     echo "  $0 docker-restart backend-dev      # Restart backend service"
+    echo "  $0 docker-rebuild                  # Rebuild all dev images (fresh build)"
+    echo "  $0 docker-rebuild-service backend-dev  # Rebuild only backend service"
     echo ""
     echo "Service URLs (when using docker-start):"
     echo "  Frontend:        http://localhost:3000"
@@ -366,6 +456,15 @@ case "${1:-help}" in
         ;;
     docker-test)
         docker_test
+        ;;
+    docker-rebuild)
+        docker_rebuild
+        ;;
+    docker-rebuild-prod)
+        docker_rebuild_prod
+        ;;
+    docker-rebuild-service)
+        docker_rebuild_service "$@"
         ;;
     test)
         test
