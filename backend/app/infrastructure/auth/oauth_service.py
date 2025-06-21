@@ -204,6 +204,52 @@ class OAuthService:
                 detail="OAuth authentication failed",
             ) from e
 
+    async def exchange_code_for_user(
+        self, provider: str, code: str, redirect_uri: str
+    ) -> OAuthUserInfo:
+        """Exchange authorization code for user information."""
+        if provider not in self.oauth._clients:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"OAuth provider '{provider}' not configured",
+            )
+
+        client = self.oauth._clients[provider]
+
+        try:
+            # Create a mock request with the authorization code
+            from starlette.requests import Request
+
+            # Create a mock request with the code parameter
+            mock_request = Request({
+                "type": "http",
+                "method": "GET",
+                "url": f"{redirect_uri}?code={code}",
+                "query_string": f"code={code}".encode(),
+            })
+
+            # Exchange authorization code for access token
+            token = await client.authorize_access_token(mock_request)
+
+            # Get user information
+            user_info = await self._get_user_info(client, token, provider)
+
+            logger.info(
+                "OAuth code exchange successful",
+                provider=provider,
+                user_id=user_info.id,
+                email=user_info.email,
+            )
+
+            return user_info
+
+        except Exception as e:
+            logger.error("OAuth code exchange failed", provider=provider, error=str(e))
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="OAuth authentication failed",
+            ) from e
+
     async def _get_user_info(
         self, client: Any, token: dict[str, Any], provider: str
     ) -> OAuthUserInfo:
