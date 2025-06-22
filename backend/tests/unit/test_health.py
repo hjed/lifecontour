@@ -24,13 +24,15 @@ def mock_db_session():
 def unit_test_client(mock_db_session):
     """Create test client with mocked database for unit tests."""
     # Create test settings that allow all hosts
-    # Unit tests should not connect to any real database
+    # Unit tests should not connect to any real database or Redis
     test_settings = Settings(
         debug=True,
         allowed_hosts=["*"],  # Allow all hosts for testing
         cors_origins=["*"],
         # Use a dummy PostgreSQL URL - it won't be used due to dependency override
         database_url="postgresql://dummy:dummy@localhost:5432/dummy",
+        # Use a dummy Redis URL - will fail connection as expected in unit tests
+        redis_url="redis://dummy:6379",
     )
 
     app = create_app(settings=test_settings)
@@ -89,3 +91,56 @@ def test_readiness_check_unhealthy(mock_db_check, unit_test_client: TestClient) 
 
     assert response.status_code == 503
     mock_db_check.assert_called_once()
+
+
+@pytest.mark.unit
+def test_integration_health_check_components_importable() -> None:
+    """Test that integration health check components can be imported (unit test safe)."""
+    # Test core_shared package accessibility
+    try:
+        from core_shared.base_service import BaseIntegrationService, SyncResult
+        from core_shared.models.external_reference import ExternalReference
+        from core_shared.models.sync_metadata import SyncMetadata, SyncStatus
+
+        # Verify enums work correctly
+        _ = SyncStatus.SUCCESS
+        _ = SyncResult.SUCCESS
+
+        # Test that we can reference the classes
+        available_models = [
+            SyncMetadata.__name__,
+            ExternalReference.__name__,
+            BaseIntegrationService.__name__,
+        ]
+        assert len(available_models) == 3
+        assert "SyncMetadata" in available_models
+        assert "ExternalReference" in available_models
+        assert "BaseIntegrationService" in available_models
+
+    except Exception as e:
+        pytest.fail(f"Core shared package import failed: {e}")
+
+    # Test integration domain configuration
+    try:
+        from app.core.integrations.database import IntegrationDatabaseManager
+        from app.core.integrations.exceptions import IntegrationError
+        from app.core.integrations.task_queue import TaskQueueConfig
+
+        # Verify configuration is accessible
+        config = TaskQueueConfig()
+        assert config.QUEUE_NAME == "integration_tasks"
+        assert config.MAX_JOBS == 10
+        assert config.JOB_TIMEOUT == 300
+        assert config.MAX_TRIES == 3
+
+        # Test that we can reference the classes
+        available_components = [
+            IntegrationError.__name__,
+            IntegrationDatabaseManager.__name__,
+        ]
+        assert len(available_components) == 2
+        assert "IntegrationError" in available_components
+        assert "IntegrationDatabaseManager" in available_components
+
+    except Exception as e:
+        pytest.fail(f"Integration domain import failed: {e}")
