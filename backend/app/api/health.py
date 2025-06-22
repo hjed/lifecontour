@@ -13,6 +13,7 @@ import structlog
 from dishka.integrations.fastapi import FromDishka, inject
 from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel
+from redis.asyncio import Redis
 from sqlalchemy.orm import Session
 
 from app.infrastructure.config import Settings
@@ -174,3 +175,136 @@ async def liveness_check() -> dict[str, str]:
     Returns 200 if the application is alive, 503 if it should be restarted.
     """
     return {"status": "alive"}
+
+
+@router.get("/health/integrations", response_model=DetailedHealthResponse)
+@inject
+async def integration_health_check(
+    redis_pool: FromDishka[Redis],
+    settings: FromDishka[Settings],
+) -> DetailedHealthResponse:
+    """
+    Health check specifically for integration infrastructure.
+
+    Verifies that the integration foundation components are working:
+    - Redis connection for ARQ task queue
+    - Core shared package accessibility
+    - Integration domain configuration
+
+    Returns comprehensive health information for integration components.
+    """
+    services: dict[str, Any] = {}
+    overall_status = "healthy"
+
+    # Check Redis connection for ARQ task queue
+    try:
+        # Test Redis connection with a simple ping
+        pong = await redis_pool.ping()
+        if pong:
+            services["redis"] = {
+                "status": "healthy",
+                "type": "redis",
+                "purpose": "ARQ task queue",
+                "url": settings.redis_url,
+            }
+        else:
+            services["redis"] = {
+                "status": "unhealthy",
+                "type": "redis",
+                "purpose": "ARQ task queue",
+                "error": "Redis ping failed",
+            }
+            overall_status = "unhealthy"
+    except Exception as e:
+        logger.error("Redis health check failed", error=str(e))
+        services["redis"] = {
+            "status": "unhealthy",
+            "type": "redis",
+            "purpose": "ARQ task queue",
+            "error": f"Redis connection failed: {str(e)}",
+        }
+        overall_status = "unhealthy"
+
+    # Check core_shared package accessibility
+    try:
+        # Import and verify core_shared models are accessible
+        # These imports are intentionally tested to verify package accessibility
+        from core_shared.base_service import BaseIntegrationService, SyncResult
+        from core_shared.models.external_reference import ExternalReference
+        from core_shared.models.sync_metadata import SyncMetadata, SyncStatus
+
+        # Verify enums work correctly (test that they can be accessed)
+        _ = SyncStatus.SUCCESS
+        _ = SyncResult.SUCCESS
+
+        # Test that we can reference the classes (for health check verification)
+        available_models = [
+            SyncMetadata.__name__,
+            ExternalReference.__name__,
+            BaseIntegrationService.__name__,
+        ]
+
+        services["core_shared"] = {
+            "status": "healthy",
+            "type": "python_package",
+            "purpose": "Shared integration models",
+            "models": available_models,
+            "enums_working": True,
+        }
+    except Exception as e:
+        logger.error("Core shared package health check failed", error=str(e))
+        services["core_shared"] = {
+            "status": "unhealthy",
+            "type": "python_package",
+            "purpose": "Shared integration models",
+            "error": f"Core shared package error: {str(e)}",
+        }
+        overall_status = "unhealthy"
+
+    # Check integration domain configuration
+    try:
+        # These imports are intentionally tested to verify domain accessibility
+        from app.core.integrations.database import IntegrationDatabaseManager
+        from app.core.integrations.exceptions import IntegrationError
+        from app.core.integrations.task_queue import TaskQueueConfig, get_redis_settings
+
+        # Verify configuration is accessible
+        config = TaskQueueConfig()
+        _ = get_redis_settings(settings)  # Test that it can be called
+
+        # Test that we can reference the classes (for health check verification)
+        available_components = [
+            IntegrationError.__name__,
+            IntegrationDatabaseManager.__name__,
+        ]
+
+        services["integration_domain"] = {
+            "status": "healthy",
+            "type": "domain_configuration",
+            "purpose": "Integration architecture foundation",
+            "task_queue_config": {
+                "queue_name": config.QUEUE_NAME,
+                "max_jobs": config.MAX_JOBS,
+                "job_timeout": config.JOB_TIMEOUT,
+                "max_tries": config.MAX_TRIES,
+            },
+            "redis_settings_configured": True,
+            "available_components": available_components,
+        }
+    except Exception as e:
+        logger.error("Integration domain health check failed", error=str(e))
+        services["integration_domain"] = {
+            "status": "unhealthy",
+            "type": "domain_configuration",
+            "purpose": "Integration architecture foundation",
+            "error": f"Integration domain error: {str(e)}",
+        }
+        overall_status = "unhealthy"
+
+    return DetailedHealthResponse(
+        status=overall_status,
+        timestamp=datetime.now(UTC),
+        version="0.1.0",
+        uptime=_get_uptime(),
+        services=services,
+    )
