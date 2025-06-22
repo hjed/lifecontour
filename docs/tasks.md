@@ -170,7 +170,7 @@ Tasks are organized by **feature iterations** that deliver end-to-end value incr
 - [x] Implement session-per-task database connection pattern
 - [x] Create integration-specific exception handling
 - [x] Add integration domain to dependency injection container
-- [x] Write unit tests for integration foundation
+- [x] Write unit tests for integration foundationdd
 - [x] Update Docker Compose with Redis service and volume mounts for core_shared
 - [x] **BONUS**: Add integration health check endpoint (`/api/health/integrations`)
 - [x] **BONUS**: Create comprehensive verification script for steel thread validation
@@ -179,21 +179,65 @@ Tasks are organized by **feature iterations** that deliver end-to-end value incr
 **Final Status:** All integration foundation components implemented and verified. Steel thread complete with Redis task queue, core shared models, integration domain, dependency injection, and comprehensive testing. Integration health check endpoint provides monitoring capabilities. Ready for ITER2-002.
 
 ### ITER2-002: Google Contacts Integration 🔴
-**Description:** Implement Google Contacts integration using the isolated worker architecture
+**Description:** Implement Google Contacts integration using the isolated worker architecture with efficient sync-token based incremental updates
 **Dependencies:** ITER2-001
+**Strategy:** Break into 5 manageable slices (separate PRs) leveraging Google's sync-token and ETag features
+
+#### Slice 1: Foundational API Client & Credential Management 🟢
+**Description:** Establish secure, authenticated connection to Google People API with automatic token refresh
 **Acceptance Criteria:**
-- [ ] Create Google Contacts integration package using core_shared models
-- [ ] Implement Google API client with OAuth2 authentication
-- [ ] Create Google Contacts service with sync logic
-- [ ] Implement two-way sync with conflict resolution using SyncMetadata
-- [ ] Add mandatory idempotency patterns with version hashing
-- [ ] Create ARQ background tasks with DLQ configuration
-- [ ] Implement session-per-task database connection pattern
-- [ ] Add worker-specific configuration and secrets management
-- [ ] Implement credential management and token refresh
-- [ ] Add comprehensive error handling and retry logic with DLQ
-- [ ] Create integration tests for Google sync
-- [ ] Add monitoring and logging for sync operations
+- [ ] Add Google API `client_id` and `client_secret` to worker secrets management
+- [ ] Create `UserGoogleAuth` DB model (user_id, access_token, refresh_token encrypted, expires_at)
+- [ ] Implement `GoogleAuthService` for CRUD operations on UserGoogleAuth tokens with encryption
+- [ ] Implement `GoogleContactsAPIClient` using official `google-api-python-client` library
+- [ ] Add automatic token refresh logic handling 401 responses via GoogleAuthService
+- [ ] Write integration test confirming successful token refresh on 401 response
+
+#### Slice 2: Data Modeling & Read-Only Full Sync 🟢
+**Description:** Define data models and implement full synchronization from Google to local database
+**Acceptance Criteria:**
+- [ ] Create `integrations/google_contacts` package structure
+- [ ] Define Pydantic models for Google Contact API response structure
+- [ ] Create data transformer mapping Google Contact models to core_shared contact models
+- [ ] Create `UserGoogleIntegration` DB model to store user_id and sync_token
+- [ ] Implement `GoogleContactsService.full_sync(user_id)` returning (List[Contact], next_sync_token)
+- [ ] Write unit tests for full_sync mocking API client and verifying pagination/token extraction
+
+#### Slice 3: Idempotent Persistence & Incremental Sync Logic 🟡
+**Description:** Implement efficient incremental synchronization using Google's sync-token feature
+**Acceptance Criteria:**
+- [ ] Create `SyncMetadata` DB model (item_id, external_id, version_hash as ETag, last_synced_at)
+- [ ] Implement persistence logic to save contacts and SyncMetadata from full_sync results
+- [ ] Implement `GoogleContactsService.incremental_sync(user_id, sync_token)` for efficient updates
+- [ ] Add logic to handle created, updated, and soft-deleted contacts in incremental_sync
+- [ ] Write unit tests for incremental_sync covering create, update, and delete scenarios
+
+#### Slice 4: ARQ Worker with Smart Sync Strategy 🟡
+**Description:** Move sync logic to background tasks with intelligent full vs incremental sync decision making
+**Acceptance Criteria:**
+- [ ] Create ARQ task `sync_google_contacts(ctx, user_id)` with session-per-task pattern
+- [ ] Implement dependency injection and database session management for worker
+- [ ] Implement smart sync strategy (check sync_token, choose incremental or full sync)
+- [ ] Handle expired sync_token (HTTP 410) by falling back to full sync
+- [ ] Configure DLQ and retry policies (max_tries) for sync_google_contacts task
+- [ ] Add structured logging to monitor sync outcomes (sync_type, items_processed, errors)
+
+#### Slice 5: Two-Way Sync & Conflict Resolution 🟡
+**Description:** Complete bidirectional synchronization with optimistic concurrency control using ETags
+**Acceptance Criteria:**
+- [ ] Add logic to detect locally created/updated contacts since last sync
+- [ ] Add `create_contact` and `update_contact` methods to GoogleContactsAPIClient
+- [ ] Implement push logic using ETag from SyncMetadata in If-Match header for updates
+- [ ] Handle `412 Precondition Failed` errors by logging conflicts and skipping updates
+- [ ] Update SyncMetadata with new ETag from Google API response after successful push
+- [ ] Create comprehensive integration tests mocking API for two-way sync, conflicts, token expiration
+
+**Key Architectural Decisions Made:**
+- **Sync Strategy:** Use Google's sync-token for efficient incremental updates (29-day validity)
+- **Conflict Resolution:** Optimistic concurrency control with ETags in If-Match headers
+- **Credential Storage:** Encrypted refresh_tokens in database with GoogleAuthService
+- **Sync Triggers:** Periodic ARQ cron jobs + user-initiated sync via API endpoint
+- **Error Handling:** Smart fallback from incremental to full sync on token expiration (HTTP 410)
 
 ### ITER2-003: Integration Worker Architecture 🟡
 **Description:** Set up background worker processes for integration isolation
@@ -620,7 +664,8 @@ Use this section to track progress:
 
 ```
 Iteration 1 (Contact MVP): [x] ITER1-001 [x] ITER1-002 [x] ITER1-003 [x] ITER1-004 [x] ITER1-005
-Iteration 2 (Integration Foundation): [x] ITER2-001 [ ] ITER2-002 [ ] ITER2-003 [ ] ITER2-004 [ ] ITER2-005
+Iteration 2 (Integration Foundation): [x] ITER2-001 [ ] ITER2-002 (5 slices) [ ] ITER2-003 [ ] ITER2-004 [ ] ITER2-005
+  ITER2-002 Slices: [ ] Slice 1 [ ] Slice 2 [ ] Slice 3 [ ] Slice 4 [ ] Slice 5
 Iteration 3 (Extended Integrations): [ ] ITER3-001 [ ] ITER3-002 [ ] ITER3-003 [ ] ITER3-004
 Iteration 4 (Journal): [ ] ITER4-001 [ ] ITER4-002 [ ] ITER4-003 [ ] ITER4-004
 Iteration 5 (Calendar): [ ] ITER5-001 [ ] ITER5-002 [ ] ITER5-003 [ ] ITER5-004
