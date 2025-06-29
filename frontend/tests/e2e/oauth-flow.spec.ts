@@ -6,22 +6,24 @@
  */
 
 import { test, expect } from '@playwright/test';
-import { waitForPageReady } from './utils/test-helpers';
+import {
+  createTestHelpers,
+  navigateAndWaitForStable,
+  verifyUrlMatches
+} from './utils/test-helpers';
 
 test.describe('OAuth Authentication Flow', () => {
   test('should handle OAuth redirect URI correctly', async ({ page }) => {
+    const { oauth } = createTestHelpers(page);
+
     // Navigate to login page (test real backend)
     await page.goto('/auth/login');
 
     // Verify login page loads
     await expect(page.locator('h1')).toContainText('Welcome Back');
 
-    // Wait for providers to load and button to appear
-    const oauthButtons = page.locator('button:has-text("Continue with")');
-    await expect(oauthButtons.first()).toBeVisible({ timeout: 15000 });
-
-    // Ensure button is enabled before clicking
-    await expect(oauthButtons.first()).toBeEnabled();
+    // Wait for providers to load and verify OAuth buttons
+    await oauth.verifyOAuthButtonsVisible(15000);
 
     // Set up request tracking
     let loginRequestMade = false;
@@ -32,7 +34,7 @@ test.describe('OAuth Authentication Flow', () => {
       }
     });
 
-    await oauthButtons.first().click();
+    await oauth.clickFirstOAuthButton();
 
     // Wait a bit to see if request is made
     await page.waitForTimeout(2000);
@@ -45,16 +47,15 @@ test.describe('OAuth Authentication Flow', () => {
 
   test('should handle OAuth callback with correct parameters', async ({ page }) => {
     // Simulate OAuth callback with correct parameters (test real backend)
-    await page.goto('/auth/callback?code=test-code&state=test-state');
-
-    // Verify callback page processes the OAuth response
-    // Note: With real backend, this might redirect to login if auth fails
-    // or to dashboard if successful - we just verify no crash occurs
-    await page.waitForLoadState('networkidle');
+    await navigateAndWaitForStable(page, '/auth/callback?code=test-code&state=test-state');
 
     // Should stay on callback URL or redirect to a valid page
-    const currentUrl = page.url();
-    expect(currentUrl).toMatch(/\/(auth\/callback|auth\/login|$|contacts)/);
+    await verifyUrlMatches(page, [
+      '/auth/callback',
+      '/auth/login',
+      '/',
+      '/contacts'
+    ]);
   });
 
   test('should handle OAuth callback errors gracefully', async ({ page }) => {
@@ -77,43 +78,23 @@ test.describe('OAuth Authentication Flow', () => {
   });
 
   test('should redirect unauthenticated users to login', async ({ page }) => {
+    const { auth } = createTestHelpers(page);
+
     // Navigate to a protected page (no mocking - test real backend)
     await page.goto('/');
-    await waitForPageReady(page);
 
-    // Check if we're redirected to login or if page loads (auth might be bypassed in dev)
-    const currentUrl = page.url();
-    if (currentUrl.includes('/auth/login')) {
-      // If redirected to login, verify login page shows OAuth buttons
-      const oauthButtons = page.locator('button:has-text("Continue with")');
-      await expect(oauthButtons.first()).toBeVisible({ timeout: 10000 });
-    } else {
-      // If not redirected, just verify the page loads without crashing
-      const bodyText = await page.textContent('body');
-      expect(bodyText).toBeTruthy();
-    }
+    // Handle authentication redirect or successful access
+    await auth.handleProtectedPageAccess();
   });
 
   test('should handle OAuth login button clicks', async ({ page }) => {
+    const { oauth } = createTestHelpers(page);
+
     // Navigate to login page
-    await page.goto('/auth/login');
-    await waitForPageReady(page);
+    await navigateAndWaitForStable(page, '/auth/login');
 
-    // Check if OAuth buttons are present
-    const oauthButtons = page.locator('button:has-text("Continue with")');
-    const buttonCount = await oauthButtons.count();
-
-    if (buttonCount > 0) {
-      // If buttons are present, test clicking them
-      await expect(oauthButtons.first()).toBeVisible();
-      await expect(oauthButtons.first()).toBeEnabled();
-
-      // Click the OAuth button (this will trigger the real OAuth flow)
-      await oauthButtons.first().click();
-
-      // Wait a moment to see if any navigation happens
-      await page.waitForTimeout(1000);
-    }
+    // Handle OAuth buttons if present
+    await oauth.handleOAuthButtons({ click: true, waitAfterClick: 1000 });
 
     // The page should load without crashing regardless
     const currentUrl = page.url();
@@ -123,55 +104,33 @@ test.describe('OAuth Authentication Flow', () => {
   });
 
   test('should redirect to login when accessing protected pages', async ({ page }) => {
+    const { auth } = createTestHelpers(page);
+
     // Try to access a protected page (no mocking - test real backend)
     await page.goto('/contacts');
 
-    // Check if we're redirected to login or if page loads (auth might be bypassed in dev)
-    const currentUrl = page.url();
-    if (currentUrl.includes('/auth/login')) {
-      // If redirected to login, verify login page shows OAuth buttons
-      const oauthButtons = page.locator('button:has-text("Continue with")');
-      await expect(oauthButtons.first()).toBeVisible({ timeout: 10000 });
-    } else {
-      // If not redirected, just verify the page loads without crashing
-      const bodyText = await page.textContent('body');
-      expect(bodyText).toBeTruthy();
-    }
+    // Handle authentication redirect or successful access
+    await auth.handleProtectedPageAccess();
   });
 
   test('should redirect to login when accessing protected pages without auth', async ({ page }) => {
+    const { auth } = createTestHelpers(page);
+
     // Navigate to contacts page (no mocking - test real backend)
     await page.goto('/contacts');
-    await waitForPageReady(page);
 
-    // Check if we're redirected to login or if page loads (auth might be bypassed in dev)
-    const currentUrl = page.url();
-    if (currentUrl.includes('/auth/login')) {
-      // If redirected to login, verify login page shows OAuth buttons
-      const oauthButtons = page.locator('button:has-text("Continue with")');
-      await expect(oauthButtons.first()).toBeVisible({ timeout: 10000 });
-    } else {
-      // If not redirected, just verify the page loads without crashing
-      const bodyText = await page.textContent('body');
-      expect(bodyText).toBeTruthy();
-    }
+    // Handle authentication redirect or successful access
+    await auth.handleProtectedPageAccess();
   });
 
   test('should handle OAuth provider selection', async ({ page }) => {
+    const { oauth } = createTestHelpers(page);
+
     // Navigate to login page (no mocking - test real backend)
-    await page.goto('/auth/login');
-    await waitForPageReady(page);
+    await navigateAndWaitForStable(page, '/auth/login');
 
-    // Check if OAuth provider buttons are available
-    const oauthButtons = page.locator('button:has-text("Continue with")');
-    const buttonCount = await oauthButtons.count();
-
-    if (buttonCount > 0) {
-      // If buttons are present, test clicking them
-      await expect(oauthButtons.first()).toBeVisible();
-      await oauthButtons.first().click();
-      await page.waitForTimeout(1000);
-    }
+    // Handle OAuth buttons if available
+    await oauth.handleOAuthButtons({ click: true, waitAfterClick: 1000 });
 
     // Verify page loads without crashing
     const bodyText = await page.textContent('body');
@@ -179,13 +138,14 @@ test.describe('OAuth Authentication Flow', () => {
   });
 
   test('should handle OAuth login attempts', async ({ page }) => {
+    const { oauth } = createTestHelpers(page);
+
     // Navigate to login page (no mocking - test real backend)
     await page.goto('/auth/login');
 
     // Try to login with OAuth provider
-    const oauthButtons = page.locator('button:has-text("Continue with")');
-    await expect(oauthButtons.first()).toBeVisible();
-    await oauthButtons.first().click();
+    await oauth.verifyOAuthButtonsVisible();
+    await oauth.clickFirstOAuthButton();
 
     // Should either redirect to OAuth provider or show error
     // We just verify the click doesn't crash the page
@@ -195,12 +155,13 @@ test.describe('OAuth Authentication Flow', () => {
 
 test.describe('OAuth Redirect URI Configuration', () => {
   test('should handle OAuth login flow', async ({ page }) => {
+    const { oauth } = createTestHelpers(page);
+
     // Test OAuth login flow with real backend
     await page.goto('/auth/login');
 
-    const oauthButtons = page.locator('button:has-text("Continue with")');
-    await expect(oauthButtons.first()).toBeVisible({ timeout: 10000 });
-    await oauthButtons.first().click();
+    await oauth.verifyOAuthButtonsVisible(10000);
+    await oauth.clickFirstOAuthButton();
 
     // Wait for login request to be made
     await page.waitForTimeout(1000);

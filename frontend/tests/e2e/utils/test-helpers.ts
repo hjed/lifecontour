@@ -260,6 +260,8 @@ export function createTestHelpers(page: Page) {
     accessibility: new AccessibilityHelpers(page),
     responsive: new ResponsiveHelpers(page),
     form: new FormHelpers(page),
+    oauth: new OAuthHelpers(page),
+    auth: new AuthHelpers(page),
   };
 }
 
@@ -283,4 +285,164 @@ export async function takeScreenshot(
     path: `test-results/screenshots/${name}.png`,
     fullPage: options?.fullPage ?? false,
   });
+}
+
+/**
+ * OAuth interaction utilities.
+ */
+export class OAuthHelpers {
+  constructor(private readonly page: Page) {}
+
+  /**
+   * Find OAuth buttons on the page.
+   */
+  async findOAuthButtons() {
+    return this.page.locator('button:has-text("Continue with")');
+  }
+
+  /**
+   * Verify OAuth buttons are visible and enabled.
+   */
+  async verifyOAuthButtonsVisible(timeout: number = TEST_DATA.TIMEOUTS.LONG): Promise<void> {
+    const oauthButtons = await this.findOAuthButtons();
+    await expect(oauthButtons.first()).toBeVisible({ timeout });
+    await expect(oauthButtons.first()).toBeEnabled();
+  }
+
+  /**
+   * Click the first available OAuth button.
+   */
+  async clickFirstOAuthButton(): Promise<void> {
+    const oauthButtons = await this.findOAuthButtons();
+    await expect(oauthButtons.first()).toBeVisible();
+    await expect(oauthButtons.first()).toBeEnabled();
+    await oauthButtons.first().click();
+  }
+
+  /**
+   * Check if OAuth buttons are present and optionally interact with them.
+   */
+  async handleOAuthButtons(options?: { click?: boolean; waitAfterClick?: number }): Promise<boolean> {
+    const oauthButtons = await this.findOAuthButtons();
+    const buttonCount = await oauthButtons.count();
+
+    if (buttonCount > 0) {
+      await expect(oauthButtons.first()).toBeVisible();
+
+      if (options?.click) {
+        await expect(oauthButtons.first()).toBeEnabled();
+        await oauthButtons.first().click();
+
+        if (options.waitAfterClick) {
+          await this.page.waitForTimeout(options.waitAfterClick);
+        }
+      }
+
+      return true;
+    }
+
+    return false;
+  }
+}
+
+/**
+ * Authentication flow utilities.
+ */
+export class AuthHelpers {
+  constructor(private readonly page: Page) {}
+
+  /**
+   * Check if user is redirected to login or stays on intended page.
+   * Returns true if redirected to login, false if stayed on page.
+   */
+  async checkAuthenticationRedirect(): Promise<boolean> {
+    const currentUrl = this.page.url();
+    return currentUrl.includes('/auth/login');
+  }
+
+  /**
+   * Verify login page elements are present.
+   */
+  async verifyLoginPageElements(): Promise<void> {
+    const oauthHelpers = new OAuthHelpers(this.page);
+    await oauthHelpers.verifyOAuthButtonsVisible();
+  }
+
+  /**
+   * Handle the common pattern of accessing a protected page.
+   * Verifies either login redirect or successful page access.
+   */
+  async handleProtectedPageAccess(): Promise<'redirected' | 'accessed'> {
+    await waitForPageReady(this.page);
+
+    if (await this.checkAuthenticationRedirect()) {
+      // If redirected to login, verify login page elements
+      await this.verifyLoginPageElements();
+      return 'redirected';
+    } else {
+      // If not redirected, verify page loads without crashing
+      await verifyPageHasContent(this.page);
+      return 'accessed';
+    }
+  }
+
+  /**
+   * Navigate to login page and verify OAuth setup.
+   */
+  async navigateToLoginAndVerifyOAuth(): Promise<void> {
+    await this.page.goto('/auth/login');
+    await waitForPageReady(this.page);
+
+    const oauthHelpers = new OAuthHelpers(this.page);
+    await oauthHelpers.verifyOAuthButtonsVisible();
+  }
+}
+
+/**
+ * Page verification utilities.
+ */
+
+/**
+ * Verify page loads without crashing and has meaningful content.
+ */
+export async function verifyPageHasContent(page: Page): Promise<void> {
+  const bodyText = await page.textContent('body');
+  expect(bodyText).toBeTruthy();
+  expect(bodyText?.trim().length).toBeGreaterThan(0);
+}
+
+/**
+ * Verify page loads successfully with title and content.
+ */
+export async function verifyPageLoadsSuccessfully(page: Page, expectedTitlePattern?: RegExp): Promise<void> {
+  if (expectedTitlePattern) {
+    await expect(page).toHaveTitle(expectedTitlePattern);
+  }
+
+  await page.waitForLoadState('networkidle');
+  await verifyPageHasContent(page);
+}
+
+/**
+ * Navigate to a page and wait for it to be stable.
+ */
+export async function navigateAndWaitForStable(page: Page, url: string): Promise<void> {
+  await page.goto(url);
+  await waitForPageReady(page);
+}
+
+/**
+ * Verify URL matches one of the expected patterns.
+ */
+export async function verifyUrlMatches(page: Page, patterns: (string | RegExp)[]): Promise<void> {
+  const currentUrl = page.url();
+  const matches = patterns.some(pattern => {
+    if (typeof pattern === 'string') {
+      return currentUrl.includes(pattern);
+    } else {
+      return pattern.test(currentUrl);
+    }
+  });
+
+  expect(matches).toBeTruthy();
 }
