@@ -9,12 +9,12 @@ const determineProvider = (state: string | null): OAuthProvider => {
   // Parse provider from state parameter (format: "provider:randomString")
   if (state?.includes(':')) {
     const provider = state.split(':')[0].toLowerCase();
-    
+
     // Check if provider is in the enum (case-insensitive)
     if (Object.values(OAuthProvider).includes(provider as OAuthProvider)) {
       return provider as OAuthProvider;
     }
-    
+
     // Map unknown providers to generic (e.g., "hydra" -> "generic")
     return OAuthProvider.GENERIC;
   }
@@ -32,7 +32,9 @@ describe('OAuth Callback Provider Determination', () => {
 
     it('should handle known providers correctly', () => {
       expect(determineProvider('github:xyz789')).toBe(OAuthProvider.GITHUB);
-      expect(determineProvider('microsoft:def456')).toBe(OAuthProvider.MICROSOFT);
+      expect(determineProvider('microsoft:def456')).toBe(
+        OAuthProvider.MICROSOFT
+      );
       expect(determineProvider('discord:ghi789')).toBe(OAuthProvider.DISCORD);
       expect(determineProvider('generic:jkl012')).toBe(OAuthProvider.GENERIC);
     });
@@ -40,8 +42,12 @@ describe('OAuth Callback Provider Determination', () => {
     it('should handle case-insensitive provider names', () => {
       expect(determineProvider('GITHUB:xyz789')).toBe(OAuthProvider.GITHUB);
       expect(determineProvider('GitHub:xyz789')).toBe(OAuthProvider.GITHUB);
-      expect(determineProvider('MICROSOFT:def456')).toBe(OAuthProvider.MICROSOFT);
-      expect(determineProvider('Microsoft:def456')).toBe(OAuthProvider.MICROSOFT);
+      expect(determineProvider('MICROSOFT:def456')).toBe(
+        OAuthProvider.MICROSOFT
+      );
+      expect(determineProvider('Microsoft:def456')).toBe(
+        OAuthProvider.MICROSOFT
+      );
     });
 
     it('should map unknown providers to generic', () => {

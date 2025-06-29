@@ -1,6 +1,6 @@
 /**
  * End-to-end tests for OAuth authentication flow.
- * 
+ *
  * Tests the complete OAuth flow including redirect URI handling,
  * callback processing, and session management.
  */
@@ -9,7 +9,7 @@ import { test, expect } from '@playwright/test';
 import {
   createTestHelpers,
   navigateAndWaitForStable,
-  verifyUrlMatches
+  verifyUrlMatches,
 } from './utils/test-helpers';
 
 test.describe('OAuth Authentication Flow', () => {
@@ -45,28 +45,37 @@ test.describe('OAuth Authentication Flow', () => {
     }
   });
 
-  test('should handle OAuth callback with correct parameters', async ({ page }) => {
+  test('should handle OAuth callback with correct parameters', async ({
+    page,
+  }) => {
     // Simulate OAuth callback with correct parameters (test real backend)
-    await navigateAndWaitForStable(page, '/auth/callback?code=test-code&state=test-state');
+    await navigateAndWaitForStable(
+      page,
+      '/auth/callback?code=test-code&state=test-state'
+    );
 
     // Should stay on callback URL or redirect to a valid page
     await verifyUrlMatches(page, [
       '/auth/callback',
       '/auth/login',
       '/',
-      '/contacts'
+      '/contacts',
     ]);
   });
 
   test('should handle OAuth callback errors gracefully', async ({ page }) => {
     // Navigate to callback page with error parameters
-    await page.goto('/auth/callback?error=access_denied&error_description=User%20denied%20access');
+    await page.goto(
+      '/auth/callback?error=access_denied&error_description=User%20denied%20access'
+    );
 
     // Wait for the page to process the error
     await page.waitForLoadState('networkidle');
 
     // Verify error is displayed - check for either the error message or error state
-    await expect(page.locator('body')).toContainText('User denied access', { timeout: 10000 });
+    await expect(page.locator('body')).toContainText('User denied access', {
+      timeout: 10000,
+    });
   });
 
   test('should handle missing OAuth parameters', async ({ page }) => {
@@ -74,7 +83,9 @@ test.describe('OAuth Authentication Flow', () => {
     await page.goto('/auth/callback');
 
     // Verify error is displayed for missing parameters
-    await expect(page.locator('body')).toContainText('Missing required OAuth parameters');
+    await expect(page.locator('body')).toContainText(
+      'Missing required OAuth parameters'
+    );
   });
 
   test('should redirect unauthenticated users to login', async ({ page }) => {
@@ -103,7 +114,9 @@ test.describe('OAuth Authentication Flow', () => {
     expect(bodyText).toBeTruthy();
   });
 
-  test('should redirect to login when accessing protected pages', async ({ page }) => {
+  test('should redirect to login when accessing protected pages', async ({
+    page,
+  }) => {
     const { auth } = createTestHelpers(page);
 
     // Try to access a protected page (no mocking - test real backend)
@@ -113,7 +126,9 @@ test.describe('OAuth Authentication Flow', () => {
     await auth.handleProtectedPageAccess();
   });
 
-  test('should redirect to login when accessing protected pages without auth', async ({ page }) => {
+  test('should redirect to login when accessing protected pages without auth', async ({
+    page,
+  }) => {
     const { auth } = createTestHelpers(page);
 
     // Navigate to contacts page (no mocking - test real backend)

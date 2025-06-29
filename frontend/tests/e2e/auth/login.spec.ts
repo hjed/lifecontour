@@ -223,7 +223,6 @@ test.describe('Login Page', () => {
         const bodyText = await page.textContent('body');
         expect(bodyText).toBeTruthy();
       }
-
     });
 
     test('should support Enter key activation', async ({ page }) => {
@@ -302,7 +301,9 @@ test.describe('Login Page', () => {
   });
 
   test.describe('Authentication Flow', () => {
-    test('should show login page for unauthenticated users', async ({ page }) => {
+    test('should show login page for unauthenticated users', async ({
+      page,
+    }) => {
       // Navigate to login page
       await page.goto(TEST_DATA.URLS.LOGIN);
 
@@ -322,7 +323,9 @@ test.describe('Login Page', () => {
       await expect(oauthButtons.first()).toBeVisible();
     });
 
-    test('should show login page for unauthenticated users when accessing login directly', async ({ page }) => {
+    test('should show login page for unauthenticated users when accessing login directly', async ({
+      page,
+    }) => {
       // Navigate to login page directly
       await page.goto(TEST_DATA.URLS.LOGIN);
 
@@ -330,7 +333,9 @@ test.describe('Login Page', () => {
       await expect(page).toHaveURL(TEST_DATA.URLS.LOGIN);
 
       // Should show login page content
-      await expect(page.getByRole('heading', { name: 'Welcome Back' })).toBeVisible();
+      await expect(
+        page.getByRole('heading', { name: 'Welcome Back' })
+      ).toBeVisible();
       const oauthButtons = page.locator('button:has-text("Continue with")');
       await expect(oauthButtons.first()).toBeVisible();
     });

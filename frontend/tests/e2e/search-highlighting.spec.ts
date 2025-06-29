@@ -7,7 +7,9 @@
 import { test, expect } from '@playwright/test';
 
 test.describe('Search Functionality - Unauthenticated', () => {
-  test('should redirect to login when accessing search without authentication', async ({ page }) => {
+  test('should redirect to login when accessing search without authentication', async ({
+    page,
+  }) => {
     // Try to access contacts page with search parameter
     await page.goto('/contacts?search=test');
 
@@ -15,7 +17,9 @@ test.describe('Search Functionality - Unauthenticated', () => {
     const currentUrl = page.url();
     if (currentUrl.includes('/auth/login')) {
       // If redirected to login, verify login page loads correctly
-      await expect(page.getByRole('heading', { name: 'Welcome Back' })).toBeVisible();
+      await expect(
+        page.getByRole('heading', { name: 'Welcome Back' })
+      ).toBeVisible();
 
       // Verify OAuth buttons are present
       const oauthButtons = page.locator('button:has-text("Continue with")');
@@ -27,7 +31,9 @@ test.describe('Search Functionality - Unauthenticated', () => {
     }
   });
 
-  test('should redirect to login when accessing global search', async ({ page }) => {
+  test('should redirect to login when accessing global search', async ({
+    page,
+  }) => {
     // Try to access any search functionality
     await page.goto('/search?q=test');
 
