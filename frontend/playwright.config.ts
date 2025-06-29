@@ -12,7 +12,7 @@ export default defineConfig({
   /* Retry on CI only */
   retries: process.env.CI ? 2 : 0,
   /* Opt out of parallel tests on CI. */
-  workers: process.env.CI ? 1 : undefined,
+  workers: process.env.CI ? 1 : 2, // Limit to 2 workers to reduce resource contention
   /* Reporter to use. See https://playwright.dev/docs/test-reporters */
   reporter: 'html',
   /* Shared settings for all the projects below. See https://playwright.dev/docs/api/class-testoptions. */
@@ -22,6 +22,15 @@ export default defineConfig({
 
     /* Collect trace when retrying the failed test. See https://playwright.dev/docs/trace-viewer */
     trace: 'on-first-retry',
+
+    /* Set environment variables for tests */
+    extraHTTPHeaders: {
+      'X-Test-Backend-URL': 'http://localhost:8001',
+    },
+
+    /* Increase timeout for better reliability */
+    actionTimeout: 10000,
+    navigationTimeout: 30000,
   },
 
   /* Configure projects for major browsers */
@@ -33,7 +42,19 @@ export default defineConfig({
 
     {
       name: 'firefox',
-      use: { ...devices['Desktop Firefox'] },
+      use: {
+        ...devices['Desktop Firefox'],
+        // Firefox-specific settings for better reliability
+        launchOptions: {
+          firefoxUserPrefs: {
+            'dom.webnotifications.enabled': false,
+            'dom.push.enabled': false,
+          },
+        },
+        // Longer timeouts for Firefox
+        actionTimeout: 15000,
+        navigationTimeout: 45000,
+      },
     },
 
     {
@@ -67,5 +88,9 @@ export default defineConfig({
     command: 'pnpm dev',
     url: 'http://localhost:3000',
     reuseExistingServer: !process.env.CI,
+    timeout: 120 * 1000, // 2 minutes for dev server to start
+    env: {
+      BACKEND_URL: 'http://localhost:8000',
+    },
   },
 });

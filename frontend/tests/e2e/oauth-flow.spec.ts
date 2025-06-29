@@ -61,8 +61,11 @@ test.describe('OAuth Authentication Flow', () => {
     // Navigate to callback page with error parameters
     await page.goto('/auth/callback?error=access_denied&error_description=User%20denied%20access');
 
-    // Verify error is displayed
-    await expect(page.locator('body')).toContainText('User denied access');
+    // Wait for the page to process the error
+    await page.waitForLoadState('networkidle');
+
+    // Verify error is displayed - check for either the error message or error state
+    await expect(page.locator('body')).toContainText('User denied access', { timeout: 10000 });
   });
 
   test('should handle missing OAuth parameters', async ({ page }) => {

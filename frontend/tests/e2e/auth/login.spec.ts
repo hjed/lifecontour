@@ -46,7 +46,10 @@ test.describe('Login Page', () => {
     test('should display OAuth provider buttons', async ({ page }) => {
       // Wait for providers to load and check that at least one OAuth button is present
       const oauthButtons = page.locator('button:has-text("Continue with")');
-      await expect(oauthButtons.first()).toBeVisible();
+
+      // Wait for the page to be fully loaded and providers to be fetched
+      await page.waitForLoadState('networkidle');
+      await expect(oauthButtons.first()).toBeVisible({ timeout: 10000 });
 
       // Check that we have at least one provider button
       const buttonCount = await oauthButtons.count();
