@@ -1,0 +1,132 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database for testing
+  database-test:
+    image: postgres:15-alpine
+    container_name: pms-postgres-test
+    environment:
+      POSTGRES_DB: personal_management_test
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    volumes:
+      - ./docker/database/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    ports:
+      - "5433:5432"  # Different port to avoid conflicts
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d personal_management_test"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - personal-management-test
+
+  # MeiliSearch for testing
+  meilisearch-test:
+    image: getmeili/meilisearch:v1.2
+    container_name: pms-meilisearch-test
+    environment:
+      - MEILI_MASTER_KEY=test_search_key
+      - MEILI_ENV=development
+      - MEILI_LOG_LEVEL=WARN
+    ports:
+      - "7701:7700"  # Different port to avoid conflicts
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:7700/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - personal-management-test
+
+  # Redis for testing
+  redis-test:
+    image: redis:7-alpine
+    container_name: pms-redis-test
+    ports:
+      - "6380:6379"  # Different port to avoid conflicts
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - personal-management-test
+
+  # OAuth Provider (Hydra) for testing
+  oauth-provider-test:
+    image: oryd/hydra:v2.2.0
+    container_name: pms-oauth-test
+    environment:
+      - DSN=postgres://postgres:postgres@database-test:5432/personal_management_test?sslmode=disable
+      - URLS_SELF_ISSUER=http://localhost:4446
+      - URLS_CONSENT=http://localhost:3002/consent
+      - URLS_LOGIN=http://localhost:3002/login
+      - URLS_LOGOUT=http://localhost:3002/logout
+      - SECRETS_SYSTEM=test-system-secret-change-in-production
+      - OIDC_SUBJECT_IDENTIFIERS_SUPPORTED_TYPES=public,pairwise
+      - OIDC_SUBJECT_IDENTIFIERS_PAIRWISE_SALT=test-salt-change-in-production
+    ports:
+      - "4446:4444"  # Different port to avoid conflicts
+      - "4447:4445"  # Different port to avoid conflicts
+    command: serve -c /etc/config/hydra/hydra.yml all --dev
+    volumes:
+      - ./docker/oauth/hydra.yml:/etc/config/hydra/hydra.yml:ro
+      - ./docker/oauth/init-oauth.sh:/init-oauth.sh:ro
+    depends_on:
+      database-test:
+        condition: service_healthy
+    networks:
+      - personal-management-test
+
+  # Backend API for testing
+  backend-test:
+    build:
+      context: .
+      dockerfile: docker/backend/Dockerfile.dev
+    container_name: pms-backend-test
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@database-test:5432/personal_management_test
+      OAUTH_ISSUER_URL: http://oauth-provider-test:4444
+      OAUTH_CLIENT_ID: personal-management-system
+      OAUTH_CLIENT_SECRET: personal-management-secret
+      OAUTH_REDIRECT_URI: http://localhost:3000/auth/callback
+      MEILISEARCH_URL: http://meilisearch-test:7700
+      MEILISEARCH_API_KEY: test_search_key
+      SESSION_SECRET_KEY: test_session_secret_key
+      SEARCH_INDEX_PREFIX: test_
+      REDIS_URL: redis://redis-test:6379
+      ENVIRONMENT: test
+    volumes:
+      - ./backend:/app
+      - ./core_shared:/core_shared
+    ports:
+      - "8001:8000"  # Different port to avoid conflicts
+    depends_on:
+      database-test:
+        condition: service_healthy
+      meilisearch-test:
+        condition: service_healthy
+      redis-test:
+        condition: service_healthy
+      oauth-provider-test:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    networks:
+      - personal-management-test
+
+networks:
+  personal-management-test:
+    driver: bridge
+
+volumes:
+  postgres_test_data:
+  meilisearch_test_data:
