@@ -59,7 +59,9 @@ class AuthProvider(Provider):
             ) from e
 
     @provide(scope=Scope.REQUEST)
-    def get_optional_user(self, request: Request, settings: Settings) -> SessionUser | None:
+    def get_optional_user(
+        self, request: Request, settings: Settings
+    ) -> SessionUser | None:
         """
         Get current authenticated user from session if available.
 

@@ -44,20 +44,20 @@ class TestLoginEndpoint:
     def test_login_endpoint_exists(self, client):
         """Test that the login endpoint exists and accepts POST requests."""
         response = client.post("/api/auth/login", json={"provider": "github"})
-        
+
         # Should not return 404 (endpoint exists)
         assert response.status_code != 404
-        
+
         # Should return 200 with proper OAuth configuration or 400 if not configured
         assert response.status_code in [200, 400]
 
     def test_login_endpoint_returns_json(self, client):
         """Test that the login endpoint returns JSON response."""
         response = client.post("/api/auth/login", json={"provider": "github"})
-        
+
         # Should return JSON
         assert response.headers.get("content-type") == "application/json"
-        
+
         # Should be parseable as JSON
         data = response.json()
         assert isinstance(data, dict)
@@ -65,7 +65,7 @@ class TestLoginEndpoint:
     def test_login_endpoint_with_configured_provider(self, client):
         """Test login endpoint behavior with configured OAuth provider."""
         response = client.post("/api/auth/login", json={"provider": "github"})
-        
+
         if response.status_code == 200:
             # If OAuth is properly configured, should return authorization_url and state
             data = response.json()
@@ -83,10 +83,10 @@ class TestLoginEndpoint:
     def test_login_endpoint_invalid_provider(self, client):
         """Test login endpoint with invalid provider."""
         response = client.post("/api/auth/login", json={"provider": "invalid_provider"})
-        
+
         # Should return 400 for invalid provider
         assert response.status_code == 400
-        
+
         data = response.json()
         assert "errors" in data
         assert "OAuth provider" in data["errors"][0]["detail"]
@@ -112,11 +112,10 @@ class TestLoginEndpoint:
 
     def test_callback_endpoint_exists(self, client):
         """Test that the callback endpoint exists and accepts POST requests."""
-        response = client.post("/api/auth/callback", json={
-            "code": "test_code",
-            "state": "test_state",
-            "provider": "github"
-        })
+        response = client.post(
+            "/api/auth/callback",
+            json={"code": "test_code", "state": "test_state", "provider": "github"},
+        )
 
         # Should not return 404 (endpoint exists)
         assert response.status_code != 404

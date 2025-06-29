@@ -10,10 +10,10 @@ from fastapi import APIRouter, HTTPException, Query, Request, status
 from starlette.responses import RedirectResponse
 
 from app.api.auth.schemas import (
-    AuthProviderInfo,
-    AuthProvidersResponse,
     AuthorizeRequest,
     AuthorizeResponse,
+    AuthProviderInfo,
+    AuthProvidersResponse,
     AuthStatusResponse,
     CallbackRequest,
     CallbackResponse,
@@ -96,7 +96,7 @@ async def login(
 
     # Generate callback URL pointing to frontend callback page
     # OAuth provider will redirect user to frontend, which then calls backend
-    base_url = str(request.base_url).rstrip('/')
+    base_url = str(request.base_url).rstrip("/")
     callback_url = f"{base_url}/auth/callback"
 
     # Get authorization URL from OAuth service
@@ -137,7 +137,7 @@ async def authorize(
 
     # Generate callback URL pointing to frontend callback page
     # OAuth provider will redirect user to frontend, which then calls backend
-    base_url = str(request.base_url).rstrip('/')
+    base_url = str(request.base_url).rstrip("/")
     callback_url = f"{base_url}/auth/callback"
 
     # Get authorization URL from OAuth service
@@ -171,11 +171,15 @@ async def auth_callback_json(
     try:
         # Verify state parameter for CSRF protection
         stored_state = request.session.get("oauth_state")
-        if not callback_data.state or not stored_state or callback_data.state != stored_state:
+        if (
+            not callback_data.state
+            or not stored_state
+            or callback_data.state != stored_state
+        ):
             logger.warning(
                 "OAuth state mismatch",
                 state=callback_data.state,
-                stored_state=stored_state
+                stored_state=stored_state,
             )
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -190,6 +194,12 @@ async def auth_callback_json(
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Provider mismatch",
+            )
+
+        if redirect_uri is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Missing redirect URI in session",
             )
 
         # Exchange authorization code for user info
@@ -216,11 +226,13 @@ async def auth_callback_json(
         return CallbackResponse(redirect_url=redirect_url)
 
     except Exception as e:
-        logger.error("OAuth JSON callback failed", provider=callback_data.provider, error=str(e))
+        logger.error(
+            "OAuth JSON callback failed", provider=callback_data.provider, error=str(e)
+        )
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Authentication failed: {str(e)}"
-        )
+            detail=f"Authentication failed: {str(e)}",
+        ) from e
 
 
 @router.get("/callback/{provider}")

@@ -52,7 +52,9 @@ class CallbackRequest(BaseModel):
 class CallbackResponse(BaseModel):
     """Response model for OAuth callback."""
 
-    redirect_url: str = Field(..., description="URL to redirect to after authentication")
+    redirect_url: str = Field(
+        ..., description="URL to redirect to after authentication"
+    )
 
 
 class UserResponse(BaseModel):
