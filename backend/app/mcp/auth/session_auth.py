@@ -11,6 +11,7 @@ import structlog
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
+from starlette.types import ASGIApp
 
 from app.infrastructure.auth.models import SessionUser
 
@@ -26,7 +27,7 @@ class SessionAuthMiddleware(BaseHTTPMiddleware):
     endpoints and allows other requests to pass through unchanged.
     """
 
-    def __init__(self, app, disable_auth: bool = False):
+    def __init__(self, app: ASGIApp, disable_auth: bool = False):
         """Initialize middleware with optional auth disabling."""
         super().__init__(app)
         self.disable_auth = disable_auth
@@ -51,6 +52,7 @@ class SessionAuthMiddleware(BaseHTTPMiddleware):
         # If authentication is disabled, create a mock user
         if self.disable_auth:
             from app.infrastructure.auth.models import SessionUser
+
             mock_user = SessionUser(
                 id="dev-user",
                 email="dev@example.com",

@@ -221,12 +221,14 @@ class OAuthService:
             from starlette.requests import Request
 
             # Create a mock request with the code parameter
-            mock_request = Request({
-                "type": "http",
-                "method": "GET",
-                "url": f"{redirect_uri}?code={code}",
-                "query_string": f"code={code}".encode(),
-            })
+            mock_request = Request(
+                {
+                    "type": "http",
+                    "method": "GET",
+                    "url": f"{redirect_uri}?code={code}",
+                    "query_string": f"code={code}".encode(),
+                }
+            )
 
             # Exchange authorization code for access token
             token = await client.authorize_access_token(mock_request)

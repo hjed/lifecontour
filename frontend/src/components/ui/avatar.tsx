@@ -3,9 +3,7 @@
 import * as React from "react"
 import { cn } from "@/lib/utils"
 
-interface AvatarProps extends React.HTMLAttributes<HTMLDivElement> {}
-
-const Avatar = React.forwardRef<HTMLDivElement, AvatarProps>(
+const Avatar = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement>>(
   ({ className, ...props }, ref) => (
     <div
       ref={ref}
@@ -19,22 +17,20 @@ const Avatar = React.forwardRef<HTMLDivElement, AvatarProps>(
 )
 Avatar.displayName = "Avatar"
 
-interface AvatarImageProps extends React.ImgHTMLAttributes<HTMLImageElement> {}
-
-const AvatarImage = React.forwardRef<HTMLImageElement, AvatarImageProps>(
-  ({ className, ...props }, ref) => (
+const AvatarImage = React.forwardRef<HTMLImageElement, React.ImgHTMLAttributes<HTMLImageElement>>(
+  ({ className, alt = "", ...props }, ref) => (
+    // eslint-disable-next-line @next/next/no-img-element
     <img
       ref={ref}
       className={cn("aspect-square h-full w-full object-cover", className)}
+      alt={alt}
       {...props}
     />
   )
 )
 AvatarImage.displayName = "AvatarImage"
 
-interface AvatarFallbackProps extends React.HTMLAttributes<HTMLDivElement> {}
-
-const AvatarFallback = React.forwardRef<HTMLDivElement, AvatarFallbackProps>(
+const AvatarFallback = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement>>(
   ({ className, ...props }, ref) => (
     <div
       ref={ref}
