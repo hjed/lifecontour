@@ -77,6 +77,7 @@ export const API_PATTERNS = {
   LOGIN: '**/api/auth/login',
   LOGOUT: '**/api/auth/logout',
   CALLBACK: '**/api/auth/callback/**',
+  PROVIDERS: '**/api/auth/providers',
 } as const;
 
 /**
