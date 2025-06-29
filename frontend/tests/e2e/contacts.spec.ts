@@ -2,7 +2,7 @@ import { test, expect } from '@playwright/test';
 import {
   createTestHelpers,
   navigateAndWaitForStable,
-  verifyPageLoadsSuccessfully
+  verifyPageLoadsSuccessfully,
 } from './utils/test-helpers';
 
 test.describe('Contact Management', () => {
@@ -19,7 +19,9 @@ test.describe('Contact Management', () => {
 
     if (result === 'redirected') {
       // Additional verification for login page
-      await expect(page.getByRole('heading', { name: 'Welcome Back' })).toBeVisible();
+      await expect(
+        page.getByRole('heading', { name: 'Welcome Back' })
+      ).toBeVisible();
     }
   });
 
@@ -47,7 +49,9 @@ test.describe('Contact Management', () => {
       await navigateAndWaitForStable(page, '/contacts/new');
     } catch (error) {
       // If navigation is interrupted by redirect, that's expected behavior
-      console.log('Navigation redirected, which is expected for unauthenticated users');
+      console.log(
+        'Navigation redirected, which is expected for unauthenticated users'
+      );
     }
 
     // Verify we end up on a valid page (either contacts/new or login)
@@ -57,5 +61,4 @@ test.describe('Contact Management', () => {
     const bodyText = await page.textContent('body');
     expect(bodyText).toBeTruthy();
   });
-
 });

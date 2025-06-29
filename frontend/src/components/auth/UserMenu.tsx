@@ -53,43 +53,46 @@ export function UserMenu() {
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
         <Button
-          variant="ghost"
-          className="relative h-8 w-8 rounded-full"
-          data-testid="user-menu"
+          variant='ghost'
+          className='relative h-8 w-8 rounded-full'
+          data-testid='user-menu'
         >
-          <Avatar className="h-8 w-8">
-            <AvatarImage src={user.avatar_url || undefined} alt={user.name || user.email} />
+          <Avatar className='h-8 w-8'>
+            <AvatarImage
+              src={user.avatar_url || undefined}
+              alt={user.name || user.email}
+            />
             <AvatarFallback>{initials}</AvatarFallback>
           </Avatar>
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent className="w-56" align="end" forceMount>
-        <DropdownMenuLabel className="font-normal">
-          <div className="flex flex-col space-y-1">
-            <p className="text-sm font-medium leading-none">
+      <DropdownMenuContent className='w-56' align='end' forceMount>
+        <DropdownMenuLabel className='font-normal'>
+          <div className='flex flex-col space-y-1'>
+            <p className='text-sm leading-none font-medium'>
               {user.name || 'User'}
             </p>
-            <p className="text-xs leading-none text-muted-foreground">
+            <p className='text-muted-foreground text-xs leading-none'>
               {user.email}
             </p>
           </div>
         </DropdownMenuLabel>
         <DropdownMenuSeparator />
         <DropdownMenuItem>
-          <User className="mr-2 h-4 w-4" />
+          <User className='mr-2 h-4 w-4' />
           <span>Profile</span>
         </DropdownMenuItem>
         <DropdownMenuItem>
-          <Settings className="mr-2 h-4 w-4" />
+          <Settings className='mr-2 h-4 w-4' />
           <span>Settings</span>
         </DropdownMenuItem>
         <DropdownMenuSeparator />
         <DropdownMenuItem
           onClick={handleLogout}
           disabled={isLoggingOut}
-          className="text-red-600 focus:text-red-600"
+          className='text-red-600 focus:text-red-600'
         >
-          <LogOut className="mr-2 h-4 w-4" />
+          <LogOut className='mr-2 h-4 w-4' />
           <span>{isLoggingOut ? 'Signing out...' : 'Sign Out'}</span>
         </DropdownMenuItem>
       </DropdownMenuContent>

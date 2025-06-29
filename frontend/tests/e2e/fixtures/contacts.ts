@@ -118,12 +118,17 @@ export const MOCK_CONTACTS_RESPONSES = {
   }),
 
   contactsSearch: (query: string) => {
-    const filtered = MOCK_CONTACTS.filter(contact =>
-      contact.attributes.first_name.toLowerCase().includes(query.toLowerCase()) ||
-      contact.attributes.last_name?.toLowerCase().includes(query.toLowerCase()) ||
-      contact.attributes.contact_methods.some(method =>
-        method.attributes.value.toLowerCase().includes(query.toLowerCase())
-      )
+    const filtered = MOCK_CONTACTS.filter(
+      contact =>
+        contact.attributes.first_name
+          .toLowerCase()
+          .includes(query.toLowerCase()) ||
+        contact.attributes.last_name
+          ?.toLowerCase()
+          .includes(query.toLowerCase()) ||
+        contact.attributes.contact_methods.some(method =>
+          method.attributes.value.toLowerCase().includes(query.toLowerCase())
+        )
     );
 
     return {
@@ -178,68 +183,80 @@ export class ContactsFixtures {
    * Mock contacts list endpoint with sample data.
    */
   async mockContactsList(): Promise<void> {
-    await this.page.route(CONTACTS_API_PATTERNS.CONTACTS, async (route: Route) => {
-      const url = new URL(route.request().url());
-      const searchParams = url.searchParams;
-      
-      // Check if this is a search request
-      if (searchParams.has('q')) {
-        const query = searchParams.get('q') || '';
-        await route.fulfill({
-          status: 200,
-          contentType: 'application/json',
-          body: JSON.stringify(MOCK_CONTACTS_RESPONSES.contactsSearch(query)),
-        });
-      } else {
-        await route.fulfill({
-          status: 200,
-          contentType: 'application/json',
-          body: JSON.stringify(MOCK_CONTACTS_RESPONSES.contactsList()),
-        });
+    await this.page.route(
+      CONTACTS_API_PATTERNS.CONTACTS,
+      async (route: Route) => {
+        const url = new URL(route.request().url());
+        const searchParams = url.searchParams;
+
+        // Check if this is a search request
+        if (searchParams.has('q')) {
+          const query = searchParams.get('q') || '';
+          await route.fulfill({
+            status: 200,
+            contentType: 'application/json',
+            body: JSON.stringify(MOCK_CONTACTS_RESPONSES.contactsSearch(query)),
+          });
+        } else {
+          await route.fulfill({
+            status: 200,
+            contentType: 'application/json',
+            body: JSON.stringify(MOCK_CONTACTS_RESPONSES.contactsList()),
+          });
+        }
       }
-    });
+    );
   }
 
   /**
    * Mock contacts search endpoint.
    */
   async mockContactsSearch(): Promise<void> {
-    await this.page.route(CONTACTS_API_PATTERNS.CONTACTS_SEARCH, async (route: Route) => {
-      const url = new URL(route.request().url());
-      const query = url.searchParams.get('q') || '';
-      
-      await route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify(MOCK_CONTACTS_RESPONSES.contactsSearch(query)),
-      });
-    });
+    await this.page.route(
+      CONTACTS_API_PATTERNS.CONTACTS_SEARCH,
+      async (route: Route) => {
+        const url = new URL(route.request().url());
+        const query = url.searchParams.get('q') || '';
+
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify(MOCK_CONTACTS_RESPONSES.contactsSearch(query)),
+        });
+      }
+    );
   }
 
   /**
    * Mock empty contacts list.
    */
   async mockContactsEmpty(): Promise<void> {
-    await this.page.route(CONTACTS_API_PATTERNS.CONTACTS, async (route: Route) => {
-      await route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify(MOCK_CONTACTS_RESPONSES.contactsEmpty()),
-      });
-    });
+    await this.page.route(
+      CONTACTS_API_PATTERNS.CONTACTS,
+      async (route: Route) => {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify(MOCK_CONTACTS_RESPONSES.contactsEmpty()),
+        });
+      }
+    );
   }
 
   /**
    * Mock contacts API error.
    */
   async mockContactsError(): Promise<void> {
-    await this.page.route(CONTACTS_API_PATTERNS.CONTACTS, async (route: Route) => {
-      await route.fulfill({
-        status: 500,
-        contentType: 'application/json',
-        body: JSON.stringify(MOCK_CONTACTS_RESPONSES.contactsError()),
-      });
-    });
+    await this.page.route(
+      CONTACTS_API_PATTERNS.CONTACTS,
+      async (route: Route) => {
+        await route.fulfill({
+          status: 500,
+          contentType: 'application/json',
+          body: JSON.stringify(MOCK_CONTACTS_RESPONSES.contactsError()),
+        });
+      }
+    );
   }
 
   /**

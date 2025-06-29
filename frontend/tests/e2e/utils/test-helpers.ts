@@ -303,7 +303,9 @@ export class OAuthHelpers {
   /**
    * Verify OAuth buttons are visible and enabled.
    */
-  async verifyOAuthButtonsVisible(timeout: number = TEST_DATA.TIMEOUTS.LONG): Promise<void> {
+  async verifyOAuthButtonsVisible(
+    timeout: number = TEST_DATA.TIMEOUTS.LONG
+  ): Promise<void> {
     const oauthButtons = await this.findOAuthButtons();
     await expect(oauthButtons.first()).toBeVisible({ timeout });
     await expect(oauthButtons.first()).toBeEnabled();
@@ -322,7 +324,10 @@ export class OAuthHelpers {
   /**
    * Check if OAuth buttons are present and optionally interact with them.
    */
-  async handleOAuthButtons(options?: { click?: boolean; waitAfterClick?: number }): Promise<boolean> {
+  async handleOAuthButtons(options?: {
+    click?: boolean;
+    waitAfterClick?: number;
+  }): Promise<boolean> {
     const oauthButtons = await this.findOAuthButtons();
     const buttonCount = await oauthButtons.count();
 
@@ -414,7 +419,10 @@ export async function verifyPageHasContent(page: Page): Promise<void> {
 /**
  * Verify page loads successfully with title and content.
  */
-export async function verifyPageLoadsSuccessfully(page: Page, expectedTitlePattern?: RegExp): Promise<void> {
+export async function verifyPageLoadsSuccessfully(
+  page: Page,
+  expectedTitlePattern?: RegExp
+): Promise<void> {
   if (expectedTitlePattern) {
     await expect(page).toHaveTitle(expectedTitlePattern);
   }
@@ -426,7 +434,10 @@ export async function verifyPageLoadsSuccessfully(page: Page, expectedTitlePatte
 /**
  * Navigate to a page and wait for it to be stable.
  */
-export async function navigateAndWaitForStable(page: Page, url: string): Promise<void> {
+export async function navigateAndWaitForStable(
+  page: Page,
+  url: string
+): Promise<void> {
   await page.goto(url);
   await waitForPageReady(page);
 }
@@ -434,7 +445,10 @@ export async function navigateAndWaitForStable(page: Page, url: string): Promise
 /**
  * Verify URL matches one of the expected patterns.
  */
-export async function verifyUrlMatches(page: Page, patterns: (string | RegExp)[]): Promise<void> {
+export async function verifyUrlMatches(
+  page: Page,
+  patterns: (string | RegExp)[]
+): Promise<void> {
   const currentUrl = page.url();
   const matches = patterns.some(pattern => {
     if (typeof pattern === 'string') {
