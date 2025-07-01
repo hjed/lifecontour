@@ -20,7 +20,6 @@ import {
   AuthState,
   AuthContextValue,
   AuthEvent,
-  OAuthProvider,
   SessionUser,
   LoginResponse,
   LogoutResponse,
@@ -182,7 +181,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
   // Login mutation
   const loginMutation = useMutation({
-    mutationFn: async (provider: OAuthProvider): Promise<LoginResponse> => {
+    mutationFn: async (provider: string): Promise<LoginResponse> => {
       const response = await fetch(API_ENDPOINTS.AUTH.LOGIN, {
         method: 'POST',
         headers: {
@@ -203,10 +202,12 @@ export function AuthProvider({ children }: AuthProviderProps) {
     },
     onMutate: provider => {
       dispatch({ type: 'LOGIN_START', provider });
+      // Store provider in sessionStorage for callback page
+      sessionStorage.setItem('oauth_provider', provider);
     },
     onSuccess: data => {
       // Redirect to OAuth provider
-      window.location.href = data.authorize_url;
+      window.location.href = data.authorization_url;
     },
     onError: error => {
       dispatch({
@@ -261,7 +262,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
   // Auth context value
   const contextValue: AuthContextValue = {
     state,
-    login: (provider: OAuthProvider) => {
+    login: (provider: string) => {
       loginMutation.mutate(provider);
       return Promise.resolve({} as LoginResponse);
     },

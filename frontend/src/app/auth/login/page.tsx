@@ -20,7 +20,6 @@ import { Button } from '@/components/ui/button';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Separator } from '@/components/ui/separator';
 import { useAuth } from '@/lib/auth/AuthProvider';
-import { OAuthProvider } from '@/types/auth';
 import { UI_TEXT, API_ENDPOINTS } from '@/lib/constants';
 import { GitBranch, Key } from 'lucide-react';
 
@@ -76,7 +75,7 @@ function LoginContent() {
   // Handle OAuth login
   const handleLogin = (providerName: string) => {
     setLoadingProvider(providerName);
-    login(providerName as OAuthProvider);
+    login(providerName);
     // Redirect happens in AuthProvider after successful OAuth
     // Error handling is done in AuthProvider's onError callback
     // Loading state will be cleared when mutation completes

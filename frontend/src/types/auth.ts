@@ -49,7 +49,7 @@ export interface LoginRequest {
 }
 
 export interface LoginResponse {
-  authorize_url: string;
+  authorization_url: string;
   state: string;
 }
 
@@ -80,13 +80,13 @@ export interface LogoutResponse {
 export interface AuthError {
   code: string;
   message: string;
-  provider?: OAuthProvider;
+  provider?: string;
   details?: Record<string, unknown>;
 }
 
 // Authentication Events
 export type AuthEvent =
-  | { type: 'LOGIN_START'; provider: OAuthProvider }
+  | { type: 'LOGIN_START'; provider: string }
   | { type: 'LOGIN_SUCCESS'; user: SessionUser }
   | { type: 'LOGIN_ERROR'; error: AuthError }
   | { type: 'LOGOUT_START' }
@@ -99,7 +99,7 @@ export type AuthEvent =
 // Authentication Context Types
 export interface AuthContextValue {
   state: AuthState;
-  login: (provider: OAuthProvider) => Promise<LoginResponse>;
+  login: (provider: string) => Promise<LoginResponse>;
   logout: () => Promise<LogoutResponse>;
   refreshSession: () => Promise<void>;
   clearError: () => void;

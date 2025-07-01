@@ -39,6 +39,16 @@ export const MOCK_USERS = {
     created_at: '2024-01-01T00:00:00Z',
     last_login: '2024-01-01T00:00:00Z',
   },
+  generic: {
+    id: 'test-user-generic',
+    email: 'test@generic.com',
+    name: 'Test User Generic',
+    avatar_url: 'https://generic.com/test-user.png',
+    provider: 'generic',
+    provider_id: 'generic-123',
+    created_at: '2024-01-01T00:00:00Z',
+    last_login: '2024-01-01T00:00:00Z',
+  },
 } as const;
 
 // Mock OAuth responses

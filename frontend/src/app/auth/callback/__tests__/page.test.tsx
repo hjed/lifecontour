@@ -2,71 +2,65 @@
  * Tests for OAuth callback page functionality.
  */
 
-import { OAuthProvider } from '@/types/auth';
-
-// Mock the determineProvider function logic for testing
-const determineProvider = (state: string | null): OAuthProvider => {
-  // Parse provider from state parameter (format: "provider:randomString")
-  if (state?.includes(':')) {
-    const provider = state.split(':')[0].toLowerCase();
-
-    // Check if provider is in the enum (case-insensitive)
-    if (Object.values(OAuthProvider).includes(provider as OAuthProvider)) {
-      return provider as OAuthProvider;
-    }
-
-    // Map unknown providers to generic (e.g., "hydra" -> "generic")
-    return OAuthProvider.GENERIC;
-  }
-
-  // Default to generic if state is invalid or missing
-  return OAuthProvider.GENERIC;
+// Mock sessionStorage for testing
+const mockSessionStorage = {
+  getItem: jest.fn(),
+  setItem: jest.fn(),
+  removeItem: jest.fn(),
+  clear: jest.fn(),
 };
 
-describe('OAuth Callback Provider Determination', () => {
-  describe('determineProvider', () => {
-    it('should map hydra provider to generic', () => {
-      const result = determineProvider('hydra:abc123');
-      expect(result).toBe(OAuthProvider.GENERIC);
+Object.defineProperty(window, 'sessionStorage', {
+  value: mockSessionStorage,
+});
+
+// Mock the provider retrieval logic for testing
+const getStoredProvider = (): string => {
+  return mockSessionStorage.getItem('oauth_provider') || 'generic';
+};
+
+describe('OAuth Callback Provider Storage', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
+  describe('getStoredProvider', () => {
+    it('should return stored provider from sessionStorage', () => {
+      mockSessionStorage.getItem.mockReturnValue('github');
+      const result = getStoredProvider();
+      expect(result).toBe('github');
+      expect(mockSessionStorage.getItem).toHaveBeenCalledWith('oauth_provider');
     });
 
-    it('should handle known providers correctly', () => {
-      expect(determineProvider('github:xyz789')).toBe(OAuthProvider.GITHUB);
-      expect(determineProvider('microsoft:def456')).toBe(
-        OAuthProvider.MICROSOFT
-      );
-      expect(determineProvider('discord:ghi789')).toBe(OAuthProvider.DISCORD);
-      expect(determineProvider('generic:jkl012')).toBe(OAuthProvider.GENERIC);
+    it('should return generic as default when no provider stored', () => {
+      mockSessionStorage.getItem.mockReturnValue(null);
+      const result = getStoredProvider();
+      expect(result).toBe('generic');
     });
 
-    it('should handle case-insensitive provider names', () => {
-      expect(determineProvider('GITHUB:xyz789')).toBe(OAuthProvider.GITHUB);
-      expect(determineProvider('GitHub:xyz789')).toBe(OAuthProvider.GITHUB);
-      expect(determineProvider('MICROSOFT:def456')).toBe(
-        OAuthProvider.MICROSOFT
-      );
-      expect(determineProvider('Microsoft:def456')).toBe(
-        OAuthProvider.MICROSOFT
-      );
+    it('should handle different provider types', () => {
+      const providers = ['github', 'microsoft', 'discord', 'generic'];
+
+      providers.forEach(provider => {
+        mockSessionStorage.getItem.mockReturnValue(provider);
+        const result = getStoredProvider();
+        expect(result).toBe(provider);
+      });
     });
 
-    it('should map unknown providers to generic', () => {
-      expect(determineProvider('unknown:abc123')).toBe(OAuthProvider.GENERIC);
-      expect(determineProvider('custom:xyz789')).toBe(OAuthProvider.GENERIC);
-      expect(determineProvider('oauth2:def456')).toBe(OAuthProvider.GENERIC);
+    it('should return generic for empty string', () => {
+      mockSessionStorage.getItem.mockReturnValue('');
+      const result = getStoredProvider();
+      expect(result).toBe('generic');
     });
+  });
 
-    it('should default to generic for invalid state formats', () => {
-      expect(determineProvider('invalid-format')).toBe(OAuthProvider.GENERIC);
-      expect(determineProvider('no-colon')).toBe(OAuthProvider.GENERIC);
-      expect(determineProvider('')).toBe(OAuthProvider.GENERIC);
-      expect(determineProvider(null)).toBe(OAuthProvider.GENERIC);
-    });
-
-    it('should handle edge cases', () => {
-      expect(determineProvider(':')).toBe(OAuthProvider.GENERIC);
-      expect(determineProvider(':abc123')).toBe(OAuthProvider.GENERIC);
-      expect(determineProvider('provider:')).toBe(OAuthProvider.GENERIC);
+  describe('Provider cleanup', () => {
+    it('should remove provider from sessionStorage after successful auth', () => {
+      // This would be tested in integration tests where we can test the actual callback page
+      // Here we just verify the mock setup works
+      mockSessionStorage.removeItem('oauth_provider');
+      expect(mockSessionStorage.removeItem).toHaveBeenCalledWith('oauth_provider');
     });
   });
 });

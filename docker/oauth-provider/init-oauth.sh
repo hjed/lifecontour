@@ -36,7 +36,7 @@ curl -X POST http://localhost:4445/admin/clients \
         "client_secret": "dev-client-secret",
         "grant_types": ["authorization_code", "refresh_token"],
         "response_types": ["code"],
-        "redirect_uris": ["http://localhost:8000/auth/callback"],
+        "redirect_uris": ["http://localhost:3000/auth/callback"],
         "scope": "openid profile email",
         "skip_consent": true,
         "skip_logout_consent": true,
