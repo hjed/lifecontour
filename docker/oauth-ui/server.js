@@ -184,7 +184,7 @@ app.post('/api/clients', async (req, res) => {
       grant_types: ['authorization_code', 'refresh_token'],
       response_types: ['code'],
       scope: 'openid profile email',
-      redirect_uris: ['http://localhost:8000/api/auth/callback'],
+      redirect_uris: ['http://localhost:3000/auth/callback'],
       token_endpoint_auth_method: 'client_secret_post'
     };
 

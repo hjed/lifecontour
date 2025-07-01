@@ -195,35 +195,24 @@ async def auth_callback_json(
     )
 
     try:
-        # TODO: Temporarily bypass session state check for debugging
-        # The session state is not being maintained properly between requests
-        logger.warning(
-            "Bypassing session state check for debugging",
-            callback_state=callback_data.state,
-            provider=callback_data.provider,
-        )
-
         # Use hardcoded redirect URI for now
         redirect_uri = "http://localhost:3000/auth/callback"
 
-        # Exchange authorization code for user info
-        oauth_user = await oauth_service.exchange_code_for_user(
-            callback_data.provider, callback_data.code, redirect_uri
+        # Exchange authorization code for user info using proper session handling
+        oauth_user = await oauth_service.handle_callback_with_code(
+            request, callback_data.provider, callback_data.code,
+            callback_data.state, redirect_uri
         )
 
         # Create session user
         session_user = SessionUser.from_oauth_user(oauth_user)
 
-        # TODO: Temporarily bypass session storage for debugging
         # Store user in session (serialize datetime to ISO string)
-        try:
-            request.session["user"] = session_user.model_dump(mode="json")
-            logger.info("Successfully stored user in session")
-        except Exception as e:
-            logger.warning("Failed to store user in session", error=str(e))
+        request.session["user"] = session_user.model_dump(mode="json")
+        logger.info("Successfully stored user in session")
 
-        # Use default redirect URL for now
-        redirect_url = "/"
+        # Get redirect URL from session or use default
+        redirect_url = request.session.pop("post_auth_redirect", "/")
 
         logger.info(
             "OAuth authentication successful via JSON callback",
