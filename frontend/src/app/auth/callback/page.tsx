@@ -19,7 +19,6 @@ import {
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useAuth } from '@/lib/auth/AuthProvider';
-import { OAuthProvider } from '@/types/auth';
 
 // Component that uses useSearchParams - needs to be wrapped in Suspense
 function CallbackContent() {
@@ -47,8 +46,8 @@ function CallbackContent() {
           throw new Error('Missing required OAuth parameters');
         }
 
-        // Determine provider from state or URL
-        const provider = determineProvider(state);
+        // Get provider from sessionStorage (stored during login)
+        const provider = sessionStorage.getItem('oauth_provider') || 'generic';
 
         // Send callback data to backend
         const response = await fetch('/api/auth/callback', {
@@ -76,6 +75,9 @@ function CallbackContent() {
         // Refresh session to get user data
         await refreshSession();
 
+        // Clean up stored provider
+        sessionStorage.removeItem('oauth_provider');
+
         // Redirect to intended destination or dashboard
         const redirectTo = data.redirect_url ?? '/';
         router.replace(redirectTo);
@@ -87,20 +89,6 @@ function CallbackContent() {
 
     processCallback();
   }, [searchParams, router, refreshSession]);
-
-  // Determine OAuth provider from state parameter
-  const determineProvider = (state: string | null): OAuthProvider => {
-    // Parse provider from state parameter (format: "provider:randomString")
-    if (state?.includes(':')) {
-      const provider = state.split(':')[0].toUpperCase();
-      if (Object.values(OAuthProvider).includes(provider as OAuthProvider)) {
-        return provider as OAuthProvider;
-      }
-    }
-
-    // Default to GitHub if state is invalid or missing
-    return OAuthProvider.GITHUB;
-  };
 
   // Show error state
   if (error) {

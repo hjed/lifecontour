@@ -220,15 +220,23 @@ class OAuthService:
             # Create a mock request with the authorization code
             from starlette.requests import Request
 
-            # Create a mock request with the code parameter
-            mock_request = Request(
-                {
-                    "type": "http",
-                    "method": "GET",
-                    "url": f"{redirect_uri}?code={code}",
-                    "query_string": f"code={code}".encode(),
-                }
-            )
+            # Create a mock request with the code parameter and session support
+            scope = {
+                "type": "http",
+                "method": "GET",
+                "url": f"{redirect_uri}?code={code}",
+                "query_string": f"code={code}".encode(),
+                "headers": [],
+                "path": "/mock",
+                "root_path": "",
+                "scheme": "http",
+                "server": ("localhost", 8000),
+            }
+
+            # Create request and manually add session attribute
+            mock_request = Request(scope)
+            # Add a mock session that doesn't require middleware
+            mock_request._session = {}
 
             # Exchange authorization code for access token
             token = await client.authorize_access_token(mock_request)

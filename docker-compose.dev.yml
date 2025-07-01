@@ -132,7 +132,7 @@ services:
       OTEL_SERVICE_NAME: personal-management-backend-dev
       OTEL_RESOURCE_ATTRIBUTES: "service.name=personal-management-backend-dev,service.version=0.1.0-dev"
       # OAuth Configuration for testing
-      OAUTH_PROVIDER_NAME: hydra
+      OAUTH_PROVIDER_NAME: generic
       OAUTH_CLIENT_ID: dev-client-id
       OAUTH_CLIENT_SECRET: dev-client-secret
       OAUTH_AUTHORIZATION_URL: http://localhost:4444/oauth2/auth
