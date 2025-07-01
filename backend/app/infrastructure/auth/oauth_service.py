@@ -89,17 +89,23 @@ class OAuthService:
             and self.settings.oauth_token_url
         ):
             try:
+                # Build client kwargs with userinfo URL if available
+                client_kwargs = {"scope": "openid email profile"}
+                if self.settings.oauth_userinfo_url:
+                    client_kwargs["userinfo_endpoint"] = self.settings.oauth_userinfo_url
+
                 self.oauth.register(
                     name=self.settings.oauth_provider_name,
                     client_id=self.settings.oauth_client_id,
                     client_secret=self.settings.oauth_client_secret,
                     authorize_url=self.settings.oauth_authorization_url,
                     access_token_url=self.settings.oauth_token_url,
-                    client_kwargs={"scope": "openid email profile"},
+                    client_kwargs=client_kwargs,
                 )
                 logger.info(
                     "Configured generic OAuth provider",
                     provider_name=self.settings.oauth_provider_name,
+                    userinfo_url=self.settings.oauth_userinfo_url,
                 )
             except Exception as e:
                 logger.warning(
@@ -204,10 +210,49 @@ class OAuthService:
                 detail="OAuth authentication failed",
             ) from e
 
-    async def exchange_code_for_user(
-        self, provider: str, code: str, redirect_uri: str
+    async def handle_callback_with_code(
+        self, request: Request, provider: str, code: str, state: str, redirect_uri: str
     ) -> OAuthUserInfo:
-        """Exchange authorization code for user information."""
+        """Handle OAuth callback with authorization code and state."""
+        # Verify state parameter for CSRF protection
+        stored_state = request.session.get("oauth_state")
+        stored_provider = request.session.get("oauth_provider")
+        stored_redirect_uri = request.session.get("oauth_redirect_uri")
+
+        if not state or not stored_state or state != stored_state:
+            logger.warning(
+                "OAuth state mismatch",
+                state=state,
+                stored_state=stored_state,
+                provider=provider
+            )
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid OAuth state parameter",
+            )
+
+        if not stored_provider or stored_provider != provider:
+            logger.warning(
+                "OAuth provider mismatch",
+                provider=provider,
+                stored_provider=stored_provider
+            )
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid OAuth provider",
+            )
+
+        if not stored_redirect_uri or stored_redirect_uri != redirect_uri:
+            logger.warning(
+                "OAuth redirect URI mismatch",
+                redirect_uri=redirect_uri,
+                stored_redirect_uri=stored_redirect_uri
+            )
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid OAuth redirect URI",
+            )
+
         if provider not in self.oauth._clients:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -217,32 +262,38 @@ class OAuthService:
         client = self.oauth._clients[provider]
 
         try:
-            # Create a mock request with the authorization code
-            from starlette.requests import Request
-
-            # Create a mock request with the code parameter and session support
+            # Create a proper request scope with the authorization code
+            # This mimics what would happen in a real callback request
+            callback_url = f"{redirect_uri}?code={code}&state={state}"
             scope = {
                 "type": "http",
                 "method": "GET",
-                "url": f"{redirect_uri}?code={code}",
-                "query_string": f"code={code}".encode(),
+                "url": callback_url,
+                "query_string": f"code={code}&state={state}".encode(),
                 "headers": [],
-                "path": "/mock",
+                "path": "/auth/callback",
                 "root_path": "",
                 "scheme": "http",
                 "server": ("localhost", 8000),
             }
 
-            # Create request and manually add session attribute
-            mock_request = Request(scope)
-            # Add a mock session that doesn't require middleware
-            mock_request._session = {}
+            # Create a new request with the callback parameters
+            from starlette.requests import Request
+            callback_request = Request(scope)
 
-            # Exchange authorization code for access token
-            token = await client.authorize_access_token(mock_request)
+            # Copy the session from the original request to maintain state
+            callback_request._session = request.session
+
+            # Exchange authorization code for access token using the callback request
+            token = await client.authorize_access_token(callback_request)
 
             # Get user information
             user_info = await self._get_user_info(client, token, provider)
+
+            # Clean up session
+            request.session.pop("oauth_state", None)
+            request.session.pop("oauth_provider", None)
+            request.session.pop("oauth_redirect_uri", None)
 
             logger.info(
                 "OAuth code exchange successful",

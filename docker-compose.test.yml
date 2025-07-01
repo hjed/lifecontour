@@ -72,10 +72,12 @@ services:
     ports:
       - "4446:4444"  # Different port to avoid conflicts
       - "4447:4445"  # Different port to avoid conflicts
-    command: serve -c /etc/config/hydra/hydra.yml all --dev
     volumes:
-      - ./docker/oauth/hydra.yml:/etc/config/hydra/hydra.yml:ro
-      - ./docker/oauth/init-oauth.sh:/init-oauth.sh:ro
+      - ./docker/oauth-provider/hydra-test.yml:/etc/config/hydra/hydra.yml:ro
+      - ./docker/oauth-provider/init-oauth-test.sh:/init-oauth.sh:ro
+      - ./docker/oauth-provider/entrypoint.sh:/entrypoint.sh:ro
+    entrypoint: ["/entrypoint.sh"]
+    command: ["serve", "-c", "/etc/config/hydra/hydra.yml", "all", "--dev"]
     depends_on:
       database-test:
         condition: service_healthy
@@ -90,10 +92,15 @@ services:
     container_name: pms-backend-test
     environment:
       DATABASE_URL: postgresql://postgres:postgres@database-test:5432/personal_management_test
-      OAUTH_ISSUER_URL: http://oauth-provider-test:4444
-      OAUTH_CLIENT_ID: personal-management-system
-      OAUTH_CLIENT_SECRET: personal-management-secret
-      OAUTH_REDIRECT_URI: http://localhost:3000/auth/callback
+      # OAuth Configuration for testing
+      OAUTH_PROVIDER_NAME: generic
+      OAUTH_CLIENT_ID: test-client-id
+      OAUTH_CLIENT_SECRET: test-client-secret
+      OAUTH_AUTHORIZATION_URL: http://localhost:4446/oauth2/auth
+      OAUTH_TOKEN_URL: http://oauth-provider-test:4444/oauth2/token
+      OAUTH_USERINFO_URL: http://oauth-provider-test:4444/userinfo
+      # Disable auth for easier testing
+      DISABLE_AUTH: "false"
       MEILISEARCH_URL: http://meilisearch-test:7700
       MEILISEARCH_API_KEY: test_search_key
       SESSION_SECRET_KEY: test_session_secret_key

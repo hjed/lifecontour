@@ -79,14 +79,27 @@ services:
       - SERVE_COOKIES_SAME_SITE_MODE=Lax
       - SERVE_COOKIES_SAME_SITE_LEGACY_WORKAROUND=true
     volumes:
-      - ./docker/oauth-provider/init-oauth.sh:/init-oauth.sh:ro
+      - ./docker/oauth-provider/hydra.yml:/etc/config/hydra/hydra.yml:ro
     ports:
       - "4444:4444"  # Public port
       - "4445:4445"  # Admin port
     networks:
       - pms-dev
-    entrypoint: ["/bin/sh", "-c"]
-    command: ["/init-oauth.sh & hydra serve all --dev"]
+    command: ["serve", "-c", "/etc/config/hydra/hydra.yml", "all", "--dev"]
+
+  # OAuth Client Initializer
+  oauth-init-dev:
+    image: curlimages/curl:latest
+    container_name: pms-oauth-init-dev
+    networks:
+      - pms-dev
+    depends_on:
+      - oauth-provider-dev
+    volumes:
+      - ./docker/oauth-provider/init-oauth.sh:/init-oauth.sh:ro
+    entrypoint: ["/bin/sh"]
+    command: ["/init-oauth.sh"]
+    restart: "no"
 
   # OAuth Provider UI (for managing clients and users)
   oauth-ui-dev:
