@@ -322,6 +322,19 @@ class OAuthService:
                 detail="OAuth provider mismatch",
             )
 
+        # Validate redirect URI matches the one encoded in state
+        if redirect_uri != state_redirect_uri:
+            logger.warning(
+                "OAuth redirect URI mismatch",
+                requested_redirect_uri=redirect_uri,
+                state_redirect_uri=state_redirect_uri,
+                provider=provider,
+            )
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="OAuth redirect URI mismatch",
+            )
+
         if provider not in self.oauth._clients:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,

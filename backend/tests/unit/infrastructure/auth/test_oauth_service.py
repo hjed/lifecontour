@@ -6,6 +6,9 @@ Tests OAuth provider configuration and user information extraction.
 
 from unittest.mock import AsyncMock, Mock
 
+import pytest
+from fastapi import HTTPException
+
 from app.infrastructure.auth.models import OAuthUserInfo
 from app.infrastructure.auth.oauth_service import OAuthService
 from app.infrastructure.config import Settings
@@ -218,3 +221,71 @@ class TestOAuthService:
             == "https://cdn.discordapp.com/avatars/123456789/avatar_hash.png"
         )
         assert user_info.provider == "discord"
+
+    def test_encode_decode_state(self):
+        """Test encoding and decoding OAuth state."""
+        settings = Settings()
+        oauth_service = OAuthService(settings)
+
+        provider = "github"
+        redirect_uri = "http://localhost:3000/auth/callback"
+        csrf_token = "test_csrf_token"
+
+        # Test encoding
+        encoded_state = oauth_service._encode_state(provider, redirect_uri, csrf_token)
+        assert isinstance(encoded_state, str)
+        assert len(encoded_state) > 0
+
+        # Test decoding
+        decoded_state = oauth_service._decode_state(encoded_state)
+        assert decoded_state["provider"] == provider
+        assert decoded_state["redirect_uri"] == redirect_uri
+        assert decoded_state["csrf_token"] == csrf_token
+
+    def test_decode_state_invalid(self):
+        """Test decoding invalid OAuth state."""
+        settings = Settings()
+        oauth_service = OAuthService(settings)
+
+        # Test with invalid base64
+        with pytest.raises(HTTPException) as exc_info:
+            oauth_service._decode_state("invalid_state")
+        assert exc_info.value.status_code == 400
+
+        # Test with valid base64 but invalid JSON
+        import base64
+        invalid_json = base64.urlsafe_b64encode(b"invalid json").decode()
+        with pytest.raises(HTTPException) as exc_info:
+            oauth_service._decode_state(invalid_json)
+        assert exc_info.value.status_code == 400
+
+    async def test_handle_callback_with_code_redirect_uri_mismatch(self):
+        """Test that handle_callback_with_code validates redirect URI."""
+        settings = Settings(
+            github_client_id="test_client_id",
+            github_client_secret="test_client_secret"
+        )
+        oauth_service = OAuthService(settings)
+
+        # Create a mock request with session
+        mock_request = Mock()
+        mock_request.session = {"oauth_csrf_token": "test_csrf_token"}
+
+        # Create state with one redirect URI
+        original_redirect_uri = "http://localhost:3000/auth/callback"
+        encoded_state = oauth_service._encode_state("github", original_redirect_uri, "test_csrf_token")
+
+        # Try to use a different redirect URI in the callback
+        different_redirect_uri = "http://malicious.com/callback"
+
+        with pytest.raises(HTTPException) as exc_info:
+            await oauth_service.handle_callback_with_code(
+                mock_request,
+                "github",
+                "test_code",
+                encoded_state,
+                different_redirect_uri
+            )
+
+        assert exc_info.value.status_code == 400
+        assert "redirect URI mismatch" in str(exc_info.value.detail)
