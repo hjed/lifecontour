@@ -4,8 +4,9 @@ Authentication API controllers.
 Handles OAuth authentication endpoints including authorization, callback, and logout.
 """
 
-import structlog
 from typing import Any
+
+import structlog
 from dishka.integrations.fastapi import FromDishka, inject
 from fastapi import APIRouter, HTTPException, Query, Request, status
 from starlette.responses import RedirectResponse
