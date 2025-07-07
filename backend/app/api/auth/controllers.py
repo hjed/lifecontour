@@ -5,6 +5,7 @@ Handles OAuth authentication endpoints including authorization, callback, and lo
 """
 
 import structlog
+from typing import Any
 from dishka.integrations.fastapi import FromDishka, inject
 from fastapi import APIRouter, HTTPException, Query, Request, status
 from starlette.responses import RedirectResponse
@@ -77,7 +78,7 @@ async def get_auth_providers(
 
 
 @router.get("/debug/session")
-async def debug_session(request: Request) -> dict:
+async def debug_session(request: Request) -> dict[str, Any]:
     """Debug endpoint to test session functionality."""
     try:
         # Try to access session

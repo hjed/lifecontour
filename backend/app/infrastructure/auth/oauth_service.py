@@ -47,7 +47,7 @@ class OAuthService:
         try:
             # Base64 decode the state
             state_json = base64.urlsafe_b64decode(encoded_state.encode()).decode()
-            state_data = json.loads(state_json)
+            state_data: dict[str, str] = json.loads(state_json)
 
             # Validate required fields
             required_fields = ["provider", "redirect_uri", "csrf_token"]
