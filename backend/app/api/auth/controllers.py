@@ -9,6 +9,8 @@ from dishka.integrations.fastapi import FromDishka, inject
 from fastapi import APIRouter, HTTPException, Query, Request, status
 from starlette.responses import RedirectResponse
 
+from app.infrastructure.config import Settings
+
 from app.api.auth.schemas import (
     AuthorizeRequest,
     AuthorizeResponse,
@@ -100,6 +102,7 @@ async def login(
     request_data: AuthorizeRequest,
     request: Request,
     oauth_service: FromDishka[OAuthService],
+    settings: FromDishka[Settings],
 ) -> AuthorizeResponse:
     """
     Initiate OAuth login flow.
@@ -115,8 +118,8 @@ async def login(
 
     # Generate callback URL pointing to frontend callback page
     # OAuth provider will redirect user to frontend, which then calls backend
-    # Use frontend URL for OAuth callback
-    callback_url = "http://localhost:3000/auth/callback"
+    # Use configured frontend URL for OAuth callback
+    callback_url = f"{settings.frontend_url}/auth/callback"
 
     # Get authorization URL from OAuth service
     # Let domain exceptions bubble up to global handlers
@@ -131,6 +134,9 @@ async def login(
         "OAuth login initiated via JSON API",
         provider=provider,
         redirect_url=redirect_url,
+        state=state[:10] + "..." if state else None,
+        session_keys=list(request.session.keys()),
+        callback_url=callback_url,
     )
 
     return AuthorizeResponse(authorization_url=authorization_url, state=state)
@@ -142,6 +148,7 @@ async def authorize(
     provider: str,
     request: Request,
     oauth_service: FromDishka[OAuthService],
+    settings: FromDishka[Settings],
     redirect_url: str = Query(
         default="/", description="URL to redirect to after authentication"
     ),
@@ -156,8 +163,8 @@ async def authorize(
 
     # Generate callback URL pointing to frontend callback page
     # OAuth provider will redirect user to frontend, which then calls backend
-    # Use frontend URL for OAuth callback
-    callback_url = "http://localhost:3000/auth/callback"
+    # Use configured frontend URL for OAuth callback
+    callback_url = f"{settings.frontend_url}/auth/callback"
 
     # Get authorization URL from OAuth service
     # Let domain exceptions bubble up to global handlers
@@ -180,6 +187,7 @@ async def auth_callback_json(
     callback_data: CallbackRequest,
     request: Request,
     oauth_service: FromDishka[OAuthService],
+    settings: FromDishka[Settings],
 ) -> CallbackResponse:
     """
     Handle OAuth callback from frontend.
@@ -192,11 +200,14 @@ async def auth_callback_json(
         provider=callback_data.provider,
         code_length=len(callback_data.code) if callback_data.code else 0,
         state_length=len(callback_data.state) if callback_data.state else 0,
+        state_preview=callback_data.state[:10] + "..." if callback_data.state else None,
+        session_keys=list(request.session.keys()),
+        session_oauth_state=request.session.get("oauth_state", "")[:10] + "..." if request.session.get("oauth_state") else None,
     )
 
     try:
-        # Use hardcoded redirect URI for now
-        redirect_uri = "http://localhost:3000/auth/callback"
+        # Use configured frontend URL for redirect URI
+        redirect_uri = f"{settings.frontend_url}/auth/callback"
 
         # Exchange authorization code for user info using proper session handling
         oauth_user = await oauth_service.handle_callback_with_code(

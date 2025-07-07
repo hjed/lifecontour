@@ -44,6 +44,12 @@ class Settings(BaseSettings):
         description="Allowed CORS origins",
     )
 
+    # Frontend settings
+    frontend_url: str = Field(
+        default="http://localhost:3000",
+        description="Frontend application URL for OAuth callbacks and redirects",
+    )
+
     # Database settings
     database_url: str = Field(
         default="postgresql://postgres:postgres@localhost:5432/personal_management",

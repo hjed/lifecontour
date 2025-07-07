@@ -1,12 +1,11 @@
 #!/bin/sh
 
-# OAuth Provider Initialization Script
-# This script creates the OAuth client automatically when the container starts
-# It runs in the background after Hydra has started
+# OAuth Provider Initialization Script for Testing
+# This script creates the OAuth client automatically for testing environments
 
 set -e
 
-echo "🔧 Starting OAuth provider initialization..."
+echo "🧪 Starting OAuth provider initialization for testing..."
 
 # Colors for output (if supported)
 if [ -t 1 ]; then
@@ -47,30 +46,27 @@ print_error() {
 
 # Wait for Hydra to be ready with better error handling
 print_step "Waiting for Hydra to be ready..."
-max_attempts=60  # Increased timeout
+max_attempts=60  # Increased timeout for test environment
 attempt=0
 
-# Use the Docker service name for internal network communication
-HYDRA_ADMIN_URL="http://oauth-provider-dev:4445"
-
 while [ $attempt -lt $max_attempts ]; do
-    if curl -f -s ${HYDRA_ADMIN_URL}/health/ready >/dev/null 2>&1; then
+    if curl -f -s http://oauth-provider-dev:4445/health/ready >/dev/null 2>&1; then
         print_success "Hydra is ready!"
         break
     fi
-
+    
     # Show progress every 10 attempts
     if [ $((attempt % 10)) -eq 0 ] && [ $attempt -gt 0 ]; then
         print_step "Still waiting for Hydra... (attempt $((attempt + 1))/$max_attempts)"
     fi
-
+    
     sleep 2
     attempt=$((attempt + 1))
 done
 
 if [ $attempt -eq $max_attempts ]; then
     print_error "Hydra failed to start within expected time"
-    print_error "Check Hydra logs: docker logs pms-oauth-dev"
+    print_error "Check Hydra logs: docker logs pms-oauth-test"
     exit 1
 fi
 
@@ -79,9 +75,9 @@ sleep 3
 
 # Check if client already exists
 print_step "Checking if OAuth client already exists..."
-if curl -f -s ${HYDRA_ADMIN_URL}/admin/clients/dev-client-id >/dev/null 2>&1; then
+if curl -f -s http://oauth-provider-dev:4445/admin/clients/dev-client-id >/dev/null 2>&1; then
     print_warning "OAuth client already exists, removing it first..."
-    if curl -X DELETE -s ${HYDRA_ADMIN_URL}/admin/clients/dev-client-id >/dev/null 2>&1; then
+    if curl -X DELETE -s http://oauth-provider-dev:4445/admin/clients/dev-client-id >/dev/null 2>&1; then
         print_success "Existing client removed"
         sleep 2  # Wait for deletion to complete
     else
@@ -89,8 +85,8 @@ if curl -f -s ${HYDRA_ADMIN_URL}/admin/clients/dev-client-id >/dev/null 2>&1; th
     fi
 fi
 
-# Create OAuth client with comprehensive configuration
-print_step "Creating OAuth client..."
+# Create OAuth client with comprehensive configuration for testing
+print_step "Creating OAuth client for testing..."
 
 CLIENT_CONFIG='{
     "client_id": "dev-client-id",
@@ -103,7 +99,7 @@ CLIENT_CONFIG='{
     "audience": [],
     "skip_consent": true,
     "skip_logout_consent": true,
-    "client_name": "Personal Management System (Development)",
+    "client_name": "Personal Management System (Testing)",
     "client_uri": "http://localhost:3000",
     "logo_uri": "",
     "policy_uri": "",
@@ -113,7 +109,7 @@ CLIENT_CONFIG='{
     "subject_type": "public"
 }'
 
-if curl -X POST ${HYDRA_ADMIN_URL}/admin/clients \
+if curl -X POST http://oauth-provider-dev:4445/admin/clients \
     -H "Content-Type: application/json" \
     -d "$CLIENT_CONFIG" \
     -f -s >/dev/null 2>&1; then
@@ -121,7 +117,7 @@ if curl -X POST ${HYDRA_ADMIN_URL}/admin/clients \
 else
     print_error "Failed to create OAuth client"
     print_error "Response from Hydra:"
-    curl -X POST ${HYDRA_ADMIN_URL}/admin/clients \
+    curl -X POST http://oauth-provider-dev:4445/admin/clients \
         -H "Content-Type: application/json" \
         -d "$CLIENT_CONFIG" 2>&1 || true
     exit 1
@@ -129,14 +125,14 @@ fi
 
 # Verify client configuration
 print_step "Verifying OAuth client configuration..."
-CLIENT_INFO=$(curl -s ${HYDRA_ADMIN_URL}/admin/clients/dev-client-id 2>/dev/null)
+CLIENT_INFO=$(curl -s http://oauth-provider-dev:4445/admin/clients/dev-client-id 2>/dev/null)
 
 if [ $? -eq 0 ] && echo "$CLIENT_INFO" | grep -q '"client_id":"dev-client-id"'; then
     print_success "Client verification successful"
-
+    
     # Extract and display key configuration
     echo ""
-    print_step "OAuth Client Configuration:"
+    print_step "OAuth Client Configuration (Testing):"
     echo "  Client ID: dev-client-id"
     echo "  Client Name: Personal Management System (Development)"
     echo "  Redirect URI: http://localhost:3000/auth/callback"
@@ -151,7 +147,7 @@ fi
 print_step "Testing OAuth endpoints..."
 
 # Test authorization endpoint
-AUTH_URL="http://localhost:4444/oauth2/auth?client_id=dev-client-id&response_type=code&scope=openid%20profile%20email&redirect_uri=http://localhost:3000/auth/callback&state=test"
+AUTH_URL="http://localhost:4446/oauth2/auth?client_id=test-client-id&response_type=code&scope=openid%20profile%20email&redirect_uri=http://localhost:3000/auth/callback&state=test"
 
 if curl -s -o /dev/null -w "%{http_code}" "$AUTH_URL" | grep -E "^(200|302)$" >/dev/null; then
     print_success "Authorization endpoint is working"
@@ -159,16 +155,15 @@ else
     print_warning "Authorization endpoint test inconclusive"
 fi
 
-print_success "OAuth provider initialization complete!"
+print_success "OAuth provider initialization complete for testing!"
 echo ""
-print_step "🔗 OAuth Configuration Summary:"
-echo "  Authorization URL: http://localhost:4444/oauth2/auth"
-echo "  Token URL: http://localhost:4444/oauth2/token"
-echo "  Userinfo URL: http://localhost:4444/userinfo"
-echo "  Admin URL: http://localhost:4445"
+print_step "🔗 OAuth Configuration Summary (Testing):"
+echo "  Authorization URL: http://localhost:4446/oauth2/auth"
+echo "  Token URL: http://localhost:4446/oauth2/token"
+echo "  Userinfo URL: http://localhost:4446/userinfo"
+echo "  Admin URL: http://localhost:4447"
 echo ""
 print_step "🧪 Test the OAuth flow:"
-echo "  1. Open http://localhost:3000/auth/login"
-echo "  2. Click the OAuth login button"
-echo "  3. Complete the authorization flow"
+echo "  1. Run tests: npm run test:e2e -- oauth-flow.spec.ts"
+echo "  2. Or manually test at http://localhost:3000/auth/login"
 echo ""
