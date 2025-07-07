@@ -9,8 +9,6 @@ from dishka.integrations.fastapi import FromDishka, inject
 from fastapi import APIRouter, HTTPException, Query, Request, status
 from starlette.responses import RedirectResponse
 
-from app.infrastructure.config import Settings
-
 from app.api.auth.schemas import (
     AuthorizeRequest,
     AuthorizeResponse,
@@ -24,6 +22,7 @@ from app.api.auth.schemas import (
 )
 from app.infrastructure.auth.models import SessionUser
 from app.infrastructure.auth.oauth_service import OAuthService
+from app.infrastructure.config import Settings
 
 logger = structlog.get_logger()
 
@@ -202,7 +201,9 @@ async def auth_callback_json(
         state_length=len(callback_data.state) if callback_data.state else 0,
         state_preview=callback_data.state[:10] + "..." if callback_data.state else None,
         session_keys=list(request.session.keys()),
-        session_oauth_state=request.session.get("oauth_state", "")[:10] + "..." if request.session.get("oauth_state") else None,
+        session_oauth_state=request.session.get("oauth_state", "")[:10] + "..."
+        if request.session.get("oauth_state")
+        else None,
     )
 
     try:
@@ -211,8 +212,11 @@ async def auth_callback_json(
 
         # Exchange authorization code for user info using proper session handling
         oauth_user = await oauth_service.handle_callback_with_code(
-            request, callback_data.provider, callback_data.code,
-            callback_data.state, redirect_uri
+            request,
+            callback_data.provider,
+            callback_data.code,
+            callback_data.state,
+            redirect_uri,
         )
 
         # Create session user

@@ -56,7 +56,11 @@ class OAuthService:
 
             return state_data
         except (ValueError, json.JSONDecodeError, Exception) as e:
-            logger.warning("Failed to decode OAuth state", error=str(e), state=encoded_state[:20] + "...")
+            logger.warning(
+                "Failed to decode OAuth state",
+                error=str(e),
+                state=encoded_state[:20] + "...",
+            )
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Invalid OAuth state parameter",
@@ -127,7 +131,9 @@ class OAuthService:
                 # Build client kwargs with userinfo URL if available
                 client_kwargs = {"scope": "openid email profile"}
                 if self.settings.oauth_userinfo_url:
-                    client_kwargs["userinfo_endpoint"] = self.settings.oauth_userinfo_url
+                    client_kwargs["userinfo_endpoint"] = (
+                        self.settings.oauth_userinfo_url
+                    )
 
                 self.oauth.register(
                     name=self.settings.oauth_provider_name,
@@ -193,7 +199,9 @@ class OAuthService:
         code = request.query_params.get("code")
 
         if not state or not code:
-            logger.warning("Missing OAuth callback parameters", state=bool(state), code=bool(code))
+            logger.warning(
+                "Missing OAuth callback parameters", state=bool(state), code=bool(code)
+            )
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Missing OAuth callback parameters",
@@ -203,7 +211,6 @@ class OAuthService:
         try:
             state_data = self._decode_state(state)
             provider = state_data["provider"]
-            redirect_uri = state_data["redirect_uri"]
         except HTTPException:
             # Re-raise HTTPException from _decode_state
             raise
@@ -262,7 +269,9 @@ class OAuthService:
             # Re-raise HTTPException from _decode_state
             raise
         except Exception as e:
-            logger.error("Failed to decode OAuth state", error=str(e), state=state[:20] + "...")
+            logger.error(
+                "Failed to decode OAuth state", error=str(e), state=state[:20] + "..."
+            )
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Invalid OAuth state parameter",
@@ -278,7 +287,9 @@ class OAuthService:
             state_provider=state_provider,
             state_redirect_uri=state_redirect_uri,
             received_redirect_uri=redirect_uri,
-            csrf_token_match=stored_csrf_token == state_csrf_token if stored_csrf_token else False,
+            csrf_token_match=stored_csrf_token == state_csrf_token
+            if stored_csrf_token
+            else False,
             session_keys=list(request.session.keys()),
         )
 
@@ -286,8 +297,12 @@ class OAuthService:
         if not stored_csrf_token or stored_csrf_token != state_csrf_token:
             logger.warning(
                 "OAuth CSRF token mismatch",
-                stored_csrf_token=stored_csrf_token[:10] + "..." if stored_csrf_token else None,
-                state_csrf_token=state_csrf_token[:10] + "..." if state_csrf_token else None,
+                stored_csrf_token=stored_csrf_token[:10] + "..."
+                if stored_csrf_token
+                else None,
+                state_csrf_token=state_csrf_token[:10] + "..."
+                if state_csrf_token
+                else None,
                 provider=provider,
             )
             raise HTTPException(
@@ -307,8 +322,6 @@ class OAuthService:
                 detail="OAuth provider mismatch",
             )
 
-
-
         if provider not in self.oauth._clients:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -320,10 +333,10 @@ class OAuthService:
         try:
             # Get token endpoint from client configuration
             # For Authlib clients, the token endpoint is stored in the client metadata
-            token_endpoint = getattr(client, 'access_token_url', None)
+            token_endpoint = getattr(client, "access_token_url", None)
             if not token_endpoint:
                 # Try to get from server metadata
-                token_endpoint = client.server_metadata.get('token_endpoint')
+                token_endpoint = client.server_metadata.get("token_endpoint")
             if not token_endpoint:
                 # Final fallback - this should not happen with proper configuration
                 raise HTTPException(
@@ -336,7 +349,7 @@ class OAuthService:
                 provider=provider,
                 token_endpoint=token_endpoint,
                 code_length=len(code),
-                redirect_uri=redirect_uri
+                redirect_uri=redirect_uri,
             )
 
             # Exchange authorization code for access token using direct HTTP request
@@ -353,7 +366,7 @@ class OAuthService:
                 token_response = await http_client.post(
                     token_endpoint,
                     data=token_data,
-                    headers={"Content-Type": "application/x-www-form-urlencoded"}
+                    headers={"Content-Type": "application/x-www-form-urlencoded"},
                 )
 
                 if token_response.status_code != 200:
@@ -361,7 +374,7 @@ class OAuthService:
                         "Token exchange failed",
                         provider=provider,
                         status_code=token_response.status_code,
-                        response_text=token_response.text[:200]
+                        response_text=token_response.text[:200],
                     )
                     raise HTTPException(
                         status_code=status.HTTP_400_BAD_REQUEST,
@@ -373,9 +386,9 @@ class OAuthService:
             logger.info(
                 "Token exchange successful",
                 provider=provider,
-                token_type=token.get('token_type'),
-                has_access_token=bool(token.get('access_token')),
-                has_id_token=bool(token.get('id_token'))
+                token_type=token.get("token_type"),
+                has_access_token=bool(token.get("access_token")),
+                has_id_token=bool(token.get("id_token")),
             )
 
             # Get user information
