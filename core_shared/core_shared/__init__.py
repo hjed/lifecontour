@@ -16,13 +16,14 @@ from core_shared.base_service import (
     TransformationError,
 )
 from core_shared.database import create_engine_from_url, get_database_url
-from core_shared.models import Base, ExternalReference, SyncMetadata, SyncStatus
+from core_shared.models import Base, ExternalReference, SyncMetadata, SyncStatus, UserGoogleAuth
 
 __all__ = [
     "Base",
     "SyncMetadata",
     "ExternalReference",
     "SyncStatus",
+    "UserGoogleAuth",
     "get_database_url",
     "create_engine_from_url",
     "BaseIntegrationService",

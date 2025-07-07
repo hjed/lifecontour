@@ -130,6 +130,9 @@ class Settings(BaseSettings):
     google_client_secret: str = Field(
         default="", description="Google OAuth client secret"
     )
+    google_token_encryption_key: str = Field(
+        default="", description="Fernet encryption key for Google OAuth tokens"
+    )
     immich_base_url: str = Field(default="", description="Immich instance base URL")
     immich_api_key: str = Field(default="", description="Immich API key")
 

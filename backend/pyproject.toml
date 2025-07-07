@@ -35,6 +35,8 @@ dependencies = [
     "fastmcp>=2.3.2",
     "dishka>=1.6.0",
     "arq>=0.25.0",
+    "google-api-python-client>=2.0.0",
+    "cryptography>=41.0.0",
     "core_shared",
 ]
 
