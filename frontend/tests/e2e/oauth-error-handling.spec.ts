@@ -32,17 +32,20 @@ test.describe('OAuth Error Handling', () => {
     const callbackResponses: { status: number; error?: string }[] = [];
     page.on('response', async response => {
       if (response.url().includes('/api/auth/callback')) {
-        const responseData: { status: number; error?: string } = { status: response.status() };
-        
+        const responseData: { status: number; error?: string } = {
+          status: response.status(),
+        };
+
         if (!response.ok()) {
           try {
             const errorData = await response.json();
-            responseData.error = errorData.detail || errorData.message || 'Unknown error';
+            responseData.error =
+              errorData.detail || errorData.message || 'Unknown error';
           } catch {
             responseData.error = 'Failed to parse error response';
           }
         }
-        
+
         callbackResponses.push(responseData);
         console.log('CALLBACK RESPONSE:', responseData);
       }
@@ -50,19 +53,26 @@ test.describe('OAuth Error Handling', () => {
 
     // Navigate to callback with invalid state
     console.log('2. Navigating to callback with invalid state...');
-    await page.goto('/auth/callback?code=valid-code&state=invalid-state-that-does-not-match');
+    await page.goto(
+      '/auth/callback?code=valid-code&state=invalid-state-that-does-not-match'
+    );
     await page.waitForTimeout(3000);
 
     // Should have received an error response
     expect(callbackResponses.length).toBeGreaterThan(0);
     const errorResponse = callbackResponses.find(r => r.status >= 400);
     expect(errorResponse).toBeTruthy();
-    console.log('3. Error response received as expected:', errorResponse?.error);
+    console.log(
+      '3. Error response received as expected:',
+      errorResponse?.error
+    );
 
     // Check that error is displayed to user
-    const errorElements = page.locator('[role="alert"], .alert, .error, [data-testid="error"]');
+    const errorElements = page.locator(
+      '[role="alert"], .alert, .error, [data-testid="error"]'
+    );
     const errorCount = await errorElements.count();
-    
+
     if (errorCount > 0) {
       const errorText = await errorElements.first().textContent();
       console.log('4. Error message displayed to user:', errorText);
@@ -93,7 +103,9 @@ test.describe('OAuth Error Handling', () => {
       if (response.url().includes('/api/auth/callback') && !response.ok()) {
         try {
           const errorData = await response.json();
-          errorResponses.push(errorData.detail || errorData.message || 'Unknown error');
+          errorResponses.push(
+            errorData.detail || errorData.message || 'Unknown error'
+          );
         } catch {
           errorResponses.push(`HTTP ${response.status()}`);
         }
@@ -102,17 +114,20 @@ test.describe('OAuth Error Handling', () => {
 
     // Simulate expired code scenario
     console.log('2. Testing with potentially expired authorization code...');
-    await page.goto('/auth/callback?code=expired-or-invalid-code&state=test-state');
+    await page.goto(
+      '/auth/callback?code=expired-or-invalid-code&state=test-state'
+    );
     await page.waitForTimeout(3000);
 
     console.log('3. Checking error handling for expired code...');
-    
+
     // Should show appropriate error message
     const bodyText = await page.textContent('body');
-    const hasErrorMessage = bodyText?.includes('Authentication failed') || 
-                           bodyText?.includes('expired') || 
-                           bodyText?.includes('invalid') ||
-                           errorResponses.length > 0;
+    const hasErrorMessage =
+      bodyText?.includes('Authentication failed') ||
+      bodyText?.includes('expired') ||
+      bodyText?.includes('invalid') ||
+      errorResponses.length > 0;
 
     if (hasErrorMessage) {
       console.log('4. Appropriate error handling found');
@@ -120,7 +135,9 @@ test.describe('OAuth Error Handling', () => {
         console.log('5. Backend error responses:', errorResponses);
       }
     } else {
-      console.log('4. No explicit error message - checking redirect behavior...');
+      console.log(
+        '4. No explicit error message - checking redirect behavior...'
+      );
       const currentUrl = page.url();
       if (currentUrl.includes('/auth/login')) {
         console.log('5. Redirected to login page (acceptable error handling)');
@@ -144,23 +161,24 @@ test.describe('OAuth Error Handling', () => {
       {
         name: 'access_denied',
         params: 'error=access_denied&error_description=User%20denied%20access',
-        expectedMessage: 'User denied access'
+        expectedMessage: 'User denied access',
       },
       {
         name: 'invalid_request',
-        params: 'error=invalid_request&error_description=Invalid%20OAuth%20request',
-        expectedMessage: 'Invalid OAuth request'
+        params:
+          'error=invalid_request&error_description=Invalid%20OAuth%20request',
+        expectedMessage: 'Invalid OAuth request',
       },
       {
         name: 'server_error',
         params: 'error=server_error&error_description=OAuth%20provider%20error',
-        expectedMessage: 'OAuth provider error'
-      }
+        expectedMessage: 'OAuth provider error',
+      },
     ];
 
     for (const scenario of errorScenarios) {
       console.log(`2. Testing ${scenario.name} error scenario...`);
-      
+
       await page.goto(`/auth/callback?${scenario.params}`);
       await page.waitForTimeout(2000);
 
@@ -171,12 +189,14 @@ test.describe('OAuth Error Handling', () => {
       if (hasExpectedError) {
         console.log(`3. ${scenario.name} error correctly displayed`);
       } else {
-        console.log(`3. ${scenario.name} error not explicitly shown - checking general error handling...`);
-        
+        console.log(
+          `3. ${scenario.name} error not explicitly shown - checking general error handling...`
+        );
+
         // Look for any error indicators
         const errorElements = page.locator('[role="alert"], .alert, .error');
         const errorCount = await errorElements.count();
-        
+
         if (errorCount > 0) {
           console.log(`4. General error handling found for ${scenario.name}`);
         }
@@ -198,11 +218,15 @@ test.describe('OAuth Error Handling', () => {
     const buttonCount = await oauthButtons.count();
 
     if (buttonCount > 0) {
-      console.log('2. OAuth buttons found, testing network failure scenarios...');
+      console.log(
+        '2. OAuth buttons found, testing network failure scenarios...'
+      );
 
       // Simulate network failure by intercepting requests
       await page.route('**/api/auth/login', route => {
-        console.log('3. Intercepting login request to simulate network failure...');
+        console.log(
+          '3. Intercepting login request to simulate network failure...'
+        );
         route.abort('failed');
       });
 
@@ -219,12 +243,13 @@ test.describe('OAuth Error Handling', () => {
       await page.waitForTimeout(3000);
 
       console.log('4. Checking error handling after network failure...');
-      
+
       // Should handle network failure gracefully
       const bodyText = await page.textContent('body');
-      const hasErrorHandling = bodyText?.includes('error') || 
-                              bodyText?.includes('failed') || 
-                              errors.length > 0;
+      const hasErrorHandling =
+        bodyText?.includes('error') ||
+        bodyText?.includes('failed') ||
+        errors.length > 0;
 
       if (hasErrorHandling) {
         console.log('5. Network failure handled appropriately');
@@ -232,29 +257,34 @@ test.describe('OAuth Error Handling', () => {
           console.log('6. Console errors logged:', errors.slice(0, 3));
         }
       } else {
-        console.log('5. No explicit error handling - checking if page remains functional...');
-        
+        console.log(
+          '5. No explicit error handling - checking if page remains functional...'
+        );
+
         // Page should still be usable
         const currentUrl = page.url();
         expect(currentUrl).toBeTruthy();
-        
+
         // Should still be able to interact with the page
         const clickableElements = page.locator('button, a, input');
         const clickableCount = await clickableElements.count();
         expect(clickableCount).toBeGreaterThan(0);
-        
+
         console.log('6. Page remains functional after network failure');
       }
 
       // Clean up route interception
       await page.unroute('**/api/auth/login');
-
     } else {
-      console.log('2. No OAuth buttons found - testing session endpoint network failure...');
-      
+      console.log(
+        '2. No OAuth buttons found - testing session endpoint network failure...'
+      );
+
       // Test network failure on session endpoint
       await page.route('**/api/auth/session', route => {
-        console.log('3. Intercepting session request to simulate network failure...');
+        console.log(
+          '3. Intercepting session request to simulate network failure...'
+        );
         route.abort('failed');
       });
 
@@ -263,13 +293,13 @@ test.describe('OAuth Error Handling', () => {
       await page.waitForTimeout(2000);
 
       console.log('4. Checking handling of session endpoint failure...');
-      
+
       // Should handle session check failure gracefully
       const bodyText = await page.textContent('body');
       expect(bodyText).toBeTruthy();
-      
+
       console.log('5. Session endpoint failure handled');
-      
+
       await page.unroute('**/api/auth/session');
     }
 
@@ -281,7 +311,7 @@ test.describe('OAuth Error Handling', () => {
 
     // Test various malformed callback scenarios
     const malformedUrls = [
-      '/auth/callback?code=',  // Empty code
+      '/auth/callback?code=', // Empty code
       '/auth/callback?state=', // Empty state
       '/auth/callback?code=test', // Missing state
       '/auth/callback?state=test', // Missing code
@@ -291,7 +321,7 @@ test.describe('OAuth Error Handling', () => {
 
     for (const url of malformedUrls) {
       console.log(`2. Testing malformed URL: ${url}`);
-      
+
       await page.goto(url);
       await page.waitForTimeout(2000);
 
@@ -301,16 +331,19 @@ test.describe('OAuth Error Handling', () => {
 
       // Should show appropriate error or redirect to login
       const currentUrl = page.url();
-      const hasErrorHandling = bodyText?.includes('error') || 
-                              bodyText?.includes('invalid') || 
-                              bodyText?.includes('missing') ||
-                              currentUrl.includes('/auth/login');
+      const hasErrorHandling =
+        bodyText?.includes('error') ||
+        bodyText?.includes('invalid') ||
+        bodyText?.includes('missing') ||
+        currentUrl.includes('/auth/login');
 
       if (hasErrorHandling) {
         console.log(`3. Malformed URL handled appropriately: ${url}`);
       } else {
-        console.log(`3. No explicit error for ${url} - checking page stability...`);
-        
+        console.log(
+          `3. No explicit error for ${url} - checking page stability...`
+        );
+
         // Page should still be stable
         const title = await page.title();
         expect(title).toBeTruthy();
@@ -322,7 +355,9 @@ test.describe('OAuth Error Handling', () => {
 });
 
 test.describe('OAuth Session and State Management Errors', () => {
-  test('should handle missing session state during callback', async ({ page }) => {
+  test('should handle missing session state during callback', async ({
+    page,
+  }) => {
     console.log('1. Testing missing session state handling...');
 
     // Navigate directly to callback without establishing session
@@ -333,9 +368,10 @@ test.describe('OAuth Session and State Management Errors', () => {
 
     // Should handle missing session gracefully
     const bodyText = await page.textContent('body');
-    const hasErrorHandling = bodyText?.includes('error') ||
-                            bodyText?.includes('invalid') ||
-                            bodyText?.includes('session');
+    const hasErrorHandling =
+      bodyText?.includes('error') ||
+      bodyText?.includes('invalid') ||
+      bodyText?.includes('session');
 
     if (hasErrorHandling) {
       console.log('3. Missing session state handled with error message');
@@ -381,10 +417,11 @@ test.describe('OAuth Session and State Management Errors', () => {
     const bodyText = await page.textContent('body');
     const currentUrl = page.url();
 
-    const hasTimeoutHandling = bodyText?.includes('error') ||
-                              bodyText?.includes('timeout') ||
-                              bodyText?.includes('expired') ||
-                              currentUrl.includes('/auth/login');
+    const hasTimeoutHandling =
+      bodyText?.includes('error') ||
+      bodyText?.includes('timeout') ||
+      bodyText?.includes('expired') ||
+      currentUrl.includes('/auth/login');
 
     if (hasTimeoutHandling) {
       console.log('4. Session timeout handled appropriately');
@@ -444,7 +481,6 @@ test.describe('OAuth Session and State Management Errors', () => {
       expect(currentUrl).toBeTruthy();
 
       console.log('5. Concurrent requests handled without crashing');
-
     } else {
       console.log('2. No OAuth buttons found - skipping concurrent test');
     }
@@ -460,12 +496,16 @@ test.describe('OAuth Session and State Management Errors', () => {
 
     // Intercept OAuth provider requests to simulate unavailability
     await page.route('**/oauth/**', route => {
-      console.log('2. Intercepting OAuth provider request to simulate unavailability...');
+      console.log(
+        '2. Intercepting OAuth provider request to simulate unavailability...'
+      );
       route.abort('failed');
     });
 
     await page.route('**localhost:4444/**', route => {
-      console.log('3. Intercepting Hydra requests to simulate unavailability...');
+      console.log(
+        '3. Intercepting Hydra requests to simulate unavailability...'
+      );
       route.abort('failed');
     });
 
@@ -493,10 +533,11 @@ test.describe('OAuth Session and State Management Errors', () => {
       const currentUrl = page.url();
 
       // Should either show error or remain on login page
-      const hasErrorHandling = bodyText?.includes('error') ||
-                              bodyText?.includes('unavailable') ||
-                              currentUrl.includes('/auth/login') ||
-                              errors.length > 0;
+      const hasErrorHandling =
+        bodyText?.includes('error') ||
+        bodyText?.includes('unavailable') ||
+        currentUrl.includes('/auth/login') ||
+        errors.length > 0;
 
       if (hasErrorHandling) {
         console.log('6. Provider unavailability handled appropriately');
@@ -504,9 +545,10 @@ test.describe('OAuth Session and State Management Errors', () => {
         console.log('6. No explicit error - checking page stability...');
         expect(bodyText).toBeTruthy();
       }
-
     } else {
-      console.log('4. No OAuth buttons found - provider may already be unavailable');
+      console.log(
+        '4. No OAuth buttons found - provider may already be unavailable'
+      );
     }
 
     // Clean up route interceptions

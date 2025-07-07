@@ -60,7 +60,9 @@ describe('OAuth Callback Provider Storage', () => {
       // This would be tested in integration tests where we can test the actual callback page
       // Here we just verify the mock setup works
       mockSessionStorage.removeItem('oauth_provider');
-      expect(mockSessionStorage.removeItem).toHaveBeenCalledWith('oauth_provider');
+      expect(mockSessionStorage.removeItem).toHaveBeenCalledWith(
+        'oauth_provider'
+      );
     });
   });
 });

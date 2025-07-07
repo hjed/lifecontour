@@ -33,7 +33,9 @@ test.describe('Debug OAuth Authentication', () => {
 
     // Wait for redirect to OAuth provider login page
     console.log('5. Waiting for OAuth provider login page...');
-    await page.waitForURL(/localhost:3001\/login\?login_challenge=/, { timeout: 10000 });
+    await page.waitForURL(/localhost:3001\/login\?login_challenge=/, {
+      timeout: 10000,
+    });
 
     // We should now be on the OAuth provider's login page
     console.log('6. On OAuth provider login page:', page.url());
@@ -59,7 +61,9 @@ test.describe('Debug OAuth Authentication', () => {
     if (page.url().includes('/consent')) {
       console.log('10. On consent page, accepting consent...');
       // Look for consent form and submit it
-      const consentButton = page.locator('button[type="submit"], button:has-text("Accept"), button:has-text("Allow")');
+      const consentButton = page.locator(
+        'button[type="submit"], button:has-text("Accept"), button:has-text("Allow")'
+      );
       await expect(consentButton.first()).toBeVisible({ timeout: 5000 });
       await consentButton.first().click();
       await page.waitForTimeout(1000);
@@ -86,7 +90,7 @@ test.describe('Debug OAuth Authentication', () => {
 
     console.log('16. OAuth flow completed successfully!');
   });
-  
+
   test('should test direct API calls', async ({ page }) => {
     // Test the providers endpoint
     console.log('Testing /api/auth/providers...');
@@ -94,14 +98,14 @@ test.describe('Debug OAuth Authentication', () => {
     console.log('Providers status:', providersResponse.status());
     const providers = await providersResponse.json();
     console.log('Providers data:', JSON.stringify(providers, null, 2));
-    
+
     // Test the login endpoint
     console.log('Testing /api/auth/login...');
     const loginResponse = await page.request.post('/api/auth/login', {
-      data: { provider: 'generic' }
+      data: { provider: 'generic' },
     });
     console.log('Login status:', loginResponse.status());
-    
+
     if (loginResponse.ok()) {
       const loginData = await loginResponse.json();
       console.log('Login data:', JSON.stringify(loginData, null, 2));
