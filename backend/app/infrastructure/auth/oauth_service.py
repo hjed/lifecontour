@@ -5,9 +5,12 @@ Provides OAuth2 authentication using Authlib with support for GitHub, Microsoft,
 Discord, and generic OAuth2 providers.
 """
 
+import base64
+import json
 import secrets
 from typing import Any
 
+import httpx
 import structlog
 from authlib.integrations.starlette_client import OAuth
 from fastapi import HTTPException, Request, status
@@ -26,6 +29,38 @@ class OAuthService:
         self.settings = settings
         self.oauth = OAuth()
         self._configure_providers()
+
+    def _encode_state(self, provider: str, redirect_uri: str, csrf_token: str) -> str:
+        """Encode OAuth state with provider info and CSRF token."""
+        state_data = {
+            "provider": provider,
+            "redirect_uri": redirect_uri,
+            "csrf_token": csrf_token,
+        }
+        # Base64 encode the JSON state data
+        state_json = json.dumps(state_data)
+        encoded_state = base64.urlsafe_b64encode(state_json.encode()).decode()
+        return encoded_state
+
+    def _decode_state(self, encoded_state: str) -> dict[str, str]:
+        """Decode OAuth state to extract provider info and CSRF token."""
+        try:
+            # Base64 decode the state
+            state_json = base64.urlsafe_b64decode(encoded_state.encode()).decode()
+            state_data = json.loads(state_json)
+
+            # Validate required fields
+            required_fields = ["provider", "redirect_uri", "csrf_token"]
+            if not all(field in state_data for field in required_fields):
+                raise ValueError("Missing required fields in state")
+
+            return state_data
+        except (ValueError, json.JSONDecodeError, Exception) as e:
+            logger.warning("Failed to decode OAuth state", error=str(e), state=encoded_state[:20] + "...")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid OAuth state parameter",
+            ) from e
 
     def _configure_providers(self) -> None:
         """Configure OAuth providers based on settings."""
@@ -130,49 +165,54 @@ class OAuthService:
 
         client = self.oauth._clients[provider]
 
-        # Generate and store state for CSRF protection
-        state = secrets.token_urlsafe(32)
-        request.session["oauth_state"] = state
-        request.session["oauth_provider"] = provider
-        request.session["oauth_redirect_uri"] = redirect_uri
+        # Generate CSRF token and encode state with provider info
+        csrf_token = secrets.token_urlsafe(32)
+        encoded_state = self._encode_state(provider, redirect_uri, csrf_token)
 
-        # Get authorization URL
+        # Store CSRF token in session for validation (only the CSRF token, not all state)
+        request.session["oauth_csrf_token"] = csrf_token
+
+        # Get authorization URL with encoded state
         authorization_url = await client.create_authorization_url(
-            redirect_uri, state=state
+            redirect_uri, state=encoded_state
         )
 
         logger.info(
             "Generated OAuth authorization URL",
             provider=provider,
-            state=state,
+            state_preview=encoded_state[:20] + "...",
+            csrf_token=csrf_token[:10] + "...",
         )
 
         return str(authorization_url["url"])
 
     async def handle_callback(self, request: Request) -> OAuthUserInfo:
         """Handle OAuth callback and extract user information."""
-        # Verify state parameter for CSRF protection
+        # Get state and code from query parameters
         state = request.query_params.get("state")
-        stored_state = request.session.get("oauth_state")
+        code = request.query_params.get("code")
 
-        if not state or not stored_state or state != stored_state:
-            logger.warning(
-                "OAuth state mismatch", state=state, stored_state=stored_state
+        if not state or not code:
+            logger.warning("Missing OAuth callback parameters", state=bool(state), code=bool(code))
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Missing OAuth callback parameters",
             )
+
+        # Decode state to get provider info
+        try:
+            state_data = self._decode_state(state)
+            provider = state_data["provider"]
+            redirect_uri = state_data["redirect_uri"]
+        except HTTPException:
+            # Re-raise HTTPException from _decode_state
+            raise
+        except Exception as e:
+            logger.error("Failed to decode OAuth state in callback", error=str(e))
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Invalid OAuth state parameter",
-            )
-
-        provider = request.session.get("oauth_provider")
-        redirect_uri = request.session.get("oauth_redirect_uri")
-
-        if not provider or not redirect_uri:
-            logger.warning("Missing OAuth session data", provider=provider)
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Invalid OAuth session",
-            )
+            ) from e
 
         if provider not in self.oauth._clients:
             raise HTTPException(
@@ -189,10 +229,8 @@ class OAuthService:
             # Get user information
             user_info = await self._get_user_info(client, token, provider)
 
-            # Clean up session
-            request.session.pop("oauth_state", None)
-            request.session.pop("oauth_provider", None)
-            request.session.pop("oauth_redirect_uri", None)
+            # Clean up session (only need to remove CSRF token now)
+            request.session.pop("oauth_csrf_token", None)
 
             logger.info(
                 "OAuth authentication successful",
@@ -214,44 +252,62 @@ class OAuthService:
         self, request: Request, provider: str, code: str, state: str, redirect_uri: str
     ) -> OAuthUserInfo:
         """Handle OAuth callback with authorization code and state."""
-        # Verify state parameter for CSRF protection
-        stored_state = request.session.get("oauth_state")
-        stored_provider = request.session.get("oauth_provider")
-        stored_redirect_uri = request.session.get("oauth_redirect_uri")
+        # Decode state to get provider info and CSRF token
+        try:
+            state_data = self._decode_state(state)
+            state_provider = state_data["provider"]
+            state_redirect_uri = state_data["redirect_uri"]
+            state_csrf_token = state_data["csrf_token"]
+        except HTTPException:
+            # Re-raise HTTPException from _decode_state
+            raise
+        except Exception as e:
+            logger.error("Failed to decode OAuth state", error=str(e), state=state[:20] + "...")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid OAuth state parameter",
+            ) from e
 
-        if not state or not stored_state or state != stored_state:
+        # Verify CSRF token against session
+        stored_csrf_token = request.session.get("oauth_csrf_token")
+
+        # Enhanced logging for debugging
+        logger.info(
+            "OAuth callback validation",
+            provider=provider,
+            state_provider=state_provider,
+            state_redirect_uri=state_redirect_uri,
+            received_redirect_uri=redirect_uri,
+            csrf_token_match=stored_csrf_token == state_csrf_token if stored_csrf_token else False,
+            session_keys=list(request.session.keys()),
+        )
+
+        # Validate CSRF token
+        if not stored_csrf_token or stored_csrf_token != state_csrf_token:
             logger.warning(
-                "OAuth state mismatch",
-                state=state,
-                stored_state=stored_state,
-                provider=provider
+                "OAuth CSRF token mismatch",
+                stored_csrf_token=stored_csrf_token[:10] + "..." if stored_csrf_token else None,
+                state_csrf_token=state_csrf_token[:10] + "..." if state_csrf_token else None,
+                provider=provider,
             )
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Invalid OAuth state parameter",
             )
 
-        if not stored_provider or stored_provider != provider:
+        # Validate provider matches
+        if provider != state_provider:
             logger.warning(
                 "OAuth provider mismatch",
-                provider=provider,
-                stored_provider=stored_provider
+                requested_provider=provider,
+                state_provider=state_provider,
             )
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Invalid OAuth provider",
+                detail="OAuth provider mismatch",
             )
 
-        if not stored_redirect_uri or stored_redirect_uri != redirect_uri:
-            logger.warning(
-                "OAuth redirect URI mismatch",
-                redirect_uri=redirect_uri,
-                stored_redirect_uri=stored_redirect_uri
-            )
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Invalid OAuth redirect URI",
-            )
+
 
         if provider not in self.oauth._clients:
             raise HTTPException(
@@ -262,38 +318,71 @@ class OAuthService:
         client = self.oauth._clients[provider]
 
         try:
-            # Create a proper request scope with the authorization code
-            # This mimics what would happen in a real callback request
-            callback_url = f"{redirect_uri}?code={code}&state={state}"
-            scope = {
-                "type": "http",
-                "method": "GET",
-                "url": callback_url,
-                "query_string": f"code={code}&state={state}".encode(),
-                "headers": [],
-                "path": "/auth/callback",
-                "root_path": "",
-                "scheme": "http",
-                "server": ("localhost", 8000),
+            # Get token endpoint from client configuration
+            # For Authlib clients, the token endpoint is stored in the client metadata
+            token_endpoint = getattr(client, 'access_token_url', None)
+            if not token_endpoint:
+                # Try to get from server metadata
+                token_endpoint = client.server_metadata.get('token_endpoint')
+            if not token_endpoint:
+                # Final fallback - this should not happen with proper configuration
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail=f"No token endpoint configured for provider '{provider}'",
+                )
+
+            logger.info(
+                "Exchanging authorization code for token",
+                provider=provider,
+                token_endpoint=token_endpoint,
+                code_length=len(code),
+                redirect_uri=redirect_uri
+            )
+
+            # Exchange authorization code for access token using direct HTTP request
+            # This avoids the state validation issues with Authlib's authorize_access_token
+            token_data = {
+                "grant_type": "authorization_code",
+                "code": code,
+                "redirect_uri": redirect_uri,
+                "client_id": client.client_id,
+                "client_secret": client.client_secret,
             }
 
-            # Create a new request with the callback parameters
-            from starlette.requests import Request
-            callback_request = Request(scope)
+            async with httpx.AsyncClient() as http_client:
+                token_response = await http_client.post(
+                    token_endpoint,
+                    data=token_data,
+                    headers={"Content-Type": "application/x-www-form-urlencoded"}
+                )
 
-            # Copy the session from the original request to maintain state
-            callback_request._session = request.session
+                if token_response.status_code != 200:
+                    logger.error(
+                        "Token exchange failed",
+                        provider=provider,
+                        status_code=token_response.status_code,
+                        response_text=token_response.text[:200]
+                    )
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="Failed to exchange authorization code for token",
+                    )
 
-            # Exchange authorization code for access token using the callback request
-            token = await client.authorize_access_token(callback_request)
+                token = token_response.json()
+
+            logger.info(
+                "Token exchange successful",
+                provider=provider,
+                token_type=token.get('token_type'),
+                has_access_token=bool(token.get('access_token')),
+                has_id_token=bool(token.get('id_token'))
+            )
 
             # Get user information
             user_info = await self._get_user_info(client, token, provider)
 
-            # Clean up session
-            request.session.pop("oauth_state", None)
-            request.session.pop("oauth_provider", None)
-            request.session.pop("oauth_redirect_uri", None)
+            # Clean up session (only need to remove CSRF token now)
+            request.session.pop("oauth_csrf_token", None)
 
             logger.info(
                 "OAuth code exchange successful",
