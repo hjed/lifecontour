@@ -13,19 +13,24 @@ test.describe('OAuth Docker Integration', () => {
 
     // Test if Hydra public endpoint is accessible
     try {
-      const response = await page.request.get('http://localhost:4444/.well-known/openid_configuration');
-      
+      const response = await page.request.get(
+        'http://localhost:4444/.well-known/openid_configuration'
+      );
+
       if (response.ok()) {
         const config = await response.json();
         console.log('2. Hydra OpenID configuration retrieved successfully');
-        console.log('3. Authorization endpoint:', config.authorization_endpoint);
+        console.log(
+          '3. Authorization endpoint:',
+          config.authorization_endpoint
+        );
         console.log('4. Token endpoint:', config.token_endpoint);
-        
+
         // Verify required endpoints are present
         expect(config.authorization_endpoint).toBeTruthy();
         expect(config.token_endpoint).toBeTruthy();
         expect(config.issuer).toBeTruthy();
-        
+
         console.log('5. Hydra OAuth provider is properly configured');
       } else {
         console.log('2. Hydra not accessible - may not be running in Docker');
@@ -37,29 +42,37 @@ test.describe('OAuth Docker Integration', () => {
     }
   });
 
-  test('should verify OAuth client configuration in Hydra', async ({ page }) => {
+  test('should verify OAuth client configuration in Hydra', async ({
+    page,
+  }) => {
     console.log('1. Testing OAuth client configuration...');
 
     try {
       // Test if Hydra admin endpoint is accessible
-      const response = await page.request.get('http://localhost:4445/admin/clients/dev-client-id');
-      
+      const response = await page.request.get(
+        'http://localhost:4445/admin/clients/dev-client-id'
+      );
+
       if (response.ok()) {
         const client = await response.json();
         console.log('2. OAuth client configuration retrieved successfully');
         console.log('3. Client ID:', client.client_id);
         console.log('4. Redirect URIs:', client.redirect_uris);
-        
+
         // Verify client configuration
         expect(client.client_id).toBe('dev-client-id');
-        expect(client.redirect_uris).toContain('http://localhost:3000/auth/callback');
+        expect(client.redirect_uris).toContain(
+          'http://localhost:3000/auth/callback'
+        );
         expect(client.grant_types).toContain('authorization_code');
         expect(client.response_types).toContain('code');
-        
+
         console.log('5. OAuth client is properly configured in Hydra');
       } else {
         console.log('2. OAuth client not found - may need to be created');
-        console.log('3. This is expected if Docker Compose is not running or client not initialized');
+        console.log(
+          '3. This is expected if Docker Compose is not running or client not initialized'
+        );
       }
     } catch (error) {
       console.log('2. Hydra admin connection failed:', error);
@@ -82,19 +95,20 @@ test.describe('OAuth Docker Integration', () => {
 
     if (buttonCount > 0) {
       console.log('3. Backend OAuth configuration is working');
-      
+
       // Get button text to verify provider
       const buttonText = await oauthButtons.first().textContent();
       console.log('4. OAuth provider button:', buttonText);
-      
+
       // Verify button is enabled and clickable
       await expect(oauthButtons.first()).toBeEnabled();
       console.log('5. OAuth button is properly enabled');
-      
     } else {
       console.log('3. No OAuth buttons found');
-      console.log('4. This may indicate OAuth provider is not configured or not running');
-      
+      console.log(
+        '4. This may indicate OAuth provider is not configured or not running'
+      );
+
       // Check for any error messages about OAuth configuration
       const bodyText = await page.textContent('body');
       if (bodyText?.includes('OAuth') || bodyText?.includes('provider')) {
@@ -108,11 +122,15 @@ test.describe('OAuth Docker Integration', () => {
 
     // Track OAuth login requests
     const oauthRequests: { url: string; status: number }[] = [];
-    
+
     page.on('response', response => {
       if (response.url().includes('/api/auth/login')) {
         oauthRequests.push({ url: response.url(), status: response.status() });
-        console.log('2. OAuth login request:', response.status(), response.url());
+        console.log(
+          '2. OAuth login request:',
+          response.status(),
+          response.url()
+        );
       }
     });
 
@@ -123,33 +141,40 @@ test.describe('OAuth Docker Integration', () => {
     const buttonCount = await oauthButtons.count();
 
     if (buttonCount > 0) {
-      console.log('3. Clicking OAuth button to test authorization URL generation...');
-      
+      console.log(
+        '3. Clicking OAuth button to test authorization URL generation...'
+      );
+
       await oauthButtons.first().click();
       await page.waitForTimeout(3000);
 
       // Check if OAuth request was made
       if (oauthRequests.length > 0) {
         console.log('4. OAuth login request was made successfully');
-        
+
         const successfulRequests = oauthRequests.filter(r => r.status < 400);
         const errorRequests = oauthRequests.filter(r => r.status >= 400);
-        
+
         console.log('5. Successful requests:', successfulRequests.length);
         console.log('6. Error requests:', errorRequests.length);
-        
+
         if (successfulRequests.length > 0) {
           console.log('7. OAuth authorization URL generation is working');
-          
+
           // Check if we were redirected to Hydra
           const currentUrl = page.url();
-          if (currentUrl.includes('localhost:4444') || currentUrl.includes('oauth2/auth')) {
+          if (
+            currentUrl.includes('localhost:4444') ||
+            currentUrl.includes('oauth2/auth')
+          ) {
             console.log('8. Successfully redirected to Hydra OAuth provider');
           } else {
             console.log('8. Current URL:', currentUrl);
           }
         } else {
-          console.log('7. OAuth requests returned errors - checking error details...');
+          console.log(
+            '7. OAuth requests returned errors - checking error details...'
+          );
           // This might be expected if Hydra is not running
         }
       } else {
@@ -162,7 +187,9 @@ test.describe('OAuth Docker Integration', () => {
     }
   });
 
-  test('should verify OAuth callback handling with Docker setup', async ({ page }) => {
+  test('should verify OAuth callback handling with Docker setup', async ({
+    page,
+  }) => {
     console.log('1. Testing OAuth callback handling with Docker setup...');
 
     // Set up session storage as if we initiated OAuth
@@ -172,8 +199,9 @@ test.describe('OAuth Docker Integration', () => {
     });
 
     // Track callback requests
-    const callbackRequests: { method: string; url: string; status?: number }[] = [];
-    
+    const callbackRequests: { method: string; url: string; status?: number }[] =
+      [];
+
     page.on('request', request => {
       if (request.url().includes('/api/auth/callback')) {
         callbackRequests.push({ method: request.method(), url: request.url() });
@@ -201,31 +229,38 @@ test.describe('OAuth Docker Integration', () => {
     const callbackResponse = callbackRequests.find(r => r.status !== undefined);
     if (callbackResponse) {
       console.log('5. Callback response status:', callbackResponse.status);
-      
+
       if (callbackResponse.status && callbackResponse.status < 500) {
         console.log('6. Callback handling is working (no server errors)');
       } else {
-        console.log('6. Server error in callback - may indicate configuration issue');
+        console.log(
+          '6. Server error in callback - may indicate configuration issue'
+        );
       }
     }
 
     // Check final page state
     const currentUrl = page.url();
     const bodyText = await page.textContent('body');
-    
+
     console.log('7. Final URL:', currentUrl);
-    
+
     if (currentUrl.includes('/auth/login')) {
       console.log('8. Redirected to login - checking for error messages...');
-      
-      const hasError = bodyText?.includes('error') || bodyText?.includes('failed');
+
+      const hasError =
+        bodyText?.includes('error') || bodyText?.includes('failed');
       if (hasError) {
         console.log('9. Error message found (expected with mock parameters)');
       }
     } else if (currentUrl.includes('/auth/callback')) {
-      console.log('8. Remained on callback page - checking for error display...');
-      
-      const hasError = bodyText?.includes('error') || bodyText?.includes('Authentication failed');
+      console.log(
+        '8. Remained on callback page - checking for error display...'
+      );
+
+      const hasError =
+        bodyText?.includes('error') ||
+        bodyText?.includes('Authentication failed');
       if (hasError) {
         console.log('9. Error appropriately displayed on callback page');
       }
@@ -234,16 +269,20 @@ test.describe('OAuth Docker Integration', () => {
     console.log('10. OAuth callback Docker integration test completed');
   });
 
-  test('should verify OAuth environment variables are properly set', async ({ page }) => {
+  test('should verify OAuth environment variables are properly set', async ({
+    page,
+  }) => {
     console.log('1. Testing OAuth environment variable configuration...');
 
     // Make a request to a backend endpoint that might expose configuration info
     try {
-      const response = await page.request.get('http://localhost:8000/api/health');
-      
+      const response = await page.request.get(
+        'http://localhost:8000/api/health'
+      );
+
       if (response.ok()) {
         console.log('2. Backend is accessible for configuration testing');
-        
+
         // Navigate to login page to see if OAuth is configured
         await page.goto('/auth/login');
         await page.waitForLoadState('networkidle');
@@ -254,26 +293,24 @@ test.describe('OAuth Docker Integration', () => {
         if (buttonCount > 0) {
           console.log('3. OAuth providers are configured (buttons present)');
           console.log('4. Environment variables are properly set');
-          
+
           // Test that clicking doesn't immediately fail
           await oauthButtons.first().click();
           await page.waitForTimeout(1000);
-          
+
           // Should either redirect or show some response
           const currentUrl = page.url();
           console.log('5. URL after OAuth click:', currentUrl);
-          
+
           if (currentUrl !== 'http://localhost:3000/auth/login') {
             console.log('6. OAuth flow initiated successfully');
           } else {
             console.log('6. Remained on login page - checking for errors...');
           }
-          
         } else {
           console.log('3. No OAuth providers configured');
           console.log('4. Environment variables may not be set correctly');
         }
-        
       } else {
         console.log('2. Backend not accessible - Docker may not be running');
       }

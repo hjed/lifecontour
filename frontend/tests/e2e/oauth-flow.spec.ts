@@ -9,7 +9,9 @@
 import { test, expect } from '@playwright/test';
 
 test.describe('OAuth Authentication Flow - Real Provider Tests', () => {
-  test('should complete full OAuth flow with Hydra provider', async ({ page }) => {
+  test('should complete full OAuth flow with Hydra provider', async ({
+    page,
+  }) => {
     // Enable console logging for debugging
     page.on('console', msg => console.log('BROWSER:', msg.text()));
     page.on('pageerror', error => console.log('PAGE ERROR:', error.message));
@@ -59,7 +61,6 @@ test.describe('OAuth Authentication Flow - Real Provider Tests', () => {
       // 2. Click authorize/consent
       // 3. Get redirected back to our callback
       // 4. Verify successful authentication
-
     } else if (currentUrl.includes('/auth/login')) {
       // Still on login page - check for error messages or provider issues
       console.log('6. Still on login page - checking for errors...');
@@ -74,14 +75,17 @@ test.describe('OAuth Authentication Flow - Real Provider Tests', () => {
 
         // This might be expected if OAuth provider is not configured
         // We'll treat this as a configuration issue, not a test failure
-        console.log('OAuth provider may not be configured - this is expected in some environments');
+        console.log(
+          'OAuth provider may not be configured - this is expected in some environments'
+        );
       }
 
       // Verify that the login request was at least attempted
-      const authRequests = requests.filter(url => url.includes('/api/auth/login'));
+      const authRequests = requests.filter(url =>
+        url.includes('/api/auth/login')
+      );
       expect(authRequests.length).toBeGreaterThan(0);
       console.log('7. OAuth login request was made successfully');
-
     } else {
       console.log('6. Unexpected redirect target:', currentUrl);
       // Log the page content for debugging
@@ -90,10 +94,14 @@ test.describe('OAuth Authentication Flow - Real Provider Tests', () => {
     }
   });
 
-  test('should handle OAuth callback with proper session state', async ({ page }) => {
+  test('should handle OAuth callback with proper session state', async ({
+    page,
+  }) => {
     // Enable console logging for debugging
     page.on('console', msg => console.log('CALLBACK BROWSER:', msg.text()));
-    page.on('pageerror', error => console.log('CALLBACK PAGE ERROR:', error.message));
+    page.on('pageerror', error =>
+      console.log('CALLBACK PAGE ERROR:', error.message)
+    );
 
     console.log('1. Testing OAuth callback handling...');
 
@@ -145,7 +153,9 @@ test.describe('OAuth Authentication Flow - Real Provider Tests', () => {
     // 3. Still on callback page (processing or error state)
 
     if (finalUrl.includes('/auth/login')) {
-      console.log('6. Redirected back to login - checking for error handling...');
+      console.log(
+        '6. Redirected back to login - checking for error handling...'
+      );
 
       // Look for error messages
       const errorElements = page.locator('[role="alert"], .alert, .error');
@@ -156,14 +166,15 @@ test.describe('OAuth Authentication Flow - Real Provider Tests', () => {
         console.log('Expected error found:', errorText);
         // This is expected behavior when testing with invalid OAuth codes
       }
-
-    } else if (finalUrl === 'http://localhost:3000/' || finalUrl.includes('/contacts')) {
+    } else if (
+      finalUrl === 'http://localhost:3000/' ||
+      finalUrl.includes('/contacts')
+    ) {
       console.log('6. Successfully redirected to authenticated area');
 
       // Verify we're actually authenticated by checking for user-specific content
       const bodyText = await page.textContent('body');
       expect(bodyText).toBeTruthy();
-
     } else if (finalUrl.includes('/auth/callback')) {
       console.log('6. Still on callback page - checking for error state...');
 
@@ -227,7 +238,9 @@ test.describe('OAuth Authentication Flow - Real Provider Tests', () => {
     console.log('5. OAuth state validation test completed');
   });
 
-  test('should handle OAuth provider configuration errors', async ({ page }) => {
+  test('should handle OAuth provider configuration errors', async ({
+    page,
+  }) => {
     console.log('1. Testing OAuth provider configuration error handling...');
 
     await page.goto('/auth/login');
@@ -245,7 +258,7 @@ test.describe('OAuth Authentication Flow - Real Provider Tests', () => {
     // Try to initiate OAuth with potentially unconfigured provider
     const oauthButtons = page.locator('button:has-text("Continue with")');
 
-    if (await oauthButtons.count() > 0) {
+    if ((await oauthButtons.count()) > 0) {
       console.log('2. OAuth buttons found, testing error handling...');
       await oauthButtons.first().click();
       await page.waitForTimeout(2000);
@@ -295,8 +308,10 @@ test.describe('OAuth Authentication Flow - Real Provider Tests', () => {
     });
 
     // Verify there's a way to retry login
-    const retryLink = page.locator('a:has-text("Try signing in again"), button:has-text("Try signing in again")');
-    if (await retryLink.count() > 0) {
+    const retryLink = page.locator(
+      'a:has-text("Try signing in again"), button:has-text("Try signing in again")'
+    );
+    if ((await retryLink.count()) > 0) {
       console.log('4. Retry link found - good UX');
       expect(await retryLink.first().isVisible()).toBe(true);
     }
@@ -321,7 +336,9 @@ test.describe('OAuth Authentication Flow - Real Provider Tests', () => {
     console.log('3. Missing parameters test completed');
   });
 
-  test('should handle session validation and protected routes', async ({ page }) => {
+  test('should handle session validation and protected routes', async ({
+    page,
+  }) => {
     console.log('1. Testing session validation and protected routes...');
 
     // Track session requests
@@ -360,9 +377,10 @@ test.describe('OAuth Authentication Flow - Real Provider Tests', () => {
       const oauthButtons = page.locator('button:has-text("Continue with")');
       const buttonCount = await oauthButtons.count();
       console.log('6. OAuth buttons found:', buttonCount);
-
     } else if (currentUrl.includes('/contacts')) {
-      console.log('5. Stayed on contacts page - checking authentication state...');
+      console.log(
+        '5. Stayed on contacts page - checking authentication state...'
+      );
 
       // If we're on the contacts page, we should either:
       // - Be authenticated and see content
@@ -371,20 +389,26 @@ test.describe('OAuth Authentication Flow - Real Provider Tests', () => {
       expect(bodyText).toBeTruthy();
 
       // Look for signs of authentication requirement
-      const loginElements = page.locator('a[href*="/auth/login"], button:has-text("Sign in"), button:has-text("Login")');
+      const loginElements = page.locator(
+        'a[href*="/auth/login"], button:has-text("Sign in"), button:has-text("Login")'
+      );
       const loginCount = await loginElements.count();
 
       if (loginCount > 0) {
         console.log('6. Login prompt found on protected page');
       } else {
-        console.log('6. No login prompt - may be authenticated or public access');
+        console.log(
+          '6. No login prompt - may be authenticated or public access'
+        );
       }
     }
 
     console.log('7. Session validation test completed');
   });
 
-  test('should maintain OAuth provider selection through flow', async ({ page }) => {
+  test('should maintain OAuth provider selection through flow', async ({
+    page,
+  }) => {
     console.log('1. Testing OAuth provider selection persistence...');
 
     await page.goto('/auth/login');
@@ -418,20 +442,23 @@ test.describe('OAuth Authentication Flow - Real Provider Tests', () => {
         return sessionStorage.getItem('oauth_provider');
       });
 
-      console.log('4. Provider after callback navigation:', providerAfterCallback);
+      console.log(
+        '4. Provider after callback navigation:',
+        providerAfterCallback
+      );
       // Note: Provider might be cleared after successful processing
-
     } else {
       console.log('2. No OAuth buttons found - provider not configured');
     }
 
     console.log('5. Provider selection persistence test completed');
   });
-
 });
 
 test.describe('OAuth Integration and Backend Communication', () => {
-  test('should properly communicate with backend OAuth endpoints', async ({ page }) => {
+  test('should properly communicate with backend OAuth endpoints', async ({
+    page,
+  }) => {
     console.log('1. Testing OAuth backend integration...');
 
     // Track all OAuth-related API calls
@@ -468,22 +495,34 @@ test.describe('OAuth Integration and Backend Communication', () => {
       await page.waitForTimeout(3000);
 
       // Verify login API call was made
-      const loginCalls = apiCalls.filter(call => call.url.includes('/api/auth/login'));
+      const loginCalls = apiCalls.filter(call =>
+        call.url.includes('/api/auth/login')
+      );
       expect(loginCalls.length).toBeGreaterThan(0);
       console.log('4. Login API calls made:', loginCalls.length);
 
       // Check response status
-      const successfulCalls = loginCalls.filter(call => call.status && call.status < 400);
-      const errorCalls = loginCalls.filter(call => call.status && call.status >= 400);
+      const successfulCalls = loginCalls.filter(
+        call => call.status && call.status < 400
+      );
+      const errorCalls = loginCalls.filter(
+        call => call.status && call.status >= 400
+      );
 
-      console.log('5. Successful calls:', successfulCalls.length, 'Error calls:', errorCalls.length);
+      console.log(
+        '5. Successful calls:',
+        successfulCalls.length,
+        'Error calls:',
+        errorCalls.length
+      );
 
       if (successfulCalls.length > 0) {
         console.log('6. OAuth login endpoint responding successfully');
       } else if (errorCalls.length > 0) {
-        console.log('6. OAuth login endpoint returned errors (may be expected if not configured)');
+        console.log(
+          '6. OAuth login endpoint returned errors (may be expected if not configured)'
+        );
       }
-
     } else {
       console.log('3. No OAuth buttons found - testing session endpoint...');
 
@@ -491,7 +530,9 @@ test.describe('OAuth Integration and Backend Communication', () => {
       await page.goto('/contacts');
       await page.waitForTimeout(2000);
 
-      const sessionCalls = apiCalls.filter(call => call.url.includes('/api/auth/session'));
+      const sessionCalls = apiCalls.filter(call =>
+        call.url.includes('/api/auth/session')
+      );
       expect(sessionCalls.length).toBeGreaterThan(0);
       console.log('4. Session API calls made:', sessionCalls.length);
     }
@@ -500,7 +541,9 @@ test.describe('OAuth Integration and Backend Communication', () => {
     console.log('8. Total API calls made:', apiCalls.length);
   });
 
-  test('should handle OAuth configuration status correctly', async ({ page }) => {
+  test('should handle OAuth configuration status correctly', async ({
+    page,
+  }) => {
     console.log('1. Testing OAuth configuration detection...');
 
     await page.goto('/auth/login');
@@ -522,14 +565,18 @@ test.describe('OAuth Integration and Backend Communication', () => {
       // Test that buttons are properly enabled and clickable
       await expect(oauthButtons.first()).toBeEnabled();
       console.log('4. OAuth buttons are properly enabled');
-
     } else {
       console.log('3. No OAuth providers configured - this may be expected');
 
       // Check if there's a message about no providers
       const bodyText = await page.textContent('body');
-      if (bodyText?.includes('No OAuth providers') || bodyText?.includes('not configured')) {
-        console.log('4. Appropriate message shown for missing OAuth configuration');
+      if (
+        bodyText?.includes('No OAuth providers') ||
+        bodyText?.includes('not configured')
+      ) {
+        console.log(
+          '4. Appropriate message shown for missing OAuth configuration'
+        );
       }
     }
 
