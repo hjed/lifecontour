@@ -29,7 +29,7 @@ If you prefer to manage the database manually:
 
 1. **Start the test database:**
    ```bash
-   docker compose -f docker-compose.test.yml up -d
+   docker-compose -f docker-compose.test.yml up -d
    ```
 
 2. **Wait for database to be ready:**
@@ -44,7 +44,7 @@ If you prefer to manage the database manually:
 
 4. **Stop the test database:**
    ```bash
-   docker compose -f docker-compose.test.yml down -v
+   docker-compose -f docker-compose.test.yml down -v
    ```
 
 ## Test Structure
@@ -95,7 +95,7 @@ If you get Docker-related errors:
 2. Check that port 5433 is not in use
 3. Try stopping any existing containers:
    ```bash
-   docker compose -f docker-compose.test.yml down -v
+   docker-compose -f docker-compose.test.yml down -v
    ```
 
 ### Database Connection Issues

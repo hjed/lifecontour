@@ -54,7 +54,7 @@ print_success "Docker is available and running"
 
 # Check if Docker Compose is available
 print_step "Checking Docker Compose availability..."
-if ! docker compose version &> /dev/null; then
+if ! docker-compose version &> /dev/null; then
     print_error "Docker Compose is not available"
     exit 1
 fi
@@ -70,7 +70,7 @@ check_service_health() {
     print_step "Checking $service_name health..."
     
     while [ $attempt -lt $max_attempts ]; do
-        if docker compose -f docker-compose.dev.yml ps $service_name | grep -q "healthy\|Up"; then
+        if docker-compose -f docker-compose.dev.yml ps $service_name | grep -q "healthy\|Up"; then
             print_success "$service_name is healthy"
             return 0
         fi
@@ -121,7 +121,7 @@ test_json_endpoint() {
 
 # Start Docker Compose services
 print_step "Starting Docker Compose services..."
-if docker compose -f docker-compose.dev.yml up -d; then
+if docker-compose -f docker-compose.dev.yml up -d; then
     print_success "Docker Compose services started"
 else
     print_error "Failed to start Docker Compose services"
@@ -281,7 +281,7 @@ echo "   cd frontend && npm run test:e2e -- oauth-error-handling.spec.ts"
 echo "   cd frontend && npm run test:e2e -- oauth-docker-integration.spec.ts"
 echo ""
 echo "🛠️  To stop services:"
-echo "   docker compose -f docker-compose.dev.yml down"
+echo "   docker-compose -f docker-compose.dev.yml down"
 echo ""
 
 print_success "OAuth Docker verification script completed successfully!"
