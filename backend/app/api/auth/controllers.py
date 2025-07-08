@@ -117,8 +117,8 @@ async def login(
         "OAuth login initiated via JSON API",
         provider=provider,
         redirect_url=redirect_url,
-        state=state[:10] + "..." if state else None,
-        session_keys=list(request.session.keys()),
+        has_state=bool(state),
+        session_key_count=len(request.session.keys()),
         callback_url=callback_url,
     )
 

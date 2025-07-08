@@ -59,7 +59,7 @@ class OAuthService:
             logger.warning(
                 "Failed to decode OAuth state",
                 error=str(e),
-                state=encoded_state[:20] + "...",
+                has_state=bool(encoded_state),
             )
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -186,8 +186,8 @@ class OAuthService:
         logger.info(
             "Generated OAuth authorization URL",
             provider=provider,
-            state_preview=encoded_state[:20] + "...",
-            csrf_token=csrf_token[:10] + "...",
+            has_state=bool(encoded_state),
+            has_csrf_token=bool(csrf_token),
         )
 
         return str(authorization_url["url"])
@@ -270,7 +270,7 @@ class OAuthService:
             raise
         except Exception as e:
             logger.error(
-                "Failed to decode OAuth state", error=str(e), state=state[:20] + "..."
+                "Failed to decode OAuth state", error=str(e), has_state=bool(state)
             )
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -293,12 +293,8 @@ class OAuthService:
         if not stored_csrf_token or stored_csrf_token != state_csrf_token:
             logger.warning(
                 "OAuth CSRF token mismatch",
-                stored_csrf_token=stored_csrf_token[:10] + "..."
-                if stored_csrf_token
-                else None,
-                state_csrf_token=state_csrf_token[:10] + "..."
-                if state_csrf_token
-                else None,
+                has_stored_token=bool(stored_csrf_token),
+                has_state_token=bool(state_csrf_token),
                 provider=provider,
             )
             raise HTTPException(
