@@ -69,7 +69,7 @@ main() {
 
     # Check if Docker Compose is running
     log_info "Checking Docker Compose services..."
-    if ! docker compose -f docker-compose.dev.yml ps | grep -q "Up"; then
+    if ! docker-compose -f docker-compose.dev.yml ps | grep -q "Up"; then
         log_error "Docker Compose services are not running!"
         log_info "Start them with: ./scripts/dev.sh docker-start"
         exit 1

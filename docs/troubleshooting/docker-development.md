@@ -254,7 +254,7 @@ docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
 ```bash
 # Stop and remove all containers and volumes
 ./scripts/dev.sh docker-stop
-docker compose -f docker-compose.dev.yml down -v
+docker-compose -f docker-compose.dev.yml down -v
 
 # Start fresh
 ./scripts/dev.sh docker-start

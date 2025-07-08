@@ -76,9 +76,6 @@ async def get_auth_providers(
     return AuthProvidersResponse(providers=providers)
 
 
-
-
-
 @router.post("/login", response_model=AuthorizeResponse)
 @inject
 async def login(
