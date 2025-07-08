@@ -4,8 +4,6 @@ Authentication API controllers.
 Handles OAuth authentication endpoints including authorization, callback, and logout.
 """
 
-from typing import Any
-
 import structlog
 from dishka.integrations.fastapi import FromDishka, inject
 from fastapi import APIRouter, HTTPException, Query, Request, status
@@ -78,23 +76,7 @@ async def get_auth_providers(
     return AuthProvidersResponse(providers=providers)
 
 
-@router.get("/debug/session")
-async def debug_session(request: Request) -> dict[str, Any]:
-    """Debug endpoint to test session functionality."""
-    try:
-        # Try to access session
-        session_data = dict(request.session)
-        return {
-            "session_available": True,
-            "session_data": session_data,
-            "session_id": getattr(request.session, "session_id", "unknown"),
-        }
-    except Exception as e:
-        return {
-            "session_available": False,
-            "error": str(e),
-            "error_type": type(e).__name__,
-        }
+
 
 
 @router.post("/login", response_model=AuthorizeResponse)
@@ -199,13 +181,6 @@ async def auth_callback_json(
     logger.info(
         "OAuth JSON callback received",
         provider=callback_data.provider,
-        code_length=len(callback_data.code) if callback_data.code else 0,
-        state_length=len(callback_data.state) if callback_data.state else 0,
-        state_preview=callback_data.state[:10] + "..." if callback_data.state else None,
-        session_keys=list(request.session.keys()),
-        session_oauth_state=request.session.get("oauth_state", "")[:10] + "..."
-        if request.session.get("oauth_state")
-        else None,
     )
 
     try:
