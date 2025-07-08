@@ -254,6 +254,7 @@ class TestOAuthService:
 
         # Test with valid base64 but invalid JSON
         import base64
+
         invalid_json = base64.urlsafe_b64encode(b"invalid json").decode()
         with pytest.raises(HTTPException) as exc_info:
             oauth_service._decode_state(invalid_json)
@@ -262,8 +263,7 @@ class TestOAuthService:
     async def test_handle_callback_with_code_redirect_uri_mismatch(self):
         """Test that handle_callback_with_code validates redirect URI."""
         settings = Settings(
-            github_client_id="test_client_id",
-            github_client_secret="test_client_secret"
+            github_client_id="test_client_id", github_client_secret="test_client_secret"
         )
         oauth_service = OAuthService(settings)
 
@@ -273,7 +273,9 @@ class TestOAuthService:
 
         # Create state with one redirect URI
         original_redirect_uri = "http://localhost:3000/auth/callback"
-        encoded_state = oauth_service._encode_state("github", original_redirect_uri, "test_csrf_token")
+        encoded_state = oauth_service._encode_state(
+            "github", original_redirect_uri, "test_csrf_token"
+        )
 
         # Try to use a different redirect URI in the callback
         different_redirect_uri = "http://malicious.com/callback"
@@ -284,7 +286,7 @@ class TestOAuthService:
                 "github",
                 "test_code",
                 encoded_state,
-                different_redirect_uri
+                different_redirect_uri,
             )
 
         assert exc_info.value.status_code == 400
