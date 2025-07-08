@@ -73,7 +73,7 @@ services:
     container_name: personal-management-backend
     environment:
       DATABASE_URL: postgresql://postgres:postgres@database:5432/personal_management
-      DEBUG: "true"
+      DEBUG: "false"
       LOG_LEVEL: INFO
       CORS_ORIGINS: "http://localhost:3000,http://127.0.0.1:3000,http://frontend:3000"
       ALLOWED_HOSTS: "localhost,127.0.0.1,backend"

@@ -280,17 +280,13 @@ class OAuthService:
         # Verify CSRF token against session
         stored_csrf_token = request.session.get("oauth_csrf_token")
 
-        # Enhanced logging for debugging
+        # Validate CSRF token
         logger.info(
             "OAuth callback validation",
             provider=provider,
-            state_provider=state_provider,
-            state_redirect_uri=state_redirect_uri,
-            received_redirect_uri=redirect_uri,
             csrf_token_match=stored_csrf_token == state_csrf_token
             if stored_csrf_token
             else False,
-            session_keys=list(request.session.keys()),
         )
 
         # Validate CSRF token

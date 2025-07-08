@@ -3,7 +3,7 @@
 
 # Logging
 log:
-  level: debug
+  level: info
   format: json
 
 # Development settings
