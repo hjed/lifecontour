@@ -117,6 +117,7 @@ module = [
     "stdnum.*",
     "pycountry.*",
     "core_shared.*",
+    "authlib.integrations.starlette_client",
 ]
 ignore_missing_imports = true
 
