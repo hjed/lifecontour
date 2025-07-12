@@ -9,6 +9,7 @@
 
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ReactQueryDevtools } from '@tanstack/react-query-devtools';
+import { ThemeProvider } from 'next-themes';
 import { useState } from 'react';
 import { Toaster } from '@/components/ui/sonner';
 import { AuthProvider } from '@/lib/auth/AuthProvider';
@@ -50,27 +51,34 @@ export function Providers({ children }: ProvidersProps) {
 
   return (
     <QueryClientProvider client={queryClient}>
-      <AuthProvider>
-        {children}
+      <ThemeProvider
+        attribute='class'
+        defaultTheme='system'
+        enableSystem
+        disableTransitionOnChange
+      >
+        <AuthProvider>
+          {children}
 
-        {/* Toast notifications */}
-        <Toaster
-          position='top-right'
-          toastOptions={{
-            duration: 4000,
-            style: {
-              background: 'hsl(var(--background))',
-              color: 'hsl(var(--foreground))',
-              border: '1px solid hsl(var(--border))',
-            },
-          }}
-        />
+          {/* Toast notifications */}
+          <Toaster
+            position='top-right'
+            toastOptions={{
+              duration: 4000,
+              style: {
+                background: 'hsl(var(--background))',
+                color: 'hsl(var(--foreground))',
+                border: '1px solid hsl(var(--border))',
+              },
+            }}
+          />
 
-        {/* React Query DevTools - only in development */}
-        {process.env.NODE_ENV === 'development' && (
-          <ReactQueryDevtools initialIsOpen={false} />
-        )}
-      </AuthProvider>
+          {/* React Query DevTools - only in development */}
+          {process.env.NODE_ENV === 'development' && (
+            <ReactQueryDevtools initialIsOpen={false} />
+          )}
+        </AuthProvider>
+      </ThemeProvider>
     </QueryClientProvider>
   );
 }
