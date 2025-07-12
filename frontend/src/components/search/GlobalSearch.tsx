@@ -131,7 +131,8 @@ export function GlobalSearch({
       if (onSearch) {
         onSearch(trimmedQuery);
       } else {
-        // For now, just call the callback since we don't have a search results page yet
+        // TODO: ITER1.5-001 - Implement navigation to search results page
+        // router.push(`/search?q=${encodeURIComponent(trimmedQuery)}`);
         console.log('Search query:', trimmedQuery);
       }
     },
@@ -196,7 +197,8 @@ export function GlobalSearch({
           if (selectedIndex >= 0 && selectedIndex < suggestions.length) {
             const suggestion = suggestions[selectedIndex];
             if (suggestion.url) {
-              // For now, just log the navigation since we don't have all routes yet
+              // TODO: ITER1.5-001 - Implement proper navigation to suggestion URLs
+              // router.push(suggestion.url);
               console.log('Navigate to:', suggestion.url);
               setIsOpen(false);
               setQuery('');
@@ -308,7 +310,8 @@ export function GlobalSearch({
                   )}
                   onClick={() => {
                     if (suggestion.url) {
-                      // For now, just log the navigation since we don't have all routes yet
+                      // TODO: ITER1.5-001 - Implement proper navigation to suggestion URLs
+                      // router.push(suggestion.url);
                       console.log('Navigate to:', suggestion.url);
                       setIsOpen(false);
                       setQuery('');
