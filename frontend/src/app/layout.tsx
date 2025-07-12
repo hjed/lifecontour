@@ -2,6 +2,7 @@ import type { Metadata } from 'next/types';
 import { Inter } from 'next/font/google';
 import './globals.css';
 import { Providers } from '@/lib/providers';
+import { Header } from '@/components/layout';
 
 const inter = Inter({ subsets: ['latin'] });
 
@@ -21,7 +22,10 @@ export default function RootLayout({
     <html lang='en-AU' suppressHydrationWarning>
       <body className={inter.className}>
         <div className='bg-background min-h-screen font-sans antialiased'>
-          <Providers>{children}</Providers>
+          <Providers>
+            <Header />
+            {children}
+          </Providers>
         </div>
       </body>
     </html>
