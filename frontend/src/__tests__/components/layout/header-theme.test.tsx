@@ -5,7 +5,7 @@
 import { render, screen } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ThemeProvider } from 'next-themes';
-import { Header } from '@/components/layout/Header';
+import { Header } from '@/components/layout';
 import { AuthProvider } from '@/lib/auth/AuthProvider';
 
 // Mock next/link
