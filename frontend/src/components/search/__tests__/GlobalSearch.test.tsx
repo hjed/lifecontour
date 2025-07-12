@@ -2,7 +2,7 @@
  * @jest-environment jsdom
  */
 
-import { render, screen } from '@testing-library/react';
+import { render, screen, act } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { GlobalSearch } from '../GlobalSearch';
 
@@ -235,5 +235,68 @@ describe('GlobalSearch', () => {
       'recent-searches',
       JSON.stringify(['test query'])
     );
+  });
+
+  it('implements proper accessibility attributes for combobox pattern', async () => {
+    const user = userEvent.setup();
+    render(<GlobalSearch />);
+
+    const searchInput = screen.getByRole('combobox', {
+      name: /global search/i,
+    });
+
+    // Initially, aria-controls and aria-activedescendant should not be set
+    expect(searchInput).toHaveAttribute('aria-expanded', 'false');
+    expect(searchInput).not.toHaveAttribute('aria-controls');
+    expect(searchInput).not.toHaveAttribute('aria-activedescendant');
+
+    // Type to open suggestions (use 'john' to match mock data)
+    await user.type(searchInput, 'john');
+
+    // Wait for debounced query to update (300ms delay)
+    await act(async () => {
+      await new Promise(resolve => setTimeout(resolve, 350));
+    });
+
+    // After opening, aria-controls should point to listbox
+    expect(searchInput).toHaveAttribute('aria-expanded', 'true');
+    expect(searchInput).toHaveAttribute('aria-controls');
+
+    // Check that listbox exists with proper ID
+    const listbox = screen.getByRole('listbox', {
+      name: /search suggestions/i,
+    });
+    expect(listbox).toBeInTheDocument();
+    expect(listbox).toHaveAttribute('id');
+
+    // Verify aria-controls points to the listbox
+    const listboxId = listbox.getAttribute('id');
+    expect(searchInput).toHaveAttribute('aria-controls', listboxId);
+
+    // Navigate with arrow keys to test aria-activedescendant
+    await user.keyboard('{ArrowDown}');
+
+    // Should now have aria-activedescendant pointing to first option
+    expect(searchInput).toHaveAttribute('aria-activedescendant');
+
+    // Check that options have unique IDs
+    const options = screen.getAllByRole('option');
+    expect(options.length).toBeGreaterThan(0);
+
+    options.forEach((option, index) => {
+      expect(option).toHaveAttribute('id');
+      expect(option).toHaveAttribute('aria-selected');
+
+      // First option should be selected after arrow down
+      if (index === 0) {
+        expect(option).toHaveAttribute('aria-selected', 'true');
+        expect(searchInput).toHaveAttribute(
+          'aria-activedescendant',
+          option.getAttribute('id')
+        );
+      } else {
+        expect(option).toHaveAttribute('aria-selected', 'false');
+      }
+    });
   });
 });

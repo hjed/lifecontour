@@ -74,6 +74,13 @@ export function GlobalSearch({
   const inputRef = useRef<HTMLInputElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
+  // Generate unique IDs for accessibility
+  const listboxId = useRef(
+    `search-listbox-${Math.random().toString(36).substring(2, 11)}`
+  );
+  const getOptionId = (index: number) =>
+    `search-option-${listboxId.current}-${index}`;
+
   // Debounce search query for API calls
   const debouncedQuery = useDebounce(query, 300);
 
@@ -238,6 +245,12 @@ export function GlobalSearch({
           aria-label='Global search'
           aria-expanded={isOpen}
           aria-haspopup='listbox'
+          aria-controls={isOpen ? listboxId.current : undefined}
+          aria-activedescendant={
+            isOpen && selectedIndex >= 0
+              ? getOptionId(selectedIndex)
+              : undefined
+          }
           role='combobox'
         />
         {query && (
@@ -264,7 +277,11 @@ export function GlobalSearch({
           className='absolute top-full right-0 left-0 z-50 mt-1 max-h-80 overflow-auto'
         >
           <CardContent className='p-0'>
-            <div role='listbox' aria-label='Search suggestions'>
+            <div
+              role='listbox'
+              aria-label='Search suggestions'
+              id={listboxId.current}
+            >
               {!debouncedQuery.trim() && recentSearches.length > 0 && (
                 <>
                   <div className='text-muted-foreground px-3 py-2 text-xs font-medium'>
@@ -277,6 +294,7 @@ export function GlobalSearch({
               {suggestions.map((suggestion, index) => (
                 <button
                   key={suggestion.id}
+                  id={getOptionId(index)}
                   className={cn(
                     'hover:bg-accent flex w-full items-center gap-2 px-3 py-2 text-left text-sm',
                     selectedIndex === index && 'bg-accent'
