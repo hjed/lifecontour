@@ -12,7 +12,13 @@
  * - Responsive design
  */
 
-import React, { useState, useRef, useEffect, useCallback } from 'react';
+import React, {
+  useState,
+  useRef,
+  useEffect,
+  useCallback,
+  useMemo,
+} from 'react';
 import { Search, X, Clock, Filter } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -145,54 +151,8 @@ export function GlobalSearch({
     }
   };
 
-  // Handle keyboard navigation
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (!isOpen) {
-      if (e.key === 'Enter') {
-        handleSearch();
-      }
-      return;
-    }
-
-    const suggestions = getSuggestions();
-
-    switch (e.key) {
-      case 'ArrowDown':
-        e.preventDefault();
-        setSelectedIndex(prev => (prev + 1) % suggestions.length);
-        break;
-      case 'ArrowUp':
-        e.preventDefault();
-        setSelectedIndex(prev =>
-          prev <= 0 ? suggestions.length - 1 : prev - 1
-        );
-        break;
-      case 'Enter':
-        e.preventDefault();
-        if (selectedIndex >= 0 && selectedIndex < suggestions.length) {
-          const suggestion = suggestions[selectedIndex];
-          if (suggestion.url) {
-            // For now, just log the navigation since we don't have all routes yet
-            console.log('Navigate to:', suggestion.url);
-            setIsOpen(false);
-            setQuery('');
-          } else {
-            handleSearch(suggestion.text);
-          }
-        } else {
-          handleSearch();
-        }
-        break;
-      case 'Escape':
-        setIsOpen(false);
-        setSelectedIndex(-1);
-        inputRef.current?.blur();
-        break;
-    }
-  };
-
-  // Get filtered suggestions based on query
-  const getSuggestions = (): SearchSuggestion[] => {
+  // Memoize suggestions to prevent unnecessary recalculations
+  const suggestions = useMemo(() => {
     if (!debouncedQuery.trim()) {
       // Show recent searches when no query
       return recentSearches.map((search, index) => ({
@@ -200,6 +160,7 @@ export function GlobalSearch({
         text: search,
         type: 'recent' as const,
         icon: <Clock className='h-3 w-3' />,
+        url: undefined, // Recent searches don't have URLs
       }));
     }
 
@@ -207,7 +168,54 @@ export function GlobalSearch({
     return mockSuggestions.filter(suggestion =>
       suggestion.text.toLowerCase().includes(debouncedQuery.toLowerCase())
     );
-  };
+  }, [debouncedQuery, recentSearches]);
+
+  // Handle keyboard navigation
+  const handleKeyDown = useCallback(
+    (e: React.KeyboardEvent) => {
+      if (!isOpen) {
+        if (e.key === 'Enter') {
+          handleSearch();
+        }
+        return;
+      }
+
+      switch (e.key) {
+        case 'ArrowDown':
+          e.preventDefault();
+          setSelectedIndex(prev => (prev + 1) % suggestions.length);
+          break;
+        case 'ArrowUp':
+          e.preventDefault();
+          setSelectedIndex(prev =>
+            prev <= 0 ? suggestions.length - 1 : prev - 1
+          );
+          break;
+        case 'Enter':
+          e.preventDefault();
+          if (selectedIndex >= 0 && selectedIndex < suggestions.length) {
+            const suggestion = suggestions[selectedIndex];
+            if (suggestion.url) {
+              // For now, just log the navigation since we don't have all routes yet
+              console.log('Navigate to:', suggestion.url);
+              setIsOpen(false);
+              setQuery('');
+            } else {
+              handleSearch(suggestion.text);
+            }
+          } else {
+            handleSearch();
+          }
+          break;
+        case 'Escape':
+          setIsOpen(false);
+          setSelectedIndex(-1);
+          inputRef.current?.blur();
+          break;
+      }
+    },
+    [isOpen, handleSearch, suggestions, selectedIndex]
+  );
 
   // Handle clicking outside to close dropdown
   useEffect(() => {
@@ -225,8 +233,6 @@ export function GlobalSearch({
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
-
-  const suggestions = getSuggestions();
 
   return (
     <div className={cn('relative w-full max-w-md', className)}>
