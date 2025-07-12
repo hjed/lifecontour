@@ -28,9 +28,7 @@ export function Header() {
             aria-label='Go to home page'
           >
             <Home className='h-6 w-6' />
-            <span className='hidden font-bold sm:inline-block'>
-              Home
-            </span>
+            <span className='hidden font-bold sm:inline-block'>Home</span>
           </Link>
         </div>
 
