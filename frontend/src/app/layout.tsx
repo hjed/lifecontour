@@ -2,7 +2,7 @@ import type { Metadata } from 'next/types';
 import { Inter } from 'next/font/google';
 import './globals.css';
 import { Providers } from '@/lib/providers';
-import { Header } from '@/components/layout';
+import { Header, Sidebar } from '@/components/layout';
 
 const inter = Inter({ subsets: ['latin'] });
 
@@ -24,7 +24,10 @@ export default function RootLayout({
         <div className='bg-background min-h-screen font-sans antialiased'>
           <Providers>
             <Header />
-            {children}
+            <Sidebar />
+            <main className='md:pl-64'>
+              {children}
+            </main>
           </Providers>
         </div>
       </body>
