@@ -166,6 +166,108 @@ Tasks are organized by **feature iterations** that deliver end-to-end value incr
 
 ---
 
+## Iteration 1.5: Enhanced Layout & Navigation (MVP Usability)
+
+### ITER1.5-001: Top Bar Redesign with Search 🟡
+**Description:** Redesign the header component to match the layout with home icon on left and centered search box
+**Dependencies:** ITER1-004
+**Acceptance Criteria:**
+- [ ] Modify Header component to have home icon prominently on the left
+- [ ] Add centered search box using shadcn/ui Input component with search icon
+- [ ] Implement global search functionality connecting to existing `/api/search` endpoint
+- [ ] Add search suggestions dropdown with recent searches and quick filters
+- [ ] Ensure responsive design works on mobile (search collapses to icon)
+- [ ] Remove existing navigation links from header (will move to sidebar)
+- [ ] Add proper ARIA labels and keyboard navigation for accessibility
+- [ ] Style with Tailwind CSS following existing design system
+- [ ] Write Jest unit tests for Header component (search functionality, responsive behavior)
+- [ ] Write Playwright tests for search interaction and navigation
+
+### ITER1.5-002: Sidebar Navigation Component 🟡
+
+**Description:** Create a new sidebar navigation component with hierarchical menu structure
+**Dependencies:** ITER1.5-001
+**Acceptance Criteria:**
+
+- [ ] Create new Sidebar component using shadcn/ui components (Sheet, Button, Separator)
+- [ ] Implement navigation structure from photo:
+  - [ ] Contacts section with All, Favourites, Group 1, Group 2 sub-items
+  - [ ] Journals section with Etc sub-item (placeholder for future)
+- [ ] Add proper icons using Lucide React (Users for Contacts, BookOpen for Journals)
+- [ ] Implement collapsible sections with expand/collapse functionality
+- [ ] Add active state highlighting for current page/section
+- [ ] Ensure mobile-responsive with hamburger menu toggle
+- [ ] Add proper ARIA labels and keyboard navigation
+- [ ] Style with Tailwind CSS using consistent spacing and typography
+- [ ] Write Jest unit tests for Sidebar component (navigation, collapsible sections)
+- [ ] Write Playwright tests for sidebar navigation and mobile responsiveness
+
+### ITER1.5-003: Layout Integration & Routing 🟡
+
+**Description:** Integrate sidebar with main layout and update routing structure
+**Dependencies:** ITER1.5-002
+**Acceptance Criteria:**
+
+- [ ] Update main layout.tsx to include sidebar alongside main content area
+- [ ] Create responsive grid layout (sidebar + main content) using Tailwind CSS Grid
+- [ ] Implement sidebar toggle state management using React context or state
+- [ ] Add routing for new navigation items:
+  - [ ] `/contacts` (existing)
+  - [ ] `/contacts/favourites` (filter existing contacts)
+  - [ ] `/contacts/groups/1` and `/contacts/groups/2` (placeholder pages)
+  - [ ] `/journals` (placeholder for future iteration)
+- [ ] Ensure sidebar state persists across page navigation
+- [ ] Add proper page transitions and loading states
+- [ ] Implement breadcrumb navigation in main content area
+- [ ] Test layout on different screen sizes (mobile, tablet, desktop)
+- [ ] Write Jest unit tests for layout state management
+- [ ] Write Playwright tests for navigation flow and responsive behavior
+
+### ITER1.5-004: Contact Filtering & Groups UI 🟡
+
+**Description:** Implement contact filtering and basic group management to support sidebar navigation
+**Dependencies:** ITER1.5-003
+**Acceptance Criteria:**
+
+- [ ] Add favourites functionality to existing contact management:
+  - [ ] Add "favourite" boolean field to contact model (backend)
+  - [ ] Create API endpoints for toggling contact favourites
+  - [ ] Add star icon to contact list and detail views
+- [ ] Implement basic contact groups:
+  - [ ] Create simple group assignment UI (dropdown or tags)
+  - [ ] Add group filtering to existing contact search
+  - [ ] Create group management interface (create, rename, delete groups)
+- [ ] Update contact list views to support filtering:
+  - [ ] `/contacts/favourites` - show only favourited contacts
+  - [ ] `/contacts/groups/[id]` - show contacts in specific group
+- [ ] Add group indicators to contact cards and list items
+- [ ] Ensure search functionality works within filtered views
+- [ ] Write Jest unit tests for filtering logic and group management
+- [ ] Write Playwright tests for complete filtering and favourites workflow
+
+### ITER1.5-005: Mobile Navigation & Accessibility 🟢
+
+**Description:** Ensure mobile-first responsive design and comprehensive accessibility
+**Dependencies:** ITER1.5-004
+**Acceptance Criteria:**
+
+- [ ] Implement hamburger menu for mobile sidebar access
+- [ ] Add swipe gestures for mobile sidebar open/close
+- [ ] Ensure all interactive elements meet WCAG 2.1 AA standards
+- [ ] Add proper focus management for keyboard navigation
+- [ ] Test with screen readers (add appropriate ARIA labels and roles)
+- [ ] Implement proper color contrast ratios throughout
+- [ ] Add skip navigation links for accessibility
+- [ ] Test responsive breakpoints (320px, 768px, 1024px, 1440px)
+- [ ] Optimize touch targets for mobile (minimum 44px)
+- [ ] Add loading states and error boundaries for better UX
+- [ ] Write comprehensive Playwright tests for mobile navigation
+- [ ] Write accessibility tests using axe-core integration
+
+**Final Status:** This iteration enhances the MVP with a professional layout structure that matches the provided design, making the application much more usable and setting the foundation for future features.
+
+---
+
 ## Iteration 2: Integration Architecture Foundation
 
 ### ITER2-001: Integration Architecture Foundation 🟡 ✅ COMPLETED
@@ -675,10 +777,9 @@ Use this section to track progress:
 
 ```
 Iteration 1 (Contact MVP): [x] ITER1-001 [x] ITER1-002 [x] ITER1-003 [x] ITER1-004 [x] ITER1-005
+Iteration 1.5 (Enhanced Layout): [ ] ITER1.5-001 [ ] ITER1.5-002 [ ] ITER1.5-003 [ ] ITER1.5-004 [ ] ITER1.5-005
 Iteration 2 (Integration Foundation): [x] ITER2-001 [ ] ITER2-002 (5 slices) [ ] ITER2-003 [ ] ITER2-004 [ ] ITER2-005
   ITER2-002 Slices: [ ] Slice 1 [ ] Slice 2 [ ] Slice 3 [ ] Slice 4 [ ] Slice 5
-Iteration 1 (Contact MVP): [x] ITER1-001 [x] ITER1-002 [x] ITER1-003 [x] ITER1-004 [x] ITER1-005
-Iteration 2 (Integration Foundation): [ ] ITER2-001 [ ] ITER2-002 [ ] ITER2-003 [ ] ITER2-004
 Iteration 3 (Extended Integrations): [ ] ITER3-001 [ ] ITER3-002 [ ] ITER3-003 [ ] ITER3-004
 Iteration 4 (Journal): [ ] ITER4-001 [ ] ITER4-002 [ ] ITER4-003 [ ] ITER4-004
 Iteration 5 (Calendar): [ ] ITER5-001 [ ] ITER5-002 [ ] ITER5-003 [ ] ITER5-004
@@ -687,7 +788,9 @@ Iteration 7 (Advanced): [ ] ITER7-001 [ ] ITER7-002 [ ] ITER7-003
 ```
 
 ### Value Delivery Timeline
+
 - **Iteration 1**: Working contact management system with global search, transactional events, and MCP foundation
+- **Iteration 1.5**: Enhanced layout with professional sidebar navigation, top bar with search, and improved UX
 - **Iteration 2**: Integration architecture foundation with Google Contacts sync and worker isolation
 - **Iteration 3**: Extended integrations (Immich, Strava, Firefly III) with comprehensive MCP tools
 - **Iteration 4**: Journal system with mood tracking, search capabilities, and journal MCP tools
