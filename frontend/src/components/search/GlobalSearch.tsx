@@ -90,18 +90,19 @@ export function GlobalSearch({
   
   // Handle search submission
   const handleSearch = useCallback((searchQuery: string = query) => {
-    if (!searchQuery.trim()) return;
-    
-    saveRecentSearch(searchQuery);
+    const trimmedQuery = searchQuery.trim();
+    if (!trimmedQuery) return;
+
+    saveRecentSearch(trimmedQuery);
     setIsOpen(false);
     setQuery('');
-    
+
     // Navigate to search results page or call callback
     if (onSearch) {
-      onSearch(searchQuery);
+      onSearch(trimmedQuery);
     } else {
       // For now, just call the callback since we don't have a search results page yet
-      console.log('Search query:', searchQuery);
+      console.log('Search query:', trimmedQuery);
     }
   }, [query, onSearch, saveRecentSearch]);
   

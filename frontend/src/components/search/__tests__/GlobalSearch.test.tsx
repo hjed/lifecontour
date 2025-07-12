@@ -199,16 +199,16 @@ describe('GlobalSearch', () => {
     const mockOnSearch = jest.fn();
     const user = userEvent.setup();
     render(<GlobalSearch onSearch={mockOnSearch} />);
-    
+
     const searchInput = screen.getByRole('combobox', { name: /global search/i });
-    
+
     await user.type(searchInput, '  test query  ');
     await user.keyboard('{Enter}');
-    
-    expect(mockOnSearch).toHaveBeenCalledWith('  test query  ');
+
+    expect(mockOnSearch).toHaveBeenCalledWith('test query');
     expect(localStorageMock.setItem).toHaveBeenCalledWith(
       'recent-searches',
-      JSON.stringify(['  test query  '])
+      JSON.stringify(['test query'])
     );
   });
 });
