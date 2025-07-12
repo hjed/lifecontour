@@ -247,6 +247,7 @@ describe('GlobalSearch', () => {
 
     // Initially, aria-controls and aria-activedescendant should not be set
     expect(searchInput).toHaveAttribute('aria-expanded', 'false');
+    expect(searchInput).toHaveAttribute('aria-autocomplete', 'list');
     expect(searchInput).not.toHaveAttribute('aria-controls');
     expect(searchInput).not.toHaveAttribute('aria-activedescendant');
 

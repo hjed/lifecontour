@@ -251,6 +251,7 @@ export function GlobalSearch({
           aria-label='Global search'
           aria-expanded={isOpen}
           aria-haspopup='listbox'
+          aria-autocomplete='list'
           aria-controls={isOpen ? listboxId.current : undefined}
           aria-activedescendant={
             isOpen && selectedIndex >= 0
