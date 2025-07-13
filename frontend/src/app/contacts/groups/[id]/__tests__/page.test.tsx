@@ -8,7 +8,7 @@ import {
   setupPlaceholderPageMocks,
   createPlaceholderPageTests,
   createDynamicPlaceholderPageTests,
-  PlaceholderPageConfig
+  PlaceholderPageConfig,
 } from '@/test-utils/placeholder-page';
 import ContactGroupPage from '../page';
 
@@ -16,8 +16,10 @@ const mockUseParams = useParams as jest.MockedFunction<typeof useParams>;
 
 const basePageConfig: Omit<PlaceholderPageConfig, 'title' | 'description'> = {
   pathname: '/contacts/groups/1',
-  implementationText: 'The contact groups functionality will be implemented in ITER1.5-004',
-  featuresText: 'You&apos;ll be able to organize your contacts into groups and view them here',
+  implementationText:
+    'The contact groups functionality will be implemented in ITER1.5-004',
+  featuresText:
+    'You&apos;ll be able to organize your contacts into groups and view them here',
   iterationText: 'ITER1.5-004',
 };
 
@@ -68,7 +70,10 @@ describe('ContactGroupPage', () => {
       description: 'Contacts in group 1 will appear here.',
     };
 
-    const commonTests = createPlaceholderPageTests(ContactGroupPage, pageConfigWithId);
+    const commonTests = createPlaceholderPageTests(
+      ContactGroupPage,
+      pageConfigWithId
+    );
 
     // Execute all common tests
     Object.entries(commonTests).forEach(([testName, testFn]) => {

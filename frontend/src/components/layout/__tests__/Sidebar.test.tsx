@@ -25,22 +25,24 @@ describe('Sidebar Components', () => {
   describe('DesktopSidebar', () => {
     it('renders desktop sidebar with navigation sections', () => {
       render(<DesktopSidebar />);
-      
+
       // Check that main navigation sections are present
       expect(screen.getByText('Contacts')).toBeInTheDocument();
       expect(screen.getByText('Journals')).toBeInTheDocument();
-      
+
       // Check that the sidebar has proper ARIA label
-      expect(screen.getByLabelText('Desktop navigation sidebar')).toBeInTheDocument();
+      expect(
+        screen.getByLabelText('Desktop navigation sidebar')
+      ).toBeInTheDocument();
     });
 
     it('shows contacts section expanded by default', () => {
       render(<DesktopSidebar />);
-      
+
       // Contacts section should be expanded by default
       const contactsButton = screen.getByRole('button', { name: /contacts/i });
       expect(contactsButton).toHaveAttribute('aria-expanded', 'true');
-      
+
       // Contact items should be visible
       expect(screen.getByText('All')).toBeInTheDocument();
       expect(screen.getByText('Favourites')).toBeInTheDocument();
@@ -50,35 +52,35 @@ describe('Sidebar Components', () => {
 
     it('shows journals section collapsed by default', () => {
       render(<DesktopSidebar />);
-      
+
       // Journals section should be collapsed by default
       const journalsButton = screen.getByRole('button', { name: /journals/i });
       expect(journalsButton).toHaveAttribute('aria-expanded', 'false');
-      
+
       // Journal items should not be visible initially
       expect(screen.queryByText('Etc')).not.toBeInTheDocument();
     });
 
     it('toggles section expansion when clicked', async () => {
       render(<DesktopSidebar />);
-      
+
       const journalsButton = screen.getByRole('button', { name: /journals/i });
-      
+
       // Initially collapsed
       expect(journalsButton).toHaveAttribute('aria-expanded', 'false');
       expect(screen.queryByText('Etc')).not.toBeInTheDocument();
-      
+
       // Click to expand
       fireEvent.click(journalsButton);
-      
+
       await waitFor(() => {
         expect(journalsButton).toHaveAttribute('aria-expanded', 'true');
         expect(screen.getByText('Etc')).toBeInTheDocument();
       });
-      
+
       // Click to collapse
       fireEvent.click(journalsButton);
-      
+
       await waitFor(() => {
         expect(journalsButton).toHaveAttribute('aria-expanded', 'false');
         expect(screen.queryByText('Etc')).not.toBeInTheDocument();
@@ -88,46 +90,56 @@ describe('Sidebar Components', () => {
     it('highlights active navigation item', () => {
       mockUsePathname.mockReturnValue('/contacts/favourites');
       render(<DesktopSidebar />);
-      
+
       const favouritesLink = screen.getByRole('link', { name: /favourites/i });
       expect(favouritesLink).toHaveAttribute('aria-current', 'page');
-      expect(favouritesLink).toHaveClass('bg-accent', 'text-accent-foreground', 'font-medium');
+      expect(favouritesLink).toHaveClass(
+        'bg-accent',
+        'text-accent-foreground',
+        'font-medium'
+      );
     });
 
     it('handles contacts root path correctly', () => {
       mockUsePathname.mockReturnValue('/contacts');
       render(<DesktopSidebar />);
-      
+
       const allLink = screen.getByRole('link', { name: 'All' });
       expect(allLink).toHaveAttribute('aria-current', 'page');
     });
 
     it('has proper accessibility attributes', () => {
       render(<DesktopSidebar />);
-      
+
       // Main navigation has proper role and label
       const nav = screen.getByRole('navigation', { name: 'Main navigation' });
       expect(nav).toBeInTheDocument();
-      
+
       // Section buttons have proper ARIA attributes
       const contactsButton = screen.getByRole('button', { name: /contacts/i });
       expect(contactsButton).toHaveAttribute('aria-expanded');
-      expect(contactsButton).toHaveAttribute('aria-controls', 'section-contacts');
-      
+      expect(contactsButton).toHaveAttribute(
+        'aria-controls',
+        'section-contacts'
+      );
+
       // Section groups have proper roles
       const contactsGroup = screen.getByRole('group');
-      expect(contactsGroup).toHaveAttribute('aria-labelledby', 'section-contacts-header');
+      expect(contactsGroup).toHaveAttribute(
+        'aria-labelledby',
+        'section-contacts-header'
+      );
     });
 
     it('has proper keyboard navigation support', () => {
       render(<DesktopSidebar />);
-      
+
       const contactsButton = screen.getByRole('button', { name: /contacts/i });
-      
+
       // Button should be focusable
       contactsButton.focus();
       expect(contactsButton).toHaveFocus();
-      
+
       // Should have focus-visible styles
       expect(contactsButton).toHaveClass('focus-visible:ring-2');
     });
@@ -136,18 +148,22 @@ describe('Sidebar Components', () => {
   describe('MobileSidebar', () => {
     it('renders mobile sidebar trigger button', () => {
       render(<MobileSidebar />);
-      
-      const triggerButton = screen.getByRole('button', { name: 'Open navigation menu' });
+
+      const triggerButton = screen.getByRole('button', {
+        name: 'Open navigation menu',
+      });
       expect(triggerButton).toBeInTheDocument();
       expect(triggerButton).toHaveClass('md:hidden'); // Hidden on desktop
     });
 
     it('opens sheet when trigger is clicked', async () => {
       render(<MobileSidebar />);
-      
-      const triggerButton = screen.getByRole('button', { name: 'Open navigation menu' });
+
+      const triggerButton = screen.getByRole('button', {
+        name: 'Open navigation menu',
+      });
       fireEvent.click(triggerButton);
-      
+
       await waitFor(() => {
         expect(screen.getByText('Navigation')).toBeInTheDocument();
         expect(screen.getByText('Contacts')).toBeInTheDocument();
@@ -157,19 +173,21 @@ describe('Sidebar Components', () => {
 
     it('closes sheet when navigation item is clicked', async () => {
       render(<MobileSidebar />);
-      
+
       // Open the sheet
-      const triggerButton = screen.getByRole('button', { name: 'Open navigation menu' });
+      const triggerButton = screen.getByRole('button', {
+        name: 'Open navigation menu',
+      });
       fireEvent.click(triggerButton);
-      
+
       await waitFor(() => {
         expect(screen.getByText('Navigation')).toBeInTheDocument();
       });
-      
+
       // Click on a navigation item
       const allLink = screen.getByRole('link', { name: 'All' });
       fireEvent.click(allLink);
-      
+
       // Sheet should close (Navigation title should not be visible)
       await waitFor(() => {
         expect(screen.queryByText('Navigation')).not.toBeInTheDocument();
@@ -180,18 +198,24 @@ describe('Sidebar Components', () => {
   describe('Main Sidebar Component', () => {
     it('renders both desktop and mobile sidebars', () => {
       render(<Sidebar />);
-      
+
       // Should render mobile trigger (visible on mobile)
-      expect(screen.getByRole('button', { name: 'Open navigation menu' })).toBeInTheDocument();
-      
+      expect(
+        screen.getByRole('button', { name: 'Open navigation menu' })
+      ).toBeInTheDocument();
+
       // Should render desktop sidebar (visible on desktop)
-      expect(screen.getByLabelText('Desktop navigation sidebar')).toBeInTheDocument();
+      expect(
+        screen.getByLabelText('Desktop navigation sidebar')
+      ).toBeInTheDocument();
     });
 
     it('applies custom className', () => {
-      render(<Sidebar className="custom-class" />);
-      
-      const desktopSidebar = screen.getByLabelText('Desktop navigation sidebar');
+      render(<Sidebar className='custom-class' />);
+
+      const desktopSidebar = screen.getByLabelText(
+        'Desktop navigation sidebar'
+      );
       expect(desktopSidebar).toHaveClass('custom-class');
     });
   });
@@ -210,35 +234,35 @@ describe('Sidebar Components', () => {
       testCases.forEach(({ pathname, expectedActive }) => {
         mockUsePathname.mockReturnValue(pathname);
         const { unmount } = render(<DesktopSidebar />);
-        
+
         if (expectedActive) {
           const activeLink = screen.getByRole('link', { name: expectedActive });
           expect(activeLink).toHaveAttribute('aria-current', 'page');
         }
-        
+
         unmount();
       });
     });
 
     it('handles section state persistence', async () => {
       render(<DesktopSidebar />);
-      
+
       // Expand journals section
       const journalsButton = screen.getByRole('button', { name: /journals/i });
       fireEvent.click(journalsButton);
-      
+
       await waitFor(() => {
         expect(screen.getByText('Etc')).toBeInTheDocument();
       });
-      
+
       // Collapse contacts section
       const contactsButton = screen.getByRole('button', { name: /contacts/i });
       fireEvent.click(contactsButton);
-      
+
       await waitFor(() => {
         expect(screen.queryByText('All')).not.toBeInTheDocument();
       });
-      
+
       // Journals should still be expanded
       expect(screen.getByText('Etc')).toBeInTheDocument();
     });

@@ -25,7 +25,7 @@ export function Header() {
         <div className='flex items-center space-x-2'>
           {/* Mobile Sidebar - Only show on mobile */}
           <MobileSidebar />
-          
+
           {/* Home Icon */}
           <Link
             href='/'

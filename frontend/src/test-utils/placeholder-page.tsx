@@ -8,6 +8,7 @@
 import { render, screen } from '@testing-library/react';
 import { useRouter, usePathname, useParams } from 'next/navigation';
 import { useAuth } from '@/lib/auth/AuthProvider';
+import { OAuthProvider } from '@/types/auth';
 
 // Mock Next.js navigation hooks
 jest.mock('next/navigation', () => ({
@@ -40,13 +41,23 @@ export const createMockRouter = () => ({
 export const authStates = {
   authenticated: {
     state: {
-      user: { id: '1', email: 'test@example.com' },
+      user: {
+        id: '1',
+        email: 'test@example.com',
+        name: 'Test User',
+        provider: OAuthProvider.GITHUB,
+        provider_id: 'github_123',
+        created_at: '2023-01-01T00:00:00Z',
+        last_login: '2023-01-01T00:00:00Z',
+      },
       isLoading: false,
       isAuthenticated: true,
       error: undefined,
     },
     login: jest.fn(),
     logout: jest.fn(),
+    refreshSession: jest.fn(),
+    clearError: jest.fn(),
   },
   unauthenticated: {
     state: {
@@ -57,6 +68,8 @@ export const authStates = {
     },
     login: jest.fn(),
     logout: jest.fn(),
+    refreshSession: jest.fn(),
+    clearError: jest.fn(),
   },
   loading: {
     state: {
@@ -67,6 +80,8 @@ export const authStates = {
     },
     login: jest.fn(),
     logout: jest.fn(),
+    refreshSession: jest.fn(),
+    clearError: jest.fn(),
   },
 } as const;
 
@@ -96,9 +111,10 @@ export interface PlaceholderPageConfig {
 export function setupPlaceholderPageMocks(config: PlaceholderPageConfig) {
   beforeEach(() => {
     // Mock Next.js router hooks
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     mockUseRouter.mockReturnValue(createMockRouter() as any);
     mockUsePathname.mockReturnValue(config.pathname);
-    
+
     if (config.params) {
       mockUseParams.mockReturnValue(config.params);
     }
@@ -122,10 +138,12 @@ export function createPlaceholderPageTests(
   return {
     'renders the page with correct title and description': () => {
       render(<PageComponent />);
-      
+
       // Check main heading
-      expect(screen.getByRole('heading', { level: 1, name: config.title })).toBeInTheDocument();
-      
+      expect(
+        screen.getByRole('heading', { level: 1, name: config.title })
+      ).toBeInTheDocument();
+
       // Check description
       expect(screen.getByText(config.description)).toBeInTheDocument();
     },
@@ -137,22 +155,28 @@ export function createPlaceholderPageTests(
       expect(screen.getByText('Coming Soon')).toBeInTheDocument();
 
       // Check card content - use more flexible text matching for HTML entities
-      expect(screen.getByText((content, element) => {
-        return content.includes(config.implementationText.replace(/&apos;/g, "'"));
-      })).toBeInTheDocument();
-      expect(screen.getByText((content, element) => {
-        return content.includes(config.featuresText.replace(/&apos;/g, "'"));
-      })).toBeInTheDocument();
+      expect(
+        screen.getByText((content, _element) => {
+          return content.includes(
+            config.implementationText.replace(/&apos;/g, "'")
+          );
+        })
+      ).toBeInTheDocument();
+      expect(
+        screen.getByText((content, _element) => {
+          return content.includes(config.featuresText.replace(/&apos;/g, "'"));
+        })
+      ).toBeInTheDocument();
     },
 
     'has proper page structure with container and spacing': () => {
       const { container } = render(<PageComponent />);
-      
+
       // Check that the page has proper container structure
       const containerDiv = container.querySelector('.container');
       expect(containerDiv).toBeInTheDocument();
       expect(containerDiv).toHaveClass('mx-auto', 'px-4', 'py-8');
-      
+
       // Check that there's a margin bottom on the header section
       const headerSection = container.querySelector('.mb-6');
       expect(headerSection).toBeInTheDocument();
@@ -181,11 +205,11 @@ export function createPlaceholderPageTests(
 
     'has proper semantic HTML structure': () => {
       render(<PageComponent />);
-      
+
       // Check that the main heading is properly structured
       const heading = screen.getByRole('heading', { level: 1 });
       expect(heading).toHaveTextContent(config.title);
-      
+
       // Check that the description paragraph exists
       const description = screen.getByText(config.description);
       expect(description.tagName.toLowerCase()).toBe('p');
@@ -193,13 +217,15 @@ export function createPlaceholderPageTests(
 
     'has accessible card structure': () => {
       render(<PageComponent />);
-      
+
       // The card should have proper heading structure
       const cardTitle = screen.getByText('Coming Soon');
       expect(cardTitle).toBeInTheDocument();
-      
+
       // The card content should be readable
-      const cardContent = screen.getByText(new RegExp(config.implementationText));
+      const cardContent = screen.getByText(
+        new RegExp(config.implementationText)
+      );
       expect(cardContent).toBeInTheDocument();
     },
 
@@ -207,9 +233,11 @@ export function createPlaceholderPageTests(
     ...(config.iterationText && {
       'mentions the correct iteration for implementation': () => {
         render(<PageComponent />);
-        
+
         // Verify that it mentions the specific iteration
-        expect(screen.getByText(new RegExp(config.iterationText!))).toBeInTheDocument();
+        expect(
+          screen.getByText(new RegExp(config.iterationText!))
+        ).toBeInTheDocument();
       },
     }),
 
@@ -217,9 +245,11 @@ export function createPlaceholderPageTests(
     ...(config.iconColorClass && {
       'uses appropriate icon color': () => {
         const { container } = render(<PageComponent />);
-        
+
         // Check that the icon has the expected color class
-        const iconElement = container.querySelector(`.${config.iconColorClass}`);
+        const iconElement = container.querySelector(
+          `.${config.iconColorClass}`
+        );
         expect(iconElement).toBeInTheDocument();
       },
     }),
@@ -241,15 +271,19 @@ export function createDynamicPlaceholderPageTests(
   const tests: Record<string, () => void> = {};
 
   dynamicTests.forEach(({ params, expectedTitle, expectedDescription }) => {
-    const paramString = Object.entries(params).map(([k, v]) => `${k}=${v}`).join(', ');
-    
+    const paramString = Object.entries(params)
+      .map(([k, v]) => `${k}=${v}`)
+      .join(', ');
+
     tests[`renders correctly with params: ${paramString}`] = () => {
       mockUseParams.mockReturnValue(params);
-      
+
       render(<PageComponent />);
-      
+
       // Check dynamic title and description
-      expect(screen.getByRole('heading', { level: 1, name: expectedTitle })).toBeInTheDocument();
+      expect(
+        screen.getByRole('heading', { level: 1, name: expectedTitle })
+      ).toBeInTheDocument();
       expect(screen.getByText(expectedDescription)).toBeInTheDocument();
     };
   });

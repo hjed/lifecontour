@@ -67,9 +67,7 @@ const navigationSections: NavigationSection[] = [
     label: 'Journals',
     icon: BookOpen,
     defaultExpanded: false,
-    items: [
-      { label: 'Etc', href: '/journals' },
-    ],
+    items: [{ label: 'Etc', href: '/journals' }],
   },
 ];
 
@@ -78,11 +76,16 @@ const navigationSections: NavigationSection[] = [
  */
 function SidebarContent({ onNavigate }: SidebarContentProps) {
   const pathname = usePathname();
-  const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>(
-    navigationSections.reduce((acc, section) => {
-      acc[section.label] = section.defaultExpanded ?? false;
-      return acc;
-    }, {} as Record<string, boolean>)
+  const [expandedSections, setExpandedSections] = useState<
+    Record<string, boolean>
+  >(
+    navigationSections.reduce(
+      (acc, section) => {
+        acc[section.label] = section.defaultExpanded ?? false;
+        return acc;
+      },
+      {} as Record<string, boolean>
+    )
   );
 
   const toggleSection = (sectionLabel: string) => {
@@ -100,7 +103,11 @@ function SidebarContent({ onNavigate }: SidebarContentProps) {
   };
 
   return (
-    <nav className='flex h-full flex-col space-y-2 p-4' role='navigation' aria-label='Main navigation'>
+    <nav
+      className='flex h-full flex-col space-y-2 p-4'
+      role='navigation'
+      aria-label='Main navigation'
+    >
       {navigationSections.map((section, sectionIndex) => {
         const isExpanded = expandedSections[section.label];
         const SectionIcon = section.icon;
@@ -108,14 +115,14 @@ function SidebarContent({ onNavigate }: SidebarContentProps) {
         return (
           <div key={section.label} className='space-y-1'>
             {sectionIndex > 0 && <Separator className='my-2' />}
-            
+
             {/* Section Header */}
             <Button
               variant='ghost'
               className={cn(
-                'w-full justify-start px-2 py-1.5 h-auto font-medium',
+                'h-auto w-full justify-start px-2 py-1.5 font-medium',
                 'hover:bg-accent hover:text-accent-foreground',
-                'focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2'
+                'focus-visible:ring-ring focus-visible:ring-2 focus-visible:ring-offset-2'
               )}
               onClick={() => toggleSection(section.label)}
               aria-expanded={isExpanded}
@@ -139,7 +146,7 @@ function SidebarContent({ onNavigate }: SidebarContentProps) {
                 role='group'
                 aria-labelledby={`section-${section.label.toLowerCase()}-header`}
               >
-                {section.items.map((item) => {
+                {section.items.map(item => {
                   const isActive = isActiveLink(item.href);
                   const ItemIcon = item.icon;
 
@@ -149,19 +156,32 @@ function SidebarContent({ onNavigate }: SidebarContentProps) {
                       variant='ghost'
                       size='sm'
                       className={cn(
-                        'w-full justify-start px-2 py-1.5 h-auto font-normal',
+                        'h-auto w-full justify-start px-2 py-1.5 font-normal',
                         'hover:bg-accent hover:text-accent-foreground',
-                        'focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2',
-                        isActive && 'bg-accent text-accent-foreground font-medium'
+                        'focus-visible:ring-ring focus-visible:ring-2 focus-visible:ring-offset-2',
+                        isActive &&
+                          'bg-accent text-accent-foreground font-medium'
                       )}
                       asChild
                     >
                       <Link
-                        href={item.href as any}
+                        href={
+                          item.href as
+                            | '/contacts'
+                            | '/contacts/favourites'
+                            | '/contacts/groups/1'
+                            | '/contacts/groups/2'
+                            | '/journals'
+                        }
                         onClick={onNavigate}
                         aria-current={isActive ? 'page' : undefined}
                       >
-                        {ItemIcon && <ItemIcon className='mr-2 h-3 w-3' aria-hidden='true' />}
+                        {ItemIcon && (
+                          <ItemIcon
+                            className='mr-2 h-3 w-3'
+                            aria-hidden='true'
+                          />
+                        )}
                         {item.label}
                       </Link>
                     </Button>
@@ -183,14 +203,14 @@ export function DesktopSidebar({ className }: SidebarProps) {
   return (
     <aside
       className={cn(
-        'hidden md:flex md:w-64 md:flex-col md:fixed md:top-14 md:bottom-0 md:left-0 md:z-40',
-        'bg-background border-r border-border',
+        'hidden md:fixed md:top-14 md:bottom-0 md:left-0 md:z-40 md:flex md:w-64 md:flex-col',
+        'bg-background border-border border-r',
         className
       )}
       role='complementary'
       aria-label='Desktop navigation sidebar'
     >
-      <div className='flex flex-col h-full'>
+      <div className='flex h-full flex-col'>
         <SidebarContent />
       </div>
     </aside>
@@ -216,7 +236,7 @@ export function MobileSidebar({ className }: SidebarProps) {
         </Button>
       </SheetTrigger>
       <SheetContent side='left' className='w-64 p-0'>
-        <SheetHeader className='px-4 py-2 border-b'>
+        <SheetHeader className='border-b px-4 py-2'>
           <SheetTitle>Navigation</SheetTitle>
         </SheetHeader>
         <SidebarContent onNavigate={() => setOpen(false)} />

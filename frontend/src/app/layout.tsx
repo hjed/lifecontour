@@ -25,9 +25,7 @@ export default function RootLayout({
           <Providers>
             <Header />
             <DesktopSidebar />
-            <main className='md:pl-64'>
-              {children}
-            </main>
+            <main className='md:pl-64'>{children}</main>
           </Providers>
         </div>
       </body>

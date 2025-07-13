@@ -16,7 +16,9 @@ export default function FavouritesPage() {
     <AuthGuard>
       <div className='container mx-auto px-4 py-8'>
         <div className='mb-6'>
-          <h1 className='text-3xl font-bold tracking-tight'>Favourite Contacts</h1>
+          <h1 className='text-3xl font-bold tracking-tight'>
+            Favourite Contacts
+          </h1>
           <p className='text-muted-foreground'>
             Your starred contacts will appear here.
           </p>
@@ -32,7 +34,8 @@ export default function FavouritesPage() {
           <CardContent>
             <p className='text-muted-foreground'>
               The favourites functionality will be implemented in ITER1.5-004.
-              You&apos;ll be able to star your important contacts and view them here.
+              You&apos;ll be able to star your important contacts and view them
+              here.
             </p>
           </CardContent>
         </Card>

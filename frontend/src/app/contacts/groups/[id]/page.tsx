@@ -37,8 +37,9 @@ export default function ContactGroupPage() {
           </CardHeader>
           <CardContent>
             <p className='text-muted-foreground'>
-              The contact groups functionality will be implemented in ITER1.5-004.
-              You&apos;ll be able to organize your contacts into groups and view them here.
+              The contact groups functionality will be implemented in
+              ITER1.5-004. You&apos;ll be able to organize your contacts into
+              groups and view them here.
             </p>
           </CardContent>
         </Card>
