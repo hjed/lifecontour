@@ -32,7 +32,7 @@ export default function FavouritesPage() {
           <CardContent>
             <p className='text-muted-foreground'>
               The favourites functionality will be implemented in ITER1.5-004.
-              You'll be able to star your important contacts and view them here.
+              You&apos;ll be able to star your important contacts and view them here.
             </p>
           </CardContent>
         </Card>

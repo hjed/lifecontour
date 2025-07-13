@@ -30,13 +30,13 @@ import { useDebounce } from '@/hooks/useDebounce';
 
 interface GlobalSearchProps {
   /** Additional CSS classes */
-  className?: string;
+  readonly className?: string;
   /** Placeholder text for the search input */
-  placeholder?: string;
+  readonly placeholder?: string;
   /** Whether to show the search suggestions dropdown */
-  showSuggestions?: boolean;
+  readonly showSuggestions?: boolean;
   /** Callback when search is performed */
-  onSearch?: (query: string) => void;
+  readonly onSearch?: (query: string) => void;
 }
 
 interface SearchSuggestion {

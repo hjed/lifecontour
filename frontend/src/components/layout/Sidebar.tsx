@@ -43,11 +43,11 @@ interface NavigationSection {
 }
 
 interface SidebarProps {
-  className?: string;
+  readonly className?: string;
 }
 
 interface SidebarContentProps {
-  onNavigate?: () => void;
+  readonly onNavigate?: () => void;
 }
 
 // Navigation configuration
@@ -120,6 +120,7 @@ function SidebarContent({ onNavigate }: SidebarContentProps) {
               onClick={() => toggleSection(section.label)}
               aria-expanded={isExpanded}
               aria-controls={`section-${section.label.toLowerCase()}`}
+              id={`section-${section.label.toLowerCase()}-header`}
             >
               <SectionIcon className='mr-2 h-4 w-4' aria-hidden='true' />
               <span className='flex-1 text-left'>{section.label}</span>
@@ -182,14 +183,14 @@ export function DesktopSidebar({ className }: SidebarProps) {
   return (
     <aside
       className={cn(
-        'hidden md:flex md:w-64 md:flex-col md:fixed md:inset-y-0 md:z-50',
+        'hidden md:flex md:w-64 md:flex-col md:fixed md:top-14 md:bottom-0 md:left-0 md:z-40',
         'bg-background border-r border-border',
         className
       )}
       role='complementary'
       aria-label='Desktop navigation sidebar'
     >
-      <div className='flex flex-col h-full pt-16'> {/* pt-16 to account for header height */}
+      <div className='flex flex-col h-full'>
         <SidebarContent />
       </div>
     </aside>

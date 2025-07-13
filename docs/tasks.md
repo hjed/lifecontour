@@ -195,24 +195,48 @@ Tasks are organized by **feature iterations** that deliver end-to-end value incr
 - All tests passing (173/173), TypeScript clean, ESLint clean
 - Files: `GlobalSearch.tsx`, `header.tsx` (redesigned), `layout.tsx` (updated), test files
 
-### ITER1.5-002: Sidebar Navigation Component 🟡
+### ITER1.5-002: Sidebar Navigation Component 🟡 ✅ COMPLETED
 
 **Description:** Create a new sidebar navigation component with hierarchical menu structure
 **Dependencies:** ITER1.5-001
+**Status:** COMPLETED - Commit 38319a2 on main branch
+
 **Acceptance Criteria:**
 
-- [ ] Create new Sidebar component using shadcn/ui components (Sheet, Button, Separator)
-- [ ] Implement navigation structure from photo:
-  - [ ] Contacts section with All, Favourites, Group 1, Group 2 sub-items
-  - [ ] Journals section with Etc sub-item (placeholder for future)
-- [ ] Add proper icons using Lucide React (Users for Contacts, BookOpen for Journals)
-- [ ] Implement collapsible sections with expand/collapse functionality
-- [ ] Add active state highlighting for current page/section
-- [ ] Ensure mobile-responsive with hamburger menu toggle
-- [ ] Add proper ARIA labels and keyboard navigation
-- [ ] Style with Tailwind CSS using consistent spacing and typography
-- [ ] Write Jest unit tests for Sidebar component (navigation, collapsible sections)
-- [ ] Write Playwright tests for sidebar navigation and mobile responsiveness
+- [x] Create new Sidebar component using shadcn/ui components (Sheet, Button, Separator)
+- [x] Implement navigation structure from photo:
+  - [x] Contacts section with All, Favourites, Group 1, Group 2 sub-items
+  - [x] Journals section with Etc sub-item (placeholder for future)
+- [x] Add proper icons using Lucide React (Users for Contacts, BookOpen for Journals)
+- [x] Implement collapsible sections with expand/collapse functionality
+- [x] Add active state highlighting for current page/section
+- [x] Ensure mobile-responsive with hamburger menu toggle
+- [x] Add proper ARIA labels and keyboard navigation
+- [x] Style with Tailwind CSS using consistent spacing and typography
+- [x] Write Jest unit tests for Sidebar component (navigation, collapsible sections)
+- [x] Write Playwright tests for sidebar navigation and mobile responsiveness
+
+**Implementation Details:**
+
+- Created comprehensive Sidebar component with desktop and mobile variants
+- Implemented hierarchical navigation with collapsible sections (Contacts, Journals)
+- Added proper icons: Users for Contacts, BookOpen for Journals, Star for Favourites
+- Mobile responsiveness with Sheet component for hamburger menu
+- Active state highlighting using Next.js usePathname hook
+- Comprehensive test coverage: 15 Jest unit tests + Playwright e2e tests
+- All tests passing, TypeScript clean, ESLint clean
+- Files: `Sidebar.tsx`, `sheet.tsx` (new), test files, layout integration
+
+**ITER1.5-002.1: Placeholder Pages Implementation** ✅ COMPLETED
+
+- [x] Implemented `/contacts/favourites` page with star icon and placeholder content
+- [x] Implemented `/contacts/groups/[id]` dynamic route for groups 1 and 2 with users icon
+- [x] Implemented `/journals` page with book icon and placeholder content
+- [x] All pages use AuthGuard for authentication protection
+- [x] Consistent styling with shadcn/ui Card components and responsive design
+- [x] Comprehensive test coverage: 30 new unit tests across 3 test files
+- [x] All tests passing (219 total tests, 22 test suites)
+- [x] Pages ready for future feature implementation
 
 ### ITER1.5-003: Layout Integration & Routing 🟡
 
@@ -279,9 +303,10 @@ Tasks are organized by **feature iterations** that deliver end-to-end value incr
 **Progress Update - December 2024:**
 
 - ✅ **ITER1.5-001 COMPLETED** - Top bar redesign with global search functionality implemented
-- 🔄 **Next**: ITER1.5-002 Sidebar Navigation Component
+- ✅ **ITER1.5-002 COMPLETED** - Sidebar navigation component with placeholder pages implemented
+- 🔄 **Next**: ITER1.5-003 Layout Integration & Routing (partially complete - sidebar integrated, routing complete, placeholder pages implemented)
 
-**Final Status:** This iteration enhances the MVP with a professional layout structure that matches the provided design, making the application much more usable and setting the foundation for future features.
+**Final Status:** This iteration enhances the MVP with a professional layout structure that matches the provided design, making the application much more usable and setting the foundation for future features. Sidebar navigation and placeholder pages are complete and ready for future feature implementation.
 
 ---
 

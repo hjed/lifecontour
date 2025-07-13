@@ -35,10 +35,10 @@ const contactFormSchema = z.object({
 type ContactFormValues = z.infer<typeof contactFormSchema>;
 
 interface ContactFormProps {
-  initialData?: ContactFormData;
-  onSubmit: (data: ContactFormData) => Promise<void>;
-  onCancel?: () => void;
-  isLoading?: boolean;
+  readonly initialData?: ContactFormData;
+  readonly onSubmit: (data: ContactFormData) => Promise<void>;
+  readonly onCancel?: () => void;
+  readonly isLoading?: boolean;
 }
 
 export function ContactForm({
