@@ -118,18 +118,16 @@ function ContactsPageContent() {
 
   if (error) {
     return (
-      <div className='container mx-auto px-4 py-8'>
-        <Alert variant='destructive'>
-          <AlertDescription>
-            {error instanceof Error ? error.message : 'Failed to load contacts'}
-          </AlertDescription>
-        </Alert>
-      </div>
+      <Alert variant='destructive'>
+        <AlertDescription>
+          {error instanceof Error ? error.message : 'Failed to load contacts'}
+        </AlertDescription>
+      </Alert>
     );
   }
 
   return (
-    <div className='container mx-auto px-4 py-8'>
+    <div>
       {/* Header */}
       <div className='mb-8 flex flex-col gap-4 md:flex-row md:items-center md:justify-between'>
         <div>

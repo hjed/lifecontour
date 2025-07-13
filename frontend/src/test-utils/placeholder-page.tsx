@@ -169,17 +169,15 @@ export function createPlaceholderPageTests(
       ).toBeInTheDocument();
     },
 
-    'has proper page structure with container and spacing': () => {
+    'has proper page structure with spacing': () => {
       const { container } = render(<PageComponent />);
-
-      // Check that the page has proper container structure
-      const containerDiv = container.querySelector('.container');
-      expect(containerDiv).toBeInTheDocument();
-      expect(containerDiv).toHaveClass('mx-auto', 'px-4', 'py-8');
 
       // Check that there's a margin bottom on the header section
       const headerSection = container.querySelector('.mb-6');
       expect(headerSection).toBeInTheDocument();
+
+      // Check that the page has proper structure (no longer expecting container classes since they're in layout)
+      expect(container.firstChild).toBeInTheDocument();
     },
 
     'renders within AuthGuard component': () => {

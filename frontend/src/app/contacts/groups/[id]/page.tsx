@@ -18,32 +18,30 @@ export default function ContactGroupPage() {
 
   return (
     <AuthGuard>
-      <div className='container mx-auto px-4 py-8'>
-        <div className='mb-6'>
-          <h1 className='text-3xl font-bold tracking-tight'>
-            Contact Group {groupId}
-          </h1>
-          <p className='text-muted-foreground'>
-            Contacts in group {groupId} will appear here.
-          </p>
-        </div>
-
-        <Card>
-          <CardHeader>
-            <CardTitle className='flex items-center gap-2'>
-              <Users className='h-5 w-5 text-blue-500' />
-              Coming Soon
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p className='text-muted-foreground'>
-              The contact groups functionality will be implemented in
-              ITER1.5-004. You&apos;ll be able to organize your contacts into
-              groups and view them here.
-            </p>
-          </CardContent>
-        </Card>
+      <div className='mb-6'>
+        <h1 className='text-3xl font-bold tracking-tight'>
+          Contact Group {groupId}
+        </h1>
+        <p className='text-muted-foreground'>
+          Contacts in group {groupId} will appear here.
+        </p>
       </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className='flex items-center gap-2'>
+            <Users className='h-5 w-5 text-blue-500' />
+            Coming Soon
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <p className='text-muted-foreground'>
+            The contact groups functionality will be implemented in ITER1.5-004.
+            You&apos;ll be able to organize your contacts into groups and view
+            them here.
+          </p>
+        </CardContent>
+      </Card>
     </AuthGuard>
   );
 }
