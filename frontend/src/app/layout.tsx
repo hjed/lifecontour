@@ -3,6 +3,8 @@ import { Inter } from 'next/font/google';
 import './globals.css';
 import { Providers } from '@/lib/providers';
 import { Header, DesktopSidebar } from '@/components/layout';
+import { SidebarProvider } from '@/contexts/SidebarContext';
+import { Breadcrumb } from '@/components/navigation/Breadcrumb';
 
 const inter = Inter({ subsets: ['latin'] });
 
@@ -23,9 +25,16 @@ export default function RootLayout({
       <body className={inter.className}>
         <div className='bg-background min-h-screen font-sans antialiased'>
           <Providers>
-            <Header />
-            <DesktopSidebar />
-            <main className='md:pl-64'>{children}</main>
+            <SidebarProvider>
+              <Header />
+              <DesktopSidebar />
+              <main className='md:pl-64'>
+                <div className='container mx-auto px-4 py-6'>
+                  <Breadcrumb className='mb-4' />
+                  {children}
+                </div>
+              </main>
+            </SidebarProvider>
           </Providers>
         </div>
       </body>

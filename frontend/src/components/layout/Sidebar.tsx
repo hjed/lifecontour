@@ -4,7 +4,8 @@
  * Sidebar navigation component with hierarchical menu structure.
  *
  * Features collapsible sections for Contacts and Journals with proper
- * icons, active state highlighting, and mobile responsiveness.
+ * icons, active state highlighting, mobile responsiveness, and global
+ * state management via SidebarContext.
  */
 
 import { useState } from 'react';
@@ -28,18 +29,19 @@ import {
   SheetTitle,
   SheetTrigger,
 } from '@/components/ui/sheet';
+import { useSidebar, useSidebarAvailable } from '@/contexts/SidebarContext';
 
 interface NavigationItem {
-  label: string;
-  href: string;
-  icon?: React.ComponentType<{ className?: string }>;
+  readonly label: string;
+  readonly href: string;
+  readonly icon?: React.ComponentType<{ className?: string }>;
 }
 
 interface NavigationSection {
-  label: string;
-  icon: React.ComponentType<{ className?: string }>;
-  items: NavigationItem[];
-  defaultExpanded?: boolean;
+  readonly label: string;
+  readonly icon: React.ComponentType<{ className?: string }>;
+  readonly items: NavigationItem[];
+  readonly defaultExpanded?: boolean;
 }
 
 interface SidebarProps {
@@ -48,6 +50,18 @@ interface SidebarProps {
 
 interface SidebarContentProps {
   readonly onNavigate?: () => void;
+}
+
+/**
+ * Determines if a given href matches the current pathname for active link highlighting.
+ *
+ * Special handling for the contacts root path to ensure exact matching.
+ */
+function isActiveLink(href: string, pathname: string): boolean {
+  if (href === '/contacts') {
+    return pathname === '/contacts' || pathname === '/contacts/';
+  }
+  return pathname.startsWith(href);
 }
 
 // Navigation configuration
@@ -72,9 +86,28 @@ const navigationSections: NavigationSection[] = [
 ];
 
 /**
- * Sidebar content component that can be used in both desktop and mobile layouts
+ * Sidebar content component with context support
  */
-function SidebarContent({ onNavigate }: SidebarContentProps) {
+function SidebarContentWithContext({ onNavigate }: SidebarContentProps) {
+  const pathname = usePathname();
+  const { state, toggleSection } = useSidebar();
+
+  const checkActiveLink = (href: string) => isActiveLink(href, pathname);
+
+  return (
+    <SidebarContentInner
+      expandedSections={state.expandedSections}
+      toggleSection={toggleSection}
+      isActiveLink={checkActiveLink}
+      onNavigate={onNavigate}
+    />
+  );
+}
+
+/**
+ * Sidebar content component with local state fallback
+ */
+function SidebarContentWithLocalState({ onNavigate }: SidebarContentProps) {
   const pathname = usePathname();
   const [expandedSections, setExpandedSections] = useState<
     Record<string, boolean>
@@ -95,13 +128,45 @@ function SidebarContent({ onNavigate }: SidebarContentProps) {
     }));
   };
 
-  const isActiveLink = (href: string) => {
-    if (href === '/contacts') {
-      return pathname === '/contacts' || pathname === '/contacts/';
-    }
-    return pathname.startsWith(href);
-  };
+  const checkActiveLink = (href: string) => isActiveLink(href, pathname);
 
+  return (
+    <SidebarContentInner
+      expandedSections={expandedSections}
+      toggleSection={toggleSection}
+      isActiveLink={checkActiveLink}
+      onNavigate={onNavigate}
+    />
+  );
+}
+
+/**
+ * Sidebar content component that can be used in both desktop and mobile layouts
+ */
+function SidebarContent({ onNavigate }: SidebarContentProps) {
+  const sidebarAvailable = useSidebarAvailable();
+
+  if (sidebarAvailable) {
+    return <SidebarContentWithContext onNavigate={onNavigate} />;
+  }
+
+  return <SidebarContentWithLocalState onNavigate={onNavigate} />;
+}
+
+/**
+ * Inner sidebar content component with shared rendering logic
+ */
+function SidebarContentInner({
+  expandedSections,
+  toggleSection,
+  isActiveLink,
+  onNavigate,
+}: {
+  readonly expandedSections: Record<string, boolean>;
+  readonly toggleSection: (sectionLabel: string) => void;
+  readonly isActiveLink: (href: string) => boolean;
+  readonly onNavigate?: () => void;
+}) {
   return (
     <nav
       className='flex h-full flex-col space-y-2 p-4'

@@ -238,26 +238,35 @@ Tasks are organized by **feature iterations** that deliver end-to-end value incr
 - [x] All tests passing (219 total tests, 22 test suites)
 - [x] Pages ready for future feature implementation
 
-### ITER1.5-003: Layout Integration & Routing 🟡
+### ITER1.5-003: Layout Integration & Routing ✅ COMPLETED
 
 **Description:** Integrate sidebar with main layout and update routing structure
 **Dependencies:** ITER1.5-002
 **Acceptance Criteria:**
 
-- [ ] Update main layout.tsx to include sidebar alongside main content area
-- [ ] Create responsive grid layout (sidebar + main content) using Tailwind CSS Grid
-- [ ] Implement sidebar toggle state management using React context or state
-- [ ] Add routing for new navigation items:
-  - [ ] `/contacts` (existing)
-  - [ ] `/contacts/favourites` (filter existing contacts)
-  - [ ] `/contacts/groups/1` and `/contacts/groups/2` (placeholder pages)
-  - [ ] `/journals` (placeholder for future iteration)
-- [ ] Ensure sidebar state persists across page navigation
-- [ ] Add proper page transitions and loading states
-- [ ] Implement breadcrumb navigation in main content area
-- [ ] Test layout on different screen sizes (mobile, tablet, desktop)
-- [ ] Write Jest unit tests for layout state management
-- [ ] Write Playwright tests for navigation flow and responsive behavior
+- [x] Update main layout.tsx to include sidebar alongside main content area
+- [x] Create responsive grid layout (sidebar + main content) using Tailwind CSS Grid
+- [x] Implement sidebar toggle state management using React context or state
+- [x] Add routing for new navigation items:
+  - [x] `/contacts` (existing)
+  - [x] `/contacts/favourites` (filter existing contacts)
+  - [x] `/contacts/groups/1` and `/contacts/groups/2` (placeholder pages)
+  - [x] `/journals` (placeholder for future iteration)
+- [x] Ensure sidebar state persists across page navigation
+- [x] Add proper page transitions and loading states
+- [x] Implement breadcrumb navigation in main content area
+- [x] Test layout on different screen sizes (mobile, tablet, desktop)
+- [x] Write Jest unit tests for layout state management
+- [x] Write Playwright tests for navigation flow and responsive behavior
+
+**Implementation Details:**
+
+- **SidebarContext**: Global state management for sidebar visibility and section expansion with localStorage persistence
+- **Breadcrumb Component**: Automatic breadcrumb generation based on pathname with support for dynamic routes
+- **Loading Components**: Comprehensive loading states including spinners, skeletons, and overlays
+- **Layout Updates**: Container styling moved to layout.tsx for consistent spacing across all pages
+- **Responsive Design**: Mobile-first approach with proper sidebar behavior on different screen sizes
+- **Test Coverage**: 285 tests passing including new tests for SidebarContext, Breadcrumb, and loading components
 
 ### ITER1.5-004: Contact Filtering & Groups UI 🟡
 
@@ -304,7 +313,8 @@ Tasks are organized by **feature iterations** that deliver end-to-end value incr
 
 - ✅ **ITER1.5-001 COMPLETED** - Top bar redesign with global search functionality implemented
 - ✅ **ITER1.5-002 COMPLETED** - Sidebar navigation component with placeholder pages implemented
-- 🔄 **Next**: ITER1.5-003 Layout Integration & Routing (partially complete - sidebar integrated, routing complete, placeholder pages implemented)
+- ✅ **ITER1.5-003 COMPLETED** - Layout integration & routing with SidebarContext, breadcrumb navigation, and loading components
+- 🔄 **Next**: ITER1.5-004 Contact Filtering & Groups UI
 
 **Final Status:** This iteration enhances the MVP with a professional layout structure that matches the provided design, making the application much more usable and setting the foundation for future features. Sidebar navigation and placeholder pages are complete and ready for future feature implementation.
 
@@ -819,7 +829,7 @@ Use this section to track progress:
 
 ```
 Iteration 1 (Contact MVP): [x] ITER1-001 [x] ITER1-002 [x] ITER1-003 [x] ITER1-004 [x] ITER1-005
-Iteration 1.5 (Enhanced Layout): [x] ITER1.5-001 [ ] ITER1.5-002 [ ] ITER1.5-003 [ ] ITER1.5-004 [ ] ITER1.5-005
+Iteration 1.5 (Enhanced Layout): [x] ITER1.5-001 [x] ITER1.5-002 [x] ITER1.5-003 [ ] ITER1.5-004 [ ] ITER1.5-005
 Iteration 2 (Integration Foundation): [x] ITER2-001 [ ] ITER2-002 (5 slices) [ ] ITER2-003 [ ] ITER2-004 [ ] ITER2-005
   ITER2-002 Slices: [ ] Slice 1 [ ] Slice 2 [ ] Slice 3 [ ] Slice 4 [ ] Slice 5
 Iteration 3 (Extended Integrations): [ ] ITER3-001 [ ] ITER3-002 [ ] ITER3-003 [ ] ITER3-004
