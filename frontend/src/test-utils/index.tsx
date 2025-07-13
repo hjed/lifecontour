@@ -81,7 +81,7 @@ export const createMockResponses = {
 
 // Test wrapper component with providers
 interface TestWrapperProps {
-  children: React.ReactNode;
+  readonly children: React.ReactNode;
 }
 
 function TestWrapper({ children }: TestWrapperProps) {

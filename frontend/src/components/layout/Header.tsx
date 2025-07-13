@@ -13,6 +13,7 @@ import { Button } from '@/components/ui/button';
 import { UserMenu } from '@/components/auth/UserMenu';
 import { useAuth } from '@/lib/auth/AuthProvider';
 import { GlobalSearch } from '@/components/search/GlobalSearch';
+import { MobileSidebar } from './Sidebar';
 
 export function Header() {
   const { state } = useAuth();
@@ -20,8 +21,12 @@ export function Header() {
   return (
     <header className='bg-background/95 supports-[backdrop-filter]:bg-background/60 sticky top-0 z-50 w-full border-b backdrop-blur'>
       <div className='container flex h-14 items-center'>
-        {/* Home Icon - Prominent on the left */}
-        <div className='flex items-center'>
+        {/* Mobile Navigation and Home Icon */}
+        <div className='flex items-center space-x-2'>
+          {/* Mobile Sidebar - Only show on mobile */}
+          <MobileSidebar />
+          
+          {/* Home Icon */}
           <Link
             href='/'
             className='hover:text-foreground/80 text-foreground flex items-center space-x-2 transition-colors'
