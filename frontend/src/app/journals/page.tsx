@@ -32,7 +32,8 @@ export default function JournalsPage() {
           <CardContent>
             <p className='text-muted-foreground'>
               The journal system will be implemented in a future iteration.
-              You&apos;ll be able to create and manage your personal journal entries here.
+              You&apos;ll be able to create and manage your personal journal
+              entries here.
             </p>
           </CardContent>
         </Card>

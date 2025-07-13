@@ -6,7 +6,7 @@ import { render, screen } from '@testing-library/react';
 import {
   setupPlaceholderPageMocks,
   createPlaceholderPageTests,
-  PlaceholderPageConfig
+  PlaceholderPageConfig,
 } from '@/test-utils/placeholder-page';
 import JournalsPage from '../page';
 
@@ -14,8 +14,10 @@ const pageConfig: PlaceholderPageConfig = {
   title: 'Journals',
   description: 'Your journal entries will appear here.',
   pathname: '/journals',
-  implementationText: 'The journal system will be implemented in a future iteration',
-  featuresText: 'You&apos;ll be able to create and manage your personal journal entries here',
+  implementationText:
+    'The journal system will be implemented in a future iteration',
+  featuresText:
+    'You&apos;ll be able to create and manage your personal journal entries here',
   iconColorClass: 'text-green-500',
 };
 
@@ -50,6 +52,8 @@ describe('JournalsPage', () => {
     render(<JournalsPage />);
 
     // Check that the page clearly explains what will be available
-    expect(screen.getByText(/create and manage your personal journal entries/)).toBeInTheDocument();
+    expect(
+      screen.getByText(/create and manage your personal journal entries/)
+    ).toBeInTheDocument();
   });
 });
