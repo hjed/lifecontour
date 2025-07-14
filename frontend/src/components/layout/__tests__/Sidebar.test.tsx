@@ -226,8 +226,8 @@ describe('Sidebar Components', () => {
         { pathname: '/contacts', expectedActive: 'All' },
         { pathname: '/contacts/', expectedActive: 'All' },
         { pathname: '/contacts/favourites', expectedActive: 'Favourites' },
-        { pathname: '/contacts/groups/1', expectedActive: 'Group 1' },
-        { pathname: '/contacts/groups/2', expectedActive: 'Group 2' },
+        { pathname: '/contacts/tags/1', expectedActive: 'Group 1' },
+        { pathname: '/contacts/tags/2', expectedActive: 'Group 2' },
         { pathname: '/journals', expectedActive: null }, // Journals section collapsed by default
       ];
 

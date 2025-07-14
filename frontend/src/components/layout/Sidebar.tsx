@@ -73,8 +73,9 @@ const navigationSections: NavigationSection[] = [
     items: [
       { label: 'All', href: '/contacts' },
       { label: 'Favourites', href: '/contacts/favourites', icon: Star },
-      { label: 'Group 1', href: '/contacts/groups/1' },
-      { label: 'Group 2', href: '/contacts/groups/2' },
+      // TODO: ITER1.5-004 - Replace with dynamic groups (using tag system)
+      { label: 'Group 1', href: '/contacts/tags/1' },
+      { label: 'Group 2', href: '/contacts/tags/2' },
     ],
   },
   {
@@ -234,8 +235,8 @@ function SidebarContentInner({
                           item.href as
                             | '/contacts'
                             | '/contacts/favourites'
-                            | '/contacts/groups/1'
-                            | '/contacts/groups/2'
+                            | '/contacts/tags/1'
+                            | '/contacts/tags/2'
                             | '/journals'
                         }
                         onClick={onNavigate}

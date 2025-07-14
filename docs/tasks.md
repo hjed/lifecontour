@@ -205,7 +205,7 @@ Tasks are organized by **feature iterations** that deliver end-to-end value incr
 
 - [x] Create new Sidebar component using shadcn/ui components (Sheet, Button, Separator)
 - [x] Implement navigation structure from photo:
-  - [x] Contacts section with All, Favourites, Group 1, Group 2 sub-items
+  - [x] Contacts section with All, Favourites, and tag-based filtering sub-items
   - [x] Journals section with Etc sub-item (placeholder for future)
 - [x] Add proper icons using Lucide React (Users for Contacts, BookOpen for Journals)
 - [x] Implement collapsible sections with expand/collapse functionality
@@ -230,7 +230,7 @@ Tasks are organized by **feature iterations** that deliver end-to-end value incr
 **ITER1.5-002.1: Placeholder Pages Implementation** ✅ COMPLETED
 
 - [x] Implemented `/contacts/favourites` page with star icon and placeholder content
-- [x] Implemented `/contacts/groups/[id]` dynamic route for groups 1 and 2 with users icon
+- [x] Implemented `/contacts/tags/[id]` dynamic route for group filtering (using tag system) with users icon
 - [x] Implemented `/journals` page with book icon and placeholder content
 - [x] All pages use AuthGuard for authentication protection
 - [x] Consistent styling with shadcn/ui Card components and responsive design
@@ -250,7 +250,7 @@ Tasks are organized by **feature iterations** that deliver end-to-end value incr
 - [x] Add routing for new navigation items:
   - [x] `/contacts` (existing)
   - [x] `/contacts/favourites` (filter existing contacts)
-  - [x] `/contacts/groups/1` and `/contacts/groups/2` (placeholder pages)
+  - [x] `/contacts/tags/[id]` (group filtering using tag system)
   - [x] `/journals` (placeholder for future iteration)
 - [x] Ensure sidebar state persists across page navigation
 - [x] Add proper page transitions and loading states
@@ -270,7 +270,7 @@ Tasks are organized by **feature iterations** that deliver end-to-end value incr
 
 ### ITER1.5-004: Contact Filtering & Groups UI 🟡
 
-**Description:** Implement contact filtering and basic group management to support sidebar navigation
+**Description:** Implement contact filtering and group management using existing tag system to support sidebar navigation
 **Dependencies:** ITER1.5-003
 **Acceptance Criteria:**
 
@@ -278,17 +278,20 @@ Tasks are organized by **feature iterations** that deliver end-to-end value incr
   - [ ] Add "favourite" boolean field to contact model (backend)
   - [ ] Create API endpoints for toggling contact favourites
   - [ ] Add star icon to contact list and detail views
-- [ ] Implement basic contact groups:
-  - [ ] Create simple group assignment UI (dropdown or tags)
-  - [ ] Add group filtering to existing contact search
-  - [ ] Create group management interface (create, rename, delete groups)
+- [ ] Implement contact groups using existing tag system:
+  - [ ] Present tags as "groups" in the UI for better user experience
+  - [ ] Update sidebar to display actual tags as groups instead of hardcoded "Group 1, Group 2"
+  - [ ] Add group-based filtering using existing tag filtering functionality
+  - [ ] Enhance group management UI (leveraging existing tag CRUD operations)
 - [ ] Update contact list views to support filtering:
   - [ ] `/contacts/favourites` - show only favourited contacts
-  - [ ] `/contacts/groups/[id]` - show contacts in specific group
-- [ ] Add group indicators to contact cards and list items
+  - [ ] `/contacts/tags/[id]` - show contacts with specific group (using tag ID, presents as "groups" in UI)
+- [ ] Add group indicators to contact cards and list items (using existing tag display)
 - [ ] Ensure search functionality works within filtered views
 - [ ] Write Jest unit tests for filtering logic and group management
 - [ ] Write Playwright tests for complete filtering and favourites workflow
+
+**Note:** In this system, "groups" and "tags" are the same concept - we use the existing comprehensive tag system (with hierarchical support, color coding, and full CRUD operations) but present it as "groups" in the UI for better user experience. This simplifies implementation by reusing existing tag infrastructure.
 
 ### ITER1.5-005: Mobile Navigation & Accessibility 🟢
 

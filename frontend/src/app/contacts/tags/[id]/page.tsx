@@ -2,7 +2,8 @@
  * Contact groups page - placeholder for ITER1.5-004
  *
  * This page will show contacts in a specific group when the groups
- * functionality is implemented in ITER1.5-004.
+ * functionality is implemented in ITER1.5-004. Groups are implemented
+ * using the existing tag system (groups and tags are the same concept).
  */
 
 'use client';
@@ -38,7 +39,7 @@ export default function ContactGroupPage() {
           <p className='text-muted-foreground'>
             The contact groups functionality will be implemented in ITER1.5-004.
             You&apos;ll be able to organize your contacts into groups and view
-            them here.
+            them here. Groups are implemented using the existing tag system.
           </p>
         </CardContent>
       </Card>
