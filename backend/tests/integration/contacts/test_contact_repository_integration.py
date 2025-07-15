@@ -286,3 +286,83 @@ class TestContactRepositoryIntegration:
         names = [f"{c.first_name} {c.last_name}" for c in all_contacts]
         assert "John Doe" in names
         assert "Jane Smith" in names
+
+    @pytest.mark.asyncio
+    async def test_save_contact_with_favourite(self, contact_repo):
+        """Test saving a contact with favourite flag."""
+        # Arrange
+        contact = Contact(first_name="Favourite", last_name="User", is_favourite=True)
+
+        # Act
+        saved_contact = await contact_repo.save(contact)
+
+        # Assert
+        assert saved_contact.id is not None
+        assert saved_contact.is_favourite is True
+
+        # Verify retrieval
+        retrieved = await contact_repo.find_by_id(saved_contact.id)
+        assert retrieved is not None
+        assert retrieved.is_favourite is True
+
+    @pytest.mark.asyncio
+    async def test_get_favourite_contacts(self, contact_repo):
+        """Test getting favourite contacts."""
+        # Arrange - Create contacts with different favourite status
+        contact1 = Contact(first_name="Fav1", last_name="User", is_favourite=True)
+        contact2 = Contact(first_name="Fav2", last_name="User", is_favourite=True)
+        contact3 = Contact(first_name="Regular", last_name="User", is_favourite=False)
+
+        await contact_repo.save(contact1)
+        await contact_repo.save(contact2)
+        await contact_repo.save(contact3)
+
+        # Act
+        favourites = await contact_repo.get_favourite_contacts()
+
+        # Assert
+        assert len(favourites) >= 2  # At least the two we just created
+        favourite_names = [c.first_name for c in favourites]
+        assert "Fav1" in favourite_names
+        assert "Fav2" in favourite_names
+        assert "Regular" not in favourite_names
+
+    @pytest.mark.asyncio
+    async def test_get_favourite_contacts_count(self, contact_repo):
+        """Test getting count of favourite contacts."""
+        # Arrange - Create contacts with different favourite status
+        contact1 = Contact(first_name="FavCount1", last_name="User", is_favourite=True)
+        contact2 = Contact(first_name="FavCount2", last_name="User", is_favourite=True)
+        contact3 = Contact(first_name="RegularCount", last_name="User", is_favourite=False)
+
+        await contact_repo.save(contact1)
+        await contact_repo.save(contact2)
+        await contact_repo.save(contact3)
+
+        # Act
+        count = await contact_repo.get_favourite_contacts_count()
+
+        # Assert
+        assert count >= 2  # At least the two we just created
+
+    @pytest.mark.asyncio
+    async def test_get_contacts_by_filters_favourite_only(self, contact_repo):
+        """Test filtering contacts by favourite status."""
+        # Arrange - Create contacts with different favourite status
+        contact1 = Contact(first_name="FilterFav1", last_name="User", is_favourite=True)
+        contact2 = Contact(first_name="FilterFav2", last_name="User", is_favourite=True)
+        contact3 = Contact(first_name="FilterReg", last_name="User", is_favourite=False)
+
+        await contact_repo.save(contact1)
+        await contact_repo.save(contact2)
+        await contact_repo.save(contact3)
+
+        # Act
+        filtered = await contact_repo.get_contacts_by_filters(is_favourite=True)
+
+        # Assert
+        assert len(filtered) >= 2  # At least the two we just created
+        filtered_names = [c.first_name for c in filtered]
+        assert "FilterFav1" in filtered_names
+        assert "FilterFav2" in filtered_names
+        assert "FilterReg" not in filtered_names

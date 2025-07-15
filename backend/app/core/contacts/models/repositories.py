@@ -51,6 +51,27 @@ class ContactRepository(ABC):
         pass
 
     @abstractmethod
+    async def get_favourite_contacts(self, limit: int = 100, offset: int = 0) -> list[Contact]:
+        """Get all favourite contacts with pagination."""
+        pass
+
+    @abstractmethod
+    async def get_favourite_contacts_count(self) -> int:
+        """Get total count of favourite contacts."""
+        pass
+
+    @abstractmethod
+    async def get_contacts_by_filters(
+        self,
+        is_favourite: bool | None = None,
+        tag_ids: list[int] | None = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[Contact]:
+        """Get contacts filtered by favourite status and/or tags."""
+        pass
+
+    @abstractmethod
     async def add_method(self, contact_id: int, method: ContactMethod) -> ContactMethod:
         """Add a contact method."""
         pass

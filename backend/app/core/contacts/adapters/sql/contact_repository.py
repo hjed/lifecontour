@@ -33,7 +33,7 @@ class SqlContactRepository(ContactRepository):
         # Get contact basic info
         contact_query = text(
             """
-            SELECT id, first_name, last_name, middle_name, nick_name, created_at, updated_at
+            SELECT id, first_name, last_name, middle_name, nick_name, is_favourite, created_at, updated_at
             FROM contacts WHERE id = :contact_id
         """
         )
@@ -50,6 +50,7 @@ class SqlContactRepository(ContactRepository):
             last_name=contact_row.last_name,
             middle_name=contact_row.middle_name,
             nick_name=contact_row.nick_name,
+            is_favourite=contact_row.is_favourite,
             created_at=contact_row.created_at,
             updated_at=contact_row.updated_at,
         )
@@ -235,8 +236,8 @@ class SqlContactRepository(ContactRepository):
                 # Insert new contact
                 query = text(
                     """
-                    INSERT INTO contacts (first_name, last_name, middle_name, nick_name)
-                    VALUES (:first_name, :last_name, :middle_name, :nick_name)
+                    INSERT INTO contacts (first_name, last_name, middle_name, nick_name, is_favourite)
+                    VALUES (:first_name, :last_name, :middle_name, :nick_name, :is_favourite)
                     RETURNING id, created_at, updated_at
                 """
                 )
@@ -247,6 +248,7 @@ class SqlContactRepository(ContactRepository):
                         "last_name": contact.last_name,
                         "middle_name": contact.middle_name,
                         "nick_name": contact.nick_name,
+                        "is_favourite": contact.is_favourite,
                     },
                 )
                 row = result.fetchone()
@@ -262,7 +264,7 @@ class SqlContactRepository(ContactRepository):
                     UPDATE contacts
                     SET first_name = :first_name, last_name = :last_name,
                         middle_name = :middle_name, nick_name = :nick_name,
-                        updated_at = NOW()
+                        is_favourite = :is_favourite, updated_at = NOW()
                     WHERE id = :id
                     RETURNING updated_at
                 """
@@ -275,6 +277,7 @@ class SqlContactRepository(ContactRepository):
                         "last_name": contact.last_name,
                         "middle_name": contact.middle_name,
                         "nick_name": contact.nick_name,
+                        "is_favourite": contact.is_favourite,
                     },
                 )
                 row = result.fetchone()
@@ -592,3 +595,103 @@ class SqlContactRepository(ContactRepository):
         """
         )
         await self.conn.execute(query, {"contact_id": contact_id, "tag_id": tag_id})
+
+    async def get_favourite_contacts(self, limit: int = 100, offset: int = 0) -> list[Contact]:
+        """Get all favourite contacts with pagination."""
+        query = text(
+            """
+            SELECT id FROM contacts
+            WHERE is_favourite = true
+            ORDER BY first_name, last_name
+            LIMIT :limit OFFSET :offset
+            """
+        )
+        result = await self.conn.execute(query, {"limit": limit, "offset": offset})
+        contact_ids = [row.id for row in result.fetchall()]
+
+        contacts = []
+        for contact_id in contact_ids:
+            contact = await self.find_by_id(contact_id)
+            if contact:
+                contacts.append(contact)
+        return contacts
+
+    async def get_favourite_contacts_count(self) -> int:
+        """Get total count of favourite contacts."""
+        query = text(
+            """
+            SELECT COUNT(*) as count
+            FROM contacts
+            WHERE is_favourite = true
+            """
+        )
+        result = await self.conn.execute(query)
+        row = result.fetchone()
+        return row.count if row else 0
+
+    async def get_contacts_by_filters(
+        self,
+        is_favourite: bool | None = None,
+        tag_ids: list[int] | None = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[Contact]:
+        """Get contacts filtered by favourite status and/or tags."""
+        # Build the query dynamically based on filters
+        query_parts = [
+            """
+            SELECT DISTINCT c.id, c.first_name, c.last_name
+            FROM contacts c
+            """
+        ]
+
+        # Add tag join if filtering by tags
+        if tag_ids:
+            query_parts.append(
+                """
+                JOIN contact_tags ct ON c.id = ct.contact_id
+                """
+            )
+
+        # Start WHERE clause
+        where_parts = []
+        params = {"limit": limit, "offset": offset}
+
+        # Add favourite filter if specified
+        if is_favourite is not None:
+            where_parts.append("c.is_favourite = :is_favourite")
+            params["is_favourite"] = is_favourite
+
+        # Add tag filter if specified
+        if tag_ids:
+            tag_placeholders = []
+            for i, tag_id in enumerate(tag_ids):
+                param_name = f"tag_id_{i}"
+                tag_placeholders.append(f":{ param_name}")
+                params[param_name] = tag_id
+
+            where_parts.append(f"ct.tag_id IN ({', '.join(tag_placeholders)})")
+
+        # Combine WHERE parts if any
+        if where_parts:
+            query_parts.append("WHERE " + " AND ".join(where_parts))
+
+        # Add ORDER BY and LIMIT
+        query_parts.append(
+            """
+            ORDER BY c.first_name, c.last_name
+            LIMIT :limit OFFSET :offset
+            """
+        )
+
+        # Execute the query
+        query = text("".join(query_parts))
+        result = await self.conn.execute(query, params)
+        contact_ids = [row.id for row in result.fetchall()]
+
+        contacts = []
+        for contact_id in contact_ids:
+            contact = await self.find_by_id(contact_id)
+            if contact:
+                contacts.append(contact)
+        return contacts

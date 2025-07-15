@@ -247,6 +247,7 @@ class TestContact:
         assert contact.last_name is None
         assert contact.middle_name is None
         assert contact.nick_name is None
+        assert contact.is_favourite is False  # Default should be False
         assert len(contact.methods) == 0
         assert len(contact.addresses) == 0
         assert len(contact.notes) == 0
@@ -261,6 +262,7 @@ class TestContact:
             middle_name="Michael",
             nick_name="Johnny",
             id=1,
+            is_favourite=True,
             created_at=now,
             updated_at=now,
         )
@@ -269,6 +271,7 @@ class TestContact:
         assert contact.middle_name == "Michael"
         assert contact.nick_name == "Johnny"
         assert contact.id == 1
+        assert contact.is_favourite is True
         assert contact.created_at == now
         assert contact.updated_at == now
 
@@ -465,3 +468,48 @@ class TestContact:
         # Remove non-existing tag - should not error
         contact.remove_tag(999)
         assert len(contact.tags) == 1
+
+    def test_favourite_default_false(self):
+        """Test that is_favourite defaults to False."""
+        contact = Contact(first_name="John")
+        assert contact.is_favourite is False
+
+    def test_favourite_can_be_set_true(self):
+        """Test that is_favourite can be set to True."""
+        contact = Contact(first_name="John", is_favourite=True)
+        assert contact.is_favourite is True
+
+    def test_favourite_can_be_set_false_explicitly(self):
+        """Test that is_favourite can be explicitly set to False."""
+        contact = Contact(first_name="John", is_favourite=False)
+        assert contact.is_favourite is False
+
+    def test_toggle_favourite_method(self):
+        """Test toggle_favourite method."""
+        contact = Contact(first_name="John")
+        assert contact.is_favourite is False
+
+        # Toggle to True
+        contact.toggle_favourite()
+        assert contact.is_favourite is True
+
+        # Toggle back to False
+        contact.toggle_favourite()
+        assert contact.is_favourite is False
+
+    def test_set_favourite_method(self):
+        """Test set_favourite method."""
+        contact = Contact(first_name="John")
+        assert contact.is_favourite is False
+
+        # Set to True
+        contact.set_favourite(True)
+        assert contact.is_favourite is True
+
+        # Set to False
+        contact.set_favourite(False)
+        assert contact.is_favourite is False
+
+        # Set to True again
+        contact.set_favourite(True)
+        assert contact.is_favourite is True
