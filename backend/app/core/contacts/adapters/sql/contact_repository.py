@@ -680,13 +680,16 @@ class SqlContactRepository(ContactRepository):
 
         # Add tag filter if specified
         if tag_ids:
-            tag_placeholders = []
-            for i, tag_id in enumerate(tag_ids):
-                param_name = f"tag_id_{i}"
-                tag_placeholders.append(f":{ param_name}")
-                params[param_name] = tag_id
+            # Create safe parameter names and placeholders for tag IDs
+            tag_param_placeholders = []
+            for tag_index, tag_id_value in enumerate(tag_ids):
+                # Use explicit, safe parameter naming pattern
+                tag_param_name = f"tag_id_param_{tag_index}"
+                tag_param_placeholders.append(f":{tag_param_name}")
+                params[tag_param_name] = tag_id_value
 
-            where_parts.append(f"ct.tag_id IN ({', '.join(tag_placeholders)})")
+            tag_placeholders_sql = ", ".join(tag_param_placeholders)
+            where_parts.append(f"ct.tag_id IN ({tag_placeholders_sql})")
 
         # Combine WHERE parts if any
         if where_parts:

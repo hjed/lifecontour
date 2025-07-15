@@ -36,6 +36,6 @@ def downgrade() -> None:
     """Remove is_favourite field from contacts table."""
     # Drop the index first
     op.drop_index("ix_contacts_is_favourite", table_name="contacts")
-    
+
     # Then drop the column
     op.drop_column("contacts", "is_favourite")
