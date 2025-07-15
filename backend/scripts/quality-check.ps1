@@ -11,10 +11,13 @@ uv run ruff check .
 Write-Host "Step 2: Ruff formatting check..." -ForegroundColor Yellow
 uv run ruff format --check .
 
-Write-Host "Step 3: Running unit tests..." -ForegroundColor Yellow
+Write-Host "Step 3: MyPy type checking..." -ForegroundColor Yellow
+uv run mypy app/
+
+Write-Host "Step 4: Running unit tests..." -ForegroundColor Yellow
 uv run python -m pytest tests/unit/ -v
 
-Write-Host "Step 4: Running integration tests..." -ForegroundColor Yellow
+Write-Host "Step 5: Running integration tests..." -ForegroundColor Yellow
 uv run python -m pytest tests/integration/ -v
 
 Write-Host "All quality checks passed!" -ForegroundColor Green
