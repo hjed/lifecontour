@@ -644,7 +644,7 @@ class SqlContactRepository(ContactRepository):
         )
         result = await self.conn.execute(query)
         row = result.fetchone()
-        return row.count if row else 0
+        return row[0] if row else 0
 
     async def get_contacts_by_filters(
         self,
@@ -749,9 +749,10 @@ class SqlContactRepository(ContactRepository):
         result = await self.conn.execute(methods_query, {"contact_ids": contact_ids})
         for row in result:
             method = ContactMethod(
-                id=row.id,
                 method_type=MethodType(row.method_type),
                 value=row.value,
+                contact_id=row.contact_id,
+                id=row.id,
                 label=row.label,
                 is_primary=row.is_primary,
                 created_at=row.created_at,
@@ -772,14 +773,15 @@ class SqlContactRepository(ContactRepository):
         result = await self.conn.execute(addresses_query, {"contact_ids": contact_ids})
         for row in result:
             address = ContactAddress(
+                street_line_1=row.street_line_1,
+                country_code=row.country_code,
+                contact_id=row.contact_id,
                 id=row.id,
                 label=row.label,
-                street_line_1=row.street_line_1,
                 street_line_2=row.street_line_2,
                 locality=row.locality,
                 region=row.region,
                 postal_code=row.postal_code,
-                country_code=row.country_code,
                 is_primary=row.is_primary,
                 created_at=row.created_at,
                 updated_at=row.updated_at,
@@ -798,8 +800,9 @@ class SqlContactRepository(ContactRepository):
         result = await self.conn.execute(notes_query, {"contact_ids": contact_ids})
         for row in result:
             note = ContactNote(
-                id=row.id,
                 content=row.content,
+                contact_id=row.contact_id,
+                id=row.id,
                 created_at=row.created_at,
                 updated_at=row.updated_at,
             )
