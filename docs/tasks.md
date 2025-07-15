@@ -268,16 +268,100 @@ Tasks are organized by **feature iterations** that deliver end-to-end value incr
 - **Responsive Design**: Mobile-first approach with proper sidebar behavior on different screen sizes
 - **Test Coverage**: 285 tests passing including new tests for SidebarContext, Breadcrumb, and loading components
 
-### ITER1.5-004: Contact Filtering & Groups UI 🟡
+### ITER1.5-004: Contact Filtering & Groups (Backend + Frontend) 🟡
 
-**Description:** Implement contact filtering and group management using existing tag system to support sidebar navigation
+**Description:** Implement complete contact filtering and group management using existing tag system to support sidebar navigation
 **Dependencies:** ITER1.5-003
+**Status:** IN PROGRESS
+
+#### ITER1.5-004A: Backend Support for Contact Filtering & Groups 🟡
+
+**Description:** Implement backend support for contact filtering and favourites functionality to enable the new navigation structure
+
+#### Phase 1: Foundation (Database & Domain) 🟡
+
+**Description:** Database schema and domain model updates for favourites support
+
+**Acceptance Criteria:**
+
+- [ ] Create database migration for `is_favourite` boolean field in contacts table
+- [ ] Update `Contact` domain entity to include `is_favourite` field
+- [ ] Update `ContactBuilder` to handle favourite status
+- [ ] Add domain events for favourite changes
+- [ ] Write unit tests for domain changes
+- [ ] Update repository interfaces for favourite operations
+
+#### Phase 2: Service Layer 🟡
+
+**Description:** Business logic for favourites and enhanced filtering
+
+**Dependencies:** Phase 1
+
+**Acceptance Criteria:**
+
+- [ ] Add `toggle_contact_favourite()` method to `ContactService`
+- [ ] Add `get_favourite_contacts()` method
+- [ ] Enhance `get_contacts_paginated()` to support filtering by tags and favourites
+- [ ] Add validation for favourite operations
+- [ ] Update history tracking for favourite changes
+- [ ] Write comprehensive service layer unit tests
+
+#### Phase 3: API Layer 🟡
+
+**Description:** REST API endpoints for tags and enhanced contact filtering
+
+**Dependencies:** Phase 2
+
+**Acceptance Criteria:**
+
+- [ ] Create dedicated `/api/tags` endpoint for listing all tags
+- [ ] Add `/api/tags/{id}` endpoint for tag details
+- [ ] Enhance `/api/contacts` endpoint with filtering parameters:
+  - [ ] `tags[]` - filter by tag IDs
+  - [ ] `favourite` - filter by favourite status
+  - [ ] `search` - text search
+- [ ] Add `/api/contacts/{id}/favourite` endpoint for toggling favourites
+- [ ] Update API schemas to include favourite status
+- [ ] Write API integration tests with real database
+
+#### Phase 4: Search & MCP Integration 🟢
+
+**Description:** Update search indexing and MCP tools
+
+**Dependencies:** Phase 3
+
+**Acceptance Criteria:**
+
+- [ ] Add `is_favourite` field to MeiliSearch contact index
+- [ ] Update search filters to support favourite filtering
+- [ ] Update MCP tools for favourite operations
+- [ ] Add `list_tags` MCP tool
+- [ ] Write integration tests for search and MCP
+
+#### Phase 5: Testing & Documentation 🟢
+
+**Description:** Comprehensive testing and documentation
+
+**Dependencies:** Phase 4
+
+**Acceptance Criteria:**
+
+- [ ] End-to-end Playwright tests for filtering workflows
+- [ ] Performance testing for filtered queries
+- [ ] Update API documentation
+- [ ] Security review of new endpoints
+
+#### ITER1.5-004B: Frontend Contact Filtering & Groups UI 🟡
+
+**Description:** Implement frontend UI for contact filtering and group management using the backend APIs
+**Dependencies:** ITER1.5-004A Phase 3
+
 **Acceptance Criteria:**
 
 - [ ] Add favourites functionality to existing contact management:
-  - [ ] Add "favourite" boolean field to contact model (backend)
-  - [ ] Create API endpoints for toggling contact favourites
   - [ ] Add star icon to contact list and detail views
+  - [ ] Implement favourite toggle functionality
+  - [ ] Update contact cards to show favourite status
 - [ ] Implement contact groups using existing tag system:
   - [ ] Present tags as "groups" in the UI for better user experience
   - [ ] Update sidebar to display actual tags as groups instead of hardcoded "Group 1, Group 2"

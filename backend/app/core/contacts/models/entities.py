@@ -142,6 +142,7 @@ class Contact:
     last_name: str | None = None
     middle_name: str | None = None
     nick_name: str | None = None
+    is_favourite: bool = False
     created_at: datetime | None = None
     updated_at: datetime | None = None
 
@@ -224,3 +225,11 @@ class Contact:
     def remove_tag(self, tag_id: int) -> None:
         """Remove a tag from the contact."""
         self.tags = [tag for tag in self.tags if tag.id != tag_id]
+
+    def toggle_favourite(self) -> None:
+        """Toggle the favourite status of the contact."""
+        self.is_favourite = not self.is_favourite
+
+    def set_favourite(self, is_favourite: bool) -> None:
+        """Set the favourite status of the contact."""
+        self.is_favourite = is_favourite

@@ -203,6 +203,7 @@ TEST_DATABASE_SCHEMA_STATEMENTS = [
         last_name VARCHAR(100),
         middle_name VARCHAR(100),
         nick_name VARCHAR(100),
+        is_favourite BOOLEAN DEFAULT FALSE NOT NULL,
         created_at TIMESTAMP DEFAULT NOW(),
         updated_at TIMESTAMP DEFAULT NOW()
     )""",
