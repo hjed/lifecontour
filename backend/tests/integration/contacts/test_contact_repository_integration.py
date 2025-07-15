@@ -333,7 +333,9 @@ class TestContactRepositoryIntegration:
         # Arrange - Create contacts with different favourite status
         contact1 = Contact(first_name="FavCount1", last_name="User", is_favourite=True)
         contact2 = Contact(first_name="FavCount2", last_name="User", is_favourite=True)
-        contact3 = Contact(first_name="RegularCount", last_name="User", is_favourite=False)
+        contact3 = Contact(
+            first_name="RegularCount", last_name="User", is_favourite=False
+        )
 
         await contact_repo.save(contact1)
         await contact_repo.save(contact2)
