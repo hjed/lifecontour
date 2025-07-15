@@ -598,22 +598,37 @@ class SqlContactRepository(ContactRepository):
 
     async def get_favourite_contacts(self, limit: int = 100, offset: int = 0) -> list[Contact]:
         """Get all favourite contacts with pagination."""
+        # Single query to get all contact data
         query = text(
             """
-            SELECT id FROM contacts
+            SELECT id, first_name, last_name, middle_name, nick_name,
+                   is_favourite, created_at, updated_at
+            FROM contacts
             WHERE is_favourite = true
             ORDER BY first_name, last_name
             LIMIT :limit OFFSET :offset
             """
         )
         result = await self.conn.execute(query, {"limit": limit, "offset": offset})
-        contact_ids = [row.id for row in result.fetchall()]
-
         contacts = []
-        for contact_id in contact_ids:
-            contact = await self.find_by_id(contact_id)
-            if contact:
-                contacts.append(contact)
+
+        for row in result:
+            contact = Contact(
+                id=row.id,
+                first_name=row.first_name,
+                last_name=row.last_name,
+                middle_name=row.middle_name,
+                nick_name=row.nick_name,
+                is_favourite=row.is_favourite,
+                created_at=row.created_at,
+                updated_at=row.updated_at,
+            )
+            contacts.append(contact)
+
+        # Batch load related entities for all contacts
+        if contacts:
+            await self._batch_load_contact_relations(contacts)
+
         return contacts
 
     async def get_favourite_contacts_count(self) -> int:
@@ -640,7 +655,8 @@ class SqlContactRepository(ContactRepository):
         # Build the query dynamically based on filters
         query_parts = [
             """
-            SELECT DISTINCT c.id, c.first_name, c.last_name
+            SELECT DISTINCT c.id, c.first_name, c.last_name, c.middle_name, c.nick_name,
+                   c.is_favourite, c.created_at, c.updated_at
             FROM contacts c
             """
         ]
@@ -687,11 +703,123 @@ class SqlContactRepository(ContactRepository):
         # Execute the query
         query = text("".join(query_parts))
         result = await self.conn.execute(query, params)
-        contact_ids = [row.id for row in result.fetchall()]
-
         contacts = []
-        for contact_id in contact_ids:
-            contact = await self.find_by_id(contact_id)
-            if contact:
-                contacts.append(contact)
+
+        for row in result:
+            contact = Contact(
+                id=row.id,
+                first_name=row.first_name,
+                last_name=row.last_name,
+                middle_name=row.middle_name,
+                nick_name=row.nick_name,
+                is_favourite=row.is_favourite,
+                created_at=row.created_at,
+                updated_at=row.updated_at,
+            )
+            contacts.append(contact)
+
+        # Batch load related entities for all contacts
+        if contacts:
+            await self._batch_load_contact_relations(contacts)
+
         return contacts
+
+    async def _batch_load_contact_relations(self, contacts: list[Contact]) -> None:
+        """Efficiently load all related entities for a list of contacts in batches."""
+        if not contacts:
+            return
+
+        contact_ids = [contact.id for contact in contacts]
+        contact_map = {contact.id: contact for contact in contacts}
+
+        # Batch load contact methods
+        methods_query = text(
+            """
+            SELECT contact_id, id, method_type, value, label, is_primary, created_at, updated_at
+            FROM contact_methods
+            WHERE contact_id = ANY(:contact_ids)
+            ORDER BY contact_id, is_primary DESC, created_at ASC
+            """
+        )
+        result = await self.conn.execute(methods_query, {"contact_ids": contact_ids})
+        for row in result:
+            method = ContactMethod(
+                id=row.id,
+                method_type=MethodType(row.method_type),
+                value=row.value,
+                label=row.label,
+                is_primary=row.is_primary,
+                created_at=row.created_at,
+                updated_at=row.updated_at,
+            )
+            contact_map[row.contact_id].methods.append(method)
+
+        # Batch load contact addresses
+        addresses_query = text(
+            """
+            SELECT contact_id, id, label, street_line_1, street_line_2, locality, region,
+                   postal_code, country_code, is_primary, created_at, updated_at
+            FROM contact_addresses
+            WHERE contact_id = ANY(:contact_ids)
+            ORDER BY contact_id, is_primary DESC, created_at ASC
+            """
+        )
+        result = await self.conn.execute(addresses_query, {"contact_ids": contact_ids})
+        for row in result:
+            address = ContactAddress(
+                id=row.id,
+                label=row.label,
+                street_line_1=row.street_line_1,
+                street_line_2=row.street_line_2,
+                locality=row.locality,
+                region=row.region,
+                postal_code=row.postal_code,
+                country_code=row.country_code,
+                is_primary=row.is_primary,
+                created_at=row.created_at,
+                updated_at=row.updated_at,
+            )
+            contact_map[row.contact_id].addresses.append(address)
+
+        # Batch load contact notes
+        notes_query = text(
+            """
+            SELECT contact_id, id, content, created_at, updated_at
+            FROM contact_notes
+            WHERE contact_id = ANY(:contact_ids)
+            ORDER BY contact_id, created_at DESC
+            """
+        )
+        result = await self.conn.execute(notes_query, {"contact_ids": contact_ids})
+        for row in result:
+            note = ContactNote(
+                id=row.id,
+                content=row.content,
+                created_at=row.created_at,
+                updated_at=row.updated_at,
+            )
+            contact_map[row.contact_id].notes.append(note)
+
+        # Batch load contact tags
+        tags_query = text(
+            """
+            SELECT ct.contact_id, t.id, t.name, t.parent_id, t.color, t.description,
+                   t.created_at, t.updated_at
+            FROM tags t
+            JOIN contact_tags ct ON t.id = ct.tag_id
+            WHERE ct.contact_id = ANY(:contact_ids)
+            ORDER BY ct.contact_id, t.name
+            """
+        )
+        result = await self.conn.execute(tags_query, {"contact_ids": contact_ids})
+        for row in result:
+            tag = Tag(
+                id=row.id,
+                name=row.name,
+                parent_id=row.parent_id,
+                color=row.color,
+                description=row.description,
+                created_at=row.created_at,
+                updated_at=row.updated_at,
+            )
+            contact_map[row.contact_id].tags.append(tag)
