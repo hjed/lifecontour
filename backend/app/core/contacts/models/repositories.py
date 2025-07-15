@@ -51,7 +51,9 @@ class ContactRepository(ABC):
         pass
 
     @abstractmethod
-    async def get_favourite_contacts(self, limit: int = 100, offset: int = 0) -> list[Contact]:
+    async def get_favourite_contacts(
+        self, limit: int = 100, offset: int = 0
+    ) -> list[Contact]:
         """Get all favourite contacts with pagination."""
         pass
 

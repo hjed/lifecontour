@@ -596,7 +596,9 @@ class SqlContactRepository(ContactRepository):
         )
         await self.conn.execute(query, {"contact_id": contact_id, "tag_id": tag_id})
 
-    async def get_favourite_contacts(self, limit: int = 100, offset: int = 0) -> list[Contact]:
+    async def get_favourite_contacts(
+        self, limit: int = 100, offset: int = 0
+    ) -> list[Contact]:
         """Get all favourite contacts with pagination."""
         # Single query to get all contact data
         query = text(
