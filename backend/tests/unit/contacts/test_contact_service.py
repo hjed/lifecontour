@@ -82,14 +82,20 @@ class TestContactService:
         """Test successful contact favourite toggle."""
         # Arrange
         contact_id = 1
-        existing_contact = Contact(first_name="John", last_name="Doe", id=contact_id, is_favourite=False)
-        updated_contact = Contact(first_name="John", last_name="Doe", id=contact_id, is_favourite=True)
+        existing_contact = Contact(
+            first_name="John", last_name="Doe", id=contact_id, is_favourite=False
+        )
+        updated_contact = Contact(
+            first_name="John", last_name="Doe", id=contact_id, is_favourite=True
+        )
 
         mock_contact_repo.find_by_id.return_value = existing_contact
         mock_contact_repo.save.return_value = updated_contact
 
         # Act
-        result = await contact_service.toggle_contact_favourite(contact_id, mock_transaction)
+        result = await contact_service.toggle_contact_favourite(
+            contact_id, mock_transaction
+        )
 
         # Assert
         assert result.is_favourite is True
