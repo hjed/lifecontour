@@ -943,10 +943,35 @@ class ContactService:
         return await self.contact_repo.get_all(limit, offset)
 
     async def get_contacts_paginated(
-        self, limit: int = 20, offset: int = 0
+        self,
+        limit: int = 20,
+        offset: int = 0,
+        is_favourite: bool | None = None,
+        tag_ids: list[int] | None = None,
     ) -> list[Contact]:
-        """Get contacts with pagination (alias for get_all_contacts)."""
-        return await self.get_all_contacts(limit, offset)
+        """
+        Get contacts with pagination and optional filtering.
+
+        Args:
+            limit: Maximum number of contacts to return
+            offset: Number of contacts to skip
+            is_favourite: Filter by favourite status (None for no filter)
+            tag_ids: Filter by tag IDs (None for no filter)
+
+        Returns:
+            List of contacts matching the filters
+        """
+        # If no filters are applied, use the existing get_all method
+        if is_favourite is None and tag_ids is None:
+            return await self.get_all_contacts(limit, offset)
+
+        # Use the filtered method when filters are applied
+        return await self.contact_repo.get_contacts_by_filters(
+            is_favourite=is_favourite,
+            tag_ids=tag_ids,
+            limit=limit,
+            offset=offset,
+        )
 
     async def get_contacts_count(self) -> int:
         """Get total count of contacts."""
@@ -959,3 +984,60 @@ class ContactService:
     async def get_contact_history(self, contact_id: int, limit: int = 50) -> list[Any]:
         """Get contact history."""
         return await self.history_service.get_contact_history(contact_id, limit)
+
+    async def toggle_contact_favourite(
+        self, contact_id: int, transaction: AsyncConnection
+    ) -> Contact:
+        """
+        Toggle the favourite status of a contact.
+
+        Args:
+            contact_id: ID of the contact to toggle
+            transaction: Database transaction
+
+        Returns:
+            Updated contact with toggled favourite status
+
+        Raises:
+            ContactValidationError: If contact not found
+        """
+
+        async def _toggle_operation() -> Contact:
+            # Find the contact
+            contact = await self.contact_repo.find_by_id(contact_id)
+            if not contact:
+                raise ContactValidationError("id", "Contact not found")
+
+            # Toggle favourite status
+            old_favourite = contact.is_favourite
+            contact.toggle_favourite()
+
+            # Save the updated contact
+            updated_contact = await self.contact_repo.save(contact)
+
+            # Record history and publish event
+            changed_fields = {
+                "is_favourite": {"old": old_favourite, "new": contact.is_favourite}
+            }
+            await self._publish_contact_updated_events(
+                updated_contact, changed_fields, transaction
+            )
+
+            return updated_contact
+
+        return cast(Contact, await self._execute_with_retry(_toggle_operation))
+
+    async def get_favourite_contacts(
+        self, limit: int = 100, offset: int = 0
+    ) -> list[Contact]:
+        """
+        Get all favourite contacts with pagination.
+
+        Args:
+            limit: Maximum number of contacts to return
+            offset: Number of contacts to skip
+
+        Returns:
+            List of favourite contacts
+        """
+        return await self.contact_repo.get_favourite_contacts(limit, offset)

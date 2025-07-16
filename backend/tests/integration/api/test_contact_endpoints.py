@@ -433,3 +433,94 @@ class TestContactEndpoints:
         assert len(contact_methods) == 1
         assert contact_methods[0]["attributes"]["method_type"] == "email"
         assert contact_methods[0]["attributes"]["value"] == "alice@newcompany.com"
+
+    # Phase 3 Tests: Favourite functionality and filtering
+    async def test_toggle_contact_favourite_success(self, integration_api_client):
+        """Test successful contact favourite toggle."""
+        client = integration_api_client
+
+        # Create a contact first
+        contact_data = {
+            "data": {
+                "type": "contact",
+                "attributes": {
+                    "first_name": "John",
+                    "last_name": "Doe",
+                    "is_favourite": False
+                }
+            }
+        }
+
+        create_response = await client.post("/api/contacts", json=contact_data)
+        assert create_response.status_code == 201
+        contact_id = create_response.json()["data"]["id"]
+
+        # Toggle favourite to True
+        toggle_response = await client.post(f"/api/contacts/{contact_id}/favourite")
+        assert toggle_response.status_code == 200
+
+        toggle_data = toggle_response.json()
+        assert toggle_data["data"]["attributes"]["is_favourite"] is True
+
+        # Toggle favourite back to False
+        toggle_response2 = await client.post(f"/api/contacts/{contact_id}/favourite")
+        assert toggle_response2.status_code == 200
+
+        toggle_data2 = toggle_response2.json()
+        assert toggle_data2["data"]["attributes"]["is_favourite"] is False
+
+    async def test_toggle_contact_favourite_not_found(self, integration_api_client):
+        """Test toggle favourite for non-existent contact."""
+        client = integration_api_client
+
+        response = await client.post("/api/contacts/999/favourite")
+        assert response.status_code == 404
+
+    async def test_list_contacts_with_favourite_filter(self, integration_api_client):
+        """Test listing contacts with favourite filter."""
+        client = integration_api_client
+
+        # Create favourite and non-favourite contacts
+        favourite_contact = {
+            "data": {
+                "type": "contact",
+                "attributes": {
+                    "first_name": "Favourite",
+                    "last_name": "User",
+                    "is_favourite": True
+                }
+            }
+        }
+
+        regular_contact = {
+            "data": {
+                "type": "contact",
+                "attributes": {
+                    "first_name": "Regular",
+                    "last_name": "User",
+                    "is_favourite": False
+                }
+            }
+        }
+
+        await client.post("/api/contacts", json=favourite_contact)
+        await client.post("/api/contacts", json=regular_contact)
+
+        # Test filtering by favourite=true
+        response = await client.get("/api/contacts?favourite=true")
+        assert response.status_code == 200
+
+        data = response.json()
+        assert len(data["data"]) == 1
+        assert data["data"][0]["attributes"]["first_name"] == "Favourite"
+        assert data["data"][0]["attributes"]["is_favourite"] is True
+
+        # Test filtering by favourite=false
+        response = await client.get("/api/contacts?favourite=false")
+        assert response.status_code == 200
+
+        data = response.json()
+        # Should have at least the regular contact we created
+        regular_contacts = [c for c in data["data"] if c["attributes"]["first_name"] == "Regular"]
+        assert len(regular_contacts) == 1
+        assert regular_contacts[0]["attributes"]["is_favourite"] is False

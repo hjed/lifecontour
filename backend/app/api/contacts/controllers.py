@@ -29,7 +29,10 @@ from app.api.contacts.schemas import (
     TagAssignmentRequest,
     TagListResponse,
 )
-from app.core.contacts.models.exceptions import ContactNotFoundError
+from app.core.contacts.models.exceptions import (
+    ContactNotFoundError,
+    ContactValidationError,
+)
 from app.core.contacts.services import ContactService
 from app.infrastructure.auth.models import SessionUser
 
@@ -49,6 +52,10 @@ async def list_contacts(
     user: FromDishka[SessionUser],  # Require authentication
     page: int = Query(default=1, description="Page number", ge=1),
     limit: int = Query(default=20, description="Items per page", ge=1, le=100),
+    favourite: bool | None = Query(
+        default=None, description="Filter by favourite status"
+    ),
+    tags: list[int] | None = Query(default=None, description="Filter by tag IDs"),
 ) -> ContactListResponse:
     """
     List contacts with pagination.
@@ -61,6 +68,8 @@ async def list_contacts(
     contacts = await contact_service.get_contacts_paginated(
         offset=pagination.offset,
         limit=pagination.limit,
+        is_favourite=favourite,
+        tag_ids=tags,
     )
 
     total_count = await contact_service.get_contacts_count()
@@ -250,3 +259,34 @@ async def get_contact_tags(
     tag_resources = [TagConverter.to_resource(tag, base_url) for tag in tags]
 
     return TagListResponse(data=tag_resources)
+
+
+@router.post("/{contact_id}/favourite", response_model=ContactResponse)
+@inject
+async def toggle_contact_favourite(
+    contact_id: int,
+    request: Request,
+    contact_service: FromDishka[ContactService],
+    connection: FromDishka[AsyncConnection],
+    user: FromDishka[SessionUser],  # Require authentication
+) -> ContactResponse:
+    """
+    Toggle the favourite status of a contact.
+
+    Toggles the is_favourite field of the specified contact.
+    Returns the updated contact with the new favourite status.
+    """
+    base_url = get_request_base_url(request)
+
+    try:
+        updated_contact = await contact_service.toggle_contact_favourite(
+            contact_id, connection
+        )
+
+        return ContactResponse(
+            data=ContactConverter.to_resource(updated_contact, base_url)
+        )
+    except ContactValidationError as e:
+        if "Contact not found" in str(e):
+            raise ContactNotFoundError(contact_id) from e
+        raise
