@@ -108,6 +108,7 @@ class TestContactConverter:
         assert resource.id == "1"
         assert resource.attributes.first_name == "John"
         assert resource.attributes.last_name is None
+        assert resource.attributes.is_favourite is False  # Default value
         assert resource.attributes.contact_methods == []
         assert resource.attributes.addresses == []
         assert resource.attributes.notes == []
@@ -137,6 +138,7 @@ class TestContactConverter:
             id=1,
             first_name="John",
             last_name="Doe",
+            is_favourite=True,  # Test with favourite contact
             methods=[method],
             addresses=[address],
             notes=[note],
@@ -149,6 +151,7 @@ class TestContactConverter:
         assert resource.id == "1"
         assert resource.attributes.first_name == "John"
         assert resource.attributes.last_name == "Doe"
+        assert resource.attributes.is_favourite is True  # Test favourite contact
         assert len(resource.attributes.contact_methods) == 1
         assert len(resource.attributes.addresses) == 1
         assert len(resource.attributes.notes) == 1
@@ -246,6 +249,7 @@ class TestContactRequestConverter:
             first_name="John",
             last_name="Doe",
             middle_name="William",
+            is_favourite=True,
         )
         data = ContactCreateData(attributes=attrs)
 
@@ -255,6 +259,7 @@ class TestContactRequestConverter:
         assert contact.first_name == "John"
         assert contact.last_name == "Doe"
         assert contact.middle_name == "William"
+        assert contact.is_favourite is True
         assert contact.methods == []
         assert contact.addresses == []
         assert contact.notes == []

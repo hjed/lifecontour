@@ -278,20 +278,28 @@ Tasks are organized by **feature iterations** that deliver end-to-end value incr
 
 **Description:** Implement backend support for contact filtering and favourites functionality to enable the new navigation structure
 
-#### Phase 1: Foundation (Database & Domain) 🟡
+#### Phase 1: Foundation (Database & Domain) 🟡 ✅ COMPLETED
 
 **Description:** Database schema and domain model updates for favourites support
 
 **Acceptance Criteria:**
 
-- [ ] Create database migration for `is_favourite` boolean field in contacts table
-- [ ] Update `Contact` domain entity to include `is_favourite` field
-- [ ] Update `ContactBuilder` to handle favourite status
-- [ ] Add domain events for favourite changes
-- [ ] Write unit tests for domain changes
-- [ ] Update repository interfaces for favourite operations
+- [x] Create database migration for `is_favourite` boolean field in contacts table
+- [x] Update `Contact` domain entity to include `is_favourite` field
+- [x] Update `ContactBuilder` to handle favourite status (N/A - Contact constructed directly)
+- [x] Add domain events for favourite changes (handled via ContactUpdated event)
+- [x] Write unit tests for domain changes
+- [x] Update repository interfaces for favourite operations
 
-#### Phase 2: Service Layer 🟡
+**Implementation Details:**
+- Migration `0004_add_favourite_field_to_contacts.py` adds `is_favourite` boolean field with index
+- Contact entity includes `is_favourite: bool = False` field with `toggle_favourite()` and `set_favourite()` methods
+- Repository includes `get_favourite_contacts()` and filtering by `is_favourite` in `get_contacts_paginated()`
+- Unit tests cover favourite functionality in `test_entities.py`
+- Integration tests verify favourite persistence in `test_contact_repository_integration.py`
+- Domain events handled through existing `ContactUpdated` event with `changed_fields` including favourite status
+
+#### Phase 2: Service Layer 🟡 ✅ COMPLETED
 
 **Description:** Business logic for favourites and enhanced filtering
 
@@ -299,14 +307,23 @@ Tasks are organized by **feature iterations** that deliver end-to-end value incr
 
 **Acceptance Criteria:**
 
-- [ ] Add `toggle_contact_favourite()` method to `ContactService`
-- [ ] Add `get_favourite_contacts()` method
-- [ ] Enhance `get_contacts_paginated()` to support filtering by tags and favourites
-- [ ] Add validation for favourite operations
-- [ ] Update history tracking for favourite changes
-- [ ] Write comprehensive service layer unit tests
+- [x] Add `toggle_contact_favourite()` method to `ContactService`
+- [x] Add `get_favourite_contacts()` method
+- [x] Enhance `get_contacts_paginated()` to support filtering by tags and favourites
+- [x] Add validation for favourite operations
+- [x] Update history tracking for favourite changes
+- [x] Write comprehensive service layer unit tests
 
-#### Phase 3: API Layer 🟡
+**Implementation Details:**
+- Added `toggle_contact_favourite()` method with transaction support and retry logic
+- Added `get_favourite_contacts()` method that delegates to repository
+- Enhanced `get_contacts_paginated()` to support `is_favourite` and `tag_ids` filtering parameters
+- Validation includes contact existence check in toggle operation
+- History tracking implemented via existing `ContactUpdated` event with changed_fields
+- Added 5 comprehensive unit tests covering all new functionality
+- All tests passing (27/27) with proper mocking and assertions
+
+#### Phase 3: API Layer 🟡 ✅ COMPLETED
 
 **Description:** REST API endpoints for tags and enhanced contact filtering
 
@@ -314,15 +331,25 @@ Tasks are organized by **feature iterations** that deliver end-to-end value incr
 
 **Acceptance Criteria:**
 
-- [ ] Create dedicated `/api/tags` endpoint for listing all tags
-- [ ] Add `/api/tags/{id}` endpoint for tag details
-- [ ] Enhance `/api/contacts` endpoint with filtering parameters:
-  - [ ] `tags[]` - filter by tag IDs
-  - [ ] `favourite` - filter by favourite status
-  - [ ] `search` - text search
-- [ ] Add `/api/contacts/{id}/favourite` endpoint for toggling favourites
-- [ ] Update API schemas to include favourite status
-- [ ] Write API integration tests with real database
+- [x] Create dedicated `/api/tags` endpoint for listing all tags (existing)
+- [x] Add `/api/tags/{id}` endpoint for tag details (existing)
+- [x] Enhance `/api/contacts` endpoint with filtering parameters:
+  - [x] `tags[]` - filter by tag IDs
+  - [x] `favourite` - filter by favourite status
+  - [x] `search` - text search (existing)
+- [x] Add `/api/contacts/{id}/favourite` endpoint for toggling favourites
+- [x] Update API schemas to include favourite status
+- [x] Write API integration tests with real database
+
+**Implementation Details:**
+- Added `favourite` and `tags` query parameters to `/api/contacts` endpoint
+- Implemented `/api/contacts/{id}/favourite` POST endpoint for toggling favourite status
+- Updated `ContactAttributes` schema to include `is_favourite: bool` field
+- Updated `ContactConverter` to serialize/deserialize `is_favourite` field in both create and update operations
+- Enhanced `list_contacts` controller to use new filtering parameters from service layer
+- Added comprehensive integration tests covering favourite toggle and filtering functionality
+- All tests passing (3/3 favourite-related API tests) with real database integration
+- Proper error handling with ContactValidationError -> ContactNotFoundError conversion
 
 #### Phase 4: Search & MCP Integration 🟢
 

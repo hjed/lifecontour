@@ -114,6 +114,9 @@ class ContactAttributes(BaseModel):
     last_name: str | None = Field(default=None, description="Contact last name")
     middle_name: str | None = Field(default=None, description="Contact middle name")
     nick_name: str | None = Field(default=None, description="Contact nickname")
+    is_favourite: bool = Field(
+        default=False, description="Whether contact is marked as favourite"
+    )
     created_at: datetime | None = Field(
         default=None, description="Contact creation timestamp"
     )

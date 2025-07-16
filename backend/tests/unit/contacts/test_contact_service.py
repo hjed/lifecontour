@@ -74,6 +74,125 @@ class TestContactService:
             tag_hierarchy_service=tag_hierarchy_service,
         )
 
+    # Phase 2 Tests: Favourite functionality
+    @pytest.mark.asyncio
+    async def test_toggle_contact_favourite_success(
+        self, contact_service, mock_contact_repo, mock_transaction
+    ):
+        """Test successful contact favourite toggle."""
+        # Arrange
+        contact_id = 1
+        existing_contact = Contact(first_name="John", last_name="Doe", id=contact_id, is_favourite=False)
+        updated_contact = Contact(first_name="John", last_name="Doe", id=contact_id, is_favourite=True)
+
+        mock_contact_repo.find_by_id.return_value = existing_contact
+        mock_contact_repo.save.return_value = updated_contact
+
+        # Act
+        result = await contact_service.toggle_contact_favourite(contact_id, mock_transaction)
+
+        # Assert
+        assert result.is_favourite is True
+        mock_contact_repo.find_by_id.assert_called_once_with(contact_id)
+        mock_contact_repo.save.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_toggle_contact_favourite_contact_not_found(
+        self, contact_service, mock_contact_repo, mock_transaction
+    ):
+        """Test toggle favourite when contact not found."""
+        # Arrange
+        contact_id = 999
+        mock_contact_repo.find_by_id.return_value = None
+
+        # Act & Assert
+        with pytest.raises(ContactValidationError, match="Contact not found"):
+            await contact_service.toggle_contact_favourite(contact_id, mock_transaction)
+
+    @pytest.mark.asyncio
+    async def test_get_favourite_contacts_success(
+        self, contact_service, mock_contact_repo
+    ):
+        """Test successful retrieval of favourite contacts."""
+        # Arrange
+        favourite_contacts = [
+            Contact(first_name="John", last_name="Doe", id=1, is_favourite=True),
+            Contact(first_name="Jane", last_name="Smith", id=2, is_favourite=True),
+        ]
+        mock_contact_repo.get_favourite_contacts.return_value = favourite_contacts
+
+        # Act
+        result = await contact_service.get_favourite_contacts(limit=10, offset=0)
+
+        # Assert
+        assert result == favourite_contacts
+        mock_contact_repo.get_favourite_contacts.assert_called_once_with(10, 0)
+
+    @pytest.mark.asyncio
+    async def test_get_contacts_paginated_with_favourite_filter(
+        self, contact_service, mock_contact_repo
+    ):
+        """Test get_contacts_paginated with favourite filter."""
+        # Arrange
+        favourite_contacts = [
+            Contact(first_name="John", last_name="Doe", id=1, is_favourite=True),
+        ]
+        mock_contact_repo.get_contacts_by_filters.return_value = favourite_contacts
+
+        # Act
+        result = await contact_service.get_contacts_paginated(
+            limit=10, offset=0, is_favourite=True
+        )
+
+        # Assert
+        assert result == favourite_contacts
+        mock_contact_repo.get_contacts_by_filters.assert_called_once_with(
+            is_favourite=True, tag_ids=None, limit=10, offset=0
+        )
+
+    @pytest.mark.asyncio
+    async def test_get_contacts_paginated_with_tag_filter(
+        self, contact_service, mock_contact_repo
+    ):
+        """Test get_contacts_paginated with tag filter."""
+        # Arrange
+        tag_contacts = [
+            Contact(first_name="John", last_name="Doe", id=1),
+        ]
+        mock_contact_repo.get_contacts_by_filters.return_value = tag_contacts
+
+        # Act
+        result = await contact_service.get_contacts_paginated(
+            limit=10, offset=0, tag_ids=[1, 2]
+        )
+
+        # Assert
+        assert result == tag_contacts
+        mock_contact_repo.get_contacts_by_filters.assert_called_once_with(
+            is_favourite=None, tag_ids=[1, 2], limit=10, offset=0
+        )
+
+    @pytest.mark.asyncio
+    async def test_get_contacts_paginated_no_filters_uses_get_all(
+        self, contact_service, mock_contact_repo
+    ):
+        """Test get_contacts_paginated without filters uses get_all_contacts."""
+        # Arrange
+        all_contacts = [
+            Contact(first_name="John", last_name="Doe", id=1),
+            Contact(first_name="Jane", last_name="Smith", id=2),
+        ]
+        mock_contact_repo.get_all.return_value = all_contacts
+
+        # Act
+        result = await contact_service.get_contacts_paginated(limit=10, offset=0)
+
+        # Assert
+        assert result == all_contacts
+        mock_contact_repo.get_all.assert_called_once_with(10, 0)
+        # Ensure get_contacts_by_filters was not called
+        mock_contact_repo.get_contacts_by_filters.assert_not_called()
+
     @pytest.mark.asyncio
     async def test_create_contact_success(
         self, contact_service, mock_contact_repo, mock_transaction
