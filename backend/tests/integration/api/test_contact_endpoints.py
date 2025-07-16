@@ -446,8 +446,8 @@ class TestContactEndpoints:
                 "attributes": {
                     "first_name": "John",
                     "last_name": "Doe",
-                    "is_favourite": False
-                }
+                    "is_favourite": False,
+                },
             }
         }
 
@@ -487,8 +487,8 @@ class TestContactEndpoints:
                 "attributes": {
                     "first_name": "Favourite",
                     "last_name": "User",
-                    "is_favourite": True
-                }
+                    "is_favourite": True,
+                },
             }
         }
 
@@ -498,8 +498,8 @@ class TestContactEndpoints:
                 "attributes": {
                     "first_name": "Regular",
                     "last_name": "User",
-                    "is_favourite": False
-                }
+                    "is_favourite": False,
+                },
             }
         }
 
@@ -521,6 +521,8 @@ class TestContactEndpoints:
 
         data = response.json()
         # Should have at least the regular contact we created
-        regular_contacts = [c for c in data["data"] if c["attributes"]["first_name"] == "Regular"]
+        regular_contacts = [
+            c for c in data["data"] if c["attributes"]["first_name"] == "Regular"
+        ]
         assert len(regular_contacts) == 1
         assert regular_contacts[0]["attributes"]["is_favourite"] is False
