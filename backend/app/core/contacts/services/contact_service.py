@@ -1016,9 +1016,7 @@ class ContactService:
             updated_contact = await self.contact_repo.save(contact)
 
             # Record history and publish event
-            changed_fields = {
-                "is_favourite": {"old": old_favourite, "new": contact.is_favourite}
-            }
+            changed_fields = {"is_favourite": (old_favourite, contact.is_favourite)}
             await self._publish_contact_updated_events(
                 updated_contact, changed_fields, transaction
             )
