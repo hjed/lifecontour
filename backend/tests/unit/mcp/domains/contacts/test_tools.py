@@ -31,6 +31,48 @@ class TestContactTools:
         assert True
 
     @pytest.mark.asyncio
+    async def test_toggle_contact_favourite_tool_registered(self, mcp_server):
+        """Test that toggle_contact_favourite tool is registered."""
+        from fastmcp.client import Client
+
+        async with Client(mcp_server) as client:
+            # List available tools
+            tools_response = await client.list_tools()
+
+            # Extract tools list
+            if hasattr(tools_response, "tools"):
+                tools = tools_response.tools
+            else:
+                tools = tools_response
+
+            # Verify toggle_contact_favourite tool is registered
+            tool_names = [tool.name for tool in tools]
+            assert "toggle_contact_favourite" in tool_names, (
+                "toggle_contact_favourite tool not found in registered tools"
+            )
+
+    @pytest.mark.asyncio
+    async def test_list_tags_tool_registered(self, mcp_server):
+        """Test that list_tags tool is registered."""
+        from fastmcp.client import Client
+
+        async with Client(mcp_server) as client:
+            # List available tools
+            tools_response = await client.list_tools()
+
+            # Extract tools list
+            if hasattr(tools_response, "tools"):
+                tools = tools_response.tools
+            else:
+                tools = tools_response
+
+            # Verify list_tags tool is registered
+            tool_names = [tool.name for tool in tools]
+            assert "list_tags" in tool_names, (
+                "list_tags tool not found in registered tools"
+            )
+
+    @pytest.mark.asyncio
     async def test_list_tools(self, mcp_server):
         """Test that contact tools are properly registered and listed."""
         # Use FastMCP Client for in-memory testing
@@ -53,6 +95,8 @@ class TestContactTools:
                 "create_contact",
                 "update_contact",
                 "list_contacts",
+                "toggle_contact_favourite",
+                "list_tags",
             ]
 
             for expected_tool in expected_tools:

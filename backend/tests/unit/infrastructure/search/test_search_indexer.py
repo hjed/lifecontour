@@ -309,3 +309,103 @@ class TestSearchIndexer:
         mock_index.update_documents.assert_called_once()
         documents = mock_index.update_documents.call_args[0][0]
         assert documents[0]["id"] == 42
+
+    @pytest.mark.asyncio
+    async def test_contact_created_includes_is_favourite_field(
+        self, indexer, mock_meilisearch_client, contact_created_event
+    ):
+        """Test that ContactCreated event includes is_favourite field in indexed document."""
+        # Arrange
+        mock_index = MagicMock()
+        mock_meilisearch_client.index.return_value = mock_index
+        mock_index.get_stats.return_value = {"numberOfDocuments": 0}
+
+        mock_task = MagicMock()
+        mock_task.task_uid = "task-123"
+        mock_index.add_documents.return_value = mock_task
+
+        # Mock the complete contact data fetch to include is_favourite
+        complete_contact_data = {
+            "id": 42,
+            "first_name": "John",
+            "last_name": "Doe",
+            "full_name": "John Doe",
+            "email": "john@example.com",
+            "entity_type": "contact",
+            "is_favourite": True,
+            "tags": [],
+        }
+
+        with (
+            patch(
+                "app.infrastructure.search.search_indexer.get_index_name",
+                return_value="pms_contacts",
+            ),
+            patch.object(
+                indexer,
+                "_fetch_complete_contact_data",
+                return_value=complete_contact_data,
+            ),
+        ):
+            # Act
+            await indexer.process_event(contact_created_event)
+
+        # Assert
+        mock_index.add_documents.assert_called_once()
+        documents = mock_index.add_documents.call_args[0][0]
+
+        assert len(documents) == 1
+        doc = documents[0]
+        assert doc["id"] == 42
+        assert doc["is_favourite"] is True
+        assert "is_favourite" in doc
+
+    @pytest.mark.asyncio
+    async def test_contact_updated_includes_is_favourite_field(
+        self, indexer, mock_meilisearch_client, contact_updated_event
+    ):
+        """Test that ContactUpdated event includes is_favourite field in indexed document."""
+        # Arrange
+        mock_index = MagicMock()
+        mock_meilisearch_client.index.return_value = mock_index
+        mock_index.get_stats.return_value = {"numberOfDocuments": 1}
+
+        mock_task = MagicMock()
+        mock_task.task_uid = "task-456"
+        mock_index.update_documents.return_value = mock_task
+
+        # Mock the complete contact data fetch to include is_favourite
+        complete_contact_data = {
+            "id": 42,
+            "first_name": "Jane",
+            "last_name": "Smith",
+            "full_name": "Jane Smith",
+            "email": "jane@example.com",
+            "entity_type": "contact",
+            "is_favourite": False,
+            "tags": ["customer"],
+        }
+
+        with (
+            patch(
+                "app.infrastructure.search.search_indexer.get_index_name",
+                return_value="pms_contacts",
+            ),
+            patch.object(
+                indexer,
+                "_fetch_complete_contact_data",
+                return_value=complete_contact_data,
+            ),
+        ):
+            # Act
+            await indexer.process_event(contact_updated_event)
+
+        # Assert
+        mock_index.update_documents.assert_called_once()
+        documents = mock_index.update_documents.call_args[0][0]
+
+        assert len(documents) == 1
+        doc = documents[0]
+        assert doc["id"] == 42
+        assert doc["is_favourite"] is False
+        assert "is_favourite" in doc

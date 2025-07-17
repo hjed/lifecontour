@@ -78,7 +78,13 @@ CONTACTS_INDEX_SETTINGS = {
         "phones",
         "notes_content",
     ],
-    "filterableAttributes": ["tags", "entity_type", "created_at", "updated_at"],
+    "filterableAttributes": [
+        "tags",
+        "entity_type",
+        "created_at",
+        "updated_at",
+        "is_favourite",
+    ],
     "sortableAttributes": ["created_at", "updated_at", "last_name", "first_name"],
     "displayedAttributes": [
         "id",
@@ -96,6 +102,7 @@ CONTACTS_INDEX_SETTINGS = {
         "entity_type",
         "created_at",
         "updated_at",
+        "is_favourite",
     ],
 }
 

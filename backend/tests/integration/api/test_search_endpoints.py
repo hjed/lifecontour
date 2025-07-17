@@ -26,6 +26,7 @@ class TestSearchEndpoints:
                     "email": "john@example.com",
                     "phone": "+1234567890",
                     "tags": ["customer"],
+                    "is_favourite": False,
                     "created_at": "2024-01-01T00:00:00",
                     "updated_at": "2024-01-01T00:00:00",
                     "_formatted": {"first_name": "<em>John</em>", "last_name": "Doe"},
@@ -189,3 +190,133 @@ class TestSearchEndpoints:
         assert "page=5" in links["last"]
         assert "page=1" in links["prev"]
         assert "page=3" in links["next"]
+
+    def test_contact_search_with_favourite_filter_true(
+        self, authenticated_search_client
+    ):
+        """Test contact search with favourite filter set to true."""
+        test_client, setup_search_mock = authenticated_search_client
+
+        # Mock the search service to return favourite contacts
+        mock_search_results = {
+            "hits": [
+                {
+                    "id": 1,
+                    "first_name": "John",
+                    "last_name": "Doe",
+                    "full_name": "John Doe",
+                    "email": "john@example.com",
+                    "phone": "+1234567890",
+                    "tags": ["customer"],
+                    "is_favourite": True,
+                    "created_at": "2024-01-01T00:00:00",
+                    "updated_at": "2024-01-01T00:00:00",
+                }
+            ],
+            "estimated_total_hits": 1,
+            "processing_time_ms": 25,
+            "facet_distribution": {},
+        }
+
+        # Setup the mock search service
+        setup_search_mock(mock_search_results)
+
+        # Make request with favourite filter
+        response = test_client.get("/api/search/contacts?q=john&favourite=true")
+
+        # Assert response
+        assert response.status_code == 200
+        data = response.json()
+
+        # Check that results contain favourite contacts
+        assert len(data["data"]) == 1
+        assert data["data"][0]["attributes"]["is_favourite"] is True
+
+    def test_contact_search_with_favourite_filter_false(
+        self, authenticated_search_client
+    ):
+        """Test contact search with favourite filter set to false."""
+        test_client, setup_search_mock = authenticated_search_client
+
+        # Mock the search service to return non-favourite contacts
+        mock_search_results = {
+            "hits": [
+                {
+                    "id": 2,
+                    "first_name": "Jane",
+                    "last_name": "Smith",
+                    "full_name": "Jane Smith",
+                    "email": "jane@example.com",
+                    "phone": "+1234567891",
+                    "tags": ["customer"],
+                    "is_favourite": False,
+                    "created_at": "2024-01-01T00:00:00",
+                    "updated_at": "2024-01-01T00:00:00",
+                }
+            ],
+            "estimated_total_hits": 1,
+            "processing_time_ms": 25,
+            "facet_distribution": {},
+        }
+
+        # Setup the mock search service
+        setup_search_mock(mock_search_results)
+
+        # Make request with favourite filter
+        response = test_client.get("/api/search/contacts?q=jane&favourite=false")
+
+        # Assert response
+        assert response.status_code == 200
+        data = response.json()
+
+        # Check that results contain non-favourite contacts
+        assert len(data["data"]) == 1
+        assert data["data"][0]["attributes"]["is_favourite"] is False
+
+    def test_contact_search_with_combined_filters_including_favourite(
+        self, authenticated_search_client
+    ):
+        """Test contact search with multiple filters including favourite."""
+        test_client, setup_search_mock = authenticated_search_client
+
+        # Mock the search service to return filtered results
+        mock_search_results = {
+            "hits": [
+                {
+                    "id": 1,
+                    "first_name": "John",
+                    "last_name": "Doe",
+                    "full_name": "John Doe",
+                    "email": "john@example.com",
+                    "phone": "+1234567890",
+                    "tags": ["vip"],
+                    "is_favourite": True,
+                    "created_at": "2024-01-01T00:00:00",
+                    "updated_at": "2024-01-01T00:00:00",
+                }
+            ],
+            "estimated_total_hits": 1,
+            "processing_time_ms": 25,
+            "facet_distribution": {},
+        }
+
+        # Setup the mock search service
+        setup_search_mock(mock_search_results)
+
+        # Make request with multiple filters
+        response = test_client.get(
+            "/api/search/contacts?q=john&favourite=true&tags=vip"
+        )
+
+        # Assert response
+        assert response.status_code == 200
+        data = response.json()
+
+        # Check that results match the filters
+        assert len(data["data"]) == 1
+        contact_data = data["data"][0]
+        contact_attributes = contact_data["attributes"]
+        contact_meta = contact_data["meta"]
+
+        assert contact_attributes["is_favourite"] is True
+        assert "vip" in contact_meta["search_metadata"]["tags"]

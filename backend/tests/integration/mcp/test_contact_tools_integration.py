@@ -195,6 +195,8 @@ class TestContactToolsIntegration:
                 "create_contact",
                 "update_contact",
                 "list_contacts",
+                "toggle_contact_favourite",
+                "list_tags",
             ]
 
             for expected_tool in expected_tools:

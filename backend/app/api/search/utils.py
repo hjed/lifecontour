@@ -30,6 +30,7 @@ def create_contact_resource_from_search_hit(
         last_name=hit.get("last_name"),
         middle_name=hit.get("middle_name"),
         nick_name=hit.get("nick_name"),
+        is_favourite=hit.get("is_favourite", False),
         created_at=hit.get("created_at"),
         updated_at=hit.get("updated_at"),
         contact_methods=[],

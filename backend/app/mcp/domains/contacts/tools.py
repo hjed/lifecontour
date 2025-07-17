@@ -538,3 +538,137 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
         )
 
         return MCPResponseBuilder.success_response(response)
+
+    @mcp.tool
+    @mcp_unified_error_handler("toggle_contact_favourite", "management")
+    @inject
+    async def toggle_contact_favourite(
+        contact_service: FromDishka[ContactService],
+        connection: FromDishka[AsyncConnection],
+        contact_id: Annotated[
+            int, Field(description="ID of the contact to toggle favourite status")
+        ],
+    ) -> str:
+        """
+        Toggle the favourite status of a contact for AI-managed relationship prioritization.
+
+        Toggles whether a contact is marked as a favourite, which helps prioritize
+        important contacts for quick access and AI analysis. Returns the updated
+        contact information with the new favourite status.
+
+        Args:
+            contact_id: The ID of the contact to toggle favourite status
+
+        Returns:
+            JSON string containing AI-friendly contact information with updated favourite status including:
+            - Updated contact details with new favourite status
+            - Confirmation of the favourite status change
+            - Contextual summary for AI understanding
+        """
+        logger.info("MCP: Toggling contact favourite status", contact_id=contact_id)
+
+        try:
+            # Toggle the favourite status
+            updated_contact = await contact_service.toggle_contact_favourite(
+                contact_id, connection
+            )
+
+            # Create AI-friendly response using shared converter
+            favourite_status = (
+                "favourite" if updated_contact.is_favourite else "not favourite"
+            )
+            response = ContactConverter.to_contact_response(
+                updated_contact,
+                additional_context=f"Contact favourite status updated - now marked as {favourite_status}",
+            )
+
+            logger.info(
+                "MCP: Contact favourite status toggled successfully",
+                contact_id=updated_contact.id,
+                contact_name=updated_contact.get_full_name(),
+                is_favourite=updated_contact.is_favourite,
+            )
+
+            return MCPResponseBuilder.success_response(response)
+
+        except ContactNotFoundError as e:
+            logger.warning(
+                "MCP: Contact not found for favourite toggle",
+                contact_id=contact_id,
+                error=str(e),
+            )
+            raise ContactValidationError(
+                "contact_id", f"Contact with ID {contact_id} not found"
+            ) from e
+
+    @mcp.tool
+    @mcp_unified_error_handler("list_tags", "tag")
+    @inject
+    async def list_tags(
+        tag_repo: FromDishka[TagRepository],
+        limit: Annotated[
+            int, Field(description="Maximum number of tags to return", ge=1, le=100)
+        ] = 50,
+    ) -> str:
+        """
+        List all available tags for AI-managed contact categorization.
+
+        Retrieves all tags that can be used to categorize contacts, providing
+        AI with a comprehensive view of available contact categories and
+        organizational structures.
+
+        Args:
+            limit: Maximum number of tags to return (1-100, default: 50)
+
+        Returns:
+            JSON string containing AI-friendly tag information including:
+            - List of all available tags with names and usage counts
+            - Tag categorization suggestions for AI understanding
+            - Contextual summary of the tag system
+        """
+        logger.info("MCP: Listing tags", limit=limit)
+
+        try:
+            # Get all tags from repository
+            tags = await tag_repo.get_all(limit=limit)
+
+            # Convert tags to AI-friendly format
+            tag_data = []
+            for tag in tags:
+                tag_info = {
+                    "id": str(tag.id) if tag.id else "unknown",
+                    "name": tag.name.value,
+                    "usage_count": 0,  # TODO: Add usage count when available
+                    "description": f"Tag for categorizing contacts as '{tag.name.value}'",
+                }
+                tag_data.append(tag_info)
+
+            # Build AI-friendly response
+            response_data = {
+                "tags": tag_data,
+                "total_count": len(tag_data),
+                "summary": f"Found {len(tag_data)} available tags for contact categorization. "
+                f"Tags help organize contacts by relationship type, importance, or context.",
+                "suggestions": [
+                    "Use tags to categorize contacts by relationship (friend, work, family)",
+                    "Create tags for contact importance (vip, important, regular)",
+                    "Add context-specific tags (client, vendor, colleague, neighbor)",
+                    "Consider activity-based tags (active, inactive, prospect)",
+                ],
+            }
+
+            logger.info(
+                "MCP: Tags listed successfully",
+                tag_count=len(tag_data),
+                limit=limit,
+            )
+
+            return MCPResponseBuilder.success_response(response_data)
+
+        except Exception as e:
+            logger.error(
+                "MCP: Failed to list tags",
+                error=str(e),
+                limit=limit,
+            )
+            raise

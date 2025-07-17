@@ -58,13 +58,16 @@ def search_contacts(
     page: int = Query(default=1, description="Page number", ge=1),
     limit: int = Query(default=20, description="Results per page", ge=1, le=100),
     tags: list[str] | None = Query(default=None, description="Filter by tags"),
+    favourite: bool | None = Query(
+        default=None, description="Filter by favourite status"
+    ),
     sort: list[str] | None = Query(default=None, description="Sort criteria"),
 ) -> ContactSearchResponse:
     """
     Search contacts using MeiliSearch.
 
     Supports full-text search across fields with highlighting, facets, and pagination.
-    Supports filtering by tags and custom sorting.
+    Supports filtering by tags, favourite status, and custom sorting.
     """
     # Calculate offset from page
     offset = calculate_pagination_offset(page, limit)
@@ -73,6 +76,8 @@ def search_contacts(
     filters = {}
     if tags:
         filters["tags"] = tags
+    if favourite is not None:
+        filters["is_favourite"] = favourite
 
     try:
         results = search_service.search_contacts(

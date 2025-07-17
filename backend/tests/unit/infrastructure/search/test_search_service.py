@@ -120,6 +120,91 @@ class TestSearchService:
         assert "entity_type = 'contact'" in filter_str
         assert "tags IN ['VIP', 'Customer']" in filter_str
 
+    def test_search_contacts_with_favourite_filter_true(
+        self, search_service, mock_meilisearch_client, mock_search_results
+    ):
+        """Test contact search with favourite filter set to true."""
+        # Arrange
+        mock_index = MagicMock()
+        mock_meilisearch_client.index.return_value = mock_index
+        mock_index.search.return_value = mock_search_results
+
+        filters = {"is_favourite": True}
+
+        with patch(
+            "app.infrastructure.search.search_service.get_index_name",
+            return_value="pms_contacts",
+        ):
+            # Act
+            search_service.search_contacts("John", filters=filters)
+
+        # Assert
+        call_args = mock_index.search.call_args
+        search_params = call_args[0][1]
+
+        # Check that favourite filter was applied
+        assert "filter" in search_params
+        filter_str = search_params["filter"]
+        assert "is_favourite = true" in filter_str
+
+    def test_search_contacts_with_favourite_filter_false(
+        self, search_service, mock_meilisearch_client, mock_search_results
+    ):
+        """Test contact search with favourite filter set to false."""
+        # Arrange
+        mock_index = MagicMock()
+        mock_meilisearch_client.index.return_value = mock_index
+        mock_index.search.return_value = mock_search_results
+
+        filters = {"is_favourite": False}
+
+        with patch(
+            "app.infrastructure.search.search_service.get_index_name",
+            return_value="pms_contacts",
+        ):
+            # Act
+            search_service.search_contacts("John", filters=filters)
+
+        # Assert
+        call_args = mock_index.search.call_args
+        search_params = call_args[0][1]
+
+        # Check that favourite filter was applied
+        assert "filter" in search_params
+        filter_str = search_params["filter"]
+        assert "is_favourite = false" in filter_str
+
+    def test_search_contacts_with_combined_filters_including_favourite(
+        self, search_service, mock_meilisearch_client, mock_search_results
+    ):
+        """Test contact search with multiple filters including favourite."""
+        # Arrange
+        mock_index = MagicMock()
+        mock_meilisearch_client.index.return_value = mock_index
+        mock_index.search.return_value = mock_search_results
+
+        filters = {"is_favourite": True, "tags": ["VIP"], "entity_type": "contact"}
+
+        with patch(
+            "app.infrastructure.search.search_service.get_index_name",
+            return_value="pms_contacts",
+        ):
+            # Act
+            search_service.search_contacts("John", filters=filters)
+
+        # Assert
+        call_args = mock_index.search.call_args
+        search_params = call_args[0][1]
+
+        # Check that all filters were applied
+        assert "filter" in search_params
+        filter_str = search_params["filter"]
+        assert "is_favourite = true" in filter_str
+        assert "tags IN ['VIP']" in filter_str
+        assert "entity_type = 'contact'" in filter_str
+        # Filters should be combined with AND
+        assert " AND " in filter_str
+
     def test_search_contacts_with_pagination(
         self, search_service, mock_meilisearch_client, mock_search_results
     ):
