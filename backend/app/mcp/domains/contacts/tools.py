@@ -11,7 +11,7 @@ from typing import Annotated
 import structlog
 from dishka.integrations.starlette import FromDishka, inject
 from fastmcp import FastMCP
-from pydantic import Field
+from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core.contacts.models.entities import (
@@ -44,6 +44,22 @@ from app.mcp.shared.decorators import mcp_unified_error_handler
 from app.mcp.shared.response_builders import MCPResponseBuilder
 
 logger = structlog.get_logger()
+
+
+class TagInfo(BaseModel):
+    """Information about a tag."""
+    id: str
+    name: str
+    usage_count: int
+    description: str
+
+
+class TagListResponse(BaseModel):
+    """Response for list_tags MCP tool."""
+    tags: list[TagInfo]
+    total_count: int
+    summary: str
+    suggestions: list[str]
 
 
 def register_contact_tools(mcp: FastMCP[None]) -> None:
@@ -630,32 +646,34 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
 
         try:
             # Get all tags from repository
-            tags = await tag_repo.get_all(limit=limit)
+            all_tags = await tag_repo.get_all()
+            # Apply limit manually since repository doesn't support it
+            tags = all_tags[:limit] if limit < len(all_tags) else all_tags
 
             # Convert tags to AI-friendly format
             tag_data = []
             for tag in tags:
-                tag_info = {
-                    "id": str(tag.id) if tag.id else "unknown",
-                    "name": tag.name.value,
-                    "usage_count": 0,  # TODO: Add usage count when available
-                    "description": f"Tag for categorizing contacts as '{tag.name.value}'",
-                }
+                tag_info = TagInfo(
+                    id=str(tag.id) if tag.id else "unknown",
+                    name=tag.name.value,
+                    usage_count=0,  # TODO: Add usage count when available
+                    description=f"Tag for categorizing contacts as '{tag.name.value}'",
+                )
                 tag_data.append(tag_info)
 
             # Build AI-friendly response
-            response_data = {
-                "tags": tag_data,
-                "total_count": len(tag_data),
-                "summary": f"Found {len(tag_data)} available tags for contact categorization. "
+            response_data = TagListResponse(
+                tags=tag_data,
+                total_count=len(tag_data),
+                summary=f"Found {len(tag_data)} available tags for contact categorization. "
                 f"Tags help organize contacts by relationship type, importance, or context.",
-                "suggestions": [
+                suggestions=[
                     "Use tags to categorize contacts by relationship (friend, work, family)",
                     "Create tags for contact importance (vip, important, regular)",
                     "Add context-specific tags (client, vendor, colleague, neighbor)",
                     "Consider activity-based tags (active, inactive, prospect)",
                 ],
-            }
+            )
 
             logger.info(
                 "MCP: Tags listed successfully",
