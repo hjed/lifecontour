@@ -55,7 +55,7 @@ async def list_contacts(
     favourite: bool | None = Query(
         default=None, description="Filter by favourite status"
     ),
-    tags: list[int] | None = Query(default=None, description="Filter by tag IDs"),
+    tag_ids: list[int] | None = Query(default=None, description="Filter by tag IDs"),
 ) -> ContactListResponse:
     """
     List contacts with pagination.
@@ -69,7 +69,7 @@ async def list_contacts(
         offset=pagination.offset,
         limit=pagination.limit,
         is_favourite=favourite,
-        tag_ids=tags,
+        tag_ids=tag_ids,
     )
 
     total_count = await contact_service.get_contacts_count()

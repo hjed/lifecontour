@@ -334,7 +334,7 @@ Tasks are organized by **feature iterations** that deliver end-to-end value incr
 - [x] Create dedicated `/api/tags` endpoint for listing all tags (existing)
 - [x] Add `/api/tags/{id}` endpoint for tag details (existing)
 - [x] Enhance `/api/contacts` endpoint with filtering parameters:
-  - [x] `tags[]` - filter by tag IDs
+  - [x] `tag_ids[]` - filter by tag IDs
   - [x] `favourite` - filter by favourite status
   - [x] `search` - text search (existing)
 - [x] Add `/api/contacts/{id}/favourite` endpoint for toggling favourites
