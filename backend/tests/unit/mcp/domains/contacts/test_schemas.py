@@ -211,7 +211,7 @@ class TestContactResponse:
             name=str(contact_data["name"]),
             email=str(contact_data["email"]),
             phone=str(contact_data["phone"]),
-            tags=list(contact_data["tags"]),
+            tags=contact_data["tags"],  # type: ignore[arg-type]
             is_favourite=bool(contact_data["is_favourite"]),
             summary=str(contact_data["summary"]),
         )

@@ -73,7 +73,7 @@ def search_contacts(
     offset = calculate_pagination_offset(page, limit)
 
     # Build filters
-    filters = {}
+    filters: dict[str, list[str] | bool] = {}
     if tags:
         filters["tags"] = tags
     if favourite is not None:
