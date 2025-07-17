@@ -82,6 +82,9 @@ class SearchService:
                     if isinstance(value, list):
                         # Handle array filters (e.g., tags)
                         filter_expressions.append(f"{key} IN {value}")
+                    elif isinstance(value, bool):
+                        # Handle boolean filters (e.g., is_favourite)
+                        filter_expressions.append(f"{key} = {str(value).lower()}")
                     else:
                         filter_expressions.append(f"{key} = '{value}'")
 

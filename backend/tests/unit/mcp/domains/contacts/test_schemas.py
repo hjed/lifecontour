@@ -38,6 +38,7 @@ class TestContactResponse:
         assert response.email == "john@example.com"
         assert response.phone == "+1234567890"
         assert response.tags == ["friend", "work"]
+        assert response.is_favourite is False  # Default value
         assert response.summary == "John is a software engineer and close friend."
 
     def test_contact_response_optional_fields(self):
@@ -131,3 +132,98 @@ class TestContactResponse:
         assert json_data["phone"] == "+1234567890"
         assert json_data["tags"] == ["friend", "work"]
         assert json_data["summary"] == "John is a software engineer and close friend."
+
+    def test_contact_response_with_is_favourite_true(self):
+        """Test contact response with is_favourite set to true."""
+        contact_data = {
+            "id": "contact-123",
+            "name": "John Doe",
+            "email": "john@example.com",
+            "is_favourite": True,
+            "summary": "John is a favourite contact.",
+        }
+
+        response = ContactResponse(
+            id=str(contact_data["id"]),
+            name=str(contact_data["name"]),
+            email=str(contact_data["email"]),
+            is_favourite=bool(contact_data["is_favourite"]),
+            summary=str(contact_data["summary"]),
+        )
+
+        assert response.id == "contact-123"
+        assert response.name == "John Doe"
+        assert response.email == "john@example.com"
+        assert response.is_favourite is True
+        assert response.summary == "John is a favourite contact."
+
+    def test_contact_response_with_is_favourite_false(self):
+        """Test contact response with is_favourite set to false."""
+        contact_data = {
+            "id": "contact-456",
+            "name": "Jane Smith",
+            "is_favourite": False,
+            "summary": "Jane is not a favourite contact.",
+        }
+
+        response = ContactResponse(
+            id=str(contact_data["id"]),
+            name=str(contact_data["name"]),
+            is_favourite=bool(contact_data["is_favourite"]),
+            summary=str(contact_data["summary"]),
+        )
+
+        assert response.id == "contact-456"
+        assert response.name == "Jane Smith"
+        assert response.is_favourite is False
+        assert response.summary == "Jane is not a favourite contact."
+
+    def test_contact_response_is_favourite_default_false(self):
+        """Test that is_favourite defaults to False when not provided."""
+        contact_data = {
+            "id": "contact-789",
+            "name": "Bob Wilson",
+            "summary": "Bob is a contact with default favourite status.",
+        }
+
+        response = ContactResponse(
+            id=str(contact_data["id"]),
+            name=str(contact_data["name"]),
+            summary=str(contact_data["summary"]),
+        )
+
+        assert response.is_favourite is False
+
+    def test_contact_response_json_serialization_with_is_favourite(self):
+        """Test contact response JSON serialization includes is_favourite field."""
+        contact_data = {
+            "id": "contact-123",
+            "name": "John Doe",
+            "email": "john@example.com",
+            "phone": "+1234567890",
+            "tags": ["friend", "work"],
+            "is_favourite": True,
+            "summary": "John is a favourite software engineer and close friend.",
+        }
+
+        response = ContactResponse(
+            id=str(contact_data["id"]),
+            name=str(contact_data["name"]),
+            email=str(contact_data["email"]),
+            phone=str(contact_data["phone"]),
+            tags=list(contact_data["tags"]),
+            is_favourite=bool(contact_data["is_favourite"]),
+            summary=str(contact_data["summary"]),
+        )
+        json_data = response.model_dump()
+
+        assert json_data["id"] == "contact-123"
+        assert json_data["name"] == "John Doe"
+        assert json_data["email"] == "john@example.com"
+        assert json_data["phone"] == "+1234567890"
+        assert json_data["tags"] == ["friend", "work"]
+        assert json_data["is_favourite"] is True
+        assert (
+            json_data["summary"]
+            == "John is a favourite software engineer and close friend."
+        )

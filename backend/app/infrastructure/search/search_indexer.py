@@ -143,7 +143,7 @@ class SearchIndexer:
             # Fetch basic contact info
             contact_query = text("""
                 SELECT id, first_name, last_name, middle_name, nick_name,
-                       created_at, updated_at
+                       is_favourite, created_at, updated_at
                 FROM contacts
                 WHERE id = :contact_id
             """)
@@ -233,6 +233,7 @@ class SearchIndexer:
                 "notes_content": notes_content,
                 "tags": tags,
                 "entity_type": "contact",
+                "is_favourite": contact_row.is_favourite,
                 "created_at": contact_row.created_at.isoformat()
                 if contact_row.created_at
                 else None,
@@ -279,6 +280,7 @@ class SearchIndexer:
                 "email": contact_data.get("email"),
                 "phone": contact_data.get("phone"),
                 "entity_type": "contact",
+                "is_favourite": contact_data.get("is_favourite", False),
                 "created_at": occurred_at_str,
                 "updated_at": occurred_at_str,
                 "tags": [],

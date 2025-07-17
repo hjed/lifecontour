@@ -36,6 +36,11 @@ class ContactResponse(BaseModel):
         description="List of tags associated with the contact (e.g., 'friend', 'work', 'family')",
     )
 
+    is_favourite: bool = Field(
+        default=False,
+        description="Whether the contact is marked as a favourite for quick access",
+    )
+
     summary: str = Field(
         description="AI-friendly summary of the contact including relationship context and key details"
     )
@@ -50,6 +55,7 @@ class ContactResponse(BaseModel):
                 "email": "john@example.com",
                 "phone": "+1234567890",
                 "tags": ["friend", "work"],
+                "is_favourite": True,
                 "summary": "John is a software engineer and close friend who works at TechCorp. We collaborate on side projects and meet regularly for coffee.",
             }
         }

@@ -54,6 +54,7 @@ class ContactConverter:
             email=primary_email,
             phone=primary_phone,
             tags=tag_names,
+            is_favourite=contact.is_favourite,
             summary=summary,
         )
 
