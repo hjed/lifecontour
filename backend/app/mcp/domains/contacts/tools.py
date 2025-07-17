@@ -48,6 +48,7 @@ logger = structlog.get_logger()
 
 class TagInfo(BaseModel):
     """Information about a tag."""
+
     id: str
     name: str
     usage_count: int
@@ -56,6 +57,7 @@ class TagInfo(BaseModel):
 
 class TagListResponse(BaseModel):
     """Response for list_tags MCP tool."""
+
     tags: list[TagInfo]
     total_count: int
     summary: str
