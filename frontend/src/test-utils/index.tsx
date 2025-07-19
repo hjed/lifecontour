@@ -131,6 +131,56 @@ export const setupMocks = {
     jest.clearAllMocks();
     localStorage.clear();
   },
+
+  // Common API hook mocks to reduce duplication
+  contactsApi: () => {
+    jest.mock('@/lib/api/contacts', () => ({
+      useContacts: jest.fn(),
+      useContact: jest.fn(),
+      useSearchContacts: jest.fn(),
+      useCreateContact: jest.fn(),
+      useUpdateContact: jest.fn(),
+      useDeleteContact: jest.fn(),
+      useToggleContactFavourite: jest.fn(),
+      useTags: jest.fn(),
+    }));
+  },
+
+  // Common Next.js navigation mocks
+  nextNavigation: (overrides: Record<string, unknown> = {}) => {
+    jest.mock('next/navigation', () => ({
+      useRouter: () => ({
+        push: jest.fn(),
+        replace: jest.fn(),
+        prefetch: jest.fn(),
+        back: jest.fn(),
+        forward: jest.fn(),
+        refresh: jest.fn(),
+        ...overrides.router,
+      }),
+      usePathname: () => overrides.pathname || '/contacts',
+      useSearchParams: () => new URLSearchParams(),
+      useParams: () => overrides.params || {},
+      ...overrides,
+    }));
+  },
+
+  // Common date-fns mocks
+  dateFns: () => {
+    jest.mock('date-fns', () => ({
+      format: jest.fn(() => '1 January 2024'),
+    }));
+    jest.mock('date-fns/locale', () => ({
+      enAU: {},
+    }));
+  },
+
+  // Common debounce hook mock
+  debounce: () => {
+    jest.mock('@/hooks/useDebounce', () => ({
+      useDebounce: jest.fn(value => value),
+    }));
+  },
 } as const;
 
 // Contact-specific test utilities
