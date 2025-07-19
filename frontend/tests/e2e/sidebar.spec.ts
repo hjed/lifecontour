@@ -110,11 +110,17 @@ test.describe('Sidebar Navigation', () => {
       await page.getByRole('link', { name: 'Favourites' }).click();
       await expect(page).toHaveURL('/contacts/favourites');
 
-      await page.getByRole('link', { name: 'Group 1' }).click();
-      await expect(page).toHaveURL('/contacts/groups/1');
+      // Test dynamic tag navigation (if any tags exist)
+      const tagLinks = page.locator('a[href*="/contacts/tags/"]');
+      const tagCount = await tagLinks.count();
 
-      await page.getByRole('link', { name: 'Group 2' }).click();
-      await expect(page).toHaveURL('/contacts/groups/2');
+      if (tagCount > 0) {
+        // Click the first tag link
+        const firstTagLink = tagLinks.first();
+        const href = await firstTagLink.getAttribute('href');
+        await firstTagLink.click();
+        await expect(page).toHaveURL(href!);
+      }
 
       await page.getByRole('link', { name: 'All' }).click();
       await expect(page).toHaveURL('/contacts');

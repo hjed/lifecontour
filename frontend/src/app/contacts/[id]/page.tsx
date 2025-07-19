@@ -225,9 +225,9 @@ function ContactDetailPageContent() {
                         <h3 className='mb-3 font-semibold'>Contact Methods</h3>
                         <div className='space-y-2'>
                           {contact.attributes.contact_methods.map(
-                            (method, index) => (
+                            (method) => (
                               <div
-                                key={index}
+                                key={`${method.attributes.method_type}-${method.attributes.value}`}
                                 className='flex items-center gap-3'
                               >
                                 {method.attributes.method_type === 'email' && (
@@ -268,9 +268,9 @@ function ContactDetailPageContent() {
                         <h3 className='mb-3 font-semibold'>Addresses</h3>
                         <div className='space-y-3'>
                           {contact.attributes.addresses.map(
-                            (address, index) => (
+                            (address) => (
                               <div
-                                key={index}
+                                key={`${address.attributes.street_line_1}-${address.attributes.postal_code || address.attributes.locality}`}
                                 className='flex items-start gap-3'
                               >
                                 <MapPin className='text-muted-foreground mt-0.5 h-4 w-4' />
@@ -318,8 +318,8 @@ function ContactDetailPageContent() {
                       <div>
                         <h3 className='mb-3 font-semibold'>Notes</h3>
                         <div className='space-y-2'>
-                          {contact.attributes.notes.map((note, index) => (
-                            <div key={index} className='text-sm'>
+                          {contact.attributes.notes.map((note) => (
+                            <div key={`${note.attributes.content.substring(0, 50)}-${note.attributes.created_at}`} className='text-sm'>
                               <p>{note.attributes.content}</p>
                               {note.attributes.created_at && (
                                 <p className='text-muted-foreground mt-1 text-xs'>

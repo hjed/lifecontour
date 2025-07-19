@@ -62,8 +62,11 @@ test.describe('Favourites Page', () => {
     const result = await auth.handleProtectedPageAccess();
 
     if (result === 'accessed') {
-      // Wait for content to load
-      await page.waitForTimeout(2000);
+      // Wait for content to load by waiting for contact cards or empty state
+      await page.waitForSelector(
+        '[data-testid="contact-card"], .contact-card, [class*="card"], text=/no.*favourite.*contacts/i, text=/star.*contacts/i',
+        { timeout: 10000 }
+      );
 
       // Look for contact cards or empty state
       const contactCards = page.locator(
@@ -99,8 +102,11 @@ test.describe('Favourites Page', () => {
     const result = await auth.handleProtectedPageAccess();
 
     if (result === 'accessed') {
-      // Wait for content to load
-      await page.waitForTimeout(2000);
+      // Wait for content to load by waiting for empty state messages or contact cards
+      await page.waitForSelector(
+        'text=/no.*favourite.*contacts/i, text=/star.*contacts/i, text=/add.*favourite/i, text=/no contacts found/i, [data-testid="contact-card"], .contact-card, [class*="card"]',
+        { timeout: 10000 }
+      );
 
       // Look for empty state indicators
       const emptyStateMessages = [

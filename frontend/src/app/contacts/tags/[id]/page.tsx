@@ -14,12 +14,12 @@ import { Users, Tag, AlertCircle } from 'lucide-react';
 import Link from 'next/link';
 import { useContacts, useTags } from '@/lib/api/contacts';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
+import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { AuthGuard } from '@/components/auth/AuthGuard';
-import { FavouriteToggle } from '@/components/contacts/FavouriteToggle';
+import { ContactList } from '@/components/contacts/ContactList';
+import { useDisplayContacts } from '@/hooks/useDisplayContacts';
 
 export default function ContactGroupPage() {
   return (
@@ -55,23 +55,8 @@ function ContactGroupPageContent() {
     return tagsData.data.find(tag => tag.id === tagId);
   }, [tagsData?.data, tagId]);
 
-  const displayContacts = useMemo(() => {
-    const contacts = contactsData?.data || [];
-    return contacts.map(contact => ({
-      id: contact.id,
-      name: `${contact.attributes.first_name} ${contact.attributes.last_name || ''}`.trim(),
-      is_favourite: contact.attributes.is_favourite || false,
-      primary_email: contact.attributes.contact_methods?.find(
-        m => m.attributes.method_type === 'email' && m.attributes.is_primary
-      )?.attributes.value,
-      primary_phone: contact.attributes.contact_methods?.find(
-        m => m.attributes.method_type === 'phone' && m.attributes.is_primary
-      )?.attributes.value,
-      tags: contact.relationships?.tags?.data || [],
-      created_at: contact.attributes.created_at,
-      updated_at: contact.attributes.updated_at,
-    }));
-  }, [contactsData?.data]);
+  // Transform contacts for display
+  const displayContacts = useDisplayContacts(contactsData?.data);
 
   if (contactsError || tagsError) {
     return (
@@ -167,91 +152,31 @@ function ContactGroupPageContent() {
       </div>
 
       {/* Contact List */}
-      {displayContacts.length === 0 ? (
-        <Card>
-          <CardContent className='pt-6'>
-            <div className='py-8 text-center'>
-              <Tag className='text-muted-foreground mx-auto mb-4 h-12 w-12' />
-              <h3 className='mb-2 text-lg font-semibold'>
-                No contacts found in this tag
-              </h3>
-              <p className='text-muted-foreground mb-4'>
-                Add some contacts to the &quot;{currentTag.attributes.name}
-                &quot; tag to see them here
-              </p>
-              <Button asChild>
-                <Link href='/contacts'>
-                  <Users className='mr-2 h-4 w-4' />
-                  Browse All Contacts
-                </Link>
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
-      ) : (
-        <div className='grid gap-4 md:grid-cols-2 lg:grid-cols-3'>
-          {displayContacts.map(contact => (
-            <Card
-              key={contact.id}
-              className='transition-shadow hover:shadow-md'
-            >
-              <CardHeader>
-                <div className='flex items-start justify-between'>
-                  <CardTitle className='flex-1 text-lg'>
-                    <Link
-                      href={`/contacts/${contact.id}`}
-                      className='hover:text-primary transition-colors'
-                    >
-                      {contact.name}
-                    </Link>
-                  </CardTitle>
-                  <FavouriteToggle
-                    contactId={contact.id}
-                    isFavourite={contact.is_favourite}
-                    contactName={contact.name}
-                    size='sm'
-                    className='ml-2 flex-shrink-0'
-                  />
-                </div>
-              </CardHeader>
-              <CardContent>
-                <div className='space-y-2'>
-                  {contact.primary_email && (
-                    <p className='text-sm'>
-                      <span className='font-medium'>Email:</span>{' '}
-                      {contact.primary_email}
-                    </p>
-                  )}
-                  {contact.primary_phone && (
-                    <p className='text-sm'>
-                      <span className='font-medium'>Phone:</span>{' '}
-                      {contact.primary_phone}
-                    </p>
-                  )}
-                  {contact.tags.length > 0 && (
-                    <div className='mt-2 flex flex-wrap gap-1'>
-                      {contact.tags.slice(0, 3).map(tag => (
-                        <Badge
-                          key={tag.id}
-                          variant='secondary'
-                          className='text-xs'
-                        >
-                          {tag.attributes.name}
-                        </Badge>
-                      ))}
-                      {contact.tags.length > 3 && (
-                        <Badge variant='outline' className='text-xs'>
-                          +{contact.tags.length - 3} more
-                        </Badge>
-                      )}
-                    </div>
-                  )}
-                </div>
-              </CardContent>
-            </Card>
-          ))}
-        </div>
-      )}
+      <ContactList
+        contacts={displayContacts}
+        emptyState={
+          <Card>
+            <CardContent className='pt-6'>
+              <div className='py-8 text-center'>
+                <Tag className='text-muted-foreground mx-auto mb-4 h-12 w-12' />
+                <h3 className='mb-2 text-lg font-semibold'>
+                  No contacts found in this tag
+                </h3>
+                <p className='text-muted-foreground mb-4'>
+                  Add some contacts to the &quot;{currentTag.attributes.name}
+                  &quot; tag to see them here
+                </p>
+                <Button asChild>
+                  <Link href='/contacts'>
+                    <Users className='mr-2 h-4 w-4' />
+                    Browse All Contacts
+                  </Link>
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        }
+      />
     </div>
   );
 }

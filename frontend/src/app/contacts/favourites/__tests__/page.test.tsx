@@ -11,6 +11,8 @@ import {
   setupMocks,
   contactTestUtils,
 } from '@/test-utils';
+import { useAuth } from '@/lib/auth/AuthProvider';
+import { AuthState, SessionUser, OAuthProvider } from '@/types/auth';
 
 // Mock Next.js navigation
 jest.mock('next/navigation', () => ({
@@ -29,6 +31,33 @@ jest.mock('@/lib/api/contacts', () => ({
   useContacts: jest.fn(),
 }));
 
+// Mock the auth provider
+jest.mock('@/lib/auth/AuthProvider', () => ({
+  useAuth: jest.fn(),
+  AuthProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+}));
+
+// Mock the constants
+jest.mock('@/lib/constants', () => ({
+  DATE_FORMATS: {
+    SHORT: 'dd/MM/yyyy',
+    LONG: 'dd MMMM yyyy',
+    WITH_TIME: 'dd/MM/yyyy HH:mm',
+    TIME_ONLY: 'HH:mm',
+    ISO: 'yyyy-MM-dd',
+  },
+  ERROR_MESSAGES: {
+    SESSION_EXPIRED: 'Your session has expired. Please log in again.',
+    NETWORK_ERROR: 'Network error. Please check your connection.',
+    UNAUTHORIZED: 'You are not authorized to access this resource.',
+    FORBIDDEN: 'Access to this resource is forbidden.',
+    NOT_FOUND: 'The requested resource was not found.',
+    SERVER_ERROR: 'An internal server error occurred.',
+    VALIDATION_ERROR: 'Please check your input and try again.',
+    UNKNOWN_ERROR: 'An unknown error occurred.',
+  },
+}));
+
 // Mock the FavouriteToggle component
 jest.mock('@/components/contacts/FavouriteToggle', () => ({
   FavouriteToggle: ({ contactId, isFavourite, contactName }: any) => (
@@ -40,6 +69,19 @@ jest.mock('@/components/contacts/FavouriteToggle', () => ({
 }));
 
 const mockUseContacts = useContacts as jest.MockedFunction<typeof useContacts>;
+const mockUseAuth = useAuth as jest.MockedFunction<typeof useAuth>;
+
+// Test helper to create mock SessionUser
+const createMockUser = (overrides: Partial<SessionUser> = {}): SessionUser => ({
+  id: '1',
+  email: 'test@example.com',
+  name: 'Test User',
+  provider: 'github' as OAuthProvider,
+  provider_id: 'github_123',
+  created_at: '2023-01-01T00:00:00Z',
+  last_login: '2023-01-01T00:00:00Z',
+  ...overrides,
+});
 
 describe('FavouritesPage', () => {
   beforeEach(() => {
@@ -47,13 +89,18 @@ describe('FavouritesPage', () => {
     setupMocks.clearMocks();
     setupMocks.fetch();
 
-    // Mock authenticated session
-    (fetch as jest.Mock).mockResolvedValue({
-      ok: true,
-      json: async () => ({
-        authenticated: true,
-        user: { id: '1', name: 'Test User' },
-      }),
+    // Mock authenticated user using useAuth hook
+    mockUseAuth.mockReturnValue({
+      state: {
+        isLoading: false,
+        isAuthenticated: true,
+        user: createMockUser(),
+        error: undefined,
+      } as AuthState,
+      login: jest.fn(),
+      logout: jest.fn(),
+      refreshSession: jest.fn(),
+      clearError: jest.fn(),
     });
   });
 

@@ -30,7 +30,7 @@ interface BreadcrumbProps {
 const ROUTE_LABELS: Record<string, string> = {
   contacts: 'Contacts',
   favourites: 'Favourites',
-  groups: 'Groups',
+  tags: 'Tags',
   journals: 'Journals',
   new: 'New',
   edit: 'Edit',
@@ -58,8 +58,8 @@ function getDynamicRouteLabel(
 
   // Handle numeric IDs with contextual labeling
   if (segment.match(/^\d+$/)) {
-    if (parentSegment === 'groups') {
-      return `Group ${segment}`;
+    if (parentSegment === 'tags') {
+      return `Tag ${segment}`;
     } else if (parentSegment === 'contacts' && segmentIndex === 1) {
       return 'Contact Details';
     } else {

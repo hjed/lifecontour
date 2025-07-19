@@ -103,12 +103,12 @@ describe('Breadcrumb', () => {
     });
 
     it('generates breadcrumbs for dynamic routes', () => {
-      mockUsePathname.mockReturnValue('/contacts/groups/1');
+      mockUsePathname.mockReturnValue('/contacts/tags/1');
       render(<Breadcrumb />);
 
       expect(screen.getByText('Contacts')).toBeInTheDocument();
-      expect(screen.getByText('Groups')).toBeInTheDocument();
-      expect(screen.getByText('Group 1')).toBeInTheDocument();
+      expect(screen.getByText('Tags')).toBeInTheDocument();
+      expect(screen.getByText('Tag 1')).toBeInTheDocument();
     });
 
     it('handles contact detail pages', () => {

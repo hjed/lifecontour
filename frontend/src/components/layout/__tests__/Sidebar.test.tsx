@@ -28,13 +28,52 @@ describe('Sidebar Components', () => {
     mockUseTags.mockReturnValue({
       data: {
         data: [
-          { id: '1', attributes: { name: 'Group 1', color: '#ff0000' } },
-          { id: '2', attributes: { name: 'Group 2', color: '#00ff00' } },
+          {
+            type: 'tags',
+            id: '1',
+            attributes: {
+              name: 'Group 1',
+              color: '#ff0000',
+              created_at: '2024-01-01T00:00:00Z',
+              updated_at: '2024-01-01T00:00:00Z'
+            }
+          },
+          {
+            type: 'tags',
+            id: '2',
+            attributes: {
+              name: 'Group 2',
+              color: '#00ff00',
+              created_at: '2024-01-01T00:00:00Z',
+              updated_at: '2024-01-01T00:00:00Z'
+            }
+          },
         ],
       },
       isLoading: false,
+      isError: false,
+      isPending: false,
+      isLoadingError: false,
+      isRefetchError: false,
       error: null,
-    });
+      status: 'success',
+      fetchStatus: 'idle',
+      isSuccess: true,
+      isPlaceholderData: false,
+      isPaused: false,
+      isRefetching: false,
+      isStale: false,
+      dataUpdatedAt: Date.now(),
+      errorUpdatedAt: 0,
+      failureCount: 0,
+      failureReason: null,
+      errorUpdateCount: 0,
+      isFetched: true,
+      isFetchedAfterMount: true,
+      isFetching: false,
+      isInitialLoading: false,
+      refetch: jest.fn(),
+    } as any);
   });
 
   afterEach(() => {

@@ -186,10 +186,17 @@ export class ResponsiveHelpers {
   }
 
   /**
+   * Set viewport to mobile size.
+   */
+  async setMobileViewport(): Promise<void> {
+    await this.page.setViewportSize(TEST_DATA.VIEWPORT_SIZES.MOBILE);
+  }
+
+  /**
    * Check mobile-specific interactions.
    */
   async checkMobileInteractions(): Promise<void> {
-    await this.page.setViewportSize(TEST_DATA.VIEWPORT_SIZES.MOBILE);
+    await this.setMobileViewport();
 
     // Check that buttons are large enough for touch
     const buttons = await this.page.locator('button').all();
