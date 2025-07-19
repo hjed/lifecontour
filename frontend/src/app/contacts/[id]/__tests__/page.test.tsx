@@ -8,6 +8,7 @@ import {
   useContact,
   useUpdateContact,
   useDeleteContact,
+  useToggleContactFavourite,
 } from '@/lib/api/contacts';
 import { ContactResponse } from '@/types/contacts';
 import {
@@ -22,6 +23,7 @@ jest.mock('@/lib/api/contacts', () => ({
   useContact: jest.fn(),
   useUpdateContact: jest.fn(),
   useDeleteContact: jest.fn(),
+  useToggleContactFavourite: jest.fn(),
 }));
 
 // Mock Next.js navigation
@@ -142,6 +144,10 @@ const mockUseUpdateContact = useUpdateContact as jest.MockedFunction<
 const mockUseDeleteContact = useDeleteContact as jest.MockedFunction<
   typeof useDeleteContact
 >;
+const mockUseToggleContactFavourite =
+  useToggleContactFavourite as jest.MockedFunction<
+    typeof useToggleContactFavourite
+  >;
 
 describe('ContactDetailPage', () => {
   beforeEach(() => {
@@ -161,6 +167,14 @@ describe('ContactDetailPage', () => {
         },
       }),
     });
+
+    // Set up default mock for useToggleContactFavourite
+    mockUseToggleContactFavourite.mockReturnValue({
+      mutate: jest.fn(),
+      isPending: false,
+      isError: false,
+      error: null,
+    } as any);
   });
 
   const renderContactDetailPage = () => {

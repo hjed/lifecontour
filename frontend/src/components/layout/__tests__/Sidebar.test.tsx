@@ -5,17 +5,36 @@
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { usePathname } from 'next/navigation';
 import { Sidebar, DesktopSidebar, MobileSidebar } from '../Sidebar';
+import { useTags } from '@/lib/api/contacts';
 
 // Mock Next.js navigation
 jest.mock('next/navigation', () => ({
   usePathname: jest.fn(),
 }));
 
+// Mock the API hooks
+jest.mock('@/lib/api/contacts', () => ({
+  useTags: jest.fn(),
+}));
+
 const mockUsePathname = usePathname as jest.MockedFunction<typeof usePathname>;
+const mockUseTags = useTags as jest.MockedFunction<typeof useTags>;
 
 describe('Sidebar Components', () => {
   beforeEach(() => {
     mockUsePathname.mockReturnValue('/contacts');
+
+    // Mock tags data to match the expected test data
+    mockUseTags.mockReturnValue({
+      data: {
+        data: [
+          { id: '1', attributes: { name: 'Group 1', color: '#ff0000' } },
+          { id: '2', attributes: { name: 'Group 2', color: '#00ff00' } },
+        ],
+      },
+      isLoading: false,
+      error: null,
+    });
   });
 
   afterEach(() => {

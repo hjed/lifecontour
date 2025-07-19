@@ -35,6 +35,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 
 import { ContactForm } from '@/components/contacts/ContactForm';
+import { FavouriteToggle } from '@/components/contacts/FavouriteToggle';
 import { AuthGuard } from '@/components/auth/AuthGuard';
 import { DATE_FORMATS } from '@/lib/constants';
 
@@ -173,6 +174,12 @@ function ContactDetailPageContent() {
                 <div className='flex gap-2'>
                   {!isEditing && (
                     <>
+                      <FavouriteToggle
+                        contactId={contact.id}
+                        isFavourite={contact.attributes.is_favourite || false}
+                        contactName={fullName}
+                        size='sm'
+                      />
                       <Button variant='outline' size='sm' onClick={handleEdit}>
                         <Edit className='mr-2 h-4 w-4' />
                         Edit

@@ -1,19 +1,71 @@
 /**
- * Favourites contacts page - placeholder for ITER1.5-004
+ * Favourites contacts page showing only starred contacts.
  *
- * This page will show only favourited contacts when the favourites
- * functionality is implemented in ITER1.5-004.
+ * Displays a filtered list of contacts that have been marked as favourites,
+ * with the same functionality as the main contacts page but filtered.
  */
 
 'use client';
 
-import { AuthGuard } from '@/components/auth/AuthGuard';
+import { useMemo } from 'react';
+import { Star, Users } from 'lucide-react';
+import Link from 'next/link';
+import { useContacts } from '@/lib/api/contacts';
+import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Star } from 'lucide-react';
+import { Badge } from '@/components/ui/badge';
+import { Skeleton } from '@/components/ui/skeleton';
+import { Alert, AlertDescription } from '@/components/ui/alert';
+import { AuthGuard } from '@/components/auth/AuthGuard';
+import { FavouriteToggle } from '@/components/contacts/FavouriteToggle';
 
 export default function FavouritesPage() {
   return (
     <AuthGuard>
+      <FavouritesPageContent />
+    </AuthGuard>
+  );
+}
+
+function FavouritesPageContent() {
+  // Fetch only favourite contacts
+  const { data, isLoading, error } = useContacts({ favourite: true });
+
+  const displayContacts = useMemo(() => {
+    const contacts = data?.data || [];
+    return contacts.map(contact => ({
+      id: contact.id,
+      name: `${contact.attributes.first_name} ${contact.attributes.last_name || ''}`.trim(),
+      is_favourite: contact.attributes.is_favourite || false,
+      primary_email: contact.attributes.contact_methods?.find(
+        m => m.attributes.method_type === 'email' && m.attributes.is_primary
+      )?.attributes.value,
+      primary_phone: contact.attributes.contact_methods?.find(
+        m => m.attributes.method_type === 'phone' && m.attributes.is_primary
+      )?.attributes.value,
+      tags: contact.relationships?.tags?.data || [],
+      created_at: contact.attributes.created_at,
+      updated_at: contact.attributes.updated_at,
+    }));
+  }, [data?.data]);
+
+  if (error) {
+    return (
+      <div className='container mx-auto px-4 py-8'>
+        <Alert variant='destructive'>
+          <AlertDescription>
+            {error instanceof Error
+              ? error.message
+              : 'Failed to load favourite contacts'}
+          </AlertDescription>
+        </Alert>
+      </div>
+    );
+  }
+
+  return (
+    <div className='space-y-6'>
+      {/* Header */}
       <div className='mb-6'>
         <h1 className='text-3xl font-bold tracking-tight'>
           Favourite Contacts
@@ -23,21 +75,108 @@ export default function FavouritesPage() {
         </p>
       </div>
 
-      <Card>
-        <CardHeader>
-          <CardTitle className='flex items-center gap-2'>
-            <Star className='h-5 w-5 text-yellow-500' />
-            Coming Soon
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <p className='text-muted-foreground'>
-            The favourites functionality will be implemented in ITER1.5-004.
-            You&apos;ll be able to star your important contacts and view them
-            here.
-          </p>
-        </CardContent>
-      </Card>
-    </AuthGuard>
+      {/* Contact List */}
+      {isLoading ? (
+        <div className='grid gap-4 md:grid-cols-2 lg:grid-cols-3'>
+          {Array.from({ length: 6 }).map((_, i) => (
+            <Card key={i} data-testid='skeleton'>
+              <CardHeader>
+                <Skeleton className='h-6 w-3/4' />
+                <Skeleton className='h-4 w-1/2' />
+              </CardHeader>
+              <CardContent>
+                <div className='space-y-2'>
+                  <Skeleton className='h-4 w-full' />
+                  <Skeleton className='h-4 w-2/3' />
+                </div>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      ) : displayContacts.length === 0 ? (
+        <Card>
+          <CardContent className='pt-6'>
+            <div className='py-8 text-center'>
+              <Star className='text-muted-foreground mx-auto mb-4 h-12 w-12' />
+              <h3 className='mb-2 text-lg font-semibold'>
+                No favourite contacts found
+              </h3>
+              <p className='text-muted-foreground mb-4'>
+                Star some contacts to see them here
+              </p>
+              <Button asChild>
+                <Link href='/contacts'>
+                  <Users className='mr-2 h-4 w-4' />
+                  Browse All Contacts
+                </Link>
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      ) : (
+        <div className='grid gap-4 md:grid-cols-2 lg:grid-cols-3'>
+          {displayContacts.map(contact => (
+            <Card
+              key={contact.id}
+              className='transition-shadow hover:shadow-md'
+            >
+              <CardHeader>
+                <div className='flex items-start justify-between'>
+                  <CardTitle className='flex-1 text-lg'>
+                    <Link
+                      href={`/contacts/${contact.id}`}
+                      className='hover:text-primary transition-colors'
+                    >
+                      {contact.name}
+                    </Link>
+                  </CardTitle>
+                  <FavouriteToggle
+                    contactId={contact.id}
+                    isFavourite={contact.is_favourite}
+                    contactName={contact.name}
+                    size='sm'
+                    className='ml-2 flex-shrink-0'
+                  />
+                </div>
+              </CardHeader>
+              <CardContent>
+                <div className='space-y-2'>
+                  {contact.primary_email && (
+                    <p className='text-sm'>
+                      <span className='font-medium'>Email:</span>{' '}
+                      {contact.primary_email}
+                    </p>
+                  )}
+                  {contact.primary_phone && (
+                    <p className='text-sm'>
+                      <span className='font-medium'>Phone:</span>{' '}
+                      {contact.primary_phone}
+                    </p>
+                  )}
+                  {contact.tags.length > 0 && (
+                    <div className='mt-2 flex flex-wrap gap-1'>
+                      {contact.tags.slice(0, 3).map(tag => (
+                        <Badge
+                          key={tag.id}
+                          variant='secondary'
+                          className='text-xs'
+                        >
+                          {tag.attributes.name}
+                        </Badge>
+                      ))}
+                      {contact.tags.length > 3 && (
+                        <Badge variant='outline' className='text-xs'>
+                          +{contact.tags.length - 3} more
+                        </Badge>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }

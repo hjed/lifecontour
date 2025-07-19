@@ -20,6 +20,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { AuthGuard } from '@/components/auth/AuthGuard';
 import { SearchHighlight } from '@/components/search/SearchHighlight';
+import { FavouriteToggle } from '@/components/contacts/FavouriteToggle';
 import { useDebounce } from '@/hooks/useDebounce';
 import { TIMEOUTS } from '@/lib/constants';
 
@@ -86,6 +87,7 @@ function ContactsPageContent() {
       return {
         id: contact.id,
         name: `${contact.attributes.first_name} ${contact.attributes.last_name || ''}`.trim(),
+        is_favourite: contact.attributes.is_favourite || false,
         primary_email: contact.attributes.contact_methods?.find(
           m => m.attributes.method_type === 'email' && m.attributes.is_primary
         )?.attributes.value,
@@ -259,21 +261,30 @@ function ContactsPageContent() {
               className='transition-shadow hover:shadow-md'
             >
               <CardHeader>
-                <CardTitle className='text-lg'>
-                  <Link
-                    href={`/contacts/${contact.id}`}
-                    className='hover:text-primary transition-colors'
-                  >
-                    {contact.isSearchResult && contact.highlightedName ? (
-                      <SearchHighlight
-                        text={contact.highlightedName}
-                        fallback={contact.name}
-                      />
-                    ) : (
-                      contact.name
-                    )}
-                  </Link>
-                </CardTitle>
+                <div className='flex items-start justify-between'>
+                  <CardTitle className='flex-1 text-lg'>
+                    <Link
+                      href={`/contacts/${contact.id}`}
+                      className='hover:text-primary transition-colors'
+                    >
+                      {contact.isSearchResult && contact.highlightedName ? (
+                        <SearchHighlight
+                          text={contact.highlightedName}
+                          fallback={contact.name}
+                        />
+                      ) : (
+                        contact.name
+                      )}
+                    </Link>
+                  </CardTitle>
+                  <FavouriteToggle
+                    contactId={contact.id}
+                    isFavourite={contact.is_favourite}
+                    contactName={contact.name}
+                    size='sm'
+                    className='ml-2 flex-shrink-0'
+                  />
+                </div>
               </CardHeader>
               <CardContent>
                 <div className='space-y-2'>

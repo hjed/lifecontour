@@ -2,92 +2,160 @@
  * @jest-environment jsdom
  */
 
-import { render, screen } from '@testing-library/react';
-import { useParams } from 'next/navigation';
-import {
-  setupPlaceholderPageMocks,
-  createPlaceholderPageTests,
-  createDynamicPlaceholderPageTests,
-  PlaceholderPageConfig,
-} from '@/test-utils/placeholder-page';
+import { screen } from '@testing-library/react';
 import ContactGroupPage from '../page';
+import { useContacts, useTags } from '@/lib/api/contacts';
+import { TagListResponse } from '@/types/contacts';
+import {
+  renderWithProviders,
+  setupMocks,
+  contactTestUtils,
+} from '@/test-utils';
 
-const mockUseParams = useParams as jest.MockedFunction<typeof useParams>;
+// Mock Next.js router
+jest.mock('next/navigation', () => ({
+  useParams: jest.fn(() => ({ id: '1' })),
+  useRouter: jest.fn(() => ({
+    push: jest.fn(),
+    back: jest.fn(),
+    forward: jest.fn(),
+    refresh: jest.fn(),
+    replace: jest.fn(),
+  })),
+  usePathname: jest.fn(() => '/contacts/tags/1'),
+}));
 
-const basePageConfig: Omit<PlaceholderPageConfig, 'title' | 'description'> = {
-  pathname: '/contacts/tags/1',
-  implementationText:
-    'The contact groups functionality will be implemented in ITER1.5-004',
-  featuresText:
-    'You&apos;ll be able to organize your contacts into groups and view them here. Groups are implemented using the existing tag system',
-  iterationText: 'ITER1.5-004',
-};
+// Mock the API hooks
+jest.mock('@/lib/api/contacts', () => ({
+  useContacts: jest.fn(),
+  useTags: jest.fn(),
+}));
+
+// Mock the FavouriteToggle component
+jest.mock('@/components/contacts/FavouriteToggle', () => ({
+  FavouriteToggle: ({ contactId, isFavourite, contactName }: any) => (
+    <button data-testid={`favourite-toggle-${contactId}`}>
+      {isFavourite ? 'Remove from favourites' : 'Add to favourites'} -{' '}
+      {contactName}
+    </button>
+  ),
+}));
+
+const mockUseContacts = useContacts as jest.MockedFunction<typeof useContacts>;
+const mockUseTags = useTags as jest.MockedFunction<typeof useTags>;
 
 describe('ContactGroupPage', () => {
-  setupPlaceholderPageMocks({
-    ...basePageConfig,
-    title: 'Contact Group 1', // Default for setup
-    description: 'Contacts in group 1 will appear here.',
-  });
+  beforeEach(() => {
+    contactTestUtils.setupContactTest();
+    setupMocks.clearMocks();
+    setupMocks.fetch();
 
-  // Dynamic route tests
-  const dynamicTests = createDynamicPlaceholderPageTests(
-    ContactGroupPage,
-    basePageConfig,
-    [
-      {
-        params: { id: '1' },
-        expectedTitle: 'Contact Group 1',
-        expectedDescription: 'Contacts in group 1 will appear here.',
-      },
-      {
-        params: { id: '2' },
-        expectedTitle: 'Contact Group 2',
-        expectedDescription: 'Contacts in group 2 will appear here.',
-      },
-      {
-        params: { id: 'custom-group' },
-        expectedTitle: 'Contact Group custom-group',
-        expectedDescription: 'Contacts in group custom-group will appear here.',
-      },
-    ]
-  );
-
-  // Execute dynamic tests
-  Object.entries(dynamicTests).forEach(([testName, testFn]) => {
-    it(testName, testFn);
-  });
-
-  // Common tests for a specific group ID
-  describe('with group ID 1', () => {
-    beforeEach(() => {
-      mockUseParams.mockReturnValue({ id: '1' });
+    // Mock authenticated session
+    (fetch as jest.Mock).mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        authenticated: true,
+        user: { id: '1', name: 'Test User' },
+      }),
     });
+  });
 
-    const pageConfigWithId: PlaceholderPageConfig = {
-      ...basePageConfig,
-      title: 'Contact Group 1',
-      description: 'Contacts in group 1 will appear here.',
+  it('should call useContacts with tag filter', async () => {
+    const mockTagsData: TagListResponse = {
+      data: [
+        {
+          type: 'tags',
+          id: '1',
+          attributes: {
+            name: 'Work',
+            color: '#3182CE',
+            description: 'Work contacts',
+            created_at: '2024-01-01T00:00:00Z',
+            updated_at: '2024-01-01T00:00:00Z',
+          },
+        },
+      ],
     };
 
-    const commonTests = createPlaceholderPageTests(
-      ContactGroupPage,
-      pageConfigWithId
-    );
+    mockUseTags.mockReturnValue({
+      data: mockTagsData,
+      isLoading: false,
+      error: null,
+    } as any);
 
-    // Execute all common tests
-    Object.entries(commonTests).forEach(([testName, testFn]) => {
-      it(testName, testFn);
-    });
+    mockUseContacts.mockReturnValue({
+      data: { data: [], meta: { total: 0, page: 1, limit: 20 } },
+      isLoading: false,
+      error: null,
+    } as any);
+
+    renderWithProviders(<ContactGroupPage />);
+
+    // Wait for authentication to complete and page to load
+    await screen.findByText('Work Contacts');
+
+    expect(mockUseContacts).toHaveBeenCalledWith({ tags: ['1'] });
   });
 
-  // Additional edge case tests
-  it('handles missing or undefined group ID gracefully', () => {
-    mockUseParams.mockReturnValue({ id: undefined });
+  it('should show empty state when no contacts in tag', async () => {
+    const mockTagsData: TagListResponse = {
+      data: [
+        {
+          type: 'tags',
+          id: '1',
+          attributes: {
+            name: 'Work',
+            color: '#3182CE',
+            description: 'Work contacts',
+            created_at: '2024-01-01T00:00:00Z',
+            updated_at: '2024-01-01T00:00:00Z',
+          },
+        },
+      ],
+    };
 
-    render(<ContactGroupPage />);
+    mockUseTags.mockReturnValue({
+      data: mockTagsData,
+      isLoading: false,
+      error: null,
+    } as any);
 
-    // Should still render but with undefined in the text
-    expect(screen.getByRole('heading', { level: 1 })).toBeInTheDocument();
+    mockUseContacts.mockReturnValue({
+      data: { data: [], meta: { total: 0, page: 1, limit: 20 } },
+      isLoading: false,
+      error: null,
+    } as any);
+
+    renderWithProviders(<ContactGroupPage />);
+
+    expect(
+      await screen.findByText('No contacts found in this tag')
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText('Add some contacts to the "Work" tag to see them here')
+    ).toBeInTheDocument();
+  });
+
+  it('should handle tag not found', async () => {
+    mockUseTags.mockReturnValue({
+      data: { data: [] },
+      isLoading: false,
+      error: null,
+    } as any);
+
+    mockUseContacts.mockReturnValue({
+      data: { data: [], meta: { total: 0, page: 1, limit: 20 } },
+      isLoading: false,
+      error: null,
+    } as any);
+
+    renderWithProviders(<ContactGroupPage />);
+
+    expect(
+      await screen.findByRole('heading', { name: 'Tag Not Found', level: 1 })
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText('The requested tag could not be found.')
+    ).toBeInTheDocument();
   });
 });
