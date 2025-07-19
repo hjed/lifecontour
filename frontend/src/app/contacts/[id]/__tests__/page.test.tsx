@@ -18,124 +18,14 @@ import {
   setupMocks,
 } from '@/test-utils';
 
-// Mock the API hooks
-jest.mock('@/lib/api/contacts', () => ({
-  useContact: jest.fn(),
-  useUpdateContact: jest.fn(),
-  useDeleteContact: jest.fn(),
-  useToggleContactFavourite: jest.fn(),
-}));
-
-// Mock Next.js navigation
-jest.mock('next/navigation', () => ({
-  useRouter: () => ({
-    push: jest.fn(),
-    replace: jest.fn(),
-    prefetch: jest.fn(),
-    back: jest.fn(),
-    forward: jest.fn(),
-    refresh: jest.fn(),
-  }),
-  usePathname: () => '/contacts/1',
-  useSearchParams: () => new URLSearchParams(),
-  useParams: () => ({ id: '1' }),
-}));
-
-// Mock date-fns
-jest.mock('date-fns', () => ({
-  format: jest.fn(() => '1 January 2024'),
-}));
-
-jest.mock('date-fns/locale', () => ({
-  enAU: {},
-}));
-
-// Mock constants
-jest.mock('@/lib/constants', () => ({
-  API_ENDPOINTS: {
-    AUTH: {
-      LOGIN: '/api/auth/login',
-      LOGOUT: '/api/auth/logout',
-      SESSION: '/api/auth/session',
-      CALLBACK: '/api/auth/callback',
-      PROVIDERS: '/api/auth/providers',
-    },
-    CONTACTS: {
-      BASE: '/api/contacts',
-      SEARCH: '/api/contacts/search',
-    },
-  },
-  HTTP_HEADERS: {
-    CONTENT_TYPE: 'Content-Type',
-    APPLICATION_JSON: 'application/json',
-    AUTHORIZATION: 'Authorization',
-  },
-  ERROR_MESSAGES: {
-    LOGIN_FAILED: 'Login failed',
-    LOGOUT_FAILED: 'Logout failed',
-    AUTH_FAILED: 'Authentication failed',
-    SESSION_EXPIRED: 'Your session has expired. Please sign in again.',
-    OAUTH_ERROR: 'OAuth error',
-    MISSING_OAUTH_PARAMS: 'Missing required OAuth parameters',
-    NETWORK_ERROR: 'Network error occurred',
-    UNKNOWN_ERROR: 'An unknown error occurred',
-    FETCH_FAILED: 'Failed to fetch data. Please try again.',
-  },
-  SUCCESS_MESSAGES: {
-    SIGNED_IN: 'Successfully signed in',
-    SIGNED_OUT: 'Successfully signed out',
-    CONTACT_CREATED: 'Contact created successfully',
-    CONTACT_UPDATED: 'Contact updated successfully',
-    CONTACT_DELETED: 'Contact deleted successfully',
-  },
-  OAUTH_PROVIDER_NAMES: {
-    GITHUB: 'GitHub',
-    MICROSOFT: 'Microsoft',
-    DISCORD: 'Discord',
-    GENERIC: 'Generic',
-  },
-  OAUTH_PROVIDER_ICONS: {
-    GITHUB: 'github',
-    MICROSOFT: 'microsoft',
-    DISCORD: 'discord',
-    GENERIC: 'generic',
-  },
-  OAUTH_PROVIDER_COLORS: {
-    GITHUB: '#333',
-    MICROSOFT: '#0078d4',
-    DISCORD: '#5865f2',
-    GENERIC: '#666',
-  },
-  AUTH_STORAGE_KEYS: {
-    SESSION: 'auth_session',
-    CSRF_TOKEN: 'csrf_token',
-  },
-  UI_TEXT: {
-    WELCOME_BACK: 'Welcome Back',
-    SIGN_IN_DESCRIPTION: 'Sign in to your Personal Management System',
-    CONTINUE_WITH: 'Continue with',
-    CONNECTING_TO: 'Connecting to',
-    PRIVACY_NOTICE:
-      'By signing in, you agree to our terms of service and privacy policy.',
-    PRIVATE_APP_NOTICE: 'This is a private application for personal use only.',
-    LOADING: 'Loading',
-    CHECKING_AUTH: 'Checking your authentication status',
-    PLEASE_WAIT: 'Please wait...',
-    COMPLETING_SIGN_IN: 'Completing Sign In',
-    FINISH_SESSION_SETUP: 'Please wait while we finish setting up your session',
-    SHOULD_TAKE_MOMENT: 'This should only take a moment...',
-    AUTH_FAILED: 'Authentication Failed',
-    PROBLEM_SIGNING_IN: 'There was a problem signing you in',
-    TRY_AGAIN: 'Try signing in again',
-  },
-  DATE_FORMATS: {
-    WITH_TIME: 'dd/MM/yyyy HH:mm',
-    LONG: 'dd MMMM yyyy',
-  },
-  VALIDATION_MESSAGES: {
-    REQUIRED_FIELD: 'This field is required',
-  },
-}));
+// Use shared mock utilities to reduce duplication
+setupMocks.contactsApi();
+setupMocks.nextNavigation({
+  pathname: '/contacts/1',
+  params: { id: '1' }
+});
+setupMocks.dateFns();
+setupMocks.constants();
 
 const mockUseContact = useContact as jest.MockedFunction<typeof useContact>;
 const mockUseUpdateContact = useUpdateContact as jest.MockedFunction<
