@@ -10,6 +10,7 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
+import type { Route } from 'next';
 import { usePathname } from 'next/navigation';
 import {
   Users,
@@ -34,7 +35,7 @@ import { useTags } from '@/lib/api/contacts';
 
 interface NavigationItem {
   readonly label: string;
-  readonly href: string;
+  readonly href: Route;
   readonly icon?: React.ComponentType<{ className?: string }>;
   readonly disabled?: boolean;
 }
@@ -59,7 +60,7 @@ interface SidebarContentProps {
  *
  * Special handling for the contacts root path to ensure exact matching.
  */
-function isActiveLink(href: string, pathname: string): boolean {
+function isActiveLink(href: Route, pathname: string): boolean {
   if (href === '/contacts') {
     return pathname === '/contacts' || pathname === '/contacts/';
   }
@@ -75,20 +76,20 @@ function useNavigationSections(): NavigationSection[] {
   } = useTags();
 
   const contactItems: NavigationItem[] = [
-    { label: 'All', href: '/contacts' },
-    { label: 'Favourites', href: '/contacts/favourites', icon: Star },
+    { label: 'All', href: '/contacts' as Route },
+    { label: 'Favourites', href: '/contacts/favourites' as Route, icon: Star },
   ];
 
   // Add dynamic tag items
   if (tagsData?.data && !tagsLoading && !tagsError) {
     const tagItems = tagsData.data.map(tag => ({
       label: tag.attributes.name,
-      href: `/contacts/tags/${tag.id}`,
+      href: `/contacts/tags/${tag.id}` as Route,
     }));
     contactItems.push(...tagItems);
   } else if (tagsLoading) {
     // Show loading placeholder
-    contactItems.push({ label: 'Loading tags...', href: '#', disabled: true });
+    contactItems.push({ label: 'Loading tags...', href: '#' as Route, disabled: true });
   }
 
   return [
@@ -102,7 +103,7 @@ function useNavigationSections(): NavigationSection[] {
       label: 'Journals',
       icon: BookOpen,
       defaultExpanded: false,
-      items: [{ label: 'Etc', href: '/journals' }],
+      items: [{ label: 'Etc', href: '/journals' as Route }],
     },
   ];
 }
@@ -115,7 +116,7 @@ function SidebarContentWithContext({ onNavigate }: SidebarContentProps) {
   const { state, toggleSection } = useSidebar();
   const navigationSections = useNavigationSections();
 
-  const checkActiveLink = (href: string) => isActiveLink(href, pathname);
+  const checkActiveLink = (href: Route) => isActiveLink(href, pathname);
 
   return (
     <SidebarContentInner
@@ -153,7 +154,7 @@ function SidebarContentWithLocalState({ onNavigate }: SidebarContentProps) {
     }));
   };
 
-  const checkActiveLink = (href: string) => isActiveLink(href, pathname);
+  const checkActiveLink = (href: Route) => isActiveLink(href, pathname);
 
   return (
     <SidebarContentInner
@@ -191,7 +192,7 @@ function SidebarContentInner({
 }: {
   readonly expandedSections: Record<string, boolean>;
   readonly toggleSection: (sectionLabel: string) => void;
-  readonly isActiveLink: (href: string) => boolean;
+  readonly isActiveLink: (href: Route) => boolean;
   readonly onNavigate?: () => void;
   readonly navigationSections: NavigationSection[];
 }) {
@@ -279,8 +280,7 @@ function SidebarContentInner({
                       asChild
                     >
                       <Link
-                        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                        href={item.href as any}
+                        href={item.href}
                         onClick={onNavigate}
                         aria-current={isActive ? 'page' : undefined}
                       >
