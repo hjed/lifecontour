@@ -231,6 +231,7 @@ shadcn/ui implementation patterns._
 - Always define interfaces for API objects, database entities, and configuration
 - Use exact optional property types for better type safety
 - Keep http client usage issolated to dedicated components and resources (adapter pattern)
+- Never use `any` type or disable type checking. Always fix the underlying issue.
 
 ### Code Organization
 
