@@ -21,10 +21,12 @@ test.describe('Sidebar Dynamic Tags Navigation', () => {
 
         // Look for tag links in sidebar (should not be hardcoded Group 1, Group 2)
         const tagLinks = page.locator('a[href*="/contacts/tags/"]');
-        const hardcodedGroups = page.locator('text="Group 1", text="Group 2"');
+        const hardcodedGroup1 = page.locator('text="Group 1"');
+        const hardcodedGroup2 = page.locator('text="Group 2"');
 
         // Should not have hardcoded groups
-        expect(await hardcodedGroups.count()).toBe(0);
+        expect(await hardcodedGroup1.count()).toBe(0);
+        expect(await hardcodedGroup2.count()).toBe(0);
 
         // May have dynamic tag links
         const tagCount = await tagLinks.count();

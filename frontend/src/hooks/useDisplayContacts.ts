@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import { ContactResource } from '@/types/contacts';
+import { ContactResource, TagResource } from '@/types/contacts';
 
 /**
  * Transformed contact data for display purposes
@@ -10,7 +10,7 @@ export interface DisplayContact {
   is_favourite: boolean;
   primary_email?: string;
   primary_phone?: string;
-  tags: any[];
+  tags: TagResource[];
   created_at: string;
   updated_at: string;
 }

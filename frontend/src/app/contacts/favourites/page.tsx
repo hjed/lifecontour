@@ -11,7 +11,7 @@ import { Star, Users } from 'lucide-react';
 import Link from 'next/link';
 import { useContacts } from '@/lib/api/contacts';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { AuthGuard } from '@/components/auth/AuthGuard';
