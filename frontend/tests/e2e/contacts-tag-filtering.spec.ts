@@ -1,9 +1,5 @@
 import { test, expect } from '@playwright/test';
-import {
-  createTestHelpers,
-  navigateAndWaitForStable,
-  verifyPageLoadsSuccessfully,
-} from './utils/test-helpers';
+import { createTestHelpers } from './utils/test-helpers';
 
 test.describe('Tag Filtering Pages', () => {
   test('should load tag filtering page successfully', async ({ page }) => {
@@ -23,7 +19,7 @@ test.describe('Tag Filtering Pages', () => {
       ).toBeVisible();
     } else {
       // If authenticated, verify tag page loads
-      await verifyPageLoadsSuccessfully(page, /Personal Management System/);
+      await expect(page).toHaveTitle(/Personal Management System/);
     }
   });
 
@@ -36,8 +32,11 @@ test.describe('Tag Filtering Pages', () => {
     const result = await auth.handleProtectedPageAccess();
 
     if (result === 'accessed') {
-      // Wait for content to load
-      await page.waitForTimeout(2000);
+      // Wait for content to load by waiting for either tag content or error message
+      await page.waitForSelector(
+        'text=/contacts.*tag/i, text=/tag.*contacts/i, text=/tag.*not.*found/i, text=/not.*found/i, h1',
+        { timeout: 10000 }
+      );
 
       // Should show either tag content or "tag not found" message
       const pageContent = page.locator('body');
@@ -70,8 +69,11 @@ test.describe('Tag Filtering Pages', () => {
     const result = await auth.handleProtectedPageAccess();
 
     if (result === 'accessed') {
-      // Wait for content to load
-      await page.waitForTimeout(2000);
+      // Wait for content to load by waiting for error messages or page content
+      await page.waitForSelector(
+        'text=/tag.*not.*found/i, text=/not.*found/i, text=/doesn.*exist/i, text=/invalid.*tag/i, h1, main',
+        { timeout: 10000 }
+      );
 
       // Should show "tag not found" or similar error message
       const errorMessages = [
@@ -99,7 +101,7 @@ test.describe('Tag Filtering Pages', () => {
         }
       } else {
         // If no error message, should still be a valid page
-        await verifyPageLoadsSuccessfully(page, /Personal Management System/);
+        await expect(page).toHaveTitle(/Personal Management System/);
       }
     }
   });
@@ -115,8 +117,11 @@ test.describe('Tag Filtering Pages', () => {
     const result = await auth.handleProtectedPageAccess();
 
     if (result === 'accessed') {
-      // Wait for content to load
-      await page.waitForTimeout(2000);
+      // Wait for content to load by waiting for contact cards, empty state, or error message
+      await page.waitForSelector(
+        '[data-testid="contact-card"], .contact-card, [class*="card"], text=/no contacts.*tag/i, text=/no contacts found/i, text=/tag.*not.*found/i',
+        { timeout: 10000 }
+      );
 
       // Look for contact cards or empty state
       const contactCards = page.locator(
@@ -186,8 +191,11 @@ test.describe('Tag Filtering Pages', () => {
     const result = await auth.handleProtectedPageAccess();
 
     if (result === 'accessed') {
-      // Wait for content to load
-      await page.waitForTimeout(2000);
+      // Wait for content to load by waiting for empty state, contact cards, or error message
+      await page.waitForSelector(
+        'text=/no contacts.*tag/i, text=/no contacts found/i, text=/add.*contacts.*tag/i, [data-testid="contact-card"], .contact-card, [class*="card"], text=/tag.*not.*found/i',
+        { timeout: 10000 }
+      );
 
       // Look for empty state message
       const emptyStateMessages = [
@@ -259,11 +267,9 @@ test.describe('Tag Filtering Pages', () => {
     const result = await auth.handleProtectedPageAccess();
 
     if (result === 'accessed') {
-      // Wait for content to load
-      await page.waitForTimeout(2000);
-
+      // Wait for content to load by waiting for the heading
       const heading = page.locator('h1');
-      await expect(heading).toBeVisible();
+      await expect(heading).toBeVisible({ timeout: 10000 });
 
       // Should have tag icon or visual indicator
       const tagIcon = heading.locator('svg');

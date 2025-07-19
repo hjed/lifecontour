@@ -1,9 +1,5 @@
 import { test, expect } from '@playwright/test';
-import {
-  createTestHelpers,
-  navigateAndWaitForStable,
-  verifyPageLoadsSuccessfully,
-} from './utils/test-helpers';
+import { createTestHelpers } from './utils/test-helpers';
 
 test.describe('Contact Favourites and Filtering', () => {
   test.describe('Favourites Functionality', () => {
@@ -66,7 +62,8 @@ test.describe('Contact Favourites and Filtering', () => {
           }
         } catch (error) {
           // If no contacts are loaded, that's also a valid state
-          console.log('No contacts found or page still loading');
+          console.log('No contacts found or page still loading:', error);
+          // This is expected behavior when no contacts exist
         }
       }
     });
@@ -111,7 +108,11 @@ test.describe('Contact Favourites and Filtering', () => {
       if (result === 'accessed') {
         // Look for empty state message or contact cards
         try {
-          await page.waitForTimeout(2000); // Wait for content to load
+          // Wait for content to load by waiting for either empty state or contact cards
+          await page.waitForSelector(
+            'text=/no.*favourite.*contacts/i, text=/star.*contacts/i, [data-testid="contact-card"], .contact-card, [class*="card"]',
+            { timeout: 10000 }
+          );
 
           const emptyState = page.locator(
             'text=/no.*favourite.*contacts/i, text=/star.*contacts/i'
@@ -127,7 +128,8 @@ test.describe('Contact Favourites and Filtering', () => {
           expect(hasEmptyState || hasContacts).toBe(true);
         } catch (error) {
           // If page is still loading or has issues, that's also valid
-          console.log('Favourites page content still loading or has issues');
+          console.log('Favourites page content still loading or has issues:', error);
+          // This is expected behavior during page loading
         }
       }
     });
@@ -171,7 +173,8 @@ test.describe('Contact Favourites and Filtering', () => {
             expect(href).toMatch(/\/contacts\/tags\/\w+/);
           }
         } catch (error) {
-          console.log('Sidebar still loading or no tags available');
+          console.log('Sidebar still loading or no tags available:', error);
+          // This is expected behavior when sidebar is loading or no tags exist
         }
       }
     });
@@ -209,7 +212,11 @@ test.describe('Contact Favourites and Filtering', () => {
       if (result === 'accessed') {
         // Should show "tag not found" or similar error message
         try {
-          await page.waitForTimeout(2000); // Wait for content to load
+          // Wait for content to load by waiting for either error message or page content
+          await page.waitForSelector(
+            'text=/tag.*not.*found/i, text=/not.*found/i, h1, main, [role="main"]',
+            { timeout: 10000 }
+          );
 
           const errorContent = page.locator(
             'text=/tag.*not.*found/i, text=/not.*found/i'
@@ -221,13 +228,11 @@ test.describe('Contact Favourites and Filtering', () => {
             expect(hasErrorMessage).toBe(true);
           } else {
             // If no error message, should still be a valid page
-            await verifyPageLoadsSuccessfully(
-              page,
-              /Personal Management System/
-            );
+            await expect(page).toHaveTitle(/Personal Management System/);
           }
         } catch (error) {
-          console.log('Tag page content still loading');
+          console.log('Tag page content still loading:', error);
+          // This is expected behavior during page loading
         }
       }
     });
@@ -259,8 +264,10 @@ test.describe('Contact Favourites and Filtering', () => {
           }
         } catch (error) {
           console.log(
-            'Navigation test encountered expected authentication flow'
+            'Navigation test encountered expected authentication flow:',
+            error
           );
+          // This is expected behavior during authentication redirects
         }
       }
     });
@@ -295,8 +302,10 @@ test.describe('Contact Favourites and Filtering', () => {
             }
           } catch (error) {
             console.log(
-              `UI elements test for ${pageUrl} encountered loading issues`
+              `UI elements test for ${pageUrl} encountered loading issues:`,
+              error
             );
+            // This is expected behavior during page loading or authentication
           }
         }
       }

@@ -279,7 +279,6 @@ function SidebarContentInner({
                       asChild
                     >
                       <Link
-                        // @ts-expect-error - Dynamic routes not supported by Next.js types
                         href={item.href}
                         onClick={onNavigate}
                         aria-current={isActive ? 'page' : undefined}

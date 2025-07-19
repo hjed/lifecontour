@@ -1,9 +1,5 @@
 import { test, expect } from '@playwright/test';
-import {
-  createTestHelpers,
-  navigateAndWaitForStable,
-  verifyPageLoadsSuccessfully,
-} from './utils/test-helpers';
+import { createTestHelpers } from './utils/test-helpers';
 
 test.describe('Sidebar Dynamic Tags Navigation', () => {
   test('should display dynamic tags in sidebar navigation', async ({
@@ -149,8 +145,8 @@ test.describe('Sidebar Dynamic Tags Navigation', () => {
           // Click the tag link
           await firstTagLink.click();
 
-          // Wait for navigation
-          await page.waitForTimeout(1000);
+          // Wait for navigation to complete
+          await page.waitForLoadState('networkidle');
 
           // Should navigate to tag page or login
           const currentUrl = page.url();
@@ -189,8 +185,8 @@ test.describe('Sidebar Dynamic Tags Navigation', () => {
         if ((await favouritesLink.count()) > 0) {
           await favouritesLink.first().click();
 
-          // Wait for navigation
-          await page.waitForTimeout(1000);
+          // Wait for navigation to complete
+          await page.waitForLoadState('networkidle');
 
           // Should navigate to favourites page or login
           const currentUrl = page.url();
