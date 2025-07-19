@@ -279,7 +279,8 @@ function SidebarContentInner({
                       asChild
                     >
                       <Link
-                        href={item.href}
+                        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                        href={item.href as any}
                         onClick={onNavigate}
                         aria-current={isActive ? 'page' : undefined}
                       >
