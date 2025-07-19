@@ -30,11 +30,13 @@ import {
   SheetTrigger,
 } from '@/components/ui/sheet';
 import { useSidebar, useSidebarAvailable } from '@/contexts/SidebarContext';
+import { useTags } from '@/lib/api/contacts';
 
 interface NavigationItem {
   readonly label: string;
   readonly href: string;
   readonly icon?: React.ComponentType<{ className?: string }>;
+  readonly disabled?: boolean;
 }
 
 interface NavigationSection {
@@ -64,27 +66,46 @@ function isActiveLink(href: string, pathname: string): boolean {
   return pathname.startsWith(href);
 }
 
-// Navigation configuration
-const navigationSections: NavigationSection[] = [
-  {
-    label: 'Contacts',
-    icon: Users,
-    defaultExpanded: true,
-    items: [
-      { label: 'All', href: '/contacts' },
-      { label: 'Favourites', href: '/contacts/favourites', icon: Star },
-      // TODO: ITER1.5-004 - Replace with dynamic groups (using tag system)
-      { label: 'Group 1', href: '/contacts/tags/1' },
-      { label: 'Group 2', href: '/contacts/tags/2' },
-    ],
-  },
-  {
-    label: 'Journals',
-    icon: BookOpen,
-    defaultExpanded: false,
-    items: [{ label: 'Etc', href: '/journals' }],
-  },
-];
+// Dynamic navigation configuration
+function useNavigationSections(): NavigationSection[] {
+  const {
+    data: tagsData,
+    isLoading: tagsLoading,
+    error: tagsError,
+  } = useTags();
+
+  const contactItems: NavigationItem[] = [
+    { label: 'All', href: '/contacts' },
+    { label: 'Favourites', href: '/contacts/favourites', icon: Star },
+  ];
+
+  // Add dynamic tag items
+  if (tagsData?.data && !tagsLoading && !tagsError) {
+    const tagItems = tagsData.data.map(tag => ({
+      label: tag.attributes.name,
+      href: `/contacts/tags/${tag.id}`,
+    }));
+    contactItems.push(...tagItems);
+  } else if (tagsLoading) {
+    // Show loading placeholder
+    contactItems.push({ label: 'Loading tags...', href: '#', disabled: true });
+  }
+
+  return [
+    {
+      label: 'Contacts',
+      icon: Users,
+      defaultExpanded: true,
+      items: contactItems,
+    },
+    {
+      label: 'Journals',
+      icon: BookOpen,
+      defaultExpanded: false,
+      items: [{ label: 'Etc', href: '/journals' }],
+    },
+  ];
+}
 
 /**
  * Sidebar content component with context support
@@ -92,6 +113,7 @@ const navigationSections: NavigationSection[] = [
 function SidebarContentWithContext({ onNavigate }: SidebarContentProps) {
   const pathname = usePathname();
   const { state, toggleSection } = useSidebar();
+  const navigationSections = useNavigationSections();
 
   const checkActiveLink = (href: string) => isActiveLink(href, pathname);
 
@@ -101,6 +123,7 @@ function SidebarContentWithContext({ onNavigate }: SidebarContentProps) {
       toggleSection={toggleSection}
       isActiveLink={checkActiveLink}
       onNavigate={onNavigate}
+      navigationSections={navigationSections}
     />
   );
 }
@@ -110,6 +133,7 @@ function SidebarContentWithContext({ onNavigate }: SidebarContentProps) {
  */
 function SidebarContentWithLocalState({ onNavigate }: SidebarContentProps) {
   const pathname = usePathname();
+  const navigationSections = useNavigationSections();
   const [expandedSections, setExpandedSections] = useState<
     Record<string, boolean>
   >(
@@ -137,6 +161,7 @@ function SidebarContentWithLocalState({ onNavigate }: SidebarContentProps) {
       toggleSection={toggleSection}
       isActiveLink={checkActiveLink}
       onNavigate={onNavigate}
+      navigationSections={navigationSections}
     />
   );
 }
@@ -162,11 +187,13 @@ function SidebarContentInner({
   toggleSection,
   isActiveLink,
   onNavigate,
+  navigationSections,
 }: {
   readonly expandedSections: Record<string, boolean>;
   readonly toggleSection: (sectionLabel: string) => void;
   readonly isActiveLink: (href: string) => boolean;
   readonly onNavigate?: () => void;
+  readonly navigationSections: NavigationSection[];
 }) {
   return (
     <nav
@@ -213,8 +240,29 @@ function SidebarContentInner({
                 aria-labelledby={`section-${section.label.toLowerCase()}-header`}
               >
                 {section.items.map(item => {
-                  const isActive = isActiveLink(item.href);
+                  const isActive = !item.disabled && isActiveLink(item.href);
                   const ItemIcon = item.icon;
+
+                  if (item.disabled) {
+                    return (
+                      <div
+                        key={item.href}
+                        className={cn(
+                          'h-auto w-full justify-start px-2 py-1.5 font-normal',
+                          'text-muted-foreground cursor-not-allowed opacity-50',
+                          'flex items-center'
+                        )}
+                      >
+                        {ItemIcon && (
+                          <ItemIcon
+                            className='mr-2 h-3 w-3'
+                            aria-hidden='true'
+                          />
+                        )}
+                        {item.label}
+                      </div>
+                    );
+                  }
 
                   return (
                     <Button
@@ -231,14 +279,8 @@ function SidebarContentInner({
                       asChild
                     >
                       <Link
-                        href={
-                          item.href as
-                            | '/contacts'
-                            | '/contacts/favourites'
-                            | '/contacts/tags/1'
-                            | '/contacts/tags/2'
-                            | '/journals'
-                        }
+                        // @ts-expect-error - Dynamic routes not supported by Next.js types
+                        href={item.href}
                         onClick={onNavigate}
                         aria-current={isActive ? 'page' : undefined}
                       >

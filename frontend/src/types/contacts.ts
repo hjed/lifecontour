@@ -85,6 +85,7 @@ export interface ContactAttributes {
   last_name?: string;
   middle_name?: string;
   nick_name?: string;
+  is_favourite?: boolean;
   created_at: string;
   updated_at: string;
   // Embedded related data (not separate resources for REST API)
@@ -189,6 +190,7 @@ export interface ContactDisplay {
 export interface ContactFilters {
   search?: string;
   tags?: string[];
+  favourite?: boolean;
   created_after?: string;
   created_before?: string;
 }

@@ -17,6 +17,7 @@ import {
 jest.mock('@/lib/api/contacts', () => ({
   useContacts: jest.fn(),
   useSearchContacts: jest.fn(),
+  useToggleContactFavourite: jest.fn(),
 }));
 
 // Mock the debounce hook
@@ -114,6 +115,11 @@ const mockUseSearchContacts = useSearchContacts as jest.MockedFunction<
   typeof useSearchContacts
 >;
 
+// Get the mocked function from the module
+const mockUseToggleContactFavourite = jest.mocked(
+  jest.requireMock('@/lib/api/contacts').useToggleContactFavourite
+);
+
 describe('ContactsPage', () => {
   beforeEach(() => {
     contactTestUtils.setupContactTest();
@@ -131,6 +137,14 @@ describe('ContactsPage', () => {
           name: 'Test User',
         },
       }),
+    });
+
+    // Set up default mock for useToggleContactFavourite
+    mockUseToggleContactFavourite.mockReturnValue({
+      mutate: jest.fn(),
+      isPending: false,
+      isError: false,
+      error: null,
     });
   });
 

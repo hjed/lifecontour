@@ -39,7 +39,7 @@ export const tagKeys = {
 };
 
 // API Functions
-async function fetchContacts(
+export async function fetchContacts(
   filters: ContactFilters = {}
 ): Promise<ContactListResponse> {
   const params = new URLSearchParams();
@@ -47,6 +47,9 @@ async function fetchContacts(
   if (filters.search) params.append('search', filters.search);
   if (filters.tags?.length) {
     filters.tags.forEach(tag => params.append('tags', tag));
+  }
+  if (filters.favourite !== undefined) {
+    params.append('favourite', filters.favourite.toString());
   }
   if (filters.created_after)
     params.append('created_after', filters.created_after);
@@ -212,6 +215,30 @@ async function fetchTags(): Promise<TagListResponse> {
   return response.json();
 }
 
+export async function toggleContactFavourite(
+  contactId: string
+): Promise<ContactResponse> {
+  const response = await fetch(
+    `${API_ENDPOINTS.CONTACTS.BASE}/${contactId}/favourite`,
+    {
+      method: 'POST',
+      credentials: 'include',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    }
+  );
+
+  if (!response.ok) {
+    const errorData: JsonApiErrorResponse = await response.json();
+    throw new Error(
+      errorData.errors?.[0]?.detail || ERROR_MESSAGES.UPDATE_FAILED
+    );
+  }
+
+  return response.json();
+}
+
 // React Query Hooks
 export function useContacts(
   filters: ContactFilters = {},
@@ -302,6 +329,30 @@ export function useDeleteContact() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: contactKeys.all });
       toast.success(SUCCESS_MESSAGES.CONTACT_DELETED);
+    },
+    onError: (error: Error) => {
+      toast.error(error.message);
+    },
+  });
+}
+
+export function useToggleContactFavourite() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: toggleContactFavourite,
+    onSuccess: data => {
+      const contactId = data.data.id;
+      queryClient.invalidateQueries({
+        queryKey: contactKeys.detail(contactId),
+      });
+      queryClient.invalidateQueries({ queryKey: contactKeys.lists() });
+      const isFavourite = data.data.attributes.is_favourite;
+      toast.success(
+        isFavourite
+          ? 'Contact added to favourites'
+          : 'Contact removed from favourites'
+      );
     },
     onError: (error: Error) => {
       toast.error(error.message);
