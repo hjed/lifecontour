@@ -1,0 +1,20 @@
+{
+  "name": "oauth-login-consent-service",
+  "version": "1.0.0",
+  "description": "Auto-accepting OAuth login/consent service for E2E testing",
+  "main": "app.js",
+  "scripts": {
+    "start": "node app.js",
+    "dev": "nodemon app.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "axios": "^1.6.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
