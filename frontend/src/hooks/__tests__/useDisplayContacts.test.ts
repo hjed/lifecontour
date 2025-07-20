@@ -5,6 +5,7 @@
 import { renderHook } from '@testing-library/react';
 import { useDisplayContacts } from '../useDisplayContacts';
 import { contactTestUtils } from '@/test-utils';
+import { ContactMethodType } from '../../types/contacts';
 
 describe('useDisplayContacts', () => {
   const mockContact = contactTestUtils.createMockContact();
@@ -12,12 +13,13 @@ describe('useDisplayContacts', () => {
   // Create a contact with phone number for testing
   const mockContactWithPhone = contactTestUtils.createMockContact({
     attributes: {
+      ...contactTestUtils.createMockContact().attributes,
       contact_methods: [
         {
           id: '1',
           type: 'contact_methods' as const,
           attributes: {
-            method_type: 'email' as const,
+            method_type: ContactMethodType.EMAIL,
             value: 'john@example.com',
             label: 'Work',
             is_primary: true,
@@ -27,7 +29,7 @@ describe('useDisplayContacts', () => {
           id: '2',
           type: 'contact_methods' as const,
           attributes: {
-            method_type: 'phone' as const,
+            method_type: ContactMethodType.PHONE,
             value: '+1-555-123-4567',
             label: 'Mobile',
             is_primary: true,
@@ -87,7 +89,7 @@ describe('useDisplayContacts', () => {
       ...mockContact,
       attributes: {
         ...mockContact.attributes,
-        last_name: null,
+        last_name: undefined,
       },
     };
 
@@ -119,27 +121,27 @@ describe('useDisplayContacts', () => {
         contact_methods: [
           {
             id: '1',
-            type: 'contact_methods',
+            type: 'contact_methods' as const,
             attributes: {
-              method_type: 'email' as const,
+              method_type: ContactMethodType.EMAIL,
               value: 'secondary@example.com',
               is_primary: false,
             },
           },
           {
             id: '2',
-            type: 'contact_methods',
+            type: 'contact_methods' as const,
             attributes: {
-              method_type: 'email' as const,
+              method_type: ContactMethodType.EMAIL,
               value: 'primary@example.com',
               is_primary: true,
             },
           },
           {
             id: '3',
-            type: 'contact_methods',
+            type: 'contact_methods' as const,
             attributes: {
-              method_type: 'phone' as const,
+              method_type: ContactMethodType.PHONE,
               value: '+1-555-999-8888',
               is_primary: true,
             },
