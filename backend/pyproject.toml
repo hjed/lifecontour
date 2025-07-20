@@ -134,7 +134,7 @@ module = [
 disallow_untyped_defs = false
 disallow_incomplete_defs = false
 
-# Specific override for pytest-asyncio fixture typing issue
+# Specific override for pytest async generator fixture typing issue
 [[tool.mypy.overrides]]
 module = "tests.integration.google_contacts.test_google_contacts_client"
 disable_error_code = ["misc"]
