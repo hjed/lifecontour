@@ -67,12 +67,12 @@ while [ $attempt -lt $max_attempts ]; do
         print_success "Hydra is ready!"
         break
     fi
-    
+
     # Show progress every 10 attempts
     if [ $((attempt % 10)) -eq 0 ] && [ $attempt -gt 0 ]; then
         print_step "Still waiting for Hydra... (attempt $((attempt + 1))/$max_attempts)"
     fi
-    
+
     sleep 2
     attempt=$((attempt + 1))
 done

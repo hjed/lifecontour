@@ -69,18 +69,18 @@ check_directory() {
 # Setup Docker environment
 setup_environment() {
     print_status "Setting up Docker environment for e2e tests..."
-    
+
     # Stop any existing containers
     print_status "Stopping existing containers..."
     docker-compose -f docker-compose.test.yml down --remove-orphans || true
-    
+
     # Start services
     print_status "Starting Docker services..."
     docker-compose -f docker-compose.test.yml up -d --build
-    
+
     # Verify services are ready
     print_status "Verifying services..."
-    
+
     # Check backend health
     for i in {1..30}; do
         if curl -s http://localhost:8001/api/health > /dev/null; then
@@ -93,7 +93,7 @@ setup_environment() {
         fi
         sleep 2
     done
-    
+
     # Check OAuth provider
     for i in {1..30}; do
         if curl -s http://localhost:4446/.well-known/openid_configuration > /dev/null; then
@@ -106,7 +106,7 @@ setup_environment() {
         fi
         sleep 2
     done
-    
+
     print_success "Environment setup complete!"
 }
 
@@ -114,7 +114,7 @@ setup_environment() {
 run_tests() {
     local test_args=()
     local playwright_args=()
-    
+
     # Parse arguments
     while [[ $# -gt 0 ]]; do
         case $1 in
@@ -144,17 +144,17 @@ run_tests() {
                 ;;
         esac
     done
-    
+
     print_status "Running Playwright e2e tests..."
-    
+
     cd frontend
-    
+
     # Install Playwright browsers if needed
     if [[ ! -d ~/.cache/ms-playwright ]]; then
         print_status "Installing Playwright browsers..."
         pnpm exec playwright install chromium
     fi
-    
+
     # Run tests
     if [[ ${#test_args[@]} -gt 0 ]]; then
         print_status "Running specific tests: ${test_args[*]}"
@@ -163,7 +163,7 @@ run_tests() {
         print_status "Running all tests"
         pnpm exec playwright test "${playwright_args[@]}"
     fi
-    
+
     cd ..
 }
 
@@ -195,7 +195,7 @@ show_logs() {
 # Main script logic
 main() {
     check_directory
-    
+
     case "${1:-help}" in
         setup)
             setup_environment
