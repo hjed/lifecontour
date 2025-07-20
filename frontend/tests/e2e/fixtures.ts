@@ -7,7 +7,13 @@
 
 import { test as base, Page, BrowserContext } from '@playwright/test';
 import { createTestHelpers } from './utils/test-helpers';
-import { TestDataManager } from './data-management';
+import {
+  TestDataManager,
+  ContactFactory,
+  TagFactory,
+  DataSetFactory,
+  DataSet,
+} from './data-management';
 
 // Types for our fixtures
 export interface AuthState {
@@ -44,13 +50,32 @@ export interface TestFixtures {
   authenticatedPage: Page;
   unauthenticatedPage: Page;
 
-  // Data fixtures
+  // Basic data fixtures
   contactsWithData: { page: Page; contacts: TestContact[] };
   emptyContactsPage: Page;
   contactsWithTags: { page: Page; contacts: TestContact[]; tags: string[] };
 
-  // Cleanup tracking
+  // Advanced data fixtures
+  smallDataSet: { page: Page; contacts: TestContact[]; tags: any[] };
+  mediumDataSet: { page: Page; contacts: TestContact[]; tags: any[] };
+  largeDataSet: { page: Page; contacts: TestContact[]; tags: any[] };
+  searchTestData: { page: Page; contacts: TestContact[]; tags: any[] };
+  favouritesTestData: { page: Page; contacts: TestContact[]; tags: any[] };
+  taggedTestData: { page: Page; contacts: TestContact[]; tags: any[] };
+  performanceTestData: { page: Page; contacts: TestContact[]; tags: any[] };
+
+  // Specialized fixtures
+  contactsWithoutTags: { page: Page; contacts: TestContact[] };
+  favouriteContacts: { page: Page; contacts: TestContact[] };
+  regularContacts: { page: Page; contacts: TestContact[] };
+
+  // Utility fixtures
   testCleanup: (cleanupFn: () => Promise<void>) => void;
+  dataFactory: {
+    contacts: typeof ContactFactory;
+    tags: typeof TagFactory;
+    datasets: typeof DataSetFactory;
+  };
 }
 
 export interface WorkerFixtures {
@@ -346,6 +371,207 @@ export const test = base.extend<TestFixtures, WorkerFixtures>({
 
     const tagNames = createdTags.map(tag => tag.name);
     await use({ page: authenticatedPage, contacts, tags: tagNames });
+  },
+
+  // Advanced data fixtures
+  smallDataSet: async ({ authenticatedPage, testCleanup }, use) => {
+    const dataManager = new TestDataManager(authenticatedPage);
+    const dataset = DataSetFactory.createSmall();
+
+    console.log('📊 [Small Dataset] Creating small test dataset...');
+
+    // Create tags first
+    const createdTags = await dataManager.createTags(dataset.tags);
+
+    // Create contacts with tag assignments
+    const createdContacts = await dataManager.createContacts(dataset.contacts);
+
+    testCleanup(async () => {
+      await dataManager.cleanup();
+    });
+
+    await use({
+      page: authenticatedPage,
+      contacts: createdContacts,
+      tags: createdTags,
+    });
+  },
+
+  mediumDataSet: async ({ authenticatedPage, testCleanup }, use) => {
+    const dataManager = new TestDataManager(authenticatedPage);
+    const dataset = DataSetFactory.createMedium();
+
+    console.log('📊 [Medium Dataset] Creating medium test dataset...');
+
+    const createdTags = await dataManager.createTags(dataset.tags);
+    const createdContacts = await dataManager.createContacts(dataset.contacts);
+
+    testCleanup(async () => {
+      await dataManager.cleanup();
+    });
+
+    await use({
+      page: authenticatedPage,
+      contacts: createdContacts,
+      tags: createdTags,
+    });
+  },
+
+  largeDataSet: async ({ authenticatedPage, testCleanup }, use) => {
+    const dataManager = new TestDataManager(authenticatedPage);
+    const dataset = DataSetFactory.createLarge();
+
+    console.log('📊 [Large Dataset] Creating large test dataset...');
+
+    const createdTags = await dataManager.createTags(dataset.tags);
+    const createdContacts = await dataManager.createContacts(dataset.contacts);
+
+    testCleanup(async () => {
+      await dataManager.cleanup();
+    });
+
+    await use({
+      page: authenticatedPage,
+      contacts: createdContacts,
+      tags: createdTags,
+    });
+  },
+
+  searchTestData: async ({ authenticatedPage, testCleanup }, use) => {
+    const dataManager = new TestDataManager(authenticatedPage);
+    const dataset = DataSetFactory.createSearchTestData();
+
+    console.log('🔍 [Search Dataset] Creating search test dataset...');
+
+    const createdTags = await dataManager.createTags(dataset.tags);
+    const createdContacts = await dataManager.createContacts(dataset.contacts);
+
+    testCleanup(async () => {
+      await dataManager.cleanup();
+    });
+
+    await use({
+      page: authenticatedPage,
+      contacts: createdContacts,
+      tags: createdTags,
+    });
+  },
+
+  favouritesTestData: async ({ authenticatedPage, testCleanup }, use) => {
+    const dataManager = new TestDataManager(authenticatedPage);
+    const dataset = DataSetFactory.createFavouritesTestData();
+
+    console.log('⭐ [Favourites Dataset] Creating favourites test dataset...');
+
+    const createdTags = await dataManager.createTags(dataset.tags);
+    const createdContacts = await dataManager.createContacts(dataset.contacts);
+
+    testCleanup(async () => {
+      await dataManager.cleanup();
+    });
+
+    await use({
+      page: authenticatedPage,
+      contacts: createdContacts,
+      tags: createdTags,
+    });
+  },
+
+  taggedTestData: async ({ authenticatedPage, testCleanup }, use) => {
+    const dataManager = new TestDataManager(authenticatedPage);
+    const dataset = DataSetFactory.createTaggedData();
+
+    console.log('🏷️ [Tagged Dataset] Creating tagged test dataset...');
+
+    const createdTags = await dataManager.createTags(dataset.tags);
+    const createdContacts = await dataManager.createContacts(dataset.contacts);
+
+    testCleanup(async () => {
+      await dataManager.cleanup();
+    });
+
+    await use({
+      page: authenticatedPage,
+      contacts: createdContacts,
+      tags: createdTags,
+    });
+  },
+
+  performanceTestData: async ({ authenticatedPage, testCleanup }, use) => {
+    const dataManager = new TestDataManager(authenticatedPage);
+    const dataset = DataSetFactory.createPerformanceTestData();
+
+    console.log(
+      '🚀 [Performance Dataset] Creating performance test dataset...'
+    );
+
+    const createdTags = await dataManager.createTags(dataset.tags);
+    const createdContacts = await dataManager.createContacts(dataset.contacts);
+
+    testCleanup(async () => {
+      await dataManager.cleanup();
+    });
+
+    await use({
+      page: authenticatedPage,
+      contacts: createdContacts,
+      tags: createdTags,
+    });
+  },
+
+  // Specialized fixtures
+  contactsWithoutTags: async ({ authenticatedPage, testCleanup }, use) => {
+    const dataManager = new TestDataManager(authenticatedPage);
+
+    console.log('📝 [No Tags] Creating contacts without tags...');
+
+    const contacts = ContactFactory.createMany(5, { tags: [] });
+    const createdContacts = await dataManager.createContacts(contacts);
+
+    testCleanup(async () => {
+      await dataManager.cleanup();
+    });
+
+    await use({ page: authenticatedPage, contacts: createdContacts });
+  },
+
+  favouriteContacts: async ({ authenticatedPage, testCleanup }, use) => {
+    const dataManager = new TestDataManager(authenticatedPage);
+
+    console.log('⭐ [Favourites] Creating favourite contacts...');
+
+    const contacts = ContactFactory.createFavourites(3);
+    const createdContacts = await dataManager.createContacts(contacts);
+
+    testCleanup(async () => {
+      await dataManager.cleanup();
+    });
+
+    await use({ page: authenticatedPage, contacts: createdContacts });
+  },
+
+  regularContacts: async ({ authenticatedPage, testCleanup }, use) => {
+    const dataManager = new TestDataManager(authenticatedPage);
+
+    console.log('📝 [Regular] Creating regular contacts...');
+
+    const contacts = ContactFactory.createMany(5, { isFavourite: false });
+    const createdContacts = await dataManager.createContacts(contacts);
+
+    testCleanup(async () => {
+      await dataManager.cleanup();
+    });
+
+    await use({ page: authenticatedPage, contacts: createdContacts });
+  },
+
+  // Utility fixtures
+  dataFactory: async ({}, use) => {
+    await use({
+      contacts: ContactFactory,
+      tags: TagFactory,
+      datasets: DataSetFactory,
+    });
   },
 
   // Test-scoped fixture: Cleanup tracking

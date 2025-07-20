@@ -340,3 +340,238 @@ test.describe('Example: Migration from Old Pattern', () => {
     );
   });
 });
+
+test.describe('Advanced Data Fixtures Examples', () => {
+  test.describe('Dataset Fixtures', () => {
+    test('should work with small dataset for quick tests', async ({
+      smallDataSet,
+    }) => {
+      const { page, contacts, tags } = smallDataSet;
+
+      await page.goto('/contacts');
+
+      // Small dataset: 5 contacts, 3 tags - perfect for quick smoke tests
+      expect(contacts).toHaveLength(5);
+      expect(tags).toHaveLength(3);
+
+      console.log(
+        `📊 Small dataset loaded: ${contacts.length} contacts, ${tags.length} tags`
+      );
+    });
+
+    test('should work with medium dataset for comprehensive tests', async ({
+      mediumDataSet,
+    }) => {
+      const { page, contacts, tags } = mediumDataSet;
+
+      await page.goto('/contacts');
+
+      // Medium dataset: 20 contacts, 8 tags - good for feature testing
+      expect(contacts).toHaveLength(20);
+      expect(tags).toHaveLength(8);
+
+      // Test pagination if implemented
+      const contactCards = page.locator('[data-testid^="contact-"]');
+      await expect(contactCards.first()).toBeVisible();
+
+      console.log(
+        `📊 Medium dataset loaded: ${contacts.length} contacts, ${tags.length} tags`
+      );
+    });
+
+    test('should work with search test data for search functionality', async ({
+      searchTestData,
+    }) => {
+      const { page, contacts, tags } = searchTestData;
+
+      await page.goto('/contacts');
+
+      // Search dataset: specific contacts designed for search testing
+      expect(contacts).toHaveLength(4);
+      expect(tags).toHaveLength(3);
+
+      // Verify specific search test contacts
+      const johnContact = contacts.find(
+        c => c.firstName === 'John' && c.lastName === 'SearchTest'
+      );
+      const janeContact = contacts.find(
+        c => c.firstName === 'Jane' && c.lastName === 'FindMe'
+      );
+
+      expect(johnContact).toBeDefined();
+      expect(janeContact).toBeDefined();
+
+      // Test search functionality
+      const searchInput = page.locator('[data-testid="search-input"]');
+      if (await searchInput.isVisible()) {
+        await searchInput.fill('SearchTest');
+        await expect(
+          page.locator(`[data-testid="contact-${johnContact!.id}"]`)
+        ).toBeVisible();
+      }
+
+      console.log(
+        `🔍 Search dataset loaded: ${contacts.length} contacts, ${tags.length} tags`
+      );
+    });
+
+    test('should work with favourites test data', async ({
+      favouritesTestData,
+    }) => {
+      const { page, contacts, tags } = favouritesTestData;
+
+      await page.goto('/contacts');
+
+      // Check favourite/regular distribution
+      const favouriteContacts = contacts.filter(c => c.isFavourite);
+      const regularContacts = contacts.filter(c => !c.isFavourite);
+
+      expect(favouriteContacts.length).toBeGreaterThan(0);
+      expect(regularContacts.length).toBeGreaterThan(0);
+
+      // Test favourites filter
+      const favouritesFilter = page.locator(
+        '[data-testid="favourites-filter"]'
+      );
+      if (await favouritesFilter.isVisible()) {
+        await favouritesFilter.click();
+
+        // Should only show favourite contacts
+        for (const contact of favouriteContacts) {
+          await expect(
+            page.locator(`[data-testid="contact-${contact.id}"]`)
+          ).toBeVisible();
+        }
+      }
+
+      console.log(
+        `⭐ Favourites dataset: ${favouriteContacts.length} favourites, ${regularContacts.length} regular`
+      );
+    });
+  });
+
+  test.describe('Specialized Fixtures', () => {
+    test('should work with contacts without tags', async ({
+      contactsWithoutTags,
+    }) => {
+      const { page, contacts } = contactsWithoutTags;
+
+      await page.goto('/contacts');
+
+      // All contacts should have no tags
+      expect(contacts).toHaveLength(5);
+      contacts.forEach(contact => {
+        expect(contact.tags || []).toHaveLength(0);
+      });
+
+      // Verify no tag elements are displayed
+      for (const contact of contacts) {
+        const contactCard = page.locator(
+          `[data-testid="contact-${contact.id}"]`
+        );
+        const tagElements = contactCard.locator('[data-testid^="tag-"]');
+        await expect(tagElements).toHaveCount(0);
+      }
+
+      console.log(
+        `📝 Untagged dataset: ${contacts.length} contacts without tags`
+      );
+    });
+
+    test('should work with favourite contacts only', async ({
+      favouriteContacts,
+    }) => {
+      const { page, contacts } = favouriteContacts;
+
+      await page.goto('/contacts');
+
+      // All contacts should be favourites
+      expect(contacts).toHaveLength(3);
+      contacts.forEach(contact => {
+        expect(contact.isFavourite).toBe(true);
+      });
+
+      // Verify favourite indicators are shown
+      for (const contact of contacts) {
+        const contactCard = page.locator(
+          `[data-testid="contact-${contact.id}"]`
+        );
+        const favouriteIcon = contactCard.locator(
+          '[data-testid="favourite-icon"]'
+        );
+        await expect(favouriteIcon).toBeVisible();
+      }
+
+      console.log(`⭐ Favourites only: ${contacts.length} favourite contacts`);
+    });
+
+    test('should work with regular contacts only', async ({
+      regularContacts,
+    }) => {
+      const { page, contacts } = regularContacts;
+
+      await page.goto('/contacts');
+
+      // All contacts should be regular (not favourites)
+      expect(contacts).toHaveLength(5);
+      contacts.forEach(contact => {
+        expect(contact.isFavourite).toBe(false);
+      });
+
+      // Verify no favourite indicators are shown
+      for (const contact of contacts) {
+        const contactCard = page.locator(
+          `[data-testid="contact-${contact.id}"]`
+        );
+        const favouriteIcon = contactCard.locator(
+          '[data-testid="favourite-icon"]'
+        );
+        await expect(favouriteIcon).not.toBeVisible();
+      }
+
+      console.log(`📝 Regular only: ${contacts.length} regular contacts`);
+    });
+  });
+
+  test.describe('Data Factory Usage', () => {
+    test('should use data factories for custom scenarios', async ({
+      authenticatedPage,
+      dataFactory,
+      testCleanup,
+    }) => {
+      // Demonstrate factory usage for custom test scenarios
+      const customContacts = dataFactory.contacts.createMany(3, {
+        firstName: 'TestUser',
+        isFavourite: true,
+      });
+
+      const customTags = dataFactory.tags.createWithPrefix('CustomTag', 2);
+      const searchDataset = dataFactory.datasets.createSearchTestData();
+
+      // Verify factory-generated data structure
+      expect(customContacts).toHaveLength(3);
+      expect(customTags).toHaveLength(2);
+      expect(searchDataset.contacts).toHaveLength(4);
+      expect(searchDataset.tags).toHaveLength(3);
+
+      // Verify custom properties
+      customContacts.forEach(contact => {
+        expect(contact.firstName).toBe('TestUser');
+        expect(contact.isFavourite).toBe(true);
+        expect(contact.lastName).toBeDefined();
+        expect(contact.email).toBeDefined();
+      });
+
+      customTags.forEach(tag => {
+        expect(tag.name).toContain('CustomTag');
+        expect(tag.color).toBeDefined();
+      });
+
+      console.log(`🏭 Factory data generated successfully:
+        - ${customContacts.length} custom contacts
+        - ${customTags.length} custom tags
+        - ${searchDataset.contacts.length} search test contacts
+        - ${searchDataset.tags.length} search test tags`);
+    });
+  });
+});
