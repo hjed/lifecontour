@@ -213,6 +213,8 @@ alembic downgrade -1
 
 ### Development Guides
 - **[Code Quality Standards](docs/code-quality-standards.md)** - Linting, formatting, and testing standards
+- **[Testing Strategy](docs/architecture/testing-strategy.md)** - Comprehensive testing patterns and fixture-based E2E testing
+- **[E2E Testing Guide](frontend/tests/e2e/FIXTURE_SYSTEM_GUIDE.md)** - Advanced fixture system with real OAuth authentication
 - **[CI/CD Setup](docs/ci-cd-setup.md)** - Continuous integration and deployment
 - **[MCP Setup](docs/mcp-setup.md)** - Model Context Protocol integration
 

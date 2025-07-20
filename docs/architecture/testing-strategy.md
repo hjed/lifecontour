@@ -147,76 +147,96 @@ async def test_google_contacts_full_sync():
 
 ## End-to-End Testing with Playwright
 
+### Advanced Fixture-Based Testing System
+
+**🎯 MAJOR MILESTONE**: Complete fixture-based testing system with real OAuth authentication and deterministic data management.
+
+> 📚 **Complete Documentation**: See [`frontend/tests/e2e/FIXTURE_SYSTEM_GUIDE.md`](../../frontend/tests/e2e/FIXTURE_SYSTEM_GUIDE.md) for comprehensive documentation, examples, and best practices.
+
+#### Key Features
+
+- ✅ **Real OAuth Authentication**: Authentic OAuth flows with Hydra provider
+- ✅ **Worker-Scoped Performance**: OAuth once per worker, not per test
+- ✅ **Deterministic Data**: Advanced fixture system eliminates conditional logic
+- ✅ **Automatic Cleanup**: Zero test pollution with dependency tracking
+- ✅ **Scalable Datasets**: From 5 contacts (smoke tests) to 500 contacts (performance tests)
+- ✅ **Data Factories**: Realistic test data generation with customization
+
+#### Available Fixtures
+
+**Authentication Fixtures:**
+- `authenticatedPage`: Real OAuth-authenticated page
+- `unauthenticatedPage`: Clean unauthenticated state
+
+**Dataset Fixtures:**
+- `smallDataSet`: 5 contacts, 3 tags - quick smoke tests
+- `mediumDataSet`: 20 contacts, 8 tags - comprehensive testing
+- `largeDataSet`: 100 contacts, 15 tags - performance testing
+- `searchTestData`: Optimized for search functionality testing
+- `favouritesTestData`: Mix of favourite/regular contacts
+- `performanceTestData`: 500 contacts, 50 tags - stress testing
+
+**Specialized Fixtures:**
+- `favouriteContacts`: Only favourite contacts
+- `contactsWithoutTags`: Guaranteed untagged contacts
+- `dataFactory`: Access to all data generation factories
+
 ### E2E Testing Guidelines
 
 - Test complete user workflows from start to finish
 - Use `data-testid` attributes for reliable element selection
 - Test Australian localization (DD/MM/YYYY dates)
-- Mock external API calls for consistent testing
+- Use fixture-based testing for deterministic scenarios
 - Verify error handling and user feedback
 - Test responsive design across different screen sizes
 - Include accessibility testing in E2E flows
 
-### ⚠️ CRITICAL: Test Data Setup Requirements
+### ⚠️ LEGACY PATTERN - Replaced by Fixture System
 
-**NEVER write tests that accept multiple outcomes or skip based on data state.**
+**The conditional logic patterns below have been replaced by the advanced fixture-based testing system.**
 
-#### ❌ WRONG - Accepting Multiple Outcomes
+> 🚀 **Migration**: See [`frontend/tests/e2e/MIGRATION_GUIDE.md`](../../frontend/tests/e2e/MIGRATION_GUIDE.md) for migrating from conditional logic to fixtures.
+
+#### ❌ OLD PATTERN - Conditional Logic (Now Replaced)
 ```typescript
-// BAD: Test accepts either empty state or contact cards
+// OLD: Conditional logic based on data state
 const { hasContacts, hasEmptyState } = await contacts.checkContactsOrEmptyState();
-expect(hasContacts || hasEmptyState).toBe(true); // This is meaningless
+expect(hasContacts || hasEmptyState).toBe(true); // Meaningless test
 
-// BAD: Skipping based on data state
+// OLD: Skipping based on data state
 if (contactCount === 0) {
   test.skip('No contacts found - this test requires contacts');
 }
-
-// BAD: Try-catch to suppress failures
-try {
-  await contacts.testFavouriteButtons();
-} catch {
-  console.log('Test skipped - no contacts found');
-}
 ```
 
-#### ✅ CORRECT - Deterministic Test Data Setup
+#### ✅ NEW PATTERN - Fixture-Based Testing
 ```typescript
-// GOOD: Each test sets up exactly the data it needs
-test('should display favourite contacts when they exist', async ({ page }) => {
-  const { testData, contacts } = createTestHelpers(page);
+// NEW: Use specific fixtures for guaranteed state
+test('should display favourite contacts', async ({ favouriteContacts }) => {
+  const { page, contacts } = favouriteContacts;
 
-  // Set up test state: authenticated user with favourite contacts
-  await testData.setupAuthenticatedUser();
-  await testData.createTestContacts([
-    { firstName: 'John', lastName: 'Doe', isFavourite: true },
-    { firstName: 'Jane', lastName: 'Smith', isFavourite: true },
-  ]);
-
-  // Navigate to favourites page
   await page.goto('/contacts/favourites');
 
-  // Should show exactly 2 favourite contacts
-  const contactCards = await contacts.waitForContactCards();
-  expect(await contactCards.count()).toBe(2);
+  // Guaranteed: contacts exist and are favourites
+  expect(contacts).toHaveLength(3);
+  contacts.forEach(contact => {
+    expect(contact.isFavourite).toBe(true);
+  });
 });
 
-// GOOD: Separate test for empty state
-test('should display empty state when no favourite contacts exist', async ({ page }) => {
-  const { testData } = createTestHelpers(page);
+// NEW: Separate fixture for empty state
+test('should display empty state', async ({ emptyContactsPage }) => {
+  await emptyContactsPage.goto('/contacts/favourites');
 
-  // Set up test state: authenticated user with no favourite contacts
-  await testData.setupAuthenticatedUser();
-  await testData.createTestContacts([
-    { firstName: 'John', lastName: 'Doe', isFavourite: false },
-  ]);
-
-  // Navigate to favourites page
-  await page.goto('/contacts/favourites');
-
-  // Should show empty state
-  const emptyState = page.locator('text=/no.*favourite.*contacts/i');
+  // Guaranteed: no contacts exist
+  const emptyState = emptyContactsPage.locator('[data-testid="empty-state"]');
   await expect(emptyState).toBeVisible();
+});
+
+// NEW: Use data factories for custom scenarios
+test('custom scenario', async ({ authenticatedPage, dataFactory, testCleanup }) => {
+  const customContacts = dataFactory.contacts.createFavourites(5);
+  // Test with exactly 5 favourite contacts
 });
 ```
 
