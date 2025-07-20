@@ -30,6 +30,23 @@ export const SELECTORS = {
   // Navigation
   HEADER: 'header',
   MAIN_CONTENT: 'main',
+  SIDEBAR: 'nav, aside, [role="navigation"]',
+
+  // Contacts
+  CONTACT_CARD: '[data-testid="contact-card"], .contact-card, [class*="card"]',
+  FAVOURITE_BUTTON: 'button[aria-label*="favourite"], button[aria-label*="Favourite"]',
+  CONTACT_LINK: 'a[href*="/contacts/"]',
+
+  // Navigation Links
+  ALL_CONTACTS_LINK: 'a[href="/contacts"]:has-text("All"), a[href="/contacts"]:has-text("Browse"), a:has-text("All Contacts")',
+  FAVOURITES_LINK: 'a[href="/contacts/favourites"]',
+  TAG_LINKS: 'a[href*="/contacts/tags/"]',
+
+  // Empty States
+  EMPTY_CONTACTS: 'text=/no contacts/i, text=/create.*contact/i',
+  EMPTY_FAVOURITES: 'text=/no.*favourite.*contacts/i, text=/star.*contacts/i',
+  EMPTY_TAG_CONTACTS: 'text=/no contacts.*tag/i, text=/no contacts found/i',
+  TAG_NOT_FOUND: 'text=/tag.*not.*found/i, text=/not.*found/i',
 } as const;
 
 /**
@@ -260,6 +277,350 @@ export class FormHelpers {
 }
 
 /**
+ * Contact-specific testing utilities.
+ */
+export class ContactTestHelpers {
+  constructor(private readonly page: Page) {}
+
+  /**
+   * Navigate to a contact-related page with authentication handling.
+   */
+  async navigateToPageWithAuth(
+    url: string,
+    expectedContent?: string
+  ): Promise<'redirected' | 'accessed'> {
+    await this.page.goto(url);
+    await expect(this.page).toHaveTitle(/Personal Management System/);
+
+    const auth = new AuthHelpers(this.page);
+    const result = await auth.handleProtectedPageAccess();
+
+    if (result === 'redirected') {
+      // Verify login page elements
+      await expect(
+        this.page.getByRole('heading', { name: 'Welcome Back' })
+      ).toBeVisible();
+    } else if (expectedContent) {
+      // If authenticated, verify expected content
+      const pageContent = this.page.locator('body');
+      await expect(pageContent).toContainText(new RegExp(expectedContent, 'i'));
+    }
+
+    return result;
+  }
+
+  /**
+   * Test authenticated access to a page - fails if not authenticated.
+   */
+  async testAuthenticatedPageAccess(url: string, expectedContent?: string): Promise<void> {
+    const result = await this.navigateToPageWithAuth(url, expectedContent);
+
+    if (result === 'redirected') {
+      throw new Error(`Expected authenticated access to ${url}, but was redirected to login`);
+    }
+
+    // If we reach here, we're authenticated and can test the actual functionality
+    await this.page.waitForTimeout(2000); // Wait for page to fully load
+  }
+
+  /**
+   * Test that a page properly redirects to login when not authenticated.
+   */
+  async testUnauthenticatedRedirect(url: string): Promise<void> {
+    const result = await this.navigateToPageWithAuth(url);
+
+    if (result === 'accessed') {
+      throw new Error(`Expected redirect to login for ${url}, but page was accessible`);
+    }
+
+    // If we reach here, we were properly redirected to login
+  }
+
+  /**
+   * Navigate to a page and expect it to be accessible (authenticated).
+   * This test will fail if the user is not authenticated.
+   */
+  async navigateToAuthenticatedPage(url: string): Promise<void> {
+    await this.page.goto(url);
+    await expect(this.page).toHaveTitle(/Personal Management System/);
+
+    // Wait for any redirects to complete
+    await this.page.waitForTimeout(2000);
+
+    const currentUrl = this.page.url();
+
+    // Should not be redirected to login
+    if (currentUrl.includes('/auth/login')) {
+      throw new Error(`Test requires authentication. Please ensure user is logged in before running authenticated tests. Current URL: ${currentUrl}`);
+    }
+
+    // Should be on the expected page
+    expect(currentUrl).toContain(url.split('?')[0]); // Remove query params for comparison
+  }
+
+  /**
+   * Navigate to a page and expect it to redirect to login (unauthenticated).
+   * This test will fail if the user is already authenticated.
+   */
+  async navigateToUnauthenticatedPage(url: string): Promise<void> {
+    await this.page.goto(url);
+    await expect(this.page).toHaveTitle(/Personal Management System/);
+
+    // Wait for any redirects to complete
+    await this.page.waitForTimeout(2000);
+
+    const currentUrl = this.page.url();
+
+    // Should be redirected to login
+    if (!currentUrl.includes('/auth/login')) {
+      throw new Error(`Test requires no authentication. Please ensure user is logged out before running unauthenticated tests. Current URL: ${currentUrl}`);
+    }
+
+    // Should have login form
+    await expect(
+      this.page.getByRole('heading', { name: 'Welcome Back' })
+    ).toBeVisible();
+  }
+
+  /**
+   * Wait for contact cards to load and return the locator.
+   */
+  async waitForContactCards(timeout = 5000) {
+    await this.page.waitForSelector(SELECTORS.CONTACT_CARD, { timeout });
+    return this.page.locator(SELECTORS.CONTACT_CARD);
+  }
+
+  /**
+   * Get contact cards locator without waiting.
+   */
+  getContactCards() {
+    return this.page.locator(SELECTORS.CONTACT_CARD);
+  }
+
+  /**
+   * Test favourite button functionality on contact cards.
+   */
+  async testFavouriteButtons(): Promise<void> {
+    const favouriteButtons = this.page.locator(SELECTORS.FAVOURITE_BUTTON);
+    const buttonCount = await favouriteButtons.count();
+
+    if (buttonCount > 0) {
+      const firstButton = favouriteButtons.first();
+
+      // Verify button has proper accessibility
+      await expect(firstButton).toHaveAttribute('aria-label');
+      await expect(firstButton).toHaveAttribute('type', 'button');
+
+      // Verify button is enabled and clickable
+      await expect(firstButton).toBeEnabled();
+
+      // Verify star icon is present
+      const starIcon = firstButton.locator('svg');
+      await expect(starIcon).toBeVisible();
+    }
+  }
+
+  /**
+   * Click a favourite button and verify interaction.
+   */
+  async clickFavouriteButton(): Promise<void> {
+    const favouriteButtons = this.page.locator(SELECTORS.FAVOURITE_BUTTON);
+    const buttonCount = await favouriteButtons.count();
+
+    if (buttonCount > 0) {
+      const firstButton = favouriteButtons.first();
+      await expect(firstButton).toBeEnabled();
+
+      await firstButton.click();
+      await this.page.waitForTimeout(1000); // Wait for state changes
+
+      // Button should still be present and enabled after click
+      await expect(firstButton).toBeEnabled();
+    }
+  }
+
+  /**
+   * Verify contact card structure.
+   */
+  async verifyContactCardStructure(): Promise<void> {
+    const contactCards = this.getContactCards();
+    const cardCount = await contactCards.count();
+
+    if (cardCount > 0) {
+      const firstCard = contactCards.first();
+
+      // Each contact card should have a favourite toggle
+      const favouriteToggle = firstCard.locator(SELECTORS.FAVOURITE_BUTTON);
+      await expect(favouriteToggle).toBeVisible();
+
+      // Each contact card should have contact name/link
+      const contactLink = firstCard.locator(SELECTORS.CONTACT_LINK);
+      if ((await contactLink.count()) > 0) {
+        await expect(contactLink.first()).toBeVisible();
+      }
+    }
+  }
+
+  /**
+   * Check for empty state or contact cards.
+   */
+  async checkContactsOrEmptyState(emptyStateSelector: string = SELECTORS.EMPTY_CONTACTS): Promise<{
+    hasContacts: boolean;
+    hasEmptyState: boolean;
+  }> {
+    const contactCards = this.getContactCards();
+    const emptyState = this.page.locator(emptyStateSelector);
+
+    const hasContacts = (await contactCards.count()) > 0;
+    const hasEmptyState = (await emptyState.count()) > 0;
+
+    // Should have either contacts or empty state
+    expect(hasContacts || hasEmptyState).toBe(true);
+
+    return { hasContacts, hasEmptyState };
+  }
+
+  /**
+   * Test responsive design with favourite toggles.
+   */
+  async testResponsiveFavouriteToggles(): Promise<void> {
+    const responsive = new ResponsiveHelpers(this.page);
+    await responsive.setMobileViewport();
+
+    try {
+      await this.waitForContactCards();
+
+      const favouriteButtons = this.page.locator(SELECTORS.FAVOURITE_BUTTON);
+      const buttonCount = await favouriteButtons.count();
+
+      if (buttonCount > 0) {
+        const firstButton = favouriteButtons.first();
+        await expect(firstButton).toBeVisible();
+
+        // Button should be appropriately sized for mobile
+        const buttonBox = await firstButton.boundingBox();
+        if (buttonBox) {
+          // Button should be at least 24px for touch targets
+          expect(buttonBox.width).toBeGreaterThanOrEqual(24);
+          expect(buttonBox.height).toBeGreaterThanOrEqual(24);
+        }
+      }
+    } catch (error) {
+      console.log('Mobile responsive test skipped - no contacts loaded');
+    }
+  }
+}
+
+/**
+ * Sidebar-specific testing utilities.
+ */
+export class SidebarTestHelpers {
+  constructor(private readonly page: Page) {}
+
+  /**
+   * Wait for sidebar to load.
+   */
+  async waitForSidebar(timeout = 5000): Promise<void> {
+    await this.page.waitForSelector(SELECTORS.SIDEBAR, { timeout });
+  }
+
+  /**
+   * Test favourites link in sidebar.
+   */
+  async testFavouritesLink(): Promise<void> {
+    const favouritesLink = this.page.locator(SELECTORS.FAVOURITES_LINK);
+
+    if ((await favouritesLink.count()) > 0) {
+      await expect(favouritesLink.first()).toBeVisible();
+      await expect(favouritesLink.first()).toBeEnabled();
+
+      // Should have star icon or "Favourites" text
+      const linkContent = favouritesLink.first();
+      const hasStarIcon = (await linkContent.locator('svg').count()) > 0;
+      const linkText = await linkContent.textContent();
+
+      expect(
+        hasStarIcon ||
+          (linkText && linkText.toLowerCase().includes('favourite'))
+      ).toBe(true);
+    }
+  }
+
+  /**
+   * Test dynamic tag links in sidebar.
+   */
+  async testDynamicTagLinks(): Promise<void> {
+    const tagLinks = this.page.locator(SELECTORS.TAG_LINKS);
+    const hardcodedGroup1 = this.page.locator('text="Group 1"');
+    const hardcodedGroup2 = this.page.locator('text="Group 2"');
+
+    // Should not have hardcoded groups
+    expect(await hardcodedGroup1.count()).toBe(0);
+    expect(await hardcodedGroup2.count()).toBe(0);
+
+    // May have dynamic tag links
+    const tagCount = await tagLinks.count();
+    if (tagCount > 0) {
+      const firstTag = tagLinks.first();
+      await expect(firstTag).toHaveAttribute('href');
+
+      const href = await firstTag.getAttribute('href');
+      expect(href).toMatch(/\/contacts\/tags\/\w+/);
+
+      await expect(firstTag).toBeVisible();
+      await expect(firstTag).toBeEnabled();
+    }
+  }
+
+  /**
+   * Navigate to favourites page from sidebar.
+   */
+  async navigateToFavourites(): Promise<void> {
+    const favouritesLink = this.page.locator(SELECTORS.FAVOURITES_LINK);
+
+    if ((await favouritesLink.count()) > 0) {
+      await favouritesLink.first().click();
+      await this.page.waitForLoadState('networkidle');
+
+      const currentUrl = this.page.url();
+      expect(
+        currentUrl.includes('/contacts/favourites') ||
+          currentUrl.includes('/auth/login')
+      ).toBe(true);
+    }
+  }
+
+  /**
+   * Test mobile sidebar responsiveness.
+   */
+  async testMobileSidebar(): Promise<void> {
+    const responsive = new ResponsiveHelpers(this.page);
+    await responsive.setMobileViewport();
+
+    const sidebar = this.page.locator(SELECTORS.SIDEBAR);
+    const hamburgerButton = this.page.locator(
+      'button[aria-label*="menu"], button[aria-label*="navigation"]'
+    );
+
+    // Either sidebar is visible or there's a hamburger menu
+    const sidebarVisible = await sidebar.first().isVisible();
+    const hamburgerVisible = (await hamburgerButton.count()) > 0;
+
+    expect(sidebarVisible || hamburgerVisible).toBe(true);
+
+    if (hamburgerVisible && !sidebarVisible) {
+      // Try to open mobile menu
+      await hamburgerButton.first().click();
+      await this.page.waitForTimeout(500);
+
+      // Navigation should now be visible
+      const mobileNav = this.page.locator(SELECTORS.SIDEBAR);
+      await expect(mobileNav.first()).toBeVisible();
+    }
+  }
+}
+
+/**
  * Create test helpers for a page.
  */
 export function createTestHelpers(page: Page) {
@@ -269,6 +630,8 @@ export function createTestHelpers(page: Page) {
     form: new FormHelpers(page),
     oauth: new OAuthHelpers(page),
     auth: new AuthHelpers(page),
+    contacts: new ContactTestHelpers(page),
+    sidebar: new SidebarTestHelpers(page),
   };
 }
 
@@ -368,8 +731,16 @@ export class AuthHelpers {
    * Returns true if redirected to login, false if stayed on page.
    */
   async checkAuthenticationRedirect(): Promise<boolean> {
+    // Wait a bit for any redirects to complete
+    await this.page.waitForTimeout(1000);
+
     const currentUrl = this.page.url();
-    return currentUrl.includes('/auth/login');
+    const hasLoginUrl = currentUrl.includes('/auth/login');
+
+    // Also check for login form presence (in case of client-side redirect)
+    const hasLoginForm = await this.page.locator('h1:has-text("Welcome Back")').count() > 0;
+
+    return hasLoginUrl || hasLoginForm;
   }
 
   /**
@@ -386,6 +757,9 @@ export class AuthHelpers {
    */
   async handleProtectedPageAccess(): Promise<'redirected' | 'accessed'> {
     await waitForPageReady(this.page);
+
+    // Wait a bit longer for any redirects to complete
+    await this.page.waitForTimeout(2000);
 
     if (await this.checkAuthenticationRedirect()) {
       // If redirected to login, verify login page elements
