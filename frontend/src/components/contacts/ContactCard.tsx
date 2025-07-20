@@ -18,17 +18,11 @@ interface ContactCardProps {
  */
 export function ContactCard({ contact }: ContactCardProps) {
   return (
-    <Card
-      key={contact.id}
-      className='transition-shadow hover:shadow-md'
-    >
+    <Card key={contact.id} className='transition-shadow hover:shadow-md'>
       <CardHeader>
         <div className='flex items-start justify-between'>
           <CardTitle className='text-lg'>
-            <Link
-              href={`/contacts/${contact.id}`}
-              className='hover:underline'
-            >
+            <Link href={`/contacts/${contact.id}`} className='hover:underline'>
               {contact.name}
             </Link>
           </CardTitle>
@@ -43,13 +37,13 @@ export function ContactCard({ contact }: ContactCardProps) {
         {/* Contact Methods */}
         <div className='space-y-2'>
           {contact.primary_email && (
-            <div className='flex items-center gap-2 text-sm text-muted-foreground'>
+            <div className='text-muted-foreground flex items-center gap-2 text-sm'>
               <Mail className='h-4 w-4' aria-hidden='true' />
               <span>{contact.primary_email}</span>
             </div>
           )}
           {contact.primary_phone && (
-            <div className='flex items-center gap-2 text-sm text-muted-foreground'>
+            <div className='text-muted-foreground flex items-center gap-2 text-sm'>
               <Phone className='h-4 w-4' aria-hidden='true' />
               <span>{contact.primary_phone}</span>
             </div>
@@ -59,7 +53,7 @@ export function ContactCard({ contact }: ContactCardProps) {
         {/* Tags */}
         {contact.tags.length > 0 && (
           <div className='flex flex-wrap gap-1'>
-            {contact.tags.map((tag) => (
+            {contact.tags.map(tag => (
               <Badge key={tag.id} variant='secondary' className='text-xs'>
                 {tag.attributes?.name || `Tag ${tag.id}`}
               </Badge>
@@ -68,7 +62,7 @@ export function ContactCard({ contact }: ContactCardProps) {
         )}
 
         {/* Created Date */}
-        <div className='flex items-center gap-2 text-xs text-muted-foreground'>
+        <div className='text-muted-foreground flex items-center gap-2 text-xs'>
           <Calendar className='h-3 w-3' aria-hidden='true' />
           <span>
             Added{' '}

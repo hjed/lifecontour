@@ -89,7 +89,11 @@ function useNavigationSections(): NavigationSection[] {
     contactItems.push(...tagItems);
   } else if (tagsLoading) {
     // Show loading placeholder
-    contactItems.push({ label: 'Loading tags...', href: '#' as Route, disabled: true });
+    contactItems.push({
+      label: 'Loading tags...',
+      href: '#' as Route,
+      disabled: true,
+    });
   }
 
   return [

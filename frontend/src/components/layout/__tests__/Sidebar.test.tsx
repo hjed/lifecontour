@@ -35,8 +35,8 @@ describe('Sidebar Components', () => {
               name: 'Group 1',
               color: '#ff0000',
               created_at: '2024-01-01T00:00:00Z',
-              updated_at: '2024-01-01T00:00:00Z'
-            }
+              updated_at: '2024-01-01T00:00:00Z',
+            },
           },
           {
             type: 'tags',
@@ -45,8 +45,8 @@ describe('Sidebar Components', () => {
               name: 'Group 2',
               color: '#00ff00',
               created_at: '2024-01-01T00:00:00Z',
-              updated_at: '2024-01-01T00:00:00Z'
-            }
+              updated_at: '2024-01-01T00:00:00Z',
+            },
           },
         ],
       },
