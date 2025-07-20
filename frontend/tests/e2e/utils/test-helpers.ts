@@ -320,7 +320,7 @@ export class ContactTestHelpers {
     }
 
     // If we reach here, we're authenticated and can test the actual functionality
-    await this.page.waitForTimeout(2000); // Wait for page to fully load
+    await this.page.waitForLoadState('networkidle'); // Wait for page to fully load
   }
 
   /**
@@ -345,7 +345,7 @@ export class ContactTestHelpers {
     await expect(this.page).toHaveTitle(/Personal Management System/);
 
     // Wait for any redirects to complete
-    await this.page.waitForTimeout(2000);
+    await this.page.waitForLoadState('networkidle');
 
     const currentUrl = this.page.url();
 
@@ -367,7 +367,7 @@ export class ContactTestHelpers {
     await expect(this.page).toHaveTitle(/Personal Management System/);
 
     // Wait for any redirects to complete
-    await this.page.waitForTimeout(2000);
+    await this.page.waitForLoadState('networkidle');
 
     const currentUrl = this.page.url();
 
@@ -432,7 +432,7 @@ export class ContactTestHelpers {
       await expect(firstButton).toBeEnabled();
 
       await firstButton.click();
-      await this.page.waitForTimeout(1000); // Wait for state changes
+      await this.page.waitForLoadState('networkidle'); // Wait for state changes
 
       // Button should still be present and enabled after click
       await expect(firstButton).toBeEnabled();
@@ -505,7 +505,7 @@ export class ContactTestHelpers {
           expect(buttonBox.height).toBeGreaterThanOrEqual(24);
         }
       }
-    } catch (error) {
+    } catch {
       console.log('Mobile responsive test skipped - no contacts loaded');
     }
   }
@@ -611,7 +611,6 @@ export class SidebarTestHelpers {
     if (hamburgerVisible && !sidebarVisible) {
       // Try to open mobile menu
       await hamburgerButton.first().click();
-      await this.page.waitForTimeout(500);
 
       // Navigation should now be visible
       const mobileNav = this.page.locator(SELECTORS.SIDEBAR);
@@ -709,7 +708,7 @@ export class OAuthHelpers {
         await oauthButtons.first().click();
 
         if (options.waitAfterClick) {
-          await this.page.waitForTimeout(options.waitAfterClick);
+          await this.page.waitForLoadState('networkidle');
         }
       }
 
@@ -732,7 +731,7 @@ export class AuthHelpers {
    */
   async checkAuthenticationRedirect(): Promise<boolean> {
     // Wait a bit for any redirects to complete
-    await this.page.waitForTimeout(1000);
+    await this.page.waitForLoadState('networkidle');
 
     const currentUrl = this.page.url();
     const hasLoginUrl = currentUrl.includes('/auth/login');
@@ -759,7 +758,7 @@ export class AuthHelpers {
     await waitForPageReady(this.page);
 
     // Wait a bit longer for any redirects to complete
-    await this.page.waitForTimeout(2000);
+    await this.page.waitForLoadState('networkidle');
 
     if (await this.checkAuthenticationRedirect()) {
       // If redirected to login, verify login page elements
