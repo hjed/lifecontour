@@ -17,6 +17,7 @@ from app.core.integrations.encryption import EncryptionService
 from app.core.integrations.google_contacts.models import SITE_USER_ID
 from app.core.integrations.google_contacts.service import (
     GoogleAuthService,
+    GoogleAuthTokensNotFoundError,
     TokenRefreshFailedError,
 )
 from app.infrastructure.config import Settings
@@ -235,7 +236,7 @@ async def test_get_access_token_not_found(
     google_auth_service: GoogleAuthService,
 ) -> None:
     """Test getting access token for non-existent account."""
-    with pytest.raises(ValueError, match="No Google auth found"):
+    with pytest.raises(GoogleAuthTokensNotFoundError, match="No Google auth found"):
         await google_auth_service.get_access_token("nonexistent@example.com")
 
 
@@ -244,7 +245,7 @@ async def test_refresh_token_not_found(
     google_auth_service: GoogleAuthService,
 ) -> None:
     """Test refreshing token for non-existent account."""
-    with pytest.raises(ValueError, match="No Google auth found"):
+    with pytest.raises(GoogleAuthTokensNotFoundError, match="No Google auth found"):
         await google_auth_service.refresh_access_token("nonexistent@example.com")
 
 
