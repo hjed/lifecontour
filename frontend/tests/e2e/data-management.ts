@@ -351,3 +351,390 @@ export class TestDataManager {
     }
   }
 }
+
+/**
+ * Advanced Data Factories for generating realistic test data
+ */
+
+export interface DataSet {
+  contacts: ContactCreateRequest[];
+  tags: TagCreateRequest[];
+}
+
+export interface BulkCreateResult<T> {
+  created: T[];
+  errors: Array<{ item: T; error: string }>;
+}
+
+/**
+ * Factory for generating realistic contact data
+ */
+export class ContactFactory {
+  private static readonly FIRST_NAMES = [
+    'Alice',
+    'Bob',
+    'Carol',
+    'David',
+    'Emma',
+    'Frank',
+    'Grace',
+    'Henry',
+    'Ivy',
+    'Jack',
+    'Kate',
+    'Liam',
+    'Maya',
+    'Noah',
+    'Olivia',
+    'Paul',
+    'Quinn',
+    'Rachel',
+    'Sam',
+    'Tara',
+    'Uma',
+    'Victor',
+    'Wendy',
+    'Xavier',
+    'Yara',
+    'Zoe',
+  ];
+
+  private static readonly LAST_NAMES = [
+    'Anderson',
+    'Brown',
+    'Chen',
+    'Davis',
+    'Evans',
+    'Foster',
+    'Garcia',
+    'Harris',
+    'Johnson',
+    'Kim',
+    'Lee',
+    'Miller',
+    'Nelson',
+    "O'Brien",
+    'Parker',
+    'Quinn',
+    'Rodriguez',
+    'Smith',
+    'Taylor',
+    'Underwood',
+    'Valdez',
+    'Wilson',
+    'Young',
+    'Zhang',
+  ];
+
+  private static readonly DOMAINS = [
+    'example.com',
+    'test.org',
+    'demo.net',
+    'sample.io',
+    'mock.dev',
+    'testing.com',
+    'placeholder.org',
+    'dummy.net',
+  ];
+
+  static create(
+    overrides: Partial<ContactCreateRequest> = {}
+  ): ContactCreateRequest {
+    const firstName =
+      this.FIRST_NAMES[Math.floor(Math.random() * this.FIRST_NAMES.length)];
+    const lastName =
+      this.LAST_NAMES[Math.floor(Math.random() * this.LAST_NAMES.length)];
+    const domain =
+      this.DOMAINS[Math.floor(Math.random() * this.DOMAINS.length)];
+
+    return {
+      firstName,
+      lastName,
+      email: `${firstName.toLowerCase()}.${lastName.toLowerCase()}@${domain}`,
+      phone: `+1-555-${Math.floor(Math.random() * 900) + 100}-${Math.floor(Math.random() * 9000) + 1000}`,
+      isFavourite: Math.random() > 0.8, // 20% chance of being favourite
+      ...overrides,
+    };
+  }
+
+  static createMany(
+    count: number,
+    overrides: Partial<ContactCreateRequest> = {}
+  ): ContactCreateRequest[] {
+    return Array.from({ length: count }, () => this.create(overrides));
+  }
+
+  static createWithTags(
+    tagNames: string[],
+    overrides: Partial<ContactCreateRequest> = {}
+  ): ContactCreateRequest {
+    return this.create({ ...overrides, tags: tagNames });
+  }
+
+  static createFavourites(count: number): ContactCreateRequest[] {
+    return this.createMany(count, { isFavourite: true });
+  }
+
+  static createWithEmails(count: number): ContactCreateRequest[] {
+    return this.createMany(count).map(contact => ({
+      ...contact,
+      email: contact.email || `${contact.firstName.toLowerCase()}@example.com`,
+    }));
+  }
+
+  static createWithPhones(count: number): ContactCreateRequest[] {
+    return this.createMany(count).map(contact => ({
+      ...contact,
+      phone:
+        contact.phone ||
+        `+1-555-${Math.floor(Math.random() * 900) + 100}-${Math.floor(Math.random() * 9000) + 1000}`,
+    }));
+  }
+}
+
+/**
+ * Factory for generating tag data
+ */
+export class TagFactory {
+  private static readonly TAG_NAMES = [
+    'Work',
+    'Personal',
+    'Family',
+    'Friends',
+    'Business',
+    'Client',
+    'Vendor',
+    'Team',
+    'Project',
+    'Important',
+    'Archive',
+    'Follow-up',
+    'Meeting',
+    'Call',
+    'Email',
+    'Urgent',
+    'Low-Priority',
+    'High-Priority',
+    'Marketing',
+    'Sales',
+    'Support',
+    'Development',
+    'Design',
+    'Research',
+  ];
+
+  private static readonly COLORS = [
+    '#FF6B6B',
+    '#4ECDC4',
+    '#45B7D1',
+    '#96CEB4',
+    '#FFEAA7',
+    '#DDA0DD',
+    '#98D8C8',
+    '#F7DC6F',
+    '#BB8FCE',
+    '#85C1E9',
+    '#F8C471',
+    '#82E0AA',
+    '#AED6F1',
+    '#F1948A',
+    '#D7BDE2',
+    '#A9DFBF',
+    '#F9E79F',
+    '#AEB6BF',
+  ];
+
+  static create(overrides: Partial<TagCreateRequest> = {}): TagCreateRequest {
+    const name =
+      this.TAG_NAMES[Math.floor(Math.random() * this.TAG_NAMES.length)];
+    const color = this.COLORS[Math.floor(Math.random() * this.COLORS.length)];
+    const timestamp = Date.now();
+
+    return {
+      name: `${name}-${timestamp}`, // Ensure uniqueness
+      color,
+      ...overrides,
+    };
+  }
+
+  static createMany(
+    count: number,
+    overrides: Partial<TagCreateRequest> = {}
+  ): TagCreateRequest[] {
+    return Array.from({ length: count }, () => this.create(overrides));
+  }
+
+  static createWithPrefix(prefix: string, count: number): TagCreateRequest[] {
+    return Array.from({ length: count }, (_, index) =>
+      this.create({
+        name: `${prefix}-${index + 1}-${Date.now()}`,
+      })
+    );
+  }
+
+  static createHierarchy(): TagCreateRequest[] {
+    const timestamp = Date.now();
+    return [
+      this.create({ name: `Work-Parent-${timestamp}`, color: '#FF6B6B' }),
+      this.create({ name: `Work-Team-${timestamp}`, color: '#FF8E8E' }),
+      this.create({ name: `Work-Client-${timestamp}`, color: '#FFB1B1' }),
+      this.create({ name: `Personal-Parent-${timestamp}`, color: '#4ECDC4' }),
+      this.create({ name: `Personal-Family-${timestamp}`, color: '#71D4D4' }),
+      this.create({ name: `Personal-Friends-${timestamp}`, color: '#94DCDC' }),
+    ];
+  }
+}
+
+/**
+ * Factory for generating complete datasets with relationships
+ */
+export class DataSetFactory {
+  static createEmpty(): DataSet {
+    return {
+      contacts: [],
+      tags: [],
+    };
+  }
+
+  static createSmall(): DataSet {
+    const tags = TagFactory.createMany(3);
+    const contacts = ContactFactory.createMany(5);
+
+    // Assign some tags to contacts
+    contacts[0].tags = [tags[0].name];
+    contacts[1].tags = [tags[0].name, tags[1].name];
+    contacts[2].tags = [tags[2].name];
+
+    return {
+      contacts,
+      tags,
+    };
+  }
+
+  static createMedium(): DataSet {
+    const tags = TagFactory.createMany(8);
+    const contacts = ContactFactory.createMany(20);
+
+    // Assign tags to various contacts
+    for (let i = 0; i < contacts.length; i++) {
+      const numTags = Math.floor(Math.random() * 3); // 0-2 tags per contact
+      const selectedTags = tags
+        .sort(() => 0.5 - Math.random())
+        .slice(0, numTags)
+        .map(tag => tag.name);
+      contacts[i].tags = selectedTags;
+    }
+
+    return {
+      contacts,
+      tags,
+    };
+  }
+
+  static createLarge(): DataSet {
+    const tags = TagFactory.createMany(15);
+    const contacts = ContactFactory.createMany(100);
+
+    // Create more realistic tag distribution
+    for (let i = 0; i < contacts.length; i++) {
+      const numTags = Math.floor(Math.random() * 4); // 0-3 tags per contact
+      const selectedTags = tags
+        .sort(() => 0.5 - Math.random())
+        .slice(0, numTags)
+        .map(tag => tag.name);
+      contacts[i].tags = selectedTags;
+    }
+
+    return {
+      contacts,
+      tags,
+    };
+  }
+
+  static createSearchTestData(): DataSet {
+    const timestamp = Date.now();
+    const tags = [
+      TagFactory.create({ name: `SearchTag1-${timestamp}`, color: '#FF6B6B' }),
+      TagFactory.create({ name: `SearchTag2-${timestamp}`, color: '#4ECDC4' }),
+      TagFactory.create({ name: `CommonTag-${timestamp}`, color: '#45B7D1' }),
+    ];
+
+    const contacts = [
+      ContactFactory.create({
+        firstName: 'John',
+        lastName: 'SearchTest',
+        email: 'john.search@test.com',
+        tags: [tags[0].name],
+      }),
+      ContactFactory.create({
+        firstName: 'Jane',
+        lastName: 'FindMe',
+        email: 'jane.findme@test.com',
+        tags: [tags[1].name, tags[2].name],
+      }),
+      ContactFactory.create({
+        firstName: 'Bob',
+        lastName: 'Regular',
+        email: 'bob@regular.com',
+        tags: [tags[2].name],
+      }),
+      ContactFactory.create({
+        firstName: 'Alice',
+        lastName: 'NoTags',
+        email: 'alice@notags.com',
+        tags: [],
+      }),
+    ];
+
+    return {
+      contacts,
+      tags,
+    };
+  }
+
+  static createFavouritesTestData(): DataSet {
+    const tags = TagFactory.createMany(3);
+    const favourites = ContactFactory.createFavourites(3);
+    const regular = ContactFactory.createMany(5, { isFavourite: false });
+
+    return {
+      contacts: [...favourites, ...regular],
+      tags,
+    };
+  }
+
+  static createTaggedData(): DataSet {
+    const tags = TagFactory.createHierarchy();
+    const contacts = [
+      ContactFactory.createWithTags([tags[0].name, tags[1].name]), // Work tags
+      ContactFactory.createWithTags([tags[3].name, tags[4].name]), // Personal tags
+      ContactFactory.createWithTags([tags[0].name, tags[3].name]), // Mixed tags
+      ContactFactory.create(), // No tags
+    ];
+
+    return {
+      contacts,
+      tags,
+    };
+  }
+
+  static createPerformanceTestData(): DataSet {
+    const tags = TagFactory.createMany(50);
+    const contacts = ContactFactory.createMany(500);
+
+    // Distribute tags across contacts for performance testing
+    for (let i = 0; i < contacts.length; i++) {
+      const numTags = Math.floor(Math.random() * 5); // 0-4 tags per contact
+      const selectedTags = tags
+        .sort(() => 0.5 - Math.random())
+        .slice(0, numTags)
+        .map(tag => tag.name);
+      contacts[i].tags = selectedTags;
+    }
+
+    return {
+      contacts,
+      tags,
+    };
+  }
+}
