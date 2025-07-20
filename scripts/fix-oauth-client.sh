@@ -41,7 +41,7 @@ print_error() {
 print_step "Checking Hydra availability..."
 if ! curl -f http://localhost:4445/health/ready >/dev/null 2>&1; then
     print_error "Hydra admin endpoint is not accessible at http://localhost:4445"
-    print_error "Make sure Docker Compose is running: docker-compose -f docker-compose.dev.yml up -d"
+    print_error "Make sure Docker Compose is running: docker compose -f docker-compose.dev.yml up -d"
     exit 1
 fi
 

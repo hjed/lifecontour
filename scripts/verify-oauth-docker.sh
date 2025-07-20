@@ -54,7 +54,7 @@ print_success "Docker is available and running"
 
 # Check if Docker Compose is available
 print_step "Checking Docker Compose availability..."
-if ! docker-compose version &> /dev/null; then
+if ! docker compose version &> /dev/null; then
     print_error "Docker Compose is not available"
     exit 1
 fi
@@ -66,20 +66,20 @@ check_service_health() {
     local service_name=$1
     local max_attempts=30
     local attempt=0
-    
+
     print_step "Checking $service_name health..."
-    
+
     while [ $attempt -lt $max_attempts ]; do
-        if docker-compose -f docker-compose.dev.yml ps $service_name | grep -q "healthy\|Up"; then
+        if docker compose -f docker-compose.dev.yml ps $service_name | grep -q "healthy\|Up"; then
             print_success "$service_name is healthy"
             return 0
         fi
-        
+
         echo "Waiting for $service_name to be healthy... (attempt $((attempt + 1))/$max_attempts)"
         sleep 2
         attempt=$((attempt + 1))
     done
-    
+
     print_warning "$service_name is not healthy after $max_attempts attempts"
     return 1
 }
@@ -89,9 +89,9 @@ test_endpoint() {
     local url=$1
     local description=$2
     local expected_status=${3:-200}
-    
+
     print_step "Testing $description..."
-    
+
     if curl -s -o /dev/null -w "%{http_code}" "$url" | grep -q "$expected_status"; then
         print_success "$description is accessible"
         return 0
@@ -105,9 +105,9 @@ test_endpoint() {
 test_json_endpoint() {
     local url=$1
     local description=$2
-    
+
     print_step "Testing $description..."
-    
+
     local response=$(curl -s "$url" 2>/dev/null)
     if echo "$response" | jq . &> /dev/null; then
         print_success "$description returned valid JSON"
@@ -121,7 +121,7 @@ test_json_endpoint() {
 
 # Start Docker Compose services
 print_step "Starting Docker Compose services..."
-if docker-compose -f docker-compose.dev.yml up -d; then
+if docker compose -f docker-compose.dev.yml up -d; then
     print_success "Docker Compose services started"
 else
     print_error "Failed to start Docker Compose services"
@@ -141,12 +141,12 @@ if check_service_health "oauth-provider-dev"; then
     test_endpoint "http://localhost:4444/health/ready" "Hydra public health endpoint"
     test_endpoint "http://localhost:4445/health/ready" "Hydra admin health endpoint"
     test_json_endpoint "http://localhost:4444/.well-known/openid_configuration" "Hydra OpenID configuration"
-    
+
     # Check if OAuth client exists
     print_step "Checking OAuth client configuration..."
     if curl -s "http://localhost:4445/admin/clients/dev-client-id" | jq . &> /dev/null; then
         print_success "OAuth client 'dev-client-id' is configured"
-        
+
         # Show client details
         echo "Client configuration:"
         curl -s "http://localhost:4445/admin/clients/dev-client-id" | jq '{client_id, redirect_uris, grant_types, response_types, scope}'
@@ -167,17 +167,17 @@ fi
 # Check Backend
 if check_service_health "backend-dev"; then
     test_endpoint "http://localhost:8000/api/health" "Backend health endpoint"
-    
+
     # Test OAuth endpoints
     print_step "Testing backend OAuth endpoints..."
-    
+
     # Test login endpoint (should return method not allowed for GET)
     if curl -s -o /dev/null -w "%{http_code}" "http://localhost:8000/api/auth/login" | grep -q "405"; then
         print_success "OAuth login endpoint is accessible"
     else
         print_warning "OAuth login endpoint may not be configured"
     fi
-    
+
     # Test session endpoint
     if curl -s -o /dev/null -w "%{http_code}" "http://localhost:8000/api/auth/session" | grep -q "401\|200"; then
         print_success "OAuth session endpoint is accessible"
@@ -191,7 +191,7 @@ fi
 # Check Frontend
 if check_service_health "frontend-dev"; then
     test_endpoint "http://localhost:3000" "Frontend" "200"
-    
+
     # Test if login page loads
     print_step "Testing frontend OAuth integration..."
     if curl -s "http://localhost:3000/auth/login" | grep -q "Welcome Back\|Continue with\|OAuth"; then
@@ -214,21 +214,21 @@ const puppeteer = require('puppeteer');
   try {
     const browser = await puppeteer.launch({ headless: true });
     const page = await browser.newPage();
-    
+
     // Navigate to login page
     await page.goto('http://localhost:3000/auth/login');
     await page.waitForLoadState('networkidle');
-    
+
     // Look for OAuth buttons
     const oauthButtons = await page.$$('button:has-text("Continue with")');
-    
+
     if (oauthButtons.length > 0) {
       console.log('✅ OAuth buttons found on login page');
-      
+
       // Try clicking the first OAuth button
       await oauthButtons[0].click();
       await page.waitForTimeout(2000);
-      
+
       const currentUrl = page.url();
       if (currentUrl.includes('localhost:4444') || currentUrl.includes('oauth2/auth')) {
         console.log('✅ Successfully redirected to Hydra OAuth provider');
@@ -238,7 +238,7 @@ const puppeteer = require('puppeteer');
     } else {
       console.log('⚠️  No OAuth buttons found on login page');
     }
-    
+
     await browser.close();
   } catch (error) {
     console.log('❌ OAuth integration test failed:', error.message);
@@ -281,7 +281,7 @@ echo "   cd frontend && npm run test:e2e -- oauth-error-handling.spec.ts"
 echo "   cd frontend && npm run test:e2e -- oauth-docker-integration.spec.ts"
 echo ""
 echo "🛠️  To stop services:"
-echo "   docker-compose -f docker-compose.dev.yml down"
+echo "   docker compose -f docker-compose.dev.yml down"
 echo ""
 
 print_success "OAuth Docker verification script completed successfully!"

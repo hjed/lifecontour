@@ -68,6 +68,7 @@ export interface TestFixtures {
   contactsWithoutTags: { page: Page; contacts: TestContact[] };
   favouriteContacts: { page: Page; contacts: TestContact[] };
   regularContacts: { page: Page; contacts: TestContact[] };
+  taggedContactsData: { page: Page; contacts: TestContact[]; tags: any[] };
 
   // Utility fixtures
   testCleanup: (cleanupFn: () => Promise<void>) => void;
@@ -563,6 +564,26 @@ export const test = base.extend<TestFixtures, WorkerFixtures>({
     });
 
     await use({ page: authenticatedPage, contacts: createdContacts });
+  },
+
+  taggedContactsData: async ({ authenticatedPage, testCleanup }, use) => {
+    const dataManager = new TestDataManager(authenticatedPage);
+    const dataset = DataSetFactory.createTaggedData();
+
+    console.log('🏷️ [Tagged Contacts] Creating tagged contacts dataset...');
+
+    const createdTags = await dataManager.createTags(dataset.tags);
+    const createdContacts = await dataManager.createContacts(dataset.contacts);
+
+    testCleanup(async () => {
+      await dataManager.cleanup();
+    });
+
+    await use({
+      page: authenticatedPage,
+      contacts: createdContacts,
+      tags: createdTags,
+    });
   },
 
   // Utility fixtures

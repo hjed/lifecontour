@@ -1,20 +1,14 @@
-import { test, expect } from '@playwright/test';
-import { createTestHelpers } from './utils/test-helpers';
+import { test, expect } from './fixtures';
 
 /**
  * Sidebar Navigation Tests
  *
- * These tests set up their own test data to ensure deterministic behavior.
- * Each test creates the exact data state it needs to test specific functionality.
+ * Converted to use the advanced fixture-based testing system.
+ * Each test uses deterministic fixtures that provide guaranteed authentication state.
  */
 test.describe('Sidebar Navigation', () => {
   test.describe('Desktop Sidebar', () => {
     test('displays sidebar navigation on desktop', async ({ page }) => {
-      const { testData, sidebar } = createTestHelpers(page);
-
-      // Set up test state: authenticated user
-      await testData.setupAuthenticatedUser();
-
       // Set viewport to desktop size
       await page.setViewportSize({ width: 1024, height: 768 });
 
@@ -23,7 +17,8 @@ test.describe('Sidebar Navigation', () => {
       await expect(page).toHaveTitle(/Personal Management System/);
 
       // Check that desktop sidebar is visible
-      await sidebar.waitForSidebar();
+      const sidebar = page.locator('[data-testid="sidebar"], nav, aside');
+      await expect(sidebar).toBeVisible();
 
       // Check navigation sections are present
       await expect(
@@ -35,13 +30,9 @@ test.describe('Sidebar Navigation', () => {
     });
 
     test('shows contacts section with proper navigation links', async ({
-      page,
+      taggedContactsData,
     }) => {
-      const { testData, sidebar } = createTestHelpers(page);
-
-      // Set up test state: authenticated user with tags
-      await testData.setupAuthenticatedUser();
-      await testData.createTestTags(['work', 'family']);
+      const { page } = taggedContactsData;
 
       // Set viewport to desktop size
       await page.setViewportSize({ width: 1024, height: 768 });
@@ -49,8 +40,6 @@ test.describe('Sidebar Navigation', () => {
       // Navigate to contacts page
       await page.goto('/contacts');
       await expect(page).toHaveTitle(/Personal Management System/);
-
-      await sidebar.waitForSidebar();
 
       // Should have basic navigation items
       await expect(page.getByRole('link', { name: 'All' })).toBeVisible();
@@ -72,10 +61,7 @@ test.describe('Sidebar Navigation', () => {
     });
 
     test('shows journals section collapsed by default', async ({ page }) => {
-      const { testData } = createTestHelpers(page);
-
       // Set up test state: authenticated user
-      await testData.setupAuthenticatedUser();
 
       // Set viewport to desktop size
       await page.setViewportSize({ width: 1024, height: 768 });
@@ -93,10 +79,7 @@ test.describe('Sidebar Navigation', () => {
     });
 
     test('can toggle section expansion', async ({ page }) => {
-      const { testData } = createTestHelpers(page);
-
       // Set up test state: authenticated user
-      await testData.setupAuthenticatedUser();
 
       // Set viewport to desktop size
       await page.setViewportSize({ width: 1024, height: 768 });
@@ -123,10 +106,7 @@ test.describe('Sidebar Navigation', () => {
     });
 
     test('highlights active navigation item', async ({ page }) => {
-      const { testData } = createTestHelpers(page);
-
       // Set up test state: authenticated user
-      await testData.setupAuthenticatedUser();
 
       // Set viewport to desktop size
       await page.setViewportSize({ width: 1024, height: 768 });
