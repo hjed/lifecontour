@@ -7,7 +7,7 @@
 
 'use client';
 
-import { useState, useMemo } from 'react';
+import { useState } from 'react';
 import { Plus, Search, Filter, Users } from 'lucide-react';
 import Link from 'next/link';
 import { useContacts, useSearchContacts } from '@/lib/api/contacts';
@@ -22,6 +22,7 @@ import { AuthGuard } from '@/components/auth/AuthGuard';
 import { SearchHighlight } from '@/components/search/SearchHighlight';
 import { FavouriteToggle } from '@/components/contacts/FavouriteToggle';
 import { useDebounce } from '@/hooks/useDebounce';
+import { useDisplayContacts } from '@/hooks/useDisplayContacts';
 import { TIMEOUTS } from '@/lib/constants';
 
 export default function ContactsPage() {
@@ -64,50 +65,8 @@ function ContactsPageContent() {
 
   const totalContacts = data?.meta?.total || 0;
 
-  const displayContacts = useMemo(() => {
-    const contacts = data?.data || [];
-    return contacts.map(contact => {
-      const highlighted = contact.meta?.highlighted as Record<
-        string,
-        string
-      > | null;
-      const isSearchResult = shouldUseSearch && !!highlighted;
-
-      // Pre-compute highlighted text for performance
-      const highlightedName =
-        isSearchResult && highlighted
-          ? (highlighted.first_name || contact.attributes.first_name) +
-            (highlighted.last_name
-              ? ` ${highlighted.last_name}`
-              : contact.attributes.last_name
-                ? ` ${contact.attributes.last_name}`
-                : '')
-          : null;
-
-      return {
-        id: contact.id,
-        name: `${contact.attributes.first_name} ${contact.attributes.last_name || ''}`.trim(),
-        is_favourite: contact.attributes.is_favourite || false,
-        primary_email: contact.attributes.contact_methods?.find(
-          m => m.attributes.method_type === 'email' && m.attributes.is_primary
-        )?.attributes.value,
-        primary_phone: contact.attributes.contact_methods?.find(
-          m => m.attributes.method_type === 'phone' && m.attributes.is_primary
-        )?.attributes.value,
-        tags: contact.relationships?.tags?.data || [],
-        created_at: contact.attributes.created_at,
-        updated_at: contact.attributes.updated_at,
-        // Include search highlighting data when available
-        highlighted,
-        isSearchResult,
-        highlightedName,
-        highlightedEmail:
-          isSearchResult && highlighted ? highlighted.email : null,
-        highlightedPhone:
-          isSearchResult && highlighted ? highlighted.phone : null,
-      };
-    });
-  }, [data?.data, shouldUseSearch]);
+  // Use the centralized display contacts hook with search highlighting support
+  const displayContacts = useDisplayContacts(data?.data, shouldUseSearch);
 
   const handleSearchChange = (value: string) => {
     setSearchQuery(value);
