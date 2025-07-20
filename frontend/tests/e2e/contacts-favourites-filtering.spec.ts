@@ -1,284 +1,230 @@
 import { test, expect } from '@playwright/test';
 import { createTestHelpers } from './utils/test-helpers';
 
+/**
+ * Contact Favourites and Filtering Tests
+ *
+ * These tests set up their own test data to ensure deterministic behavior.
+ * Each test creates the exact data state it needs to test specific functionality.
+ */
 test.describe('Contact Favourites and Filtering', () => {
   test.describe('Favourites Functionality', () => {
-    test('should load favourites page successfully', async ({ page }) => {
-      const { auth } = createTestHelpers(page);
+    test('should display favourite contacts when favourite contacts exist', async ({ page }) => {
+      const { testData, contacts } = createTestHelpers(page);
 
+      // Set up test state: authenticated user with favourite contacts
+      await testData.setupAuthenticatedUser();
+      await testData.createTestContacts([
+        { firstName: 'John', lastName: 'Doe', email: 'john@example.com', isFavourite: true },
+        { firstName: 'Jane', lastName: 'Smith', email: 'jane@example.com', isFavourite: true },
+        { firstName: 'Bob', lastName: 'Wilson', email: 'bob@example.com', isFavourite: false },
+      ]);
+
+      // Navigate to favourites page
       await page.goto('/contacts/favourites');
       await expect(page).toHaveTitle(/Personal Management System/);
 
-      // Handle authentication redirect or successful access
-      const result = await auth.handleProtectedPageAccess();
+      // Should show exactly 2 favourite contacts
+      const contactCards = await contacts.waitForContactCards();
+      expect(await contactCards.count()).toBe(2);
 
-      if (result === 'redirected') {
-        // Verify login page elements
-        await expect(
-          page.getByRole('heading', { name: 'Welcome Back' })
-        ).toBeVisible();
-      } else {
-        // If authenticated, verify favourites page content
-        const pageContent = page.locator('body');
-        await expect(pageContent).toContainText(/favourite/i);
-      }
+      // Each contact card should have a favourite button
+      await contacts.testFavouriteButtons();
     });
 
-    test('should display favourite toggle buttons on contact cards when authenticated', async ({
-      page,
-    }) => {
-      const { auth } = createTestHelpers(page);
+    test('should display empty state when no favourite contacts exist', async ({ page }) => {
+      const { testData } = createTestHelpers(page);
 
-      await page.goto('/contacts');
-      await expect(page).toHaveTitle(/Personal Management System/);
+      // Set up test state: authenticated user with no favourite contacts
+      await testData.setupAuthenticatedUser();
+      await testData.createTestContacts([
+        { firstName: 'John', lastName: 'Doe', email: 'john@example.com', isFavourite: false },
+        { firstName: 'Jane', lastName: 'Smith', email: 'jane@example.com', isFavourite: false },
+      ]);
 
-      const result = await auth.handleProtectedPageAccess();
-
-      if (result === 'accessed') {
-        // Only test favourite buttons if we have access to the contacts page
-        try {
-          // Wait for contacts to load
-          await page.waitForSelector(
-            '[data-testid="contact-card"], .contact-card, [class*="card"]',
-            {
-              timeout: 5000,
-            }
-          );
-
-          // Look for favourite toggle buttons (star icons)
-          const favouriteButtons = page.locator(
-            'button[aria-label*="favourite"], button[aria-label*="Favourite"]'
-          );
-
-          // Should have at least one favourite button if contacts are loaded
-          const buttonCount = await favouriteButtons.count();
-          if (buttonCount > 0) {
-            expect(buttonCount).toBeGreaterThan(0);
-
-            // Verify the first button has proper accessibility
-            const firstButton = favouriteButtons.first();
-            await expect(firstButton).toHaveAttribute('aria-label');
-            await expect(firstButton).toHaveAttribute('type', 'button');
-          }
-        } catch (error) {
-          // If no contacts are loaded, that's also a valid state
-          console.log('No contacts found or page still loading:', error);
-          // This is expected behavior when no contacts exist
-        }
-      }
-    });
-
-    test('should handle navigation to favourites page', async ({ page }) => {
-      const { auth } = createTestHelpers(page);
-
-      await page.goto('/contacts');
-      await expect(page).toHaveTitle(/Personal Management System/);
-
-      const result = await auth.handleProtectedPageAccess();
-
-      if (result === 'accessed') {
-        // Look for favourites link in sidebar or navigation
-        const favouritesLink = page.locator(
-          'a[href="/contacts/favourites"], a:has-text("Favourites")'
-        );
-
-        if ((await favouritesLink.count()) > 0) {
-          await favouritesLink.first().click();
-
-          // Verify we're on the favourites page or redirected to login
-          const currentUrl = page.url();
-          expect(
-            currentUrl.includes('/contacts/favourites') ||
-              currentUrl.includes('/auth/login')
-          ).toBe(true);
-        }
-      }
-    });
-
-    test('should handle empty favourites state when authenticated', async ({
-      page,
-    }) => {
-      const { auth } = createTestHelpers(page);
-
+      // Navigate to favourites page
       await page.goto('/contacts/favourites');
       await expect(page).toHaveTitle(/Personal Management System/);
 
-      const result = await auth.handleProtectedPageAccess();
+      // Should show empty state message
+      const emptyState = page.locator('text=/no.*favourite.*contacts/i, text=/star.*contacts/i');
+      await expect(emptyState).toBeVisible();
 
-      if (result === 'accessed') {
-        // Look for empty state message or contact cards
-        try {
-          // Wait for content to load by waiting for either empty state or contact cards
-          await page.waitForSelector(
-            'text=/no.*favourite.*contacts/i, text=/star.*contacts/i, [data-testid="contact-card"], .contact-card, [class*="card"]',
-            { timeout: 10000 }
-          );
+      // Should not show any contact cards
+      const contactCards = page.locator('[data-testid="contact-card"], .contact-card, [class*="card"]');
+      expect(await contactCards.count()).toBe(0);
+    });
 
-          const emptyState = page.locator(
-            'text=/no.*favourite.*contacts/i, text=/star.*contacts/i'
-          );
-          const contactCards = page.locator(
-            '[data-testid="contact-card"], .contact-card, [class*="card"]'
-          );
+    test('should redirect to login when not authenticated', async ({ page }) => {
+      const { testData } = createTestHelpers(page);
 
-          // Either should have empty state or contact cards, not both
-          const hasEmptyState = (await emptyState.count()) > 0;
-          const hasContacts = (await contactCards.count()) > 0;
+      // Set up test state: no authentication
+      await testData.clearAllTestData();
 
-          expect(hasEmptyState || hasContacts).toBe(true);
-        } catch (error) {
-          // If page is still loading or has issues, that's also valid
-          console.log(
-            'Favourites page content still loading or has issues:',
-            error
-          );
-          // This is expected behavior during page loading
-        }
-      }
+      // Navigate to favourites page
+      await page.goto('/contacts/favourites');
+      await expect(page).toHaveTitle(/Personal Management System/);
+
+      // Should redirect to login
+      await page.waitForLoadState('networkidle');
+      const currentUrl = page.url();
+      expect(currentUrl).toContain('/auth/login');
+
+      // Should show login form
+      await expect(page.getByRole('heading', { name: 'Welcome Back' })).toBeVisible();
+    });
+
+    test('should toggle favourite status when favourite button is clicked', async ({
+      page,
+    }) => {
+      const { testData, contacts } = createTestHelpers(page);
+
+      // Set up test state: authenticated user with contacts
+      await testData.setupAuthenticatedUser();
+      await testData.createTestContacts([
+        { firstName: 'John', lastName: 'Doe', email: 'john@example.com', isFavourite: false },
+        { firstName: 'Jane', lastName: 'Smith', email: 'jane@example.com', isFavourite: true },
+      ]);
+
+      // Navigate to contacts page
+      await page.goto('/contacts');
+      await expect(page).toHaveTitle(/Personal Management System/);
+
+      // Should show 2 contacts
+      const contactCards = await contacts.waitForContactCards();
+      expect(await contactCards.count()).toBe(2);
+
+      // Click favourite button on first contact
+      await contacts.clickFavouriteButton();
+
+      // Button should still be functional after click
+      const favouriteButtons = page.locator('button[aria-label*="favourite"], button[aria-label*="Favourite"]');
+      await expect(favouriteButtons.first()).toBeEnabled();
+    });
+
+    test('should allow navigation to favourites page from sidebar', async ({ page }) => {
+      const { testData, sidebar } = createTestHelpers(page);
+
+      // Set up test state: authenticated user
+      await testData.setupAuthenticatedUser();
+
+      // Navigate to contacts page
+      await page.goto('/contacts');
+      await expect(page).toHaveTitle(/Personal Management System/);
+
+      // Navigate to favourites via sidebar
+      await sidebar.navigateToFavourites();
+
+      // Should be on favourites page
+      const currentUrl = page.url();
+      expect(currentUrl).toContain('/contacts/favourites');
     });
   });
 
   test.describe('Tag-based Filtering', () => {
-    test('should display dynamic tags in sidebar when authenticated', async ({
-      page,
-    }) => {
-      const { auth } = createTestHelpers(page);
+    test('should display contacts filtered by tag when tag exists', async ({ page }) => {
+      const { testData, contacts } = createTestHelpers(page);
 
-      await page.goto('/contacts');
+      // Set up test state: authenticated user with tagged contacts
+      await testData.setupAuthenticatedUser();
+      await testData.createTestTags(['work', 'family']);
+      await testData.createTestContacts([
+        { firstName: 'John', lastName: 'Doe', email: 'john@example.com', tags: ['work'] },
+        { firstName: 'Jane', lastName: 'Smith', email: 'jane@example.com', tags: ['work'] },
+        { firstName: 'Bob', lastName: 'Wilson', email: 'bob@example.com', tags: ['family'] },
+      ]);
+
+      // Navigate to work tag page
+      await page.goto('/contacts/tags/work');
       await expect(page).toHaveTitle(/Personal Management System/);
 
-      const result = await auth.handleProtectedPageAccess();
+      // Should show exactly 2 contacts with work tag
+      const contactCards = await contacts.waitForContactCards();
+      expect(await contactCards.count()).toBe(2);
 
-      if (result === 'accessed') {
-        try {
-          // Wait for sidebar to load
-          await page.waitForSelector('nav, aside, [role="navigation"]', {
-            timeout: 5000,
-          });
-
-          // Look for tag links in sidebar (should not be hardcoded Group 1, Group 2)
-          const tagLinks = page.locator('a[href*="/contacts/tags/"]');
-          const hardcodedGroup1 = page.locator('text="Group 1"');
-          const hardcodedGroup2 = page.locator('text="Group 2"');
-
-          // Should not have hardcoded groups
-          expect(await hardcodedGroup1.count()).toBe(0);
-          expect(await hardcodedGroup2.count()).toBe(0);
-
-          // May have dynamic tag links
-          const tagCount = await tagLinks.count();
-          if (tagCount > 0) {
-            // Verify tag links have proper structure
-            const firstTag = tagLinks.first();
-            await expect(firstTag).toHaveAttribute('href');
-
-            const href = await firstTag.getAttribute('href');
-            expect(href).toMatch(/\/contacts\/tags\/\w+/);
-          }
-        } catch (error) {
-          console.log('Sidebar still loading or no tags available:', error);
-          // This is expected behavior when sidebar is loading or no tags exist
-        }
-      }
+      // Page should indicate it's showing work tag
+      const pageContent = page.locator('body');
+      await expect(pageContent).toContainText(/work/i);
     });
 
-    test('should load tag filtering page successfully', async ({ page }) => {
-      const { auth } = createTestHelpers(page);
+    test('should display empty state when tag has no contacts', async ({ page }) => {
+      const { testData } = createTestHelpers(page);
 
-      // Test with a sample tag ID
-      await page.goto('/contacts/tags/1');
+      // Set up test state: authenticated user with empty tag
+      await testData.setupAuthenticatedUser();
+      await testData.createTestTags(['empty-tag']);
+      await testData.createTestContacts([
+        { firstName: 'John', lastName: 'Doe', email: 'john@example.com', tags: ['other-tag'] },
+      ]);
+
+      // Navigate to empty tag page
+      await page.goto('/contacts/tags/empty-tag');
       await expect(page).toHaveTitle(/Personal Management System/);
 
-      const result = await auth.handleProtectedPageAccess();
+      // Should show empty state for this tag
+      const emptyState = page.locator('text=/no contacts.*tag/i, text=/no contacts found/i');
+      await expect(emptyState).toBeVisible();
 
-      if (result === 'accessed') {
-        // Should show either tag content or "tag not found" message
-        const pageContent = page.locator('body');
-        const hasTagContent =
-          (await pageContent.locator('text=/contacts.*tag/i').count()) > 0;
-        const hasNotFoundContent =
-          (await pageContent.locator('text=/tag.*not.*found/i').count()) > 0;
-
-        expect(hasTagContent || hasNotFoundContent).toBe(true);
-      }
+      // Should not show any contact cards
+      const contactCards = page.locator('[data-testid="contact-card"], .contact-card, [class*="card"]');
+      expect(await contactCards.count()).toBe(0);
     });
 
-    test('should handle non-existent tag gracefully', async ({ page }) => {
-      const { auth } = createTestHelpers(page);
+    test('should display not found message for non-existent tag', async ({ page }) => {
+      const { testData } = createTestHelpers(page);
 
-      // Test with a non-existent tag ID
+      // Set up test state: authenticated user with no matching tag
+      await testData.setupAuthenticatedUser();
+      await testData.createTestTags(['work', 'family']);
+
+      // Navigate to non-existent tag page
       await page.goto('/contacts/tags/non-existent-tag-999');
       await expect(page).toHaveTitle(/Personal Management System/);
 
-      const result = await auth.handleProtectedPageAccess();
-
-      if (result === 'accessed') {
-        // Should show "tag not found" or similar error message
-        try {
-          // Wait for content to load by waiting for either error message or page content
-          await page.waitForSelector(
-            'text=/tag.*not.*found/i, text=/not.*found/i, h1, main, [role="main"]',
-            { timeout: 10000 }
-          );
-
-          const errorContent = page.locator(
-            'text=/tag.*not.*found/i, text=/not.*found/i'
-          );
-          const hasErrorMessage = (await errorContent.count()) > 0;
-
-          // Should either show error message or have valid page content
-          if (hasErrorMessage) {
-            expect(hasErrorMessage).toBe(true);
-          } else {
-            // If no error message, should still be a valid page
-            await expect(page).toHaveTitle(/Personal Management System/);
-          }
-        } catch (error) {
-          console.log('Tag page content still loading:', error);
-          // This is expected behavior during page loading
-        }
-      }
+      // Should show tag not found message
+      const errorContent = page.locator('text=/tag.*not.*found/i, text=/not.*found/i');
+      await expect(errorContent).toBeVisible();
     });
   });
 
   test.describe('Integration Tests', () => {
-    test('should handle navigation between contact pages', async ({ page }) => {
-      const { auth } = createTestHelpers(page);
+    test('should maintain consistent navigation between contact pages', async ({ page }) => {
+      const { testData } = createTestHelpers(page);
 
-      // Test basic navigation flow
+      // Set up test state: authenticated user with contacts
+      await testData.setupAuthenticatedUser();
+      await testData.createTestContacts([
+        { firstName: 'John', lastName: 'Doe', email: 'john@example.com', isFavourite: true },
+      ]);
+
+      // Start on contacts page
       await page.goto('/contacts');
       await expect(page).toHaveTitle(/Personal Management System/);
 
-      const result = await auth.handleProtectedPageAccess();
+      // Navigate to favourites page via sidebar
+      const favouritesLink = page.locator('a[href="/contacts/favourites"]');
+      await expect(favouritesLink).toBeVisible();
+      await favouritesLink.click();
+      await page.waitForLoadState('networkidle');
 
-      if (result === 'accessed') {
-        // Try to navigate to favourites page
-        try {
-          const favouritesLink = page.locator('a[href="/contacts/favourites"]');
-          if ((await favouritesLink.count()) > 0) {
-            await favouritesLink.click();
+      // Should be on favourites page
+      expect(page.url()).toContain('/contacts/favourites');
 
-            // Should either stay on favourites or redirect to login
-            const currentUrl = page.url();
-            expect(
-              currentUrl.includes('/contacts') ||
-                currentUrl.includes('/auth/login')
-            ).toBe(true);
-          }
-        } catch (error) {
-          console.log(
-            'Navigation test encountered expected authentication flow:',
-            error
-          );
-          // This is expected behavior during authentication redirects
-        }
-      }
+      // Should show favourite contact
+      const contactCards = page.locator('[data-testid="contact-card"], .contact-card, [class*="card"]');
+      expect(await contactCards.count()).toBe(1);
     });
 
-    test('should show consistent UI elements across contact pages', async ({
+    test('should display consistent UI structure across contact pages', async ({
       page,
     }) => {
-      const { auth } = createTestHelpers(page);
+      const { testData, sidebar } = createTestHelpers(page);
+
+      // Set up test state: authenticated user
+      await testData.setupAuthenticatedUser();
+      await testData.createTestContacts([
+        { firstName: 'John', lastName: 'Doe', email: 'john@example.com', isFavourite: true },
+      ]);
 
       const pagesToTest = ['/contacts', '/contacts/favourites'];
 
@@ -286,31 +232,14 @@ test.describe('Contact Favourites and Filtering', () => {
         await page.goto(pageUrl);
         await expect(page).toHaveTitle(/Personal Management System/);
 
-        const result = await auth.handleProtectedPageAccess();
+        // Each page should have sidebar and header
+        await sidebar.waitForSidebar();
+        const header = page.locator('h1, [role="heading"]').first();
+        await expect(header).toBeVisible();
 
-        if (result === 'accessed') {
-          try {
-            // Verify common UI elements exist - use first() to avoid strict mode violations
-            const sidebar = page
-              .locator('nav, aside, [role="navigation"]')
-              .first();
-            const header = page.locator('h1, [role="heading"]').first();
-
-            await expect(sidebar).toBeVisible();
-            await expect(header).toBeVisible();
-
-            // Verify page-specific content
-            if (pageUrl.includes('favourites')) {
-              await expect(page.locator('body')).toContainText(/favourite/i);
-            }
-          } catch (error) {
-            console.log(
-              `UI elements test for ${pageUrl} encountered loading issues:`,
-              error
-            );
-            // This is expected behavior during page loading or authentication
-          }
-        }
+        // Each page should have main content area
+        const mainContent = page.locator('main, [role="main"]');
+        await expect(mainContent).toBeVisible();
       }
     });
   });

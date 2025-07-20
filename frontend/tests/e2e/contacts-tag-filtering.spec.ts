@@ -1,108 +1,83 @@
 import { test, expect } from '@playwright/test';
 import { createTestHelpers } from './utils/test-helpers';
 
+/**
+ * Tag Filtering Pages Tests
+ *
+ * These tests set up their own test data to ensure deterministic behavior.
+ * Each test creates the exact data state it needs to test specific functionality.
+ */
 test.describe('Tag Filtering Pages', () => {
-  test('should load tag filtering page successfully', async ({ page }) => {
-    const { auth } = createTestHelpers(page);
+  test('should redirect to login when not authenticated', async ({ page }) => {
+    const { testData } = createTestHelpers(page);
 
-    // Test with a sample tag ID
-    await page.goto('/contacts/tags/1');
+    // Set up test state: no authentication
+    await testData.clearAllTestData();
+
+    // Navigate to tag page
+    await page.goto('/contacts/tags/work');
     await expect(page).toHaveTitle(/Personal Management System/);
 
-    // Handle authentication redirect or successful access
-    const result = await auth.handleProtectedPageAccess();
+    // Should redirect to login
+    await page.waitForLoadState('networkidle');
+    const currentUrl = page.url();
+    expect(currentUrl).toContain('/auth/login');
 
-    if (result === 'redirected') {
-      // Verify login page elements
-      await expect(
-        page.getByRole('heading', { name: 'Welcome Back' })
-      ).toBeVisible();
-    } else {
-      // If authenticated, verify tag page loads
-      await expect(page).toHaveTitle(/Personal Management System/);
-    }
+    // Should show login form
+    await expect(page.getByRole('heading', { name: 'Welcome Back' })).toBeVisible();
   });
 
-  test('should show tag-specific content when tag exists', async ({ page }) => {
-    const { auth } = createTestHelpers(page);
+  test('should display contacts filtered by tag when tag exists', async ({ page }) => {
+    const { testData, contacts } = createTestHelpers(page);
 
-    await page.goto('/contacts/tags/1');
+    // Set up test state: authenticated user with tagged contacts
+    await testData.setupAuthenticatedUser();
+    await testData.createTestTags(['work']);
+    await testData.createTestContacts([
+      { firstName: 'John', lastName: 'Doe', email: 'john@example.com', tags: ['work'] },
+      { firstName: 'Jane', lastName: 'Smith', email: 'jane@example.com', tags: ['work'] },
+      { firstName: 'Bob', lastName: 'Wilson', email: 'bob@example.com', tags: ['family'] },
+    ]);
+
+    // Navigate to work tag page
+    await page.goto('/contacts/tags/work');
     await expect(page).toHaveTitle(/Personal Management System/);
 
-    const result = await auth.handleProtectedPageAccess();
+    // Should show exactly 2 contacts with work tag
+    const contactCards = await contacts.waitForContactCards();
+    expect(await contactCards.count()).toBe(2);
 
-    if (result === 'accessed') {
-      // Wait for content to load by waiting for either tag content or error message
-      await page.waitForSelector(
-        'text=/contacts.*tag/i, text=/tag.*contacts/i, text=/tag.*not.*found/i, text=/not.*found/i, h1',
-        { timeout: 10000 }
-      );
+    // Should have proper heading with tag information
+    const heading = page.locator('h1');
+    await expect(heading).toBeVisible();
+    await expect(heading).toContainText(/work/i);
 
-      // Should show either tag content or "tag not found" message
-      const pageContent = page.locator('body');
-      const hasTagContent =
-        (await pageContent
-          .locator('text=/contacts.*tag/i, text=/tag.*contacts/i')
-          .count()) > 0;
-      const hasNotFoundContent =
-        (await pageContent
-          .locator('text=/tag.*not.*found/i, text=/not.*found/i')
-          .count()) > 0;
-
-      expect(hasTagContent || hasNotFoundContent).toBe(true);
-
-      if (hasTagContent) {
-        // Should have a heading with tag information
-        const heading = page.locator('h1');
-        await expect(heading).toBeVisible();
-      }
-    }
+    // Contacts should have favourite buttons
+    await contacts.testFavouriteButtons();
   });
 
-  test('should handle non-existent tag gracefully', async ({ page }) => {
-    const { auth } = createTestHelpers(page);
+  test('should display not found message for non-existent tag', async ({ page }) => {
+    const { testData } = createTestHelpers(page);
 
-    // Test with a non-existent tag ID
+    // Set up test state: authenticated user with no matching tag
+    await testData.setupAuthenticatedUser();
+    await testData.createTestTags(['work', 'family']);
+
+    // Navigate to non-existent tag page
     await page.goto('/contacts/tags/non-existent-tag-999');
     await expect(page).toHaveTitle(/Personal Management System/);
 
-    const result = await auth.handleProtectedPageAccess();
+    // Should show tag not found message
+    const errorContent = page.locator('text=/tag.*not.*found/i, text=/not.*found/i');
+    await expect(errorContent).toBeVisible();
 
-    if (result === 'accessed') {
-      // Wait for content to load by waiting for error messages or page content
-      await page.waitForSelector(
-        'text=/tag.*not.*found/i, text=/not.*found/i, text=/doesn.*exist/i, text=/invalid.*tag/i, h1, main',
-        { timeout: 10000 }
-      );
-
-      // Should show "tag not found" or similar error message
-      const errorMessages = [
-        'text=/tag.*not.*found/i',
-        'text=/not.*found/i',
-        'text=/doesn.*exist/i',
-        'text=/invalid.*tag/i',
-      ];
-
-      let hasErrorMessage = false;
-      for (const selector of errorMessages) {
-        if ((await page.locator(selector).count()) > 0) {
-          hasErrorMessage = true;
-          break;
-        }
-      }
-
-      if (hasErrorMessage) {
-        // Should have helpful navigation back to contacts
-        const backLink = page.locator(
-          'a[href="/contacts"], a:has-text("Browse"), a:has-text("All Contacts")'
-        );
-        if ((await backLink.count()) > 0) {
-          await expect(backLink.first()).toBeVisible();
-        }
-      } else {
-        // If no error message, should still be a valid page
-        await expect(page).toHaveTitle(/Personal Management System/);
-      }
+    // Should have helpful navigation back to contacts
+    const backLink = page.locator(
+      'a[href="/contacts"], a:has-text("Browse"), a:has-text("All Contacts")'
+    );
+    const linkCount = await backLink.count();
+    if (linkCount > 0) {
+      await expect(backLink.first()).toBeVisible();
     }
   });
 

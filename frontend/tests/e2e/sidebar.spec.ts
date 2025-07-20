@@ -1,29 +1,30 @@
 import { test, expect } from '@playwright/test';
+import { createTestHelpers } from './utils/test-helpers';
 
+/**
+ * Sidebar Navigation Tests
+ *
+ * These tests set up their own test data to ensure deterministic behavior.
+ * Each test creates the exact data state it needs to test specific functionality.
+ */
 test.describe('Sidebar Navigation', () => {
-  test.beforeEach(async ({ page }) => {
-    // Set environment variable to disable authentication for testing
-    await page.addInitScript(() => {
-      window.localStorage.setItem('DISABLE_AUTH', 'true');
-    });
-
-    // Navigate to the contacts page (which should show the sidebar)
-    await page.goto('/contacts');
-
-    // Wait for the page to load
-    await page.waitForLoadState('networkidle');
-  });
 
   test.describe('Desktop Sidebar', () => {
     test('displays sidebar navigation on desktop', async ({ page }) => {
+      const { testData, sidebar } = createTestHelpers(page);
+
+      // Set up test state: authenticated user
+      await testData.setupAuthenticatedUser();
+
       // Set viewport to desktop size
       await page.setViewportSize({ width: 1024, height: 768 });
 
+      // Navigate to contacts page
+      await page.goto('/contacts');
+      await expect(page).toHaveTitle(/Personal Management System/);
+
       // Check that desktop sidebar is visible
-      const desktopSidebar = page.getByRole('complementary', {
-        name: 'Desktop navigation sidebar',
-      });
-      await expect(desktopSidebar).toBeVisible();
+      await sidebar.waitForSidebar();
 
       // Check navigation sections are present
       await expect(
@@ -34,24 +35,49 @@ test.describe('Sidebar Navigation', () => {
       ).toBeVisible();
     });
 
-    test('shows contacts section expanded by default', async ({ page }) => {
+    test('shows contacts section with proper navigation links', async ({ page }) => {
+      const { testData, sidebar } = createTestHelpers(page);
+
+      // Set up test state: authenticated user with tags
+      await testData.setupAuthenticatedUser();
+      await testData.createTestTags(['work', 'family']);
+
+      // Set viewport to desktop size
       await page.setViewportSize({ width: 1024, height: 768 });
 
-      // Contacts section should be expanded
-      const contactsButton = page.getByRole('button', { name: /contacts/i });
-      await expect(contactsButton).toHaveAttribute('aria-expanded', 'true');
+      // Navigate to contacts page
+      await page.goto('/contacts');
+      await expect(page).toHaveTitle(/Personal Management System/);
 
-      // Contact navigation items should be visible
+      await sidebar.waitForSidebar();
+
+      // Should have basic navigation items
       await expect(page.getByRole('link', { name: 'All' })).toBeVisible();
       await expect(
         page.getByRole('link', { name: 'Favourites' })
       ).toBeVisible();
-      await expect(page.getByRole('link', { name: 'Group 1' })).toBeVisible();
-      await expect(page.getByRole('link', { name: 'Group 2' })).toBeVisible();
+
+      // Should NOT have hardcoded groups
+      await expect(page.getByRole('link', { name: 'Group 1' })).not.toBeVisible();
+      await expect(page.getByRole('link', { name: 'Group 2' })).not.toBeVisible();
+
+      // Should have dynamic tag links
+      const tagLinks = page.locator('a[href*="/contacts/tags/"]');
+      expect(await tagLinks.count()).toBeGreaterThan(0);
     });
 
     test('shows journals section collapsed by default', async ({ page }) => {
+      const { testData } = createTestHelpers(page);
+
+      // Set up test state: authenticated user
+      await testData.setupAuthenticatedUser();
+
+      // Set viewport to desktop size
       await page.setViewportSize({ width: 1024, height: 768 });
+
+      // Navigate to contacts page
+      await page.goto('/contacts');
+      await expect(page).toHaveTitle(/Personal Management System/);
 
       // Journals section should be collapsed
       const journalsButton = page.getByRole('button', { name: /journals/i });
@@ -62,7 +88,17 @@ test.describe('Sidebar Navigation', () => {
     });
 
     test('can toggle section expansion', async ({ page }) => {
+      const { testData } = createTestHelpers(page);
+
+      // Set up test state: authenticated user
+      await testData.setupAuthenticatedUser();
+
+      // Set viewport to desktop size
       await page.setViewportSize({ width: 1024, height: 768 });
+
+      // Navigate to contacts page
+      await page.goto('/contacts');
+      await expect(page).toHaveTitle(/Personal Management System/);
 
       const journalsButton = page.getByRole('button', { name: /journals/i });
 
@@ -82,7 +118,17 @@ test.describe('Sidebar Navigation', () => {
     });
 
     test('highlights active navigation item', async ({ page }) => {
+      const { testData } = createTestHelpers(page);
+
+      // Set up test state: authenticated user
+      await testData.setupAuthenticatedUser();
+
+      // Set viewport to desktop size
       await page.setViewportSize({ width: 1024, height: 768 });
+
+      // Navigate to contacts page
+      await page.goto('/contacts');
+      await expect(page).toHaveTitle(/Personal Management System/);
 
       // Current page should be highlighted (we're on /contacts)
       const allLink = page.getByRole('link', { name: 'All' });
