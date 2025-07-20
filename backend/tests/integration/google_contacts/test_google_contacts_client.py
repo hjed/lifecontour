@@ -5,6 +5,7 @@ Tests the complete flow of API calls with automatic token refresh
 on 401 responses.
 """
 
+from collections.abc import AsyncGenerator
 from datetime import UTC, datetime, timedelta
 
 import httpx
@@ -51,7 +52,7 @@ def google_auth_service(
 @pytest.fixture
 async def google_client(
     google_auth_service: GoogleAuthService,
-) -> GoogleContactsAPIClient:
+) -> AsyncGenerator[GoogleContactsAPIClient, None]:
     """Create Google Contacts API client for testing."""
     client = GoogleContactsAPIClient(
         auth_service=google_auth_service,

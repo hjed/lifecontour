@@ -179,7 +179,9 @@ class GoogleAuthService:
         auth_record = result.fetchone()
 
         if not auth_record:
-            raise GoogleAuthTokensNotFoundError(f"No Google auth found for {google_account_email}")
+            raise GoogleAuthTokensNotFoundError(
+                f"No Google auth found for {google_account_email}"
+            )
 
         return self.encryption_service.decrypt(auth_record.encrypted_access_token)
 
@@ -214,7 +216,9 @@ class GoogleAuthService:
         row = result.fetchone()
 
         if not row:
-            raise GoogleAuthTokensNotFoundError(f"No Google auth found for {google_account_email}")
+            raise GoogleAuthTokensNotFoundError(
+                f"No Google auth found for {google_account_email}"
+            )
 
         if not row.encrypted_refresh_token:
             raise TokenRefreshFailedError(
