@@ -97,6 +97,15 @@ services:
       - oauth-provider-dev
     volumes:
       - ./docker/oauth-provider/init-oauth.sh:/init-oauth.sh:ro
+    environment:
+      - OAUTH_PROVIDER_HOST=oauth-provider-dev
+      - OAUTH_ADMIN_PORT=4445
+      - CLIENT_ID=dev-client-id
+      - CLIENT_SECRET=dev-client-secret
+      - ENVIRONMENT=development
+      - FRONTEND_URL=http://localhost:3000
+      - PUBLIC_PORT=4444
+      - ADMIN_PORT_EXTERNAL=4445
     entrypoint: ["/bin/sh"]
     command: ["/init-oauth.sh"]
     restart: "no"

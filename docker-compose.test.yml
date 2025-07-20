@@ -10,7 +10,7 @@ services:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
     volumes:
-      - ./docker/database/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+      - ./docker/database/init-test.sql:/docker-entrypoint-initdb.d/init.sql:ro
     ports:
       - "5433:5432"  # Different port to avoid conflicts
     healthcheck:
@@ -56,39 +56,62 @@ services:
     networks:
       - personal-management-test
 
-  # OAuth Provider (Hydra) for testing
+  # Simple OAuth2 Provider for Testing (SQLite In-Memory)
   oauth-provider-test:
     image: oryd/hydra:v2.2.0
     container_name: pms-oauth-test
     environment:
-      - DSN=postgres://postgres:postgres@database-test:5432/personal_management_test?sslmode=disable
+      # Use SQLite in-memory database for tests (faster and isolated)
+      - DSN=sqlite://file::memory:?cache=shared
       - URLS_SELF_ISSUER=http://localhost:4446
       - URLS_CONSENT=http://localhost:3002/consent
       - URLS_LOGIN=http://localhost:3002/login
       - URLS_LOGOUT=http://localhost:3002/logout
       - SECRETS_SYSTEM=test-system-secret-change-in-production
-      - OIDC_SUBJECT_IDENTIFIERS_SUPPORTED_TYPES=public,pairwise
       - OIDC_SUBJECT_IDENTIFIERS_PAIRWISE_SALT=test-salt-change-in-production
+      - LOG_LEVEL=debug
+      - SERVE_COOKIES_SAME_SITE_MODE=Lax
+      - SERVE_COOKIES_SAME_SITE_LEGACY_WORKAROUND=true
+    volumes:
+      - ./docker/oauth-provider/hydra.yml:/etc/config/hydra/hydra.yml:ro
     ports:
       - "4446:4444"  # Different port to avoid conflicts
       - "4447:4445"  # Different port to avoid conflicts
-    volumes:
-      - ./docker/oauth-provider/hydra-test.yml:/etc/config/hydra/hydra.yml:ro
-      - ./docker/oauth-provider/init-oauth-test.sh:/init-oauth.sh:ro
-      - ./docker/oauth-provider/entrypoint.sh:/entrypoint.sh:ro
-    entrypoint: ["/entrypoint.sh"]
-    command: ["serve", "-c", "/etc/config/hydra/hydra.yml", "all", "--dev"]
-    depends_on:
-      database-test:
-        condition: service_healthy
     networks:
       - personal-management-test
+    command: ["serve", "-c", "/etc/config/hydra/hydra.yml", "all", "--dev"]
+
+  # OAuth Client Initializer for Tests
+  oauth-init-test:
+    image: curlimages/curl:latest
+    container_name: pms-oauth-init-test
+    networks:
+      - personal-management-test
+    depends_on:
+      - oauth-provider-test
+    volumes:
+      - ./docker/oauth-provider/init-oauth.sh:/init-oauth.sh:ro
+    environment:
+      - OAUTH_PROVIDER_HOST=oauth-provider-test
+      - OAUTH_ADMIN_PORT=4445
+      - CLIENT_ID=test-client-id
+      - CLIENT_SECRET=test-client-secret
+      - ENVIRONMENT=testing
+      - FRONTEND_URL=http://localhost:3000
+      - PUBLIC_PORT=4446
+      - ADMIN_PORT_EXTERNAL=4447
+    entrypoint: ["/bin/sh"]
+    command: ["/init-oauth.sh"]
+    restart: "no"
 
   # Backend API for testing
   backend-test:
     build:
       context: .
-      dockerfile: docker/backend/Dockerfile.dev
+      dockerfile: docker/backend/Dockerfile
+      args:
+        BUILD_ENV: development
+        INSTALL_DEV_DEPS: "true"
     container_name: pms-backend-test
     environment:
       DATABASE_URL: postgresql://postgres:postgres@database-test:5432/personal_management_test
