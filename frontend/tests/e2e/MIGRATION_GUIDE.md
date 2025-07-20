@@ -1,10 +1,12 @@
 # E2E Test Migration Guide
 
-This guide explains how to migrate existing Playwright tests from the conditional logic pattern to the new fixture-based approach.
+This guide explains how to migrate existing Playwright tests from the conditional logic pattern to the advanced fixture-based testing system.
 
 ## Overview
 
-The new fixture-based approach eliminates conditional logic in tests by providing deterministic test scenarios through Playwright fixtures. This makes tests more reliable, faster, and easier to understand.
+The advanced fixture-based testing system eliminates conditional logic in tests by providing deterministic test scenarios through comprehensive Playwright fixtures. This system includes real OAuth authentication, advanced data management, and performance optimizations that make tests more reliable, faster, and significantly easier to understand and maintain.
+
+> 📚 **Complete Documentation**: See [`FIXTURE_SYSTEM_GUIDE.md`](./FIXTURE_SYSTEM_GUIDE.md) for comprehensive documentation of all available fixtures, data factories, and best practices.
 
 ## Key Changes
 
@@ -112,18 +114,97 @@ test('should display contacts', async ({ contactsWithData }) => {
 
 ### Authentication Fixtures
 
-- `authenticatedPage`: Page with user already logged in
+- `authenticatedPage`: Page with real OAuth authentication (worker-scoped for performance)
 - `unauthenticatedPage`: Page with no authentication (clean state)
 
-### Data Fixtures
+### Basic Data Fixtures
 
-- `contactsWithData`: Page with pre-created test contacts
+- `contactsWithData`: Page with pre-created test contacts (2 contacts)
 - `emptyContactsPage`: Page with no contacts (authenticated)
 - `contactsWithTags`: Page with contacts that have tags assigned
+
+### Advanced Dataset Fixtures
+
+- `smallDataSet`: 5 contacts, 3 tags - perfect for quick smoke tests
+- `mediumDataSet`: 20 contacts, 8 tags - comprehensive feature testing
+- `largeDataSet`: 100 contacts, 15 tags - performance testing
+- `searchTestData`: Optimized contacts for search functionality testing
+- `favouritesTestData`: Mix of favourite/regular contacts for filtering tests
+- `taggedTestData`: Hierarchical tags and complex tagging scenarios
+- `performanceTestData`: 500 contacts, 50 tags - stress testing
+
+### Specialized Fixtures
+
+- `contactsWithoutTags`: Guaranteed untagged contacts
+- `favouriteContacts`: Only favourite contacts
+- `regularContacts`: Only non-favourite contacts
 
 ### Utility Fixtures
 
 - `testCleanup`: Function to register cleanup tasks
+- `dataFactory`: Access to ContactFactory, TagFactory, and DataSetFactory for custom data generation
+
+## Advanced Patterns
+
+### Dataset-Specific Testing
+
+```typescript
+// Use specific datasets for different test scenarios
+test('search functionality with optimized data', async ({ searchTestData }) => {
+  const { page, contacts, tags } = searchTestData;
+
+  // Guaranteed: specific search test contacts exist
+  const johnContact = contacts.find(c => c.lastName === 'SearchTest');
+  expect(johnContact).toBeDefined();
+
+  await page.goto('/contacts');
+  await page.locator('[data-testid="search-input"]').fill('SearchTest');
+  await expect(
+    page.locator(`[data-testid="contact-${johnContact!.id}"]`)
+  ).toBeVisible();
+});
+
+test('performance with large dataset', async ({ largeDataSet }) => {
+  const { page, contacts, tags } = largeDataSet;
+
+  // Guaranteed: 100 contacts, 15 tags for performance testing
+  expect(contacts).toHaveLength(100);
+  expect(tags).toHaveLength(15);
+
+  await page.goto('/contacts');
+
+  const startTime = Date.now();
+  await page.waitForLoadState('networkidle');
+  const loadTime = Date.now() - startTime;
+
+  expect(loadTime).toBeLessThan(5000); // Performance assertion
+});
+```
+
+### Custom Data Generation
+
+```typescript
+// Use data factories for custom scenarios
+test('custom scenario with data factories', async ({
+  authenticatedPage,
+  dataFactory,
+  testCleanup,
+}) => {
+  // Generate custom test data
+  const customContacts = dataFactory.contacts.createMany(3, {
+    firstName: 'CustomTest',
+    isFavourite: true,
+  });
+
+  const customTags = dataFactory.tags.createWithPrefix('TestTag', 2);
+  const searchDataset = dataFactory.datasets.createSearchTestData();
+
+  // Use generated data for specific test scenario
+  expect(customContacts).toHaveLength(3);
+  expect(customTags).toHaveLength(2);
+  expect(searchDataset.contacts).toHaveLength(4);
+});
+```
 
 ## Migration Steps
 
@@ -298,12 +379,25 @@ test('contact list shows empty state when no data', async ({
 
 ## Benefits of Migration
 
+### Core Benefits
+
 1. **Deterministic Tests**: Each test knows exactly what state it's starting with
-2. **Faster Execution**: Authentication happens once per worker, not per test
-3. **Cleaner Code**: No conditional logic cluttering test assertions
-4. **Better Debugging**: Failed tests have clear, predictable state
-5. **Automatic Cleanup**: No manual cleanup code needed
-6. **Parallel Execution**: Tests can run in parallel without interfering with each other
+2. **Real OAuth Authentication**: Authentic OAuth flows with Hydra provider
+3. **Worker-Scoped Performance**: Authentication happens once per worker, not per test
+4. **Cleaner Code**: No conditional logic cluttering test assertions
+5. **Better Debugging**: Failed tests have clear, predictable state
+6. **Automatic Cleanup**: No manual cleanup code needed with dependency tracking
+7. **Parallel Execution**: Tests can run in parallel without interfering with each other
+
+### Advanced Benefits
+
+8. **Scalable Testing**: From 5 contacts (smoke tests) to 500 contacts (performance tests)
+9. **Specialized Scenarios**: Purpose-built fixtures for search, favourites, tagging, etc.
+10. **Data Factory System**: Generate custom test data with realistic patterns
+11. **Intelligent Fallbacks**: Tests continue even with API failures using mock data
+12. **Zero Test Pollution**: Complete isolation between tests with automatic cleanup
+13. **Performance Optimized**: Bulk operations and efficient data management
+14. **Comprehensive Documentation**: Complete guides, examples, and best practices
 
 ## Common Pitfalls
 
