@@ -34,11 +34,13 @@ export const SELECTORS = {
 
   // Contacts
   CONTACT_CARD: '[data-testid="contact-card"], .contact-card, [class*="card"]',
-  FAVOURITE_BUTTON: 'button[aria-label*="favourite"], button[aria-label*="Favourite"]',
+  FAVOURITE_BUTTON:
+    'button[aria-label*="favourite"], button[aria-label*="Favourite"]',
   CONTACT_LINK: 'a[href*="/contacts/"]',
 
   // Navigation Links
-  ALL_CONTACTS_LINK: 'a[href="/contacts"]:has-text("All"), a[href="/contacts"]:has-text("Browse"), a:has-text("All Contacts")',
+  ALL_CONTACTS_LINK:
+    'a[href="/contacts"]:has-text("All"), a[href="/contacts"]:has-text("Browse"), a:has-text("All Contacts")',
   FAVOURITES_LINK: 'a[href="/contacts/favourites"]',
   TAG_LINKS: 'a[href*="/contacts/tags/"]',
 
@@ -312,11 +314,16 @@ export class ContactTestHelpers {
   /**
    * Test authenticated access to a page - fails if not authenticated.
    */
-  async testAuthenticatedPageAccess(url: string, expectedContent?: string): Promise<void> {
+  async testAuthenticatedPageAccess(
+    url: string,
+    expectedContent?: string
+  ): Promise<void> {
     const result = await this.navigateToPageWithAuth(url, expectedContent);
 
     if (result === 'redirected') {
-      throw new Error(`Expected authenticated access to ${url}, but was redirected to login`);
+      throw new Error(
+        `Expected authenticated access to ${url}, but was redirected to login`
+      );
     }
 
     // If we reach here, we're authenticated and can test the actual functionality
@@ -330,7 +337,9 @@ export class ContactTestHelpers {
     const result = await this.navigateToPageWithAuth(url);
 
     if (result === 'accessed') {
-      throw new Error(`Expected redirect to login for ${url}, but page was accessible`);
+      throw new Error(
+        `Expected redirect to login for ${url}, but page was accessible`
+      );
     }
 
     // If we reach here, we were properly redirected to login
@@ -351,7 +360,9 @@ export class ContactTestHelpers {
 
     // Should not be redirected to login
     if (currentUrl.includes('/auth/login')) {
-      throw new Error(`Test requires authentication. Please ensure user is logged in before running authenticated tests. Current URL: ${currentUrl}`);
+      throw new Error(
+        `Test requires authentication. Please ensure user is logged in before running authenticated tests. Current URL: ${currentUrl}`
+      );
     }
 
     // Should be on the expected page
@@ -373,7 +384,9 @@ export class ContactTestHelpers {
 
     // Should be redirected to login
     if (!currentUrl.includes('/auth/login')) {
-      throw new Error(`Test requires no authentication. Please ensure user is logged out before running unauthenticated tests. Current URL: ${currentUrl}`);
+      throw new Error(
+        `Test requires no authentication. Please ensure user is logged out before running unauthenticated tests. Current URL: ${currentUrl}`
+      );
     }
 
     // Should have login form
@@ -693,7 +706,10 @@ export class SidebarTestHelpers {
   /**
    * Test sidebar navigation with authentication handling.
    */
-  async testSidebarNavigation(linkSelector: string, expectedUrl: string): Promise<boolean> {
+  async testSidebarNavigation(
+    linkSelector: string,
+    expectedUrl: string
+  ): Promise<boolean> {
     await this.waitForSidebar();
 
     const navLink = this.page.locator(linkSelector);
@@ -710,7 +726,8 @@ export class SidebarTestHelpers {
     await this.page.waitForLoadState('networkidle');
 
     const currentUrl = this.page.url();
-    const isOnExpectedPage = currentUrl.includes(expectedUrl) || currentUrl.includes('/auth/login');
+    const isOnExpectedPage =
+      currentUrl.includes(expectedUrl) || currentUrl.includes('/auth/login');
     expect(isOnExpectedPage).toBe(true);
 
     return currentUrl.includes(expectedUrl);
@@ -727,20 +744,24 @@ export class TestDataHelpers {
    * Create test contacts via API calls.
    * This should be implemented to call backend test APIs.
    */
-  async createTestContacts(_contacts: Array<{
-    firstName: string;
-    lastName: string;
-    email?: string;
-    phone?: string;
-    isFavourite?: boolean;
-    tags?: string[];
-  }>): Promise<void> {
+  async createTestContacts(
+    _contacts: Array<{
+      firstName: string;
+      lastName: string;
+      email?: string;
+      phone?: string;
+      isFavourite?: boolean;
+      tags?: string[];
+    }>
+  ): Promise<void> {
     // TODO: Implement API calls to create test contacts
     // Example:
     // for (const contact of contacts) {
     //   await this.page.request.post('/api/test/contacts', { data: contact });
     // }
-    throw new Error('Test data setup not implemented. Backend test APIs required.');
+    throw new Error(
+      'Test data setup not implemented. Backend test APIs required.'
+    );
   }
 
   /**
@@ -752,7 +773,9 @@ export class TestDataHelpers {
     // for (const tag of tags) {
     //   await this.page.request.post('/api/test/tags', { data: { name: tag } });
     // }
-    throw new Error('Test data setup not implemented. Backend test APIs required.');
+    throw new Error(
+      'Test data setup not implemented. Backend test APIs required.'
+    );
   }
 
   /**
@@ -762,7 +785,9 @@ export class TestDataHelpers {
     // TODO: Implement API calls to clear test data
     // Example:
     // await this.page.request.delete('/api/test/data');
-    throw new Error('Test data cleanup not implemented. Backend test APIs required.');
+    throw new Error(
+      'Test data cleanup not implemented. Backend test APIs required.'
+    );
   }
 
   /**
@@ -771,7 +796,9 @@ export class TestDataHelpers {
   async setupAuthenticatedUser(): Promise<void> {
     // TODO: Implement authentication setup
     // This should create a test user and set up authentication cookies/tokens
-    throw new Error('Authentication setup not implemented. Backend test APIs required.');
+    throw new Error(
+      'Authentication setup not implemented. Backend test APIs required.'
+    );
   }
 }
 
@@ -894,7 +921,8 @@ export class AuthHelpers {
     const hasLoginUrl = currentUrl.includes('/auth/login');
 
     // Also check for login form presence (in case of client-side redirect)
-    const hasLoginForm = await this.page.locator('h1:has-text("Welcome Back")').count() > 0;
+    const hasLoginForm =
+      (await this.page.locator('h1:has-text("Welcome Back")').count()) > 0;
 
     return hasLoginUrl || hasLoginForm;
   }
@@ -943,7 +971,10 @@ export class AuthHelpers {
    * Test authenticated page access with proper fallback handling.
    * Returns the authentication result and whether the test should continue.
    */
-  async testAuthenticatedPageAccess(url: string, expectedContent?: string): Promise<{
+  async testAuthenticatedPageAccess(
+    url: string,
+    expectedContent?: string
+  ): Promise<{
     result: 'redirected' | 'accessed';
     shouldContinue: boolean;
   }> {
@@ -962,7 +993,9 @@ export class AuthHelpers {
       // If authenticated, verify expected content if provided
       if (expectedContent) {
         const pageContent = this.page.locator('body');
-        await expect(pageContent).toContainText(new RegExp(expectedContent, 'i'));
+        await expect(pageContent).toContainText(
+          new RegExp(expectedContent, 'i')
+        );
       }
       return { result, shouldContinue: true };
     }

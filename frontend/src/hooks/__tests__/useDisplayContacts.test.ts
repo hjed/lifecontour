@@ -93,7 +93,9 @@ describe('useDisplayContacts', () => {
       },
     };
 
-    const { result } = renderHook(() => useDisplayContacts([contactWithoutLastName]));
+    const { result } = renderHook(() =>
+      useDisplayContacts([contactWithoutLastName])
+    );
     expect(result.current[0].name).toBe('John');
   });
 
@@ -106,7 +108,9 @@ describe('useDisplayContacts', () => {
       },
     };
 
-    const { result } = renderHook(() => useDisplayContacts([contactWithoutMethods]));
+    const { result } = renderHook(() =>
+      useDisplayContacts([contactWithoutMethods])
+    );
     const displayContact = result.current[0];
 
     expect(displayContact.primary_email).toBeUndefined();
@@ -150,7 +154,9 @@ describe('useDisplayContacts', () => {
       },
     };
 
-    const { result } = renderHook(() => useDisplayContacts([contactWithMultipleMethods]));
+    const { result } = renderHook(() =>
+      useDisplayContacts([contactWithMultipleMethods])
+    );
     const displayContact = result.current[0];
 
     expect(displayContact.primary_email).toBe('primary@example.com');
@@ -158,7 +164,7 @@ describe('useDisplayContacts', () => {
   });
 
   it('handles search highlighting when shouldUseSearch is true', () => {
-    const { result } = renderHook(() => 
+    const { result } = renderHook(() =>
       useDisplayContacts([mockContactWithHighlighting], true)
     );
 
@@ -171,13 +177,19 @@ describe('useDisplayContacts', () => {
       email: '<mark>john</mark>@example.com',
       phone: '+1-555-<mark>123</mark>-4567',
     });
-    expect(displayContact.highlightedName).toBe('<mark>John</mark> <mark>Doe</mark>');
-    expect(displayContact.highlightedEmail).toBe('<mark>john</mark>@example.com');
-    expect(displayContact.highlightedPhone).toBe('+1-555-<mark>123</mark>-4567');
+    expect(displayContact.highlightedName).toBe(
+      '<mark>John</mark> <mark>Doe</mark>'
+    );
+    expect(displayContact.highlightedEmail).toBe(
+      '<mark>john</mark>@example.com'
+    );
+    expect(displayContact.highlightedPhone).toBe(
+      '+1-555-<mark>123</mark>-4567'
+    );
   });
 
   it('does not include search highlighting when shouldUseSearch is false', () => {
-    const { result } = renderHook(() => 
+    const { result } = renderHook(() =>
       useDisplayContacts([mockContactWithHighlighting], false)
     );
 
@@ -234,7 +246,8 @@ describe('useDisplayContacts', () => {
 
   it('updates when dependencies change', () => {
     const { result, rerender } = renderHook(
-      ({ contacts, shouldUseSearch }) => useDisplayContacts(contacts, shouldUseSearch),
+      ({ contacts, shouldUseSearch }) =>
+        useDisplayContacts(contacts, shouldUseSearch),
       {
         initialProps: { contacts: [mockContact], shouldUseSearch: false },
       }
@@ -244,9 +257,14 @@ describe('useDisplayContacts', () => {
     expect(firstResult[0].isSearchResult).toBe(false);
 
     // Rerender with different shouldUseSearch - should update the result
-    rerender({ contacts: [mockContactWithHighlighting], shouldUseSearch: true });
+    rerender({
+      contacts: [mockContactWithHighlighting],
+      shouldUseSearch: true,
+    });
     expect(result.current[0].isSearchResult).toBe(true);
-    expect(result.current[0].highlightedName).toBe('<mark>John</mark> <mark>Doe</mark>');
+    expect(result.current[0].highlightedName).toBe(
+      '<mark>John</mark> <mark>Doe</mark>'
+    );
 
     // Rerender back to original - should update again
     rerender({ contacts: [mockContact], shouldUseSearch: false });

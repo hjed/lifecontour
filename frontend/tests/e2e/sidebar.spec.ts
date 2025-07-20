@@ -8,7 +8,6 @@ import { createTestHelpers } from './utils/test-helpers';
  * Each test creates the exact data state it needs to test specific functionality.
  */
 test.describe('Sidebar Navigation', () => {
-
   test.describe('Desktop Sidebar', () => {
     test('displays sidebar navigation on desktop', async ({ page }) => {
       const { testData, sidebar } = createTestHelpers(page);
@@ -35,7 +34,9 @@ test.describe('Sidebar Navigation', () => {
       ).toBeVisible();
     });
 
-    test('shows contacts section with proper navigation links', async ({ page }) => {
+    test('shows contacts section with proper navigation links', async ({
+      page,
+    }) => {
       const { testData, sidebar } = createTestHelpers(page);
 
       // Set up test state: authenticated user with tags
@@ -58,8 +59,12 @@ test.describe('Sidebar Navigation', () => {
       ).toBeVisible();
 
       // Should NOT have hardcoded groups
-      await expect(page.getByRole('link', { name: 'Group 1' })).not.toBeVisible();
-      await expect(page.getByRole('link', { name: 'Group 2' })).not.toBeVisible();
+      await expect(
+        page.getByRole('link', { name: 'Group 1' })
+      ).not.toBeVisible();
+      await expect(
+        page.getByRole('link', { name: 'Group 2' })
+      ).not.toBeVisible();
 
       // Should have dynamic tag links
       const tagLinks = page.locator('a[href*="/contacts/tags/"]');
