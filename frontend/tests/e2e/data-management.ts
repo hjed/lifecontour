@@ -8,6 +8,13 @@
 import { Page } from '@playwright/test';
 import { TestContact } from './fixtures';
 
+/**
+ * Utility function to generate realistic phone numbers
+ */
+function generatePhoneNumber(): string {
+  return `+1-555-${Math.floor(Math.random() * 900) + 100}-${Math.floor(Math.random() * 9000) + 1000}`;
+}
+
 export interface ContactCreateRequest {
   firstName: string;
   lastName: string;
@@ -451,7 +458,7 @@ export class ContactFactory {
       firstName,
       lastName,
       email: `${firstName.toLowerCase()}.${lastName.toLowerCase()}@${domain}`,
-      phone: `+1-555-${Math.floor(Math.random() * 900) + 100}-${Math.floor(Math.random() * 9000) + 1000}`,
+      phone: generatePhoneNumber(),
       isFavourite: Math.random() > 0.8, // 20% chance of being favourite
       ...overrides,
     };
@@ -485,9 +492,7 @@ export class ContactFactory {
   static createWithPhones(count: number): ContactCreateRequest[] {
     return this.createMany(count).map(contact => ({
       ...contact,
-      phone:
-        contact.phone ||
-        `+1-555-${Math.floor(Math.random() * 900) + 100}-${Math.floor(Math.random() * 9000) + 1000}`,
+      phone: contact.phone || generatePhoneNumber(),
     }));
   }
 }

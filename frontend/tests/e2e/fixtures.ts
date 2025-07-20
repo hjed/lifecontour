@@ -5,7 +5,7 @@
  * Eliminates conditional logic and ensures each test has exactly the data it needs.
  */
 
-import { test as base, Page, BrowserContext } from '@playwright/test';
+import { test as base, Page } from '@playwright/test';
 import { createTestHelpers } from './utils/test-helpers';
 import {
   TestDataManager,

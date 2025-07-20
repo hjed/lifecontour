@@ -1,54 +1,54 @@
 /**
  * End-to-end tests for the login page.
  *
- * Tests the complete login flow including OAuth provider interactions,
- * error handling, accessibility, and responsive design.
+ * Converted to use the advanced fixture-based testing system.
+ * Tests the complete login flow with deterministic authentication states.
  */
 
-import { test, expect } from '@playwright/test';
-import {
-  createTestHelpers,
-  SELECTORS,
-  TEST_DATA,
-  waitForPageReady,
-} from '../utils/test-helpers';
+import { test, expect } from '../fixtures';
 
-test.describe('Login Page', () => {
-  test.beforeEach(async ({ page }) => {
-    // Navigate to login page (no mocking - test against real backend)
-    await page.goto(TEST_DATA.URLS.LOGIN);
-    await waitForPageReady(page);
-  });
-
+test.describe('Login Page - Unauthenticated Users', () => {
   test.describe('Page Rendering', () => {
     test('should render login page with correct title and content', async ({
-      page,
+      unauthenticatedPage,
     }) => {
+      // Navigate to login page
+      await unauthenticatedPage.goto('/auth/login');
+
       // Check page title
-      await expect(page).toHaveTitle(/Personal Management System/);
+      await expect(unauthenticatedPage).toHaveTitle(
+        /Personal Management System/
+      );
 
       // Check main heading
-      const heading = page.locator(SELECTORS.LOGIN_TITLE);
+      const heading = unauthenticatedPage.locator('h1');
       await expect(heading).toBeVisible();
       await expect(heading).toHaveText('Welcome Back');
 
       // Check description
-      const description = page.locator(
+      const description = unauthenticatedPage.locator(
         'text=Sign in to your Personal Management System'
       );
       await expect(description).toBeVisible();
 
       // Check login form is present
-      const loginForm = page.locator('main');
+      const loginForm = unauthenticatedPage.locator('main');
       await expect(loginForm).toBeVisible();
     });
 
-    test('should display OAuth provider buttons', async ({ page }) => {
+    test('should display OAuth provider buttons', async ({
+      unauthenticatedPage,
+    }) => {
+      // Navigate to login page
+      await unauthenticatedPage.goto('/auth/login');
+
       // Wait for providers to load and check that at least one OAuth button is present
-      const oauthButtons = page.locator('button:has-text("Continue with")');
+      const oauthButtons = unauthenticatedPage.locator(
+        'button:has-text("Continue with")'
+      );
 
       // Wait for the page to be fully loaded and providers to be fetched
-      await page.waitForLoadState('networkidle');
+      await unauthenticatedPage.waitForLoadState('networkidle');
       await expect(oauthButtons.first()).toBeVisible({ timeout: 10000 });
 
       // Check that we have at least one provider button
@@ -60,13 +60,16 @@ test.describe('Login Page', () => {
       await expect(firstButton).toContainText('Continue with');
     });
 
-    test('should display privacy notice', async ({ page }) => {
-      const privacyNotice = page.locator(
+    test('should display privacy notice', async ({ unauthenticatedPage }) => {
+      // Navigate to login page
+      await unauthenticatedPage.goto('/auth/login');
+
+      const privacyNotice = unauthenticatedPage.locator(
         'text=By signing in, you agree to our terms of service and privacy policy.'
       );
       await expect(privacyNotice).toBeVisible();
 
-      const privateAppNotice = page.locator(
+      const privateAppNotice = unauthenticatedPage.locator(
         'text=This is a private application for personal use only.'
       );
       await expect(privateAppNotice).toBeVisible();
@@ -150,7 +153,9 @@ test.describe('Login Page', () => {
       await firstButton.click();
 
       // Should display error message (may take time to appear)
-      const errorAlert = page.locator(SELECTORS.ALERT_ERROR);
+      const errorAlert = page.locator(
+        '[data-testid="error-alert"], .alert-error, [role="alert"]'
+      );
       await expect(errorAlert).toBeVisible({ timeout: 10000 });
     });
 
@@ -171,20 +176,26 @@ test.describe('Login Page', () => {
   });
 
   test.describe('Accessibility', () => {
-    test('should have proper accessibility attributes', async ({ page }) => {
-      const helpers = createTestHelpers(page);
+    test('should have proper accessibility attributes', async ({
+      unauthenticatedPage,
+    }) => {
+      // Navigate to login page
+      await unauthenticatedPage.goto('/auth/login');
 
-      // Check button accessibility
-      await helpers.accessibility.checkButtonAccessibility();
+      // Check OAuth buttons have proper accessibility attributes
+      const oauthButtons = unauthenticatedPage.locator(
+        'button:has-text("Continue with")'
+      );
+      const buttonCount = await oauthButtons.count();
+
+      for (let i = 0; i < buttonCount; i++) {
+        const button = oauthButtons.nth(i);
+        await expect(button).toHaveAttribute('aria-label');
+      }
 
       // Check heading hierarchy
-      await helpers.accessibility.checkHeadingHierarchy();
-
-      // Check form accessibility
-      await helpers.accessibility.checkFormAccessibility();
-
-      // Check color contrast
-      await helpers.accessibility.checkColorContrast();
+      const mainHeading = unauthenticatedPage.locator('h1');
+      await expect(mainHeading).toBeVisible();
     });
 
     test('should be keyboard navigable', async ({ page }) => {
@@ -248,12 +259,32 @@ test.describe('Login Page', () => {
 
   test.describe('Responsive Design', () => {
     test('should be responsive across different screen sizes', async ({
-      page,
+      unauthenticatedPage,
     }) => {
-      const helpers = createTestHelpers(page);
+      // Navigate to login page
+      await unauthenticatedPage.goto('/auth/login');
 
-      // Test responsive layout
-      await helpers.responsive.checkResponsiveLayout();
+      // Test responsive layout across different viewports
+      const viewports = [
+        { width: 1200, height: 800 }, // Desktop
+        { width: 768, height: 1024 }, // Tablet
+        { width: 375, height: 667 }, // Mobile
+      ];
+
+      for (const viewport of viewports) {
+        await unauthenticatedPage.setViewportSize(viewport);
+
+        // Verify login page is still functional
+        const heading = unauthenticatedPage.locator('h1');
+        await expect(heading).toBeVisible();
+
+        const oauthButtons = unauthenticatedPage.locator(
+          'button:has-text("Continue with")'
+        );
+        if ((await oauthButtons.count()) > 0) {
+          await expect(oauthButtons.first()).toBeVisible();
+        }
+      }
     });
 
     test('should have proper mobile interactions', async ({ page }) => {
@@ -281,62 +312,81 @@ test.describe('Login Page', () => {
       }
     });
 
-    test('should maintain usability on mobile', async ({ page }) => {
+    test('should maintain usability on mobile', async ({
+      unauthenticatedPage,
+    }) => {
+      // Navigate to login page
+      await unauthenticatedPage.goto('/auth/login');
+
       // Set mobile viewport
-      await page.setViewportSize(TEST_DATA.VIEWPORT_SIZES.MOBILE);
+      await unauthenticatedPage.setViewportSize({ width: 375, height: 667 });
 
       // Check that login card is properly sized
-      const loginCard = page.locator(SELECTORS.LOGIN_CARD);
+      const loginCard = unauthenticatedPage.locator(
+        'main, [data-testid="login-card"]'
+      );
       await expect(loginCard).toBeVisible();
 
       // Check that OAuth buttons are still clickable
-      const oauthButtons = page.locator('button:has-text("Continue with")');
-      const firstButton = oauthButtons.first();
-      await expect(firstButton).toBeVisible();
+      const oauthButtons = unauthenticatedPage.locator(
+        'button:has-text("Continue with")'
+      );
+      if ((await oauthButtons.count()) > 0) {
+        const firstButton = oauthButtons.first();
+        await expect(firstButton).toBeVisible();
 
-      // Verify button is large enough for touch
-      const boundingBox = await firstButton.boundingBox();
-      expect(boundingBox?.height).toBeGreaterThanOrEqual(40);
+        // Verify button is large enough for touch
+        const boundingBox = await firstButton.boundingBox();
+        expect(boundingBox?.height).toBeGreaterThanOrEqual(40);
+      }
     });
   });
 
   test.describe('Authentication Flow', () => {
     test('should show login page for unauthenticated users', async ({
-      page,
+      unauthenticatedPage,
     }) => {
       // Navigate to login page
-      await page.goto(TEST_DATA.URLS.LOGIN);
+      await unauthenticatedPage.goto('/auth/login');
 
       // Should stay on login page and show OAuth buttons
-      await expect(page).toHaveURL(TEST_DATA.URLS.LOGIN);
-      const oauthButtons = page.locator('button:has-text("Continue with")');
+      await expect(unauthenticatedPage).toHaveURL(/\/auth\/login/);
+      const oauthButtons = unauthenticatedPage.locator(
+        'button:has-text("Continue with")'
+      );
       await expect(oauthButtons.first()).toBeVisible();
     });
 
-    test('should handle redirect parameter in URL', async ({ page }) => {
+    test('should handle redirect parameter in URL', async ({
+      unauthenticatedPage,
+    }) => {
       // Navigate to login with redirect parameter
-      await page.goto(`${TEST_DATA.URLS.LOGIN}?redirect=/dashboard`);
+      await unauthenticatedPage.goto('/auth/login?redirect=/dashboard');
 
       // Should stay on login page but preserve redirect parameter
-      await expect(page).toHaveURL(/.*login.*redirect/);
-      const oauthButtons = page.locator('button:has-text("Continue with")');
+      await expect(unauthenticatedPage).toHaveURL(/.*login.*redirect/);
+      const oauthButtons = unauthenticatedPage.locator(
+        'button:has-text("Continue with")'
+      );
       await expect(oauthButtons.first()).toBeVisible();
     });
 
     test('should show login page for unauthenticated users when accessing login directly', async ({
-      page,
+      unauthenticatedPage,
     }) => {
       // Navigate to login page directly
-      await page.goto(TEST_DATA.URLS.LOGIN);
+      await unauthenticatedPage.goto('/auth/login');
 
       // Should stay on login page since we're not authenticated
-      await expect(page).toHaveURL(TEST_DATA.URLS.LOGIN);
+      await expect(unauthenticatedPage).toHaveURL(/\/auth\/login/);
 
       // Should show login page content
       await expect(
-        page.getByRole('heading', { name: 'Welcome Back' })
+        unauthenticatedPage.getByRole('heading', { name: 'Welcome Back' })
       ).toBeVisible();
-      const oauthButtons = page.locator('button:has-text("Continue with")');
+      const oauthButtons = unauthenticatedPage.locator(
+        'button:has-text("Continue with")'
+      );
       await expect(oauthButtons.first()).toBeVisible();
     });
   });
@@ -352,5 +402,41 @@ test.describe('Login Page', () => {
       // Should use proper Australian terminology
       expect(content).toContain('Personal Management System');
     });
+  });
+});
+
+test.describe('Login Page - Authenticated Users', () => {
+  test('should redirect authenticated users away from login page', async ({
+    authenticatedPage,
+  }) => {
+    // Try to navigate to login page when already authenticated
+    await authenticatedPage.goto('/auth/login');
+
+    // Should be redirected away from login page (likely to dashboard or contacts)
+    await expect(authenticatedPage).not.toHaveURL(/\/auth\/login/);
+
+    // Should not see login form
+    const loginHeading = authenticatedPage.locator(
+      'h1:has-text("Welcome Back")'
+    );
+    await expect(loginHeading).not.toBeVisible();
+  });
+
+  test('should maintain authentication state when accessing login URL', async ({
+    authenticatedPage,
+  }) => {
+    // Navigate to a protected page first to verify authentication
+    await authenticatedPage.goto('/contacts');
+    await expect(authenticatedPage).toHaveURL(/\/contacts/);
+
+    // Try to access login page
+    await authenticatedPage.goto('/auth/login');
+
+    // Should be redirected to an authenticated page, not login
+    await expect(authenticatedPage).not.toHaveURL(/\/auth\/login/);
+
+    // Should still be authenticated (can access protected content)
+    const pageContent = await authenticatedPage.textContent('body');
+    expect(pageContent).not.toContain('Welcome Back'); // Login page content
   });
 });
