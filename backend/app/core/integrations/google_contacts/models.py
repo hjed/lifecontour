@@ -4,7 +4,7 @@ Google Contacts integration models.
 Contains SQLAlchemy models for storing Google OAuth credentials and sync state.
 """
 
-from datetime import datetime
+from datetime import UTC, datetime
 
 from core_shared.models.base import Base
 from sqlalchemy import DateTime, LargeBinary, String, UniqueConstraint
@@ -61,14 +61,14 @@ class UserGoogleAuth(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
-        default=datetime.utcnow,
+        default=lambda: datetime.now(UTC),
         comment="Record creation timestamp",
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
-        default=datetime.utcnow,
-        onupdate=datetime.utcnow,
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
         comment="Record last update timestamp",
     )
 
