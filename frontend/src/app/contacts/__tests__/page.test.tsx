@@ -13,20 +13,15 @@ import {
   setupMocks,
 } from '@/test-utils';
 
-// Mock the API hooks
 jest.mock('@/lib/api/contacts', () => ({
   useContacts: jest.fn(),
   useSearchContacts: jest.fn(),
   useToggleContactFavourite: jest.fn(),
 }));
 
-// Mock the debounce hook
 jest.mock('@/hooks/useDebounce', () => ({
   useDebounce: jest.fn(value => value),
 }));
-
-// Use shared mock constants to reduce duplication
-setupMocks.constants();
 
 // Note: Next.js navigation is mocked globally in jest.setup.ts
 
@@ -59,7 +54,6 @@ describe('ContactsPage', () => {
       }),
     });
 
-    // Set up default mock for useToggleContactFavourite
     mockUseToggleContactFavourite.mockReturnValue({
       mutate: jest.fn(),
       isPending: false,

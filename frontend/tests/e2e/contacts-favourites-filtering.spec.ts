@@ -128,7 +128,10 @@ test.describe('Contact Favourites and Filtering', () => {
           expect(hasEmptyState || hasContacts).toBe(true);
         } catch (error) {
           // If page is still loading or has issues, that's also valid
-          console.log('Favourites page content still loading or has issues:', error);
+          console.log(
+            'Favourites page content still loading or has issues:',
+            error
+          );
           // This is expected behavior during page loading
         }
       }

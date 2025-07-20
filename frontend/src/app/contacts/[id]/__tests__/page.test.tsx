@@ -18,14 +18,30 @@ import {
   setupMocks,
 } from '@/test-utils';
 
-// Use shared mock utilities to reduce duplication
-setupMocks.contactsApi();
-setupMocks.nextNavigation({
-  pathname: '/contacts/1',
-  params: { id: '1' }
-});
+// Mock the contacts API hooks
+jest.mock('@/lib/api/contacts', () => ({
+  useContact: jest.fn(),
+  useUpdateContact: jest.fn(),
+  useDeleteContact: jest.fn(),
+  useToggleContactFavourite: jest.fn(),
+}));
+
+// Mock Next.js navigation hooks
+jest.mock('next/navigation', () => ({
+  useRouter: jest.fn(() => ({
+    push: jest.fn(),
+    replace: jest.fn(),
+    prefetch: jest.fn(),
+    back: jest.fn(),
+    forward: jest.fn(),
+    refresh: jest.fn(),
+  })),
+  usePathname: jest.fn(() => '/contacts/1'),
+  useSearchParams: jest.fn(() => new URLSearchParams()),
+  useParams: jest.fn(() => ({ id: '1' })),
+}));
+
 setupMocks.dateFns();
-setupMocks.constants();
 
 const mockUseContact = useContact as jest.MockedFunction<typeof useContact>;
 const mockUseUpdateContact = useUpdateContact as jest.MockedFunction<
@@ -58,7 +74,6 @@ describe('ContactDetailPage', () => {
       }),
     });
 
-    // Set up default mock for useToggleContactFavourite
     mockUseToggleContactFavourite.mockReturnValue({
       mutate: jest.fn(),
       isPending: false,

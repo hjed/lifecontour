@@ -19,10 +19,12 @@ export interface DisplayContact {
  * Custom hook to transform contact data for display
  * Eliminates duplicate contact transformation logic across pages
  */
-export function useDisplayContacts(contacts: ContactResource[] | undefined): DisplayContact[] {
+export function useDisplayContacts(
+  contacts: ContactResource[] | undefined
+): DisplayContact[] {
   return useMemo(() => {
     if (!contacts) return [];
-    
+
     return contacts.map(contact => ({
       id: contact.id,
       name: `${contact.attributes.first_name} ${contact.attributes.last_name || ''}`.trim(),

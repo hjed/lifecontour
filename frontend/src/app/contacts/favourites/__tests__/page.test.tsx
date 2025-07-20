@@ -34,7 +34,9 @@ jest.mock('@/lib/api/contacts', () => ({
 // Mock the auth provider
 jest.mock('@/lib/auth/AuthProvider', () => ({
   useAuth: jest.fn(),
-  AuthProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  AuthProvider: ({ children }: { children: React.ReactNode }) => (
+    <>{children}</>
+  ),
 }));
 
 // Mock the constants

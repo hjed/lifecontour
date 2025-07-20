@@ -114,88 +114,7 @@ export function renderWithProviders(
   });
 }
 
-// Shared mock constants to eliminate duplication
-export const MOCK_CONSTANTS = {
-  API_ENDPOINTS: {
-    AUTH: {
-      LOGIN: '/api/auth/login',
-      LOGOUT: '/api/auth/logout',
-      SESSION: '/api/auth/session',
-      CALLBACK: '/api/auth/callback',
-      PROVIDERS: '/api/auth/providers',
-    },
-    CONTACTS: {
-      BASE: '/api/contacts',
-      SEARCH: '/api/contacts/search',
-    },
-  },
-  HTTP_HEADERS: {
-    CONTENT_TYPE: 'Content-Type',
-    APPLICATION_JSON: 'application/json',
-    AUTHORIZATION: 'Authorization',
-  },
-  ERROR_MESSAGES: {
-    LOGIN_FAILED: 'Login failed',
-    LOGOUT_FAILED: 'Logout failed',
-    AUTH_FAILED: 'Authentication failed',
-    SESSION_EXPIRED: 'Your session has expired. Please sign in again.',
-    OAUTH_ERROR: 'OAuth error',
-    MISSING_OAUTH_PARAMS: 'Missing required OAuth parameters',
-    NETWORK_ERROR: 'Network error occurred',
-    UNKNOWN_ERROR: 'An unknown error occurred',
-    FETCH_FAILED: 'Failed to fetch data. Please try again.',
-  },
-  SUCCESS_MESSAGES: {
-    SIGNED_IN: 'Successfully signed in',
-    SIGNED_OUT: 'Successfully signed out',
-    CONTACT_CREATED: 'Contact created successfully',
-    CONTACT_UPDATED: 'Contact updated successfully',
-    CONTACT_DELETED: 'Contact deleted successfully',
-  },
-  OAUTH_PROVIDER_NAMES: {
-    GITHUB: 'GitHub',
-    MICROSOFT: 'Microsoft',
-    DISCORD: 'Discord',
-    GENERIC: 'Generic',
-  },
-  OAUTH_PROVIDER_ICONS: {
-    GITHUB: 'github',
-    MICROSOFT: 'microsoft',
-    DISCORD: 'discord',
-    GENERIC: 'generic',
-  },
-  OAUTH_PROVIDER_COLORS: {
-    GITHUB: '#333',
-    MICROSOFT: '#0078d4',
-    DISCORD: '#5865f2',
-    GENERIC: '#666',
-  },
-  AUTH_STORAGE_KEYS: {
-    SESSION: 'auth_session',
-    CSRF_TOKEN: 'csrf_token',
-  },
-  TIMEOUTS: {
-    DEBOUNCE_SEARCH: 300,
-  },
-  UI_TEXT: {
-    WELCOME_BACK: 'Welcome Back',
-    SIGN_IN_DESCRIPTION: 'Sign in to your Personal Management System',
-    CONTINUE_WITH: 'Continue with',
-    CONNECTING_TO: 'Connecting to',
-    PRIVACY_NOTICE:
-      'By signing in, you agree to our terms of service and privacy policy.',
-    PRIVATE_APP_NOTICE: 'This is a private application for personal use only.',
-    LOADING: 'Loading',
-    CHECKING_AUTH: 'Checking your authentication status',
-    PLEASE_WAIT: 'Please wait...',
-    COMPLETING_SIGN_IN: 'Completing Sign In',
-    FINISH_SESSION_SETUP: 'Please wait while we finish setting up your session',
-    SHOULD_TAKE_MOMENT: 'This should only take a moment...',
-    AUTH_FAILED: 'Authentication Failed',
-    PROBLEM_SIGNING_IN: 'There was a problem signing you in',
-    TRY_AGAIN: 'Try signing in again',
-  },
-} as const;
+// Note: Mock constants are now centralized in jest.setup.ts to avoid duplication
 
 // Mock setup utilities
 export const setupMocks = {
@@ -215,9 +134,8 @@ export const setupMocks = {
     localStorage.clear();
   },
 
-  // Mock constants to reduce duplication
   constants: () => {
-    jest.mock('@/lib/constants', () => MOCK_CONSTANTS);
+    // No-op: constants are mocked globally in jest.setup.ts
   },
 
   // Common API hook mocks to reduce duplication
@@ -235,12 +153,14 @@ export const setupMocks = {
   },
 
   // Common Next.js navigation mocks
-  nextNavigation: (overrides: {
-    router?: Record<string, unknown>;
-    pathname?: string;
-    params?: Record<string, unknown>;
-    [key: string]: unknown;
-  } = {}) => {
+  nextNavigation: (
+    overrides: {
+      router?: Record<string, unknown>;
+      pathname?: string;
+      params?: Record<string, unknown>;
+      [key: string]: unknown;
+    } = {}
+  ) => {
     jest.mock('next/navigation', () => ({
       useRouter: () => ({
         push: jest.fn(),
@@ -301,7 +221,9 @@ export const breadcrumbTestUtils = {
 
   // Common test patterns for breadcrumb rendering
   expectBreadcrumbNavigation: (name = 'Breadcrumb navigation') => {
-    const nav = document.querySelector(`[role="navigation"][aria-label="${name}"]`);
+    const nav = document.querySelector(
+      `[role="navigation"][aria-label="${name}"]`
+    );
     expect(nav).toBeInTheDocument();
     return nav;
   },

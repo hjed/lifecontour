@@ -224,39 +224,40 @@ function ContactDetailPageContent() {
                       <div>
                         <h3 className='mb-3 font-semibold'>Contact Methods</h3>
                         <div className='space-y-2'>
-                          {contact.attributes.contact_methods.map(
-                            (method) => (
-                              <div
-                                key={`${method.attributes.method_type}-${method.attributes.value}`}
-                                className='flex items-center gap-3'
-                              >
-                                {method.attributes.method_type === 'email' && (
-                                  <Mail className='text-muted-foreground h-4 w-4' />
-                                )}
-                                {method.attributes.method_type === 'phone' && (
-                                  <Phone className='text-muted-foreground h-4 w-4' />
-                                )}
-                                <div>
-                                  <p className='text-sm'>
-                                    {method.attributes.value}
-                                    {method.attributes.is_primary && (
-                                      <Badge
-                                        variant='secondary'
-                                        className='ml-2 text-xs'
-                                      >
-                                        Primary
-                                      </Badge>
-                                    )}
-                                  </p>
-                                  {method.attributes.label && (
-                                    <p className='text-muted-foreground text-xs'>
-                                      {method.attributes.label}
-                                    </p>
+                          {contact.attributes.contact_methods.map(method => (
+                            <div
+                              key={
+                                method.id ||
+                                `${method.attributes.method_type}-${method.attributes.value}`
+                              }
+                              className='flex items-center gap-3'
+                            >
+                              {method.attributes.method_type === 'email' && (
+                                <Mail className='text-muted-foreground h-4 w-4' />
+                              )}
+                              {method.attributes.method_type === 'phone' && (
+                                <Phone className='text-muted-foreground h-4 w-4' />
+                              )}
+                              <div>
+                                <p className='text-sm'>
+                                  {method.attributes.value}
+                                  {method.attributes.is_primary && (
+                                    <Badge
+                                      variant='secondary'
+                                      className='ml-2 text-xs'
+                                    >
+                                      Primary
+                                    </Badge>
                                   )}
-                                </div>
+                                </p>
+                                {method.attributes.label && (
+                                  <p className='text-muted-foreground text-xs'>
+                                    {method.attributes.label}
+                                  </p>
+                                )}
                               </div>
-                            )
-                          )}
+                            </div>
+                          ))}
                         </div>
                       </div>
                     )}
@@ -267,47 +268,48 @@ function ContactDetailPageContent() {
                       <div>
                         <h3 className='mb-3 font-semibold'>Addresses</h3>
                         <div className='space-y-3'>
-                          {contact.attributes.addresses.map(
-                            (address) => (
-                              <div
-                                key={`${address.attributes.street_line_1}-${address.attributes.postal_code || address.attributes.locality}`}
-                                className='flex items-start gap-3'
-                              >
-                                <MapPin className='text-muted-foreground mt-0.5 h-4 w-4' />
-                                <div>
-                                  <p className='text-sm'>
-                                    {address.attributes.street_line_1}
-                                    {address.attributes.is_primary && (
-                                      <Badge
-                                        variant='secondary'
-                                        className='ml-2 text-xs'
-                                      >
-                                        Primary
-                                      </Badge>
-                                    )}
-                                  </p>
-                                  {address.attributes.street_line_2 && (
-                                    <p className='text-muted-foreground text-sm'>
-                                      {address.attributes.street_line_2}
-                                    </p>
+                          {contact.attributes.addresses.map(address => (
+                            <div
+                              key={
+                                address.id ||
+                                `${address.attributes.street_line_1}-${address.attributes.postal_code || address.attributes.locality}`
+                              }
+                              className='flex items-start gap-3'
+                            >
+                              <MapPin className='text-muted-foreground mt-0.5 h-4 w-4' />
+                              <div>
+                                <p className='text-sm'>
+                                  {address.attributes.street_line_1}
+                                  {address.attributes.is_primary && (
+                                    <Badge
+                                      variant='secondary'
+                                      className='ml-2 text-xs'
+                                    >
+                                      Primary
+                                    </Badge>
                                   )}
+                                </p>
+                                {address.attributes.street_line_2 && (
                                   <p className='text-muted-foreground text-sm'>
-                                    {address.attributes.locality},{' '}
-                                    {address.attributes.region}{' '}
-                                    {address.attributes.postal_code}
+                                    {address.attributes.street_line_2}
                                   </p>
-                                  <p className='text-muted-foreground text-sm'>
-                                    {address.attributes.country_code}
+                                )}
+                                <p className='text-muted-foreground text-sm'>
+                                  {address.attributes.locality},{' '}
+                                  {address.attributes.region}{' '}
+                                  {address.attributes.postal_code}
+                                </p>
+                                <p className='text-muted-foreground text-sm'>
+                                  {address.attributes.country_code}
+                                </p>
+                                {address.attributes.label && (
+                                  <p className='text-muted-foreground text-xs'>
+                                    {address.attributes.label}
                                   </p>
-                                  {address.attributes.label && (
-                                    <p className='text-muted-foreground text-xs'>
-                                      {address.attributes.label}
-                                    </p>
-                                  )}
-                                </div>
+                                )}
                               </div>
-                            )
-                          )}
+                            </div>
+                          ))}
                         </div>
                       </div>
                     )}
@@ -318,8 +320,14 @@ function ContactDetailPageContent() {
                       <div>
                         <h3 className='mb-3 font-semibold'>Notes</h3>
                         <div className='space-y-2'>
-                          {contact.attributes.notes.map((note) => (
-                            <div key={`${note.attributes.content.substring(0, 50)}-${note.attributes.created_at}`} className='text-sm'>
+                          {contact.attributes.notes.map(note => (
+                            <div
+                              key={
+                                note.id ||
+                                `${note.attributes.content.substring(0, 50)}-${note.attributes.created_at}`
+                              }
+                              className='text-sm'
+                            >
                               <p>{note.attributes.content}</p>
                               {note.attributes.created_at && (
                                 <p className='text-muted-foreground mt-1 text-xs'>
