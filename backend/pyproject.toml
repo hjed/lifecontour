@@ -36,6 +36,10 @@ dependencies = [
     "dishka>=1.6.0",
     "arq>=0.25.0",
     "core_shared",
+    "google-api-python-client>=2.0.0",
+    "google-auth-httplib2>=0.2.0",
+    "google-auth-oauthlib>=1.0.0",
+    "cryptography>=41.0.0",
 ]
 
 [tool.uv.sources]
@@ -52,6 +56,7 @@ dev = [
     "mypy>=1.7.0",
     "pre-commit>=3.5.0",
     "types-authlib>=1.5.0.20250516",  # type stubs for authlib
+    "respx>=0.20.0",  # for mocking httpx requests in tests
 ]
 
 [build-system]
@@ -177,6 +182,7 @@ dev = [
     "mypy>=1.16.0",
     "pytest>=8.3.5",
     "pytest-asyncio>=1.0.0",
+    "respx>=0.22.0",
     "ruff>=0.11.12",
     "types-authlib>=1.5.0.20250516",
 ]
