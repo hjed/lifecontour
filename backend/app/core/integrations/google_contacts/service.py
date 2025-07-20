@@ -5,7 +5,7 @@ Handles CRUD operations for Google OAuth credentials with encryption
 and concurrency safety for token refresh operations.
 """
 
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 import httpx
 import structlog
@@ -106,7 +106,7 @@ class GoogleAuthService:
                         "access_token": encrypted_access_token,
                         "refresh_token": encrypted_refresh_token,
                         "expires_at": expires_at,
-                        "updated_at": datetime.utcnow(),
+                        "updated_at": datetime.now(UTC),
                         "user_id": SITE_USER_ID,
                         "email": google_account_email,
                     },
@@ -121,7 +121,7 @@ class GoogleAuthService:
                             :expires_at, :created_at, :updated_at)
                 """)
 
-                now = datetime.utcnow()
+                now = datetime.now(UTC)
                 await self.connection.execute(
                     insert_stmt,
                     {
@@ -246,7 +246,7 @@ class GoogleAuthService:
                 token_data = response.json()
                 new_access_token = str(token_data["access_token"])
                 expires_in = token_data.get("expires_in", 3600)
-                new_expires_at = datetime.utcnow() + timedelta(seconds=expires_in)
+                new_expires_at = datetime.now(UTC) + timedelta(seconds=expires_in)
 
                 # Update the access token and expiration
                 encrypted_access_token = self.encryption_service.encrypt(
@@ -267,7 +267,7 @@ class GoogleAuthService:
                     {
                         "access_token": encrypted_access_token,
                         "expires_at": new_expires_at,
-                        "updated_at": datetime.utcnow(),
+                        "updated_at": datetime.now(UTC),
                         "user_id": SITE_USER_ID,
                         "email": google_account_email,
                     },
