@@ -809,8 +809,12 @@ export class TestDataHelpers {
 
       if (!response.ok()) {
         if (response.status() === 401) {
-          console.warn(`[TestDataHelpers] Cannot create test contact ${contact.firstName} ${contact.lastName}: Authentication required`);
-          console.warn('[TestDataHelpers] Tests will run without pre-created test data');
+          console.warn(
+            `[TestDataHelpers] Cannot create test contact ${contact.firstName} ${contact.lastName}: Authentication required`
+          );
+          console.warn(
+            '[TestDataHelpers] Tests will run without pre-created test data'
+          );
           return; // Skip creating remaining contacts
         }
         throw new Error(
@@ -853,12 +857,14 @@ export class TestDataHelpers {
       // Get all contacts
       const response = await this.page.request.get('/api/contacts', {
         headers: {
-          'Accept': 'application/vnd.api+json',
+          Accept: 'application/vnd.api+json',
         },
       });
 
       if (response.status() === 401) {
-        console.warn('[TestDataHelpers] Cannot clear test data: Authentication required');
+        console.warn(
+          '[TestDataHelpers] Cannot clear test data: Authentication required'
+        );
         return;
       }
 
@@ -868,14 +874,19 @@ export class TestDataHelpers {
 
         // Delete each contact
         for (const contact of contacts) {
-          const deleteResponse = await this.page.request.delete(`/api/contacts/${contact.id}`, {
-            headers: {
-              'Accept': 'application/vnd.api+json',
-            },
-          });
+          const deleteResponse = await this.page.request.delete(
+            `/api/contacts/${contact.id}`,
+            {
+              headers: {
+                Accept: 'application/vnd.api+json',
+              },
+            }
+          );
 
           if (deleteResponse.status() === 401) {
-            console.warn('[TestDataHelpers] Cannot delete contact: Authentication required');
+            console.warn(
+              '[TestDataHelpers] Cannot delete contact: Authentication required'
+            );
             break;
           }
         }
@@ -898,7 +909,10 @@ export class TestDataHelpers {
     if (statusResponse.ok()) {
       const authStatus = await statusResponse.json();
       if (authStatus.authenticated) {
-        console.log('[TestDataHelpers] Already authenticated:', authStatus.user?.email);
+        console.log(
+          '[TestDataHelpers] Already authenticated:',
+          authStatus.user?.email
+        );
         return;
       }
     }
@@ -916,13 +930,17 @@ export class TestDataHelpers {
     const oauthButtons = this.page.locator('button:has-text("Continue with")');
     await expect(oauthButtons.first()).toBeVisible({ timeout: 10000 });
 
-    console.log('[TestDataHelpers] OAuth system verified - providers are available');
+    console.log(
+      '[TestDataHelpers] OAuth system verified - providers are available'
+    );
 
     // For E2E tests, we don't complete the OAuth flow as it requires user interaction
     // Tests should be designed to handle unauthenticated state gracefully
     // This follows the pattern from oauth-flow.spec.ts
 
-    console.log('[TestDataHelpers] OAuth verification complete - tests will run in unauthenticated mode');
+    console.log(
+      '[TestDataHelpers] OAuth verification complete - tests will run in unauthenticated mode'
+    );
   }
 
   /**
@@ -938,28 +956,36 @@ export class TestDataHelpers {
   /**
    * Assign a tag to a contact.
    */
-  private async assignTagToContact(contactId: string, tagName: string): Promise<void> {
+  private async assignTagToContact(
+    contactId: string,
+    tagName: string
+  ): Promise<void> {
     // This would typically be done via a PATCH request to update the contact's tags
     // or via a dedicated endpoint for managing contact-tag relationships
-    const response = await this.page.request.patch(`/api/contacts/${contactId}`, {
-      data: {
+    const response = await this.page.request.patch(
+      `/api/contacts/${contactId}`,
+      {
         data: {
-          type: 'contacts',
-          id: contactId,
-          attributes: {
-            // This is a simplified approach - in reality you'd need to get current tags
-            // and add the new one, or use a dedicated tag assignment endpoint
-            tags: [tagName],
+          data: {
+            type: 'contacts',
+            id: contactId,
+            attributes: {
+              // This is a simplified approach - in reality you'd need to get current tags
+              // and add the new one, or use a dedicated tag assignment endpoint
+              tags: [tagName],
+            },
           },
         },
-      },
-      headers: {
-        'Content-Type': 'application/vnd.api+json',
-      },
-    });
+        headers: {
+          'Content-Type': 'application/vnd.api+json',
+        },
+      }
+    );
 
     if (!response.ok()) {
-      console.warn(`Failed to assign tag ${tagName} to contact ${contactId}: ${response.status()}`);
+      console.warn(
+        `Failed to assign tag ${tagName} to contact ${contactId}: ${response.status()}`
+      );
     }
   }
 }
