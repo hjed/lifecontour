@@ -196,6 +196,7 @@ TEST_DATABASE_SCHEMA_STATEMENTS = [
     "DROP TABLE IF EXISTS contact_edit_event CASCADE",
     "DROP TABLE IF EXISTS contacts CASCADE",
     "DROP TABLE IF EXISTS tags CASCADE",
+    "DROP TABLE IF EXISTS user_google_auth CASCADE",
     # Create tables
     """CREATE TABLE contacts (
         id SERIAL PRIMARY KEY,
@@ -280,6 +281,19 @@ TEST_DATABASE_SCHEMA_STATEMENTS = [
         occurred_at TIMESTAMP NOT NULL,
         correlation_id VARCHAR(255)
     )""",
+    """CREATE TABLE user_google_auth (
+        id SERIAL PRIMARY KEY,
+        user_id VARCHAR(50) NOT NULL,
+        google_account_email VARCHAR(255) NOT NULL,
+        encrypted_access_token BYTEA NOT NULL,
+        encrypted_refresh_token BYTEA,
+        expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL,
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL,
+        CONSTRAINT uq_user_google_account UNIQUE (user_id, google_account_email)
+    )""",
+    """CREATE INDEX idx_user_google_auth_user_id ON user_google_auth (user_id)""",
+    """CREATE INDEX idx_user_google_auth_email ON user_google_auth (google_account_email)""",
 ]
 
 
