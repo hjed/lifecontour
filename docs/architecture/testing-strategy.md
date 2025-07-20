@@ -157,6 +157,106 @@ async def test_google_contacts_full_sync():
 - Test responsive design across different screen sizes
 - Include accessibility testing in E2E flows
 
+### ⚠️ CRITICAL: Test Data Setup Requirements
+
+**NEVER write tests that accept multiple outcomes or skip based on data state.**
+
+#### ❌ WRONG - Accepting Multiple Outcomes
+```typescript
+// BAD: Test accepts either empty state or contact cards
+const { hasContacts, hasEmptyState } = await contacts.checkContactsOrEmptyState();
+expect(hasContacts || hasEmptyState).toBe(true); // This is meaningless
+
+// BAD: Skipping based on data state
+if (contactCount === 0) {
+  test.skip('No contacts found - this test requires contacts');
+}
+
+// BAD: Try-catch to suppress failures
+try {
+  await contacts.testFavouriteButtons();
+} catch {
+  console.log('Test skipped - no contacts found');
+}
+```
+
+#### ✅ CORRECT - Deterministic Test Data Setup
+```typescript
+// GOOD: Each test sets up exactly the data it needs
+test('should display favourite contacts when they exist', async ({ page }) => {
+  const { testData, contacts } = createTestHelpers(page);
+
+  // Set up test state: authenticated user with favourite contacts
+  await testData.setupAuthenticatedUser();
+  await testData.createTestContacts([
+    { firstName: 'John', lastName: 'Doe', isFavourite: true },
+    { firstName: 'Jane', lastName: 'Smith', isFavourite: true },
+  ]);
+
+  // Navigate to favourites page
+  await page.goto('/contacts/favourites');
+
+  // Should show exactly 2 favourite contacts
+  const contactCards = await contacts.waitForContactCards();
+  expect(await contactCards.count()).toBe(2);
+});
+
+// GOOD: Separate test for empty state
+test('should display empty state when no favourite contacts exist', async ({ page }) => {
+  const { testData } = createTestHelpers(page);
+
+  // Set up test state: authenticated user with no favourite contacts
+  await testData.setupAuthenticatedUser();
+  await testData.createTestContacts([
+    { firstName: 'John', lastName: 'Doe', isFavourite: false },
+  ]);
+
+  // Navigate to favourites page
+  await page.goto('/contacts/favourites');
+
+  // Should show empty state
+  const emptyState = page.locator('text=/no.*favourite.*contacts/i');
+  await expect(emptyState).toBeVisible();
+});
+```
+
+#### Test Data Setup Principles
+
+1. **Each test creates its own data**: Use `testData.createTestContacts()`, `testData.createTestTags()`, etc.
+2. **Tests are deterministic**: Each test knows exactly what data exists and what to expect
+3. **No conditional logic**: Tests should not have if/else based on data state
+4. **No skipping**: Tests should not skip based on what data they find
+5. **Separate scenarios**: Have separate tests for empty states vs populated states
+6. **Clean setup**: Use `testData.setupAuthenticatedUser()` and `testData.clearAllTestData()`
+
+#### Required TestDataHelpers Implementation
+
+```typescript
+export class TestDataHelpers {
+  async setupAuthenticatedUser(): Promise<void> {
+    // Set up authentication state for tests
+  }
+
+  async createTestContacts(contacts: Array<{
+    firstName: string;
+    lastName: string;
+    email?: string;
+    isFavourite?: boolean;
+    tags?: string[];
+  }>): Promise<void> {
+    // Create specific test contacts via backend APIs
+  }
+
+  async createTestTags(tags: string[]): Promise<void> {
+    // Create specific test tags via backend APIs
+  }
+
+  async clearAllTestData(): Promise<void> {
+    // Clean up all test data
+  }
+}
+```
+
 ## Database Testing Guidelines
 
 ### Database Integration Testing
