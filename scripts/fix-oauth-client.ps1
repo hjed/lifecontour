@@ -35,7 +35,7 @@ try {
     }
 } catch {
     Write-Error "Hydra admin endpoint is not accessible at http://localhost:4445"
-    Write-Error "Make sure Docker Compose is running: docker-compose -f docker-compose.dev.yml up -d"
+    Write-Error "Make sure Docker Compose is running: docker compose -f docker-compose.dev.yml up -d"
     exit 1
 }
 
@@ -72,7 +72,7 @@ try {
     $headers = @{
         "Content-Type" = "application/json"
     }
-    
+
     Invoke-WebRequest -Uri "http://localhost:4445/admin/clients" -Method POST -Body $clientConfig -Headers $headers -UseBasicParsing | Out-Null
     Write-Success "OAuth client created successfully"
 } catch {
@@ -85,14 +85,14 @@ Write-Step "Verifying OAuth client configuration..."
 try {
     $clientResponse = Invoke-WebRequest -Uri "http://localhost:4445/admin/clients/dev-client-id" -Method GET -UseBasicParsing
     $clientInfo = $clientResponse.Content | ConvertFrom-Json
-    
+
     if ($clientInfo.client_id -eq "dev-client-id") {
         Write-Success "Client ID verified"
     } else {
         Write-Error "Client ID verification failed"
         exit 1
     }
-    
+
     if ($clientInfo.redirect_uris -contains "http://localhost:3000/auth/callback") {
         Write-Success "Redirect URI verified"
     } else {
@@ -100,14 +100,14 @@ try {
         Write-Host "Current redirect URIs: $($clientInfo.redirect_uris -join ', ')"
         exit 1
     }
-    
+
     if ($clientInfo.grant_types -contains "authorization_code") {
         Write-Success "Grant types verified"
     } else {
         Write-Error "Grant types verification failed"
         exit 1
     }
-    
+
     # Display client configuration
     Write-Step "OAuth Client Configuration Summary"
     Write-Host "=================================="
@@ -127,7 +127,7 @@ try {
     }
     Write-Host "Scope: $($clientInfo.scope)"
     Write-Host "Skip Consent: $($clientInfo.skip_consent)"
-    
+
 } catch {
     Write-Error "Failed to verify client configuration: $($_.Exception.Message)"
     exit 1

@@ -72,11 +72,11 @@ setup_environment() {
 
     # Stop any existing containers
     print_status "Stopping existing containers..."
-    docker-compose -f docker-compose.test.yml down --remove-orphans || true
+    docker compose -f docker-compose.test.yml down --remove-orphans || true
 
     # Start services
     print_status "Starting Docker services..."
-    docker-compose -f docker-compose.test.yml up -d --build
+    docker compose -f docker-compose.test.yml up -d --build
 
     # Verify services are ready
     print_status "Verifying services..."
@@ -170,14 +170,14 @@ run_tests() {
 # Cleanup environment
 cleanup_environment() {
     print_status "Cleaning up Docker environment..."
-    docker-compose -f docker-compose.test.yml down --volumes --remove-orphans
+    docker compose -f docker-compose.test.yml down --volumes --remove-orphans
     print_success "Cleanup complete!"
 }
 
 # Show service status
 show_status() {
     print_status "Docker service status:"
-    docker-compose -f docker-compose.test.yml ps
+    docker compose -f docker-compose.test.yml ps
 }
 
 # Show service logs
@@ -185,10 +185,10 @@ show_logs() {
     local service=${1:-}
     if [[ -n "$service" ]]; then
         print_status "Showing logs for service: $service"
-        docker-compose -f docker-compose.test.yml logs --tail=50 -f "$service"
+        docker compose -f docker-compose.test.yml logs --tail=50 -f "$service"
     else
         print_status "Showing logs for all services:"
-        docker-compose -f docker-compose.test.yml logs --tail=50
+        docker compose -f docker-compose.test.yml logs --tail=50
     fi
 }
 

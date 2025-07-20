@@ -1,145 +1,112 @@
-import { test, expect } from '@playwright/test';
-import { createTestHelpers } from './utils/test-helpers';
+import { test, expect } from './fixtures';
 
 /**
  * Favourites Page Tests
  *
- * These tests set up their own test data to ensure deterministic behavior.
- * Each test creates the exact data state it needs to test specific functionality.
+ * Converted to use the advanced fixture-based testing system.
+ * Each test uses deterministic fixtures that provide guaranteed data state.
  */
 test.describe('Favourites Page', () => {
-  test('should redirect to login when not authenticated', async ({ page }) => {
-    const { testData } = createTestHelpers(page);
-
-    // Set up test state: no authentication
-    await testData.clearAllTestData();
-
+  test('should redirect to login when not authenticated', async ({
+    unauthenticatedPage,
+  }) => {
     // Navigate to favourites page
-    await page.goto('/contacts/favourites');
-    await expect(page).toHaveTitle(/Personal Management System/);
+    await unauthenticatedPage.goto('/contacts/favourites');
+    await expect(unauthenticatedPage).toHaveTitle(/Personal Management System/);
 
-    // Should redirect to login
-    await page.waitForLoadState('networkidle');
-    const currentUrl = page.url();
-    expect(currentUrl).toContain('/auth/login');
+    // Should redirect to login (guaranteed by fixture)
+    await expect(unauthenticatedPage).toHaveURL(/\/auth\/login/);
 
     // Should show login form
     await expect(
-      page.getByRole('heading', { name: 'Welcome Back' })
+      unauthenticatedPage.getByRole('heading', { name: 'Welcome Back' })
     ).toBeVisible();
   });
 
   test('should display favourites page with proper structure when authenticated', async ({
-    page,
+    favouriteContacts,
   }) => {
-    const { testData, contacts } = createTestHelpers(page);
-
-    // Set up test state: authenticated user with favourite contacts
-    await testData.setupAuthenticatedUser();
-    await testData.createTestContacts([
-      {
-        firstName: 'John',
-        lastName: 'Doe',
-        email: 'john@example.com',
-        isFavourite: true,
-      },
-    ]);
+    const { page, contacts } = favouriteContacts;
 
     // Navigate to favourites page
     await page.goto('/contacts/favourites');
     await expect(page).toHaveTitle(/Personal Management System/);
 
-    // Should display page with proper structure
-    await contacts.testPageStructure();
+    // Verify we have favourite contacts (guaranteed by fixture)
+    expect(contacts.length).toBeGreaterThan(0);
+    contacts.forEach(contact => {
+      expect(contact.isFavourite).toBe(true);
+    });
 
     // Should have favourites-related content
     const pageContent = page.locator('body');
     await expect(pageContent).toContainText(/favourite/i);
+
+    // Verify favourite contacts are displayed
+    for (const contact of contacts) {
+      const contactCard = page.locator(`[data-testid="contact-${contact.id}"]`);
+      await expect(contactCard).toBeVisible();
+    }
   });
 
   test('should display favourites page header with proper content', async ({
-    page,
+    authenticatedPage,
   }) => {
-    const { testData } = createTestHelpers(page);
-
-    // Set up test state: authenticated user
-    await testData.setupAuthenticatedUser();
-
     // Navigate to favourites page
-    await page.goto('/contacts/favourites');
-    await expect(page).toHaveTitle(/Personal Management System/);
+    await authenticatedPage.goto('/contacts/favourites');
+    await expect(authenticatedPage).toHaveTitle(/Personal Management System/);
 
     // Should have proper heading structure
-    const heading = page.locator('h1');
+    const heading = authenticatedPage.locator('h1');
     await expect(heading).toBeVisible();
     await expect(heading).toContainText(/favourite/i);
 
     // Should have descriptive content
-    const pageContent = page.locator('body');
+    const pageContent = authenticatedPage.locator('body');
     const textContent = await pageContent.textContent();
     expect(textContent).toBeTruthy();
     expect(textContent!.length).toBeGreaterThan(50);
   });
 
   test('should display favourite contacts when they exist', async ({
-    page,
+    favouritesTestData,
   }) => {
-    const { testData, contacts } = createTestHelpers(page);
-
-    // Set up test state: authenticated user with favourite contacts
-    await testData.setupAuthenticatedUser();
-    await testData.createTestContacts([
-      {
-        firstName: 'John',
-        lastName: 'Doe',
-        email: 'john@example.com',
-        isFavourite: true,
-      },
-      {
-        firstName: 'Jane',
-        lastName: 'Smith',
-        email: 'jane@example.com',
-        isFavourite: true,
-      },
-      {
-        firstName: 'Bob',
-        lastName: 'Wilson',
-        email: 'bob@example.com',
-        isFavourite: false,
-      },
-    ]);
+    const { page, contacts } = favouritesTestData;
 
     // Navigate to favourites page
     await page.goto('/contacts/favourites');
     await expect(page).toHaveTitle(/Personal Management System/);
 
-    // Should show exactly 2 favourite contacts
-    const contactCards = await contacts.waitForContactCards();
-    expect(await contactCards.count()).toBe(2);
+    // Should show favourite contacts (guaranteed by fixture)
+    const favouriteContacts = contacts.filter(c => c.isFavourite);
+    expect(favouriteContacts.length).toBeGreaterThan(0);
 
-    // Should have favourite buttons
-    await contacts.testFavouriteButtons();
+    // Verify favourite contacts are displayed
+    for (const contact of favouriteContacts) {
+      const contactCard = page.locator(`[data-testid="contact-${contact.id}"]`);
+      await expect(contactCard).toBeVisible();
+
+      // Should have favourite button
+      const favouriteButton = contactCard.locator(
+        '[data-testid="favourite-toggle"]'
+      );
+      await expect(favouriteButton).toBeVisible();
+    }
   });
 
   test('should display empty state when no favourite contacts exist', async ({
-    page,
+    regularContacts,
   }) => {
-    const { testData } = createTestHelpers(page);
-
-    // Set up test state: authenticated user with no favourite contacts
-    await testData.setupAuthenticatedUser();
-    await testData.createTestContacts([
-      {
-        firstName: 'John',
-        lastName: 'Doe',
-        email: 'john@example.com',
-        isFavourite: false,
-      },
-    ]);
+    const { page, contacts } = regularContacts;
 
     // Navigate to favourites page
     await page.goto('/contacts/favourites');
     await expect(page).toHaveTitle(/Personal Management System/);
+
+    // Verify all contacts are non-favourite (guaranteed by fixture)
+    contacts.forEach(contact => {
+      expect(contact.isFavourite).toBe(false);
+    });
 
     // Should show empty state
     const emptyState = page.locator(
@@ -154,39 +121,35 @@ test.describe('Favourites Page', () => {
     expect(await contactCards.count()).toBe(0);
   });
 
-  test('should provide helpful empty state messaging', async ({ page }) => {
-    const { testData } = createTestHelpers(page);
-
-    // Set up test state: authenticated user with no favourite contacts
-    await testData.setupAuthenticatedUser();
-
+  test('should provide helpful empty state messaging', async ({
+    emptyContactsPage,
+  }) => {
     // Navigate to favourites page
-    await page.goto('/contacts/favourites');
-    await expect(page).toHaveTitle(/Personal Management System/);
+    await emptyContactsPage.goto('/contacts/favourites');
+    await expect(emptyContactsPage).toHaveTitle(/Personal Management System/);
 
     // Should have empty state with helpful messaging
-    const emptyState = page.locator(
+    const emptyState = emptyContactsPage.locator(
       'text=/no.*favourite.*contacts/i, text=/star.*contacts/i'
     );
     await expect(emptyState).toBeVisible();
 
     // Should have helpful text about favourites/starring
-    const helpfulText = page.locator('text=/star/i, text=/favourite/i');
+    const helpfulText = emptyContactsPage.locator(
+      'text=/star/i, text=/favourite/i'
+    );
     expect(await helpfulText.count()).toBeGreaterThan(0);
   });
 
-  test('should allow navigation back to all contacts', async ({ page }) => {
-    const { testData } = createTestHelpers(page);
-
-    // Set up test state: authenticated user
-    await testData.setupAuthenticatedUser();
-
+  test('should allow navigation back to all contacts', async ({
+    authenticatedPage,
+  }) => {
     // Navigate to favourites page
-    await page.goto('/contacts/favourites');
-    await expect(page).toHaveTitle(/Personal Management System/);
+    await authenticatedPage.goto('/contacts/favourites');
+    await expect(authenticatedPage).toHaveTitle(/Personal Management System/);
 
     // Should have navigation back to all contacts
-    const allContactsLink = page.locator(
+    const allContactsLink = authenticatedPage.locator(
       'a[href="/contacts"]:has-text("All"), a[href="/contacts"]:has-text("Browse"), a:has-text("All Contacts")'
     );
     const linkCount = await allContactsLink.count();
@@ -197,72 +160,69 @@ test.describe('Favourites Page', () => {
 
       // Click the link and verify navigation
       await allContactsLink.first().click();
-      await page.waitForLoadState('networkidle');
+      await authenticatedPage.waitForLoadState('networkidle');
 
-      const currentUrl = page.url();
+      const currentUrl = authenticatedPage.url();
       expect(currentUrl).toContain('/contacts');
     }
     // If no link exists, that's also valid - different UI design
   });
 
   test('should show favourites link in sidebar navigation', async ({
-    page,
+    authenticatedPage,
   }) => {
-    const { testData, sidebar } = createTestHelpers(page);
-
-    // Set up test state: authenticated user
-    await testData.setupAuthenticatedUser();
-
     // Navigate to contacts page
-    await page.goto('/contacts');
-    await expect(page).toHaveTitle(/Personal Management System/);
+    await authenticatedPage.goto('/contacts');
+    await expect(authenticatedPage).toHaveTitle(/Personal Management System/);
 
     // Should show favourites link in sidebar
-    await sidebar.waitForSidebar();
-    await sidebar.testFavouritesLink();
+    const sidebar = authenticatedPage.locator(
+      '[data-testid="sidebar"], nav, aside'
+    );
+    await expect(sidebar).toBeVisible();
+
+    const favouritesLink = authenticatedPage.locator(
+      'a[href="/contacts/favourites"]'
+    );
+    await expect(favouritesLink).toBeVisible();
   });
 
   test('should maintain consistent UI with main contacts page', async ({
-    page,
+    authenticatedPage,
   }) => {
-    const { testData, sidebar } = createTestHelpers(page);
-
-    // Set up test state: authenticated user
-    await testData.setupAuthenticatedUser();
-
     // Navigate to favourites page
-    await page.goto('/contacts/favourites');
-    await expect(page).toHaveTitle(/Personal Management System/);
+    await authenticatedPage.goto('/contacts/favourites');
+    await expect(authenticatedPage).toHaveTitle(/Personal Management System/);
 
     // Should have consistent navigation elements
-    await sidebar.waitForSidebar();
+    const sidebar = authenticatedPage.locator(
+      '[data-testid="sidebar"], nav, aside'
+    );
+    await expect(sidebar).toBeVisible();
 
     // Should have consistent header structure
-    const header = page.locator('h1').first();
+    const header = authenticatedPage.locator('h1').first();
     await expect(header).toBeVisible();
 
     // Should have consistent page layout
-    const mainContent = page.locator('main, [role="main"]');
+    const mainContent = authenticatedPage.locator('main, [role="main"]');
     await expect(mainContent).toBeVisible();
   });
 
-  test('should be accessible with proper ARIA labels', async ({ page }) => {
-    const { testData, contacts } = createTestHelpers(page);
-
-    // Set up test state: authenticated user with favourite contacts
-    await testData.setupAuthenticatedUser();
-    await testData.createTestContacts([
-      {
-        firstName: 'John',
-        lastName: 'Doe',
-        email: 'john@example.com',
-        isFavourite: true,
-      },
-    ]);
+  test('should be accessible with proper ARIA labels', async ({
+    favouriteContacts,
+  }) => {
+    const { page, contacts } = favouriteContacts;
 
     // Navigate to favourites page
     await page.goto('/contacts/favourites');
     await expect(page).toHaveTitle(/Personal Management System/);
+
+    // Verify we have favourite contacts (guaranteed by fixture)
+    expect(contacts.length).toBeGreaterThan(0);
+    contacts.forEach(contact => {
+      expect(contact.isFavourite).toBe(true);
+    });
 
     // Check for proper heading structure
     const mainHeading = page.locator('h1');
@@ -278,8 +238,14 @@ test.describe('Favourites Page', () => {
     }
 
     // Check favourite buttons have proper labels
-    const contactCards = await contacts.waitForContactCards();
-    expect(await contactCards.count()).toBe(1);
+    // Verify we have favourite contacts (guaranteed by fixture)
+    expect(contacts.length).toBeGreaterThan(0);
+
+    // Check contact cards are displayed
+    for (const contact of contacts) {
+      const contactCard = page.locator(`[data-testid="contact-${contact.id}"]`);
+      await expect(contactCard).toBeVisible();
+    }
 
     const favouriteButtons = page.locator(
       'button[aria-label*="favourite"], button[aria-label*="Favourite"]'

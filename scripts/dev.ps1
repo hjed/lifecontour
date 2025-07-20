@@ -4,7 +4,7 @@
 param(
     [Parameter(Position=0)]
     [string]$Command = "help",
-    
+
     [Parameter(Position=1)]
     [string]$ServiceName = ""
 )
@@ -48,20 +48,20 @@ function Test-Command {
 # Rebuild Docker images (development)
 function Invoke-DockerRebuild {
     Write-Info "Rebuilding Docker images for development environment..."
-    
+
     # Check if Docker is available
-    if (-not (Test-Command "docker-compose")) {
+    if (-not (Test-Command "docker")) {
         Write-Error "Docker is not installed. Please install Docker first."
         exit 1
     }
 
     # Stop services first to avoid conflicts
     Write-Info "Stopping existing services..."
-    docker-compose -f docker-compose.dev.yml down
+    docker compose -f docker-compose.dev.yml down
 
     # Rebuild images with no cache
     Write-Info "Rebuilding backend and frontend images (no cache)..."
-    docker-compose -f docker-compose.dev.yml build --no-cache backend-dev frontend-dev
+    docker compose -f docker-compose.dev.yml build --no-cache backend-dev frontend-dev
 
     Write-Success "Docker images rebuilt successfully!"
     Write-Info "Use '.\scripts\dev.ps1 docker-start' to start the services with new images"
@@ -70,29 +70,29 @@ function Invoke-DockerRebuild {
 # Rebuild Docker images (production)
 function Invoke-DockerRebuildProd {
     Write-Info "Rebuilding Docker images for production environment..."
-    
+
     # Check if Docker is available
-    if (-not (Test-Command "docker-compose")) {
+    if (-not (Test-Command "docker")) {
         Write-Error "Docker is not installed. Please install Docker first."
         exit 1
     }
 
     # Stop services first to avoid conflicts
     Write-Info "Stopping existing services..."
-    docker-compose down
+    docker compose down
 
     # Rebuild images with no cache
     Write-Info "Rebuilding backend, frontend, and nginx images (no cache)..."
-    docker-compose build --no-cache backend frontend nginx
+    docker compose build --no-cache backend frontend nginx
 
     Write-Success "Production Docker images rebuilt successfully!"
-    Write-Info "Use 'docker-compose up -d' to start the services with new images"
+    Write-Info "Use 'docker compose up -d' to start the services with new images"
 }
 
 # Rebuild specific Docker service
 function Invoke-DockerRebuildService {
     param([string]$Service)
-    
+
     if ([string]::IsNullOrEmpty($Service)) {
         Write-Error "Please specify a service name to rebuild"
         Write-Info "Development services: backend-dev, frontend-dev"
@@ -101,7 +101,7 @@ function Invoke-DockerRebuildService {
     }
 
     $ComposeFile = "docker-compose.dev.yml"
-    
+
     # Determine if this is a production service
     if ($Service -in @("backend", "frontend", "nginx")) {
         $ComposeFile = "docker-compose.yml"
@@ -111,22 +111,22 @@ function Invoke-DockerRebuildService {
     }
 
     # Check if Docker is available
-    if (-not (Test-Command "docker-compose")) {
+    if (-not (Test-Command "docker")) {
         Write-Error "Docker is not installed. Please install Docker first."
         exit 1
     }
 
     # Stop the specific service
     Write-Info "Stopping service: $Service"
-    docker-compose -f $ComposeFile stop $Service
+    docker compose -f $ComposeFile stop $Service
 
     # Rebuild the service with no cache
     Write-Info "Rebuilding service: $Service (no cache)..."
-    docker-compose -f $ComposeFile build --no-cache $Service
+    docker compose -f $ComposeFile build --no-cache $Service
 
     # Restart the service
     Write-Info "Starting service: $Service"
-    docker-compose -f $ComposeFile up -d $Service
+    docker compose -f $ComposeFile up -d $Service
 
     Write-Success "Service $Service rebuilt and restarted successfully!"
 }
@@ -136,14 +136,14 @@ function Invoke-DockerStart {
     Write-Info "Starting complete Docker development environment..."
 
     # Check if Docker is available
-    if (-not (Test-Command "docker-compose")) {
+    if (-not (Test-Command "docker")) {
         Write-Error "Docker is not installed. Please install Docker first."
         exit 1
     }
 
     # Start all services
     Write-Info "Starting all services with Docker Compose..."
-    docker-compose -f docker-compose.dev.yml up -d
+    docker compose -f docker-compose.dev.yml up -d
 
     Write-Success "Docker development environment started!"
     Write-Info ""
@@ -162,7 +162,7 @@ function Invoke-DockerStart {
 # Stop Docker development environment
 function Invoke-DockerStop {
     Write-Info "Stopping Docker development environment..."
-    docker-compose -f docker-compose.dev.yml down
+    docker compose -f docker-compose.dev.yml down
     Write-Success "Docker development environment stopped!"
 }
 

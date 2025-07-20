@@ -84,7 +84,7 @@ setup() {
     log_success "Development environment setup complete!"
     log_info "Next steps:"
     log_info "1. Configure your .env files"
-    log_info "2. Start the database: docker-compose up database"
+    log_info "2. Start the database: docker compose up database"
     log_info "3. Run migrations: cd backend && alembic upgrade head"
     log_info "4. Start development: ./scripts/dev.sh start"
 }
@@ -124,7 +124,7 @@ docker_start() {
     log_info "Starting complete Docker development environment..."
 
     # Check if Docker is available
-    if ! command_exists "docker-compose"; then
+    if ! command_exists "docker"; then
         log_error "Docker is not installed. Please install Docker first."
         exit 1
     fi
@@ -137,7 +137,7 @@ docker_start() {
 
     # Start all services
     log_info "Starting all services with Docker Compose..."
-    docker-compose -f docker-compose.dev.yml up -d
+    docker compose -f docker-compose.dev.yml up -d
 
     log_success "Docker development environment started!"
     log_info ""
@@ -161,7 +161,7 @@ docker_start() {
 # Stop Docker development environment
 docker_stop() {
     log_info "Stopping Docker development environment..."
-    docker-compose -f docker-compose.dev.yml down
+    docker compose -f docker-compose.dev.yml down
     log_success "Docker development environment stopped!"
 }
 
@@ -170,11 +170,11 @@ docker_logs() {
     if [ -n "$2" ]; then
         # Show logs for specific service
         log_info "Showing logs for service: $2"
-        docker-compose -f docker-compose.dev.yml logs -f "$2"
+        docker compose -f docker-compose.dev.yml logs -f "$2"
     else
         # Show logs for all services
         log_info "Showing logs for all services (use Ctrl+C to exit)..."
-        docker-compose -f docker-compose.dev.yml logs -f
+        docker compose -f docker-compose.dev.yml logs -f
     fi
 }
 
@@ -187,14 +187,14 @@ docker_restart() {
     fi
 
     log_info "Restarting Docker service: $2"
-    docker-compose -f docker-compose.dev.yml restart "$2"
+    docker compose -f docker-compose.dev.yml restart "$2"
     log_success "Service $2 restarted!"
 }
 
 # Show Docker status
 docker_status() {
     log_info "Docker development environment status:"
-    docker-compose -f docker-compose.dev.yml ps
+    docker compose -f docker-compose.dev.yml ps
 }
 
 # Test Docker environment
@@ -213,18 +213,18 @@ docker_rebuild() {
     log_info "Rebuilding Docker images for development environment..."
 
     # Check if Docker is available
-    if ! command_exists "docker-compose"; then
+    if ! command_exists "docker"; then
         log_error "Docker is not installed. Please install Docker first."
         exit 1
     fi
 
     # Stop services first to avoid conflicts
     log_info "Stopping existing services..."
-    docker-compose -f docker-compose.dev.yml down
+    docker compose -f docker-compose.dev.yml down
 
     # Rebuild images with no cache
     log_info "Rebuilding backend and frontend images (no cache)..."
-    docker-compose -f docker-compose.dev.yml build --no-cache backend-dev frontend-dev
+    docker compose -f docker-compose.dev.yml build --no-cache backend-dev frontend-dev
 
     log_success "Docker images rebuilt successfully!"
     log_info "Use './scripts/dev.sh docker-start' to start the services with new images"
@@ -235,21 +235,21 @@ docker_rebuild_prod() {
     log_info "Rebuilding Docker images for production environment..."
 
     # Check if Docker is available
-    if ! command_exists "docker-compose"; then
+    if ! command_exists "docker"; then
         log_error "Docker is not installed. Please install Docker first."
         exit 1
     fi
 
     # Stop services first to avoid conflicts
     log_info "Stopping existing services..."
-    docker-compose down
+    docker compose down
 
     # Rebuild images with no cache
     log_info "Rebuilding backend, frontend, and nginx images (no cache)..."
-    docker-compose build --no-cache backend frontend nginx
+    docker compose build --no-cache backend frontend nginx
 
     log_success "Production Docker images rebuilt successfully!"
-    log_info "Use 'docker-compose up -d' to start the services with new images"
+    log_info "Use 'docker compose up -d' to start the services with new images"
 }
 
 # Rebuild specific Docker service
@@ -273,22 +273,22 @@ docker_rebuild_service() {
     fi
 
     # Check if Docker is available
-    if ! command_exists "docker-compose"; then
+    if ! command_exists "docker"; then
         log_error "Docker is not installed. Please install Docker first."
         exit 1
     fi
 
     # Stop the specific service
     log_info "Stopping service: $service"
-    docker-compose -f "$compose_file" stop "$service"
+    docker compose -f "$compose_file" stop "$service"
 
     # Rebuild the service with no cache
     log_info "Rebuilding service: $service (no cache)..."
-    docker-compose -f "$compose_file" build --no-cache "$service"
+    docker compose -f "$compose_file" build --no-cache "$service"
 
     # Restart the service
     log_info "Starting service: $service"
-    docker-compose -f "$compose_file" up -d "$service"
+    docker compose -f "$compose_file" up -d "$service"
 
     log_success "Service $service rebuilt and restarted successfully!"
 }
