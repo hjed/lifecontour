@@ -56,6 +56,27 @@ services:
     networks:
       - personal-management-test
 
+  # OAuth Login/Consent Service for E2E Testing
+  oauth-login-consent-test:
+    build:
+      context: ./docker/oauth-login-consent
+      dockerfile: Dockerfile
+    ports:
+      - "3002:3002"
+    container_name: pms-oauth-login-consent-test
+    environment:
+      - PORT=3002
+      - HYDRA_ADMIN_URL=http://oauth-provider-test:4445
+      - NODE_ENV=test
+    networks:
+      - personal-management-test
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3002/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+
   # Simple OAuth2 Provider for Testing (SQLite In-Memory)
   oauth-provider-test:
     image: oryd/hydra:v2.2.0
@@ -80,6 +101,9 @@ services:
     networks:
       - personal-management-test
     command: ["serve", "-c", "/etc/config/hydra/hydra.yml", "all", "--dev"]
+    depends_on:
+      oauth-login-consent-test:
+        condition: service_healthy
 
   # OAuth Client Initializer for Tests
   oauth-init-test:

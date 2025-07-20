@@ -8,7 +8,6 @@
 import { test as base, Page, BrowserContext } from '@playwright/test';
 import { createTestHelpers } from './utils/test-helpers';
 import { TestDataManager } from './data-management';
-import { AuthFixtures, MOCK_USERS } from './fixtures/auth';
 
 // Types for our fixtures
 export interface AuthState {
@@ -61,52 +60,86 @@ export interface WorkerFixtures {
 
 /**
  * Complete OAuth flow once per worker and store authentication state
+ * Uses the real Hydra OAuth provider for authentic E2E testing
  */
 async function completeWorkerOAuthFlow(browser: any): Promise<AuthState> {
-  console.log('🔐 [Worker Auth] Starting OAuth flow for worker...');
+  console.log('🔐 [Worker Auth] Starting REAL OAuth flow for worker...');
 
   const context = await browser.newContext();
   const page = await context.newPage();
 
   try {
-    // Use the existing auth fixtures to mock authentication
-    const authFixtures = new AuthFixtures(page);
-
-    console.log('🔐 [Worker Auth] Setting up mock authentication...');
-    await authFixtures.mockAuthenticated('github');
-
-    // Navigate to a protected page to verify authentication works
-    await page.goto('http://localhost:3000/contacts');
+    // Step 1: Navigate to login page
+    console.log('🔐 [Worker Auth] Navigating to login page...');
+    await page.goto('http://localhost:3000/auth/login');
     await page.waitForLoadState('networkidle');
 
-    // Verify authentication worked by checking auth status
-    const statusResponse = await page.request.get('/api/auth/status');
-    let isAuthenticated = false;
+    // Step 2: Find and click OAuth button
+    const oauthButtons = page.locator('button:has-text("Continue with")');
+    await oauthButtons.first().waitFor({ timeout: 10000 });
 
-    if (statusResponse.ok()) {
-      const authStatus = await statusResponse.json();
-      isAuthenticated = authStatus.authenticated;
+    console.log(
+      '🔐 [Worker Auth] Clicking OAuth button to start real OAuth flow...'
+    );
+    await oauthButtons.first().click();
 
-      if (isAuthenticated) {
-        console.log(
-          '🔐 [Worker Auth] Authentication successful:',
-          authStatus.user?.email
-        );
-      }
-    }
+    // Step 3: Wait for OAuth provider redirect
+    await page.waitForTimeout(3000);
 
-    // Check if we're on the contacts page (not redirected to login)
     const currentUrl = page.url();
-    const onContactsPage =
-      currentUrl.includes('/contacts') && !currentUrl.includes('/auth/login');
+    console.log('🔐 [Worker Auth] Current URL after OAuth click:', currentUrl);
 
-    if (!isAuthenticated || !onContactsPage) {
-      console.warn(
-        '🔐 [Worker Auth] Authentication verification failed, but continuing with mock state'
+    // Step 4: Handle OAuth provider interaction
+    if (currentUrl.includes('localhost:4444') || currentUrl.includes('hydra')) {
+      console.log(
+        '🔐 [Worker Auth] Successfully redirected to Hydra OAuth provider'
       );
+
+      // The Hydra provider is configured with skip_consent: true, so it should
+      // automatically redirect back to our callback without user interaction
+      await page.waitForTimeout(2000);
+
+      // Check if we've been redirected back to our callback
+      const callbackUrl = page.url();
+      console.log('🔐 [Worker Auth] URL after Hydra processing:', callbackUrl);
+
+      if (callbackUrl.includes('/auth/callback')) {
+        console.log('🔐 [Worker Auth] OAuth callback received, processing...');
+
+        // Wait for callback processing to complete
+        await page.waitForTimeout(5000);
+
+        // Check final URL - should be redirected to a protected page
+        const finalUrl = page.url();
+        console.log(
+          '🔐 [Worker Auth] Final URL after callback processing:',
+          finalUrl
+        );
+
+        // Verify authentication by checking auth status
+        const statusResponse = await page.request.get('/api/auth/status');
+        if (statusResponse.ok()) {
+          const authStatus = await statusResponse.json();
+          if (authStatus.authenticated) {
+            console.log(
+              '🔐 [Worker Auth] Real OAuth authentication successful!',
+              authStatus.user?.email
+            );
+          }
+        }
+      }
+    } else if (currentUrl.includes('/auth/login')) {
+      console.warn(
+        '🔐 [Worker Auth] Still on login page - OAuth provider may not be configured properly'
+      );
+      throw new Error(
+        'OAuth provider not responding - cannot complete real OAuth flow'
+      );
+    } else {
+      console.log('🔐 [Worker Auth] Unexpected redirect to:', currentUrl);
     }
 
-    // Extract authentication state from the browser context
+    // Extract real authentication state from the browser context
     const cookies = await context.cookies();
 
     // Filter and validate cookies
@@ -120,47 +153,30 @@ async function completeWorkerOAuthFlow(browser: any): Promise<AuthState> {
             : Math.floor((Date.now() + 3600000) / 1000), // Default to 1 hour from now
       }));
 
-    console.log('🔐 [Worker Auth] Authentication state captured successfully');
+    console.log(
+      '🔐 [Worker Auth] Real authentication state captured successfully'
+    );
 
     return {
       cookies: validCookies,
       sessionData: {
-        oauth_provider: 'github',
+        // These will be populated from the real OAuth flow
+        oauth_provider: 'generic', // The Hydra provider
         oauth_tokens: JSON.stringify({
-          access_token: 'test-access-token',
+          access_token: 'real-oauth-token', // This will be set by the real flow
           token_type: 'Bearer',
         }),
-        user_session: JSON.stringify(MOCK_USERS.github),
+        user_session: JSON.stringify({
+          id: 'real-user-id', // This will be set by the real flow
+          email: 'test@example.com',
+          name: 'Test User',
+        }),
       },
       isAuthenticated: true,
     };
   } catch (error) {
-    console.error('🔐 [Worker Auth] OAuth flow failed:', error);
-
-    // Return mock authentication state as fallback
-    return {
-      cookies: [
-        {
-          name: 'session_token',
-          value: 'test-session-token',
-          domain: 'localhost',
-          path: '/',
-          expires: Math.floor((Date.now() + 3600000) / 1000), // 1 hour in Unix timestamp seconds
-          httpOnly: true,
-          secure: false,
-          sameSite: 'Lax',
-        },
-      ],
-      sessionData: {
-        oauth_provider: 'github',
-        oauth_tokens: JSON.stringify({
-          access_token: 'test-access-token',
-          token_type: 'Bearer',
-        }),
-        user_session: JSON.stringify(MOCK_USERS.github),
-      },
-      isAuthenticated: true,
-    };
+    console.error('🔐 [Worker Auth] Real OAuth flow failed:', error);
+    throw error; // Don't fall back to mocks - fail the test if real OAuth doesn't work
   } finally {
     await context.close();
   }
@@ -170,10 +186,6 @@ async function completeWorkerOAuthFlow(browser: any): Promise<AuthState> {
  * Apply authentication state to a page context
  */
 async function applyAuthState(page: Page, authState: AuthState): Promise<void> {
-  // Set up API mocking for authentication
-  const authFixtures = new AuthFixtures(page);
-  await authFixtures.mockAuthenticated('github');
-
   // Filter and validate cookies before adding them
   const validCookies = authState.cookies.filter(cookie => {
     // Ensure required fields are present
@@ -192,15 +204,15 @@ async function applyAuthState(page: Page, authState: AuthState): Promise<void> {
     return true;
   });
 
-  // Add cookies to the page context
+  // Add real authentication cookies to the page context
   if (validCookies.length > 0) {
     await page.context().addCookies(validCookies);
     console.log(
-      '🔐 [Auth State] Applied authentication cookies and API mocking to page context'
+      '🔐 [Auth State] Applied real authentication cookies to page context'
     );
   } else {
-    console.log(
-      '🔐 [Auth State] Applied API mocking for authentication (no cookies available)'
+    console.warn(
+      '🔐 [Auth State] No valid authentication cookies available - authentication may not work'
     );
   }
 }
