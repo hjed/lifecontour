@@ -143,6 +143,7 @@ function ContactGroupPageContent() {
           <Tag
             className='h-8 w-8'
             style={{ color: currentTag.attributes.color }}
+            aria-hidden='true'
           />
           {currentTag.attributes.name} Contacts
         </h1>
