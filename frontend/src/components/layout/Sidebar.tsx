@@ -35,7 +35,7 @@ import { useTags } from '@/lib/api/contacts';
 
 interface NavigationItem {
   readonly label: string;
-  readonly href: Route;
+  readonly href?: Route;
   readonly icon?: React.ComponentType<{ className?: string }>;
   readonly disabled?: boolean;
 }
@@ -88,10 +88,9 @@ function useNavigationSections(): NavigationSection[] {
     }));
     contactItems.push(...tagItems);
   } else if (tagsLoading) {
-    // Show loading placeholder
+    // Show loading placeholder - no href to disable the link entirely
     contactItems.push({
       label: 'Loading tags...',
-      href: '#' as Route,
       disabled: true,
     });
   }
@@ -244,14 +243,16 @@ function SidebarContentInner({
                 role='group'
                 aria-labelledby={`section-${section.label.toLowerCase()}-header`}
               >
-                {section.items.map(item => {
-                  const isActive = !item.disabled && isActiveLink(item.href);
+                {section.items.map((item, index) => {
+                  const isActive =
+                    !item.disabled && item.href && isActiveLink(item.href);
                   const ItemIcon = item.icon;
+                  const itemKey = item.href || `${section.label}-${index}`;
 
                   if (item.disabled) {
                     return (
                       <div
-                        key={item.href}
+                        key={itemKey}
                         className={cn(
                           'h-auto w-full justify-start px-2 py-1.5 font-normal',
                           'text-muted-foreground cursor-not-allowed opacity-50',
@@ -269,9 +270,31 @@ function SidebarContentInner({
                     );
                   }
 
+                  // Only render as link if href exists
+                  if (!item.href) {
+                    return (
+                      <div
+                        key={itemKey}
+                        className={cn(
+                          'h-auto w-full justify-start px-2 py-1.5 font-normal',
+                          'text-muted-foreground',
+                          'flex items-center'
+                        )}
+                      >
+                        {ItemIcon && (
+                          <ItemIcon
+                            className='mr-2 h-3 w-3'
+                            aria-hidden='true'
+                          />
+                        )}
+                        {item.label}
+                      </div>
+                    );
+                  }
+
                   return (
                     <Button
-                      key={item.href}
+                      key={itemKey}
                       variant='ghost'
                       size='sm'
                       className={cn(

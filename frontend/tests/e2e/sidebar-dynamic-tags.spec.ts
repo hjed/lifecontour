@@ -8,9 +8,7 @@ import { createTestHelpers } from './utils/test-helpers';
  * Each test creates the exact data state it needs to test specific functionality.
  */
 test.describe('Sidebar Dynamic Tags Navigation', () => {
-  test('should display sidebar with proper structure', async ({
-    page,
-  }) => {
+  test('should display sidebar with proper structure', async ({ page }) => {
     const { testData, sidebar } = createTestHelpers(page);
 
     // Set up test state: authenticated user
@@ -24,9 +22,7 @@ test.describe('Sidebar Dynamic Tags Navigation', () => {
     await sidebar.testSidebarStructure();
   });
 
-  test('should never display hardcoded groups in sidebar', async ({
-    page,
-  }) => {
+  test('should never display hardcoded groups in sidebar', async ({ page }) => {
     const { testData, sidebar } = createTestHelpers(page);
 
     // Set up test state: authenticated user (regardless of data)
@@ -40,9 +36,7 @@ test.describe('Sidebar Dynamic Tags Navigation', () => {
     await sidebar.testNoHardcodedGroups();
   });
 
-  test('should display dynamic tag links when tags exist', async ({
-    page,
-  }) => {
+  test('should display dynamic tag links when tags exist', async ({ page }) => {
     const { testData, sidebar } = createTestHelpers(page);
 
     // Set up test state: authenticated user with tags
@@ -127,7 +121,9 @@ test.describe('Sidebar Dynamic Tags Navigation', () => {
     await sidebar.waitForSidebar();
 
     // Click on work tag link
-    const workTagLink = page.locator('a[href*="/contacts/tags/"]:has-text("work")');
+    const workTagLink = page.locator(
+      'a[href*="/contacts/tags/"]:has-text("work")'
+    );
     await expect(workTagLink).toBeVisible();
     await workTagLink.click();
     await page.waitForLoadState('networkidle');
@@ -181,9 +177,7 @@ test.describe('Sidebar Dynamic Tags Navigation', () => {
     expect(allVisible || favVisible).toBe(true);
   });
 
-  test('should display contacts section in sidebar', async ({
-    page,
-  }) => {
+  test('should display contacts section in sidebar', async ({ page }) => {
     const { testData, sidebar } = createTestHelpers(page);
 
     // Set up test state: authenticated user
@@ -225,8 +219,7 @@ test.describe('Sidebar Dynamic Tags Navigation', () => {
 
     // Should have some indication of active state
     expect(
-      ariaCurrent === 'page' ||
-        (className && className.includes('active'))
+      ariaCurrent === 'page' || (className && className.includes('active'))
     ).toBe(true);
   });
 

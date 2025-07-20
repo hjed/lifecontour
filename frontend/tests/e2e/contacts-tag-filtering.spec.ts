@@ -24,19 +24,38 @@ test.describe('Tag Filtering Pages', () => {
     expect(currentUrl).toContain('/auth/login');
 
     // Should show login form
-    await expect(page.getByRole('heading', { name: 'Welcome Back' })).toBeVisible();
+    await expect(
+      page.getByRole('heading', { name: 'Welcome Back' })
+    ).toBeVisible();
   });
 
-  test('should display contacts filtered by tag when tag exists', async ({ page }) => {
+  test('should display contacts filtered by tag when tag exists', async ({
+    page,
+  }) => {
     const { testData, contacts } = createTestHelpers(page);
 
     // Set up test state: authenticated user with tagged contacts
     await testData.setupAuthenticatedUser();
     await testData.createTestTags(['work']);
     await testData.createTestContacts([
-      { firstName: 'John', lastName: 'Doe', email: 'john@example.com', tags: ['work'] },
-      { firstName: 'Jane', lastName: 'Smith', email: 'jane@example.com', tags: ['work'] },
-      { firstName: 'Bob', lastName: 'Wilson', email: 'bob@example.com', tags: ['family'] },
+      {
+        firstName: 'John',
+        lastName: 'Doe',
+        email: 'john@example.com',
+        tags: ['work'],
+      },
+      {
+        firstName: 'Jane',
+        lastName: 'Smith',
+        email: 'jane@example.com',
+        tags: ['work'],
+      },
+      {
+        firstName: 'Bob',
+        lastName: 'Wilson',
+        email: 'bob@example.com',
+        tags: ['family'],
+      },
     ]);
 
     // Navigate to work tag page
@@ -56,7 +75,9 @@ test.describe('Tag Filtering Pages', () => {
     await contacts.testFavouriteButtons();
   });
 
-  test('should display not found message for non-existent tag', async ({ page }) => {
+  test('should display not found message for non-existent tag', async ({
+    page,
+  }) => {
     const { testData } = createTestHelpers(page);
 
     // Set up test state: authenticated user with no matching tag
@@ -68,7 +89,9 @@ test.describe('Tag Filtering Pages', () => {
     await expect(page).toHaveTitle(/Personal Management System/);
 
     // Should show tag not found message
-    const errorContent = page.locator('text=/tag.*not.*found/i, text=/not.*found/i');
+    const errorContent = page.locator(
+      'text=/tag.*not.*found/i, text=/not.*found/i'
+    );
     await expect(errorContent).toBeVisible();
 
     // Should have helpful navigation back to contacts
