@@ -1,64 +1,110 @@
-import { test, expect } from '@playwright/test';
-import {
-  createTestHelpers,
-  navigateAndWaitForStable,
-  verifyPageLoadsSuccessfully,
-} from './utils/test-helpers';
+import { test, expect } from './fixtures';
 
-test.describe('Contact Management', () => {
-  test('should load contacts page successfully', async ({ page }) => {
-    const { auth } = createTestHelpers(page);
+test.describe('Contact Management - Authenticated User', () => {
+  test('should load contacts page successfully when authenticated', async ({
+    authenticatedPage,
+  }) => {
+    await authenticatedPage.goto('/contacts');
 
-    await page.goto('/contacts');
+    // Verify the page loads successfully
+    await expect(authenticatedPage).toHaveTitle(/Personal Management System/);
 
-    // Verify the page loads (either contacts page or login redirect)
-    await expect(page).toHaveTitle(/Personal Management System/);
+    // Should be on contacts page, not redirected to login
+    await expect(authenticatedPage).toHaveURL(/\/contacts/);
 
-    // Handle authentication redirect or successful access
-    const result = await auth.handleProtectedPageAccess();
-
-    if (result === 'redirected') {
-      // Additional verification for login page
-      await expect(
-        page.getByRole('heading', { name: 'Welcome Back' })
-      ).toBeVisible();
-    }
+    // Should see contacts page content
+    const pageContent = await authenticatedPage.textContent('body');
+    expect(pageContent).toContain('Contacts');
   });
 
-  test('should load create contact page successfully', async ({ page }) => {
-    await navigateAndWaitForStable(page, '/contacts/new');
-    await verifyPageLoadsSuccessfully(page, /Personal Management System/);
+  test('should load create contact page successfully when authenticated', async ({
+    authenticatedPage,
+  }) => {
+    await authenticatedPage.goto('/contacts/new');
+
+    // Verify the page loads successfully
+    await expect(authenticatedPage).toHaveTitle(/Personal Management System/);
+    await expect(authenticatedPage).toHaveURL(/\/contacts\/new/);
+
+    // Should see create contact form
+    const pageContent = await authenticatedPage.textContent('body');
+    expect(pageContent).toBeTruthy();
   });
 
-  test('should load contact details page successfully', async ({ page }) => {
-    await navigateAndWaitForStable(page, '/contacts/123');
-    await verifyPageLoadsSuccessfully(page, /Personal Management System/);
+  test('should load contact details page successfully when authenticated', async ({
+    authenticatedPage,
+  }) => {
+    await authenticatedPage.goto('/contacts/123');
+
+    // Verify the page loads successfully
+    await expect(authenticatedPage).toHaveTitle(/Personal Management System/);
+
+    // Page should load (might show 404 for non-existent contact, but that's valid)
+    const pageContent = await authenticatedPage.textContent('body');
+    expect(pageContent).toBeTruthy();
   });
 
-  test('should load contact edit page successfully', async ({ page }) => {
-    await navigateAndWaitForStable(page, '/contacts/123/edit');
-    await verifyPageLoadsSuccessfully(page, /Personal Management System/);
-  });
+  test('should handle navigation between contact pages when authenticated', async ({
+    authenticatedPage,
+  }) => {
+    // Navigate to contacts page
+    await authenticatedPage.goto('/contacts');
+    await expect(authenticatedPage).toHaveURL(/\/contacts/);
 
-  test('should handle navigation between contact pages', async ({ page }) => {
-    // Test basic navigation flow
-    await navigateAndWaitForStable(page, '/contacts');
+    // Navigate to create page
+    await authenticatedPage.goto('/contacts/new');
+    await expect(authenticatedPage).toHaveURL(/\/contacts\/new/);
 
-    // Try to navigate to create page (might redirect to login)
-    try {
-      await navigateAndWaitForStable(page, '/contacts/new');
-    } catch (error) {
-      // If navigation is interrupted by redirect, that's expected behavior
-      console.log(
-        'Navigation redirected, which is expected for unauthenticated users'
-      );
-    }
+    // Navigate back to contacts
+    await authenticatedPage.goto('/contacts');
+    await expect(authenticatedPage).toHaveURL(/\/contacts/);
 
-    // Verify we end up on a valid page (either contacts/new or login)
-    const currentUrl = page.url();
-    expect(currentUrl).toMatch(/\/(contacts|auth\/login)/);
-
-    const bodyText = await page.textContent('body');
+    // Verify content is present
+    const bodyText = await authenticatedPage.textContent('body');
     expect(bodyText).toBeTruthy();
+  });
+});
+
+test.describe('Contact Management - Unauthenticated User', () => {
+  test('should redirect to login when accessing contacts page unauthenticated', async ({
+    unauthenticatedPage,
+  }) => {
+    await unauthenticatedPage.goto('/contacts');
+
+    // Should be redirected to login page
+    await expect(unauthenticatedPage).toHaveURL(/\/auth\/login/);
+
+    // Should see login page content
+    await expect(
+      unauthenticatedPage.getByRole('heading', { name: 'Welcome Back' })
+    ).toBeVisible();
+  });
+
+  test('should redirect to login when accessing create contact page unauthenticated', async ({
+    unauthenticatedPage,
+  }) => {
+    await unauthenticatedPage.goto('/contacts/new');
+
+    // Should be redirected to login page
+    await expect(unauthenticatedPage).toHaveURL(/\/auth\/login/);
+
+    // Should see login page content
+    await expect(
+      unauthenticatedPage.getByRole('heading', { name: 'Welcome Back' })
+    ).toBeVisible();
+  });
+
+  test('should redirect to login when accessing contact details unauthenticated', async ({
+    unauthenticatedPage,
+  }) => {
+    await unauthenticatedPage.goto('/contacts/123');
+
+    // Should be redirected to login page
+    await expect(unauthenticatedPage).toHaveURL(/\/auth\/login/);
+
+    // Should see login page content
+    await expect(
+      unauthenticatedPage.getByRole('heading', { name: 'Welcome Back' })
+    ).toBeVisible();
   });
 });

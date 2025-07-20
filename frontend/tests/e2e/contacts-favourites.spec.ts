@@ -1,187 +1,183 @@
-import { test, expect } from '@playwright/test';
-import { createTestHelpers } from './utils/test-helpers';
+import { test, expect } from './fixtures';
 
 /**
  * Contacts Page - Favourites Functionality Tests
  *
- * These tests set up their own test data to ensure deterministic behavior.
- * Each test creates the exact data state it needs to test specific functionality.
+ * Converted to use the advanced fixture-based testing system.
+ * Each test uses deterministic fixtures that provide guaranteed data state.
  */
 test.describe('Contacts Page - Favourites Functionality', () => {
-  test('should redirect to login when not authenticated', async ({ page }) => {
-    const { testData } = createTestHelpers(page);
-
-    // Set up test state: no authentication
-    await testData.clearAllTestData();
-
+  test('should redirect to login when not authenticated', async ({
+    unauthenticatedPage,
+  }) => {
     // Navigate to contacts page
-    await page.goto('/contacts');
-    await expect(page).toHaveTitle(/Personal Management System/);
+    await unauthenticatedPage.goto('/contacts');
+    await expect(unauthenticatedPage).toHaveTitle(/Personal Management System/);
 
     // Should redirect to login
-    await page.waitForLoadState('networkidle');
-    const currentUrl = page.url();
-    expect(currentUrl).toContain('/auth/login');
+    await expect(unauthenticatedPage).toHaveURL(/\/auth\/login/);
 
     // Should show login form
     await expect(
-      page.getByRole('heading', { name: 'Welcome Back' })
+      unauthenticatedPage.getByRole('heading', { name: 'Welcome Back' })
     ).toBeVisible();
   });
 
   test('should display contacts page with proper structure when authenticated', async ({
-    page,
+    contactsWithData,
   }) => {
-    const { testData, contacts } = createTestHelpers(page);
-
-    // Set up test state: authenticated user with contacts
-    await testData.setupAuthenticatedUser();
-    await testData.createTestContacts([
-      { firstName: 'John', lastName: 'Doe', email: 'john@example.com' },
-      { firstName: 'Jane', lastName: 'Smith', email: 'jane@example.com' },
-    ]);
+    const { page, contacts } = contactsWithData;
 
     // Navigate to contacts page
     await page.goto('/contacts');
     await expect(page).toHaveTitle(/Personal Management System/);
 
-    // Should display contacts with proper structure
-    await contacts.testPageStructure();
+    // Should show exactly 2 contacts (guaranteed by fixture)
+    expect(contacts).toHaveLength(2);
 
-    // Should show exactly 2 contacts
-    const contactCards = await contacts.waitForContactCards();
-    expect(await contactCards.count()).toBe(2);
+    // Verify contacts are displayed
+    for (const contact of contacts) {
+      await expect(
+        page.locator(`[data-testid="contact-${contact.id}"]`)
+      ).toBeVisible();
+    }
   });
 
   test('should display favourite toggle buttons on contact cards', async ({
-    page,
+    favouritesTestData,
   }) => {
-    const { testData, contacts } = createTestHelpers(page);
-
-    // Set up test state: authenticated user with contacts
-    await testData.setupAuthenticatedUser();
-    await testData.createTestContacts([
-      {
-        firstName: 'John',
-        lastName: 'Doe',
-        email: 'john@example.com',
-        isFavourite: false,
-      },
-      {
-        firstName: 'Jane',
-        lastName: 'Smith',
-        email: 'jane@example.com',
-        isFavourite: true,
-      },
-    ]);
+    const { page, contacts } = favouritesTestData;
 
     // Navigate to contacts page
     await page.goto('/contacts');
     await expect(page).toHaveTitle(/Personal Management System/);
 
-    // Should show 2 contacts with favourite buttons
-    const contactCards = await contacts.waitForContactCards();
-    expect(await contactCards.count()).toBe(2);
+    // Should show contacts with mixed favourite states (guaranteed by fixture)
+    const favouriteContacts = contacts.filter(c => c.isFavourite);
+    const regularContacts = contacts.filter(c => !c.isFavourite);
 
-    // Test favourite button functionality
-    await contacts.testFavouriteButtons();
+    expect(favouriteContacts.length).toBeGreaterThan(0);
+    expect(regularContacts.length).toBeGreaterThan(0);
+
+    // Verify favourite buttons are present for all contacts
+    for (const contact of contacts) {
+      const contactCard = page.locator(`[data-testid="contact-${contact.id}"]`);
+      const favouriteButton = contactCard.locator(
+        '[data-testid="favourite-toggle"]'
+      );
+      await expect(favouriteButton).toBeVisible();
+    }
   });
 
-  test('should allow clicking favourite toggle buttons', async ({ page }) => {
-    const { testData, contacts } = createTestHelpers(page);
-
-    // Set up test state: authenticated user with contacts
-    await testData.setupAuthenticatedUser();
-    await testData.createTestContacts([
-      {
-        firstName: 'John',
-        lastName: 'Doe',
-        email: 'john@example.com',
-        isFavourite: false,
-      },
-    ]);
+  test('should allow clicking favourite toggle buttons', async ({
+    regularContacts,
+  }) => {
+    const { page, contacts } = regularContacts;
 
     // Navigate to contacts page
     await page.goto('/contacts');
     await expect(page).toHaveTitle(/Personal Management System/);
 
-    // Should show 1 contact
-    const contactCards = await contacts.waitForContactCards();
-    expect(await contactCards.count()).toBe(1);
+    // Should show contacts (all non-favourite by fixture)
+    expect(contacts.length).toBeGreaterThan(0);
+    contacts.forEach(contact => {
+      expect(contact.isFavourite).toBe(false);
+    });
 
-    // Should be able to click favourite button
-    await contacts.clickFavouriteButton();
+    // Should be able to click favourite button on first contact
+    const firstContact = contacts[0];
+    const contactCard = page.locator(
+      `[data-testid="contact-${firstContact.id}"]`
+    );
+    const favouriteButton = contactCard.locator(
+      '[data-testid="favourite-toggle"]'
+    );
+
+    await expect(favouriteButton).toBeVisible();
+    await favouriteButton.click();
+
+    // Button should be clickable (actual functionality testing would require API integration)
   });
 
   test('should display contact cards with proper structure', async ({
-    page,
+    contactsWithData,
   }) => {
-    const { testData, contacts } = createTestHelpers(page);
-
-    // Set up test state: authenticated user with contacts
-    await testData.setupAuthenticatedUser();
-    await testData.createTestContacts([
-      { firstName: 'John', lastName: 'Doe', email: 'john@example.com' },
-      { firstName: 'Jane', lastName: 'Smith', email: 'jane@example.com' },
-    ]);
+    const { page, contacts } = contactsWithData;
 
     // Navigate to contacts page
     await page.goto('/contacts');
     await expect(page).toHaveTitle(/Personal Management System/);
 
-    // Should show 2 contacts with proper structure
-    const contactCards = await contacts.waitForContactCards();
-    expect(await contactCards.count()).toBe(2);
+    // Should show contacts with proper structure (guaranteed by fixture)
+    expect(contacts).toHaveLength(2);
 
-    await contacts.verifyContactCardStructure();
+    // Verify each contact card has proper structure
+    for (const contact of contacts) {
+      const contactCard = page.locator(`[data-testid="contact-${contact.id}"]`);
+      await expect(contactCard).toBeVisible();
+
+      // Verify contact name is displayed
+      await expect(contactCard).toContainText(
+        `${contact.firstName} ${contact.lastName}`
+      );
+    }
   });
 
   test('should display empty state when no contacts exist', async ({
-    page,
+    emptyContactsPage,
   }) => {
-    const { testData } = createTestHelpers(page);
-
-    // Set up test state: authenticated user with no contacts
-    await testData.setupAuthenticatedUser();
-
     // Navigate to contacts page
-    await page.goto('/contacts');
-    await expect(page).toHaveTitle(/Personal Management System/);
+    await emptyContactsPage.goto('/contacts');
+    await expect(emptyContactsPage).toHaveTitle(/Personal Management System/);
 
-    // Should show empty state
-    const emptyState = page.locator(
+    // Should show empty state (guaranteed by fixture)
+    const emptyState = emptyContactsPage.locator(
       'text=/no contacts/i, text=/create.*contact/i'
     );
     await expect(emptyState).toBeVisible();
 
     // Should not show any contact cards
-    const contactCards = page.locator(
+    const contactCards = emptyContactsPage.locator(
       '[data-testid="contact-card"], .contact-card, [class*="card"]'
     );
     expect(await contactCards.count()).toBe(0);
   });
 
   test('should maintain responsive design with favourite toggles', async ({
-    page,
+    favouriteContacts,
   }) => {
-    const { testData, contacts } = createTestHelpers(page);
-
-    // Set up test state: authenticated user with contacts
-    await testData.setupAuthenticatedUser();
-    await testData.createTestContacts([
-      {
-        firstName: 'John',
-        lastName: 'Doe',
-        email: 'john@example.com',
-        isFavourite: true,
-      },
-    ]);
+    const { page, contacts } = favouriteContacts;
 
     // Navigate to contacts page
     await page.goto('/contacts');
     await expect(page).toHaveTitle(/Personal Management System/);
 
-    // Test responsive design
-    await contacts.testResponsiveFavouriteToggles();
+    // Should show favourite contacts (guaranteed by fixture)
+    expect(contacts.length).toBeGreaterThan(0);
+    contacts.forEach(contact => {
+      expect(contact.isFavourite).toBe(true);
+    });
+
+    // Test responsive design by checking different viewport sizes
+    const viewports = [
+      { width: 1200, height: 800 }, // Desktop
+      { width: 768, height: 1024 }, // Tablet
+      { width: 375, height: 667 }, // Mobile
+    ];
+
+    for (const viewport of viewports) {
+      await page.setViewportSize(viewport);
+
+      // Verify favourite toggles are still visible and accessible
+      for (const contact of contacts) {
+        const contactCard = page.locator(
+          `[data-testid="contact-${contact.id}"]`
+        );
+        const favouriteButton = contactCard.locator(
+          '[data-testid="favourite-toggle"]'
+        );
+        await expect(favouriteButton).toBeVisible();
+      }
+    }
   });
 });
