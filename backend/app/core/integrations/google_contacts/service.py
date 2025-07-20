@@ -18,6 +18,12 @@ from app.core.integrations.google_contacts.models import SITE_USER_ID
 logger = structlog.get_logger()
 
 
+class GoogleAuthTokensNotFoundError(Exception):
+    """Raised when no Google OAuth tokens are found for the user."""
+
+    pass
+
+
 class TokenRefreshFailedError(Exception):
     """Raised when Google token refresh fails permanently."""
 
@@ -173,7 +179,7 @@ class GoogleAuthService:
         auth_record = result.fetchone()
 
         if not auth_record:
-            raise ValueError(f"No Google auth found for {google_account_email}")
+            raise GoogleAuthTokensNotFoundError(f"No Google auth found for {google_account_email}")
 
         return self.encryption_service.decrypt(auth_record.encrypted_access_token)
 
@@ -208,7 +214,7 @@ class GoogleAuthService:
         row = result.fetchone()
 
         if not row:
-            raise ValueError(f"No Google auth found for {google_account_email}")
+            raise GoogleAuthTokensNotFoundError(f"No Google auth found for {google_account_email}")
 
         if not row.encrypted_refresh_token:
             raise TokenRefreshFailedError(

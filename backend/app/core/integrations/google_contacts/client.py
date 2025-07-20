@@ -13,6 +13,7 @@ import structlog
 
 from app.core.integrations.google_contacts.service import (
     GoogleAuthService,
+    GoogleAuthTokensNotFoundError,
     TokenRefreshFailedError,
 )
 
@@ -59,16 +60,17 @@ class GoogleAuth(httpx.Auth):
                 self._access_token = await self.auth_service.get_access_token(
                     self.google_account_email
                 )
-            except ValueError as e:
+            except GoogleAuthTokensNotFoundError as e:
                 logger.error(
                     "No Google auth tokens found",
                     google_account_email=self.google_account_email,
                     error=str(e),
                 )
-                # Let the request proceed without auth - it will fail with 401
-                # and the caller can handle the authentication error
-                yield request
-                return
+                # Raise a clear exception instead of proceeding without authentication
+                raise GoogleAuthTokensNotFoundError(
+                    f"Google OAuth tokens not found for {self.google_account_email}. "
+                    "Please authenticate with Google first."
+                ) from e
 
         # Add authorization header
         request.headers["Authorization"] = f"Bearer {self._access_token}"
