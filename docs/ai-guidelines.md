@@ -87,6 +87,78 @@ This provides complete, isolated context without noise from other integrations.
 8. **End-to-End Tests** - Full user workflows with Playwright
 9. **Deploy and Validate** - Ensure feature works in real environment
 
+### ⚠️ CRITICAL: Test Data Setup Requirements
+
+**NEVER write tests that accept multiple outcomes or skip based on data state.**
+
+#### ❌ FORBIDDEN Test Patterns
+
+```typescript
+// NEVER accept multiple outcomes
+expect(hasContacts || hasEmptyState).toBe(true); // Meaningless test
+
+// NEVER skip based on data state
+if (contactCount === 0) {
+  test.skip('No contacts found');
+}
+
+// NEVER use try-catch to suppress test failures
+try {
+  await testFeature();
+} catch {
+  console.log('Test skipped - data not available');
+}
+
+// NEVER write conditional test logic
+if (tagCount > 0) {
+  // Test with tags
+} else {
+  // Test without tags - this makes tests non-deterministic
+}
+```
+
+#### ✅ REQUIRED Test Patterns
+
+```typescript
+// ALWAYS set up exact test data needed
+test('should display contacts when they exist', async ({ page }) => {
+  const { testData } = createTestHelpers(page);
+
+  // Set up exactly what this test needs
+  await testData.setupAuthenticatedUser();
+  await testData.createTestContacts([
+    { firstName: 'John', lastName: 'Doe' },
+    { firstName: 'Jane', lastName: 'Smith' },
+  ]);
+
+  // Test expects exactly 2 contacts
+  const contacts = await page.locator('[data-testid="contact-card"]');
+  expect(await contacts.count()).toBe(2);
+});
+
+// ALWAYS have separate tests for different scenarios
+test('should display empty state when no contacts exist', async ({ page }) => {
+  const { testData } = createTestHelpers(page);
+
+  // Set up empty state
+  await testData.setupAuthenticatedUser();
+  // Don't create any contacts
+
+  // Test expects empty state
+  const emptyState = page.locator('text=/no contacts/i');
+  await expect(emptyState).toBeVisible();
+});
+```
+
+#### Test Data Setup Rules
+
+1. **Each test creates its own data** - Use `testData.createTestContacts()`, `testData.createTestTags()`, etc.
+2. **Tests are deterministic** - Each test knows exactly what data exists
+3. **No conditional logic** - Tests must not have if/else based on data state
+4. **No skipping** - Tests must not skip based on what data they find
+5. **Separate scenarios** - Different tests for empty vs populated states
+6. **Clean authentication** - Use `testData.setupAuthenticatedUser()` for auth setup
+
 ## Language Rules
 
 ### Python
