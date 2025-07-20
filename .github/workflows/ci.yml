@@ -407,10 +407,92 @@ jobs:
           flags: frontend
           name: frontend-coverage
 
+  frontend-e2e-test:
+    name: Frontend E2E Tests
+    runs-on: ubuntu-latest
+    needs: [backend-lint, frontend-lint]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - name: Get pnpm store directory
+        shell: bash
+        run: |
+          echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
+
+      - name: Setup pnpm cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.STORE_PATH }}
+          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('frontend/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-
+
+      - name: Install frontend dependencies
+        working-directory: ./frontend
+        run: pnpm install --frozen-lockfile
+
+      - name: Setup Docker environment for e2e tests
+        run: |
+          echo "🐳 Starting Docker services for e2e tests..."
+          docker-compose -f docker-compose.test.yml up -d --build
+          echo "⏳ Waiting for services to be ready..."
+
+          # Wait for backend to be healthy
+          timeout 300 bash -c 'until curl -f -s http://localhost:8001/api/health > /dev/null; do echo "Waiting for backend..."; sleep 5; done'
+          echo "✅ Backend is ready"
+
+          # Wait for OAuth provider to be ready
+          timeout 300 bash -c 'until curl -f -s http://localhost:4447/health/ready > /dev/null; do echo "Waiting for OAuth provider..."; sleep 5; done'
+          echo "✅ OAuth provider is ready"
+
+          # Wait for MeiliSearch to be healthy
+          timeout 300 bash -c 'until curl -f -s http://localhost:7701/health > /dev/null; do echo "Waiting for MeiliSearch..."; sleep 5; done'
+          echo "✅ MeiliSearch is ready"
+
+          echo "🎉 All services are ready for e2e tests!"
+
+      - name: Install Playwright Browsers
+        working-directory: ./frontend
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Run Playwright tests
+        working-directory: ./frontend
+        env:
+          CI: true
+          CLEANUP_AFTER_TESTS: true
+        run: pnpm exec playwright test
+
+      - name: Upload Playwright Report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: playwright-report
+          path: frontend/playwright-report/
+          retention-days: 7
+
+      - name: Cleanup Docker environment
+        if: always()
+        run: |
+          echo "🧹 Cleaning up Docker environment..."
+          docker-compose -f docker-compose.test.yml down --volumes --remove-orphans
+          echo "✅ Cleanup complete"
+
   build-test:
     name: Build Test
     runs-on: ubuntu-latest
-    needs: [backend-lint, core-shared-lint, backend-unit-test, core-shared-unit-test, backend-integration-test, frontend-lint, frontend-test]
+    needs: [backend-lint, core-shared-lint, backend-unit-test, core-shared-unit-test, backend-integration-test, frontend-lint, frontend-test, frontend-e2e-test]
 
     steps:
       - name: Checkout code

@@ -1,11 +1,21 @@
 #!/bin/sh
 
-# OAuth Provider Initialization Script for Testing
-# This script creates the OAuth client automatically for testing environments
+# OAuth Provider Initialization Script
+# This script creates the OAuth client automatically for development and testing environments
 
 set -e
 
-echo "🧪 Starting OAuth provider initialization for testing..."
+# Environment-specific configuration with defaults
+OAUTH_PROVIDER_HOST=${OAUTH_PROVIDER_HOST:-oauth-provider-dev}
+OAUTH_ADMIN_PORT=${OAUTH_ADMIN_PORT:-4445}
+CLIENT_ID=${CLIENT_ID:-dev-client-id}
+CLIENT_SECRET=${CLIENT_SECRET:-dev-client-secret}
+ENVIRONMENT=${ENVIRONMENT:-development}
+FRONTEND_URL=${FRONTEND_URL:-http://localhost:3000}
+PUBLIC_PORT=${PUBLIC_PORT:-4444}
+ADMIN_PORT_EXTERNAL=${ADMIN_PORT_EXTERNAL:-4445}
+
+echo "🔧 Starting OAuth provider initialization for ${ENVIRONMENT}..."
 
 # Colors for output (if supported)
 if [ -t 1 ]; then
@@ -46,11 +56,14 @@ print_error() {
 
 # Wait for Hydra to be ready with better error handling
 print_step "Waiting for Hydra to be ready..."
-max_attempts=60  # Increased timeout for test environment
+max_attempts=60  # Increased timeout for environments
 attempt=0
 
+HEALTH_URL="http://${OAUTH_PROVIDER_HOST}:${OAUTH_ADMIN_PORT}/health/ready"
+print_step "Checking health at: ${HEALTH_URL}"
+
 while [ $attempt -lt $max_attempts ]; do
-    if curl -f -s http://oauth-provider-dev:4445/health/ready >/dev/null 2>&1; then
+    if curl -f -s "${HEALTH_URL}" >/dev/null 2>&1; then
         print_success "Hydra is ready!"
         break
     fi
@@ -66,7 +79,7 @@ done
 
 if [ $attempt -eq $max_attempts ]; then
     print_error "Hydra failed to start within expected time"
-    print_error "Check Hydra logs: docker logs pms-oauth-test"
+    print_error "Check Hydra logs for more details"
     exit 1
 fi
 
@@ -75,9 +88,10 @@ sleep 3
 
 # Check if client already exists
 print_step "Checking if OAuth client already exists..."
-if curl -f -s http://oauth-provider-dev:4445/admin/clients/dev-client-id >/dev/null 2>&1; then
+CLIENT_CHECK_URL="http://${OAUTH_PROVIDER_HOST}:${OAUTH_ADMIN_PORT}/admin/clients/${CLIENT_ID}"
+if curl -f -s "${CLIENT_CHECK_URL}" >/dev/null 2>&1; then
     print_warning "OAuth client already exists, removing it first..."
-    if curl -X DELETE -s http://oauth-provider-dev:4445/admin/clients/dev-client-id >/dev/null 2>&1; then
+    if curl -X DELETE -s "${CLIENT_CHECK_URL}" >/dev/null 2>&1; then
         print_success "Existing client removed"
         sleep 2  # Wait for deletion to complete
     else
@@ -85,31 +99,35 @@ if curl -f -s http://oauth-provider-dev:4445/admin/clients/dev-client-id >/dev/n
     fi
 fi
 
-# Create OAuth client with comprehensive configuration for testing
-print_step "Creating OAuth client for testing..."
+# Create OAuth client with comprehensive configuration
+print_step "Creating OAuth client for ${ENVIRONMENT}..."
 
-CLIENT_CONFIG='{
-    "client_id": "dev-client-id",
-    "client_secret": "dev-client-secret",
+CLIENT_CONFIG=$(cat <<EOF
+{
+    "client_id": "${CLIENT_ID}",
+    "client_secret": "${CLIENT_SECRET}",
     "grant_types": ["authorization_code", "refresh_token"],
     "response_types": ["code"],
-    "redirect_uris": ["http://localhost:3000/auth/callback"],
-    "post_logout_redirect_uris": ["http://localhost:3000/"],
+    "redirect_uris": ["${FRONTEND_URL}/auth/callback"],
+    "post_logout_redirect_uris": ["${FRONTEND_URL}/"],
     "scope": "openid profile email",
     "audience": [],
     "skip_consent": true,
     "skip_logout_consent": true,
-    "client_name": "Personal Management System (Testing)",
-    "client_uri": "http://localhost:3000",
+    "client_name": "Personal Management System (${ENVIRONMENT})",
+    "client_uri": "${FRONTEND_URL}",
     "logo_uri": "",
     "policy_uri": "",
     "tos_uri": "",
     "token_endpoint_auth_method": "client_secret_post",
     "userinfo_signed_response_alg": "none",
     "subject_type": "public"
-}'
+}
+EOF
+)
 
-if curl -X POST http://oauth-provider-dev:4445/admin/clients \
+CREATE_CLIENT_URL="http://${OAUTH_PROVIDER_HOST}:${OAUTH_ADMIN_PORT}/admin/clients"
+if curl -X POST "${CREATE_CLIENT_URL}" \
     -H "Content-Type: application/json" \
     -d "$CLIENT_CONFIG" \
     -f -s >/dev/null 2>&1; then
@@ -117,7 +135,7 @@ if curl -X POST http://oauth-provider-dev:4445/admin/clients \
 else
     print_error "Failed to create OAuth client"
     print_error "Response from Hydra:"
-    curl -X POST http://oauth-provider-dev:4445/admin/clients \
+    curl -X POST "${CREATE_CLIENT_URL}" \
         -H "Content-Type: application/json" \
         -d "$CLIENT_CONFIG" 2>&1 || true
     exit 1
@@ -125,17 +143,17 @@ fi
 
 # Verify client configuration
 print_step "Verifying OAuth client configuration..."
-CLIENT_INFO=$(curl -s http://oauth-provider-dev:4445/admin/clients/dev-client-id 2>/dev/null)
+CLIENT_INFO=$(curl -s "${CLIENT_CHECK_URL}" 2>/dev/null)
 
-if [ $? -eq 0 ] && echo "$CLIENT_INFO" | grep -q '"client_id":"dev-client-id"'; then
+if [ $? -eq 0 ] && echo "$CLIENT_INFO" | grep -q "\"client_id\":\"${CLIENT_ID}\""; then
     print_success "Client verification successful"
-    
+
     # Extract and display key configuration
     echo ""
-    print_step "OAuth Client Configuration (Testing):"
-    echo "  Client ID: dev-client-id"
-    echo "  Client Name: Personal Management System (Development)"
-    echo "  Redirect URI: http://localhost:3000/auth/callback"
+    print_step "OAuth Client Configuration (${ENVIRONMENT}):"
+    echo "  Client ID: ${CLIENT_ID}"
+    echo "  Client Name: Personal Management System (${ENVIRONMENT})"
+    echo "  Redirect URI: ${FRONTEND_URL}/auth/callback"
     echo "  Grant Types: authorization_code, refresh_token"
     echo "  Scope: openid profile email"
     echo "  Skip Consent: true"
@@ -147,7 +165,8 @@ fi
 print_step "Testing OAuth endpoints..."
 
 # Test authorization endpoint
-AUTH_URL="http://localhost:4446/oauth2/auth?client_id=test-client-id&response_type=code&scope=openid%20profile%20email&redirect_uri=http://localhost:3000/auth/callback&state=test"
+PUBLIC_URL="http://localhost:${PUBLIC_PORT}"
+AUTH_URL="${PUBLIC_URL}/oauth2/auth?client_id=${CLIENT_ID}&response_type=code&scope=openid%20profile%20email&redirect_uri=${FRONTEND_URL}/auth/callback&state=test"
 
 if curl -s -o /dev/null -w "%{http_code}" "$AUTH_URL" | grep -E "^(200|302)$" >/dev/null; then
     print_success "Authorization endpoint is working"
@@ -155,15 +174,15 @@ else
     print_warning "Authorization endpoint test inconclusive"
 fi
 
-print_success "OAuth provider initialization complete for testing!"
+print_success "OAuth provider initialization complete for ${ENVIRONMENT}!"
 echo ""
-print_step "🔗 OAuth Configuration Summary (Testing):"
-echo "  Authorization URL: http://localhost:4446/oauth2/auth"
-echo "  Token URL: http://localhost:4446/oauth2/token"
-echo "  Userinfo URL: http://localhost:4446/userinfo"
-echo "  Admin URL: http://localhost:4447"
+print_step "🔗 OAuth Configuration Summary (${ENVIRONMENT}):"
+echo "  Authorization URL: ${PUBLIC_URL}/oauth2/auth"
+echo "  Token URL: ${PUBLIC_URL}/oauth2/token"
+echo "  Userinfo URL: ${PUBLIC_URL}/userinfo"
+echo "  Admin URL: http://localhost:${ADMIN_PORT_EXTERNAL}"
 echo ""
 print_step "🧪 Test the OAuth flow:"
 echo "  1. Run tests: npm run test:e2e -- oauth-flow.spec.ts"
-echo "  2. Or manually test at http://localhost:3000/auth/login"
+echo "  2. Or manually test at ${FRONTEND_URL}/auth/login"
 echo ""
