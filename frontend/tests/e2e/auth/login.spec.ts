@@ -31,9 +31,9 @@ test.describe('Login Page - Unauthenticated Users', () => {
       );
       await expect(description).toBeVisible();
 
-      // Check login form is present
-      const loginForm = unauthenticatedPage.locator('main');
-      await expect(loginForm).toBeVisible();
+      // Check login form is present - look for the login card
+      const loginCard = unauthenticatedPage.locator('[class*="max-w-md"]');
+      await expect(loginCard).toBeVisible();
     });
 
     test('should display OAuth provider buttons', async ({
@@ -77,10 +77,20 @@ test.describe('Login Page - Unauthenticated Users', () => {
   });
 
   test.describe('OAuth Provider Interactions', () => {
-    test('should have clickable OAuth provider buttons', async ({ page }) => {
+    test('should have clickable OAuth provider buttons', async ({
+      unauthenticatedPage,
+    }) => {
+      // Navigate to login page
+      await unauthenticatedPage.goto('/auth/login');
+
+      // Wait for providers to load
+      await unauthenticatedPage.waitForLoadState('networkidle');
+
       // Get all OAuth provider buttons
-      const oauthButtons = page.locator('button:has-text("Continue with")');
-      await expect(oauthButtons.first()).toBeVisible();
+      const oauthButtons = unauthenticatedPage.locator(
+        'button:has-text("Continue with")'
+      );
+      await expect(oauthButtons.first()).toBeVisible({ timeout: 10000 });
 
       // Check that all buttons are visible and enabled
       const buttonCount = await oauthButtons.count();

@@ -89,7 +89,7 @@ function LoginContent() {
   }
 
   return (
-    <main className='container mx-auto flex min-h-screen items-center justify-center px-4 py-8'>
+    <div className='flex min-h-screen items-center justify-center px-4 py-8'>
       <Card className='w-full max-w-md'>
         <CardHeader className='space-y-1 text-center'>
           <h1 className='text-2xl font-bold tracking-tight'>
@@ -157,7 +157,7 @@ function LoginContent() {
           </div>
         </CardContent>
       </Card>
-    </main>
+    </div>
   );
 }
 
