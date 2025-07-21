@@ -62,20 +62,7 @@ class DockerManager:
 
     def _get_docker_compose_cmd(self) -> list[str]:
         """Get the appropriate docker compose command."""
-        # Try docker-compose first (standalone version)
-        try:
-            result = subprocess.run(
-                ["docker-compose", "--version"],
-                check=True,
-                capture_output=True,
-                text=True,
-            )
-            if "docker-compose" in result.stdout:
-                return ["docker-compose"]
-        except (subprocess.CalledProcessError, FileNotFoundError):
-            pass
-
-        # Try docker compose (plugin version)
+        # Try docker compose first (plugin version - preferred in CI)
         try:
             result = subprocess.run(
                 ["docker", "compose", "--version"],
@@ -88,8 +75,21 @@ class DockerManager:
         except (subprocess.CalledProcessError, FileNotFoundError):
             pass
 
-        # Default to docker-compose
-        return ["docker-compose"]
+        # Try docker-compose (standalone version)
+        try:
+            result = subprocess.run(
+                ["docker-compose", "--version"],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            if "docker-compose" in result.stdout:
+                return ["docker-compose"]
+        except (subprocess.CalledProcessError, FileNotFoundError):
+            pass
+
+        # Default to docker compose (newer version)
+        return ["docker", "compose"]
 
     def is_container_running(self, container_filter: str) -> bool:
         """Check if a container matching the filter is running."""

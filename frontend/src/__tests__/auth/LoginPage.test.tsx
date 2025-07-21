@@ -147,13 +147,14 @@ describe('LoginPage', () => {
   it('should be responsive and mobile-friendly', () => {
     renderWithProviders(<LoginPage />);
 
-    // Check responsive classes are applied - look for the login container
-    const container = screen.getByRole('heading', { level: 1 }).closest('div');
-    expect(container).toBeInTheDocument();
+    // Check that the login card has responsive classes
+    const heading = screen.getByRole('heading', { level: 1 });
+    expect(heading).toBeInTheDocument();
 
-    // Check mobile-first responsive design
-    const loginCard = container?.querySelector('[class*="max-w"]');
+    // Check mobile-first responsive design - look for the card with max-width
+    const loginCard = heading.closest('[class*="max-w"]');
     expect(loginCard).toBeInTheDocument();
+    expect(loginCard).toHaveClass('max-w-md');
   });
 
   it('should follow Australian English localization', () => {
