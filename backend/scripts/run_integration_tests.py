@@ -9,17 +9,7 @@ from pathlib import Path
 
 def get_docker_compose_cmd() -> list[str]:
     """Get the appropriate docker compose command."""
-    # Try docker-compose first (standalone version)
-    try:
-        result = subprocess.run(
-            ["docker-compose", "--version"], check=True, capture_output=True, text=True
-        )
-        if "docker-compose" in result.stdout:
-            return ["docker-compose"]
-    except (subprocess.CalledProcessError, FileNotFoundError):
-        pass
-
-    # Try docker compose (plugin version)
+    # Try docker compose first (plugin version - preferred in CI)
     try:
         result = subprocess.run(
             ["docker", "compose", "--version"],
@@ -32,8 +22,18 @@ def get_docker_compose_cmd() -> list[str]:
     except (subprocess.CalledProcessError, FileNotFoundError):
         pass
 
-    # Default to docker-compose
-    return ["docker-compose"]
+    # Try docker-compose (standalone version)
+    try:
+        result = subprocess.run(
+            ["docker-compose", "--version"], check=True, capture_output=True, text=True
+        )
+        if "docker-compose" in result.stdout:
+            return ["docker-compose"]
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        pass
+
+    # Default to docker compose (newer version)
+    return ["docker", "compose"]
 
 
 def run_command(
