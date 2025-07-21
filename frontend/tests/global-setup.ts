@@ -55,6 +55,27 @@ async function waitForService(
 }
 
 /**
+ * Detect the correct Docker Compose command (v2 plugin vs standalone)
+ */
+function getDockerComposeCommand(): string {
+  try {
+    // Try 'docker compose' first (v2 plugin)
+    execSync('docker compose version', { stdio: 'pipe' });
+    return 'docker compose';
+  } catch {
+    try {
+      // Fall back to 'docker-compose' (standalone)
+      execSync('docker-compose version', { stdio: 'pipe' });
+      return 'docker-compose';
+    } catch {
+      throw new Error(
+        'Neither "docker compose" nor "docker-compose" is available'
+      );
+    }
+  }
+}
+
+/**
  * Execute shell command with error handling
  */
 function execCommand(command: string, description: string): void {
@@ -76,8 +97,9 @@ function execCommand(command: string, description: string): void {
  */
 function areServicesRunning(): boolean {
   try {
+    const dockerComposeCmd = getDockerComposeCommand();
     const result = execSync(
-      'docker-compose -f docker-compose.test.yml ps --services --filter "status=running"',
+      `${dockerComposeCmd} -f docker-compose.test.yml ps --services --filter "status=running"`,
       {
         encoding: 'utf8',
         stdio: 'pipe',
@@ -107,6 +129,10 @@ async function globalSetup(config: FullConfig) {
   const projectRoot = process.cwd().replace('/frontend', '');
   process.chdir(projectRoot);
 
+  // Detect the correct Docker Compose command
+  const dockerComposeCmd = getDockerComposeCommand();
+  console.log(`🐳 Using Docker Compose command: ${dockerComposeCmd}`);
+
   try {
     // Check if services are already running
     if (areServicesRunning()) {
@@ -114,13 +140,13 @@ async function globalSetup(config: FullConfig) {
     } else {
       // Stop any existing containers to ensure clean state
       execCommand(
-        'docker-compose -f docker-compose.test.yml down --remove-orphans',
+        `${dockerComposeCmd} -f docker-compose.test.yml down --remove-orphans`,
         'Cleaning up existing containers'
       );
 
       // Start Docker services (docker-compose v1 doesn't support --wait)
       execCommand(
-        'docker-compose -f docker-compose.test.yml up -d --build',
+        `${dockerComposeCmd} -f docker-compose.test.yml up -d --build`,
         'Starting Docker services'
       );
     }
@@ -164,10 +190,14 @@ async function globalSetup(config: FullConfig) {
     // Show service logs for debugging
     try {
       console.log('📋 Docker service logs:');
-      execSync('docker-compose -f docker-compose.test.yml logs --tail=50', {
-        stdio: 'inherit',
-        cwd: projectRoot,
-      });
+      const dockerComposeCmd = getDockerComposeCommand();
+      execSync(
+        `${dockerComposeCmd} -f docker-compose.test.yml logs --tail=50`,
+        {
+          stdio: 'inherit',
+          cwd: projectRoot,
+        }
+      );
     } catch (logError) {
       console.error('Failed to retrieve logs:', logError);
     }
