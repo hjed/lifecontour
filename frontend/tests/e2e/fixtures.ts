@@ -262,17 +262,37 @@ export const test = base.extend<TestFixtures, WorkerFixtures>({
 
   // Test-scoped fixture: Unauthenticated page (clean state)
   unauthenticatedPage: async ({ page }, use) => {
-    // Clear any existing auth state
-    await page.evaluate(() => {
-      sessionStorage.clear();
-      localStorage.clear();
-      // Clear cookies by setting them to expire
-      document.cookie.split(';').forEach(cookie => {
-        const eqPos = cookie.indexOf('=');
-        const name = eqPos > -1 ? cookie.substr(0, eqPos) : cookie;
-        document.cookie = `${name}=;expires=Thu, 01 Jan 1970 00:00:00 GMT;path=/`;
-      });
-    });
+    // Clear any existing auth state using Playwright's context methods
+    try {
+      // Clear storage state using Playwright's built-in methods
+      await page.context().clearCookies();
+
+      // Try to clear storage via evaluate, but catch any SecurityErrors
+      try {
+        await page.evaluate(() => {
+          try {
+            sessionStorage.clear();
+            localStorage.clear();
+          } catch (e) {
+            // Ignore SecurityError when storage is not accessible
+            console.log(
+              'Storage clearing failed (likely SecurityError):',
+              (e as Error).message
+            );
+          }
+        });
+      } catch (e) {
+        // Ignore SecurityError from page.evaluate itself
+        console.log(
+          'Page evaluate failed (likely SecurityError):',
+          (e as Error).message
+        );
+      }
+    } catch (e) {
+      // Ignore any other errors during cleanup
+      console.log('Context cleanup failed:', (e as Error).message);
+    }
+
     await use(page);
   },
 

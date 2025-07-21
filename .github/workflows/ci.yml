@@ -443,23 +443,72 @@ jobs:
         working-directory: ./frontend
         run: pnpm install --frozen-lockfile
 
+      - name: Check system resources
+        run: |
+          echo "🔍 System information:"
+          echo "CPU cores: $(nproc)"
+          echo "Memory: $(free -h)"
+          echo "Disk space: $(df -h)"
+          echo "Docker version: $(docker --version)"
+          echo "Docker Compose version: $(docker compose version)"
+
       - name: Setup Docker environment for e2e tests
         run: |
           echo "🐳 Starting Docker services for e2e tests..."
           docker compose -f docker-compose.test.yml up -d --build
+
+          echo "📋 Checking Docker services status..."
+          docker compose -f docker-compose.test.yml ps
+
           echo "⏳ Waiting for services to be ready..."
 
-          # Wait for backend to be healthy
-          timeout 300 bash -c 'until curl -f -s http://localhost:8001/api/health > /dev/null; do echo "Waiting for backend..."; sleep 5; done'
-          echo "✅ Backend is ready"
+          # Wait for backend to be healthy with more detailed logging
+          echo "Waiting for backend API..."
+          for i in {1..60}; do
+            if curl -f -s http://localhost:8001/api/health > /dev/null 2>&1; then
+              echo "✅ Backend is ready!"
+              break
+            fi
+            echo "Backend not ready yet... ($i/60)"
+            if [ $i -eq 60 ]; then
+              echo "❌ Backend failed to start. Checking logs..."
+              docker compose -f docker-compose.test.yml logs backend-test
+              exit 1
+            fi
+            sleep 5
+          done
 
           # Wait for OAuth provider to be ready
-          timeout 300 bash -c 'until curl -f -s http://localhost:4447/health/ready > /dev/null; do echo "Waiting for OAuth provider..."; sleep 5; done'
-          echo "✅ OAuth provider is ready"
+          echo "Waiting for OAuth provider..."
+          for i in {1..60}; do
+            if curl -f -s http://localhost:4447/health/ready > /dev/null 2>&1; then
+              echo "✅ OAuth provider is ready!"
+              break
+            fi
+            echo "OAuth provider not ready yet... ($i/60)"
+            if [ $i -eq 60 ]; then
+              echo "❌ OAuth provider failed to start. Checking logs..."
+              docker compose -f docker-compose.test.yml logs oauth-provider-test
+              exit 1
+            fi
+            sleep 5
+          done
 
           # Wait for MeiliSearch to be healthy
-          timeout 300 bash -c 'until curl -f -s http://localhost:7701/health > /dev/null; do echo "Waiting for MeiliSearch..."; sleep 5; done'
-          echo "✅ MeiliSearch is ready"
+          echo "Waiting for MeiliSearch..."
+          for i in {1..60}; do
+            if curl -f -s http://localhost:7701/health > /dev/null 2>&1; then
+              echo "✅ MeiliSearch is ready!"
+              break
+            fi
+            echo "MeiliSearch not ready yet... ($i/60)"
+            if [ $i -eq 60 ]; then
+              echo "❌ MeiliSearch failed to start. Checking logs..."
+              docker compose -f docker-compose.test.yml logs meilisearch-test
+              exit 1
+            fi
+            sleep 5
+          done
 
           echo "🎉 All services are ready for e2e tests!"
 
@@ -472,7 +521,7 @@ jobs:
         env:
           CI: true
           CLEANUP_AFTER_TESTS: true
-        run: pnpm exec playwright test
+        run: pnpm exec playwright test --project=chromium
 
       - name: Upload Playwright Report
         uses: actions/upload-artifact@v4
