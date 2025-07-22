@@ -185,6 +185,39 @@ class GoogleAuthService:
 
         return self.encryption_service.decrypt(auth_record.encrypted_access_token)
 
+    async def get_refresh_token(self, google_account_email: str) -> str | None:
+        """
+        Get decrypted refresh token for a Google account.
+
+        Args:
+            google_account_email: Google account email address
+
+        Returns:
+            Decrypted refresh token or None if not available
+
+        Raises:
+            GoogleAuthTokensNotFoundError: If no tokens found for the account
+        """
+        stmt = text("""
+            SELECT encrypted_refresh_token
+            FROM user_google_auth
+            WHERE user_id = :user_id AND google_account_email = :email
+        """)
+        result = await self.connection.execute(
+            stmt, {"user_id": SITE_USER_ID, "email": google_account_email}
+        )
+        auth_record = result.fetchone()
+
+        if not auth_record:
+            raise GoogleAuthTokensNotFoundError(
+                f"No Google auth found for {google_account_email}"
+            )
+
+        if not auth_record.encrypted_refresh_token:
+            return None
+
+        return self.encryption_service.decrypt(auth_record.encrypted_refresh_token)
+
     async def refresh_access_token(self, google_account_email: str) -> str:
         """
         Refresh Google access token using refresh token.

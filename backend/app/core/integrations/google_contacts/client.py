@@ -1,15 +1,17 @@
 """
-Google Contacts API client with automatic token refresh.
+Google Contacts API client using official Google Python client library.
 
 Provides a clean interface to the Google People API with automatic
-OAuth token refresh on 401 responses.
+OAuth token refresh and proper credential management using the official
+google-api-python-client library.
 """
 
-from collections.abc import AsyncGenerator
-from typing import Any
+from typing import Any, cast
 
-import httpx
 import structlog
+from google.oauth2.credentials import Credentials as OAuth2Credentials
+from googleapiclient.discovery import build
+from googleapiclient.errors import HttpError
 
 from app.core.integrations.google_contacts.service import (
     GoogleAuthService,
@@ -20,99 +22,95 @@ from app.core.integrations.google_contacts.service import (
 logger = structlog.get_logger()
 
 
-class GoogleAuth(httpx.Auth):
+class GoogleCredentials(OAuth2Credentials):
     """
-    Custom httpx authentication handler for Google API with automatic token refresh.
+    Custom Google OAuth2 credentials with automatic token refresh.
 
-    Handles 401 responses by automatically refreshing the access token
-    and retrying the request.
+    Integrates with our GoogleAuthService to provide automatic token refresh
+    for the official Google API client library.
     """
 
     def __init__(
-        self, auth_service: GoogleAuthService, google_account_email: str
+        self,
+        auth_service: GoogleAuthService,
+        google_account_email: str,
+        access_token: str,
+        refresh_token: str | None = None,
+        client_id: str | None = None,
+        client_secret: str | None = None,
     ) -> None:
         """
-        Initialize Google authentication handler.
+        Initialize Google credentials with auto-refresh capability.
 
         Args:
             auth_service: Service for managing Google OAuth tokens
             google_account_email: Google account email for token lookup
+            access_token: Current access token
+            refresh_token: Refresh token for automatic renewal
+            client_id: Google OAuth client ID
+            client_secret: Google OAuth client secret
         """
+        super().__init__(
+            token=access_token,
+            refresh_token=refresh_token,
+            client_id=client_id,
+            client_secret=client_secret,
+        )
         self.auth_service = auth_service
         self.google_account_email = google_account_email
-        self._access_token: str | None = None
 
-    async def async_auth_flow(
-        self, request: httpx.Request
-    ) -> AsyncGenerator[httpx.Request, httpx.Response]:
+    async def refresh(self, request: Any) -> None:
         """
-        Handle authentication flow with automatic token refresh.
+        Refresh the access token using our auth service.
+
+        This method is called automatically by the Google client library
+        when the access token expires.
 
         Args:
-            request: HTTP request to authenticate
-
-        Yields:
-            Authenticated HTTP request
+            request: HTTP request object (unused in our implementation)
         """
-        # Get initial token if not cached
-        if not self._access_token:
-            try:
-                self._access_token = await self.auth_service.get_access_token(
-                    self.google_account_email
-                )
-            except GoogleAuthTokensNotFoundError as e:
-                logger.error(
-                    "No Google auth tokens found",
-                    google_account_email=self.google_account_email,
-                    error=str(e),
-                )
-                # Raise a clear exception instead of proceeding without authentication
-                raise GoogleAuthTokensNotFoundError(
-                    f"Google OAuth tokens not found for {self.google_account_email}. "
-                    "Please authenticate with Google first."
-                ) from e
-
-        # Add authorization header
-        request.headers["Authorization"] = f"Bearer {self._access_token}"
-        response = yield request
-
-        # Check if token expired and refresh if needed
-        if response.status_code == 401:
+        try:
             logger.info(
-                "Google API returned 401, attempting token refresh",
+                "Refreshing Google access token",
                 google_account_email=self.google_account_email,
             )
 
-            try:
-                # Refresh the token
-                self._access_token = await self.auth_service.refresh_access_token(
-                    self.google_account_email
-                )
+            # Use our auth service to refresh the token
+            new_access_token = await self.auth_service.refresh_access_token(
+                self.google_account_email
+            )
 
-                # Retry the request with new token
-                request.headers["Authorization"] = f"Bearer {self._access_token}"
-                yield request
+            # Update the credentials
+            self.token = new_access_token
 
-            except TokenRefreshFailedError as e:
-                logger.error(
-                    "Google token refresh failed permanently",
-                    google_account_email=self.google_account_email,
-                    error=str(e),
-                )
-                # Don't yield another request - let the 401 response be returned
-                # The caller should handle this as an authentication failure
+            logger.info(
+                "Successfully refreshed Google access token",
+                google_account_email=self.google_account_email,
+            )
+
+        except TokenRefreshFailedError as e:
+            logger.error(
+                "Failed to refresh Google access token",
+                google_account_email=self.google_account_email,
+                error=str(e),
+            )
+            raise e
 
 
 class GoogleContactsAPIClient:
     """
-    Client for Google People API with automatic authentication.
+    Client for Google People API using official Google Python client library.
 
     Provides methods for accessing Google Contacts data with automatic
-    OAuth token management and refresh.
+    OAuth token management and refresh using the official google-api-python-client.
     """
 
     def __init__(
-        self, auth_service: GoogleAuthService, google_account_email: str
+        self,
+        auth_service: GoogleAuthService,
+        google_account_email: str,
+        google_client_id: str,
+        google_client_secret: str,
     ) -> None:
         """
         Initialize Google Contacts API client.
@@ -120,22 +118,59 @@ class GoogleContactsAPIClient:
         Args:
             auth_service: Service for managing Google OAuth tokens
             google_account_email: Google account email for API access
+            google_client_id: Google OAuth client ID
+            google_client_secret: Google OAuth client secret
         """
+        self.auth_service = auth_service
         self.google_account_email = google_account_email
-        self.auth = GoogleAuth(auth_service, google_account_email)
-        self.client = httpx.AsyncClient(
-            auth=self.auth,
-            base_url="https://people.googleapis.com",
-            timeout=30.0,
-        )
+        self.google_client_id = google_client_id
+        self.google_client_secret = google_client_secret
+        self._service = None
 
-    async def __aenter__(self) -> "GoogleContactsAPIClient":
-        """Async context manager entry."""
-        return self
+    async def _get_service(self) -> Any:
+        """
+        Get or create the Google People API service with proper credentials.
 
-    async def __aexit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
-        """Async context manager exit."""
-        await self.client.aclose()
+        Returns:
+            Google People API service instance
+        """
+        if self._service is None:
+            try:
+                # Get current access token
+                access_token = await self.auth_service.get_access_token(
+                    self.google_account_email
+                )
+
+                # Get refresh token (if available)
+                refresh_token = await self.auth_service.get_refresh_token(
+                    self.google_account_email
+                )
+
+                # Create credentials
+                credentials = GoogleCredentials(
+                    auth_service=self.auth_service,
+                    google_account_email=self.google_account_email,
+                    access_token=access_token,
+                    refresh_token=refresh_token,
+                    client_id=self.google_client_id,
+                    client_secret=self.google_client_secret,
+                )
+
+                # Build the service
+                self._service = build("people", "v1", credentials=credentials)
+
+            except GoogleAuthTokensNotFoundError as e:
+                logger.error(
+                    "No Google auth tokens found",
+                    google_account_email=self.google_account_email,
+                    error=str(e),
+                )
+                raise GoogleAuthTokensNotFoundError(
+                    f"Google OAuth tokens not found for {self.google_account_email}. "
+                    "Please authenticate with Google first."
+                ) from e
+
+        return self._service
 
     async def list_connections(
         self,
@@ -144,7 +179,7 @@ class GoogleContactsAPIClient:
         sync_token: str | None = None,
     ) -> dict[str, Any]:
         """
-        List contacts from Google People API.
+        List contacts from Google People API using official client library.
 
         Args:
             page_size: Number of contacts to return per page (max 2000)
@@ -155,45 +190,57 @@ class GoogleContactsAPIClient:
             Google People API response with contacts data
 
         Raises:
-            httpx.HTTPStatusError: If API request fails
+            HttpError: If API request fails
+            GoogleAuthTokensNotFoundError: If authentication tokens are missing
         """
-        params: dict[str, str | int] = {
-            "resourceName": "people/me",
-            "pageSize": min(page_size, 2000),  # Google's max limit
-            "personFields": "names,emailAddresses,phoneNumbers,addresses,organizations,birthdays,metadata",
-        }
+        try:
+            service = await self._get_service()
 
-        if page_token:
-            params["pageToken"] = page_token
-        if sync_token:
-            params["syncToken"] = sync_token
+            # Build request parameters
+            request_params = {
+                "resourceName": "people/me",
+                "pageSize": min(page_size, 2000),  # Google's max limit
+                "personFields": "names,emailAddresses,phoneNumbers,addresses,organizations,birthdays,metadata",
+            }
 
-        logger.info(
-            "Fetching Google contacts",
-            google_account_email=self.google_account_email,
-            page_size=page_size,
-            has_page_token=bool(page_token),
-            has_sync_token=bool(sync_token),
-        )
+            if page_token:
+                request_params["pageToken"] = page_token
+            if sync_token:
+                request_params["syncToken"] = sync_token
 
-        response = await self.client.get("/v1/people/me/connections", params=params)
-        response.raise_for_status()
+            logger.info(
+                "Fetching Google contacts using official client",
+                google_account_email=self.google_account_email,
+                page_size=page_size,
+                has_page_token=bool(page_token),
+                has_sync_token=bool(sync_token),
+            )
 
-        data: dict[str, Any] = response.json()
+            # Make the API call using official client
+            result = service.people().connections().list(**request_params).execute()
 
-        logger.info(
-            "Successfully fetched Google contacts",
-            google_account_email=self.google_account_email,
-            total_items=len(data.get("connections", [])),
-            next_page_token=data.get("nextPageToken"),
-            next_sync_token=data.get("nextSyncToken"),
-        )
+            logger.info(
+                "Successfully fetched Google contacts",
+                google_account_email=self.google_account_email,
+                total_items=len(result.get("connections", [])),
+                next_page_token=result.get("nextPageToken"),
+                next_sync_token=result.get("nextSyncToken"),
+            )
 
-        return data
+            return cast(dict[str, Any], result)
+
+        except HttpError as e:
+            logger.error(
+                "Google API error while fetching contacts",
+                google_account_email=self.google_account_email,
+                error=str(e),
+                status_code=e.resp.status,
+            )
+            raise e
 
     async def get_contact(self, resource_name: str) -> dict[str, Any]:
         """
-        Get a specific contact by resource name.
+        Get a specific contact by resource name using official client library.
 
         Args:
             resource_name: Google contact resource name (e.g., "people/123")
@@ -202,31 +249,47 @@ class GoogleContactsAPIClient:
             Google People API contact data
 
         Raises:
-            httpx.HTTPStatusError: If API request fails
+            HttpError: If API request fails
+            GoogleAuthTokensNotFoundError: If authentication tokens are missing
         """
-        params = {
-            "personFields": "names,emailAddresses,phoneNumbers,addresses,organizations,birthdays,metadata"
-        }
+        try:
+            service = await self._get_service()
 
-        logger.info(
-            "Fetching Google contact",
-            google_account_email=self.google_account_email,
-            resource_name=resource_name,
-        )
+            logger.info(
+                "Fetching Google contact using official client",
+                google_account_email=self.google_account_email,
+                resource_name=resource_name,
+            )
 
-        response = await self.client.get(f"/v1/{resource_name}", params=params)
-        response.raise_for_status()
+            # Make the API call using official client
+            result = (
+                service.people()
+                .get(
+                    resourceName=resource_name,
+                    personFields="names,emailAddresses,phoneNumbers,addresses,organizations,birthdays,metadata",
+                )
+                .execute()
+            )
 
-        data: dict[str, Any] = response.json()
+            logger.info(
+                "Successfully fetched Google contact",
+                google_account_email=self.google_account_email,
+                resource_name=resource_name,
+            )
 
-        logger.info(
-            "Successfully fetched Google contact",
-            google_account_email=self.google_account_email,
-            resource_name=resource_name,
-        )
+            return cast(dict[str, Any], result)
 
-        return data
+        except HttpError as e:
+            logger.error(
+                "Google API error while fetching contact",
+                google_account_email=self.google_account_email,
+                resource_name=resource_name,
+                error=str(e),
+                status_code=e.resp.status,
+            )
+            raise e
 
     async def close(self) -> None:
-        """Close the HTTP client."""
-        await self.client.aclose()
+        """Close any resources (no-op for official client)."""
+        # The official Google client doesn't require explicit cleanup
+        pass
