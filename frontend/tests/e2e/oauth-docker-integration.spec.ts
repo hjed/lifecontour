@@ -3,12 +3,16 @@
  *
  * Tests the complete OAuth flow against the containerized Hydra OAuth provider
  * to ensure the Docker setup works correctly for development and testing.
+ *
+ * Converted to use the advanced fixture-based testing system.
  */
 
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures';
 
 test.describe('OAuth Docker Integration', () => {
-  test('should verify Hydra OAuth provider is accessible', async ({ page }) => {
+  test('should verify Hydra OAuth provider is accessible', async ({
+    unauthenticatedPage: page,
+  }) => {
     console.log('1. Testing Hydra OAuth provider accessibility...');
 
     // Test if Hydra public endpoint is accessible
@@ -43,7 +47,7 @@ test.describe('OAuth Docker Integration', () => {
   });
 
   test('should verify OAuth client configuration in Hydra', async ({
-    page,
+    unauthenticatedPage: page,
   }) => {
     console.log('1. Testing OAuth client configuration...');
 
@@ -80,7 +84,9 @@ test.describe('OAuth Docker Integration', () => {
     }
   });
 
-  test('should verify backend OAuth configuration', async ({ page }) => {
+  test('should verify backend OAuth configuration', async ({
+    unauthenticatedPage: page,
+  }) => {
     console.log('1. Testing backend OAuth configuration...');
 
     // Navigate to login page to check OAuth provider availability
@@ -117,7 +123,9 @@ test.describe('OAuth Docker Integration', () => {
     }
   });
 
-  test('should test OAuth authorization URL generation', async ({ page }) => {
+  test('should test OAuth authorization URL generation', async ({
+    unauthenticatedPage: page,
+  }) => {
     console.log('1. Testing OAuth authorization URL generation...');
 
     // Track OAuth login requests
@@ -188,7 +196,7 @@ test.describe('OAuth Docker Integration', () => {
   });
 
   test('should verify OAuth callback handling with Docker setup', async ({
-    page,
+    unauthenticatedPage: page,
   }) => {
     console.log('1. Testing OAuth callback handling with Docker setup...');
 
@@ -270,7 +278,7 @@ test.describe('OAuth Docker Integration', () => {
   });
 
   test('should verify OAuth environment variables are properly set', async ({
-    page,
+    unauthenticatedPage: page,
   }) => {
     console.log('1. Testing OAuth environment variable configuration...');
 

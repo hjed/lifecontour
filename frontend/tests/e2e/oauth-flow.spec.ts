@@ -4,13 +4,15 @@
  * Tests the complete OAuth flow against real Hydra OAuth provider
  * without mocking critical parts. Covers authorization, callback,
  * token exchange, and session creation.
+ *
+ * Converted to use the advanced fixture-based testing system.
  */
 
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures';
 
 test.describe('OAuth Authentication Flow - Real Provider Tests', () => {
   test('should complete full OAuth flow with Hydra provider', async ({
-    page,
+    unauthenticatedPage: page,
   }) => {
     // Enable console logging for debugging
     page.on('console', msg => console.log('BROWSER:', msg.text()));
@@ -95,7 +97,7 @@ test.describe('OAuth Authentication Flow - Real Provider Tests', () => {
   });
 
   test('should handle OAuth callback with proper session state', async ({
-    page,
+    unauthenticatedPage: page,
   }) => {
     // Enable console logging for debugging
     page.on('console', msg => console.log('CALLBACK BROWSER:', msg.text()));
@@ -192,7 +194,9 @@ test.describe('OAuth Authentication Flow - Real Provider Tests', () => {
     console.log('7. OAuth callback test completed');
   });
 
-  test('should validate OAuth state parameter correctly', async ({ page }) => {
+  test('should validate OAuth state parameter correctly', async ({
+    unauthenticatedPage: page,
+  }) => {
     console.log('1. Testing OAuth state validation...');
 
     // Navigate to login page to establish session
@@ -239,7 +243,7 @@ test.describe('OAuth Authentication Flow - Real Provider Tests', () => {
   });
 
   test('should handle OAuth provider configuration errors', async ({
-    page,
+    unauthenticatedPage: page,
   }) => {
     console.log('1. Testing OAuth provider configuration error handling...');
 
@@ -283,7 +287,9 @@ test.describe('OAuth Authentication Flow - Real Provider Tests', () => {
     console.log('4. OAuth error handling test completed');
   });
 
-  test('should handle OAuth callback errors gracefully', async ({ page }) => {
+  test('should handle OAuth callback errors gracefully', async ({
+    unauthenticatedPage: page,
+  }) => {
     console.log('1. Testing OAuth callback error handling...');
 
     // Set up session storage as if we initiated OAuth
@@ -319,7 +325,9 @@ test.describe('OAuth Authentication Flow - Real Provider Tests', () => {
     console.log('5. OAuth error handling test completed');
   });
 
-  test('should handle missing OAuth parameters', async ({ page }) => {
+  test('should handle missing OAuth parameters', async ({
+    unauthenticatedPage: page,
+  }) => {
     console.log('1. Testing missing OAuth parameters handling...');
 
     // Navigate to callback page without required parameters
@@ -337,7 +345,7 @@ test.describe('OAuth Authentication Flow - Real Provider Tests', () => {
   });
 
   test('should handle session validation and protected routes', async ({
-    page,
+    unauthenticatedPage: page,
   }) => {
     console.log('1. Testing session validation and protected routes...');
 
@@ -407,7 +415,7 @@ test.describe('OAuth Authentication Flow - Real Provider Tests', () => {
   });
 
   test('should maintain OAuth provider selection through flow', async ({
-    page,
+    unauthenticatedPage: page,
   }) => {
     console.log('1. Testing OAuth provider selection persistence...');
 
@@ -457,7 +465,7 @@ test.describe('OAuth Authentication Flow - Real Provider Tests', () => {
 
 test.describe('OAuth Integration and Backend Communication', () => {
   test('should properly communicate with backend OAuth endpoints', async ({
-    page,
+    unauthenticatedPage: page,
   }) => {
     console.log('1. Testing OAuth backend integration...');
 
@@ -542,7 +550,7 @@ test.describe('OAuth Integration and Backend Communication', () => {
   });
 
   test('should handle OAuth configuration status correctly', async ({
-    page,
+    unauthenticatedPage: page,
   }) => {
     console.log('1. Testing OAuth configuration detection...');
 
