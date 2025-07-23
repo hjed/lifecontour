@@ -72,6 +72,13 @@ function LoginContent() {
     }
   }, [state.isLoading]);
 
+  // Redirect authenticated users away from login page
+  useEffect(() => {
+    if (state.isAuthenticated && !state.isLoading) {
+      router.replace(redirectTo as never);
+    }
+  }, [state.isAuthenticated, state.isLoading, router, redirectTo]);
+
   // Handle OAuth login
   const handleLogin = (providerName: string) => {
     setLoadingProvider(providerName);
@@ -81,10 +88,8 @@ function LoginContent() {
     // Loading state will be cleared when mutation completes
   };
 
-  // Redirect if already authenticated
+  // Don't render login form if authenticated (redirect will happen in useEffect)
   if (state.isAuthenticated) {
-    // Type assertion for Next.js router - redirectTo is always a valid route
-    router.replace(redirectTo as never);
     return null;
   }
 

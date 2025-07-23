@@ -6,8 +6,13 @@ middleware setup, and route registration.
 """
 
 import asyncio
+import base64
+import hashlib
+import hmac
+import json
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
+from typing import Any
 
 import structlog
 from dishka.integrations.fastapi import setup_dishka
@@ -18,7 +23,7 @@ from opentelemetry import trace
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
 from opentelemetry.instrumentation.sqlalchemy import SQLAlchemyInstrumentor
-from starlette.middleware.sessions import SessionMiddleware
+from starlette.requests import Request
 
 from app.infrastructure.config import Settings, get_settings
 from app.infrastructure.database import get_database_engine
@@ -26,6 +31,125 @@ from app.infrastructure.di.container import create_container
 from app.infrastructure.events.outbox_processor import run_outbox_processor_loop
 from app.infrastructure.logging import setup_logging
 from app.mcp.server import create_mcp_app
+
+
+class TrackedSession(dict[str, Any]):
+    """A dictionary that tracks when it's been modified."""
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self._modified = False
+
+    def __setitem__(self, key: str, value: Any) -> None:
+        super().__setitem__(key, value)
+        self._modified = True
+
+    def __delitem__(self, key: str) -> None:
+        super().__delitem__(key)
+        self._modified = True
+
+    def clear(self) -> None:
+        super().clear()
+        self._modified = True
+
+    def pop(self, *args: Any, **kwargs: Any) -> Any:
+        result = super().pop(*args, **kwargs)
+        self._modified = True
+        return result
+
+    def popitem(self) -> tuple[str, Any]:
+        result = super().popitem()
+        self._modified = True
+        return result
+
+    def setdefault(self, key: str, default: Any = None) -> Any:
+        if key not in self:
+            self._modified = True
+        return super().setdefault(key, default)
+
+    def update(self, *args: Any, **kwargs: Any) -> None:
+        super().update(*args, **kwargs)
+        self._modified = True
+
+
+class FixedSessionMiddleware:
+    """Custom session middleware that ensures sessions are properly saved."""
+
+    def __init__(
+        self,
+        app: Any,
+        secret_key: str,
+        max_age: int = 86400 * 7,
+        same_site: str = "lax",
+        https_only: bool = False,
+    ) -> None:
+        self.app = app
+        self.secret_key = secret_key
+        self.max_age = max_age
+        self.same_site = same_site
+        self.https_only = https_only
+
+    async def __call__(self, scope: Any, receive: Any, send: Any) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        request = Request(scope, receive)
+
+        # Load session from cookie
+        session_data = {}
+        session_cookie = request.cookies.get("session")
+        if session_cookie:
+            try:
+                # Parse session cookie (base64.signature format)
+                if "." in session_cookie:
+                    data_b64, signature = session_cookie.rsplit(".", 1)
+                    # Verify signature
+                    expected_sig = hmac.new(
+                        self.secret_key.encode(), data_b64.encode(), hashlib.sha256
+                    ).hexdigest()[:16]
+
+                    if hmac.compare_digest(signature, expected_sig):
+                        # Decode session data
+                        session_json = base64.b64decode(data_b64).decode()
+                        session_data = json.loads(session_json)
+            except Exception:
+                # Invalid session cookie, start fresh
+                session_data = {}
+
+        # Convert to tracked session
+        tracked_session = TrackedSession(session_data)
+
+        # Add tracked session to ASGI scope
+        scope["session"] = tracked_session
+
+        async def send_wrapper(message: Any) -> None:
+            if message["type"] == "http.response.start":
+                # Check if session was modified
+                session = scope.get("session", {})
+                if hasattr(session, "_modified") and session._modified:
+                    # Create new session cookie
+                    session_json = json.dumps(dict(session), separators=(",", ":"))
+                    session_b64 = base64.b64encode(session_json.encode()).decode()
+                    signature = hmac.new(
+                        self.secret_key.encode(), session_b64.encode(), hashlib.sha256
+                    ).hexdigest()[:16]
+
+                    session_cookie_value = f"{session_b64}.{signature}"
+
+                    # Add Set-Cookie header
+                    headers = list(message.get("headers", []))
+                    cookie_header = f"session={session_cookie_value}; Max-Age={self.max_age}; Path=/; SameSite={self.same_site}"
+                    if self.https_only:
+                        cookie_header += "; Secure"
+                    cookie_header += "; HttpOnly"
+
+                    headers.append([b"set-cookie", cookie_header.encode()])
+                    message["headers"] = headers
+
+            await send(message)
+
+        await self.app(scope, receive, send_wrapper)
 
 
 @asynccontextmanager
@@ -147,8 +271,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     from app.api.search.controllers import router as search_router
 
     # Session middleware (must be added before other middleware that uses sessions)
+    # Using custom middleware to ensure sessions are properly saved
     app.add_middleware(
-        SessionMiddleware,
+        FixedSessionMiddleware,
         secret_key=settings.session_secret_key,
         max_age=86400 * 7,  # 7 days
         same_site="lax",

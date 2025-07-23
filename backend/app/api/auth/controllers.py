@@ -180,6 +180,12 @@ async def auth_callback_json(
         provider=callback_data.provider,
     )
 
+    # Check if user is already authenticated to prevent race conditions
+    if request.session.get("user"):
+        logger.info("User already authenticated, skipping OAuth callback")
+        redirect_url = request.session.get("post_auth_redirect", "/")
+        return CallbackResponse(redirect_url=redirect_url)
+
     try:
         # Use configured frontend URL for redirect URI
         redirect_uri = f"{settings.frontend_url}/auth/callback"
@@ -198,7 +204,6 @@ async def auth_callback_json(
 
         # Store user in session (serialize datetime to ISO string)
         request.session["user"] = session_user.model_dump(mode="json")
-        logger.info("Successfully stored user in session")
 
         # Get redirect URL from session or use default
         redirect_url = request.session.pop("post_auth_redirect", "/")

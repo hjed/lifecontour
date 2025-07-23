@@ -55,6 +55,7 @@ export function FavouriteToggle({
       onClick={handleToggle}
       disabled={toggleFavouriteMutation.isPending}
       aria-label={ariaLabel}
+      data-testid='favourite-toggle'
       className={cn(
         'hover:bg-yellow-50 hover:text-yellow-600 focus-visible:ring-yellow-500',
         className

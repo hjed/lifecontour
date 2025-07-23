@@ -8,7 +8,7 @@ Controllers act as adapters between HTTP and domain services.
 import structlog
 from dishka.integrations.fastapi import FromDishka, inject
 from fastapi import APIRouter, Query, Request, status
-from sqlalchemy.ext.asyncio import AsyncConnection
+from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
 from app.api.common.schemas import (
     PaginationParams,
@@ -176,19 +176,33 @@ async def update_contact(
 async def delete_contact(
     contact_id: int,
     contact_service: FromDishka[ContactService],
-    connection: FromDishka[AsyncConnection],
+    engine: FromDishka[AsyncEngine],
     user: FromDishka[SessionUser],  # Require authentication
 ) -> None:
     """
     Delete a contact.
 
     Deletes the contact and all associated data.
+    Uses a fresh transaction to avoid aborted transaction issues.
     """
-    existing_contact = await contact_service.get_contact_by_id(contact_id)
-    if not existing_contact:
-        raise ContactNotFoundError(contact_id)
+    # Use a fresh transaction for the delete operation to avoid
+    # issues with aborted transactions from previous operations
+    async with engine.begin() as fresh_connection:
+        try:
+            # Try to delete directly - the service will handle validation
+            await contact_service.delete_contact(contact_id, fresh_connection)
+        except ContactNotFoundError:
+            # Re-raise ContactNotFoundError as-is
+            raise
+        except Exception as e:
+            # For any other error, log it and raise a generic error
+            import structlog
 
-    await contact_service.delete_contact(contact_id, connection)
+            logger = structlog.get_logger()
+            logger.error(
+                "Failed to delete contact", contact_id=contact_id, error=str(e)
+            )
+            raise
 
 
 @router.post("/{contact_id}/tags", status_code=status.HTTP_204_NO_CONTENT)

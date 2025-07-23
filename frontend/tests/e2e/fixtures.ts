@@ -84,11 +84,23 @@ export interface WorkerFixtures {
   workerAuth: AuthState;
 }
 
+// Global lock to prevent multiple workers from interfering with OAuth flow
+let oauthFlowInProgress = false;
+
 /**
  * Complete OAuth flow once per worker and store authentication state
  * Uses the real Hydra OAuth provider for authentic E2E testing
  */
 async function completeWorkerOAuthFlow(browser: any): Promise<AuthState> {
+  // Wait for any ongoing OAuth flow to complete
+  while (oauthFlowInProgress) {
+    console.log(
+      '🔐 [Worker Auth] Waiting for ongoing OAuth flow to complete...'
+    );
+    await new Promise(resolve => setTimeout(resolve, 1000));
+  }
+
+  oauthFlowInProgress = true;
   console.log('🔐 [Worker Auth] Starting REAL OAuth flow for worker...');
 
   const context = await browser.newContext();
@@ -107,10 +119,33 @@ async function completeWorkerOAuthFlow(browser: any): Promise<AuthState> {
     console.log(
       '🔐 [Worker Auth] Clicking OAuth button to start real OAuth flow...'
     );
-    await oauthButtons.first().click();
 
-    // Step 3: Wait for OAuth provider redirect
-    await page.waitForTimeout(3000);
+    // Set up callback tracking before clicking OAuth button
+    let callbackCompleted = false;
+    let callbackError: string | null = null;
+
+    // Track callback requests to detect completion
+    page.on('response', async (response: any) => {
+      if (response.url().includes('/auth/callback')) {
+        console.log(`🔐 [Worker Auth] Callback response: ${response.status()}`);
+        if (response.ok()) {
+          callbackCompleted = true;
+        } else {
+          try {
+            const errorData = await response.text();
+            callbackError = `${response.status()}: ${errorData}`;
+          } catch {
+            callbackError = `${response.status()}: Unknown error`;
+          }
+        }
+      }
+    });
+
+    // Click OAuth button and wait for navigation
+    await Promise.all([
+      page.waitForNavigation({ timeout: 30000 }),
+      oauthButtons.first().click(),
+    ]);
 
     const currentUrl = page.url();
     console.log('🔐 [Worker Auth] Current URL after OAuth click:', currentUrl);
@@ -121,21 +156,43 @@ async function completeWorkerOAuthFlow(browser: any): Promise<AuthState> {
         '🔐 [Worker Auth] Successfully redirected to Hydra OAuth provider'
       );
 
-      // The Hydra provider is configured with skip_consent: true, so it should
-      // automatically redirect back to our callback without user interaction
-      await page.waitForTimeout(2000);
+      // Wait for automatic redirect back to callback (Hydra is configured with skip_consent: true)
+      await page.waitForNavigation({ timeout: 30000 });
 
-      // Check if we've been redirected back to our callback
       const callbackUrl = page.url();
       console.log('🔐 [Worker Auth] URL after Hydra processing:', callbackUrl);
 
       if (callbackUrl.includes('/auth/callback')) {
         console.log('🔐 [Worker Auth] OAuth callback received, processing...');
 
-        // Wait for callback processing to complete
-        await page.waitForTimeout(5000);
+        // Wait for callback processing to complete or fail
+        const maxWaitTime = 15000; // 15 seconds
+        const startTime = Date.now();
 
-        // Check final URL - should be redirected to a protected page
+        while (
+          !callbackCompleted &&
+          !callbackError &&
+          Date.now() - startTime < maxWaitTime
+        ) {
+          await page.waitForTimeout(500);
+        }
+
+        if (callbackError) {
+          throw new Error(`OAuth callback failed: ${callbackError}`);
+        }
+
+        if (!callbackCompleted) {
+          throw new Error('OAuth callback timed out after 15 seconds');
+        }
+
+        // Wait for final redirect after successful callback
+        await page.waitForNavigation({ timeout: 10000 }).catch(() => {
+          // Navigation might not happen if already on the target page
+          console.log(
+            '🔐 [Worker Auth] No final navigation (might already be on target page)'
+          );
+        });
+
         const finalUrl = page.url();
         console.log(
           '🔐 [Worker Auth] Final URL after callback processing:',
@@ -151,7 +208,15 @@ async function completeWorkerOAuthFlow(browser: any): Promise<AuthState> {
               '🔐 [Worker Auth] Real OAuth authentication successful!',
               authStatus.user?.email
             );
+          } else {
+            throw new Error(
+              'Authentication status check failed: not authenticated'
+            );
           }
+        } else {
+          throw new Error(
+            `Authentication status check failed: ${statusResponse.status()}`
+          );
         }
       }
     } else if (currentUrl.includes('/auth/login')) {
@@ -164,6 +229,12 @@ async function completeWorkerOAuthFlow(browser: any): Promise<AuthState> {
     } else {
       console.log('🔐 [Worker Auth] Unexpected redirect to:', currentUrl);
     }
+
+    // Wait a bit more for browser to fully process the session cookie
+    console.log(
+      '🔐 [Worker Auth] Waiting for browser to process session cookie...'
+    );
+    await page.waitForTimeout(1000);
 
     // Extract real authentication state from the browser context
     const cookies = await context.cookies();
@@ -204,6 +275,7 @@ async function completeWorkerOAuthFlow(browser: any): Promise<AuthState> {
     console.error('🔐 [Worker Auth] Real OAuth flow failed:', error);
     throw error; // Don't fall back to mocks - fail the test if real OAuth doesn't work
   } finally {
+    oauthFlowInProgress = false; // Release the lock
     await context.close();
   }
 }
@@ -234,7 +306,17 @@ async function applyAuthState(page: Page, authState: AuthState): Promise<void> {
   if (validCookies.length > 0) {
     await page.context().addCookies(validCookies);
     console.log(
-      '🔐 [Auth State] Applied real authentication cookies to page context'
+      `🔐 [Auth State] Applied ${validCookies.length} authentication cookies to page context:`,
+      validCookies
+        .map(c => `${c.name}=${c.value.substring(0, 20)}...`)
+        .join(', ')
+    );
+
+    // Verify cookies were applied by checking them
+    const appliedCookies = await page.context().cookies();
+    console.log(
+      `🔐 [Auth State] Verified ${appliedCookies.length} cookies in context:`,
+      appliedCookies.map(c => c.name).join(', ')
     );
   } else {
     console.warn(

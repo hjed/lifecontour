@@ -18,7 +18,11 @@ interface ContactCardProps {
  */
 export function ContactCard({ contact }: ContactCardProps) {
   return (
-    <Card key={contact.id} className='transition-shadow hover:shadow-md'>
+    <Card
+      key={contact.id}
+      data-testid={`contact-${contact.id}`}
+      className='transition-shadow hover:shadow-md'
+    >
       <CardHeader>
         <div className='flex items-start justify-between'>
           <CardTitle className='text-lg'>

@@ -7,7 +7,7 @@
  * following the backend session-based authentication flow.
  */
 
-import { useEffect, useState, Suspense } from 'react';
+import { useEffect, useState, useRef, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import {
   Card,
@@ -26,9 +26,16 @@ function CallbackContent() {
   const searchParams = useSearchParams();
   const { refreshSession } = useAuth();
   const [error, setError] = useState<string | null>(null);
+  const processedRef = useRef(false);
 
   useEffect(() => {
     const processCallback = async () => {
+      // Prevent multiple callback processing
+      if (processedRef.current) {
+        return;
+      }
+      processedRef.current = true;
+
       try {
         // Get OAuth parameters from URL
         const code = searchParams.get('code');
@@ -88,7 +95,7 @@ function CallbackContent() {
     };
 
     processCallback();
-  }, [searchParams, router, refreshSession]);
+  }, [searchParams, router]); // Removed refreshSession to prevent re-runs
 
   // Show error state
   if (error) {
