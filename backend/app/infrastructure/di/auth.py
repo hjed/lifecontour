@@ -78,11 +78,22 @@ class AuthProvider(Provider):
 
         user_data = request.session.get("user")
 
+        # Debug: Log session validation details
+        logger.info(
+            "Session validation debug",
+            session_keys=list(request.session.keys()),
+            has_user_data=bool(user_data),
+            session_type=type(request.session).__name__,
+        )
+
         if not user_data:
             return None
 
         try:
+            logger.info("Validating session user data", user_data=user_data)
             return SessionUser.model_validate(user_data)
         except Exception as e:
-            logger.warning("Invalid user session data", error=str(e))
+            logger.warning(
+                "Invalid user session data", error=str(e), user_data=user_data
+            )
             return None
