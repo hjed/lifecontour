@@ -1,12 +1,16 @@
 /**
  * Debug test for OAuth authentication flow.
  * This test helps debug the actual authentication flow without mocking.
+ *
+ * Converted to use the advanced fixture-based testing system.
  */
 
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures';
 
 test.describe('Debug OAuth Authentication', () => {
-  test('should complete the full OAuth flow', async ({ page }) => {
+  test('should complete the full OAuth flow', async ({
+    unauthenticatedPage: page,
+  }) => {
     // Enable console logging
     page.on('console', msg => console.log('BROWSER:', msg.text()));
     page.on('pageerror', error => console.log('PAGE ERROR:', error.message));

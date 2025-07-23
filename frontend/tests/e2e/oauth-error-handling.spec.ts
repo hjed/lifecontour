@@ -4,12 +4,16 @@
  * Tests various OAuth error conditions including invalid state,
  * expired codes, provider errors, and network failures to ensure
  * robust error handling without mocking critical parts.
+ *
+ * Converted to use the advanced fixture-based testing system.
  */
 
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures';
 
 test.describe('OAuth Error Handling', () => {
-  test('should handle invalid OAuth state parameter', async ({ page }) => {
+  test('should handle invalid OAuth state parameter', async ({
+    unauthenticatedPage: page,
+  }) => {
     console.log('1. Testing invalid OAuth state parameter handling...');
 
     // Enable error logging
@@ -88,7 +92,9 @@ test.describe('OAuth Error Handling', () => {
     console.log('5. Invalid state parameter test completed');
   });
 
-  test('should handle expired OAuth authorization codes', async ({ page }) => {
+  test('should handle expired OAuth authorization codes', async ({
+    unauthenticatedPage: page,
+  }) => {
     console.log('1. Testing expired OAuth authorization code handling...');
 
     // Set up session storage
@@ -147,7 +153,9 @@ test.describe('OAuth Error Handling', () => {
     console.log('6. Expired code test completed');
   });
 
-  test('should handle OAuth provider errors', async ({ page }) => {
+  test('should handle OAuth provider errors', async ({
+    unauthenticatedPage: page,
+  }) => {
     console.log('1. Testing OAuth provider error handling...');
 
     // Set up session storage
@@ -206,7 +214,9 @@ test.describe('OAuth Error Handling', () => {
     console.log('5. OAuth provider error tests completed');
   });
 
-  test('should handle network failures during OAuth flow', async ({ page }) => {
+  test('should handle network failures during OAuth flow', async ({
+    unauthenticatedPage: page,
+  }) => {
     console.log('1. Testing network failure handling...');
 
     // Navigate to login page
@@ -306,7 +316,9 @@ test.describe('OAuth Error Handling', () => {
     console.log('7. Network failure test completed');
   });
 
-  test('should handle malformed OAuth callback URLs', async ({ page }) => {
+  test('should handle malformed OAuth callback URLs', async ({
+    unauthenticatedPage: page,
+  }) => {
     console.log('1. Testing malformed OAuth callback URL handling...');
 
     // Test various malformed callback scenarios
@@ -356,7 +368,7 @@ test.describe('OAuth Error Handling', () => {
 
 test.describe('OAuth Session and State Management Errors', () => {
   test('should handle missing session state during callback', async ({
-    page,
+    unauthenticatedPage: page,
   }) => {
     console.log('1. Testing missing session state handling...');
 
@@ -389,7 +401,9 @@ test.describe('OAuth Session and State Management Errors', () => {
     console.log('4. Missing session state test completed');
   });
 
-  test('should handle session timeout during OAuth flow', async ({ page }) => {
+  test('should handle session timeout during OAuth flow', async ({
+    unauthenticatedPage: page,
+  }) => {
     console.log('1. Testing session timeout during OAuth flow...');
 
     // Start OAuth flow
@@ -440,7 +454,9 @@ test.describe('OAuth Session and State Management Errors', () => {
     console.log('6. Session timeout test completed');
   });
 
-  test('should handle concurrent OAuth attempts', async ({ page }) => {
+  test('should handle concurrent OAuth attempts', async ({
+    unauthenticatedPage: page,
+  }) => {
     console.log('1. Testing concurrent OAuth attempts...');
 
     await page.goto('/auth/login');
@@ -488,7 +504,9 @@ test.describe('OAuth Session and State Management Errors', () => {
     console.log('6. Concurrent OAuth attempts test completed');
   });
 
-  test('should handle OAuth provider unavailability', async ({ page }) => {
+  test('should handle OAuth provider unavailability', async ({
+    unauthenticatedPage: page,
+  }) => {
     console.log('1. Testing OAuth provider unavailability...');
 
     await page.goto('/auth/login');
