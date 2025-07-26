@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures';
 import { createTestHelpers } from './utils/test-helpers';
 
 /**
@@ -6,13 +6,14 @@ import { createTestHelpers } from './utils/test-helpers';
  *
  * These tests set up their own test data to ensure deterministic behavior.
  * Each test creates the exact data state it needs to test specific functionality.
+ *
+ * Converted to use the advanced fixture-based testing system.
  */
 test.describe('Sidebar Dynamic Tags Navigation', () => {
-  test('should display sidebar with proper structure', async ({ page }) => {
-    const { testData, sidebar } = createTestHelpers(page);
-
-    // Set up test state: authenticated user
-    await testData.setupAuthenticatedUser();
+  test('should display sidebar with proper structure', async ({
+    authenticatedPage: page,
+  }) => {
+    const { sidebar } = createTestHelpers(page);
 
     // Navigate to contacts page
     await page.goto('/contacts');
@@ -22,11 +23,10 @@ test.describe('Sidebar Dynamic Tags Navigation', () => {
     await sidebar.testSidebarStructure();
   });
 
-  test('should never display hardcoded groups in sidebar', async ({ page }) => {
-    const { testData, sidebar } = createTestHelpers(page);
-
-    // Set up test state: authenticated user (regardless of data)
-    await testData.setupAuthenticatedUser();
+  test('should never display hardcoded groups in sidebar', async ({
+    authenticatedPage: page,
+  }) => {
+    const { sidebar } = createTestHelpers(page);
 
     // Navigate to contacts page
     await page.goto('/contacts');
@@ -36,11 +36,12 @@ test.describe('Sidebar Dynamic Tags Navigation', () => {
     await sidebar.testNoHardcodedGroups();
   });
 
-  test('should display dynamic tag links when tags exist', async ({ page }) => {
+  test('should display dynamic tag links when tags exist', async ({
+    authenticatedPage: page,
+  }) => {
     const { testData, sidebar } = createTestHelpers(page);
 
     // Set up test state: authenticated user with tags
-    await testData.setupAuthenticatedUser();
     await testData.createTestTags(['work', 'family', 'friends']);
     await testData.createTestContacts([
       { firstName: 'John', lastName: 'Doe', tags: ['work'] },
@@ -67,11 +68,10 @@ test.describe('Sidebar Dynamic Tags Navigation', () => {
     expect(href).toMatch(/\/contacts\/tags\/\w+/);
   });
 
-  test('should display favourites link in sidebar', async ({ page }) => {
-    const { testData, sidebar } = createTestHelpers(page);
-
-    // Set up test state: authenticated user
-    await testData.setupAuthenticatedUser();
+  test('should display favourites link in sidebar', async ({
+    authenticatedPage: page,
+  }) => {
+    const { sidebar } = createTestHelpers(page);
 
     // Navigate to contacts page
     await page.goto('/contacts');
@@ -81,11 +81,10 @@ test.describe('Sidebar Dynamic Tags Navigation', () => {
     await sidebar.testFavouritesLink();
   });
 
-  test('should display all contacts link in sidebar', async ({ page }) => {
-    const { testData, sidebar } = createTestHelpers(page);
-
-    // Set up test state: authenticated user
-    await testData.setupAuthenticatedUser();
+  test('should display all contacts link in sidebar', async ({
+    authenticatedPage: page,
+  }) => {
+    const { sidebar } = createTestHelpers(page);
 
     // Navigate to contacts page
     await page.goto('/contacts');
@@ -103,12 +102,11 @@ test.describe('Sidebar Dynamic Tags Navigation', () => {
   });
 
   test('should allow navigation to tag pages from sidebar', async ({
-    page,
+    authenticatedPage: page,
   }) => {
     const { testData, sidebar } = createTestHelpers(page);
 
     // Set up test state: authenticated user with tags
-    await testData.setupAuthenticatedUser();
     await testData.createTestTags(['work']);
     await testData.createTestContacts([
       { firstName: 'John', lastName: 'Doe', tags: ['work'] },
@@ -137,12 +135,9 @@ test.describe('Sidebar Dynamic Tags Navigation', () => {
   });
 
   test('should allow navigation to favourites page from sidebar', async ({
-    page,
+    authenticatedPage: page,
   }) => {
-    const { testData, sidebar } = createTestHelpers(page);
-
-    // Set up test state: authenticated user
-    await testData.setupAuthenticatedUser();
+    const { sidebar } = createTestHelpers(page);
 
     // Navigate to contacts page
     await page.goto('/contacts');
@@ -155,11 +150,10 @@ test.describe('Sidebar Dynamic Tags Navigation', () => {
     expect(page.url()).toContain('/contacts/favourites');
   });
 
-  test('should display basic navigation items in sidebar', async ({ page }) => {
-    const { testData, sidebar } = createTestHelpers(page);
-
-    // Set up test state: authenticated user
-    await testData.setupAuthenticatedUser();
+  test('should display basic navigation items in sidebar', async ({
+    authenticatedPage: page,
+  }) => {
+    const { sidebar } = createTestHelpers(page);
 
     // Navigate to contacts page
     await page.goto('/contacts');
@@ -177,11 +171,10 @@ test.describe('Sidebar Dynamic Tags Navigation', () => {
     expect(allVisible || favVisible).toBe(true);
   });
 
-  test('should display contacts section in sidebar', async ({ page }) => {
-    const { testData, sidebar } = createTestHelpers(page);
-
-    // Set up test state: authenticated user
-    await testData.setupAuthenticatedUser();
+  test('should display contacts section in sidebar', async ({
+    authenticatedPage: page,
+  }) => {
+    const { sidebar } = createTestHelpers(page);
 
     // Navigate to contacts page
     await page.goto('/contacts');
@@ -196,12 +189,9 @@ test.describe('Sidebar Dynamic Tags Navigation', () => {
   });
 
   test('should highlight active page in sidebar navigation', async ({
-    page,
+    authenticatedPage: page,
   }) => {
-    const { testData, sidebar } = createTestHelpers(page);
-
-    // Set up test state: authenticated user
-    await testData.setupAuthenticatedUser();
+    const { sidebar } = createTestHelpers(page);
 
     // Navigate to favourites page
     await page.goto('/contacts/favourites');
@@ -223,11 +213,10 @@ test.describe('Sidebar Dynamic Tags Navigation', () => {
     ).toBe(true);
   });
 
-  test('should be responsive on mobile devices', async ({ page }) => {
-    const { testData, sidebar } = createTestHelpers(page);
-
-    // Set up test state: authenticated user
-    await testData.setupAuthenticatedUser();
+  test('should be responsive on mobile devices', async ({
+    authenticatedPage: page,
+  }) => {
+    const { sidebar } = createTestHelpers(page);
 
     // Navigate to contacts page
     await page.goto('/contacts');
