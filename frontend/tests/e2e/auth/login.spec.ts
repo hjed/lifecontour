@@ -1,7 +1,6 @@
 /**
  * End-to-end tests for the login page.
  *
- * Converted to use the advanced fixture-based testing system.
  * Tests the complete login flow with deterministic authentication states.
  */
 
@@ -102,11 +101,19 @@ test.describe('Login Page - Unauthenticated Users', () => {
     });
 
     test('should have proper button labels and accessibility', async ({
-      page,
+      unauthenticatedPage,
     }) => {
+      // Navigate to login page
+      await unauthenticatedPage.goto('/auth/login');
+
+      // Wait for providers to load
+      await unauthenticatedPage.waitForLoadState('networkidle');
+
       // Get all OAuth provider buttons
-      const oauthButtons = page.locator('button:has-text("Continue with")');
-      await expect(oauthButtons.first()).toBeVisible();
+      const oauthButtons = unauthenticatedPage.locator(
+        'button:has-text("Continue with")'
+      );
+      await expect(oauthButtons.first()).toBeVisible({ timeout: 10000 });
 
       // Check button text content and accessibility
       const buttonCount = await oauthButtons.count();
@@ -117,32 +124,50 @@ test.describe('Login Page - Unauthenticated Users', () => {
       }
     });
 
-    test('should trigger login flow on button click', async ({ page }) => {
+    test('should trigger login flow on button click', async ({
+      unauthenticatedPage,
+    }) => {
+      // Navigate to login page
+      await unauthenticatedPage.goto('/auth/login');
+
+      // Wait for providers to load
+      await unauthenticatedPage.waitForLoadState('networkidle');
+
       // Capture login requests to verify the flow is triggered
       let loginRequested = false;
-      await page.route('**/api/auth/login', route => {
+      await unauthenticatedPage.route('**/api/auth/login', route => {
         loginRequested = true;
         route.continue();
       });
 
       // Get the first OAuth provider button
-      const oauthButtons = page.locator('button:has-text("Continue with")');
+      const oauthButtons = unauthenticatedPage.locator(
+        'button:has-text("Continue with")'
+      );
       const firstButton = oauthButtons.first();
-      await expect(firstButton).toBeVisible();
+      await expect(firstButton).toBeVisible({ timeout: 10000 });
 
       // Click the button
       await firstButton.click();
 
       // Should have made login request
-      await page.waitForTimeout(1000); // Give time for request
+      await unauthenticatedPage.waitForTimeout(1000); // Give time for request
       expect(loginRequested).toBe(true);
     });
   });
 
   test.describe('Error Handling', () => {
-    test('should handle network errors gracefully', async ({ page }) => {
+    test('should handle network errors gracefully', async ({
+      unauthenticatedPage,
+    }) => {
+      // Navigate to login page
+      await unauthenticatedPage.goto('/auth/login');
+
+      // Wait for providers to load
+      await unauthenticatedPage.waitForLoadState('networkidle');
+
       // Mock network failure for login endpoint
-      await page.route('**/api/auth/login', route => {
+      await unauthenticatedPage.route('**/api/auth/login', route => {
         route.fulfill({
           status: 500,
           contentType: 'application/json',
@@ -155,26 +180,36 @@ test.describe('Login Page - Unauthenticated Users', () => {
       });
 
       // Get the first OAuth provider button
-      const oauthButtons = page.locator('button:has-text("Continue with")');
+      const oauthButtons = unauthenticatedPage.locator(
+        'button:has-text("Continue with")'
+      );
       const firstButton = oauthButtons.first();
-      await expect(firstButton).toBeVisible();
+      await expect(firstButton).toBeVisible({ timeout: 10000 });
 
       // Click the button
       await firstButton.click();
 
       // Should display error message (may take time to appear)
-      const errorAlert = page.locator(
+      const errorAlert = unauthenticatedPage.locator(
         '[data-testid="error-alert"], .alert-error, [role="alert"]'
       );
       await expect(errorAlert).toBeVisible({ timeout: 10000 });
     });
 
     test('should maintain button functionality after errors', async ({
-      page,
+      unauthenticatedPage,
     }) => {
+      // Navigate to login page
+      await unauthenticatedPage.goto('/auth/login');
+
+      // Wait for providers to load
+      await unauthenticatedPage.waitForLoadState('networkidle');
+
       // All OAuth buttons should remain clickable even if there are errors
-      const oauthButtons = page.locator('button:has-text("Continue with")');
-      await expect(oauthButtons.first()).toBeVisible();
+      const oauthButtons = unauthenticatedPage.locator(
+        'button:has-text("Continue with")'
+      );
+      await expect(oauthButtons.first()).toBeVisible({ timeout: 10000 });
 
       // Buttons should be functional
       const buttonCount = await oauthButtons.count();
@@ -208,14 +243,23 @@ test.describe('Login Page - Unauthenticated Users', () => {
       await expect(mainHeading).toBeVisible();
     });
 
-    test('should be keyboard navigable', async ({ page }) => {
+    test('should be keyboard navigable', async ({ unauthenticatedPage }) => {
+      // Navigate to login page
+      await unauthenticatedPage.goto('/auth/login');
+
+      // Wait for providers to load
+      await unauthenticatedPage.waitForLoadState('networkidle');
+
       // Check if OAuth buttons are present first
-      const oauthButtons = page.locator('button:has-text("Continue with")');
+      const oauthButtons = unauthenticatedPage.locator(
+        'button:has-text("Continue with")'
+      );
+      await expect(oauthButtons.first()).toBeVisible({ timeout: 10000 });
       const buttonCount = await oauthButtons.count();
 
       if (buttonCount > 0) {
         // Tab through interactive elements
-        await page.keyboard.press('Tab');
+        await unauthenticatedPage.keyboard.press('Tab');
 
         // Check if first button gets focus (might not always work in all browsers)
         const firstButton = oauthButtons.first();
@@ -229,7 +273,7 @@ test.describe('Login Page - Unauthenticated Users', () => {
 
         // Tab to next button if there are multiple
         if (buttonCount > 1) {
-          await page.keyboard.press('Tab');
+          await unauthenticatedPage.keyboard.press('Tab');
           const secondButton = oauthButtons.nth(1);
           try {
             await expect(secondButton).toBeFocused({ timeout: 2000 });
@@ -241,28 +285,39 @@ test.describe('Login Page - Unauthenticated Users', () => {
         }
       } else {
         // If no OAuth buttons, just verify page is accessible
-        const bodyText = await page.textContent('body');
+        const bodyText = await unauthenticatedPage.textContent('body');
         expect(bodyText).toBeTruthy();
       }
     });
 
-    test('should support Enter key activation', async ({ page }) => {
+    test('should support Enter key activation', async ({
+      unauthenticatedPage,
+    }) => {
+      // Navigate to login page
+      await unauthenticatedPage.goto('/auth/login');
+
+      // Wait for providers to load
+      await unauthenticatedPage.waitForLoadState('networkidle');
+
       // Capture login requests to verify the flow is triggered
       let loginRequested = false;
-      await page.route('**/api/auth/login', route => {
+      await unauthenticatedPage.route('**/api/auth/login', route => {
         loginRequested = true;
         route.continue();
       });
 
-      const oauthButtons = page.locator('button:has-text("Continue with")');
+      const oauthButtons = unauthenticatedPage.locator(
+        'button:has-text("Continue with")'
+      );
       const firstButton = oauthButtons.first();
+      await expect(firstButton).toBeVisible({ timeout: 10000 });
 
       // Focus and press Enter
       await firstButton.focus();
-      await page.keyboard.press('Enter');
+      await unauthenticatedPage.keyboard.press('Enter');
 
       // Should have triggered login request
-      await page.waitForTimeout(1000);
+      await unauthenticatedPage.waitForTimeout(1000);
       expect(loginRequested).toBe(true);
     });
   });
@@ -297,12 +352,23 @@ test.describe('Login Page - Unauthenticated Users', () => {
       }
     });
 
-    test('should have proper mobile interactions', async ({ page }) => {
+    test('should have proper mobile interactions', async ({
+      unauthenticatedPage,
+    }) => {
+      // Navigate to login page
+      await unauthenticatedPage.goto('/auth/login');
+
       // Set mobile viewport
-      await page.setViewportSize({ width: 375, height: 667 });
+      await unauthenticatedPage.setViewportSize({ width: 375, height: 667 });
+
+      // Wait for providers to load
+      await unauthenticatedPage.waitForLoadState('networkidle');
 
       // Check OAuth buttons specifically for mobile touch targets
-      const oauthButtons = page.locator('button:has-text("Continue with")');
+      const oauthButtons = unauthenticatedPage.locator(
+        'button:has-text("Continue with")'
+      );
+      await expect(oauthButtons.first()).toBeVisible({ timeout: 10000 });
       const buttonCount = await oauthButtons.count();
 
       if (buttonCount > 0) {
@@ -317,7 +383,7 @@ test.describe('Login Page - Unauthenticated Users', () => {
         }
       } else {
         // If no OAuth buttons, just verify page is usable on mobile
-        const bodyText = await page.textContent('body');
+        const bodyText = await unauthenticatedPage.textContent('body');
         expect(bodyText).toBeTruthy();
       }
     });
@@ -402,9 +468,17 @@ test.describe('Login Page - Unauthenticated Users', () => {
   });
 
   test.describe('Australian English Localization', () => {
-    test('should use Australian English terminology', async ({ page }) => {
+    test('should use Australian English terminology', async ({
+      unauthenticatedPage,
+    }) => {
+      // Navigate to login page
+      await unauthenticatedPage.goto('/auth/login');
+
+      // Wait for providers to load
+      await unauthenticatedPage.waitForLoadState('networkidle');
+
       // Check for Australian English spellings and terminology
-      const content = await page.textContent('body');
+      const content = await unauthenticatedPage.textContent('body');
 
       // Should use "organisation" not "organization"
       expect(content).not.toContain('organization');
