@@ -52,12 +52,7 @@ class DatabaseProvider(Provider):
         Handles transaction failures gracefully to prevent aborted transaction errors.
         """
         async with engine.begin() as conn:
-            try:
-                yield conn
-            except Exception:
-                # If an exception occurs, the transaction will be automatically rolled back
-                # by the engine.begin() context manager. We just need to re-raise the exception.
-                raise
+            yield conn
 
     @provide(scope=Scope.APP)
     def get_sync_engine(self) -> Engine:

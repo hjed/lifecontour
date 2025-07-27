@@ -188,21 +188,7 @@ async def delete_contact(
     # Use a fresh transaction for the delete operation to avoid
     # issues with aborted transactions from previous operations
     async with engine.begin() as fresh_connection:
-        try:
-            # Try to delete directly - the service will handle validation
-            await contact_service.delete_contact(contact_id, fresh_connection)
-        except ContactNotFoundError:
-            # Re-raise ContactNotFoundError as-is
-            raise
-        except Exception as e:
-            # For any other error, log it and raise a generic error
-            import structlog
-
-            logger = structlog.get_logger()
-            logger.error(
-                "Failed to delete contact", contact_id=contact_id, error=str(e)
-            )
-            raise
+        await contact_service.delete_contact(contact_id, fresh_connection)
 
 
 @router.post("/{contact_id}/tags", status_code=status.HTTP_204_NO_CONTENT)
