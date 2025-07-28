@@ -104,6 +104,12 @@ services:
     depends_on:
       oauth-login-consent-test:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:4445/health/ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
 
   # OAuth Client Initializer for Tests
   oauth-init-test:
@@ -167,7 +173,9 @@ services:
       redis-test:
         condition: service_healthy
       oauth-provider-test:
-        condition: service_started
+        condition: service_healthy
+      oauth-init-test:
+        condition: service_completed_successfully
     healthcheck:
       test: ["CMD", "curl", "-f", "http://127.0.0.1:8000/api/health"]
       interval: 10s

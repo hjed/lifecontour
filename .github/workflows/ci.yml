@@ -460,6 +460,9 @@ jobs:
           echo "📋 Checking Docker services status..."
           docker compose -f docker-compose.test.yml ps
 
+          echo "📋 Checking Docker service logs for any immediate errors..."
+          docker compose -f docker-compose.test.yml logs --tail=20
+
           echo "⏳ Waiting for services to be ready..."
 
           # Wait for backend to be healthy with more detailed logging
@@ -510,7 +513,44 @@ jobs:
             sleep 5
           done
 
+          # Wait for OAuth initialization to complete
+          echo "Waiting for OAuth initialization to complete..."
+          for i in {1..30}; do
+            if docker compose -f docker-compose.test.yml ps oauth-init-test | grep -q "Exited (0)"; then
+              echo "✅ OAuth initialization completed!"
+              break
+            fi
+            echo "OAuth initialization still running... ($i/30)"
+            if [ $i -eq 30 ]; then
+              echo "❌ OAuth initialization failed or took too long. Checking logs..."
+              docker compose -f docker-compose.test.yml logs oauth-init-test
+              exit 1
+            fi
+            sleep 2
+          done
+
           echo "🎉 All services are ready for e2e tests!"
+
+          # Final verification - test actual API endpoints
+          echo "🔍 Final verification of service endpoints..."
+
+          echo "Testing backend health..."
+          curl -f -s http://localhost:8001/api/health || (echo "❌ Backend health check failed" && exit 1)
+          echo "✅ Backend health check passed"
+
+          echo "Testing OAuth provider health..."
+          curl -f -s http://localhost:4447/health/ready || (echo "❌ OAuth provider health check failed" && exit 1)
+          echo "✅ OAuth provider health check passed"
+
+          echo "Testing MeiliSearch health..."
+          curl -f -s http://localhost:7701/health || (echo "❌ MeiliSearch health check failed" && exit 1)
+          echo "✅ MeiliSearch health check passed"
+
+          echo "Testing OAuth client configuration..."
+          curl -f -s http://localhost:4447/admin/clients/test-client-id > /dev/null || (echo "❌ OAuth client not found" && exit 1)
+          echo "✅ OAuth client configuration verified"
+
+          echo "✅ All service endpoints verified and ready for testing!"
 
       - name: Install Playwright Browsers
         working-directory: ./frontend
@@ -518,6 +558,7 @@ jobs:
 
       - name: Run Playwright tests
         working-directory: ./frontend
+        timeout-minutes: 30  # Prevent hanging indefinitely
         env:
           CI: true
           CLEANUP_AFTER_TESTS: true
