@@ -34,11 +34,17 @@ async function waitForService(
           response.status < 400) ||
         (url.includes('/oauth2/auth') && response.status === 405)
       ) {
-        console.log(`✅ Service ready: ${url}`);
+        console.log(`✅ Service ready: ${url} (status: ${response.status})`);
         return;
+      } else {
+        console.log(
+          `⏳ Service not ready: ${url} (status: ${response.status})`
+        );
       }
     } catch (error) {
-      // Service not ready yet
+      console.log(
+        `⏳ Service not ready: ${url} (error: ${error instanceof Error ? error.message : String(error)})`
+      );
     }
 
     if (attempt === maxAttempts) {
@@ -122,7 +128,7 @@ function areServicesRunning(): boolean {
   }
 }
 
-async function globalSetup(config: FullConfig) {
+async function globalSetup(_config: FullConfig) {
   console.log('🚀 Starting Playwright Global Setup...');
 
   // Change to project root directory
@@ -134,33 +140,44 @@ async function globalSetup(config: FullConfig) {
   console.log(`🐳 Using Docker Compose command: ${dockerComposeCmd}`);
 
   try {
-    // Check if services are already running
-    if (areServicesRunning()) {
-      console.log('📋 Docker services already running, skipping startup...');
+    // In CI, services should already be started by the CI workflow
+    // In local development, we may need to start them
+    if (process.env.CI) {
+      console.log(
+        '🏗️ CI environment detected - services should already be running'
+      );
+      console.log('🔍 Verifying service health...');
     } else {
-      // Stop any existing containers to ensure clean state
-      execCommand(
-        `${dockerComposeCmd} -f docker-compose.test.yml down --remove-orphans`,
-        'Cleaning up existing containers'
-      );
+      // Check if services are already running
+      if (areServicesRunning()) {
+        console.log('📋 Docker services already running, skipping startup...');
+      } else {
+        // Stop any existing containers to ensure clean state
+        execCommand(
+          `${dockerComposeCmd} -f docker-compose.test.yml down --remove-orphans`,
+          'Cleaning up existing containers'
+        );
 
-      // Start Docker services (docker-compose v1 doesn't support --wait)
-      execCommand(
-        `${dockerComposeCmd} -f docker-compose.test.yml up -d --build`,
-        'Starting Docker services'
-      );
+        // Start Docker services (docker-compose v1 doesn't support --wait)
+        execCommand(
+          `${dockerComposeCmd} -f docker-compose.test.yml up -d --build`,
+          'Starting Docker services'
+        );
+      }
+
+      console.log('🔍 Verifying service health...');
     }
 
-    // Wait for critical services to be ready
-    console.log('🔍 Verifying service health...');
-
     // Wait for backend API
+    console.log('🔍 Checking backend API health...');
     await waitForService('http://localhost:8001/api/health');
 
     // Wait for OAuth provider (check admin health endpoint)
+    console.log('🔍 Checking OAuth provider health...');
     await waitForService('http://localhost:4447/health/ready');
 
     // Wait for MeiliSearch
+    console.log('🔍 Checking MeiliSearch health...');
     await waitForService('http://localhost:7701/health');
 
     console.log('✅ All services are ready!');
