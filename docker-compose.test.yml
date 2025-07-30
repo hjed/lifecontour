@@ -118,7 +118,8 @@ services:
     networks:
       - personal-management-test
     depends_on:
-      - oauth-provider-test
+      oauth-provider-test:
+        condition: service_healthy
     volumes:
       - ./docker/oauth-provider/init-oauth.sh:/init-oauth.sh:ro
     environment:

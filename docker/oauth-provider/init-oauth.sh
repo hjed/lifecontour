@@ -71,6 +71,10 @@ while [ $attempt -lt $max_attempts ]; do
     # Show progress every 10 attempts
     if [ $((attempt % 10)) -eq 0 ] && [ $attempt -gt 0 ]; then
         print_step "Still waiting for Hydra... (attempt $((attempt + 1))/$max_attempts)"
+        # Show more detailed error info every 10 attempts
+        echo "Attempting to connect to: ${HEALTH_URL}"
+        curl_output=$(curl -f -s "${HEALTH_URL}" 2>&1 || true)
+        echo "Curl response: $curl_output"
     fi
 
     sleep 2
@@ -79,6 +83,8 @@ done
 
 if [ $attempt -eq $max_attempts ]; then
     print_error "Hydra failed to start within expected time"
+    print_error "Final connection attempt to: ${HEALTH_URL}"
+    curl -f -s "${HEALTH_URL}" 2>&1 || true
     print_error "Check Hydra logs for more details"
     exit 1
 fi
@@ -89,7 +95,11 @@ sleep 3
 # Check if client already exists
 print_step "Checking if OAuth client already exists..."
 CLIENT_CHECK_URL="http://${OAUTH_PROVIDER_HOST}:${OAUTH_ADMIN_PORT}/admin/clients/${CLIENT_ID}"
-if curl -f -s "${CLIENT_CHECK_URL}" >/dev/null 2>&1; then
+echo "Checking client at: ${CLIENT_CHECK_URL}"
+
+# Use curl without -f to avoid exit code 7, check HTTP status instead
+HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "${CLIENT_CHECK_URL}" 2>/dev/null || echo "000")
+if [ "$HTTP_STATUS" = "200" ]; then
     print_warning "OAuth client already exists, removing it first..."
     if curl -X DELETE -s "${CLIENT_CHECK_URL}" >/dev/null 2>&1; then
         print_success "Existing client removed"
@@ -97,6 +107,11 @@ if curl -f -s "${CLIENT_CHECK_URL}" >/dev/null 2>&1; then
     else
         print_warning "Failed to remove existing client, continuing anyway..."
     fi
+elif [ "$HTTP_STATUS" = "404" ]; then
+    print_step "Client does not exist yet (HTTP 404) - this is expected"
+else
+    print_warning "Unexpected response when checking client (HTTP $HTTP_STATUS) - continuing anyway..."
+fi
 fi
 
 # Create OAuth client with comprehensive configuration
