@@ -165,21 +165,39 @@ fi
 print_step "Testing OAuth endpoints..."
 
 # Test authorization endpoint
-PUBLIC_URL="http://localhost:${PUBLIC_PORT}"
+# Use the OAuth provider host for internal container communication
+if [ -n "$OAUTH_PROVIDER_HOST" ]; then
+    # Running in Docker - use service name
+    PUBLIC_URL="http://${OAUTH_PROVIDER_HOST}:${PUBLIC_PORT}"
+    echo "Using Docker service URL: $PUBLIC_URL"
+else
+    # Running locally - use localhost
+    PUBLIC_URL="http://localhost:${PUBLIC_PORT}"
+    echo "Using localhost URL: $PUBLIC_URL"
+fi
+
 AUTH_URL="${PUBLIC_URL}/oauth2/auth?client_id=${CLIENT_ID}&response_type=code&scope=openid%20profile%20email&redirect_uri=${FRONTEND_URL}/auth/callback&state=test"
 
-if curl -s -o /dev/null -w "%{http_code}" "$AUTH_URL" | grep -E "^(200|302)$" >/dev/null; then
-    print_success "Authorization endpoint is working"
+echo "Testing authorization endpoint: $AUTH_URL"
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "$AUTH_URL")
+echo "Received HTTP code: $HTTP_CODE"
+
+if echo "$HTTP_CODE" | grep -E "^(200|302)$" >/dev/null; then
+    print_success "Authorization endpoint is working (HTTP $HTTP_CODE)"
 else
-    print_warning "Authorization endpoint test inconclusive"
+    print_warning "Authorization endpoint test inconclusive (HTTP $HTTP_CODE)"
+    # Don't fail the initialization for this - it might be a network timing issue
+    echo "Note: This doesn't prevent OAuth from working, just means the test couldn't verify it"
 fi
 
 print_success "OAuth provider initialization complete for ${ENVIRONMENT}!"
 echo ""
 print_step "🔗 OAuth Configuration Summary (${ENVIRONMENT}):"
-echo "  Authorization URL: ${PUBLIC_URL}/oauth2/auth"
-echo "  Token URL: ${PUBLIC_URL}/oauth2/token"
-echo "  Userinfo URL: ${PUBLIC_URL}/userinfo"
+# For display purposes, show localhost URLs (what users would access)
+DISPLAY_URL="http://localhost:${PUBLIC_PORT}"
+echo "  Authorization URL: ${DISPLAY_URL}/oauth2/auth"
+echo "  Token URL: ${DISPLAY_URL}/oauth2/token"
+echo "  Userinfo URL: ${DISPLAY_URL}/userinfo"
 echo "  Admin URL: http://localhost:${ADMIN_PORT_EXTERNAL}"
 echo ""
 print_step "🧪 Test the OAuth flow:"
