@@ -42,8 +42,13 @@ export class TestDataManager {
    * Create a test contact via API
    */
   async createContact(contactData: ContactCreateRequest): Promise<TestContact> {
+    // Make contact names unique to avoid conflicts
+    const timestamp = Date.now();
+    const uniqueFirstName = `${contactData.firstName}_${timestamp}`;
+    const uniqueLastName = `${contactData.lastName}_${timestamp}`;
+
     console.log(
-      `📝 [Data Manager] Creating contact: ${contactData.firstName} ${contactData.lastName}`
+      `📝 [Data Manager] Creating contact: ${uniqueFirstName} ${uniqueLastName}`
     );
 
     try {
@@ -76,8 +81,8 @@ export class TestDataManager {
           data: {
             type: 'contacts',
             attributes: {
-              first_name: contactData.firstName,
-              last_name: contactData.lastName,
+              first_name: uniqueFirstName,
+              last_name: uniqueLastName,
               is_favourite: contactData.isFavourite || false,
             },
           },
@@ -103,8 +108,8 @@ export class TestDataManager {
 
       return {
         id: contactId,
-        firstName: contactData.firstName,
-        lastName: contactData.lastName,
+        firstName: uniqueFirstName,
+        lastName: uniqueLastName,
         email: contactData.email,
         phone: contactData.phone,
         tags: contactData.tags,
@@ -114,7 +119,7 @@ export class TestDataManager {
       console.error(`❌ [Data Manager] Failed to create contact:`, error);
 
       // Return mock data as fallback for tests that don't require real API
-      const mockId = `mock-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+      const mockId = `mock-${Date.now()}-${Math.random().toString(36).substring(2, 11)}`;
       return {
         id: mockId,
         firstName: contactData.firstName,
@@ -161,7 +166,7 @@ export class TestDataManager {
 
     // Since there's no /api/tags endpoint, we just return mock data
     // Tags will be created automatically when contacts are created with tag names
-    const mockId = `mock-tag-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    const mockId = `mock-tag-${Date.now()}-${Math.random().toString(36).substring(2, 11)}`;
 
     return {
       id: mockId,
@@ -266,6 +271,10 @@ export class TestDataManager {
         if (response.ok()) {
           console.log(`🗑️ [Data Manager] Deleted contact ${contactId}`);
           successfulDeletes++;
+        } else if (response.status() === 404) {
+          // Contact already deleted - this is fine
+          console.log(`🗑️ [Data Manager] Contact ${contactId} already deleted`);
+          successfulDeletes++;
         } else {
           // Don't log full error details for 500 errors (known backend transaction issue)
           if (response.status() === 500) {
@@ -286,6 +295,9 @@ export class TestDataManager {
           error
         );
       }
+
+      // Small delay to reduce transaction conflicts
+      await new Promise(resolve => setTimeout(resolve, 50));
     }
 
     if (successfulDeletes > 0) {
