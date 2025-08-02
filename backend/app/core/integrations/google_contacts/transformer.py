@@ -83,10 +83,13 @@ class GoogleContactTransformer:
         # Transform notes/biographies
         contact.notes.extend(self._transform_biographies(google_person.biographies))
 
-        # Transform organizations to tags (simple approach for now)
+        # Transform memberships (contact groups/labels) to tags
         contact.tags.extend(
-            self._transform_organizations_to_tags(google_person.organizations)
+            self._transform_memberships_to_tags(google_person.memberships)
         )
+
+        # TODO: Transform organizations to contact information (company, job title, etc.)
+        # Organizations contain company/work information, not tags
 
         # Note: External references are not part of the Contact entity in this architecture
         # They would be handled separately by the integration service
@@ -281,45 +284,48 @@ class GoogleContactTransformer:
 
         return notes
 
-    def _transform_organizations_to_tags(self, organizations: list[Any]) -> list[Tag]:
+    def _transform_memberships_to_tags(self, memberships: list[Any]) -> list[Tag]:
         """
-        Transform Google organizations to Tag entities.
+        Transform Google contact group memberships to Tag entities.
 
-        For now, we create tags from organization names and titles.
-        This is a simple approach that can be enhanced later.
+        Contact groups and labels in Google Contacts are represented as memberships.
+        These are the correct source for tags, not organizations.
 
         Args:
-            organizations: List of Google organization objects
+            memberships: List of Google membership objects
 
         Returns:
             List of Tag entities
         """
         tags = []
 
-        for org in organizations:
-            # Create tag from organization name
-            if hasattr(org, "name") and org.name:
-                try:
-                    # Sanitize the name to make it valid for TagName
-                    sanitized_name = self._sanitize_tag_name(org.name)
-                    if sanitized_name:
-                        tags.append(Tag(name=TagName(sanitized_name)))
-                except ValueError:
-                    # Skip invalid tag names
-                    logger.debug(
-                        "Skipping invalid organization name for tag", name=org.name
+        for membership in memberships:
+            # Extract contact group membership information
+            if hasattr(membership, "contact_group_membership") and membership.contact_group_membership:
+                group_info = membership.contact_group_membership
+
+                # Try to get the group name or resource name
+                group_name = None
+                if isinstance(group_info, dict):
+                    # Look for common fields that might contain the group name
+                    group_name = (
+                        group_info.get("contactGroupId") or
+                        group_info.get("contactGroupResourceName") or
+                        group_info.get("name")
                     )
 
-            # Create tag from job title
-            if hasattr(org, "title") and org.title:
-                try:
-                    # Sanitize the title to make it valid for TagName
-                    sanitized_title = self._sanitize_tag_name(f"Job-{org.title}")
-                    if sanitized_title:
-                        tags.append(Tag(name=TagName(sanitized_title)))
-                except ValueError:
-                    # Skip invalid tag names
-                    logger.debug("Skipping invalid job title for tag", title=org.title)
+                if group_name:
+                    try:
+                        # Sanitize the group name to make it valid for TagName
+                        sanitized_name = self._sanitize_tag_name(str(group_name))
+                        if sanitized_name:
+                            tags.append(Tag(name=TagName(sanitized_name)))
+                    except ValueError:
+                        # Skip invalid tag names
+                        logger.debug(
+                            "Skipping invalid contact group name for tag",
+                            group_name=group_name,
+                        )
 
         return tags
 
