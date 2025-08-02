@@ -123,6 +123,7 @@ module = [
     "pycountry.*",
     "core_shared.*",
     "authlib.integrations.starlette_client",
+    "googleapiclient.*",
 ]
 ignore_missing_imports = true
 
