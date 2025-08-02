@@ -8,9 +8,7 @@ on 401 responses.
 from collections.abc import AsyncGenerator
 from datetime import UTC, datetime, timedelta
 
-import httpx
 import pytest
-import respx
 
 from app.core.integrations.encryption import EncryptionService
 from app.core.integrations.google_contacts.client import GoogleContactsAPIClient
@@ -65,12 +63,13 @@ async def google_client(
 
 
 @pytest.mark.asyncio
-@pytest.mark.skip(reason="Google API client integration tests require refactoring for new architecture")
 async def test_successful_api_call_with_valid_token(
     google_client: GoogleContactsAPIClient,
     google_auth_service: GoogleAuthService,
 ) -> None:
     """Test successful API call with valid access token."""
+    from unittest.mock import MagicMock, patch
+
     google_email = "test@example.com"
     access_token = "valid-access-token"
 
@@ -94,128 +93,130 @@ async def test_successful_api_call_with_valid_token(
         "totalItems": 1,
     }
 
-    # Mock the API endpoint
-    respx.get("https://people.googleapis.com/v1/people/me/connections").mock(
-        return_value=httpx.Response(200, json=mock_response)
-    )
+    # Mock the service at the client level
+    with patch.object(google_client, "_get_service") as mock_get_service:
+        mock_service = MagicMock()
+        mock_people = MagicMock()
+        mock_connections = MagicMock()
+        mock_list = MagicMock()
 
-    # Make API call
-    result = await google_client.list_connections()
+        mock_get_service.return_value = mock_service
+        mock_service.people.return_value = mock_people
+        mock_people.connections.return_value = mock_connections
+        mock_connections.list.return_value = mock_list
+        mock_list.execute.return_value = mock_response
 
-    # Verify response
-    assert result == mock_response
-    assert len(result["connections"]) == 1
-    assert result["connections"][0]["names"][0]["displayName"] == "John Doe"
+        # Make API call
+        result = await google_client.list_connections()
+
+        # Verify response
+        assert result == mock_response
+        assert len(result["connections"]) == 1
+        assert result["connections"][0]["names"][0]["displayName"] == "John Doe"
 
 
 @pytest.mark.asyncio
-@pytest.mark.skip(reason="Google API client integration tests require refactoring for new architecture")
-async def test_token_refresh_on_401_response(
+async def test_api_error_handling(
     google_client: GoogleContactsAPIClient,
     google_auth_service: GoogleAuthService,
 ) -> None:
-    """Test automatic token refresh when API returns 401."""
-    google_email = "test@example.com"
-    expired_token = "expired-access-token"
-    refresh_token = "valid-refresh-token"
-    new_access_token = "new-access-token"
+    """Test that API errors are properly handled and re-raised."""
+    from unittest.mock import MagicMock, patch
 
-    # Store expired tokens
+    from googleapiclient.errors import HttpError
+
+    google_email = "test@example.com"
+
+    # Store valid tokens
     await google_auth_service.store_tokens(
         google_account_email=google_email,
-        access_token=expired_token,
-        refresh_token=refresh_token,
-        expires_at=datetime.now(UTC) - timedelta(minutes=1),  # Expired
+        access_token="valid-access-token",
+        refresh_token="refresh-token",
+        expires_at=datetime.now(UTC) + timedelta(hours=1),
     )
 
-    # Mock API responses
-    mock_contacts_response = {
-        "connections": [
-            {
-                "resourceName": "people/456",
-                "names": [{"displayName": "Jane Doe"}],
-            }
-        ]
-    }
+    # Mock the service at the client level
+    with patch.object(google_client, "_get_service") as mock_get_service:
+        mock_service = MagicMock()
+        mock_people = MagicMock()
+        mock_connections = MagicMock()
+        mock_list = MagicMock()
 
-    # First call returns 401 (expired token)
-    # Second call returns 200 (after refresh)
-    respx.get("https://people.googleapis.com/v1/people/me/connections").mock(
-        side_effect=[
-            httpx.Response(401, json={"error": "invalid_token"}),
-            httpx.Response(200, json=mock_contacts_response),
-        ]
-    )
+        mock_get_service.return_value = mock_service
+        mock_service.people.return_value = mock_people
+        mock_people.connections.return_value = mock_connections
+        mock_connections.list.return_value = mock_list
 
-    # Mock token refresh endpoint
-    respx.post("https://oauth2.googleapis.com/token").mock(
-        return_value=httpx.Response(
-            200,
-            json={
-                "access_token": new_access_token,
-                "expires_in": 3600,
-                "token_type": "Bearer",
-            },
+        # Mock 401 error
+        mock_response_401 = MagicMock()
+        mock_response_401.status = 401
+        http_error = HttpError(
+            mock_response_401, b'{"error": {"message": "Invalid token"}}'
         )
-    )
+        mock_list.execute.side_effect = http_error
 
-    # Make API call - should automatically refresh token and retry
-    result = await google_client.list_connections()
+        # API call should raise HttpError
+        with pytest.raises(HttpError) as exc_info:
+            await google_client.list_connections()
 
-    # Verify successful response after token refresh
-    assert result == mock_contacts_response
-    assert len(result["connections"]) == 1
-    assert result["connections"][0]["names"][0]["displayName"] == "Jane Doe"
-
-    # Verify new token is stored in database
-    stored_token = await google_auth_service.get_access_token(google_email)
-    assert stored_token == new_access_token
+        assert exc_info.value.resp.status == 401
 
 
 @pytest.mark.asyncio
-@pytest.mark.skip(reason="Google API client integration tests require refactoring for new architecture")
-async def test_token_refresh_failure_returns_401(
+async def test_api_server_error_handling(
     google_client: GoogleContactsAPIClient,
     google_auth_service: GoogleAuthService,
 ) -> None:
-    """Test that 401 is returned when token refresh fails."""
+    """Test that server errors are properly handled and re-raised."""
+    from unittest.mock import MagicMock, patch
+
+    from googleapiclient.errors import HttpError
+
     google_email = "test@example.com"
 
-    # Store tokens with invalid refresh token
+    # Store valid tokens
     await google_auth_service.store_tokens(
         google_account_email=google_email,
-        access_token="expired-access-token",
-        refresh_token="invalid-refresh-token",
-        expires_at=datetime.now(UTC) - timedelta(minutes=1),
+        access_token="valid-access-token",
+        refresh_token="refresh-token",
+        expires_at=datetime.now(UTC) + timedelta(hours=1),
     )
 
-    # Mock API to return 401
-    respx.get("https://people.googleapis.com/v1/people/me/connections").mock(
-        return_value=httpx.Response(401, json={"error": "invalid_token"})
-    )
+    # Mock the service at the client level
+    with patch.object(google_client, "_get_service") as mock_get_service:
+        mock_service = MagicMock()
+        mock_people = MagicMock()
+        mock_connections = MagicMock()
+        mock_list = MagicMock()
 
-    # Mock token refresh to fail
-    respx.post("https://oauth2.googleapis.com/token").mock(
-        return_value=httpx.Response(
-            400,
-            json={"error": "invalid_grant"},
+        mock_get_service.return_value = mock_service
+        mock_service.people.return_value = mock_people
+        mock_people.connections.return_value = mock_connections
+        mock_connections.list.return_value = mock_list
+
+        # Mock 500 server error
+        mock_response_500 = MagicMock()
+        mock_response_500.status = 500
+        http_error = HttpError(
+            mock_response_500, b'{"error": {"message": "Internal server error"}}'
         )
-    )
+        mock_list.execute.side_effect = http_error
 
-    # API call should raise HTTPStatusError due to 401
-    with pytest.raises(httpx.HTTPStatusError) as exc_info:
-        await google_client.list_connections()
+        # API call should raise HttpError
+        with pytest.raises(HttpError) as exc_info:
+            await google_client.list_connections()
 
-    assert exc_info.value.response.status_code == 401
+        assert exc_info.value.resp.status == 500
 
 
 @pytest.mark.asyncio
-@pytest.mark.skip(reason="Google API client integration tests require refactoring for new architecture")
 async def test_get_specific_contact(
     google_client: GoogleContactsAPIClient,
     google_auth_service: GoogleAuthService,
 ) -> None:
     """Test getting a specific contact by resource name."""
+    from unittest.mock import MagicMock, patch
+
     google_email = "test@example.com"
 
     # Store valid tokens
@@ -236,27 +237,34 @@ async def test_get_specific_contact(
         "phoneNumbers": [{"value": "+1234567890", "type": "mobile"}],
     }
 
-    # Mock the API endpoint
-    respx.get("https://people.googleapis.com/v1/people/123").mock(
-        return_value=httpx.Response(200, json=mock_contact)
-    )
+    # Mock the service at the client level
+    with patch.object(google_client, "_get_service") as mock_get_service:
+        mock_service = MagicMock()
+        mock_people = MagicMock()
+        mock_get = MagicMock()
 
-    # Get specific contact
-    result = await google_client.get_contact("people/123")
+        mock_get_service.return_value = mock_service
+        mock_service.people.return_value = mock_people
+        mock_people.get.return_value = mock_get
+        mock_get.execute.return_value = mock_contact
 
-    # Verify response
-    assert result == mock_contact
-    assert result["resourceName"] == "people/123"
-    assert result["names"][0]["displayName"] == "John Doe"
+        # Get specific contact
+        result = await google_client.get_contact("people/123")
+
+        # Verify response
+        assert result == mock_contact
+        assert result["resourceName"] == "people/123"
+        assert result["names"][0]["displayName"] == "John Doe"
 
 
 @pytest.mark.asyncio
-@pytest.mark.skip(reason="Google API client integration tests require refactoring for new architecture")
 async def test_list_connections_with_pagination(
     google_client: GoogleContactsAPIClient,
     google_auth_service: GoogleAuthService,
 ) -> None:
     """Test listing connections with pagination parameters."""
+    from unittest.mock import MagicMock, patch
+
     google_email = "test@example.com"
 
     # Store valid tokens
@@ -274,42 +282,61 @@ async def test_list_connections_with_pagination(
         "totalItems": 100,
     }
 
-    # Mock the API endpoint with query parameters
-    respx.get("https://people.googleapis.com/v1/people/me/connections").mock(
-        return_value=httpx.Response(200, json=mock_response)
-    )
+    # Mock the service at the client level
+    with patch.object(google_client, "_get_service") as mock_get_service:
+        mock_service = MagicMock()
+        mock_people = MagicMock()
+        mock_connections = MagicMock()
+        mock_list = MagicMock()
 
-    # Make API call with pagination
-    result = await google_client.list_connections(
-        page_size=50,
-        page_token="current-page-token",
-        sync_token="sync-token-123",
-    )
+        mock_get_service.return_value = mock_service
+        mock_service.people.return_value = mock_people
+        mock_people.connections.return_value = mock_connections
+        mock_connections.list.return_value = mock_list
+        mock_list.execute.return_value = mock_response
 
-    # Verify response
-    assert result == mock_response
-    assert result["nextPageToken"] == "next-page-token"
-    assert result["totalItems"] == 100
+        # Make API call with pagination
+        result = await google_client.list_connections(
+            page_size=50,
+            page_token="current-page-token",
+            sync_token="sync-token-123",
+        )
+
+        # Verify response
+        assert result == mock_response
+        assert result["nextPageToken"] == "next-page-token"
+        assert result["totalItems"] == 100
+
+        # Verify the API was called with correct parameters
+        mock_connections.list.assert_called_once_with(
+            resourceName="people/me",
+            pageSize=50,
+            pageToken="current-page-token",
+            syncToken="sync-token-123",
+            personFields="names,emailAddresses,phoneNumbers,addresses,organizations,birthdays,metadata",
+        )
 
 
 @pytest.mark.asyncio
-@pytest.mark.skip(reason="Google API client integration tests require refactoring for new architecture")
-async def test_client_context_manager(
+async def test_client_initialization(
     google_auth_service: GoogleAuthService,
 ) -> None:
-    """Test using the client as an async context manager."""
+    """Test client initialization and basic properties."""
     google_email = "test@example.com"
 
-    # Test context manager usage
-    async with GoogleContactsAPIClient(
+    # Test client creation
+    client = GoogleContactsAPIClient(
         auth_service=google_auth_service,
         google_account_email=google_email,
         google_client_id="test_client_id",
         google_client_secret="test_client_secret",
-    ) as client:
-        assert client is not None
-        assert client.google_account_email == google_email
-        assert client.client is not None
+    )
 
-    # Client should be closed after context manager exits
-    assert client.client.is_closed
+    assert client is not None
+    assert client.google_account_email == google_email
+    assert client.auth_service == google_auth_service
+    assert client.google_client_id == "test_client_id"
+    assert client.google_client_secret == "test_client_secret"
+
+    # Verify the client can be created without errors
+    # The service will be created lazily when needed
