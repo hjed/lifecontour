@@ -6,12 +6,14 @@ including pagination and token extraction scenarios.
 """
 
 from datetime import UTC, datetime
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from googleapiclient.errors import HttpError
 
-from app.core.contacts.models.entities import Contact
+from app.core.contacts.models.entities import Contact, Tag
+from app.core.contacts.models.value_objects import TagName
 from app.core.integrations.google_contacts.client_factory import (
     GoogleContactsClientFactory,
 )
@@ -161,7 +163,7 @@ class TestGoogleContactsServiceFullSync:
             first_name="John",
             last_name="Doe",
             middle_name="Michael",
-            tags=["google-contact"],
+            tags=[Tag(name=TagName("google-contact"))],
             methods=[],
             addresses=[],
             notes=[],
@@ -251,7 +253,7 @@ class TestGoogleContactsServiceFullSync:
             id=0,
             first_name="John",
             last_name="Doe",
-            tags=["google-contact"],
+            tags=[Tag(name=TagName("google-contact"))],
             methods=[],
             addresses=[],
             notes=[],
@@ -260,7 +262,7 @@ class TestGoogleContactsServiceFullSync:
             id=0,
             first_name="Jane",
             last_name="Smith",
-            tags=["google-contact"],
+            tags=[Tag(name=TagName("google-contact"))],
             methods=[],
             addresses=[],
             notes=[],
@@ -303,7 +305,7 @@ class TestGoogleContactsServiceFullSync:
         """Test full sync with empty response from Google."""
         google_account_email = "test@example.com"
 
-        empty_response = {
+        empty_response: dict[str, Any] = {
             "connections": [],
             "nextPageToken": None,
             "nextSyncToken": "empty_sync_token",
@@ -364,7 +366,7 @@ class TestGoogleContactsServiceFullSync:
             id=0,
             first_name="John",
             last_name="Doe",
-            tags=["google-contact"],
+            tags=[Tag(name=TagName("google-contact"))],
             methods=[],
             addresses=[],
             notes=[],
@@ -428,7 +430,7 @@ class TestGoogleContactsServiceFullSync:
             id=0,
             first_name="John",
             last_name="Doe",
-            tags=["google-contact"],
+            tags=[Tag(name=TagName("google-contact"))],
             methods=[],
             addresses=[],
             notes=[],
