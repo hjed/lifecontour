@@ -11,8 +11,8 @@ import pytest
 from fastapi import HTTPException
 
 from app.infrastructure.auth.models import SessionUser
-from app.infrastructure.di.auth import AuthProvider
 from app.infrastructure.config import Settings
+from app.infrastructure.di.auth import AuthProvider
 
 
 class TestAuthProviderExceptionHandling:

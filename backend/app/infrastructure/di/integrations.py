@@ -11,7 +11,9 @@ from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core.integrations.database import IntegrationDatabaseManager
-from app.core.integrations.google_contacts.client_factory import GoogleContactsClientFactory
+from app.core.integrations.google_contacts.client_factory import (
+    GoogleContactsClientFactory,
+)
 from app.core.integrations.google_contacts.contacts_service import GoogleContactsService
 from app.core.integrations.google_contacts.service import GoogleAuthService
 from app.core.integrations.google_contacts.transformer import GoogleContactTransformer

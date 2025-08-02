@@ -13,7 +13,6 @@ from meilisearch.errors import MeilisearchError
 
 from app.infrastructure.search.meilisearch_client import (
     CONTACTS_INDEX_SETTINGS,
-    check_meilisearch_connection,
     get_index_name,
 )
 from app.infrastructure.search.search_service import SearchService
