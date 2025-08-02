@@ -301,7 +301,10 @@ class GoogleContactTransformer:
 
         for membership in memberships:
             # Extract contact group membership information
-            if hasattr(membership, "contact_group_membership") and membership.contact_group_membership:
+            if (
+                hasattr(membership, "contact_group_membership")
+                and membership.contact_group_membership
+            ):
                 group_info = membership.contact_group_membership
 
                 # Try to get the group name or resource name
@@ -309,9 +312,9 @@ class GoogleContactTransformer:
                 if isinstance(group_info, dict):
                     # Look for common fields that might contain the group name
                     group_name = (
-                        group_info.get("contactGroupId") or
-                        group_info.get("contactGroupResourceName") or
-                        group_info.get("name")
+                        group_info.get("contactGroupId")
+                        or group_info.get("contactGroupResourceName")
+                        or group_info.get("name")
                     )
 
                 if group_name:

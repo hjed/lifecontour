@@ -7,19 +7,19 @@ responses to internal Contact entities.
 
 import pytest
 
-from app.core.integrations.google_contacts.transformer import GoogleContactTransformer
+from app.core.contacts.models.entities import Contact, MethodType
 from app.core.integrations.google_contacts.api_models import (
-    GooglePerson,
-    GoogleName,
-    GoogleEmailAddress,
-    GooglePhoneNumber,
     GoogleAddress,
     GoogleBiography,
-    GoogleOrganization,
-    GoogleMembership,
+    GoogleEmailAddress,
     GoogleFieldMetadata,
+    GoogleMembership,
+    GoogleName,
+    GoogleOrganization,
+    GooglePerson,
+    GooglePhoneNumber,
 )
-from app.core.contacts.models.entities import Contact, MethodType
+from app.core.integrations.google_contacts.transformer import GoogleContactTransformer
 
 
 @pytest.fixture
@@ -99,16 +99,16 @@ def sample_google_person():
                 metadata=GoogleFieldMetadata(primary=True, source_primary=True),
                 contactGroupMembership={
                     "contactGroupId": "family",
-                    "contactGroupResourceName": "contactGroups/family"
-                }
+                    "contactGroupResourceName": "contactGroups/family",
+                },
             ),
             GoogleMembership(
                 metadata=GoogleFieldMetadata(primary=False, source_primary=False),
                 contactGroupMembership={
                     "contactGroupId": "work-colleagues",
-                    "contactGroupResourceName": "contactGroups/work-colleagues"
-                }
-            )
+                    "contactGroupResourceName": "contactGroups/work-colleagues",
+                },
+            ),
         ],
     )
 
@@ -132,10 +132,10 @@ class TestGoogleContactTransformer:
         contact = transformer.transform_person(sample_google_person)
 
         # Check that all collections are initialized
-        assert hasattr(contact, 'methods')
-        assert hasattr(contact, 'addresses')
-        assert hasattr(contact, 'notes')
-        assert hasattr(contact, 'tags')
+        assert hasattr(contact, "methods")
+        assert hasattr(contact, "addresses")
+        assert hasattr(contact, "notes")
+        assert hasattr(contact, "tags")
         assert isinstance(contact.methods, list)
         assert isinstance(contact.addresses, list)
         assert isinstance(contact.notes, list)
@@ -145,7 +145,9 @@ class TestGoogleContactTransformer:
         """Test transformation of email addresses."""
         contact = transformer.transform_person(sample_google_person)
 
-        email_methods = [cm for cm in contact.methods if cm.method_type == MethodType.EMAIL]
+        email_methods = [
+            cm for cm in contact.methods if cm.method_type == MethodType.EMAIL
+        ]
         assert len(email_methods) == 2
 
         # Check primary email
@@ -162,7 +164,9 @@ class TestGoogleContactTransformer:
         """Test transformation of phone numbers."""
         contact = transformer.transform_person(sample_google_person)
 
-        phone_methods = [cm for cm in contact.methods if cm.method_type == MethodType.PHONE]
+        phone_methods = [
+            cm for cm in contact.methods if cm.method_type == MethodType.PHONE
+        ]
         assert len(phone_methods) == 1
 
         phone = phone_methods[0]
@@ -251,7 +255,9 @@ class TestGoogleContactTransformer:
         contact = transformer.transform_person(person)
 
         # Should only include valid email
-        email_methods = [cm for cm in contact.methods if cm.method_type == MethodType.EMAIL]
+        email_methods = [
+            cm for cm in contact.methods if cm.method_type == MethodType.EMAIL
+        ]
         assert len(email_methods) == 1
         assert email_methods[0].value == "valid@example.com"
 
@@ -287,9 +293,7 @@ class TestGoogleContactTransformer:
                     contactGroupMembership={}  # Empty membership info
                 ),
                 GoogleMembership(
-                    contactGroupMembership={
-                        "contactGroupId": "valid-group"
-                    }
+                    contactGroupMembership={"contactGroupId": "valid-group"}
                 ),
                 GoogleMembership(
                     contactGroupMembership={
