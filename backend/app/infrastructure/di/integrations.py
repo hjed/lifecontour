@@ -84,7 +84,7 @@ class IntegrationProvider(Provider):
         self,
         connection: AsyncConnection,
         encryption_service: EncryptionService,
-        settings: Settings
+        settings: Settings,
     ) -> GoogleAuthService:
         """
         Provide Google Auth service for request scope.
