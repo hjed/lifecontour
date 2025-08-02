@@ -14,9 +14,14 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core.contacts.models.entities import Contact
-from app.core.contacts.models.exceptions import ContactValidationError, InvalidTagNameError
+from app.core.contacts.models.exceptions import (
+    ContactValidationError,
+    InvalidTagNameError,
+)
 from app.core.integrations.google_contacts.api_models import ListConnectionsResponse
-from app.core.integrations.google_contacts.client_factory import GoogleContactsClientFactory
+from app.core.integrations.google_contacts.client_factory import (
+    GoogleContactsClientFactory,
+)
 from app.core.integrations.google_contacts.models import SITE_USER_ID
 from app.core.integrations.google_contacts.service import (
     GoogleAuthTokensNotFoundError,
@@ -118,7 +123,11 @@ class GoogleContactsService:
                     try:
                         contact = self.transformer.transform_person(google_person)
                         page_contacts.append(contact)
-                    except (ValueError, InvalidTagNameError, ContactValidationError) as e:
+                    except (
+                        ValueError,
+                        InvalidTagNameError,
+                        ContactValidationError,
+                    ) as e:
                         logger.warning(
                             "Failed to transform Google contact due to validation error",
                             google_account_email=google_account_email,
@@ -176,7 +185,7 @@ class GoogleContactsService:
                 "Google API error during contacts sync",
                 google_account_email=google_account_email,
                 error=str(e),
-                status_code=e.resp.status if hasattr(e, 'resp') else None,
+                status_code=e.resp.status if hasattr(e, "resp") else None,
             )
             raise GoogleContactsSyncError(
                 f"Google API error while syncing contacts for {google_account_email}: {str(e)}"
