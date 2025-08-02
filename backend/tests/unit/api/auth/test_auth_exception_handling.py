@@ -12,6 +12,7 @@ from fastapi import HTTPException
 
 from app.infrastructure.auth.models import SessionUser
 from app.infrastructure.di.auth import AuthProvider
+from app.infrastructure.config import Settings
 
 
 class TestAuthProviderExceptionHandling:
@@ -31,10 +32,14 @@ class TestAuthProviderExceptionHandling:
         mock_request = Mock()
         mock_request.session = {"user": user_data}
 
+        # Create mock settings with auth enabled
+        mock_settings = Mock(spec=Settings)
+        mock_settings.disable_auth = False
+
         auth_provider = AuthProvider()
 
         # Should return valid SessionUser
-        result = auth_provider.get_current_user(mock_request)
+        result = auth_provider.get_current_user(mock_request, mock_settings)
         assert isinstance(result, SessionUser)
         assert result.id == "12345"
         assert result.email == "test@example.com"
@@ -47,11 +52,15 @@ class TestAuthProviderExceptionHandling:
         mock_request = Mock()
         mock_request.session = {}
 
+        # Create mock settings with auth enabled
+        mock_settings = Mock(spec=Settings)
+        mock_settings.disable_auth = False
+
         auth_provider = AuthProvider()
 
         # Should raise HTTPException for no session
         with pytest.raises(HTTPException) as exc_info:
-            auth_provider.get_current_user(mock_request)
+            auth_provider.get_current_user(mock_request, mock_settings)
 
         assert exc_info.value.status_code == 401
         assert "Authentication required" in str(exc_info.value.detail)
@@ -62,11 +71,15 @@ class TestAuthProviderExceptionHandling:
         mock_request = Mock()
         mock_request.session = {"user": "invalid_data"}
 
+        # Create mock settings with auth enabled
+        mock_settings = Mock(spec=Settings)
+        mock_settings.disable_auth = False
+
         auth_provider = AuthProvider()
 
         # Should raise HTTPException for invalid session data
         with pytest.raises(HTTPException) as exc_info:
-            auth_provider.get_current_user(mock_request)
+            auth_provider.get_current_user(mock_request, mock_settings)
 
         assert exc_info.value.status_code == 401
 
@@ -76,10 +89,14 @@ class TestAuthProviderExceptionHandling:
         mock_request = Mock()
         mock_request.session = {}
 
+        # Create mock settings with auth enabled
+        mock_settings = Mock(spec=Settings)
+        mock_settings.disable_auth = False
+
         auth_provider = AuthProvider()
 
         # Should return None for no session
-        result = auth_provider.get_optional_user(mock_request)
+        result = auth_provider.get_optional_user(mock_request, mock_settings)
         assert result is None
 
     def test_auth_provider_get_optional_user_with_valid_session(self):
@@ -96,10 +113,14 @@ class TestAuthProviderExceptionHandling:
         mock_request = Mock()
         mock_request.session = {"user": user_data}
 
+        # Create mock settings with auth enabled
+        mock_settings = Mock(spec=Settings)
+        mock_settings.disable_auth = False
+
         auth_provider = AuthProvider()
 
         # Should return valid SessionUser
-        result = auth_provider.get_optional_user(mock_request)
+        result = auth_provider.get_optional_user(mock_request, mock_settings)
         assert isinstance(result, SessionUser)
         assert result.id == "12345"
 
@@ -109,8 +130,12 @@ class TestAuthProviderExceptionHandling:
         mock_request = Mock()
         mock_request.session = {"user": "invalid_data"}
 
+        # Create mock settings with auth enabled
+        mock_settings = Mock(spec=Settings)
+        mock_settings.disable_auth = False
+
         auth_provider = AuthProvider()
 
         # Should return None for invalid session (graceful handling)
-        result = auth_provider.get_optional_user(mock_request)
+        result = auth_provider.get_optional_user(mock_request, mock_settings)
         assert result is None

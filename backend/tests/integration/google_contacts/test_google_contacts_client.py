@@ -57,6 +57,8 @@ async def google_client(
     client = GoogleContactsAPIClient(
         auth_service=google_auth_service,
         google_account_email="test@example.com",
+        google_client_id="test_client_id",
+        google_client_secret="test_client_secret",
     )
     yield client
     await client.close()
@@ -301,6 +303,8 @@ async def test_client_context_manager(
     async with GoogleContactsAPIClient(
         auth_service=google_auth_service,
         google_account_email=google_email,
+        google_client_id="test_client_id",
+        google_client_secret="test_client_secret",
     ) as client:
         assert client is not None
         assert client.google_account_email == google_email
