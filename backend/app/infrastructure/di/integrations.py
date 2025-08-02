@@ -11,6 +11,7 @@ from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core.integrations.database import IntegrationDatabaseManager
+from app.core.integrations.encryption import EncryptionService
 from app.core.integrations.google_contacts.client_factory import (
     GoogleContactsClientFactory,
 )
@@ -56,6 +57,19 @@ class IntegrationProvider(Provider):
 
     # Google Contacts integration dependencies
     @provide(scope=Scope.APP)
+    def provide_encryption_service(self, settings: Settings) -> EncryptionService:
+        """
+        Provide encryption service as singleton.
+
+        Args:
+            settings: Application settings
+
+        Returns:
+            EncryptionService: Encryption service instance
+        """
+        return EncryptionService(settings)
+
+    @provide(scope=Scope.APP)
     def provide_google_contact_transformer(self) -> GoogleContactTransformer:
         """
         Provide Google Contact transformer as singleton.
@@ -65,25 +79,37 @@ class IntegrationProvider(Provider):
         """
         return GoogleContactTransformer()
 
-    @provide(scope=Scope.APP)
-    def provide_google_auth_service(self, settings: Settings) -> GoogleAuthService:
+    @provide(scope=Scope.REQUEST)
+    def provide_google_auth_service(
+        self,
+        connection: AsyncConnection,
+        encryption_service: EncryptionService,
+        settings: Settings
+    ) -> GoogleAuthService:
         """
-        Provide Google Auth service as singleton.
+        Provide Google Auth service for request scope.
 
         Args:
+            connection: Database connection
+            encryption_service: Encryption service
             settings: Application settings
 
         Returns:
             GoogleAuthService: Auth service instance
         """
-        return GoogleAuthService(settings)
+        return GoogleAuthService(
+            connection=connection,
+            encryption_service=encryption_service,
+            google_client_id=settings.google_client_id,
+            google_client_secret=settings.google_client_secret,
+        )
 
-    @provide(scope=Scope.APP)
+    @provide(scope=Scope.REQUEST)
     def provide_google_contacts_client_factory(
         self, auth_service: GoogleAuthService, settings: Settings
     ) -> GoogleContactsClientFactory:
         """
-        Provide Google Contacts client factory as singleton.
+        Provide Google Contacts client factory for request scope.
 
         Args:
             auth_service: Google authentication service

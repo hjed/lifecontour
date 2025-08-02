@@ -36,7 +36,7 @@ def sample_google_person():
         etag="test_etag_123",
         names=[
             GoogleName(
-                metadata=GoogleFieldMetadata(primary=True, source_primary=True),
+                metadata=GoogleFieldMetadata(primary=True, sourcePrimary=True),
                 displayName="John Doe",
                 familyName="Doe",
                 givenName="John",
@@ -45,13 +45,13 @@ def sample_google_person():
         ],
         emailAddresses=[
             GoogleEmailAddress(
-                metadata=GoogleFieldMetadata(primary=True, source_primary=True),
+                metadata=GoogleFieldMetadata(primary=True, sourcePrimary=True),
                 value="john.doe@example.com",
                 type="work",
                 formattedType="Work",
             ),
             GoogleEmailAddress(
-                metadata=GoogleFieldMetadata(primary=False, source_primary=False),
+                metadata=GoogleFieldMetadata(primary=False, sourcePrimary=False),
                 value="john.personal@example.com",
                 type="home",
                 formattedType="Home",
@@ -59,7 +59,7 @@ def sample_google_person():
         ],
         phoneNumbers=[
             GooglePhoneNumber(
-                metadata=GoogleFieldMetadata(primary=True, source_primary=True),
+                metadata=GoogleFieldMetadata(primary=True, sourcePrimary=True),
                 value="+1-555-123-4567",
                 canonicalForm="+15551234567",
                 type="work",
@@ -68,7 +68,7 @@ def sample_google_person():
         ],
         addresses=[
             GoogleAddress(
-                metadata=GoogleFieldMetadata(primary=True, source_primary=True),
+                metadata=GoogleFieldMetadata(primary=True, sourcePrimary=True),
                 formattedValue="123 Main St, Anytown, CA 12345, USA",
                 streetAddress="123 Main St",
                 city="Anytown",
@@ -81,14 +81,14 @@ def sample_google_person():
         ],
         biographies=[
             GoogleBiography(
-                metadata=GoogleFieldMetadata(primary=True, source_primary=True),
+                metadata=GoogleFieldMetadata(primary=True, sourcePrimary=True),
                 value="Software engineer with 10 years of experience.",
                 contentType="TEXT_PLAIN",
             )
         ],
         organizations=[
             GoogleOrganization(
-                metadata=GoogleFieldMetadata(primary=True, source_primary=True),
+                metadata=GoogleFieldMetadata(primary=True, sourcePrimary=True),
                 name="Tech Corp",
                 title="Senior Developer",
                 type="work",
@@ -96,14 +96,14 @@ def sample_google_person():
         ],
         memberships=[
             GoogleMembership(
-                metadata=GoogleFieldMetadata(primary=True, source_primary=True),
+                metadata=GoogleFieldMetadata(primary=True, sourcePrimary=True),
                 contactGroupMembership={
                     "contactGroupId": "family",
                     "contactGroupResourceName": "contactGroups/family",
                 },
             ),
             GoogleMembership(
-                metadata=GoogleFieldMetadata(primary=False, source_primary=False),
+                metadata=GoogleFieldMetadata(primary=False, sourcePrimary=False),
                 contactGroupMembership={
                     "contactGroupId": "work-colleagues",
                     "contactGroupResourceName": "contactGroups/work-colleagues",
