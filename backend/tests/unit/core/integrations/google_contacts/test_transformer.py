@@ -16,6 +16,7 @@ from app.core.integrations.google_contacts.api_models import (
     GoogleAddress,
     GoogleBiography,
     GoogleOrganization,
+    GoogleMembership,
     GoogleFieldMetadata,
 )
 from app.core.contacts.models.entities import Contact, MethodType
@@ -91,6 +92,22 @@ def sample_google_person():
                 name="Tech Corp",
                 title="Senior Developer",
                 type="work",
+            )
+        ],
+        memberships=[
+            GoogleMembership(
+                metadata=GoogleFieldMetadata(primary=True, source_primary=True),
+                contactGroupMembership={
+                    "contactGroupId": "family",
+                    "contactGroupResourceName": "contactGroups/family"
+                }
+            ),
+            GoogleMembership(
+                metadata=GoogleFieldMetadata(primary=False, source_primary=False),
+                contactGroupMembership={
+                    "contactGroupId": "work-colleagues",
+                    "contactGroupResourceName": "contactGroups/work-colleagues"
+                }
             )
         ],
     )
@@ -174,14 +191,14 @@ class TestGoogleContactTransformer:
         note = contact.notes[0]
         assert note.content == "Software engineer with 10 years of experience."
 
-    def test_transform_person_organization_tags(self, transformer, sample_google_person):
-        """Test transformation of organizations to tags."""
+    def test_transform_person_membership_tags(self, transformer, sample_google_person):
+        """Test transformation of contact group memberships to tags."""
         contact = transformer.transform_person(sample_google_person)
 
         assert len(contact.tags) == 2
         tag_names = [tag.name.value for tag in contact.tags]
-        assert "Tech-Corp" in tag_names  # Spaces replaced with hyphens
-        assert "Job-Senior-Developer" in tag_names  # Spaces replaced with hyphens
+        assert "family" in tag_names  # Contact group ID becomes tag
+        assert "work-colleagues" in tag_names  # Contact group ID becomes tag
 
     def test_transform_person_empty_names(self, transformer):
         """Test transformation when person has no names."""
@@ -261,25 +278,33 @@ class TestGoogleContactTransformer:
         assert address.locality == "Anytown"
         assert address.region == "CA"
 
-    def test_transform_person_invalid_organization_names_skipped(self, transformer):
-        """Test that invalid organization names are skipped when creating tags."""
+    def test_transform_person_invalid_membership_names_skipped(self, transformer):
+        """Test that invalid membership names are skipped when creating tags."""
         person = GooglePerson(
             resourceName="people/c123456789",
-            organizations=[
-                GoogleOrganization(name=""),  # Empty name
-                GoogleOrganization(name="Valid Corp"),
-                GoogleOrganization(title=""),  # Empty title
-                GoogleOrganization(title="Valid Title"),
+            memberships=[
+                GoogleMembership(
+                    contactGroupMembership={}  # Empty membership info
+                ),
+                GoogleMembership(
+                    contactGroupMembership={
+                        "contactGroupId": "valid-group"
+                    }
+                ),
+                GoogleMembership(
+                    contactGroupMembership={
+                        "contactGroupId": ""  # Empty group ID
+                    }
+                ),
             ],
         )
 
         contact = transformer.transform_person(person)
 
-        # Should only create tags for valid names/titles
+        # Should only create tags for valid group memberships
         tag_names = [tag.name.value for tag in contact.tags]
-        assert "Valid-Corp" in tag_names  # Spaces replaced with hyphens
-        assert "Job-Valid-Title" in tag_names  # Spaces replaced with hyphens
-        assert len(contact.tags) == 2
+        assert "valid-group" in tag_names
+        assert len(contact.tags) == 1
 
     def test_extract_names_with_primary(self, transformer):
         """Test name extraction when primary name is available."""

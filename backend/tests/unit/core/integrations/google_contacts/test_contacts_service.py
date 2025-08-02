@@ -235,8 +235,10 @@ class TestGoogleContactsServiceFullSync:
             "totalPeople": 2,
         }
 
-        # Configure mock client to return different responses for each call
-        contacts_service.client.list_connections.side_effect = [page1_response, page2_response]
+        # Setup mock client factory to return a mock client
+        mock_client = AsyncMock()
+        mock_client.list_connections.side_effect = [page1_response, page2_response]
+        contacts_service.client_factory.create_client.return_value = mock_client
 
         # Setup mock transformer responses
         contact1 = Contact(id=0, first_name="John", last_name="Doe", tags=["google-contact"], methods=[], addresses=[], notes=[])
@@ -252,15 +254,18 @@ class TestGoogleContactsServiceFullSync:
         assert contacts[1].first_name == "Jane"
         assert next_sync_token == "final_sync_token_xyz789"
 
+        # Verify client factory was called correctly
+        contacts_service.client_factory.create_client.assert_called_once_with(google_account_email)
+
         # Verify API client was called for each page
-        assert contacts_service.client.list_connections.call_count == 2
+        assert mock_client.list_connections.call_count == 2
 
         # Check first call (no page token)
-        first_call = contacts_service.client.list_connections.call_args_list[0]
+        first_call = mock_client.list_connections.call_args_list[0]
         assert first_call[1]["page_token"] is None
 
         # Check second call (with page token)
-        second_call = contacts_service.client.list_connections.call_args_list[1]
+        second_call = mock_client.list_connections.call_args_list[1]
         assert second_call[1]["page_token"] == "page_token_2"
 
     @pytest.mark.asyncio
