@@ -8,14 +8,20 @@ to our internal contact system.
 from datetime import UTC, datetime
 
 import structlog
+from googleapiclient.errors import HttpError
+from pydantic import ValidationError
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core.contacts.models.entities import Contact
+from app.core.contacts.models.exceptions import ContactValidationError, InvalidTagNameError
 from app.core.integrations.google_contacts.api_models import ListConnectionsResponse
-from app.core.integrations.google_contacts.client import GoogleContactsAPIClient
+from app.core.integrations.google_contacts.client_factory import GoogleContactsClientFactory
 from app.core.integrations.google_contacts.models import SITE_USER_ID
-from app.core.integrations.google_contacts.service import GoogleAuthService
+from app.core.integrations.google_contacts.service import (
+    GoogleAuthTokensNotFoundError,
+    TokenRefreshFailedError,
+)
 from app.core.integrations.google_contacts.transformer import GoogleContactTransformer
 
 logger = structlog.get_logger()
@@ -38,24 +44,20 @@ class GoogleContactsService:
     def __init__(
         self,
         connection: AsyncConnection,
-        auth_service: GoogleAuthService,
-        google_client_id: str,
-        google_client_secret: str,
+        client_factory: GoogleContactsClientFactory,
+        transformer: GoogleContactTransformer,
     ) -> None:
         """
         Initialize Google Contacts service.
 
         Args:
             connection: Database connection for storing sync state
-            auth_service: Service for managing Google OAuth tokens
-            google_client_id: Google OAuth client ID
-            google_client_secret: Google OAuth client secret
+            client_factory: Factory for creating Google Contacts API clients
+            transformer: Contact data transformer (singleton)
         """
         self.connection = connection
-        self.auth_service = auth_service
-        self.google_client_id = google_client_id
-        self.google_client_secret = google_client_secret
-        self.transformer = GoogleContactTransformer()
+        self.client_factory = client_factory
+        self.transformer = transformer
 
     async def full_sync(
         self, google_account_email: str
@@ -82,13 +84,8 @@ class GoogleContactsService:
         )
 
         try:
-            # Create API client
-            client = GoogleContactsAPIClient(
-                auth_service=self.auth_service,
-                google_account_email=google_account_email,
-                google_client_id=self.google_client_id,
-                google_client_secret=self.google_client_secret,
-            )
+            # Create API client for this specific Google account
+            client = self.client_factory.create_client(google_account_email)
 
             # Fetch all contacts with pagination
             all_contacts = []
@@ -121,12 +118,23 @@ class GoogleContactsService:
                     try:
                         contact = self.transformer.transform_person(google_person)
                         page_contacts.append(contact)
-                    except Exception as e:
+                    except (ValueError, InvalidTagNameError, ContactValidationError) as e:
                         logger.warning(
-                            "Failed to transform Google contact",
+                            "Failed to transform Google contact due to validation error",
                             google_account_email=google_account_email,
                             resource_name=google_person.resource_name,
                             error=str(e),
+                            error_type=type(e).__name__,
+                        )
+                        # Continue with other contacts instead of failing completely
+                        continue
+                    except ValidationError as e:
+                        logger.warning(
+                            "Failed to transform Google contact due to Pydantic validation error",
+                            google_account_email=google_account_email,
+                            resource_name=google_person.resource_name,
+                            error=str(e),
+                            validation_errors=e.errors(),
                         )
                         # Continue with other contacts instead of failing completely
                         continue
@@ -163,15 +171,35 @@ class GoogleContactsService:
 
             return all_contacts, next_sync_token
 
-        except Exception as e:
+        except HttpError as e:
             logger.error(
-                "Google Contacts full sync failed",
+                "Google API error during contacts sync",
+                google_account_email=google_account_email,
+                error=str(e),
+                status_code=e.resp.status if hasattr(e, 'resp') else None,
+            )
+            raise GoogleContactsSyncError(
+                f"Google API error while syncing contacts for {google_account_email}: {str(e)}"
+            ) from e
+        except (GoogleAuthTokensNotFoundError, TokenRefreshFailedError) as e:
+            logger.error(
+                "Google authentication error during contacts sync",
                 google_account_email=google_account_email,
                 error=str(e),
                 error_type=type(e).__name__,
             )
             raise GoogleContactsSyncError(
-                f"Failed to sync contacts from Google for {google_account_email}: {str(e)}"
+                f"Authentication error while syncing contacts for {google_account_email}: {str(e)}"
+            ) from e
+        except ValidationError as e:
+            logger.error(
+                "Data validation error during contacts sync",
+                google_account_email=google_account_email,
+                error=str(e),
+                validation_errors=e.errors(),
+            )
+            raise GoogleContactsSyncError(
+                f"Data validation error while syncing contacts for {google_account_email}: {str(e)}"
             ) from e
 
     async def _update_sync_state(

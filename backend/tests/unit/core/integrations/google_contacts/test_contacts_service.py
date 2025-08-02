@@ -8,12 +8,16 @@ including pagination and token extraction scenarios.
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 from datetime import datetime, UTC
+from googleapiclient.errors import HttpError
 
 from app.core.integrations.google_contacts.contacts_service import (
     GoogleContactsService,
     GoogleContactsSyncError,
 )
 from app.core.integrations.google_contacts.service import GoogleAuthService
+from app.core.integrations.google_contacts.client import GoogleContactsAPIClient
+from app.core.integrations.google_contacts.client_factory import GoogleContactsClientFactory
+from app.core.integrations.google_contacts.transformer import GoogleContactTransformer
 from app.core.contacts.models.entities import Contact, MethodType
 
 
@@ -32,13 +36,26 @@ def mock_auth_service():
 
 
 @pytest.fixture
-def contacts_service(mock_connection, mock_auth_service):
+def mock_client_factory():
+    """Mock Google Contacts client factory."""
+    factory = AsyncMock(spec=GoogleContactsClientFactory)
+    return factory
+
+
+@pytest.fixture
+def mock_transformer():
+    """Mock Google Contact transformer."""
+    transformer = AsyncMock(spec=GoogleContactTransformer)
+    return transformer
+
+
+@pytest.fixture
+def contacts_service(mock_connection, mock_client_factory, mock_transformer):
     """Create GoogleContactsService instance with mocked dependencies."""
     return GoogleContactsService(
         connection=mock_connection,
-        auth_service=mock_auth_service,
-        google_client_id="test_client_id",
-        google_client_secret="test_client_secret",
+        client_factory=mock_client_factory,
+        transformer=mock_transformer,
     )
 
 
@@ -131,38 +148,55 @@ class TestGoogleContactsServiceFullSync:
         contacts_service,
         mock_connection,
         sample_list_connections_response,
+        sample_google_person_data,
     ):
         """Test successful full sync with single page of results."""
         google_account_email = "test@example.com"
-        
-        # Mock the API client
-        with patch(
-            "app.core.integrations.google_contacts.contacts_service.GoogleContactsAPIClient"
-        ) as mock_client_class:
-            mock_client = AsyncMock()
-            mock_client_class.return_value = mock_client
-            mock_client.list_connections.return_value = sample_list_connections_response
 
-            # Execute full sync
-            contacts, next_sync_token = await contacts_service.full_sync(google_account_email)
+        # Setup mock transformer response
+        expected_contact = Contact(
+            id=0,
+            first_name="John",
+            last_name="Doe",
+            middle_name="Michael",
+            tags=["google-contact"],
+            methods=[],
+            addresses=[],
+            notes=[],
+        )
+        contacts_service.transformer.transform_person.return_value = expected_contact
 
-            # Verify results
-            assert len(contacts) == 1
-            assert isinstance(contacts[0], Contact)
-            assert contacts[0].first_name == "John"
-            assert contacts[0].last_name == "Doe"
-            assert contacts[0].middle_name == "Michael"
-            assert next_sync_token == "sync_token_abc123"
+        # Setup mock client factory to return a mock client
+        mock_client = AsyncMock()
+        mock_client.list_connections.return_value = sample_list_connections_response
+        contacts_service.client_factory.create_client.return_value = mock_client
 
-            # Verify API client was called correctly
-            mock_client.list_connections.assert_called_once_with(
-                page_size=100,
-                page_token=None,
-                sync_token=None,
-            )
+        # Execute full sync
+        contacts, next_sync_token = await contacts_service.full_sync(google_account_email)
 
-            # Verify sync state was updated
-            mock_connection.execute.assert_called_once()
+        # Verify results
+        assert len(contacts) == 1
+        assert isinstance(contacts[0], Contact)
+        assert contacts[0].first_name == "John"
+        assert contacts[0].last_name == "Doe"
+        assert contacts[0].middle_name == "Michael"
+        assert next_sync_token == "sync_token_abc123"
+
+        # Verify client factory was called correctly
+        contacts_service.client_factory.create_client.assert_called_once_with(google_account_email)
+
+        # Verify API client was called correctly
+        mock_client.list_connections.assert_called_once_with(
+            page_size=100,
+            page_token=None,
+            sync_token=None,
+        )
+
+        # Verify transformer was called correctly
+        contacts_service.transformer.transform_person.assert_called_once()
+
+        # Verify sync state was updated
+        mock_connection.execute.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_full_sync_multiple_pages(
@@ -201,34 +235,33 @@ class TestGoogleContactsServiceFullSync:
             "totalPeople": 2,
         }
 
-        with patch(
-            "app.core.integrations.google_contacts.contacts_service.GoogleContactsAPIClient"
-        ) as mock_client_class:
-            mock_client = AsyncMock()
-            mock_client_class.return_value = mock_client
-            
-            # Configure mock to return different responses for each call
-            mock_client.list_connections.side_effect = [page1_response, page2_response]
+        # Configure mock client to return different responses for each call
+        contacts_service.client.list_connections.side_effect = [page1_response, page2_response]
 
-            # Execute full sync
-            contacts, next_sync_token = await contacts_service.full_sync(google_account_email)
+        # Setup mock transformer responses
+        contact1 = Contact(id=0, first_name="John", last_name="Doe", tags=["google-contact"], methods=[], addresses=[], notes=[])
+        contact2 = Contact(id=0, first_name="Jane", last_name="Smith", tags=["google-contact"], methods=[], addresses=[], notes=[])
+        contacts_service.transformer.transform_person.side_effect = [contact1, contact2]
 
-            # Verify results
-            assert len(contacts) == 2
-            assert contacts[0].first_name == "John"
-            assert contacts[1].first_name == "Jane"
-            assert next_sync_token == "final_sync_token_xyz789"
+        # Execute full sync
+        contacts, next_sync_token = await contacts_service.full_sync(google_account_email)
 
-            # Verify API client was called for each page
-            assert mock_client.list_connections.call_count == 2
-            
-            # Check first call (no page token)
-            first_call = mock_client.list_connections.call_args_list[0]
-            assert first_call[1]["page_token"] is None
-            
-            # Check second call (with page token)
-            second_call = mock_client.list_connections.call_args_list[1]
-            assert second_call[1]["page_token"] == "page_token_2"
+        # Verify results
+        assert len(contacts) == 2
+        assert contacts[0].first_name == "John"
+        assert contacts[1].first_name == "Jane"
+        assert next_sync_token == "final_sync_token_xyz789"
+
+        # Verify API client was called for each page
+        assert contacts_service.client.list_connections.call_count == 2
+
+        # Check first call (no page token)
+        first_call = contacts_service.client.list_connections.call_args_list[0]
+        assert first_call[1]["page_token"] is None
+
+        # Check second call (with page token)
+        second_call = contacts_service.client.list_connections.call_args_list[1]
+        assert second_call[1]["page_token"] == "page_token_2"
 
     @pytest.mark.asyncio
     async def test_full_sync_empty_response(
@@ -246,19 +279,15 @@ class TestGoogleContactsServiceFullSync:
             "totalPeople": 0,
         }
 
-        with patch(
-            "app.core.integrations.google_contacts.contacts_service.GoogleContactsAPIClient"
-        ) as mock_client_class:
-            mock_client = AsyncMock()
-            mock_client_class.return_value = mock_client
-            mock_client.list_connections.return_value = empty_response
+        # Setup mock client response
+        contacts_service.client.list_connections.return_value = empty_response
 
-            # Execute full sync
-            contacts, next_sync_token = await contacts_service.full_sync(google_account_email)
+        # Execute full sync
+        contacts, next_sync_token = await contacts_service.full_sync(google_account_email)
 
-            # Verify results
-            assert len(contacts) == 0
-            assert next_sync_token == "empty_sync_token"
+        # Verify results
+        assert len(contacts) == 0
+        assert next_sync_token == "empty_sync_token"
 
     @pytest.mark.asyncio
     async def test_full_sync_handles_transformation_errors(
@@ -288,20 +317,20 @@ class TestGoogleContactsServiceFullSync:
             "totalPeople": 2,
         }
 
-        with patch(
-            "app.core.integrations.google_contacts.contacts_service.GoogleContactsAPIClient"
-        ) as mock_client_class:
-            mock_client = AsyncMock()
-            mock_client_class.return_value = mock_client
-            mock_client.list_connections.return_value = response
+        # Setup mock client response
+        contacts_service.client.list_connections.return_value = response
 
-            # Execute full sync
-            contacts, next_sync_token = await contacts_service.full_sync(google_account_email)
+        # Setup mock transformer to succeed for first contact, fail for second
+        valid_contact = Contact(id=0, first_name="John", last_name="Doe", tags=["google-contact"], methods=[], addresses=[], notes=[])
+        contacts_service.transformer.transform_person.side_effect = [valid_contact, ValueError("Invalid contact data")]
 
-            # Verify that valid contact was processed and invalid one was skipped
-            assert len(contacts) == 1
-            assert contacts[0].first_name == "John"
-            assert next_sync_token == "sync_token_with_errors"
+        # Execute full sync
+        contacts, next_sync_token = await contacts_service.full_sync(google_account_email)
+
+        # Verify that valid contact was processed and invalid one was skipped
+        assert len(contacts) == 1
+        assert contacts[0].first_name == "John"
+        assert next_sync_token == "sync_token_with_errors"
 
     @pytest.mark.asyncio
     async def test_full_sync_api_error_raises_exception(
@@ -312,19 +341,18 @@ class TestGoogleContactsServiceFullSync:
         """Test that API errors are properly wrapped and raised."""
         google_account_email = "test@example.com"
 
-        with patch(
-            "app.core.integrations.google_contacts.contacts_service.GoogleContactsAPIClient"
-        ) as mock_client_class:
-            mock_client = AsyncMock()
-            mock_client_class.return_value = mock_client
-            mock_client.list_connections.side_effect = Exception("API Error")
+        # Create a mock HttpError (Google API client error)
+        mock_response = MagicMock()
+        mock_response.status = 500
+        http_error = HttpError(mock_response, b'{"error": {"message": "API Error"}}')
+        contacts_service.client.list_connections.side_effect = http_error
 
-            # Execute full sync and expect exception
-            with pytest.raises(GoogleContactsSyncError) as exc_info:
-                await contacts_service.full_sync(google_account_email)
+        # Execute full sync and expect exception
+        with pytest.raises(GoogleContactsSyncError) as exc_info:
+            await contacts_service.full_sync(google_account_email)
 
-            assert "Failed to sync contacts from Google" in str(exc_info.value)
-            assert "API Error" in str(exc_info.value)
+        assert "Google API error while syncing contacts" in str(exc_info.value)
+        assert "API Error" in str(exc_info.value)
 
     @pytest.mark.asyncio
     async def test_full_sync_updates_sync_state(
@@ -336,28 +364,28 @@ class TestGoogleContactsServiceFullSync:
         """Test that sync state is properly updated in database."""
         google_account_email = "test@example.com"
 
-        with patch(
-            "app.core.integrations.google_contacts.contacts_service.GoogleContactsAPIClient"
-        ) as mock_client_class:
-            mock_client = AsyncMock()
-            mock_client_class.return_value = mock_client
-            mock_client.list_connections.return_value = sample_list_connections_response
+        # Setup mock client response
+        contacts_service.client.list_connections.return_value = sample_list_connections_response
 
-            # Execute full sync
-            await contacts_service.full_sync(google_account_email)
+        # Setup mock transformer response
+        expected_contact = Contact(id=0, first_name="John", last_name="Doe", tags=["google-contact"], methods=[], addresses=[], notes=[])
+        contacts_service.transformer.transform_person.return_value = expected_contact
 
-            # Verify database update was called
-            mock_connection.execute.assert_called_once()
-            
-            # Check the SQL parameters
-            call_args = mock_connection.execute.call_args
-            params = call_args[0][1]  # Second argument contains parameters
-            
-            assert params["user_id"] == "site-user"
-            assert params["email"] == google_account_email
-            assert params["sync_token"] == "sync_token_abc123"
-            assert isinstance(params["sync_time"], datetime)
-            assert isinstance(params["now"], datetime)
+        # Execute full sync
+        await contacts_service.full_sync(google_account_email)
+
+        # Verify database update was called
+        mock_connection.execute.assert_called_once()
+
+        # Check the SQL parameters
+        call_args = mock_connection.execute.call_args
+        params = call_args[0][1]  # Second argument contains parameters
+
+        assert params["user_id"] == "site-user"
+        assert params["email"] == google_account_email
+        assert params["sync_token"] == "sync_token_abc123"
+        assert isinstance(params["sync_time"], datetime)
+        assert isinstance(params["now"], datetime)
 
     @pytest.mark.asyncio
     async def test_get_last_sync_token(self, contacts_service, mock_connection):

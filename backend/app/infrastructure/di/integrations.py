@@ -8,8 +8,13 @@ database managers, and base integration services.
 from arq.connections import RedisSettings
 from dishka import Provider, Scope, provide
 from redis.asyncio import Redis
+from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core.integrations.database import IntegrationDatabaseManager
+from app.core.integrations.google_contacts.client_factory import GoogleContactsClientFactory
+from app.core.integrations.google_contacts.contacts_service import GoogleContactsService
+from app.core.integrations.google_contacts.service import GoogleAuthService
+from app.core.integrations.google_contacts.transformer import GoogleContactTransformer
 from app.core.integrations.task_queue import get_redis_pool, get_redis_settings
 from app.infrastructure.config import Settings
 
@@ -46,6 +51,74 @@ class IntegrationProvider(Provider):
             IntegrationDatabaseManager: Database manager instance
         """
         return IntegrationDatabaseManager(settings)
+
+    # Google Contacts integration dependencies
+    @provide(scope=Scope.APP)
+    def provide_google_contact_transformer(self) -> GoogleContactTransformer:
+        """
+        Provide Google Contact transformer as singleton.
+
+        Returns:
+            GoogleContactTransformer: Transformer instance
+        """
+        return GoogleContactTransformer()
+
+    @provide(scope=Scope.APP)
+    def provide_google_auth_service(self, settings: Settings) -> GoogleAuthService:
+        """
+        Provide Google Auth service as singleton.
+
+        Args:
+            settings: Application settings
+
+        Returns:
+            GoogleAuthService: Auth service instance
+        """
+        return GoogleAuthService(settings)
+
+    @provide(scope=Scope.APP)
+    def provide_google_contacts_client_factory(
+        self, auth_service: GoogleAuthService, settings: Settings
+    ) -> GoogleContactsClientFactory:
+        """
+        Provide Google Contacts client factory as singleton.
+
+        Args:
+            auth_service: Google authentication service
+            settings: Application settings
+
+        Returns:
+            GoogleContactsClientFactory: Client factory instance
+        """
+        return GoogleContactsClientFactory(
+            auth_service=auth_service,
+            google_client_id=settings.google_client_id,
+            google_client_secret=settings.google_client_secret,
+        )
+
+    @provide(scope=Scope.REQUEST)
+    def provide_google_contacts_service(
+        self,
+        connection: AsyncConnection,
+        client_factory: GoogleContactsClientFactory,
+        transformer: GoogleContactTransformer,
+    ) -> GoogleContactsService:
+        """
+        Provide Google Contacts service for request scope.
+
+        Args:
+            connection: Database connection
+            client_factory: Google Contacts client factory
+            transformer: Contact transformer
+
+        Returns:
+            GoogleContactsService: Service instance
+        """
+        return GoogleContactsService(
+            connection=connection,
+            client_factory=client_factory,
+            transformer=transformer,
+        )
 
     @provide
     def provide_redis_settings(self, settings: Settings) -> RedisSettings:
