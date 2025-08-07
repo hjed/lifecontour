@@ -16,6 +16,12 @@ PUBLIC_PORT=${PUBLIC_PORT:-4444}
 ADMIN_PORT_EXTERNAL=${ADMIN_PORT_EXTERNAL:-4445}
 
 echo "🔧 Starting OAuth provider initialization for ${ENVIRONMENT}..."
+echo "DEBUG: Script started successfully"
+echo "DEBUG: Environment variables:"
+echo "  OAUTH_PROVIDER_HOST=${OAUTH_PROVIDER_HOST}"
+echo "  OAUTH_ADMIN_PORT=${OAUTH_ADMIN_PORT}"
+echo "  CLIENT_ID=${CLIENT_ID}"
+echo "  ENVIRONMENT=${ENVIRONMENT}"
 
 # Colors for output (if supported)
 if [ -t 1 ]; then
@@ -33,9 +39,9 @@ else
 fi
 
 print_status() {
-    local color=$1
-    local message=$2
-    echo -e "${color}${message}${NC}"
+    color=$1
+    message=$2
+    printf "${color}${message}${NC}\n"
 }
 
 print_step() {
@@ -64,9 +70,12 @@ print_step "Checking health at: ${HEALTH_URL}"
 
 while [ $attempt -lt $max_attempts ]; do
     # Use HTTP status code check instead of curl -f to avoid exit code 7
+    echo "DEBUG: Attempting health check (attempt $attempt/$max_attempts)"
     HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "${HEALTH_URL}" 2>/dev/null || echo "000")
+    echo "DEBUG: Health check returned HTTP code: $HTTP_CODE"
     if [ "$HTTP_CODE" = "200" ]; then
         print_success "Hydra is ready!"
+        echo "DEBUG: Health check successful, breaking out of loop"
         break
     fi
 
@@ -146,11 +155,13 @@ EOF
 )
 
 CREATE_CLIENT_URL="http://${OAUTH_PROVIDER_HOST}:${OAUTH_ADMIN_PORT}/admin/clients"
+echo "DEBUG: Creating client at URL: ${CREATE_CLIENT_URL}"
 # Use HTTP status code check instead of curl -f to avoid exit code 7
 CREATE_HTTP_CODE=$(curl -X POST "${CREATE_CLIENT_URL}" \
     -H "Content-Type: application/json" \
     -d "$CLIENT_CONFIG" \
     -s -o /dev/null -w "%{http_code}" 2>/dev/null || echo "000")
+echo "DEBUG: Client creation returned HTTP code: $CREATE_HTTP_CODE"
 
 if [ "$CREATE_HTTP_CODE" = "201" ] || [ "$CREATE_HTTP_CODE" = "200" ]; then
     print_success "OAuth client created successfully!"
@@ -165,9 +176,9 @@ fi
 
 # Verify client configuration
 print_step "Verifying OAuth client configuration..."
-CLIENT_INFO=$(curl -s "${CLIENT_CHECK_URL}" 2>/dev/null)
+CLIENT_INFO=$(curl -s "${CLIENT_CHECK_URL}" 2>/dev/null || echo "")
 
-if [ $? -eq 0 ] && echo "$CLIENT_INFO" | grep -q "\"client_id\":\"${CLIENT_ID}\""; then
+if [ -n "$CLIENT_INFO" ] && echo "$CLIENT_INFO" | grep -q "\"client_id\":\"${CLIENT_ID}\""; then
     print_success "Client verification successful"
 
     # Extract and display key configuration
