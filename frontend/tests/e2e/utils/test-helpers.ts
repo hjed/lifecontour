@@ -993,7 +993,9 @@ export class TestDataHelpers {
     const searchResponse = await this.page.request.get('/api/tags');
     if (searchResponse.ok()) {
       const tagsData = await searchResponse.json();
-      const existingTag = tagsData.data?.find((tag: any) => tag.attributes.name === tagName);
+      const existingTag = tagsData.data?.find(
+        (tag: any) => tag.attributes.name === tagName
+      );
       if (existingTag) {
         return parseInt(existingTag.id);
       }
@@ -1016,7 +1018,9 @@ export class TestDataHelpers {
     });
 
     if (!createResponse.ok()) {
-      throw new Error(`Failed to create tag ${tagName}: ${createResponse.status()}`);
+      throw new Error(
+        `Failed to create tag ${tagName}: ${createResponse.status()}`
+      );
     }
 
     const tagData = await createResponse.json();
