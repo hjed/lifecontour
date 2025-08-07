@@ -63,7 +63,9 @@ HEALTH_URL="http://${OAUTH_PROVIDER_HOST}:${OAUTH_ADMIN_PORT}/health/ready"
 print_step "Checking health at: ${HEALTH_URL}"
 
 while [ $attempt -lt $max_attempts ]; do
-    if curl -f -s "${HEALTH_URL}" >/dev/null 2>&1; then
+    # Use HTTP status code check instead of curl -f to avoid exit code 7
+    HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "${HEALTH_URL}" 2>/dev/null || echo "000")
+    if [ "$HTTP_CODE" = "200" ]; then
         print_success "Hydra is ready!"
         break
     fi
@@ -75,8 +77,8 @@ while [ $attempt -lt $max_attempts ]; do
         print_step "Still waiting for Hydra... (attempt $next_attempt/$max_attempts)"
         # Show more detailed error info every 10 attempts
         echo "Attempting to connect to: ${HEALTH_URL}"
-        curl_output=$(curl -f -s "${HEALTH_URL}" 2>&1 || true)
-        echo "Curl response: $curl_output"
+        debug_http_code=$(curl -s -o /dev/null -w "%{http_code}" "${HEALTH_URL}" 2>/dev/null || echo "000")
+        echo "HTTP response code: $debug_http_code"
     fi
 
     sleep 2
@@ -86,7 +88,8 @@ done
 if [ $attempt -eq $max_attempts ]; then
     print_error "Hydra failed to start within expected time"
     print_error "Final connection attempt to: ${HEALTH_URL}"
-    curl -f -s "${HEALTH_URL}" 2>&1 || true
+    final_http_code=$(curl -s -o /dev/null -w "%{http_code}" "${HEALTH_URL}" 2>/dev/null || echo "000")
+    print_error "Final HTTP response code: $final_http_code"
     print_error "Check Hydra logs for more details"
     exit 1
 fi
@@ -143,13 +146,16 @@ EOF
 )
 
 CREATE_CLIENT_URL="http://${OAUTH_PROVIDER_HOST}:${OAUTH_ADMIN_PORT}/admin/clients"
-if curl -X POST "${CREATE_CLIENT_URL}" \
+# Use HTTP status code check instead of curl -f to avoid exit code 7
+CREATE_HTTP_CODE=$(curl -X POST "${CREATE_CLIENT_URL}" \
     -H "Content-Type: application/json" \
     -d "$CLIENT_CONFIG" \
-    -f -s >/dev/null 2>&1; then
+    -s -o /dev/null -w "%{http_code}" 2>/dev/null || echo "000")
+
+if [ "$CREATE_HTTP_CODE" = "201" ] || [ "$CREATE_HTTP_CODE" = "200" ]; then
     print_success "OAuth client created successfully!"
 else
-    print_error "Failed to create OAuth client"
+    print_error "Failed to create OAuth client (HTTP $CREATE_HTTP_CODE)"
     print_error "Response from Hydra:"
     curl -X POST "${CREATE_CLIENT_URL}" \
         -H "Content-Type: application/json" \
