@@ -5,14 +5,16 @@
  * Eliminates conditional logic and ensures each test has exactly the data it needs.
  */
 
+/* eslint-disable react-hooks/rules-of-hooks */
+// This file contains Playwright fixtures that use the `use()` function,
+// which is not a React hook but triggers the React hooks ESLint rule
+
 import { test as base, Page } from '@playwright/test';
-import { createTestHelpers } from './utils/test-helpers';
 import {
   TestDataManager,
   ContactFactory,
   TagFactory,
   DataSetFactory,
-  DataSet,
 } from './data-management';
 
 // Types for our fixtures
@@ -689,7 +691,7 @@ export const test = base.extend<TestFixtures, WorkerFixtures>({
   },
 
   // Utility fixtures
-  dataFactory: async ({}, use) => {
+  dataFactory: async (_fixtures, use) => {
     await use({
       contacts: ContactFactory,
       tags: TagFactory,
@@ -698,7 +700,7 @@ export const test = base.extend<TestFixtures, WorkerFixtures>({
   },
 
   // Test-scoped fixture: Cleanup tracking
-  testCleanup: async ({}, use) => {
+  testCleanup: async (_fixtures, use) => {
     const cleanupTasks: (() => Promise<void>)[] = [];
 
     const addCleanupTask = (task: () => Promise<void>) => {

@@ -418,7 +418,7 @@ test.describe('Advanced Data Fixtures Examples', () => {
     test('should work with favourites test data', async ({
       favouritesTestData,
     }) => {
-      const { page, contacts, tags } = favouritesTestData;
+      const { page, contacts } = favouritesTestData;
 
       await page.goto('/contacts');
 
@@ -535,9 +535,9 @@ test.describe('Advanced Data Fixtures Examples', () => {
 
   test.describe('Data Factory Usage', () => {
     test('should use data factories for custom scenarios', async ({
-      authenticatedPage,
+      authenticatedPage: _authenticatedPage,
       dataFactory,
-      testCleanup,
+      testCleanup: _testCleanup,
     }) => {
       // Demonstrate factory usage for custom test scenarios
       const customContacts = dataFactory.contacts.createMany(3, {
