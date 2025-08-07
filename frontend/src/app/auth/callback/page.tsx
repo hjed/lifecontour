@@ -95,7 +95,7 @@ function CallbackContent() {
     };
 
     processCallback();
-  }, [searchParams, router]); // Removed refreshSession to prevent re-runs
+  }, [searchParams, router, refreshSession]);
 
   // Show error state
   if (error) {

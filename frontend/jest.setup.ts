@@ -135,7 +135,6 @@ jest.mock('@/lib/constants', () => ({
 
 // Export mock functions for test access
 declare global {
-  // eslint-disable-next-line no-var
   var __mockRouter: {
     push: jest.Mock;
     replace: jest.Mock;
