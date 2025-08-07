@@ -285,7 +285,7 @@ test.describe('OAuth Docker Integration', () => {
     // Make a request to a backend endpoint that might expose configuration info
     try {
       const response = await page.request.get(
-        'http://localhost:8000/api/health'
+        'http://localhost:8001/api/health'
       );
 
       if (response.ok()) {
