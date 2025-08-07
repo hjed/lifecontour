@@ -947,10 +947,9 @@ export class TestDataHelpers {
    * Ensure a tag exists, creating it if necessary.
    */
   private async ensureTagExists(tagName: string): Promise<void> {
-    // For now, we'll assume tags are created automatically when assigned to contacts
-    // In a real implementation, you might need to check if the tag exists first
-    // and create it via a tags API endpoint if it doesn't exist
+    // This is now handled by getOrCreateTagId method
     console.log(`[TestDataHelpers] Ensuring tag exists: ${tagName}`);
+    await this.getOrCreateTagId(tagName);
   }
 
   /**
@@ -960,20 +959,17 @@ export class TestDataHelpers {
     contactId: string,
     tagName: string
   ): Promise<void> {
-    // This would typically be done via a PATCH request to update the contact's tags
-    // or via a dedicated endpoint for managing contact-tag relationships
-    const response = await this.page.request.patch(
-      `/api/contacts/${contactId}`,
+    // First, we need to get or create the tag to get its ID
+    const tagId = await this.getOrCreateTagId(tagName);
+
+    // Use the correct POST endpoint for tag assignment
+    const response = await this.page.request.post(
+      `/api/contacts/${contactId}/tags`,
       {
         data: {
           data: {
-            type: 'contacts',
-            id: contactId,
-            attributes: {
-              // This is a simplified approach - in reality you'd need to get current tags
-              // and add the new one, or use a dedicated tag assignment endpoint
-              tags: [tagName],
-            },
+            type: 'tags',
+            id: tagId.toString(),
           },
         },
         headers: {
@@ -983,10 +979,48 @@ export class TestDataHelpers {
     );
 
     if (!response.ok()) {
-      console.warn(
+      throw new Error(
         `Failed to assign tag ${tagName} to contact ${contactId}: ${response.status()}`
       );
     }
+  }
+
+  /**
+   * Get or create a tag and return its ID.
+   */
+  private async getOrCreateTagId(tagName: string): Promise<number> {
+    // First try to find existing tag
+    const searchResponse = await this.page.request.get('/api/tags');
+    if (searchResponse.ok()) {
+      const tagsData = await searchResponse.json();
+      const existingTag = tagsData.data?.find((tag: any) => tag.attributes.name === tagName);
+      if (existingTag) {
+        return parseInt(existingTag.id);
+      }
+    }
+
+    // Create new tag if not found
+    const createResponse = await this.page.request.post('/api/tags', {
+      data: {
+        data: {
+          type: 'tags',
+          attributes: {
+            name: tagName,
+            color: '#3B82F6', // Default blue color
+          },
+        },
+      },
+      headers: {
+        'Content-Type': 'application/vnd.api+json',
+      },
+    });
+
+    if (!createResponse.ok()) {
+      throw new Error(`Failed to create tag ${tagName}: ${createResponse.status()}`);
+    }
+
+    const tagData = await createResponse.json();
+    return parseInt(tagData.data.id);
   }
 }
 

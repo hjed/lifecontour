@@ -244,7 +244,7 @@ IMMICH_BASE_URL=http://your-immich-instance
 
 **Frontend** (`.env.local`):
 ```bash
-BACKEND_URL=http://localhost:8000
+BACKEND_URL=http://localhost:8001
 NODE_ENV=development
 ```
 
