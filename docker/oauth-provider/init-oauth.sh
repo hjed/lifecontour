@@ -69,8 +69,10 @@ while [ $attempt -lt $max_attempts ]; do
     fi
 
     # Show progress every 10 attempts
-    if [ $((attempt % 10)) -eq 0 ] && [ $attempt -gt 0 ]; then
-        print_step "Still waiting for Hydra... (attempt $((attempt + 1))/$max_attempts)"
+    remainder=$(expr $attempt % 10)
+    if [ $remainder -eq 0 ] && [ $attempt -gt 0 ]; then
+        next_attempt=$(expr $attempt + 1)
+        print_step "Still waiting for Hydra... (attempt $next_attempt/$max_attempts)"
         # Show more detailed error info every 10 attempts
         echo "Attempting to connect to: ${HEALTH_URL}"
         curl_output=$(curl -f -s "${HEALTH_URL}" 2>&1 || true)
@@ -78,7 +80,7 @@ while [ $attempt -lt $max_attempts ]; do
     fi
 
     sleep 2
-    attempt=$((attempt + 1))
+    attempt=$(expr $attempt + 1)
 done
 
 if [ $attempt -eq $max_attempts ]; then
@@ -111,7 +113,6 @@ elif [ "$HTTP_STATUS" = "404" ]; then
     print_step "Client does not exist yet (HTTP 404) - this is expected"
 else
     print_warning "Unexpected response when checking client (HTTP $HTTP_STATUS) - continuing anyway..."
-fi
 fi
 
 # Create OAuth client with comprehensive configuration
