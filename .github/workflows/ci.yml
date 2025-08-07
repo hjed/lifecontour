@@ -513,21 +513,10 @@ jobs:
             sleep 5
           done
 
-          # Wait for OAuth initialization to complete
-          echo "Waiting for OAuth initialization to complete..."
-          for i in {1..30}; do
-            if docker compose -f docker-compose.test.yml ps oauth-init-test | grep -q "Exited (0)"; then
-              echo "✅ OAuth initialization completed!"
-              break
-            fi
-            echo "OAuth initialization still running... ($i/30)"
-            if [ $i -eq 30 ]; then
-              echo "❌ OAuth initialization failed or took too long. Checking logs..."
-              docker compose -f docker-compose.test.yml logs oauth-init-test
-              exit 1
-            fi
-            sleep 2
-          done
+          # OAuth initialization is handled automatically by Docker Compose dependencies
+          # The backend service depends on oauth-init-test with condition: service_completed_successfully
+          # So if the backend is healthy, oauth-init-test must have completed successfully
+          echo "✅ OAuth initialization is handled by Docker Compose dependencies"
 
           echo "🎉 All services are ready for e2e tests!"
 

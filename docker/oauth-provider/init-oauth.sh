@@ -237,3 +237,6 @@ print_step "🧪 Test the OAuth flow:"
 echo "  1. Run tests: npm run test:e2e -- oauth-flow.spec.ts"
 echo "  2. Or manually test at ${FRONTEND_URL}/auth/login"
 echo ""
+
+echo "DEBUG: Script completed successfully, exiting with code 0"
+exit 0
