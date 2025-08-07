@@ -691,7 +691,8 @@ export const test = base.extend<TestFixtures, WorkerFixtures>({
   },
 
   // Utility fixtures
-  dataFactory: async (_fixtures, use) => {
+  // eslint-disable-next-line no-empty-pattern
+  dataFactory: async ({}, use) => {
     await use({
       contacts: ContactFactory,
       tags: TagFactory,
@@ -700,7 +701,8 @@ export const test = base.extend<TestFixtures, WorkerFixtures>({
   },
 
   // Test-scoped fixture: Cleanup tracking
-  testCleanup: async (_fixtures, use) => {
+  // eslint-disable-next-line no-empty-pattern
+  testCleanup: async ({}, use) => {
     const cleanupTasks: (() => Promise<void>)[] = [];
 
     const addCleanupTask = (task: () => Promise<void>) => {
