@@ -89,7 +89,7 @@ function execCommand(command: string, description: string): void {
   try {
     execSync(command, {
       stdio: 'inherit',
-      cwd: process.cwd().replace('/frontend', ''), // Ensure we're in project root
+      cwd: process.cwd().replace(/[/\\]frontend$/, ''), // Ensure we're in project root (Windows/Unix compatible)
     });
     console.log(`✅ ${description} completed`);
   } catch (error) {
@@ -109,7 +109,7 @@ function areServicesRunning(): boolean {
       {
         encoding: 'utf8',
         stdio: 'pipe',
-        cwd: process.cwd().replace('/frontend', ''),
+        cwd: process.cwd().replace(/[/\\]frontend$/, ''),
       }
     );
 
@@ -132,7 +132,7 @@ async function globalSetup(_config: FullConfig) {
   console.log('🚀 Starting Playwright Global Setup...');
 
   // Change to project root directory
-  const projectRoot = process.cwd().replace('/frontend', '');
+  const projectRoot = process.cwd().replace(/[/\\]frontend$/, '');
   process.chdir(projectRoot);
 
   // Detect the correct Docker Compose command
