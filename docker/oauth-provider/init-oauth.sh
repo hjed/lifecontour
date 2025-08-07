@@ -201,7 +201,7 @@ fi
 AUTH_URL="${PUBLIC_URL}/oauth2/auth?client_id=${CLIENT_ID}&response_type=code&scope=openid%20profile%20email&redirect_uri=${FRONTEND_URL}/auth/callback&state=test"
 
 echo "Testing authorization endpoint: $AUTH_URL"
-HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "$AUTH_URL")
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "$AUTH_URL" 2>/dev/null || echo "000")
 echo "Received HTTP code: $HTTP_CODE"
 
 if echo "$HTTP_CODE" | grep -E "^(200|302)$" >/dev/null; then
