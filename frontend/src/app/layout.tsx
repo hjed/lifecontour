@@ -1,4 +1,4 @@
-import type { Metadata } from 'next/types';
+import type { Metadata, Viewport } from 'next/types';
 import { Inter } from 'next/font/google';
 import './globals.css';
 import { Providers } from '@/lib/providers';
@@ -11,11 +11,15 @@ const inter = Inter({ subsets: ['latin'] });
 export const metadata: Metadata = {
   title: 'Personal Management System',
   description: 'A personal CRM and journal system with AI integration',
-  viewport: 'width=device-width, initial-scale=1',
   robots: 'noindex, nofollow', // Private application
   icons: {
     icon: '/favicon.ico',
   },
+};
+
+export const viewport: Viewport = {
+  width: 'device-width',
+  initialScale: 1,
 };
 
 export default function RootLayout({
