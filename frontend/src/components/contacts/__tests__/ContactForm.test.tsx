@@ -12,6 +12,13 @@ jest.mock('@/lib/constants', () => ({
   VALIDATION_MESSAGES: {
     REQUIRED_FIELD: 'This field is required',
   },
+  DATE_FORMATS: {
+    SHORT: 'dd/MM/yyyy',
+    LONG: 'dd MMMM yyyy',
+    WITH_TIME: 'dd/MM/yyyy HH:mm',
+    TIME_ONLY: 'HH:mm',
+    ISO: 'yyyy-MM-dd',
+  },
 }));
 
 describe('ContactForm', () => {
