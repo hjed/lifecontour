@@ -191,6 +191,27 @@ async def delete_contact(
         await contact_service.delete_contact(contact_id, fresh_connection)
 
 
+@router.delete("/test/cleanup", status_code=status.HTTP_204_NO_CONTENT)
+@inject
+async def test_cleanup_contacts(
+    contact_service: FromDishka[ContactService],
+    engine: FromDishka[AsyncEngine],
+    user: FromDishka[SessionUser],  # Require authentication
+) -> None:
+    """
+    Test-only endpoint: Bulk delete all contacts for test cleanup.
+
+    This endpoint is designed for test environments to efficiently clean up
+    test data without transaction conflicts. It deletes all contacts in a
+    single transaction with minimal event publishing overhead.
+
+    WARNING: This will delete ALL contacts for the authenticated user.
+    Only use in test environments.
+    """
+    async with engine.begin() as fresh_connection:
+        await contact_service.bulk_delete_all_contacts(fresh_connection)
+
+
 @router.post("/{contact_id}/tags", status_code=status.HTTP_204_NO_CONTENT)
 @inject
 async def assign_tag_to_contact(

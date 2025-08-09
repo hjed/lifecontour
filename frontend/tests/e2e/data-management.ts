@@ -149,6 +149,9 @@ export class TestDataManager {
       contacts.push(contact);
     }
 
+    // Add a small delay to ensure database consistency
+    await new Promise(resolve => setTimeout(resolve, 100));
+
     return contacts;
   }
 
@@ -235,18 +238,40 @@ export class TestDataManager {
     );
 
     try {
-      const endpoint = isFavourite
-        ? `/api/contacts/${contactId}/favourite`
-        : `/api/contacts/${contactId}/unfavourite`;
+      // First check current favourite status
+      const getResponse = await this.page.request.get(`/api/contacts/${contactId}`, {
+        headers: {
+          'Accept': 'application/vnd.api+json',
+        },
+      });
 
-      const response = await this.page.request.post(endpoint, {});
-
-      if (!response.ok()) {
+      if (!getResponse.ok()) {
         console.warn(
-          `⚠️ [Data Manager] Failed to set favourite status: ${response.status()}`
+          `⚠️ [Data Manager] Failed to get contact status: ${getResponse.status()}`
         );
+        return;
+      }
+
+      const contactData = await getResponse.json();
+      const currentFavourite = contactData.data.attributes.is_favourite;
+
+      // Only toggle if the current status is different from desired status
+      if (currentFavourite !== isFavourite) {
+        const response = await this.page.request.post(`/api/contacts/${contactId}/favourite`, {
+          headers: {
+            'Content-Type': 'application/json', // Use regular JSON, not JSON API
+          },
+        });
+
+        if (!response.ok()) {
+          console.warn(
+            `⚠️ [Data Manager] Failed to set favourite status: ${response.status()}`
+          );
+        } else {
+          console.log(`✅ [Data Manager] Contact favourite status updated`);
+        }
       } else {
-        console.log(`✅ [Data Manager] Contact favourite status updated`);
+        console.log(`✅ [Data Manager] Contact favourite status already correct`);
       }
     } catch (error) {
       console.error(`❌ [Data Manager] Failed to set favourite status:`, error);
@@ -261,7 +286,53 @@ export class TestDataManager {
       `🧹 [Data Manager] Starting cleanup of ${this.createdContactIds.length} contacts and ${this.createdTagIds.length} tags...`
     );
 
-    // Clean up contacts - be resilient to backend transaction issues
+    // Use bulk cleanup endpoint for better performance and transaction handling
+    try {
+      const response = await this.page.request.delete('/api/contacts/test/cleanup');
+      if (response.ok()) {
+        console.log(`🗑️ [Data Manager] Bulk deleted all contacts successfully`);
+      } else {
+        console.warn(
+          `⚠️ [Data Manager] Bulk cleanup failed: ${response.status()}`
+        );
+        // Fall back to individual deletion if bulk cleanup fails
+        await this.fallbackIndividualCleanup();
+      }
+    } catch (error) {
+      console.warn(`⚠️ [Data Manager] Bulk cleanup error:`, error);
+      // Fall back to individual deletion if bulk cleanup fails
+      await this.fallbackIndividualCleanup();
+    }
+
+    // Clean up tags (if any were created)
+    for (const tagId of this.createdTagIds) {
+      try {
+        const response = await this.page.request.delete(`/api/tags/${tagId}`);
+        if (response.ok()) {
+          console.log(`🗑️ [Data Manager] Deleted tag ${tagId}`);
+        } else {
+          console.warn(
+            `⚠️ [Data Manager] Failed to delete tag ${tagId}: ${response.status()}`
+          );
+        }
+      } catch (error) {
+        console.warn(`⚠️ [Data Manager] Error deleting tag ${tagId}:`, error);
+      }
+    }
+
+    // Clear tracking arrays
+    this.createdContactIds = [];
+    this.createdTagIds = [];
+
+    console.log(`✅ [Data Manager] Cleanup completed`);
+  }
+
+  /**
+   * Fallback cleanup method using individual contact deletion
+   */
+  private async fallbackIndividualCleanup(): Promise<void> {
+    console.log(`🧹 [Data Manager] Using fallback individual cleanup...`);
+
     let successfulDeletes = 0;
     for (const contactId of this.createdContactIds) {
       try {
@@ -305,28 +376,6 @@ export class TestDataManager {
         `🗑️ [Data Manager] Successfully deleted ${successfulDeletes}/${this.createdContactIds.length} contacts`
       );
     }
-
-    // Clean up tags
-    for (const tagId of this.createdTagIds) {
-      try {
-        const response = await this.page.request.delete(`/api/tags/${tagId}`);
-        if (response.ok()) {
-          console.log(`🗑️ [Data Manager] Deleted tag ${tagId}`);
-        } else {
-          console.warn(
-            `⚠️ [Data Manager] Failed to delete tag ${tagId}: ${response.status()}`
-          );
-        }
-      } catch (error) {
-        console.warn(`⚠️ [Data Manager] Error deleting tag ${tagId}:`, error);
-      }
-    }
-
-    // Clear tracking arrays
-    this.createdContactIds = [];
-    this.createdTagIds = [];
-
-    console.log(`✅ [Data Manager] Cleanup completed`);
   }
 
   /**
@@ -349,6 +398,27 @@ export class TestDataManager {
   async clearAllContacts(): Promise<void> {
     console.log(`🧹 [Data Manager] Clearing all existing contacts...`);
 
+    try {
+      // Use bulk cleanup endpoint for efficient clearing
+      const response = await this.page.request.delete('/api/contacts/test/cleanup');
+      if (response.ok()) {
+        console.log(`🗑️ [Data Manager] Bulk cleared all contacts successfully`);
+      } else {
+        console.warn(
+          `⚠️ [Data Manager] Bulk clear failed: ${response.status()}, falling back to individual deletion`
+        );
+        await this.fallbackClearAllContacts();
+      }
+    } catch (error) {
+      console.warn(`⚠️ [Data Manager] Bulk clear error:`, error);
+      await this.fallbackClearAllContacts();
+    }
+  }
+
+  /**
+   * Fallback method to clear all contacts individually
+   */
+  private async fallbackClearAllContacts(): Promise<void> {
     try {
       // Get all contacts
       const response = await this.page.request.get('/api/contacts');

@@ -72,12 +72,17 @@ test.describe('Contact Favourites and Filtering', () => {
         /Personal Management System/
       );
 
-      // Should redirect to login (guaranteed by fixture)
-      await expect(unauthenticatedPage).toHaveURL(/\/auth\/login/);
-
-      // Should show login form
+      // Wait for the login form to appear (this indicates the redirect logic is working)
       await expect(
         unauthenticatedPage.getByRole('heading', { name: 'Welcome Back' })
+      ).toBeVisible({ timeout: 10000 });
+
+      // Should redirect to login (wait for URL change)
+      await expect(unauthenticatedPage).toHaveURL(/\/auth\/login/, { timeout: 10000 });
+
+      // Should show OAuth button
+      await expect(
+        unauthenticatedPage.getByRole('button', { name: /continue with/i })
       ).toBeVisible();
     });
 

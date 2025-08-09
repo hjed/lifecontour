@@ -83,7 +83,7 @@ function FavouritesPageContent() {
           emptyState={
             <Card>
               <CardContent className='pt-6'>
-                <div className='py-8 text-center'>
+                <div className='py-8 text-center' data-testid='empty-state'>
                   <Star className='text-muted-foreground mx-auto mb-4 h-12 w-12' />
                   <h3 className='mb-2 text-lg font-semibold'>
                     No favourite contacts found

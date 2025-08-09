@@ -144,10 +144,33 @@ async function completeWorkerOAuthFlow(browser: any): Promise<AuthState> {
     });
 
     // Click OAuth button and wait for navigation
-    await Promise.all([
-      page.waitForNavigation({ timeout: 30000 }),
-      oauthButtons.first().click(),
-    ]);
+    // WebKit sometimes needs different handling for redirects
+    const browserName = page.context().browser()?.browserType().name();
+
+    if (browserName === 'webkit') {
+      // WebKit-specific handling: click and wait with longer timeout
+      await oauthButtons.first().click();
+      await page.waitForTimeout(2000); // Give WebKit more time to process
+
+      // Wait for URL change or timeout
+      let attempts = 0;
+      const maxAttempts = 15; // 15 seconds total
+      let currentUrl = page.url();
+
+      while (currentUrl.includes('/auth/login') && attempts < maxAttempts) {
+        await page.waitForTimeout(1000);
+        currentUrl = page.url();
+        attempts++;
+      }
+
+      console.log('🔐 [Worker Auth] WebKit URL after OAuth click:', currentUrl);
+    } else {
+      // Standard handling for Chromium/Firefox
+      await Promise.all([
+        page.waitForNavigation({ timeout: 30000 }),
+        oauthButtons.first().click(),
+      ]);
+    }
 
     const currentUrl = page.url();
     console.log('🔐 [Worker Auth] Current URL after OAuth click:', currentUrl);
@@ -383,6 +406,10 @@ export const test = base.extend<TestFixtures, WorkerFixtures>({
   // Test-scoped fixture: Page with test contacts
   contactsWithData: async ({ authenticatedPage, testCleanup }, use) => {
     const dataManager = new TestDataManager(authenticatedPage);
+
+    // Clear all existing contacts first to ensure clean state
+    console.log('🧹 [Fixture] Clearing all existing contacts before creating test data...');
+    await dataManager.clearAllContacts();
 
     // Create test contacts via API
     const contacts = await dataManager.createContacts([
