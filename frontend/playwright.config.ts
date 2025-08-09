@@ -20,6 +20,9 @@ export default defineConfig({
   workers: 1, // Use single worker to prevent OAuth race conditions
   /* Reporter to use. See https://playwright.dev/docs/test-reporters */
   reporter: process.env.CI ? [['github'], ['html']] : 'html',
+  /* Global test timeout to prevent hanging tests */
+  timeout: 5 * 60 * 1000, // 5 minutes per test
+
   /* Shared settings for all the projects below. See https://playwright.dev/docs/api/class-testoptions. */
   use: {
     /* Base URL to use in actions like `await page.goto('/')`. */
