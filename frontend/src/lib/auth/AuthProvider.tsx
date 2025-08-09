@@ -270,8 +270,11 @@ export function AuthProvider({ children }: AuthProviderProps) {
       logoutMutation.mutate();
       return Promise.resolve({} as LogoutResponse);
     },
-    refreshSession: () =>
-      queryClient.invalidateQueries({ queryKey: ['auth', 'session'] }),
+    refreshSession: async () => {
+      // Invalidate and refetch the session query, waiting for completion
+      await queryClient.invalidateQueries({ queryKey: ['auth', 'session'] });
+      await queryClient.refetchQueries({ queryKey: ['auth', 'session'] });
+    },
     clearError: () => {
       dispatch({ type: 'CLEAR_ERROR' });
     },

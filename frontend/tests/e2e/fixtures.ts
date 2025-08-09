@@ -186,7 +186,7 @@ async function completeWorkerOAuthFlow(browser: any): Promise<AuthState> {
     console.log('🔐 [Worker Auth] Current URL after OAuth click:', currentUrl);
 
     // Step 4: Handle OAuth provider interaction
-    if (currentUrl.includes('localhost:4444') || currentUrl.includes('hydra')) {
+    if (currentUrl.includes('localhost:4646') || currentUrl.includes('hydra')) {
       console.log(
         '🔐 [Worker Auth] Successfully redirected to Hydra OAuth provider'
       );
