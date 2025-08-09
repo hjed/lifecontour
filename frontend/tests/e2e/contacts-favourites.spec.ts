@@ -20,7 +20,9 @@ test.describe('Contacts Page - Favourites Functionality', () => {
     ).toBeVisible({ timeout: 10000 });
 
     // Should redirect to login (wait for URL change)
-    await expect(unauthenticatedPage).toHaveURL(/\/auth\/login/, { timeout: 10000 });
+    await expect(unauthenticatedPage).toHaveURL(/\/auth\/login/, {
+      timeout: 10000,
+    });
 
     // Should show OAuth button
     await expect(
@@ -139,13 +141,19 @@ test.describe('Contacts Page - Favourites Functionality', () => {
     await emptyContactsPage.waitForLoadState('networkidle');
 
     // Wait for the empty state to appear (this ensures loading is complete)
-    await expect(emptyContactsPage.getByText('0 contacts found')).toBeVisible({ timeout: 15000 });
+    await expect(emptyContactsPage.getByText('0 contacts found')).toBeVisible({
+      timeout: 15000,
+    });
 
     // Should show "No contacts found" heading
-    await expect(emptyContactsPage.getByRole('heading', { name: /no contacts found/i })).toBeVisible();
+    await expect(
+      emptyContactsPage.getByRole('heading', { name: /no contacts found/i })
+    ).toBeVisible();
 
     // Should show "Add Contact" button
-    await expect(emptyContactsPage.getByTestId('add-contact-button')).toBeVisible();
+    await expect(
+      emptyContactsPage.getByTestId('add-contact-button')
+    ).toBeVisible();
 
     // Should not show any contact cards
     const contactCards = emptyContactsPage.locator('[data-testid^="contact-"]');

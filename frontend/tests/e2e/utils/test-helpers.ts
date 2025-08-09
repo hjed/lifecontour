@@ -959,12 +959,12 @@ export class TestDataHelpers {
     contactId: string,
     tagName: string
   ): Promise<void> {
-    console.log(`🏷️ [Test Helper] Skipping tag assignment for ${tagName} to contact ${contactId} - no standalone tag API`);
+    console.log(
+      `🏷️ [Test Helper] Skipping tag assignment for ${tagName} to contact ${contactId} - no standalone tag API`
+    );
     // TODO: Implement tag assignment once backend has proper tag management API
     // For now, tags should be created when contacts are created with tags in their attributes
   }
-
-
 }
 
 /**

@@ -408,7 +408,9 @@ export const test = base.extend<TestFixtures, WorkerFixtures>({
     const dataManager = new TestDataManager(authenticatedPage);
 
     // Clear all existing contacts first to ensure clean state
-    console.log('🧹 [Fixture] Clearing all existing contacts before creating test data...');
+    console.log(
+      '🧹 [Fixture] Clearing all existing contacts before creating test data...'
+    );
     await dataManager.clearAllContacts();
 
     // Create test contacts via API

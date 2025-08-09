@@ -200,7 +200,9 @@ function ContactsPageContent() {
               <CardContent className='pt-6'>
                 <div className='py-8 text-center' data-testid='empty-state'>
                   <Users className='text-muted-foreground mx-auto mb-4 h-12 w-12' />
-                  <h3 className='mb-2 text-lg font-semibold'>No contacts found</h3>
+                  <h3 className='mb-2 text-lg font-semibold'>
+                    No contacts found
+                  </h3>
                   <p className='text-muted-foreground mb-4'>
                     {searchQuery
                       ? `No contacts match "${searchQuery}"`
