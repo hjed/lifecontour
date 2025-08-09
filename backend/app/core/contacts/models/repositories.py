@@ -46,6 +46,15 @@ class ContactRepository(ABC):
         pass
 
     @abstractmethod
+    async def bulk_delete_all(self, transaction: Any) -> None:
+        """
+        Bulk delete all contacts and related data for test cleanup.
+
+        WARNING: This will delete ALL contacts. Only use in test environments.
+        """
+        pass
+
+    @abstractmethod
     async def get_contacts_by_tag(self, tag_id: int) -> list[Contact]:
         """Get all contacts with a specific tag."""
         pass
