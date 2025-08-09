@@ -303,6 +303,19 @@ class SqlContactRepository(ContactRepository):
         if result.rowcount == 0:
             raise ContactNotFoundError(contact_id)
 
+    async def bulk_delete_all(self, transaction: AsyncConnection) -> None:
+        """
+        Bulk delete all contacts and related data for test cleanup.
+
+        This method efficiently deletes all contacts in a single operation
+        without individual validation or event publishing overhead.
+
+        WARNING: This will delete ALL contacts. Only use in test environments.
+        """
+        # Delete all contacts - foreign key constraints will handle related data
+        query = text("DELETE FROM contacts")
+        await transaction.execute(query)
+
     async def get_contacts_by_tag(self, tag_id: int) -> list[Contact]:
         """Get all contacts with a specific tag."""
         query = text(

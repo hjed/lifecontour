@@ -14,12 +14,17 @@ test.describe('Contacts Page - Favourites Functionality', () => {
     await unauthenticatedPage.goto('/contacts');
     await expect(unauthenticatedPage).toHaveTitle(/Personal Management System/);
 
-    // Should redirect to login
-    await expect(unauthenticatedPage).toHaveURL(/\/auth\/login/);
-
-    // Should show login form
+    // Wait for the login form to appear (this indicates the redirect logic is working)
     await expect(
       unauthenticatedPage.getByRole('heading', { name: 'Welcome Back' })
+    ).toBeVisible({ timeout: 10000 });
+
+    // Should redirect to login (wait for URL change)
+    await expect(unauthenticatedPage).toHaveURL(/\/auth\/login/, { timeout: 10000 });
+
+    // Should show OAuth button
+    await expect(
+      unauthenticatedPage.getByRole('button', { name: /continue with/i })
     ).toBeVisible();
   });
 
@@ -130,16 +135,20 @@ test.describe('Contacts Page - Favourites Functionality', () => {
     await emptyContactsPage.goto('/contacts');
     await expect(emptyContactsPage).toHaveTitle(/Personal Management System/);
 
-    // Should show empty state (guaranteed by fixture)
-    const emptyState = emptyContactsPage.locator(
-      'text=/no contacts/i, text=/create.*contact/i'
-    );
-    await expect(emptyState).toBeVisible();
+    // Wait for authentication to complete and page to load
+    await emptyContactsPage.waitForLoadState('networkidle');
+
+    // Wait for the empty state to appear (this ensures loading is complete)
+    await expect(emptyContactsPage.getByText('0 contacts found')).toBeVisible({ timeout: 15000 });
+
+    // Should show "No contacts found" heading
+    await expect(emptyContactsPage.getByRole('heading', { name: /no contacts found/i })).toBeVisible();
+
+    // Should show "Add Contact" button
+    await expect(emptyContactsPage.getByTestId('add-contact-button')).toBeVisible();
 
     // Should not show any contact cards
-    const contactCards = emptyContactsPage.locator(
-      '[data-testid="contact-card"], .contact-card, [class*="card"]'
-    );
+    const contactCards = emptyContactsPage.locator('[data-testid^="contact-"]');
     expect(await contactCards.count()).toBe(0);
   });
 

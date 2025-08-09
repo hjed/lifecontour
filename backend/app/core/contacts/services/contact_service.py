@@ -668,6 +668,19 @@ class ContactService:
 
         return cast(None, await self._execute_with_retry(_delete_operation))
 
+    async def bulk_delete_all_contacts(self, transaction: AsyncConnection) -> None:
+        """
+        Bulk delete all contacts for test cleanup.
+
+        This method is designed for test environments to efficiently clean up
+        all contacts without the overhead of individual validation and event
+        publishing. It performs a direct bulk delete operation.
+
+        WARNING: This will delete ALL contacts. Only use in test environments.
+        """
+        # Use the provided transaction for the bulk delete
+        await self.contact_repo.bulk_delete_all(transaction)
+
     async def assign_tag_to_contact(
         self, contact_id: int, tag_id: int, transaction: AsyncConnection
     ) -> None:

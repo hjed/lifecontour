@@ -71,6 +71,8 @@ export default defineConfig({
     {
       name: 'webkit',
       use: { ...devices['Desktop Safari'] },
+      // Note: WebKit has known issues with OAuth redirects in test environment
+      // Tests may fail due to browser-specific JavaScript redirect handling
     },
 
     /* Test against mobile viewports. */

@@ -14,13 +14,12 @@ import { useContacts, useSearchContacts } from '@/lib/api/contacts';
 import { ContactFilters } from '@/types/contacts';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
+import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { AuthGuard } from '@/components/auth/AuthGuard';
-import { SearchHighlight } from '@/components/search/SearchHighlight';
-import { FavouriteToggle } from '@/components/contacts/FavouriteToggle';
+
+import { ContactList } from '@/components/contacts/ContactList';
 import { useDebounce } from '@/hooks/useDebounce';
 import { useDisplayContacts } from '@/hooks/useDisplayContacts';
 import { TIMEOUTS } from '@/lib/constants';
@@ -116,6 +115,7 @@ function ContactsPageContent() {
                 value={searchQuery}
                 onChange={e => handleSearchChange(e.target.value)}
                 className='pl-10'
+                data-testid='search-input'
               />
             </div>
             <div className='flex gap-2'>
@@ -192,110 +192,31 @@ function ContactsPageContent() {
             </Card>
           ))}
         </div>
-      ) : displayContacts.length === 0 ? (
-        <Card>
-          <CardContent className='pt-6'>
-            <div className='py-8 text-center'>
-              <Users className='text-muted-foreground mx-auto mb-4 h-12 w-12' />
-              <h3 className='mb-2 text-lg font-semibold'>No contacts found</h3>
-              <p className='text-muted-foreground mb-4'>
-                {searchQuery
-                  ? `No contacts match "${searchQuery}"`
-                  : 'Get started by adding your first contact'}
-              </p>
-              <Button asChild>
-                <Link href='/contacts/new'>
-                  <Plus className='mr-2 h-4 w-4' />
-                  Add Contact
-                </Link>
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
       ) : (
-        <div className='grid gap-4 md:grid-cols-2 lg:grid-cols-3'>
-          {displayContacts.map(contact => (
-            <Card
-              key={contact.id}
-              className='transition-shadow hover:shadow-md'
-            >
-              <CardHeader>
-                <div className='flex items-start justify-between'>
-                  <CardTitle className='flex-1 text-lg'>
-                    <Link
-                      href={`/contacts/${contact.id}`}
-                      className='hover:text-primary transition-colors'
-                    >
-                      {contact.isSearchResult && contact.highlightedName ? (
-                        <SearchHighlight
-                          text={contact.highlightedName}
-                          fallback={contact.name}
-                        />
-                      ) : (
-                        contact.name
-                      )}
+        <ContactList
+          contacts={displayContacts}
+          emptyState={
+            <Card>
+              <CardContent className='pt-6'>
+                <div className='py-8 text-center' data-testid='empty-state'>
+                  <Users className='text-muted-foreground mx-auto mb-4 h-12 w-12' />
+                  <h3 className='mb-2 text-lg font-semibold'>No contacts found</h3>
+                  <p className='text-muted-foreground mb-4'>
+                    {searchQuery
+                      ? `No contacts match "${searchQuery}"`
+                      : 'Get started by adding your first contact'}
+                  </p>
+                  <Button asChild data-testid='add-contact-button'>
+                    <Link href='/contacts/new'>
+                      <Plus className='mr-2 h-4 w-4' />
+                      Add Contact
                     </Link>
-                  </CardTitle>
-                  <FavouriteToggle
-                    contactId={contact.id}
-                    isFavourite={contact.is_favourite}
-                    contactName={contact.name}
-                    size='sm'
-                    className='ml-2 flex-shrink-0'
-                  />
-                </div>
-              </CardHeader>
-              <CardContent>
-                <div className='space-y-2'>
-                  {contact.primary_email && (
-                    <p className='text-sm'>
-                      <span className='font-medium'>Email:</span>{' '}
-                      {contact.isSearchResult && contact.highlightedEmail ? (
-                        <SearchHighlight
-                          text={contact.highlightedEmail}
-                          fallback={contact.primary_email}
-                        />
-                      ) : (
-                        contact.primary_email
-                      )}
-                    </p>
-                  )}
-                  {contact.primary_phone && (
-                    <p className='text-sm'>
-                      <span className='font-medium'>Phone:</span>{' '}
-                      {contact.isSearchResult && contact.highlightedPhone ? (
-                        <SearchHighlight
-                          text={contact.highlightedPhone}
-                          fallback={contact.primary_phone}
-                        />
-                      ) : (
-                        contact.primary_phone
-                      )}
-                    </p>
-                  )}
-                  {contact.tags.length > 0 && (
-                    <div className='mt-2 flex flex-wrap gap-1'>
-                      {contact.tags.slice(0, 3).map(tag => (
-                        <Badge
-                          key={tag.id}
-                          variant='secondary'
-                          className='text-xs'
-                        >
-                          {tag.attributes.name}
-                        </Badge>
-                      ))}
-                      {contact.tags.length > 3 && (
-                        <Badge variant='outline' className='text-xs'>
-                          +{contact.tags.length - 3} more
-                        </Badge>
-                      )}
-                    </div>
-                  )}
+                  </Button>
                 </div>
               </CardContent>
             </Card>
-          ))}
-        </div>
+          }
+        />
       )}
     </div>
   );
