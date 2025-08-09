@@ -43,6 +43,13 @@ jest.mock('@/lib/constants', () => ({
       SESSION: '/api/auth/session',
     },
   },
+  DATE_FORMATS: {
+    SHORT: 'dd/MM/yyyy',
+    LONG: 'dd MMMM yyyy',
+    WITH_TIME: 'dd/MM/yyyy HH:mm',
+    TIME_ONLY: 'HH:mm',
+    ISO: 'yyyy-MM-dd',
+  },
 }));
 
 // Mock the API hooks
