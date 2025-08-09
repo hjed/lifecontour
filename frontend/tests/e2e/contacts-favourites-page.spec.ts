@@ -20,7 +20,9 @@ test.describe('Favourites Page', () => {
     ).toBeVisible({ timeout: 10000 });
 
     // Should redirect to login (wait for URL change)
-    await expect(unauthenticatedPage).toHaveURL(/\/auth\/login/, { timeout: 10000 });
+    await expect(unauthenticatedPage).toHaveURL(/\/auth\/login/, {
+      timeout: 10000,
+    });
 
     // Should show OAuth button
     await expect(

@@ -239,11 +239,14 @@ export class TestDataManager {
 
     try {
       // First check current favourite status
-      const getResponse = await this.page.request.get(`/api/contacts/${contactId}`, {
-        headers: {
-          'Accept': 'application/vnd.api+json',
-        },
-      });
+      const getResponse = await this.page.request.get(
+        `/api/contacts/${contactId}`,
+        {
+          headers: {
+            Accept: 'application/vnd.api+json',
+          },
+        }
+      );
 
       if (!getResponse.ok()) {
         console.warn(
@@ -257,11 +260,14 @@ export class TestDataManager {
 
       // Only toggle if the current status is different from desired status
       if (currentFavourite !== isFavourite) {
-        const response = await this.page.request.post(`/api/contacts/${contactId}/favourite`, {
-          headers: {
-            'Content-Type': 'application/json', // Use regular JSON, not JSON API
-          },
-        });
+        const response = await this.page.request.post(
+          `/api/contacts/${contactId}/favourite`,
+          {
+            headers: {
+              'Content-Type': 'application/json', // Use regular JSON, not JSON API
+            },
+          }
+        );
 
         if (!response.ok()) {
           console.warn(
@@ -271,7 +277,9 @@ export class TestDataManager {
           console.log(`✅ [Data Manager] Contact favourite status updated`);
         }
       } else {
-        console.log(`✅ [Data Manager] Contact favourite status already correct`);
+        console.log(
+          `✅ [Data Manager] Contact favourite status already correct`
+        );
       }
     } catch (error) {
       console.error(`❌ [Data Manager] Failed to set favourite status:`, error);
@@ -288,7 +296,9 @@ export class TestDataManager {
 
     // Use bulk cleanup endpoint for better performance and transaction handling
     try {
-      const response = await this.page.request.delete('/api/contacts/test/cleanup');
+      const response = await this.page.request.delete(
+        '/api/contacts/test/cleanup'
+      );
       if (response.ok()) {
         console.log(`🗑️ [Data Manager] Bulk deleted all contacts successfully`);
       } else {
@@ -400,7 +410,9 @@ export class TestDataManager {
 
     try {
       // Use bulk cleanup endpoint for efficient clearing
-      const response = await this.page.request.delete('/api/contacts/test/cleanup');
+      const response = await this.page.request.delete(
+        '/api/contacts/test/cleanup'
+      );
       if (response.ok()) {
         console.log(`🗑️ [Data Manager] Bulk cleared all contacts successfully`);
       } else {
