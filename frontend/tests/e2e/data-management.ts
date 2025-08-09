@@ -144,7 +144,18 @@ export class TestDataManager {
 
     const contacts: TestContact[] = [];
 
+    // Add timeout to prevent hanging
+    const startTime = Date.now();
+    const maxCreationTime = 60000; // 1 minute total for all contacts
+
     for (const contactData of contactsData) {
+      if (Date.now() - startTime > maxCreationTime) {
+        console.warn(
+          `⚠️ [Data Manager] Contact creation timed out after ${maxCreationTime}ms`
+        );
+        break;
+      }
+
       const contact = await this.createContact(contactData);
       contacts.push(contact);
     }
@@ -157,24 +168,88 @@ export class TestDataManager {
 
   /**
    * Create a test tag via API
-   * Note: There's no direct /api/tags endpoint, so we skip tag creation
-   * Tags will be created automatically when contacts are created with tag names
+   * Note: There's no direct /api/tags endpoint, so we create a temporary contact
+   * with the tag name to auto-create the tag, then delete the contact
    */
   async createTag(
     tagData: TagCreateRequest
   ): Promise<{ id: string; name: string }> {
     console.log(
-      `🏷️ [Data Manager] Skipping direct tag creation: ${tagData.name} (tags are created via contacts)`
+      `🏷️ [Data Manager] Creating tag via temporary contact: ${tagData.name}`
     );
 
-    // Since there's no /api/tags endpoint, we just return mock data
-    // Tags will be created automatically when contacts are created with tag names
-    const mockId = `mock-tag-${Date.now()}-${Math.random().toString(36).substring(2, 11)}`;
+    try {
+      // Create a temporary contact with the tag to auto-create the tag
+      const tempContactData = {
+        data: {
+          type: 'contacts',
+          attributes: {
+            first_name: `TempForTag_${Date.now()}`,
+            contact_methods: [],
+            addresses: [],
+            notes: [],
+            tags: [tagData.name], // This will auto-create the tag
+          },
+        },
+      };
 
-    return {
-      id: mockId,
-      name: tagData.name,
-    };
+      const response = await this.page.request.post('/api/contacts', {
+        data: tempContactData,
+      });
+
+      if (!response.ok()) {
+        throw new Error(
+          `Failed to create temporary contact for tag: ${response.status()}`
+        );
+      }
+
+      const contactData = await response.json();
+      const tempContactId = contactData.data.id;
+
+      // Get the contact's tags to find the created tag ID
+      const tagsResponse = await this.page.request.get(
+        `/api/contacts/${tempContactId}/tags`
+      );
+
+      if (!tagsResponse.ok()) {
+        throw new Error(
+          `Failed to get tags from temporary contact: ${tagsResponse.status()}`
+        );
+      }
+
+      const tagsData = await tagsResponse.json();
+      const createdTag = tagsData.data.find(
+        (tag: any) => tag.attributes.name === tagData.name
+      );
+
+      if (!createdTag) {
+        throw new Error(`Tag ${tagData.name} was not created properly`);
+      }
+
+      // Delete the temporary contact
+      await this.page.request.delete(`/api/contacts/${tempContactId}`);
+
+      const tagId = createdTag.id;
+      this.createdTagIds.push(tagId);
+
+      console.log(`✅ [Data Manager] Tag created with ID: ${tagId}`);
+
+      return {
+        id: tagId,
+        name: tagData.name,
+      };
+    } catch (error) {
+      console.error(
+        `❌ [Data Manager] Failed to create tag: ${tagData.name}`,
+        error
+      );
+      // Return a mock ID as fallback
+      const mockId = `mock-tag-${Date.now()}-${Math.random().toString(36).substring(2, 11)}`;
+      return {
+        id: mockId,
+        name: tagData.name,
+      };
+    }
   }
 
   /**
@@ -187,7 +262,18 @@ export class TestDataManager {
 
     const tags: { id: string; name: string }[] = [];
 
+    // Add timeout to prevent hanging
+    const startTime = Date.now();
+    const maxCreationTime = 30000; // 30 seconds total for all tags
+
     for (const tagData of tagsData) {
+      if (Date.now() - startTime > maxCreationTime) {
+        console.warn(
+          `⚠️ [Data Manager] Tag creation timed out after ${maxCreationTime}ms`
+        );
+        break;
+      }
+
       const tag = await this.createTag(tagData);
       tags.push(tag);
     }
@@ -208,19 +294,42 @@ export class TestDataManager {
 
     try {
       for (const tagId of tagIds) {
+        // Skip mock tag IDs (they don't exist in the database)
+        if (tagId.startsWith('mock-tag-')) {
+          console.log(`🏷️ [Data Manager] Skipping mock tag ID: ${tagId}`);
+          continue;
+        }
+
+        // Use the correct API endpoint: POST /api/contacts/{contact_id}/tags
+        // with tag data in the request body
         const response = await this.page.request.post(
-          `/api/contacts/${contactId}/tags/${tagId}`,
-          {}
+          `/api/contacts/${contactId}/tags`,
+          {
+            data: {
+              data: {
+                type: 'tags',
+                id: tagId,
+              },
+            },
+          }
         );
 
         if (!response.ok()) {
+          const errorText = await response.text();
           console.warn(
             `⚠️ [Data Manager] Failed to assign tag ${tagId} to contact ${contactId}: ${response.status()}`
+          );
+          console.warn(`⚠️ [Data Manager] Error response:`, errorText);
+        } else {
+          console.log(
+            `✅ [Data Manager] Tag ${tagId} assigned to contact ${contactId}`
           );
         }
       }
 
-      console.log(`✅ [Data Manager] Tags assigned to contact ${contactId}`);
+      console.log(
+        `✅ [Data Manager] Tag assignment completed for contact ${contactId}`
+      );
     } catch (error) {
       console.error(`❌ [Data Manager] Failed to assign tags:`, error);
     }
@@ -294,6 +403,30 @@ export class TestDataManager {
       `🧹 [Data Manager] Starting cleanup of ${this.createdContactIds.length} contacts and ${this.createdTagIds.length} tags...`
     );
 
+    // Add timeout to prevent cleanup from hanging
+    const cleanupTimeout = 30000; // 30 seconds
+    const cleanupPromise = this.performCleanup();
+
+    try {
+      await Promise.race([
+        cleanupPromise,
+        new Promise((_, reject) =>
+          setTimeout(
+            () => reject(new Error('Cleanup timed out')),
+            cleanupTimeout
+          )
+        ),
+      ]);
+    } catch (error) {
+      console.warn(`⚠️ [Data Manager] Cleanup failed or timed out:`, error);
+      // Continue anyway to not block test completion
+    }
+  }
+
+  /**
+   * Perform the actual cleanup operations
+   */
+  private async performCleanup(): Promise<void> {
     // Use bulk cleanup endpoint for better performance and transaction handling
     try {
       const response = await this.page.request.delete(
@@ -344,7 +477,18 @@ export class TestDataManager {
     console.log(`🧹 [Data Manager] Using fallback individual cleanup...`);
 
     let successfulDeletes = 0;
+    const startTime = Date.now();
+    const maxCleanupTime = 20000; // 20 seconds for individual cleanup
+
     for (const contactId of this.createdContactIds) {
+      // Check timeout
+      if (Date.now() - startTime > maxCleanupTime) {
+        console.warn(
+          `⚠️ [Data Manager] Individual cleanup timed out after ${maxCleanupTime}ms`
+        );
+        break;
+      }
+
       try {
         const response = await this.page.request.delete(
           `/api/contacts/${contactId}`
