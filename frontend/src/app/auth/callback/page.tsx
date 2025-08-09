@@ -79,6 +79,9 @@ function CallbackContent() {
 
         const data = await response.json();
 
+        // Small delay to ensure backend session is fully processed
+        await new Promise(resolve => setTimeout(resolve, 100));
+
         // Refresh session to get user data
         await refreshSession();
 
