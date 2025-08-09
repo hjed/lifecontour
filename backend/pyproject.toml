@@ -124,6 +124,11 @@ module = [
     "core_shared.*",
     "authlib.integrations.starlette_client",
     "googleapiclient.*",
+    "arq.*",
+    "dishka.*",
+    "fastmcp.*",
+    "redis.asyncio",
+    "opentelemetry.exporter.otlp.proto.http.trace_exporter",
 ]
 ignore_missing_imports = true
 
