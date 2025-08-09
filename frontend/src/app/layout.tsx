@@ -13,6 +13,9 @@ export const metadata: Metadata = {
   description: 'A personal CRM and journal system with AI integration',
   viewport: 'width=device-width, initial-scale=1',
   robots: 'noindex, nofollow', // Private application
+  icons: {
+    icon: '/favicon.ico',
+  },
 };
 
 export default function RootLayout({

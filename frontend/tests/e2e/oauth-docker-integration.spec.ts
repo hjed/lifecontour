@@ -18,7 +18,7 @@ test.describe('OAuth Docker Integration', () => {
     // Test if Hydra public endpoint is accessible
     try {
       const response = await page.request.get(
-        'http://localhost:4444/.well-known/openid_configuration'
+        'http://localhost:4446/.well-known/openid_configuration'
       );
 
       if (response.ok()) {
@@ -51,36 +51,40 @@ test.describe('OAuth Docker Integration', () => {
   }) => {
     console.log('1. Testing OAuth client configuration...');
 
+    // Wait a bit for OAuth initialization to complete
+    console.log('2. Waiting for OAuth client initialization...');
+    await page.waitForTimeout(5000);
+
     try {
       // Test if Hydra admin endpoint is accessible
       const response = await page.request.get(
-        'http://localhost:4445/admin/clients/dev-client-id'
+        'http://localhost:4447/admin/clients/test-client-id'
       );
 
       if (response.ok()) {
         const client = await response.json();
-        console.log('2. OAuth client configuration retrieved successfully');
-        console.log('3. Client ID:', client.client_id);
-        console.log('4. Redirect URIs:', client.redirect_uris);
+        console.log('3. OAuth client configuration retrieved successfully');
+        console.log('4. Client ID:', client.client_id);
+        console.log('5. Redirect URIs:', client.redirect_uris);
 
         // Verify client configuration
-        expect(client.client_id).toBe('dev-client-id');
+        expect(client.client_id).toBe('test-client-id');
         expect(client.redirect_uris).toContain(
           'http://localhost:3000/auth/callback'
         );
         expect(client.grant_types).toContain('authorization_code');
         expect(client.response_types).toContain('code');
 
-        console.log('5. OAuth client is properly configured in Hydra');
+        console.log('6. OAuth client is properly configured in Hydra');
       } else {
-        console.log('2. OAuth client not found - may need to be created');
+        console.log('3. OAuth client not found - may need to be created');
         console.log(
-          '3. This is expected if Docker Compose is not running or client not initialized'
+          '4. This is expected if Docker Compose is not running or client not initialized'
         );
       }
     } catch (error) {
-      console.log('2. Hydra admin connection failed:', error);
-      console.log('3. This is expected if Docker Compose is not running');
+      console.log('3. Hydra admin connection failed:', error);
+      console.log('4. This is expected if Docker Compose is not running');
     }
   });
 
@@ -172,7 +176,7 @@ test.describe('OAuth Docker Integration', () => {
           // Check if we were redirected to Hydra
           const currentUrl = page.url();
           if (
-            currentUrl.includes('localhost:4444') ||
+            currentUrl.includes('localhost:4446') ||
             currentUrl.includes('oauth2/auth')
           ) {
             console.log('8. Successfully redirected to Hydra OAuth provider');
