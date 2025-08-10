@@ -168,8 +168,27 @@ test.describe('Contact Favourites and Filtering', () => {
     test('should display empty state when tag has no contacts', async ({
       authenticatedPage,
     }) => {
-      // Navigate to a tag that likely doesn't exist or has no contacts
-      await authenticatedPage.goto('/contacts/tags/empty-tag-999');
+      // Create a tag first, then navigate to it (it will have no contacts)
+      const response = await authenticatedPage.request.post('/api/tags', {
+        data: {
+          data: {
+            type: 'tags',
+            attributes: {
+              name: 'Empty-Test-Tag-' + Date.now(),
+            },
+          },
+        },
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
+
+      expect(response.ok()).toBe(true);
+      const responseData = await response.json();
+      const tagId = responseData.data.id;
+
+      // Navigate to the empty tag
+      await authenticatedPage.goto(`/contacts/tags/${tagId}`);
       await expect(authenticatedPage).toHaveTitle(/Personal Management System/);
 
       // Should show empty state for this tag
@@ -183,6 +202,9 @@ test.describe('Contact Favourites and Filtering', () => {
         '[data-testid^="contact-"]'
       );
       expect(await contactCards.count()).toBe(0);
+
+      // Clean up the tag
+      await authenticatedPage.request.delete(`/api/tags/${tagId}`);
     });
 
     test('should display not found message for non-existent tag', async ({
@@ -192,9 +214,18 @@ test.describe('Contact Favourites and Filtering', () => {
       await authenticatedPage.goto('/contacts/tags/non-existent-tag-999');
       await expect(authenticatedPage).toHaveTitle(/Personal Management System/);
 
-      // Should show tag not found message
-      const errorContent = authenticatedPage.locator('text=/tag not found/i');
-      await expect(errorContent).toBeVisible();
+      // Should show tag not found message - use the h1 specifically to avoid strict mode violation
+      const errorHeading = authenticatedPage.locator(
+        'h1:has-text("Tag Not Found")'
+      );
+      await expect(errorHeading).toBeVisible();
+
+      // Also check for the descriptive text
+      await expect(
+        authenticatedPage.locator(
+          'text=/the requested tag could not be found/i'
+        )
+      ).toBeVisible();
     });
   });
 

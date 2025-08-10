@@ -70,11 +70,16 @@ test.describe('Tag Filtering Pages', () => {
     await authenticatedPage.goto('/contacts/tags/non-existent-tag-999');
     await expect(authenticatedPage).toHaveTitle(/Personal Management System/);
 
-    // Should show tag not found message
-    const errorContent = authenticatedPage.locator(
-      'text=/tag.*not.*found/i, text=/not.*found/i'
+    // Should show tag not found message - use the h1 specifically to avoid strict mode violation
+    const errorHeading = authenticatedPage.locator(
+      'h1:has-text("Tag Not Found")'
     );
-    await expect(errorContent).toBeVisible();
+    await expect(errorHeading).toBeVisible();
+
+    // Also check for the descriptive text
+    await expect(
+      authenticatedPage.locator('text=/the requested tag could not be found/i')
+    ).toBeVisible();
 
     // Should have helpful navigation back to contacts
     const backLink = authenticatedPage.locator(
@@ -92,11 +97,19 @@ test.describe('Tag Filtering Pages', () => {
     await authenticatedPage.goto('/contacts/tags/1');
     await expect(authenticatedPage).toHaveTitle(/Personal Management System/);
 
-    // Wait for content to load by waiting for contact cards, empty state, or error message
-    await authenticatedPage.waitForSelector(
-      '[data-testid="contact-card"], .contact-card, [class*="card"], text=/no contacts.*tag/i, text=/no contacts found/i, text=/tag.*not.*found/i',
-      { timeout: 10000 }
-    );
+    // Wait for content to load by waiting for contact cards or empty state
+    try {
+      await authenticatedPage.waitForSelector(
+        '[data-testid="contact-card"], .contact-card, [class*="card"]',
+        { timeout: 5000 }
+      );
+    } catch {
+      // If no contact cards, wait for empty state or error message
+      await authenticatedPage.waitForSelector(
+        'text=/no contacts.*tag/i, text=/no contacts found/i, text=/tag.*not.*found/i',
+        { timeout: 5000 }
+      );
+    }
 
     // Look for contact cards or empty state
     const contactCards = authenticatedPage.locator(
@@ -155,10 +168,18 @@ test.describe('Tag Filtering Pages', () => {
     await expect(authenticatedPage).toHaveTitle(/Personal Management System/);
 
     // Wait for content to load by waiting for empty state, contact cards, or error message
-    await authenticatedPage.waitForSelector(
-      'text=/no contacts.*tag/i, text=/no contacts found/i, text=/add.*contacts.*tag/i, [data-testid="contact-card"], .contact-card, [class*="card"], text=/tag.*not.*found/i',
-      { timeout: 10000 }
-    );
+    try {
+      await authenticatedPage.waitForSelector(
+        '[data-testid="contact-card"], .contact-card, [class*="card"]',
+        { timeout: 5000 }
+      );
+    } catch {
+      // If no contact cards, wait for empty state or error message
+      await authenticatedPage.waitForSelector(
+        'text=/no contacts.*tag/i, text=/no contacts found/i, text=/add.*contacts.*tag/i, text=/tag.*not.*found/i',
+        { timeout: 5000 }
+      );
+    }
 
     // Look for empty state message
     const emptyStateMessages = [
