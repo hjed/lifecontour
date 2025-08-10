@@ -94,7 +94,69 @@ test.describe('Tag Filtering Pages', () => {
   test('should display contacts filtered by tag when available', async ({
     authenticatedPage,
   }) => {
-    await authenticatedPage.goto('/contacts/tags/1');
+    // Create test data with tagged contacts
+    const response = await authenticatedPage.request.post('/api/tags', {
+      data: {
+        data: {
+          type: 'tags',
+          attributes: {
+            name: 'Test-Tag-' + Date.now(),
+          },
+        },
+      },
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    });
+
+    expect(response.ok()).toBe(true);
+    const responseData = await response.json();
+    const tagId = responseData.data.id;
+
+    // Create a contact and assign the tag
+    const contactResponse = await authenticatedPage.request.post(
+      '/api/contacts',
+      {
+        data: {
+          data: {
+            type: 'contacts',
+            attributes: {
+              first_name: 'Test',
+              last_name: 'Contact',
+              email: 'test@example.com',
+              is_favourite: false,
+            },
+          },
+        },
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      }
+    );
+
+    expect(contactResponse.ok()).toBe(true);
+    const contactData = await contactResponse.json();
+    const contactId = contactData.data.id;
+
+    // Assign tag to contact
+    const assignResponse = await authenticatedPage.request.post(
+      `/api/contacts/${contactId}/tags`,
+      {
+        data: {
+          data: {
+            type: 'tags',
+            id: tagId,
+          },
+        },
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      }
+    );
+
+    expect(assignResponse.ok()).toBe(true);
+
+    await authenticatedPage.goto(`/contacts/tags/${tagId}`);
     await expect(authenticatedPage).toHaveTitle(/Personal Management System/);
 
     // Wait for content to load by waiting for contact cards or empty state
@@ -129,12 +191,12 @@ test.describe('Tag Filtering Pages', () => {
     expect(hasContacts || hasEmptyState || hasTagNotFound).toBe(true);
 
     if (hasContacts) {
-      // If there are contacts, they should have favourite toggles
-      const favouriteButtons = contactCards.locator(
-        'button[aria-label*="favourite"], button[aria-label*="Favourite"]'
-      );
-      const buttonCount = await favouriteButtons.count();
-      expect(buttonCount).toBeGreaterThan(0);
+      // Verify contact cards are visible and contain expected content
+      await expect(contactCards.first()).toBeVisible();
+
+      // Check if contact cards contain the test contact name
+      const contactText = await contactCards.first().textContent();
+      expect(contactText).toContain('Test Contact');
 
       // Contacts should be clickable
       const contactLinks = contactCards.locator('a[href*="/contacts/"]');
@@ -142,12 +204,36 @@ test.describe('Tag Filtering Pages', () => {
         await expect(contactLinks.first()).toBeVisible();
       }
     }
+
+    // Cleanup test data
+    await authenticatedPage.request.delete(`/api/contacts/${contactId}`);
+    await authenticatedPage.request.delete(`/api/tags/${tagId}`);
   });
 
   test('should show tag name in page header when tag exists', async ({
     authenticatedPage,
   }) => {
-    await authenticatedPage.goto('/contacts/tags/1');
+    // Create a test tag
+    const tagName = 'Header-Test-Tag-' + Date.now();
+    const response = await authenticatedPage.request.post('/api/tags', {
+      data: {
+        data: {
+          type: 'tags',
+          attributes: {
+            name: tagName,
+          },
+        },
+      },
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    });
+
+    expect(response.ok()).toBe(true);
+    const responseData = await response.json();
+    const tagId = responseData.data.id;
+
+    await authenticatedPage.goto(`/contacts/tags/${tagId}`);
     await expect(authenticatedPage).toHaveTitle(/Personal Management System/);
 
     // Wait for content to load
@@ -156,15 +242,37 @@ test.describe('Tag Filtering Pages', () => {
     const heading = authenticatedPage.locator('h1');
     await expect(heading).toBeVisible();
 
-    // Should contain tag-related text (either tag name or "not found")
+    // Should contain the tag name or tag-related text
     const headingText = await heading.textContent();
-    expect(headingText?.toLowerCase()).toMatch(/(tag|contact|not found)/);
+    expect(headingText?.toLowerCase()).toMatch(/(tag|contact)/);
+
+    // Cleanup test data
+    await authenticatedPage.request.delete(`/api/tags/${tagId}`);
   });
 
   test('should handle empty tag state with helpful message', async ({
     authenticatedPage,
   }) => {
-    await authenticatedPage.goto('/contacts/tags/1');
+    // Create an empty tag (no contacts assigned)
+    const response = await authenticatedPage.request.post('/api/tags', {
+      data: {
+        data: {
+          type: 'tags',
+          attributes: {
+            name: 'Empty-Tag-' + Date.now(),
+          },
+        },
+      },
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    });
+
+    expect(response.ok()).toBe(true);
+    const responseData = await response.json();
+    const tagId = responseData.data.id;
+
+    await authenticatedPage.goto(`/contacts/tags/${tagId}`);
     await expect(authenticatedPage).toHaveTitle(/Personal Management System/);
 
     // Wait for content to load by waiting for empty state, contact cards, or error message
@@ -208,6 +316,9 @@ test.describe('Tag Filtering Pages', () => {
 
     // Should have one of these states
     expect(hasEmptyStateMessage || hasContacts || hasTagNotFound).toBe(true);
+
+    // Cleanup test data
+    await authenticatedPage.request.delete(`/api/tags/${tagId}`);
   });
 
   test('should maintain consistent navigation with other contact pages', async ({
