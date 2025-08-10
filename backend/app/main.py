@@ -145,6 +145,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     from app.api.error_handlers import register_error_handlers
     from app.api.health import router as health_router
     from app.api.search.controllers import router as search_router
+    from app.api.tags.controllers import router as tags_router
 
     # Session middleware (must be added before other middleware that uses sessions)
     # Using standard Starlette SessionMiddleware
@@ -178,6 +179,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(auth_router, prefix="/api/auth", tags=["authentication"])
     app.include_router(search_router, prefix="/api", tags=["search"])
     app.include_router(contacts_router, prefix="/api", tags=["contacts"])
+    app.include_router(tags_router, prefix="/api", tags=["tags"])
 
     # Mount MCP server if enabled
     if settings.mcp_enabled:

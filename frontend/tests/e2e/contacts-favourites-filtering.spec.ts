@@ -51,15 +51,14 @@ test.describe('Contact Favourites and Filtering', () => {
       });
 
       // Should show empty state message
-      const emptyState = page.locator(
-        'text=/no.*favourite.*contacts/i, text=/star.*contacts/i'
-      );
+      const emptyState = page.locator('[data-testid="empty-state"]');
       await expect(emptyState).toBeVisible();
 
-      // Should not show any contact cards
-      const contactCards = page.locator(
-        '[data-testid="contact-card"], .contact-card, [class*="card"]'
-      );
+      // Verify the empty state contains the expected text
+      await expect(emptyState).toContainText('No favourite contacts found');
+
+      // Should not show any contact cards (exclude empty state card)
+      const contactCards = page.locator('[data-testid^="contact-"]');
       expect(await contactCards.count()).toBe(0);
     });
 
@@ -144,7 +143,7 @@ test.describe('Contact Favourites and Filtering', () => {
 
       // Navigate to first tag page (guaranteed by fixture)
       const firstTag = tags[0];
-      await page.goto(`/contacts/tags/${firstTag.name}`);
+      await page.goto(`/contacts/tags/${firstTag.id}`);
       await expect(page).toHaveTitle(/Personal Management System/);
 
       // Should show contacts with this tag (guaranteed by fixture)
@@ -175,13 +174,13 @@ test.describe('Contact Favourites and Filtering', () => {
 
       // Should show empty state for this tag
       const emptyState = authenticatedPage.locator(
-        'text=/no contacts.*tag/i, text=/no contacts found/i, text=/not.*found/i'
+        'text=/no contacts found in this tag/i'
       );
       await expect(emptyState).toBeVisible();
 
-      // Should not show any contact cards
+      // Should not show any contact cards (exclude empty state card)
       const contactCards = authenticatedPage.locator(
-        '[data-testid="contact-card"], .contact-card, [class*="card"]'
+        '[data-testid^="contact-"]'
       );
       expect(await contactCards.count()).toBe(0);
     });
@@ -194,9 +193,7 @@ test.describe('Contact Favourites and Filtering', () => {
       await expect(authenticatedPage).toHaveTitle(/Personal Management System/);
 
       // Should show tag not found message
-      const errorContent = authenticatedPage.locator(
-        'text=/tag.*not.*found/i, text=/not.*found/i'
-      );
+      const errorContent = authenticatedPage.locator('text=/tag not found/i');
       await expect(errorContent).toBeVisible();
     });
   });
@@ -240,7 +237,7 @@ test.describe('Contact Favourites and Filtering', () => {
 
         // Each page should have sidebar and header
         const sidebar = authenticatedPage.locator(
-          '[data-testid="sidebar"], nav, aside'
+          'aside[role="complementary"]'
         );
         await expect(sidebar).toBeVisible();
 

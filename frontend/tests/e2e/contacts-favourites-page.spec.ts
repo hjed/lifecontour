@@ -116,15 +116,14 @@ test.describe('Favourites Page', () => {
     });
 
     // Should show empty state
-    const emptyState = page.locator(
-      'text=/no.*favourite.*contacts/i, text=/star.*contacts/i'
-    );
+    const emptyState = page.locator('[data-testid="empty-state"]');
     await expect(emptyState).toBeVisible();
 
-    // Should not show any contact cards
-    const contactCards = page.locator(
-      '[data-testid="contact-card"], .contact-card, [class*="card"]'
-    );
+    // Verify the empty state contains the expected text
+    await expect(emptyState).toContainText('No favourite contacts found');
+
+    // Should not show any contact cards (exclude empty state card)
+    const contactCards = page.locator('[data-testid^="contact-"]');
     expect(await contactCards.count()).toBe(0);
   });
 

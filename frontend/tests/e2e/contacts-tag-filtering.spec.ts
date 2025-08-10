@@ -36,7 +36,7 @@ test.describe('Tag Filtering Pages', () => {
     const { page, contacts, tags } = taggedContactsData;
     // Navigate to first tag page (guaranteed by fixture)
     const firstTag = tags[0];
-    await page.goto(`/contacts/tags/${firstTag.name}`);
+    await page.goto(`/contacts/tags/${firstTag.id}`);
     await expect(page).toHaveTitle(/Personal Management System/);
 
     // Should show contacts with this tag (guaranteed by fixture)
