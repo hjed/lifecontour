@@ -135,16 +135,16 @@ test.describe('Favourites Page', () => {
     await expect(emptyContactsPage).toHaveTitle(/Personal Management System/);
 
     // Should have empty state with helpful messaging
-    const emptyState = emptyContactsPage.locator(
-      'text=/no.*favourite.*contacts/i, text=/star.*contacts/i'
-    );
+    const emptyState = emptyContactsPage.locator('[data-testid="empty-state"]');
     await expect(emptyState).toBeVisible();
 
+    // Check for the specific text that the frontend actually displays
+    await expect(emptyState).toContainText('No favourite contacts found');
+
     // Should have helpful text about favourites/starring
-    const helpfulText = emptyContactsPage.locator(
-      'text=/star/i, text=/favourite/i'
+    await expect(emptyState).toContainText(
+      'Star some contacts to see them here'
     );
-    expect(await helpfulText.count()).toBeGreaterThan(0);
   });
 
   test('should allow navigation back to all contacts', async ({
