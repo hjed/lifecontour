@@ -144,7 +144,7 @@ describe('Contacts API', () => {
     it('should apply filters to query', async () => {
       const filters = {
         search: 'john',
-        tags: ['work', 'friend'],
+        tags: ['1', '2'], // Use tag IDs as strings (will be parsed to integers)
         created_after: '2024-01-01',
         created_before: '2024-12-31',
       };
@@ -163,7 +163,7 @@ describe('Contacts API', () => {
       });
 
       const expectedUrl =
-        '/api/contacts?search=john&tags=work&tags=friend&created_after=2024-01-01&created_before=2024-12-31';
+        '/api/contacts?search=john&tag_ids=1&tag_ids=2&created_after=2024-01-01&created_before=2024-12-31';
       expect(mockFetch).toHaveBeenCalledWith(expectedUrl, expect.any(Object));
     });
   });
