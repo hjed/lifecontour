@@ -46,7 +46,13 @@ export async function fetchContacts(
 
   if (filters.search) params.append('search', filters.search);
   if (filters.tags?.length) {
-    filters.tags.forEach(tag => params.append('tags', tag));
+    filters.tags.forEach(tag => {
+      // Convert tag to integer ID if it's a string representation
+      const tagId = typeof tag === 'string' ? parseInt(tag, 10) : tag;
+      if (!isNaN(tagId)) {
+        params.append('tag_ids', tagId.toString());
+      }
+    });
   }
   if (filters.favourite !== undefined) {
     params.append('favourite', filters.favourite.toString());
@@ -175,6 +181,7 @@ async function searchContacts(
   if (options.page) params.append('page', options.page.toString());
   if (options.limit) params.append('limit', options.limit.toString());
   if (options.tags?.length) {
+    // For search API, keep using 'tags' as the backend search endpoint expects tag names
     options.tags.forEach(tag => params.append('tags', tag));
   }
 

@@ -102,6 +102,24 @@ export class TestDataManager {
       // Track for cleanup
       this.createdContactIds.push(contactId);
 
+      // Handle tags if provided
+      let assignedTags: string[] = [];
+      if (contactData.tags && contactData.tags.length > 0) {
+        console.log(
+          `🏷️ [Data Manager] Creating and assigning ${contactData.tags.length} tags to contact ${contactId}`
+        );
+
+        // Create tags first using the new tags API
+        const tagsData = contactData.tags.map(tagName => ({ name: tagName }));
+        const createdTags = await this.createTags(tagsData);
+
+        // Assign tags to contact
+        const tagIds = createdTags.map(tag => tag.id);
+        await this.assignTagsToContact(contactId, tagIds);
+
+        assignedTags = contactData.tags;
+      }
+
       console.log(
         `✅ [Data Manager] Contact created with ID: ${contactId} (favourite: ${contactAttributes.is_favourite})`
       );
@@ -112,7 +130,7 @@ export class TestDataManager {
         lastName: uniqueLastName,
         email: contactData.email,
         phone: contactData.phone,
-        tags: contactData.tags,
+        tags: assignedTags,
         isFavourite: contactAttributes.is_favourite || contactData.isFavourite,
       };
     } catch (error) {
@@ -174,62 +192,43 @@ export class TestDataManager {
   async createTag(
     tagData: TagCreateRequest
   ): Promise<{ id: string; name: string }> {
-    console.log(
-      `🏷️ [Data Manager] Creating tag via temporary contact: ${tagData.name}`
-    );
+    console.log(`🏷️ [Data Manager] Creating tag via tags API: ${tagData.name}`);
 
     try {
-      // Create a temporary contact with the tag to auto-create the tag
-      const tempContactData = {
+      // Use the new tags API endpoint to create the tag
+      const tagCreateData = {
         data: {
-          type: 'contacts',
+          type: 'tags',
           attributes: {
-            first_name: `TempForTag_${Date.now()}`,
-            contact_methods: [],
-            addresses: [],
-            notes: [],
-            tags: [tagData.name], // This will auto-create the tag
+            name: tagData.name,
           },
         },
       };
 
-      const response = await this.page.request.post('/api/contacts', {
-        data: tempContactData,
+      const response = await this.page.request.post('/api/tags', {
+        data: tagCreateData,
+        headers: {
+          'Content-Type': 'application/json',
+        },
       });
 
       if (!response.ok()) {
-        throw new Error(
-          `Failed to create temporary contact for tag: ${response.status()}`
-        );
+        let errorMessage = `HTTP ${response.status()}`;
+        try {
+          const errorData = await response.json();
+          errorMessage =
+            errorData.errors?.[0]?.detail || errorData.message || errorMessage;
+        } catch {
+          // If we can't parse JSON, use the status text
+          errorMessage = `${response.status()} ${response.statusText()}`;
+        }
+        throw new Error(`Failed to create tag: ${errorMessage}`);
       }
 
-      const contactData = await response.json();
-      const tempContactId = contactData.data.id;
-
-      // Get the contact's tags to find the created tag ID
-      const tagsResponse = await this.page.request.get(
-        `/api/contacts/${tempContactId}/tags`
-      );
-
-      if (!tagsResponse.ok()) {
-        throw new Error(
-          `Failed to get tags from temporary contact: ${tagsResponse.status()}`
-        );
-      }
-
-      const tagsData = await tagsResponse.json();
-      const createdTag = tagsData.data.find(
-        (tag: any) => tag.attributes.name === tagData.name
-      );
-
-      if (!createdTag) {
-        throw new Error(`Tag ${tagData.name} was not created properly`);
-      }
-
-      // Delete the temporary contact
-      await this.page.request.delete(`/api/contacts/${tempContactId}`);
-
+      const responseData = await response.json();
+      const createdTag = responseData.data;
       const tagId = createdTag.id;
+
       this.createdTagIds.push(tagId);
 
       console.log(`✅ [Data Manager] Tag created with ID: ${tagId}`);
@@ -253,7 +252,40 @@ export class TestDataManager {
   }
 
   /**
-   * Create multiple test tags
+   * Find existing tag by name
+   */
+  async findTagByName(
+    name: string
+  ): Promise<{ id: string; name: string } | null> {
+    try {
+      const response = await this.page.request.get('/api/tags');
+      if (!response.ok()) {
+        return null;
+      }
+
+      const responseData = await response.json();
+      const tags = responseData.data || [];
+
+      const existingTag = tags.find((tag: any) => tag.attributes.name === name);
+      if (existingTag) {
+        return {
+          id: existingTag.id,
+          name: existingTag.attributes.name,
+        };
+      }
+
+      return null;
+    } catch (error) {
+      console.warn(
+        `⚠️ [Data Manager] Failed to search for tag "${name}":`,
+        error
+      );
+      return null;
+    }
+  }
+
+  /**
+   * Create multiple test tags (reuse existing ones if they already exist)
    */
   async createTags(
     tagsData: TagCreateRequest[]
@@ -274,8 +306,27 @@ export class TestDataManager {
         break;
       }
 
-      const tag = await this.createTag(tagData);
-      tags.push(tag);
+      // First, try to find existing tag
+      const existingTag = await this.findTagByName(tagData.name);
+      if (existingTag) {
+        console.log(
+          `🔄 [Data Manager] Reusing existing tag: ${existingTag.name} (ID: ${existingTag.id})`
+        );
+        tags.push(existingTag);
+        continue;
+      }
+
+      // If not found, create new tag
+      try {
+        const tag = await this.createTag(tagData);
+        tags.push(tag);
+      } catch (error) {
+        console.error(
+          `❌ [Data Manager] Failed to create tag: ${tagData.name}`,
+          error
+        );
+        // Don't add failed tags to the list
+      }
     }
 
     return tags;
