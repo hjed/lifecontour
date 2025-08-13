@@ -182,9 +182,9 @@ test.describe('Favourites Page', () => {
     await expect(authenticatedPage).toHaveTitle(/Personal Management System/);
 
     // Should show favourites link in sidebar
-    const sidebar = authenticatedPage.locator(
-      '[data-testid="sidebar"], nav, aside'
-    );
+    const sidebar = authenticatedPage.getByRole('complementary', {
+      name: 'Desktop navigation sidebar',
+    });
     await expect(sidebar).toBeVisible();
 
     const favouritesLink = authenticatedPage.locator(
@@ -201,9 +201,9 @@ test.describe('Favourites Page', () => {
     await expect(authenticatedPage).toHaveTitle(/Personal Management System/);
 
     // Should have consistent navigation elements
-    const sidebar = authenticatedPage.locator(
-      '[data-testid="sidebar"], nav, aside'
-    );
+    const sidebar = authenticatedPage.getByRole('complementary', {
+      name: 'Desktop navigation sidebar',
+    });
     await expect(sidebar).toBeVisible();
 
     // Should have consistent header structure
