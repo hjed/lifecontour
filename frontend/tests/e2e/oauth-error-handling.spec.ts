@@ -476,11 +476,21 @@ test.describe('OAuth Session and State Management Errors', () => {
         }
       });
 
-      // Rapidly click OAuth button multiple times
+      // Try to rapidly click OAuth button multiple times
       const button = oauthButtons.first();
+
+      // First click should work and start OAuth flow
       await button.click();
-      await button.click();
-      await button.click();
+
+      // Subsequent clicks should either be prevented (button disabled)
+      // or fail because page has navigated away
+      try {
+        await button.click({ timeout: 1000 });
+        await button.click({ timeout: 1000 });
+      } catch (error) {
+        // Expected - button may no longer be available after navigation
+        console.log('Subsequent clicks failed as expected (page navigated)');
+      }
 
       await page.waitForTimeout(2000);
 

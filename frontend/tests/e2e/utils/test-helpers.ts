@@ -6,6 +6,7 @@
  */
 
 import { Page, expect } from '@playwright/test';
+import { TestDataManager } from '../data-management';
 
 /**
  * Common selectors used across e2e tests.
@@ -648,8 +649,8 @@ export class SidebarTestHelpers {
       // Try to open mobile menu
       await hamburgerButton.first().click();
 
-      // Navigation should now be visible
-      const mobileNav = this.page.locator(SELECTORS.SIDEBAR);
+      // Mobile navigation should now be visible (as a sheet/modal)
+      const mobileNav = this.page.locator('[role="dialog"]').or(this.page.getByText('Navigation'));
       await expect(mobileNav.first()).toBeVisible();
     }
   }
@@ -842,9 +843,10 @@ export class TestDataHelpers {
    * Create test tags via main API endpoints.
    */
   async createTestTags(tags: string[]): Promise<void> {
-    for (const tag of tags) {
-      await this.ensureTagExists(tag);
-    }
+    const dataManager = new TestDataManager(this.page);
+    // Create tags via API using TestDataManager
+    const tagCreateRequests = tags.map(name => ({ name }));
+    await dataManager.createTags(tagCreateRequests);
   }
 
   /**
@@ -947,8 +949,9 @@ export class TestDataHelpers {
    * Ensure a tag exists, creating it if necessary.
    */
   private async ensureTagExists(tagName: string): Promise<void> {
-    // Skip tag creation for now since backend doesn't have standalone tag API
-    console.log(`[TestDataHelpers] Skipping tag creation: ${tagName}`);
+    const dataManager = new TestDataManager(this.page);
+    // Use TestDataManager to create/reuse a tag via /api/tags
+    await dataManager.createTags([{ name: tagName }]);
   }
 
   /**
@@ -959,11 +962,17 @@ export class TestDataHelpers {
     contactId: string,
     tagName: string
   ): Promise<void> {
-    console.log(
-      `🏷️ [Test Helper] Skipping tag assignment for ${tagName} to contact ${contactId} - no standalone tag API`
-    );
-    // TODO: Implement tag assignment once backend has proper tag management API
-    // For now, tags should be created when contacts are created with tags in their attributes
+    // Find or create the tag, then assign to contact using TestDataManager
+    const dataManager = new TestDataManager(this.page);
+    const created = await dataManager.createTags([{ name: tagName }]);
+    const tagId = created[0]?.id;
+    if (tagId) {
+      await dataManager.assignTagsToContact(contactId, [tagId]);
+    } else {
+      console.warn(
+        `⚠️ [TestDataHelpers] Could not obtain tag id for ${tagName}, skipping assignment`
+      );
+    }
   }
 }
 
