@@ -650,7 +650,9 @@ export class SidebarTestHelpers {
       await hamburgerButton.first().click();
 
       // Mobile navigation should now be visible (as a sheet/modal)
-      const mobileNav = this.page.locator('[role="dialog"]').or(this.page.getByText('Navigation'));
+      const mobileNav = this.page
+        .locator('[role="dialog"]')
+        .or(this.page.getByText('Navigation'));
       await expect(mobileNav.first()).toBeVisible();
     }
   }
