@@ -66,7 +66,7 @@ test.describe('Sidebar Navigation', () => {
 
       // Should have dynamic tag links (wait for React Query to load tags)
       const tagLinks = page.locator('a[href*="/contacts/tags/"]');
-      await expect(tagLinks.first()).toBeVisible({ timeout: 15000 }); // Wait up to 15 seconds for tags to load
+      await expect(tagLinks.first()).toBeVisible();
       expect(await tagLinks.count()).toBeGreaterThan(0);
     });
 
