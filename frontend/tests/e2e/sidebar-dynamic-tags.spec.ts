@@ -54,9 +54,12 @@ test.describe('Sidebar Dynamic Tags Navigation', () => {
 
     // Should display tag links in sidebar
     await sidebar.waitForSidebar();
-    const tagLinks = page.locator('a[href*="/contacts/tags/"]');
-    const tagCount = await tagLinks.count();
 
+    // Wait for tags to be loaded in the sidebar (React Query cache invalidation)
+    const tagLinks = page.locator('a[href*="/contacts/tags/"]');
+    await expect(tagLinks.first()).toBeVisible({ timeout: 15000 }); // Wait up to 15 seconds for tags to load
+
+    const tagCount = await tagLinks.count();
     expect(tagCount).toBeGreaterThan(0);
 
     // First tag link should be properly structured
