@@ -8,7 +8,9 @@ import { test, expect } from './fixtures';
  */
 test.describe('Sidebar Navigation', () => {
   test.describe('Desktop Sidebar', () => {
-    test('displays sidebar navigation on desktop', async ({ authenticatedPage: page }) => {
+    test('displays sidebar navigation on desktop', async ({
+      authenticatedPage: page,
+    }) => {
       // Set viewport to desktop size
       await page.setViewportSize({ width: 1024, height: 768 });
 
@@ -61,7 +63,9 @@ test.describe('Sidebar Navigation', () => {
       expect(await tagLinks.count()).toBeGreaterThan(0);
     });
 
-    test('shows journals section collapsed by default', async ({ authenticatedPage: page }) => {
+    test('shows journals section collapsed by default', async ({
+      authenticatedPage: page,
+    }) => {
       // Set viewport to desktop size
       await page.setViewportSize({ width: 1024, height: 768 });
 
@@ -77,7 +81,9 @@ test.describe('Sidebar Navigation', () => {
       await expect(page.getByRole('link', { name: 'Etc' })).not.toBeVisible();
     });
 
-    test('can toggle section expansion', async ({ authenticatedPage: page }) => {
+    test('can toggle section expansion', async ({
+      authenticatedPage: page,
+    }) => {
       // Set viewport to desktop size
       await page.setViewportSize({ width: 1024, height: 768 });
 
@@ -102,7 +108,9 @@ test.describe('Sidebar Navigation', () => {
       await expect(page.getByRole('link', { name: 'Etc' })).not.toBeVisible();
     });
 
-    test('highlights active navigation item', async ({ authenticatedPage: page }) => {
+    test('highlights active navigation item', async ({
+      authenticatedPage: page,
+    }) => {
       // Set viewport to desktop size
       await page.setViewportSize({ width: 1024, height: 768 });
 
@@ -129,7 +137,9 @@ test.describe('Sidebar Navigation', () => {
       );
     });
 
-    test('navigation links work correctly', async ({ authenticatedPage: page }) => {
+    test('navigation links work correctly', async ({
+      authenticatedPage: page,
+    }) => {
       await page.setViewportSize({ width: 1024, height: 768 });
       await page.goto('/contacts');
 
@@ -171,7 +181,9 @@ test.describe('Sidebar Navigation', () => {
       await expect(mobileTrigger).toBeVisible();
     });
 
-    test('opens mobile sidebar when trigger is clicked', async ({ authenticatedPage: page }) => {
+    test('opens mobile sidebar when trigger is clicked', async ({
+      authenticatedPage: page,
+    }) => {
       await page.setViewportSize({ width: 375, height: 667 });
       await page.goto('/contacts');
 
@@ -200,7 +212,10 @@ test.describe('Sidebar Navigation', () => {
       await expect(page.getByText('Navigation')).toBeVisible();
 
       // Click on a navigation item in the mobile sidebar
-      await page.locator('[role="dialog"]').getByTestId('nav-link-favourites').click();
+      await page
+        .locator('[role="dialog"]')
+        .getByTestId('nav-link-favourites')
+        .click();
 
       // Should navigate and close sidebar
       await expect(page).toHaveURL('/contacts/favourites');
@@ -222,30 +237,18 @@ test.describe('Sidebar Navigation', () => {
       // Start with desktop
       await page.setViewportSize({ width: 1024, height: 768 });
       await page.goto('/contacts');
-      await expect(
-        page.getByTestId('sidebar')
-      ).toBeVisible();
-      await expect(
-        page.getByTestId('mobile-nav-trigger')
-      ).not.toBeVisible();
+      await expect(page.getByTestId('sidebar')).toBeVisible();
+      await expect(page.getByTestId('mobile-nav-trigger')).not.toBeVisible();
 
       // Switch to mobile
       await page.setViewportSize({ width: 375, height: 667 });
-      await expect(
-        page.getByTestId('sidebar')
-      ).not.toBeVisible();
-      await expect(
-        page.getByTestId('mobile-nav-trigger')
-      ).toBeVisible();
+      await expect(page.getByTestId('sidebar')).not.toBeVisible();
+      await expect(page.getByTestId('mobile-nav-trigger')).toBeVisible();
 
       // Switch back to desktop
       await page.setViewportSize({ width: 1024, height: 768 });
-      await expect(
-        page.getByTestId('sidebar')
-      ).toBeVisible();
-      await expect(
-        page.getByTestId('mobile-nav-trigger')
-      ).not.toBeVisible();
+      await expect(page.getByTestId('sidebar')).toBeVisible();
+      await expect(page.getByTestId('mobile-nav-trigger')).not.toBeVisible();
     });
 
     test('maintains navigation state across viewport changes', async ({
@@ -287,7 +290,9 @@ test.describe('Sidebar Navigation', () => {
       );
     });
 
-    test('supports keyboard navigation', async ({ authenticatedPage: page }) => {
+    test('supports keyboard navigation', async ({
+      authenticatedPage: page,
+    }) => {
       await page.setViewportSize({ width: 1024, height: 768 });
       await page.goto('/contacts');
 
