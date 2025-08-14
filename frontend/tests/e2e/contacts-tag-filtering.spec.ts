@@ -17,12 +17,10 @@ test.describe('Tag Filtering Pages', () => {
     // Wait for the login form to appear (this indicates the redirect logic is working)
     await expect(
       unauthenticatedPage.getByRole('heading', { name: 'Welcome Back' })
-    ).toBeVisible({ timeout: 10000 });
+    ).toBeVisible();
 
-    // Should redirect to login (wait for URL change)
-    await expect(unauthenticatedPage).toHaveURL(/\/auth\/login/, {
-      timeout: 10000,
-    });
+    // Should redirect to login
+    await expect(unauthenticatedPage).toHaveURL(/\/auth\/login/);
 
     // Should show OAuth button
     await expect(
@@ -124,9 +122,7 @@ test.describe('Tag Filtering Pages', () => {
     await authenticatedPage.goto(`/contacts/tags/${tagId}`);
     await expect(authenticatedPage).toHaveTitle(/Personal Management System/);
 
-    // Wait for content to load
-    await authenticatedPage.waitForTimeout(2000);
-
+    // Wait for content to load by checking for the heading
     const heading = authenticatedPage.locator('h1');
     await expect(heading).toBeVisible();
 
@@ -166,14 +162,12 @@ test.describe('Tag Filtering Pages', () => {
     // Wait for content to load by waiting for empty state, contact cards, or error message
     try {
       await authenticatedPage.waitForSelector(
-        '[data-testid="contact-card"], .contact-card, [class*="card"]',
-        { timeout: 5000 }
+        '[data-testid="contact-card"], .contact-card, [class*="card"]'
       );
     } catch {
       // If no contact cards, wait for empty state or error message
       await authenticatedPage.waitForSelector(
-        'text=/no contacts.*tag/i, text=/no contacts found/i, text=/add.*contacts.*tag/i, text=/tag.*not.*found/i',
-        { timeout: 5000 }
+        'text=/no contacts.*tag/i, text=/no contacts found/i, text=/add.*contacts.*tag/i, text=/tag.*not.*found/i'
       );
     }
 

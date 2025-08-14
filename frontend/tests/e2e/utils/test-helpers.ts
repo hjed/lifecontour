@@ -151,16 +151,16 @@ export class AccessibilityHelpers {
 
     for (const element of elementsToCheck) {
       try {
-        const isVisible = await element.isVisible({ timeout: 1000 });
+        const isVisible = await element.isVisible();
         if (isVisible) {
-          const textContent = await element.textContent({ timeout: 1000 });
+          const textContent = await element.textContent();
           if (textContent?.trim()) {
             // Element with text should be visible
-            await expect(element).toBeVisible({ timeout: 1000 });
+            await expect(element).toBeVisible();
           }
         }
       } catch (error) {
-        // Skip elements that timeout or cause errors
+        // Skip elements that cause errors
         console.warn('Skipping element in color contrast check:', error);
       }
     }
@@ -226,14 +226,14 @@ export class ResponsiveHelpers {
 
     for (const button of buttonsToCheck) {
       try {
-        const boundingBox = await button.boundingBox({ timeout: 2000 });
+        const boundingBox = await button.boundingBox();
         if (boundingBox) {
           // Minimum touch target size should be 44x44px
           expect(boundingBox.height).toBeGreaterThanOrEqual(40);
           expect(boundingBox.width).toBeGreaterThanOrEqual(40);
         }
       } catch (error) {
-        // Skip buttons that timeout or cause errors
+        // Skip buttons that cause errors
         console.warn('Skipping button in mobile interactions check:', error);
       }
     }
@@ -254,7 +254,7 @@ export class FormHelpers {
   ): Promise<void> {
     // Wait for any loading states to appear and disappear
     try {
-      await this.page.waitForSelector('[disabled]', { timeout: 1000 });
+      await this.page.waitForSelector('[disabled]');
       await this.page.waitForSelector('[disabled]', {
         state: 'detached',
         timeout,
@@ -932,7 +932,7 @@ export class TestDataHelpers {
 
     // Verify OAuth providers are available
     const oauthButtons = this.page.locator('button:has-text("Continue with")');
-    await expect(oauthButtons.first()).toBeVisible({ timeout: 10000 });
+    await expect(oauthButtons.first()).toBeVisible();
 
     console.log(
       '[TestDataHelpers] OAuth system verified - providers are available'
@@ -1032,11 +1032,9 @@ export class OAuthHelpers {
   /**
    * Verify OAuth buttons are visible and enabled.
    */
-  async verifyOAuthButtonsVisible(
-    timeout: number = TEST_DATA.TIMEOUTS.LONG
-  ): Promise<void> {
+  async verifyOAuthButtonsVisible(): Promise<void> {
     const oauthButtons = await this.findOAuthButtons();
-    await expect(oauthButtons.first()).toBeVisible({ timeout });
+    await expect(oauthButtons.first()).toBeVisible();
     await expect(oauthButtons.first()).toBeEnabled();
   }
 

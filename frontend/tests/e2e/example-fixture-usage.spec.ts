@@ -246,10 +246,10 @@ test.describe('Example: Fixture-Based Testing', () => {
       // Wait for the page to load and process the error
       await authenticatedPage.waitForLoadState('networkidle');
 
-      // Should show error state (wait longer for React Query retries to complete)
+      // Should show error state (React Query retries will complete automatically)
       await expect(
         authenticatedPage.locator('[data-testid="error-message"]')
-      ).toBeVisible({ timeout: 15000 }); // Wait up to 15 seconds for retries to complete
+      ).toBeVisible();
       await expect(
         authenticatedPage.locator('[data-testid="error-message"]')
       ).toContainText('Failed to fetch');
