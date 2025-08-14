@@ -43,14 +43,18 @@ test.describe('Sidebar Navigation', () => {
       await page.goto('/contacts');
       await expect(page).toHaveTitle(/Personal Management System/);
 
-      // Wait for sidebar to be fully loaded
-      await page.waitForSelector('[role="navigation"]', { timeout: 10000 });
+      // Wait for sidebar to be fully loaded by checking for key elements
+      const navigation = page.getByRole('navigation', { name: 'Main navigation' });
+      await expect(navigation).toBeVisible();
 
-      // Should have basic navigation items
-      await expect(page.getByTestId('nav-link-all')).toBeVisible({ timeout: 10000 });
-      await expect(
-        page.getByRole('link', { name: 'Favourites' })
-      ).toBeVisible({ timeout: 10000 });
+      // Wait for the contacts section to be properly initialized
+      const contactsButton = page.getByRole('button', { name: /contacts/i });
+      await expect(contactsButton).toBeVisible();
+      await expect(contactsButton).toHaveAttribute('aria-expanded', 'true');
+
+      // Should have basic navigation items (wait for them to be present)
+      await expect(page.getByTestId('nav-link-all')).toBeVisible();
+      await expect(page.getByRole('link', { name: 'Favourites' })).toBeVisible();
 
       // Should NOT have hardcoded groups
       await expect(
@@ -121,12 +125,13 @@ test.describe('Sidebar Navigation', () => {
       await page.goto('/contacts');
       await expect(page).toHaveTitle(/Personal Management System/);
 
-      // Wait for sidebar to be fully loaded
-      await page.waitForSelector('[role="navigation"]', { timeout: 10000 });
+      // Wait for sidebar to be fully loaded by checking for navigation and key elements
+      const navigation = page.getByRole('navigation', { name: 'Main navigation' });
+      await expect(navigation).toBeVisible();
 
       // Current page should be highlighted (we're on /contacts)
       const allLink = page.getByTestId('nav-link-all');
-      await expect(allLink).toBeVisible({ timeout: 10000 });
+      await expect(allLink).toBeVisible();
       await expect(allLink).toHaveAttribute('aria-current', 'page');
 
       // Navigate to favourites
@@ -284,16 +289,13 @@ test.describe('Sidebar Navigation', () => {
       await page.setViewportSize({ width: 1024, height: 768 });
       await page.goto('/contacts');
 
-      // Wait for sidebar to be fully loaded
-      await page.waitForSelector('[role="navigation"]', { timeout: 10000 });
-
       // Check main navigation has proper role and label
       const nav = page.getByRole('navigation', { name: 'Main navigation' });
-      await expect(nav).toBeVisible({ timeout: 10000 });
+      await expect(nav).toBeVisible();
 
       // Check section buttons have proper ARIA attributes
       const contactsButton = page.getByRole('button', { name: /contacts/i });
-      await expect(contactsButton).toBeVisible({ timeout: 10000 });
+      await expect(contactsButton).toBeVisible();
       await expect(contactsButton).toHaveAttribute('aria-expanded');
       await expect(contactsButton).toHaveAttribute(
         'aria-controls',
@@ -307,22 +309,26 @@ test.describe('Sidebar Navigation', () => {
       await page.setViewportSize({ width: 1024, height: 768 });
       await page.goto('/contacts');
 
-      // Wait for sidebar to be fully loaded
-      await page.waitForSelector('[role="navigation"]', { timeout: 10000 });
+      // Wait for sidebar to be fully loaded by ensuring key elements are present
+      const navigation = page.getByRole('navigation', { name: 'Main navigation' });
+      await expect(navigation).toBeVisible();
 
-      // Wait for the "All" link to be available (ensures sidebar content is loaded)
-      const allLink = page.getByTestId('nav-link-all');
-      await expect(allLink).toBeVisible({ timeout: 15000 });
-
-      // Focus on contacts button (should be expanded by default)
+      // Ensure the contacts section is properly initialized and expanded
       const contactsButton = page.getByRole('button', { name: /contacts/i });
-      await contactsButton.focus();
-      await expect(contactsButton).toBeFocused();
+      await expect(contactsButton).toBeVisible();
       await expect(contactsButton).toHaveAttribute('aria-expanded', 'true');
 
-      // Tab to navigation links (already visible since expanded by default)
+      // Ensure the "All" link is available (indicates sidebar content is fully loaded)
+      const allLink = page.getByTestId('nav-link-all');
+      await expect(allLink).toBeVisible();
+
+      // Focus on contacts button
+      await contactsButton.focus();
+      await expect(contactsButton).toBeFocused();
+
+      // Tab to navigation links (should focus the "All" link)
       await page.keyboard.press('Tab');
-      await expect(allLink).toBeFocused({ timeout: 10000 });
+      await expect(allLink).toBeFocused();
     });
   });
 });
