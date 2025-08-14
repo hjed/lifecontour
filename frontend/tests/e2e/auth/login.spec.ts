@@ -48,7 +48,7 @@ test.describe('Login Page - Unauthenticated Users', () => {
 
       // Wait for the page to be fully loaded and providers to be fetched
       await unauthenticatedPage.waitForLoadState('networkidle');
-      await expect(oauthButtons.first()).toBeVisible({ timeout: 10000 });
+      await expect(oauthButtons.first()).toBeVisible();
 
       // Check that we have at least one provider button
       const buttonCount = await oauthButtons.count();
@@ -89,7 +89,7 @@ test.describe('Login Page - Unauthenticated Users', () => {
       const oauthButtons = unauthenticatedPage.locator(
         'button:has-text("Continue with")'
       );
-      await expect(oauthButtons.first()).toBeVisible({ timeout: 10000 });
+      await expect(oauthButtons.first()).toBeVisible();
 
       // Check that all buttons are visible and enabled
       const buttonCount = await oauthButtons.count();
@@ -113,7 +113,7 @@ test.describe('Login Page - Unauthenticated Users', () => {
       const oauthButtons = unauthenticatedPage.locator(
         'button:has-text("Continue with")'
       );
-      await expect(oauthButtons.first()).toBeVisible({ timeout: 10000 });
+      await expect(oauthButtons.first()).toBeVisible();
 
       // Check button text content and accessibility
       const buttonCount = await oauthButtons.count();
@@ -135,6 +135,8 @@ test.describe('Login Page - Unauthenticated Users', () => {
 
       // Capture login requests to verify the flow is triggered
       let loginRequested = false;
+      const requestPromise = unauthenticatedPage.waitForRequest('**/api/auth/login');
+
       await unauthenticatedPage.route('**/api/auth/login', route => {
         loginRequested = true;
         route.continue();
@@ -145,13 +147,13 @@ test.describe('Login Page - Unauthenticated Users', () => {
         'button:has-text("Continue with")'
       );
       const firstButton = oauthButtons.first();
-      await expect(firstButton).toBeVisible({ timeout: 10000 });
+      await expect(firstButton).toBeVisible();
 
       // Click the button
       await firstButton.click();
 
-      // Should have made login request
-      await unauthenticatedPage.waitForTimeout(1000); // Give time for request
+      // Wait for the login request to be made
+      await requestPromise;
       expect(loginRequested).toBe(true);
     });
   });
@@ -184,16 +186,16 @@ test.describe('Login Page - Unauthenticated Users', () => {
         'button:has-text("Continue with")'
       );
       const firstButton = oauthButtons.first();
-      await expect(firstButton).toBeVisible({ timeout: 10000 });
+      await expect(firstButton).toBeVisible();
 
       // Click the button
       await firstButton.click();
 
-      // Should display error message (may take time to appear)
+      // Should display error message
       const errorAlert = unauthenticatedPage.locator(
         '[data-testid="error-alert"], .alert-error, [role="alert"]'
       );
-      await expect(errorAlert).toBeVisible({ timeout: 10000 });
+      await expect(errorAlert).toBeVisible();
     });
 
     test('should maintain button functionality after errors', async ({
@@ -209,7 +211,7 @@ test.describe('Login Page - Unauthenticated Users', () => {
       const oauthButtons = unauthenticatedPage.locator(
         'button:has-text("Continue with")'
       );
-      await expect(oauthButtons.first()).toBeVisible({ timeout: 10000 });
+      await expect(oauthButtons.first()).toBeVisible();
 
       // Buttons should be functional
       const buttonCount = await oauthButtons.count();
@@ -264,7 +266,7 @@ test.describe('Login Page - Unauthenticated Users', () => {
         // Check if first button gets focus (might not always work in all browsers)
         const firstButton = oauthButtons.first();
         try {
-          await expect(firstButton).toBeFocused({ timeout: 2000 });
+          await expect(firstButton).toBeFocused();
         } catch {
           // If focus test fails, just verify the button is visible and can be clicked
           await expect(firstButton).toBeVisible();
@@ -276,7 +278,7 @@ test.describe('Login Page - Unauthenticated Users', () => {
           await unauthenticatedPage.keyboard.press('Tab');
           const secondButton = oauthButtons.nth(1);
           try {
-            await expect(secondButton).toBeFocused({ timeout: 2000 });
+            await expect(secondButton).toBeFocused();
           } catch {
             // If focus test fails, just verify the button is accessible
             await expect(secondButton).toBeVisible();
@@ -301,6 +303,8 @@ test.describe('Login Page - Unauthenticated Users', () => {
 
       // Capture login requests to verify the flow is triggered
       let loginRequested = false;
+      const requestPromise = unauthenticatedPage.waitForRequest('**/api/auth/login');
+
       await unauthenticatedPage.route('**/api/auth/login', route => {
         loginRequested = true;
         route.continue();
@@ -310,14 +314,14 @@ test.describe('Login Page - Unauthenticated Users', () => {
         'button:has-text("Continue with")'
       );
       const firstButton = oauthButtons.first();
-      await expect(firstButton).toBeVisible({ timeout: 10000 });
+      await expect(firstButton).toBeVisible();
 
       // Focus and press Enter
       await firstButton.focus();
       await unauthenticatedPage.keyboard.press('Enter');
 
-      // Should have triggered login request
-      await unauthenticatedPage.waitForTimeout(1000);
+      // Wait for the login request to be made
+      await requestPromise;
       expect(loginRequested).toBe(true);
     });
   });
@@ -368,7 +372,7 @@ test.describe('Login Page - Unauthenticated Users', () => {
       const oauthButtons = unauthenticatedPage.locator(
         'button:has-text("Continue with")'
       );
-      await expect(oauthButtons.first()).toBeVisible({ timeout: 10000 });
+      await expect(oauthButtons.first()).toBeVisible();
       const buttonCount = await oauthButtons.count();
 
       if (buttonCount > 0) {
