@@ -61,7 +61,7 @@ function ContactGroupPageContent() {
   if (contactsError || tagsError) {
     return (
       <div className='container mx-auto px-4 py-8'>
-        <Alert variant='destructive'>
+        <Alert variant='destructive' data-testid='error-message'>
           <AlertCircle className='h-4 w-4' />
           <AlertDescription>
             {contactsError instanceof Error

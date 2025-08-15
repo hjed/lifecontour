@@ -76,9 +76,13 @@ function ContactsPageContent() {
     setFilters({});
   };
 
+  const toggleFavouritesFilter = () => {
+    setFilters(prev => ({ ...prev, favourite: !(prev.favourite === true) }));
+  };
+
   if (error) {
     return (
-      <Alert variant='destructive'>
+      <Alert variant='destructive' data-testid='error-message'>
         <AlertDescription>
           {error instanceof Error ? error.message : 'Failed to load contacts'}
         </AlertDescription>
@@ -127,8 +131,20 @@ function ContactsPageContent() {
                 <Filter className='mr-2 h-4 w-4' />
                 Filters
               </Button>
+              <Button
+                variant={filters.favourite ? 'default' : 'outline'}
+                onClick={toggleFavouritesFilter}
+                className='shrink-0'
+                data-testid='favourites-filter'
+              >
+                Favourites
+              </Button>
               {(searchQuery || Object.keys(filters).length > 0) && (
-                <Button variant='outline' onClick={clearSearch}>
+                <Button
+                  variant='outline'
+                  onClick={clearSearch}
+                  data-testid='clear-filters'
+                >
                   Clear
                 </Button>
               )}

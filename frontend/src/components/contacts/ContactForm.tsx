@@ -94,7 +94,7 @@ export function ContactForm({
                   <FormItem>
                     <FormLabel>First Name *</FormLabel>
                     <FormControl>
-                      <Input {...field} />
+                      <Input {...field} data-testid='first-name-input' />
                     </FormControl>
                     <FormMessage />
                   </FormItem>
@@ -107,7 +107,7 @@ export function ContactForm({
                   <FormItem>
                     <FormLabel>Last Name</FormLabel>
                     <FormControl>
-                      <Input {...field} />
+                      <Input {...field} data-testid='last-name-input' />
                     </FormControl>
                     <FormMessage />
                   </FormItem>
@@ -122,7 +122,7 @@ export function ContactForm({
                   <FormItem>
                     <FormLabel>Middle Name</FormLabel>
                     <FormControl>
-                      <Input {...field} />
+                      <Input {...field} data-testid='middle-name-input' />
                     </FormControl>
                     <FormMessage />
                   </FormItem>
@@ -135,7 +135,7 @@ export function ContactForm({
                   <FormItem>
                     <FormLabel>Nickname</FormLabel>
                     <FormControl>
-                      <Input {...field} />
+                      <Input {...field} data-testid='nickname-input' />
                     </FormControl>
                     <FormMessage />
                   </FormItem>
@@ -157,7 +157,11 @@ export function ContactForm({
               Cancel
             </Button>
           )}
-          <Button type='submit' disabled={isLoading}>
+          <Button
+            type='submit'
+            disabled={isLoading}
+            data-testid='save-contact-button'
+          >
             <Save className='mr-2 h-4 w-4' />
             {isLoading ? 'Saving...' : 'Save Contact'}
           </Button>

@@ -310,6 +310,7 @@ function SidebarContentInner({
                         href={item.href}
                         onClick={onNavigate}
                         aria-current={isActive ? 'page' : undefined}
+                        data-testid={`nav-link-${item.label.toLowerCase()}`}
                       >
                         {ItemIcon && (
                           <ItemIcon
@@ -344,6 +345,7 @@ export function DesktopSidebar({ className }: SidebarProps) {
       )}
       role='complementary'
       aria-label='Desktop navigation sidebar'
+      data-testid='sidebar'
     >
       <div className='flex h-full flex-col'>
         <SidebarContent />
@@ -366,6 +368,7 @@ export function MobileSidebar({ className }: SidebarProps) {
           size='sm'
           className={cn('md:hidden', className)}
           aria-label='Open navigation menu'
+          data-testid='mobile-nav-trigger'
         >
           <Menu className='h-5 w-5' />
         </Button>

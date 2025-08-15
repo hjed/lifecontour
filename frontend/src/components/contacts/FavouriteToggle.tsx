@@ -70,6 +70,7 @@ export function FavouriteToggle({
             : 'text-gray-400 hover:text-yellow-400'
         )}
         aria-hidden='true'
+        data-testid={isFavourite ? 'favourite-icon' : undefined}
       />
       <span className='sr-only'>{ariaLabel}</span>
     </Button>
