@@ -1,3 +1,6 @@
+default_language_version:
+  python: python3
+
 repos:
   # Backend Python hooks
   - repo: local
@@ -90,7 +93,7 @@ repos:
 
   # General hooks
   - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v4.4.0
+    rev: v4.1.0
     hooks:
       - id: trailing-whitespace
       - id: end-of-file-fixer

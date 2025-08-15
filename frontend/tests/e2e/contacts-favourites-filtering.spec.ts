@@ -244,7 +244,7 @@ test.describe('Contact Favourites and Filtering', () => {
       // Wait for navigation to complete
       await Promise.all([
         page.waitForURL('**/contacts/favourites'),
-        favouritesLink.click()
+        favouritesLink.click(),
       ]);
 
       // Should be on favourites page
