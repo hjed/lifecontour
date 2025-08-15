@@ -36,7 +36,7 @@ function FavouritesPageContent() {
   if (error) {
     return (
       <div className='container mx-auto px-4 py-8'>
-        <Alert variant='destructive'>
+        <Alert variant='destructive' data-testid='error-message'>
           <AlertDescription>
             {error instanceof Error
               ? error.message

@@ -135,7 +135,8 @@ test.describe('Login Page - Unauthenticated Users', () => {
 
       // Capture login requests to verify the flow is triggered
       let loginRequested = false;
-      const requestPromise = unauthenticatedPage.waitForRequest('**/api/auth/login');
+      const requestPromise =
+        unauthenticatedPage.waitForRequest('**/api/auth/login');
 
       await unauthenticatedPage.route('**/api/auth/login', route => {
         loginRequested = true;
@@ -303,7 +304,8 @@ test.describe('Login Page - Unauthenticated Users', () => {
 
       // Capture login requests to verify the flow is triggered
       let loginRequested = false;
-      const requestPromise = unauthenticatedPage.waitForRequest('**/api/auth/login');
+      const requestPromise =
+        unauthenticatedPage.waitForRequest('**/api/auth/login');
 
       await unauthenticatedPage.route('**/api/auth/login', route => {
         loginRequested = true;

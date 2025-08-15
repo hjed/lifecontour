@@ -95,7 +95,7 @@ function ContactDetailPageContent() {
   if (error) {
     return (
       <div className='container mx-auto px-4 py-8'>
-        <Alert variant='destructive'>
+        <Alert variant='destructive' data-testid='error-message'>
           <AlertDescription>
             {error instanceof Error ? error.message : 'Failed to load contact'}
           </AlertDescription>
@@ -164,7 +164,9 @@ function ContactDetailPageContent() {
             <CardHeader>
               <div className='flex items-start justify-between'>
                 <div>
-                  <CardTitle className='text-2xl'>{fullName}</CardTitle>
+                  <CardTitle className='text-2xl' data-testid='contact-name'>
+                    {fullName}
+                  </CardTitle>
                   {contact.attributes.nick_name && (
                     <p className='text-muted-foreground mt-1'>
                       &ldquo;{contact.attributes.nick_name}&rdquo;
@@ -180,7 +182,12 @@ function ContactDetailPageContent() {
                         contactName={fullName}
                         size='sm'
                       />
-                      <Button variant='outline' size='sm' onClick={handleEdit}>
+                      <Button
+                        variant='outline'
+                        size='sm'
+                        onClick={handleEdit}
+                        data-testid='edit-contact-button'
+                      >
                         <Edit className='mr-2 h-4 w-4' />
                         Edit
                       </Button>

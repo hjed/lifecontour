@@ -44,7 +44,9 @@ test.describe('Sidebar Navigation', () => {
       await expect(page).toHaveTitle(/Personal Management System/);
 
       // Wait for sidebar to be fully loaded by checking for key elements
-      const navigation = page.getByRole('navigation', { name: 'Main navigation' });
+      const navigation = page.getByRole('navigation', {
+        name: 'Main navigation',
+      });
       await expect(navigation).toBeVisible();
 
       // Wait for the contacts section to be properly initialized
@@ -54,7 +56,9 @@ test.describe('Sidebar Navigation', () => {
 
       // Should have basic navigation items (wait for them to be present)
       await expect(page.getByTestId('nav-link-all')).toBeVisible();
-      await expect(page.getByRole('link', { name: 'Favourites' })).toBeVisible();
+      await expect(
+        page.getByRole('link', { name: 'Favourites' })
+      ).toBeVisible();
 
       // Should NOT have hardcoded groups
       await expect(
@@ -126,7 +130,9 @@ test.describe('Sidebar Navigation', () => {
       await expect(page).toHaveTitle(/Personal Management System/);
 
       // Wait for sidebar to be fully loaded by checking for navigation and key elements
-      const navigation = page.getByRole('navigation', { name: 'Main navigation' });
+      const navigation = page.getByRole('navigation', {
+        name: 'Main navigation',
+      });
       await expect(navigation).toBeVisible();
 
       // Current page should be highlighted (we're on /contacts)
@@ -310,7 +316,9 @@ test.describe('Sidebar Navigation', () => {
       await page.goto('/contacts');
 
       // Wait for sidebar to be fully loaded by ensuring key elements are present
-      const navigation = page.getByRole('navigation', { name: 'Main navigation' });
+      const navigation = page.getByRole('navigation', {
+        name: 'Main navigation',
+      });
       await expect(navigation).toBeVisible();
 
       // Ensure the contacts section is properly initialized and expanded
