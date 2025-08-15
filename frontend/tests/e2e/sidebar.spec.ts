@@ -162,8 +162,10 @@ test.describe('Sidebar Navigation', () => {
       await page.goto('/contacts');
 
       // Test navigation to different sections
-      await page.getByTestId('nav-link-favourites').click();
-      await expect(page).toHaveURL('/contacts/favourites');
+      await Promise.all([
+        page.waitForURL('/contacts/favourites'),
+        page.getByTestId('nav-link-favourites').click()
+      ]);
 
       // Test dynamic tag navigation (if any tags exist)
       const tagLinks = page.locator('a[href*="/contacts/tags/"]');
@@ -173,12 +175,16 @@ test.describe('Sidebar Navigation', () => {
         // Click the first tag link
         const firstTagLink = tagLinks.first();
         const href = await firstTagLink.getAttribute('href');
-        await firstTagLink.click();
-        await expect(page).toHaveURL(href!);
+        await Promise.all([
+          page.waitForURL(href!),
+          firstTagLink.click()
+        ]);
       }
 
-      await page.getByTestId('nav-link-all').click();
-      await expect(page).toHaveURL('/contacts');
+      await Promise.all([
+        page.waitForURL('/contacts'),
+        page.getByTestId('nav-link-all').click()
+      ]);
     });
   });
 
@@ -229,20 +235,22 @@ test.describe('Sidebar Navigation', () => {
       await page.getByTestId('mobile-nav-trigger').click();
       await expect(page.getByText('Navigation')).toBeVisible();
 
-      // Click on a navigation item in the mobile sidebar
-      await page
-        .locator('[role="dialog"]')
-        .getByTestId('nav-link-favourites')
-        .click();
+      // Click on a navigation item in the mobile sidebar and wait for navigation
+      await Promise.all([
+        page.waitForURL('/contacts/favourites'),
+        page
+          .locator('[role="dialog"]')
+          .getByTestId('nav-link-favourites')
+          .click()
+      ]);
 
       // Should navigate and close sidebar
-      await expect(page).toHaveURL('/contacts/favourites');
       await expect(page.getByText('Navigation')).not.toBeVisible();
     });
 
     // TODO: Re-enable when mobile modal viewport issues are resolved
     test.skip('mobile sidebar has same functionality as desktop', async ({
-      authenticatedPage: page,
+      authenticatedPage: _page,
     }) => {
       // Test skipped - mobile modal has viewport interaction issues
     });
