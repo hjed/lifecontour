@@ -399,8 +399,8 @@ export class ContactTestHelpers {
   /**
    * Wait for contact cards to load and return the locator.
    */
-  async waitForContactCards(timeout = 5000) {
-    await this.page.waitForSelector(SELECTORS.CONTACT_CARD, { timeout });
+  async waitForContactCards() {
+    await this.page.waitForSelector(SELECTORS.CONTACT_CARD);
     return this.page.locator(SELECTORS.CONTACT_CARD);
   }
 
@@ -557,8 +557,8 @@ export class SidebarTestHelpers {
   /**
    * Wait for sidebar to load.
    */
-  async waitForSidebar(timeout = 5000): Promise<void> {
-    await this.page.waitForSelector(SELECTORS.SIDEBAR, { timeout });
+  async waitForSidebar(): Promise<void> {
+    await this.page.waitForSelector(SELECTORS.SIDEBAR);
   }
 
   /**
@@ -648,7 +648,7 @@ export class SidebarTestHelpers {
       // Try clicking with navigation wait
       try {
         await Promise.all([
-          this.page.waitForURL('**/contacts/favourites', { timeout: 10000 }),
+          this.page.waitForURL('**/contacts/favourites'),
           favouritesLink.first().click()
         ]);
         console.log('Navigation successful via click');
