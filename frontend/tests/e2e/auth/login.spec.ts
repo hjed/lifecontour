@@ -257,7 +257,7 @@ test.describe('Login Page - Unauthenticated Users', () => {
       const oauthButtons = unauthenticatedPage.locator(
         'button:has-text("Continue with")'
       );
-      await expect(oauthButtons.first()).toBeVisible({ timeout: 10000 });
+      await expect(oauthButtons.first()).toBeVisible();
       const buttonCount = await oauthButtons.count();
 
       if (buttonCount > 0) {
