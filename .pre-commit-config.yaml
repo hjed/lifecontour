@@ -90,21 +90,14 @@ repos:
 
   # General hooks
   - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v4.6.0
+    rev: v4.4.0
     hooks:
       - id: trailing-whitespace
-        language_version: python3
       - id: end-of-file-fixer
         exclude: ^docker/oauth-ui/package-lock\.json$
-        language_version: python3
       - id: check-yaml
-        language_version: python3
       - id: check-json
-        language_version: python3
       - id: check-toml
-        language_version: python3
       - id: check-merge-conflict
-        language_version: python3
       - id: check-added-large-files
         args: [--maxkb=1000]
-        language_version: python3
