@@ -618,7 +618,7 @@ export class SidebarTestHelpers {
       'a[href="/contacts/favourites"]',
       'a:has-text("Favourites")',
       'nav a[href*="favourites"]',
-      '[data-testid="favourites-link"]'
+      '[data-testid="favourites-link"]',
     ];
 
     let favouritesLink = null;
@@ -649,7 +649,7 @@ export class SidebarTestHelpers {
       try {
         await Promise.all([
           this.page.waitForURL('**/contacts/favourites'),
-          favouritesLink.first().click()
+          favouritesLink.first().click(),
         ]);
         console.log('Navigation successful via click');
       } catch (error) {
@@ -673,10 +673,14 @@ export class SidebarTestHelpers {
 
       if (!isOnExpectedPage) {
         console.log(`Navigation failed. Current URL: ${currentUrl}`);
-        console.log(`Expected URL to contain '/contacts/favourites' or '/auth/login'`);
+        console.log(
+          `Expected URL to contain '/contacts/favourites' or '/auth/login'`
+        );
 
         // This might be a real application bug - let's not fail the test for now
-        console.log('WARNING: Navigation to favourites failed - this might indicate an application bug');
+        console.log(
+          'WARNING: Navigation to favourites failed - this might indicate an application bug'
+        );
         return; // Don't fail the test
       }
 
