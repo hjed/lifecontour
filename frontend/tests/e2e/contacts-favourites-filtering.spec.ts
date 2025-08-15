@@ -240,8 +240,12 @@ test.describe('Contact Favourites and Filtering', () => {
       // Navigate to favourites page via sidebar
       const favouritesLink = page.locator('a[href="/contacts/favourites"]');
       await expect(favouritesLink).toBeVisible();
-      await favouritesLink.click();
-      await page.waitForLoadState('networkidle');
+
+      // Wait for navigation to complete
+      await Promise.all([
+        page.waitForURL('**/contacts/favourites'),
+        favouritesLink.click()
+      ]);
 
       // Should be on favourites page
       await expect(page).toHaveURL(/\/contacts\/favourites/);

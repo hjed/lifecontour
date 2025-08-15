@@ -14,13 +14,13 @@ test.describe('Tag Filtering Pages', () => {
     await unauthenticatedPage.goto('/contacts/tags/work');
     await expect(unauthenticatedPage).toHaveTitle(/Personal Management System/);
 
-    // Wait for the login form to appear (this indicates the redirect logic is working)
+    // Should redirect to login first
+    await expect(unauthenticatedPage).toHaveURL(/\/auth\/login/);
+
+    // Then wait for the login form to appear
     await expect(
       unauthenticatedPage.getByRole('heading', { name: 'Welcome Back' })
     ).toBeVisible();
-
-    // Should redirect to login
-    await expect(unauthenticatedPage).toHaveURL(/\/auth\/login/);
 
     // Should show OAuth button
     await expect(

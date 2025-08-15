@@ -46,8 +46,7 @@ test.describe('Login Page - Unauthenticated Users', () => {
         'button:has-text("Continue with")'
       );
 
-      // Wait for the page to be fully loaded and providers to be fetched
-      await unauthenticatedPage.waitForLoadState('networkidle');
+      // Wait for OAuth providers to be fetched and buttons to appear
       await expect(oauthButtons.first()).toBeVisible();
 
       // Check that we have at least one provider button
@@ -82,10 +81,7 @@ test.describe('Login Page - Unauthenticated Users', () => {
       // Navigate to login page
       await unauthenticatedPage.goto('/auth/login');
 
-      // Wait for providers to load
-      await unauthenticatedPage.waitForLoadState('networkidle');
-
-      // Get all OAuth provider buttons
+      // Get all OAuth provider buttons and wait for them to load
       const oauthButtons = unauthenticatedPage.locator(
         'button:has-text("Continue with")'
       );
@@ -106,10 +102,7 @@ test.describe('Login Page - Unauthenticated Users', () => {
       // Navigate to login page
       await unauthenticatedPage.goto('/auth/login');
 
-      // Wait for providers to load
-      await unauthenticatedPage.waitForLoadState('networkidle');
-
-      // Get all OAuth provider buttons
+      // Get all OAuth provider buttons and wait for them to load
       const oauthButtons = unauthenticatedPage.locator(
         'button:has-text("Continue with")'
       );
@@ -249,9 +242,6 @@ test.describe('Login Page - Unauthenticated Users', () => {
     test('should be keyboard navigable', async ({ unauthenticatedPage }) => {
       // Navigate to login page
       await unauthenticatedPage.goto('/auth/login');
-
-      // Wait for providers to load
-      await unauthenticatedPage.waitForLoadState('networkidle');
 
       // Check if OAuth buttons are present first
       const oauthButtons = unauthenticatedPage.locator(

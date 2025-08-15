@@ -163,8 +163,10 @@ test.describe('Favourites Page', () => {
       await expect(allContactsLink.first()).toBeEnabled();
 
       // Click the link and verify navigation
-      await allContactsLink.first().click();
-      await authenticatedPage.waitForLoadState('networkidle');
+      await Promise.all([
+        authenticatedPage.waitForURL('**/contacts'),
+        allContactsLink.first().click()
+      ]);
 
       const currentUrl = authenticatedPage.url();
       expect(currentUrl).toContain('/contacts');

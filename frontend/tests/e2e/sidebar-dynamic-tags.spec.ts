@@ -127,8 +127,12 @@ test.describe('Sidebar Dynamic Tags Navigation', () => {
       'a[href*="/contacts/tags/"]:has-text("work")'
     );
     await expect(workTagLink).toBeVisible();
-    await workTagLink.click();
-    await page.waitForLoadState('networkidle');
+
+    // Wait for navigation to complete
+    await Promise.all([
+      page.waitForURL('**/contacts/tags/**'),
+      workTagLink.click()
+    ]);
 
     // Should navigate to work tag page
     expect(page.url()).toContain('/contacts/tags/');
