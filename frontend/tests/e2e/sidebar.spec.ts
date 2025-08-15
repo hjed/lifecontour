@@ -164,7 +164,7 @@ test.describe('Sidebar Navigation', () => {
       // Test navigation to different sections
       await Promise.all([
         page.waitForURL('/contacts/favourites'),
-        page.getByTestId('nav-link-favourites').click()
+        page.getByTestId('nav-link-favourites').click(),
       ]);
 
       // Test dynamic tag navigation (if any tags exist)
@@ -175,15 +175,12 @@ test.describe('Sidebar Navigation', () => {
         // Click the first tag link
         const firstTagLink = tagLinks.first();
         const href = await firstTagLink.getAttribute('href');
-        await Promise.all([
-          page.waitForURL(href!),
-          firstTagLink.click()
-        ]);
+        await Promise.all([page.waitForURL(href!), firstTagLink.click()]);
       }
 
       await Promise.all([
         page.waitForURL('/contacts'),
-        page.getByTestId('nav-link-all').click()
+        page.getByTestId('nav-link-all').click(),
       ]);
     });
   });
@@ -241,7 +238,7 @@ test.describe('Sidebar Navigation', () => {
         page
           .locator('[role="dialog"]')
           .getByTestId('nav-link-favourites')
-          .click()
+          .click(),
       ]);
 
       // Should navigate and close sidebar

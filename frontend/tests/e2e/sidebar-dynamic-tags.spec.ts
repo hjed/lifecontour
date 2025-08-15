@@ -131,7 +131,7 @@ test.describe('Sidebar Dynamic Tags Navigation', () => {
     // Wait for navigation to complete
     await Promise.all([
       page.waitForURL('**/contacts/tags/**'),
-      workTagLink.click()
+      workTagLink.click(),
     ]);
 
     // Should navigate to work tag page

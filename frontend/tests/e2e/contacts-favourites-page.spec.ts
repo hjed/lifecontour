@@ -165,7 +165,7 @@ test.describe('Favourites Page', () => {
       // Click the link and verify navigation
       await Promise.all([
         authenticatedPage.waitForURL('**/contacts'),
-        allContactsLink.first().click()
+        allContactsLink.first().click(),
       ]);
 
       const currentUrl = authenticatedPage.url();
