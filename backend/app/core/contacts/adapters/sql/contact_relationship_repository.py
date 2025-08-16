@@ -177,8 +177,8 @@ class SqlContactRelationshipRepository(ContactRelationshipRepository):
 
         query = text(
             """
-            UPDATE contact_relationships 
-            SET relationship_type = :relationship_type, updated_at = now()
+            UPDATE contact_relationships
+            SET relationship_type = :relationship_type, updated_at = CURRENT_TIMESTAMP
             WHERE id = :relationship_id
             RETURNING id, from_contact_id, to_contact_id, relationship_type, created_at, updated_at
         """

@@ -142,6 +142,10 @@ class DockerManager:
             # Wait for database to be ready
             self._wait_for_database_ready()
 
+            # Run database migrations
+            print("Running database migrations...")
+            self._run_migrations()
+
         except subprocess.CalledProcessError as e:
             raise RuntimeError(f"Failed to start test database: {e}") from e
 
@@ -157,6 +161,40 @@ class DockerManager:
             print("Test database stopped")
         except subprocess.CalledProcessError as e:
             print(f"Warning: Failed to stop test database: {e}")
+
+    def _run_migrations(self) -> None:
+        """Run database migrations on test database."""
+        try:
+            import os
+            import sys
+
+            # Set test environment and database URL
+            test_env = {
+                **os.environ,
+                "ENVIRONMENT": "test",
+                "DATABASE_URL": "postgresql+asyncpg://postgres:postgres@localhost:5433/personal_management_test"
+            }
+
+            print(f"Running migrations from directory: {self.backend_dir}")
+            print(f"Python executable: {sys.executable}")
+            print(f"Database URL: {test_env['DATABASE_URL']}")
+
+            # Run migrations using alembic directly
+            result = subprocess.run(
+                [sys.executable, "-m", "alembic", "upgrade", "head"],
+                cwd=self.backend_dir,
+                capture_output=True,
+                text=True,
+                check=True,
+                env=test_env,
+            )
+            print("Database migrations completed successfully")
+            print(f"Migration output: {result.stdout}")
+
+        except subprocess.CalledProcessError as e:
+            print(f"Migration output: {e.stdout}")
+            print(f"Migration error: {e.stderr}")
+            raise RuntimeError(f"Failed to run migrations: {e}") from e
 
     def _wait_for_database_ready(self) -> None:
         """Wait for the database to be ready to accept connections."""
@@ -310,6 +348,10 @@ def db_config() -> DatabaseConfig:
 
 def get_test_database_url() -> str:
     """Get test database URL from environment variables or use defaults."""
+    # Use development database if available
+    if _is_dev_database_available():
+        return "postgresql+asyncpg://dev_user:dev_password@localhost:5432/personal_management_dev"
+
     return _db_config.get_async_url()
 
 
@@ -341,6 +383,25 @@ def stop_test_database():
     _docker_manager.stop_database()
 
 
+def _is_dev_database_available() -> bool:
+    """Check if development database is available."""
+    try:
+        import psycopg2
+
+        # Try to connect to development database
+        conn = psycopg2.connect(
+            host="localhost",
+            port=5432,
+            database="personal_management_dev",
+            user="dev_user",
+            password="dev_password"
+        )
+        conn.close()
+        return True
+    except Exception:
+        return False
+
+
 @pytest.fixture(scope="session")
 def event_loop():
     """Create an instance of the default event loop for the test session."""
@@ -355,6 +416,12 @@ def setup_test_database():
     # Skip Docker setup in CI - services are provided by GitHub Actions
     if os.getenv("CI") or os.getenv("GITHUB_ACTIONS"):
         print("Running in CI - using GitHub Actions services")
+        yield
+        return
+
+    # Check if development database is available
+    if _is_dev_database_available():
+        print("Using existing development database for integration tests")
         yield
         return
 
