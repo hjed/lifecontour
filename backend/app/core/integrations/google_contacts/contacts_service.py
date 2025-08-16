@@ -20,6 +20,7 @@ from app.core.contacts.models.exceptions import (
     ContactValidationError,
     InvalidTagNameError,
 )
+from app.core.contacts.models.repositories import ContactRepository
 from app.core.integrations.google_contacts.api_models import (
     GooglePerson,
     ListConnectionsResponse,
@@ -56,6 +57,7 @@ class GoogleContactsService:
         connection: AsyncConnection,
         client_factory: GoogleContactsClientFactory,
         transformer: GoogleContactTransformer,
+        contact_repository: ContactRepository,
     ) -> None:
         """
         Initialize Google Contacts service.
@@ -64,10 +66,12 @@ class GoogleContactsService:
             connection: Database connection for storing sync state
             client_factory: Factory for creating Google Contacts API clients
             transformer: Contact data transformer (singleton)
+            contact_repository: Repository for contact operations
         """
         self.connection = connection
         self.client_factory = client_factory
         self.transformer = transformer
+        self.contact_repository = contact_repository
 
     async def full_sync(
         self, google_account_email: str
@@ -529,12 +533,12 @@ class GoogleContactsService:
         if existing:
             # Update existing contact
             contact.id = existing["internal_id"]
-            await self._update_contact_in_database(contact)
+            updated_contact = await self._update_contact_in_database(contact)
             await self._update_sync_metadata(external_id, current_version_hash)
             logger.debug(
                 "Updated existing contact",
                 external_id=external_id,
-                internal_id=existing["internal_id"],
+                internal_id=updated_contact.id,
                 version_hash=current_version_hash,
             )
         else:
@@ -589,74 +593,36 @@ class GoogleContactsService:
         Returns:
             Contact with assigned ID and timestamps
         """
-        # For now, we'll use a simple SQL insert
-        # In a full implementation, this would use the ContactRepository
-        stmt = text("""
-            INSERT INTO contacts (first_name, last_name, middle_name, nick_name, is_favourite)
-            VALUES (:first_name, :last_name, :middle_name, :nick_name, :is_favourite)
-            RETURNING id, created_at, updated_at
-        """)
+        # Use ContactRepository for proper entity lifecycle management
+        try:
+            saved_contact = await self.contact_repository.save(contact)
+            return saved_contact
+        except Exception as e:
+            raise GoogleContactsSyncError(
+                f"Failed to create contact in database: {str(e)}"
+            ) from e
 
-        result = await self.connection.execute(
-            stmt,
-            {
-                "first_name": contact.first_name,
-                "last_name": contact.last_name,
-                "middle_name": contact.middle_name,
-                "nick_name": contact.nick_name,
-                "is_favourite": contact.is_favourite,
-            },
-        )
-
-        row = result.fetchone()
-        if not row:
-            raise GoogleContactsSyncError("Failed to create contact in database")
-
-        contact.id = row.id
-        contact.created_at = row.created_at
-        contact.updated_at = row.updated_at
-
-        return contact
-
-    async def _update_contact_in_database(self, contact: Contact) -> None:
+    async def _update_contact_in_database(self, contact: Contact) -> Contact:
         """
         Update an existing contact in the database.
 
         Args:
             contact: Contact entity to update (must have ID)
+
+        Returns:
+            Updated contact entity
         """
         if not contact.id:
             raise GoogleContactsSyncError("Cannot update contact without ID")
 
-        stmt = text("""
-            UPDATE contacts
-            SET first_name = :first_name,
-                last_name = :last_name,
-                middle_name = :middle_name,
-                nick_name = :nick_name,
-                is_favourite = :is_favourite,
-                updated_at = now()
-            WHERE id = :contact_id
-            RETURNING updated_at
-        """)
-
-        result = await self.connection.execute(
-            stmt,
-            {
-                "contact_id": contact.id,
-                "first_name": contact.first_name,
-                "last_name": contact.last_name,
-                "middle_name": contact.middle_name,
-                "nick_name": contact.nick_name,
-                "is_favourite": contact.is_favourite,
-            },
-        )
-
-        row = result.fetchone()
-        if not row:
-            raise GoogleContactsSyncError(f"Failed to update contact {contact.id}")
-
-        contact.updated_at = row.updated_at
+        # Use ContactRepository for proper entity lifecycle management
+        try:
+            updated_contact = await self.contact_repository.save(contact)
+            return updated_contact
+        except Exception as e:
+            raise GoogleContactsSyncError(
+                f"Failed to update contact {contact.id}: {str(e)}"
+            ) from e
 
     async def _create_sync_metadata(
         self, internal_id: int, external_id: str, version_hash: str
