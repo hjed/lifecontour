@@ -548,8 +548,9 @@ jobs:
       - name: Install Playwright Browsers
         working-directory: ./frontend
         run: |
+          # Install chromium for global setup (always needed) plus the target browser
           if [ "${{ matrix.browser }}" = "firefox" ]; then
-            pnpm exec playwright install --with-deps firefox
+            pnpm exec playwright install --with-deps chromium firefox
           elif [ "${{ matrix.browser }}" = "Mobile Chrome" ]; then
             pnpm exec playwright install --with-deps chromium
           else
