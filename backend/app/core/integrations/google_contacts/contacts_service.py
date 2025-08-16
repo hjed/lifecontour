@@ -12,7 +12,7 @@ from typing import Any
 import structlog
 from googleapiclient.errors import HttpError
 from pydantic import ValidationError
-from sqlalchemy import text
+from sqlalchemy import bindparam, text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core.contacts.models.entities import Contact
@@ -475,20 +475,15 @@ class GoogleContactsService:
         if not external_ids:
             return {}
 
-        # Create placeholders for the IN clause
-        placeholders = ",".join([f":id_{i}" for i in range(len(external_ids))])
-
-        stmt = text(f"""
+        # Use SQLAlchemy's expanding bindparam for safe IN clause construction
+        stmt = text("""
             SELECT internal_id, external_id, version_hash, sync_status, last_synced_at
             FROM sync_metadata
             WHERE integration_source = 'google_contacts'
-            AND external_id IN ({placeholders})
-        """)
+            AND external_id IN :external_ids
+        """).bindparams(bindparam("external_ids", expanding=True))
 
-        # Create parameters dict
-        params = {f"id_{i}": external_id for i, external_id in enumerate(external_ids)}
-
-        result = await self.connection.execute(stmt, params)
+        result = await self.connection.execute(stmt, {"external_ids": external_ids})
         rows = result.fetchall()
 
         return {
@@ -536,7 +531,7 @@ class GoogleContactsService:
             contact.id = existing["internal_id"]
             await self._update_contact_in_database(contact)
             await self._update_sync_metadata(
-                existing["internal_id"], external_id, current_version_hash
+                external_id, current_version_hash
             )
             logger.debug(
                 "Updated existing contact",
@@ -582,6 +577,8 @@ class GoogleContactsService:
         # Fallback: create hash from person data
         # Sort keys for consistent hashing
         person_str = str(sorted(google_person.items()))
+        # Truncate to 32 chars (128 bits) - sufficient for change detection
+        # Full SHA-256 not needed since this is only for version comparison, not security
         return hashlib.sha256(person_str.encode()).hexdigest()[:32]
 
     async def _create_contact_in_database(self, contact: Contact) -> Contact:
@@ -696,13 +693,12 @@ class GoogleContactsService:
         )
 
     async def _update_sync_metadata(
-        self, internal_id: int, external_id: str, version_hash: str
+        self, external_id: str, version_hash: str
     ) -> None:
         """
         Update sync metadata for an existing contact.
 
         Args:
-            internal_id: Internal contact ID
             external_id: External Google contact ID
             version_hash: New version hash (ETag)
         """
