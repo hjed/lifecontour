@@ -530,9 +530,7 @@ class GoogleContactsService:
             # Update existing contact
             contact.id = existing["internal_id"]
             await self._update_contact_in_database(contact)
-            await self._update_sync_metadata(
-                external_id, current_version_hash
-            )
+            await self._update_sync_metadata(external_id, current_version_hash)
             logger.debug(
                 "Updated existing contact",
                 external_id=external_id,
@@ -692,9 +690,7 @@ class GoogleContactsService:
             },
         )
 
-    async def _update_sync_metadata(
-        self, external_id: str, version_hash: str
-    ) -> None:
+    async def _update_sync_metadata(self, external_id: str, version_hash: str) -> None:
         """
         Update sync metadata for an existing contact.
 
