@@ -579,7 +579,6 @@ class TestGoogleContactsServicePersistence:
     ):
         """Test saving new contacts with sync metadata."""
         google_account_email = "test@example.com"
-        contacts = [sample_contact]
         google_persons = [sample_google_person_data]
 
         # Mock database responses for checking existing contacts
@@ -593,7 +592,7 @@ class TestGoogleContactsServicePersistence:
 
         # Execute method (this will be implemented)
         await contacts_service.save_contacts_with_metadata(
-            google_account_email, contacts, google_persons
+            google_account_email, [sample_contact], google_persons
         )
 
         # Verify database calls were made
@@ -611,7 +610,6 @@ class TestGoogleContactsServicePersistence:
     ):
         """Test saving contacts when sync metadata exists with same hash (idempotent)."""
         google_account_email = "test@example.com"
-        contacts = [sample_contact]
         google_persons = [sample_google_person_data]
 
         # Mock existing sync metadata with same hash
@@ -626,7 +624,7 @@ class TestGoogleContactsServicePersistence:
 
         # Execute method
         await contacts_service.save_contacts_with_metadata(
-            google_account_email, contacts, google_persons
+            google_account_email, [sample_contact], google_persons
         )
 
         # Should only check existing metadata, no updates needed
@@ -642,7 +640,6 @@ class TestGoogleContactsServicePersistence:
     ):
         """Test saving contacts when sync metadata exists with different hash (needs update)."""
         google_account_email = "test@example.com"
-        contacts = [sample_contact]
         google_persons = [sample_google_person_data]
 
         # Mock existing sync metadata with different hash
@@ -657,7 +654,7 @@ class TestGoogleContactsServicePersistence:
 
         # Execute method
         await contacts_service.save_contacts_with_metadata(
-            google_account_email, contacts, google_persons
+            google_account_email, [sample_contact], google_persons
         )
 
         # Should check existing + update contact + update metadata
