@@ -16,6 +16,7 @@ from core_shared.models.sync_metadata import SyncMetadata, SyncStatus
 from googleapiclient.errors import HttpError
 
 from app.core.contacts.models.entities import Contact, ContactMethod, MethodType, Tag
+from app.core.contacts.models.repositories import ContactRepository
 from app.core.contacts.models.value_objects import TagName
 from app.core.integrations.google_contacts.client_factory import (
     GoogleContactsClientFactory,
@@ -57,12 +58,20 @@ def mock_transformer():
 
 
 @pytest.fixture
-def contacts_service(mock_connection, mock_client_factory, mock_transformer):
+def mock_contact_repository():
+    """Mock ContactRepository."""
+    repository = AsyncMock(spec=ContactRepository)
+    return repository
+
+
+@pytest.fixture
+def contacts_service(mock_connection, mock_client_factory, mock_transformer, mock_contact_repository):
     """Create GoogleContactsService instance with mocked dependencies."""
     return GoogleContactsService(
         connection=mock_connection,
         client_factory=mock_client_factory,
         transformer=mock_transformer,
+        contact_repository=mock_contact_repository,
     )
 
 
@@ -574,6 +583,7 @@ class TestGoogleContactsServicePersistence:
         self,
         contacts_service,
         mock_connection,
+        mock_contact_repository,
         sample_contact,
         sample_google_person_data,
     ):
@@ -587,15 +597,16 @@ class TestGoogleContactsServicePersistence:
         mock_connection.execute.return_value = mock_result
 
         # Mock contact repository save
-        mock_contact_repo = AsyncMock()
-        mock_contact_repo.save.return_value = sample_contact
+        mock_contact_repository.save.return_value = sample_contact
 
-        # Execute method (this will be implemented)
+        # Execute method
         await contacts_service.save_contacts_with_metadata(
             google_account_email, [sample_contact], google_persons
         )
 
-        # Verify database calls were made
+        # Verify repository was called
+        mock_contact_repository.save.assert_called_once()
+        # Verify database calls were made for sync metadata
         assert (
             mock_connection.execute.call_count >= 2
         )  # Check existing + insert metadata
@@ -605,6 +616,7 @@ class TestGoogleContactsServicePersistence:
         self,
         contacts_service,
         mock_connection,
+        mock_contact_repository,
         sample_contact,
         sample_google_person_data,
     ):
@@ -627,6 +639,8 @@ class TestGoogleContactsServicePersistence:
             google_account_email, [sample_contact], google_persons
         )
 
+        # Should not create or update contact since hash is same (idempotent)
+        mock_contact_repository.save.assert_not_called()
         # Should only check existing metadata, no updates needed
         assert mock_connection.execute.call_count == 1
 
@@ -635,6 +649,7 @@ class TestGoogleContactsServicePersistence:
         self,
         contacts_service,
         mock_connection,
+        mock_contact_repository,
         sample_contact,
         sample_google_person_data,
     ):
@@ -652,13 +667,18 @@ class TestGoogleContactsServicePersistence:
         mock_result.fetchall.return_value = [mock_row]
         mock_connection.execute.return_value = mock_result
 
+        # Mock contact repository save for update
+        mock_contact_repository.save.return_value = sample_contact
+
         # Execute method
         await contacts_service.save_contacts_with_metadata(
             google_account_email, [sample_contact], google_persons
         )
 
-        # Should check existing + update contact + update metadata
-        assert mock_connection.execute.call_count >= 3
+        # Should update contact via repository
+        mock_contact_repository.save.assert_called_once()
+        # Should check existing + update metadata
+        assert mock_connection.execute.call_count >= 2
 
 
 class TestGoogleContactsServiceIncrementalSync:
