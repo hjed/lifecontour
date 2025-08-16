@@ -1,7 +1,7 @@
 # Iteration 4: Journal System
 
-**Status:** 🟡 PLANNED  
-**Dependencies:** Iteration 3 (Extended Integrations)  
+**Status:** 🟡 PLANNED
+**Dependencies:** Iteration 3 (Extended Integrations)
 **Goal:** Build comprehensive journal system with integration-powered content and AI-assisted insights
 
 ## Overview
@@ -24,7 +24,7 @@ This iteration creates a rich journaling experience that leverages all integrate
 ## Tasks
 
 ### ITER4-001: Journal Domain Core 🟡 PLANNED
-**Description:** Build journal domain with rich content support and mood tracking  
+**Description:** Build journal domain with rich content support and mood tracking
 **Strategy:** Break into 3 slices for domain, persistence, and business logic
 
 #### Slice 1: Domain Models & Database Schema 🟡 PLANNED
@@ -74,7 +74,7 @@ This iteration creates a rich journaling experience that leverages all integrate
 - [ ] Integrate with outbox pattern for MeiliSearch indexing
 
 ### ITER4-002: Journal REST API with Search 🟡 PLANNED
-**Description:** Create comprehensive API endpoints with advanced search capabilities  
+**Description:** Create comprehensive API endpoints with advanced search capabilities
 **Strategy:** Single focused task for API layer implementation
 
 **PR Size:** ~6 files (API controllers, schemas, search integration, tests)
@@ -103,7 +103,7 @@ This iteration creates a rich journaling experience that leverages all integrate
 - `POST /api/journal/entries/{id}/link` - Link integration content
 
 ### ITER4-003: Journal UI with Rich Editor 🔴 PLANNED
-**Description:** Build comprehensive journal interface with rich text editing  
+**Description:** Build comprehensive journal interface with rich text editing
 **Strategy:** Break into 3 slices for editor, views, and integration features
 
 #### Slice 1: Rich Text Editor & Core UI 🟡 PLANNED
@@ -146,7 +146,7 @@ This iteration creates a rich journaling experience that leverages all integrate
 - [ ] Write Playwright e2e tests for complete journaling workflows
 
 ### ITER4-004: Journal MCP Tools 🟡 PLANNED
-**Description:** Add comprehensive journal management and AI assistance tools  
+**Description:** Add comprehensive journal management and AI assistance tools
 **Strategy:** Single focused task for MCP integration
 
 **PR Size:** ~5 files (MCP tools, AI integration, analysis tools, tests)
@@ -174,7 +174,7 @@ This iteration creates a rich journaling experience that leverages all integrate
 - `export_journal_data()` - Export journal entries in various formats
 
 ### ITER4-005: Automatic Content Generation 🟡 PLANNED
-**Description:** Implement AI-powered automatic journal content from integrations  
+**Description:** Implement AI-powered automatic journal content from integrations
 **Strategy:** Single task for automation and AI features
 
 **PR Size:** ~6 files (Content generators, AI integration, automation, tests)

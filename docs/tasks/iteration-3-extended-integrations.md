@@ -1,7 +1,7 @@
 # Iteration 3: Extended Integrations
 
-**Status:** 🟡 PLANNED  
-**Dependencies:** Iteration 2 (Integration Architecture Foundation)  
+**Status:** 🟡 PLANNED
+**Dependencies:** Iteration 2 (Integration Architecture Foundation)
 **Goal:** Expand integration capabilities with Immich photos, Strava activities, and financial data
 
 ## Overview
@@ -23,7 +23,7 @@ This iteration leverages the integration architecture established in Iteration 2
 ## Tasks
 
 ### ITER3-001: Immich Integration 🟡 PLANNED
-**Description:** Implement Immich photo service integration with person matching  
+**Description:** Implement Immich photo service integration with person matching
 **Strategy:** Break into 4 manageable slices following established integration patterns
 
 #### Slice 1: Immich API Client & Authentication 🟡 PLANNED
@@ -80,7 +80,7 @@ This iteration leverages the integration architecture established in Iteration 2
 - [ ] Add Immich health checks to integration monitoring
 
 ### ITER3-002: Strava Integration 🟡 PLANNED
-**Description:** Implement Strava activity integration with journal automation  
+**Description:** Implement Strava activity integration with journal automation
 **Strategy:** Break into 3 slices focusing on activity sync and journal integration
 
 #### Slice 1: Strava API Client & OAuth 🟡 PLANNED
@@ -120,7 +120,7 @@ This iteration leverages the integration architecture established in Iteration 2
 - [ ] Add Strava monitoring to integration health checks
 
 ### ITER3-003: Firefly III Integration 🟡 PLANNED
-**Description:** Implement financial data integration with transaction linking  
+**Description:** Implement financial data integration with transaction linking
 **Strategy:** Break into 3 slices for transaction sync and financial insights
 
 #### Slice 1: Firefly III API Client 🟡 PLANNED
@@ -160,7 +160,7 @@ This iteration leverages the integration architecture established in Iteration 2
 - [ ] Add Firefly monitoring to integration health checks
 
 ### ITER3-004: Integration MCP Tools 🟡 PLANNED
-**Description:** Add comprehensive integration management tools to MCP interface  
+**Description:** Add comprehensive integration management tools to MCP interface
 **Strategy:** Single focused task for MCP tool enhancement
 
 **PR Size:** ~6 files (MCP tools, search integration, management tools, tests)

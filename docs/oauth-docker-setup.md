@@ -93,7 +93,7 @@ curl http://localhost:8000/api/health
 # Public endpoint health
 curl http://localhost:4444/health/ready
 
-# Admin endpoint health  
+# Admin endpoint health
 curl http://localhost:4445/health/ready
 
 # OpenID configuration
