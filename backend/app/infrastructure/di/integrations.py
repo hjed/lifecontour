@@ -10,7 +10,7 @@ from dishka import Provider, Scope, provide
 from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncConnection
 
-from app.core.contacts.models.repositories import ContactRepository
+from app.core.contacts.services.contact_service import ContactService
 from app.core.integrations.database import IntegrationDatabaseManager
 from app.core.integrations.encryption import EncryptionService
 from app.core.integrations.google_contacts.client_factory import (
@@ -131,7 +131,7 @@ class IntegrationProvider(Provider):
         connection: AsyncConnection,
         client_factory: GoogleContactsClientFactory,
         transformer: GoogleContactTransformer,
-        contact_repository: ContactRepository,
+        contact_service: ContactService,
     ) -> GoogleContactsService:
         """
         Provide Google Contacts service for request scope.
@@ -140,7 +140,7 @@ class IntegrationProvider(Provider):
             connection: Database connection
             client_factory: Google Contacts client factory
             transformer: Contact transformer
-            contact_repository: Contact repository for database operations
+            contact_service: Contact business logic service
 
         Returns:
             GoogleContactsService: Service instance
@@ -149,7 +149,7 @@ class IntegrationProvider(Provider):
             connection=connection,
             client_factory=client_factory,
             transformer=transformer,
-            contact_repository=contact_repository,
+            contact_service=contact_service,
         )
 
     @provide
