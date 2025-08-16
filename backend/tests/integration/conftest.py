@@ -630,3 +630,54 @@ def authenticated_search_client(test_settings, mock_search_service, test_user):
 
     test_client = TestClient(app)
     return test_client, setup_search_mock
+
+
+@pytest_asyncio.fixture
+async def authenticated_client(test_settings, test_user):
+    """Create an authenticated test client for integration tests."""
+    from dishka import Provider, Scope, make_async_container, provide
+    from dishka.integrations.fastapi import setup_dishka
+    from httpx import ASGITransport, AsyncClient
+
+    from app.infrastructure.auth.models import SessionUser
+    from app.main import create_app
+
+    class TestAuthProvider(Provider):
+        """Test provider for authenticated client."""
+
+        @provide(scope=Scope.REQUEST)
+        def get_session_user(self) -> SessionUser:
+            return test_user
+
+    # Create app with test settings
+    app = create_app(settings=test_settings)
+
+    # Replace container with test container
+    test_container = make_async_container(TestAuthProvider())
+    try:
+        await app.state.dishka_container.close()
+    except (RuntimeError, AttributeError):
+        pass
+    app.state.dishka_container = test_container
+    setup_dishka(test_container, app)
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        yield client
+
+
+@pytest.fixture
+def redis_pool():
+    """Create a mock Redis pool for testing."""
+    from unittest.mock import AsyncMock, MagicMock
+
+    mock_redis = AsyncMock()
+    mock_redis.ping = AsyncMock(return_value=True)
+    mock_redis.close = AsyncMock()
+    return mock_redis
+
+
+@pytest.fixture
+def mock_session_user(test_user):
+    """Provide a mock session user for testing."""
+    return test_user

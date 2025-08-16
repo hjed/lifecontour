@@ -104,6 +104,33 @@ services:
       - personal-management
     restart: unless-stopped
 
+  # Google Contacts Integration Worker
+  google-contacts-worker:
+    build:
+      context: .
+      dockerfile: integration_workers/google_contacts/Dockerfile
+    container_name: personal-management-google-worker
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@database:5432/personal_management
+      REDIS_URL: redis://redis:6379
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-your-google-client-id}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-your-google-client-secret}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:-your-encryption-key-here}
+      LOG_LEVEL: INFO
+      WORKER_ID: google-contacts-worker
+      MAX_CONCURRENT_JOBS: 5
+    volumes:
+      - ./core_shared:/core_shared:ro
+      - ./integration_workers/google_contacts:/app
+    depends_on:
+      database:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - personal-management
+    restart: unless-stopped
+
   # Next.js Frontend
   frontend:
     build:

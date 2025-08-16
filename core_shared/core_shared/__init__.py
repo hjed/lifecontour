@@ -15,7 +15,11 @@ from core_shared.base_service import (
     SyncResult,
     TransformationError,
 )
-from core_shared.database import create_engine_from_url, get_database_url
+# Only import what's available to avoid circular imports
+from core_shared.database.engine import (
+    create_async_engine_from_url,
+    create_session_factory,
+)
 from core_shared.models import Base, ExternalReference, SyncMetadata, SyncStatus
 
 __all__ = [
@@ -23,8 +27,8 @@ __all__ = [
     "SyncMetadata",
     "ExternalReference",
     "SyncStatus",
-    "get_database_url",
-    "create_engine_from_url",
+    "create_async_engine_from_url",
+    "create_session_factory",
     "BaseIntegrationService",
     "SyncResult",
     "SyncDirection",

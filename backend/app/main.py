@@ -144,6 +144,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     from app.api.contacts.controllers import router as contacts_router
     from app.api.error_handlers import register_error_handlers
     from app.api.health import router as health_router
+    from app.api.integrations.controllers import router as integrations_router
     from app.api.search.controllers import router as search_router
     from app.api.tags.controllers import router as tags_router
 
@@ -180,6 +181,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(search_router, prefix="/api", tags=["search"])
     app.include_router(contacts_router, prefix="/api", tags=["contacts"])
     app.include_router(tags_router, prefix="/api", tags=["tags"])
+    app.include_router(integrations_router, prefix="/api", tags=["integrations"])
 
     # Mount MCP server if enabled
     if settings.mcp_enabled:
