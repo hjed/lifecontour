@@ -1,6 +1,7 @@
 version: 2
 updates:
-  - package-ecosystem: "pip"
+  # Python backend dependencies (using uv)
+  - package-ecosystem: "uv"
     directory: "/backend"
     schedule:
       interval: "weekly"
@@ -11,6 +12,23 @@ updates:
       - "hjed"
     commit-message:
       prefix: "chore(backend)"
+      include: "scope"
+    labels:
+      - "dependencies"
+      - "backend"
+
+  # Python core_shared dependencies (using uv)
+  - package-ecosystem: "uv"
+    directory: "/core_shared"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+    open-pull-requests-limit: 5
+    assignees:
+      - "hjed"
+    commit-message:
+      prefix: "chore(core_shared)"
       include: "scope"
     labels:
       - "dependencies"
