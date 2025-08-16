@@ -130,6 +130,51 @@ services:
 
 
 
+  # Google Contacts Integration Worker (Development)
+  google-contacts-worker-dev:
+    build:
+      context: .
+      dockerfile: integration_workers/google_contacts/Dockerfile
+    container_name: pms-google-worker-dev
+    environment:
+      DATABASE_URL: postgresql://dev_user:dev_password@postgres-dev:5432/personal_management_dev
+      REDIS_URL: redis://redis-dev:6379
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-dev-google-client-id}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-dev-google-client-secret}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:-dev-encryption-key-change-in-production}
+      LOG_LEVEL: DEBUG
+      WORKER_ID: google-contacts-worker-dev
+      MAX_CONCURRENT_JOBS: 3
+    volumes:
+      - ./core_shared:/core_shared:ro
+      - ./integration_workers/google_contacts:/app
+    depends_on:
+      postgres-dev:
+        condition: service_healthy
+      redis-dev:
+        condition: service_healthy
+    networks:
+      - pms-dev
+    restart: unless-stopped
+
+  # Redis for ARQ Task Queue (Development)
+  redis-dev:
+    image: redis:7-alpine
+    container_name: pms-redis-dev
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_dev_data:/data
+    ports:
+      - "6380:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - pms-dev
+
   # Backend (Development Mode with Hot Reload)
   backend-dev:
     build:
@@ -149,6 +194,7 @@ services:
       MEILISEARCH_API_KEY: dev_master_key_change_in_production
       SESSION_SECRET_KEY: dev_session_secret_change_in_production
       SEARCH_INDEX_PREFIX: pms_dev_
+      REDIS_URL: redis://redis-dev:6379
       ENABLE_TELEMETRY: "true"
       OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger-dev:4318
       OTEL_SERVICE_NAME: personal-management-backend-dev
@@ -171,6 +217,8 @@ services:
       postgres-dev:
         condition: service_healthy
       meilisearch-dev:
+        condition: service_healthy
+      redis-dev:
         condition: service_healthy
       jaeger-dev:
         condition: service_started
@@ -219,6 +267,8 @@ volumes:
   postgres_dev_data:
     driver: local
   meilisearch_dev_data:
+    driver: local
+  redis_dev_data:
     driver: local
   backend_dev_cache:
     driver: local
