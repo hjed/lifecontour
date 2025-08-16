@@ -3,16 +3,19 @@ Unit tests for Google Contacts service.
 
 Tests the GoogleContactsService.full_sync method with mocked API responses,
 including pagination and token extraction scenarios.
+Also tests persistence logic and incremental sync functionality.
 """
 
+import hashlib
 from datetime import UTC, datetime
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from core_shared.models.sync_metadata import SyncMetadata, SyncStatus
 from googleapiclient.errors import HttpError
 
-from app.core.contacts.models.entities import Contact, Tag
+from app.core.contacts.models.entities import Contact, ContactMethod, MethodType, Tag
 from app.core.contacts.models.value_objects import TagName
 from app.core.integrations.google_contacts.client_factory import (
     GoogleContactsClientFactory,
@@ -141,6 +144,57 @@ def sample_list_connections_response(sample_google_person_data):
         "nextSyncToken": "sync_token_abc123",
         "totalPeople": 1,
     }
+
+
+@pytest.fixture
+def sample_contact():
+    """Sample Contact entity for testing."""
+    contact = Contact(
+        id=1,
+        first_name="John",
+        last_name="Doe",
+        middle_name="Michael",
+        created_at=datetime.now(UTC),
+        updated_at=datetime.now(UTC),
+    )
+    contact.methods = [
+        ContactMethod(
+            id=1,
+            contact_id=1,
+            method_type=MethodType.EMAIL,
+            value="john.doe@example.com",
+            is_primary=True,
+        )
+    ]
+    return contact
+
+
+@pytest.fixture
+def sample_sync_metadata():
+    """Sample SyncMetadata for testing."""
+    return SyncMetadata(
+        id=1,
+        internal_id=1,
+        integration_source="google_contacts",
+        external_id="people/c123456789",
+        version_hash="test_etag_123",
+        sync_status=SyncStatus.SUCCESS.value,
+        last_synced_at=datetime.now(UTC),
+        retry_count=0,
+        created_at=datetime.now(UTC),
+        updated_at=datetime.now(UTC),
+    )
+
+
+def create_version_hash(contact_data: dict[str, Any]) -> str:
+    """Create version hash from contact data (mimics real implementation)."""
+    # Use ETag if available, otherwise hash the data
+    if "etag" in contact_data:
+        return str(contact_data["etag"])
+
+    # Create hash from contact data
+    contact_str = str(sorted(contact_data.items()))
+    return hashlib.sha256(contact_str.encode()).hexdigest()[:32]
 
 
 class TestGoogleContactsServiceFullSync:
@@ -510,3 +564,293 @@ class TestGoogleContactsServiceFullSync:
         # Verify result
         assert result == expected_time
         mock_connection.execute.assert_called_once()
+
+
+class TestGoogleContactsServicePersistence:
+    """Test cases for GoogleContactsService persistence logic."""
+
+    @pytest.mark.asyncio
+    async def test_save_contacts_with_metadata_new_contacts(
+        self,
+        contacts_service,
+        mock_connection,
+        sample_contact,
+        sample_google_person_data,
+    ):
+        """Test saving new contacts with sync metadata."""
+        google_account_email = "test@example.com"
+        contacts = [sample_contact]
+        google_persons = [sample_google_person_data]
+
+        # Mock database responses for checking existing contacts
+        mock_result = MagicMock()
+        mock_result.fetchall.return_value = []  # No existing contacts
+        mock_connection.execute.return_value = mock_result
+
+        # Mock contact repository save
+        mock_contact_repo = AsyncMock()
+        mock_contact_repo.save.return_value = sample_contact
+
+        # Execute method (this will be implemented)
+        await contacts_service.save_contacts_with_metadata(
+            google_account_email, contacts, google_persons
+        )
+
+        # Verify database calls were made
+        assert (
+            mock_connection.execute.call_count >= 2
+        )  # Check existing + insert metadata
+
+    @pytest.mark.asyncio
+    async def test_save_contacts_with_metadata_existing_contacts_same_hash(
+        self,
+        contacts_service,
+        mock_connection,
+        sample_contact,
+        sample_google_person_data,
+    ):
+        """Test saving contacts when sync metadata exists with same hash (idempotent)."""
+        google_account_email = "test@example.com"
+        contacts = [sample_contact]
+        google_persons = [sample_google_person_data]
+
+        # Mock existing sync metadata with same hash
+        mock_result = MagicMock()
+        mock_row = MagicMock()
+        mock_row.internal_id = 1
+        mock_row.external_id = "people/c123456789"
+        mock_row.version_hash = "test_etag_123"  # Same as in sample data
+        mock_row.sync_status = SyncStatus.SUCCESS.value
+        mock_result.fetchall.return_value = [mock_row]
+        mock_connection.execute.return_value = mock_result
+
+        # Execute method
+        await contacts_service.save_contacts_with_metadata(
+            google_account_email, contacts, google_persons
+        )
+
+        # Should only check existing metadata, no updates needed
+        assert mock_connection.execute.call_count == 1
+
+    @pytest.mark.asyncio
+    async def test_save_contacts_with_metadata_existing_contacts_different_hash(
+        self,
+        contacts_service,
+        mock_connection,
+        sample_contact,
+        sample_google_person_data,
+    ):
+        """Test saving contacts when sync metadata exists with different hash (needs update)."""
+        google_account_email = "test@example.com"
+        contacts = [sample_contact]
+        google_persons = [sample_google_person_data]
+
+        # Mock existing sync metadata with different hash
+        mock_result = MagicMock()
+        mock_row = MagicMock()
+        mock_row.internal_id = 1
+        mock_row.external_id = "people/c123456789"
+        mock_row.version_hash = "old_etag_456"  # Different from sample data
+        mock_row.sync_status = SyncStatus.SUCCESS.value
+        mock_result.fetchall.return_value = [mock_row]
+        mock_connection.execute.return_value = mock_result
+
+        # Execute method
+        await contacts_service.save_contacts_with_metadata(
+            google_account_email, contacts, google_persons
+        )
+
+        # Should check existing + update contact + update metadata
+        assert mock_connection.execute.call_count >= 3
+
+
+class TestGoogleContactsServiceIncrementalSync:
+    """Test cases for GoogleContactsService incremental sync functionality."""
+
+    @pytest.mark.asyncio
+    async def test_incremental_sync_with_valid_token(
+        self, contacts_service, mock_connection, mock_client_factory, mock_transformer
+    ):
+        """Test incremental sync with valid sync token."""
+        google_account_email = "test@example.com"
+        sync_token = "valid_sync_token_123"
+
+        # Mock API client
+        mock_client = AsyncMock()
+        mock_client.list_connections.return_value = {
+            "connections": [
+                {
+                    "resourceName": "people/c123456789",
+                    "etag": "new_etag_456",
+                    "names": [{"givenName": "John", "familyName": "Doe"}],
+                }
+            ],
+            "nextSyncToken": "new_sync_token_456",
+        }
+        mock_client_factory.create_client.return_value = mock_client
+
+        # Mock transformer
+        mock_contact = Contact(first_name="John", last_name="Doe")
+        mock_transformer.transform_person.return_value = mock_contact
+
+        # Execute method (this will be implemented)
+        result = await contacts_service.incremental_sync(
+            google_account_email, sync_token
+        )
+
+        # Verify result structure
+        contacts, new_sync_token = result
+        assert isinstance(contacts, list)
+        assert new_sync_token == "new_sync_token_456"
+
+        # Verify API was called with sync token
+        mock_client.list_connections.assert_called_once()
+        call_args = mock_client.list_connections.call_args[1]
+        assert call_args["sync_token"] == sync_token
+
+    @pytest.mark.asyncio
+    async def test_incremental_sync_with_expired_token(
+        self, contacts_service, mock_connection, mock_client_factory
+    ):
+        """Test incremental sync with expired token (HTTP 410) falls back to full sync."""
+        google_account_email = "test@example.com"
+        sync_token = "expired_sync_token"
+
+        # Mock API client to return HTTP 410 (Gone)
+        mock_client = AsyncMock()
+        http_error = HttpError(
+            resp=MagicMock(status=410), content=b"Sync token expired"
+        )
+        mock_client.list_connections.side_effect = http_error
+        mock_client_factory.create_client.return_value = mock_client
+
+        # Mock full_sync method
+        contacts_service.full_sync = AsyncMock()
+        contacts_service.full_sync.return_value = ([], "new_full_sync_token")
+
+        # Execute method
+        result = await contacts_service.incremental_sync(
+            google_account_email, sync_token
+        )
+
+        # Should fall back to full sync
+        contacts_service.full_sync.assert_called_once_with(google_account_email)
+        contacts, new_sync_token = result
+        assert new_sync_token == "new_full_sync_token"
+
+    @pytest.mark.asyncio
+    async def test_incremental_sync_handles_deleted_contacts(
+        self, contacts_service, mock_connection, mock_client_factory, mock_transformer
+    ):
+        """Test incremental sync handles deleted contacts (soft delete)."""
+        google_account_email = "test@example.com"
+        sync_token = "valid_sync_token_123"
+
+        # Mock API response with deleted contact
+        mock_client = AsyncMock()
+        mock_client.list_connections.return_value = {
+            "connections": [
+                {
+                    "resourceName": "people/c123456789",
+                    "etag": "deleted_etag",
+                    "metadata": {"deleted": True},  # Indicates deletion
+                }
+            ],
+            "nextSyncToken": "new_sync_token_456",
+        }
+        mock_client_factory.create_client.return_value = mock_client
+
+        # Mock delete result for the DELETE statement
+        mock_delete_result = MagicMock()
+        mock_delete_result.rowcount = 1  # Simulate successful deletion
+        mock_connection.execute.return_value = mock_delete_result
+
+        # Execute method
+        result = await contacts_service.incremental_sync(
+            google_account_email, sync_token
+        )
+
+        # Should handle deletion (soft delete or remove sync metadata)
+        contacts, new_sync_token = result
+        assert new_sync_token == "new_sync_token_456"
+
+        # Verify database operations for handling deletion
+        assert mock_connection.execute.call_count >= 2
+
+    @pytest.mark.asyncio
+    async def test_incremental_sync_handles_created_and_updated_contacts(
+        self, contacts_service, mock_connection, mock_client_factory, mock_transformer
+    ):
+        """Test incremental sync handles both created and updated contacts."""
+        google_account_email = "test@example.com"
+        sync_token = "valid_sync_token_123"
+
+        # Mock API response with new and updated contacts
+        mock_client = AsyncMock()
+        mock_client.list_connections.return_value = {
+            "connections": [
+                {
+                    "resourceName": "people/c123456789",  # Existing contact
+                    "etag": "updated_etag_456",
+                    "names": [{"givenName": "John", "familyName": "Doe"}],
+                },
+                {
+                    "resourceName": "people/c987654321",  # New contact
+                    "etag": "new_etag_789",
+                    "names": [{"givenName": "Jane", "familyName": "Smith"}],
+                },
+            ],
+            "nextSyncToken": "new_sync_token_456",
+        }
+        mock_client_factory.create_client.return_value = mock_client
+
+        # Mock transformer
+        mock_contact1 = Contact(first_name="John", last_name="Doe")
+        mock_contact2 = Contact(first_name="Jane", last_name="Smith")
+        mock_transformer.transform_person.side_effect = [mock_contact1, mock_contact2]
+
+        # Mock existing sync metadata (only for first contact)
+        mock_result = MagicMock()
+        mock_row = MagicMock()
+        mock_row.internal_id = 1
+        mock_row.external_id = "people/c123456789"
+        mock_row.version_hash = "old_etag_123"  # Different hash = needs update
+        mock_result.fetchall.return_value = [mock_row]
+        mock_connection.execute.return_value = mock_result
+
+        # Execute method
+        result = await contacts_service.incremental_sync(
+            google_account_email, sync_token
+        )
+
+        # Verify result
+        contacts, new_sync_token = result
+        assert len(contacts) == 2
+        assert new_sync_token == "new_sync_token_456"
+
+        # Should handle both update and create operations
+        assert mock_connection.execute.call_count >= 3
+
+    @pytest.mark.asyncio
+    async def test_incremental_sync_error_handling(
+        self, contacts_service, mock_connection, mock_client_factory
+    ):
+        """Test incremental sync handles API errors properly."""
+        google_account_email = "test@example.com"
+        sync_token = "valid_sync_token_123"
+
+        # Mock API client to return generic HTTP error
+        mock_client = AsyncMock()
+        http_error = HttpError(
+            resp=MagicMock(status=500), content=b"Internal server error"
+        )
+        mock_client.list_connections.side_effect = http_error
+        mock_client_factory.create_client.return_value = mock_client
+
+        # Execute method and expect exception
+        with pytest.raises(GoogleContactsSyncError) as exc_info:
+            await contacts_service.incremental_sync(google_account_email, sync_token)
+
+        # Verify error message contains relevant information
+        assert "incremental sync" in str(exc_info.value).lower()
+        assert google_account_email in str(exc_info.value)
