@@ -20,7 +20,7 @@ from app.core.contacts.models.exceptions import (
     ContactValidationError,
     InvalidTagNameError,
 )
-from app.core.contacts.models.repositories import ContactRepository
+from app.core.contacts.services.contact_service import ContactService
 from app.core.integrations.google_contacts.api_models import (
     GooglePerson,
     ListConnectionsResponse,
@@ -57,21 +57,21 @@ class GoogleContactsService:
         connection: AsyncConnection,
         client_factory: GoogleContactsClientFactory,
         transformer: GoogleContactTransformer,
-        contact_repository: ContactRepository,
+        contact_service: ContactService,
     ) -> None:
         """
         Initialize Google Contacts service.
 
         Args:
-            connection: Database connection for storing sync state
+            connection: Database connection for storing sync metadata
             client_factory: Factory for creating Google Contacts API clients
             transformer: Contact data transformer (singleton)
-            contact_repository: Repository for contact operations
+            contact_service: Business logic service for contact operations
         """
         self.connection = connection
         self.client_factory = client_factory
         self.transformer = transformer
-        self.contact_repository = contact_repository
+        self.contact_service = contact_service
 
     async def full_sync(
         self, google_account_email: str
@@ -593,9 +593,12 @@ class GoogleContactsService:
         Returns:
             Contact with assigned ID and timestamps
         """
-        # Use ContactRepository for proper entity lifecycle management
+        # Integration pattern: Use business logic service for domain operations
+        # This follows integration architecture guidelines - integrations use business logic
         try:
-            saved_contact = await self.contact_repository.save(contact)
+            saved_contact = await self.contact_service.create_contact(
+                contact, self.connection
+            )
             return saved_contact
         except Exception as e:
             raise GoogleContactsSyncError(
@@ -615,9 +618,12 @@ class GoogleContactsService:
         if not contact.id:
             raise GoogleContactsSyncError("Cannot update contact without ID")
 
-        # Use ContactRepository for proper entity lifecycle management
+        # Integration pattern: Use business logic service for domain operations
+        # This follows integration architecture guidelines - integrations use business logic
         try:
-            updated_contact = await self.contact_repository.save(contact)
+            updated_contact = await self.contact_service.update_contact(
+                contact, self.connection
+            )
             return updated_contact
         except Exception as e:
             raise GoogleContactsSyncError(
