@@ -86,6 +86,23 @@ Tasks are organized into **feature iterations** that deliver end-to-end value in
 - 🟡 ARQ worker implementation with Dishka integration (pending)
 - 🟡 Two-way sync and conflict resolution (pending)
 
+### [Iteration 2.5: Interactive Contact Editing](./tasks/iteration-2.5-interactive-contact-editing.md)
+**Status:** 🟡 PLANNED
+**Goal:** Transform contact view/edit screen into a powerful, interactive interface with inline field editing
+
+**Key Deliverables:**
+- Click-to-edit functionality for all contact fields
+- Individual field save/cancel with optimistic updates
+- Backend PATCH endpoints for partial field updates
+- Enhanced user experience with contextual icons and validation
+- Comprehensive accessibility and mobile support
+
+**Architecture Benefits:**
+
+- Leverages existing contact domain and API patterns
+- Maintains clean separation between UI, API, and domain layers
+- Provides foundation for advanced editing features in future iterations
+
 ### [Iteration 3: Extended Integrations](./tasks/iteration-3-extended-integrations.md)
 **Status:** 🟡 PLANNED
 **Goal:** Expand integration capabilities with Immich photos, Strava activities, and financial data
