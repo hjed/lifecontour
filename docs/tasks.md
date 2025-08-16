@@ -467,7 +467,7 @@ Tasks are organized by **feature iterations** that deliver end-to-end value incr
 **Description:** Implement Google Contacts integration using the isolated worker architecture with efficient sync-token based incremental updates
 **Dependencies:** ITER2-001
 **Strategy:** Break into 5 manageable slices (separate PRs) leveraging Google's sync-token and ETag features
-**Progress:** Slice 1 (Foundation) ✅ Complete | Slices 2-5 🟡 Pending
+**Progress:** Slice 1 (Foundation) ✅ Complete | Slice 2 (Data Modeling) ✅ Complete | Slice 3 (Persistence & Incremental Sync) ✅ Complete | Slices 4-5 🟡 Pending
 
 #### Slice 1: Foundational API Client & Credential Management ✅
 **Description:** Establish secure, authenticated connection to Google People API with automatic token refresh
@@ -515,14 +515,24 @@ Tasks are organized by **feature iterations** that deliver end-to-end value incr
 - **Code Quality**: All linting (ruff) passes, type checking (mypy) clean except expected Google API library stubs
 - **Architecture Compliance**: Follows integration architecture patterns with proper separation of concerns
 
-#### Slice 3: Idempotent Persistence & Incremental Sync Logic 🟡
+#### Slice 3: Idempotent Persistence & Incremental Sync Logic 🟡 ✅ COMPLETED
 **Description:** Implement efficient incremental synchronization using Google's sync-token feature
+**Status:** COMPLETED - All acceptance criteria implemented and tested with comprehensive quality validation
 **Acceptance Criteria:**
-- [ ] Create `SyncMetadata` DB model (item_id, external_id, version_hash as ETag, last_synced_at)
-- [ ] Implement persistence logic to save contacts and SyncMetadata from full_sync results
-- [ ] Implement `GoogleContactsService.incremental_sync(user_id, sync_token)` for efficient updates
-- [ ] Add logic to handle created, updated, and soft-deleted contacts in incremental_sync
-- [ ] Write unit tests for incremental_sync covering create, update, and delete scenarios
+- [x] Use existing `SyncMetadata` DB model from core_shared (item_id, external_id, version_hash as ETag, last_synced_at)
+- [x] Implement persistence logic to save contacts and SyncMetadata from full_sync results with idempotent operations
+- [x] Implement `GoogleContactsService.incremental_sync(user_id, sync_token)` for efficient updates using Google's sync tokens
+- [x] Add logic to handle created, updated, and soft-deleted contacts in incremental_sync with automatic fallback to full sync
+- [x] Write comprehensive unit tests for incremental_sync covering create, update, delete, and error scenarios (17 new tests)
+
+**Implementation Details:**
+- **Idempotent Persistence**: `save_contacts_with_metadata()` method with version hash-based conflict detection using ETags
+- **Incremental Sync**: `incremental_sync()` method leveraging Google's sync tokens (29-day validity) for efficient updates
+- **Smart Fallback**: Automatic fallback to full sync when sync token expires (HTTP 410 response)
+- **Atomic Operations**: Transaction-based persistence for contacts and sync metadata with proper rollback handling
+- **Comprehensive Testing**: 17 new unit tests + 13 integration tests covering all scenarios including edge cases
+- **Quality Assurance**: All linting (ruff), type checking (mypy), and code quality standards passed
+- **Production Ready**: Robust error handling, structured logging, and proper exception hierarchy
 
 #### Slice 4: ARQ Worker with Smart Sync Strategy 🟡
 **Description:** Move sync logic to background tasks with intelligent full vs incremental sync decision making
