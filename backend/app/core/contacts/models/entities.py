@@ -18,6 +18,23 @@ class MethodType(Enum):
         return self.value
 
 
+class RelationshipType(Enum):
+    """Enumeration for contact relationship types."""
+
+    PARTNER = "partner"
+    CHILD = "child"
+    PARENT = "parent"
+    SIBLING = "sibling"
+    FRIEND = "friend"
+    COLLEAGUE = "colleague"
+    FAMILY = "family"
+    OTHER = "other"
+
+    def __str__(self) -> str:
+        """Return the string value of the enum."""
+        return self.value
+
+
 @dataclass
 class Tag:
     """Tag entity with hierarchical support."""
@@ -233,3 +250,60 @@ class Contact:
     def set_favourite(self, is_favourite: bool) -> None:
         """Set the favourite status of the contact."""
         self.is_favourite = is_favourite
+
+
+@dataclass
+class ContactRelationship:
+    """Contact relationship entity representing relationships between contacts."""
+
+    from_contact_id: int
+    to_contact_id: int
+    relationship_type: RelationshipType
+    id: int | None = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+    def __post_init__(self) -> None:
+        """Validate contact relationship."""
+        # Prevent self-relationships
+        if self.from_contact_id == self.to_contact_id:
+            raise ValueError("Contact cannot have a relationship with itself")
+
+        # Ensure positive contact IDs
+        if self.from_contact_id <= 0 or self.to_contact_id <= 0:
+            raise ValueError("Contact IDs must be positive")
+
+    def __eq__(self, other: object) -> bool:
+        """Check equality based on contact IDs and relationship type."""
+        if not isinstance(other, ContactRelationship):
+            return False
+        return (
+            self.from_contact_id == other.from_contact_id
+            and self.to_contact_id == other.to_contact_id
+            and self.relationship_type == other.relationship_type
+        )
+
+    def get_inverse_type(self) -> RelationshipType:
+        """Get the inverse relationship type for bidirectional relationships."""
+        inverse_map = {
+            RelationshipType.PARENT: RelationshipType.CHILD,
+            RelationshipType.CHILD: RelationshipType.PARENT,
+            RelationshipType.PARTNER: RelationshipType.PARTNER,
+            RelationshipType.SIBLING: RelationshipType.SIBLING,
+            RelationshipType.FRIEND: RelationshipType.FRIEND,
+            RelationshipType.COLLEAGUE: RelationshipType.COLLEAGUE,
+            RelationshipType.FAMILY: RelationshipType.FAMILY,
+            RelationshipType.OTHER: RelationshipType.OTHER,
+        }
+        return inverse_map[self.relationship_type]
+
+    def is_bidirectional(self) -> bool:
+        """Check if this relationship type should be bidirectional."""
+        bidirectional_types = {
+            RelationshipType.PARTNER,
+            RelationshipType.SIBLING,
+            RelationshipType.FRIEND,
+            RelationshipType.COLLEAGUE,
+            RelationshipType.FAMILY,
+        }
+        return self.relationship_type in bidirectional_types

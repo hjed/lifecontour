@@ -217,3 +217,84 @@ class TagListResponse(JsonApiCollectionResponse[TagResource]):
     """Response model for a list of tags."""
 
     pass
+
+
+# Field Update Schemas
+class FieldUpdateData(BaseModel):
+    """Data for updating a single contact field."""
+
+    type: str = Field(default="contact_fields", description="Resource type")
+    attributes: dict[str, Any] = Field(..., description="Field update attributes")
+
+
+class FieldUpdateRequest(BaseModel):
+    """Request model for updating a single contact field."""
+
+    data: FieldUpdateData = Field(..., description="Field update data")
+
+
+class ContactFieldAttributes(BaseModel):
+    """Attributes for a contact field response."""
+
+    field_name: str = Field(..., description="Name of the updated field")
+    field_type: str = Field(..., description="Type of field (basic, method, address, note)")
+    entity_id: int | None = Field(default=None, description="ID of the related entity (for methods, addresses, notes)")
+    old_value: str | None = Field(default=None, description="Previous field value")
+    new_value: str | None = Field(default=None, description="New field value")
+    updated_at: datetime = Field(..., description="Timestamp of the update")
+
+
+class ContactFieldResource(BaseModel):
+    """Resource model for a contact field update."""
+
+    type: str = Field(default="contact_fields", description="Resource type")
+    id: str = Field(..., description="Field identifier")
+    attributes: ContactFieldAttributes = Field(..., description="Field attributes")
+
+
+class ContactFieldResponse(JsonApiResponse[ContactFieldResource]):
+    """Response model for a single field update."""
+
+    pass
+
+
+# Method Field Update Schemas
+class MethodFieldUpdateData(BaseModel):
+    """Data for updating a contact method field."""
+
+    type: str = Field(default="contact_method_fields", description="Resource type")
+    attributes: dict[str, Any] = Field(..., description="Method field update attributes")
+
+
+class MethodFieldUpdateRequest(BaseModel):
+    """Request model for updating a contact method field."""
+
+    data: MethodFieldUpdateData = Field(..., description="Method field update data")
+
+
+# Address Field Update Schemas
+class AddressFieldUpdateData(BaseModel):
+    """Data for updating a contact address field."""
+
+    type: str = Field(default="contact_address_fields", description="Resource type")
+    attributes: dict[str, Any] = Field(..., description="Address field update attributes")
+
+
+class AddressFieldUpdateRequest(BaseModel):
+    """Request model for updating a contact address field."""
+
+    data: AddressFieldUpdateData = Field(..., description="Address field update data")
+
+
+# Note Field Update Schemas
+class NoteFieldUpdateData(BaseModel):
+    """Data for updating a contact note field."""
+
+    type: str = Field(default="contact_note_fields", description="Resource type")
+    attributes: dict[str, Any] = Field(..., description="Note field update attributes")
+
+
+class NoteFieldUpdateRequest(BaseModel):
+    """Request model for updating a contact note field."""
+
+    data: NoteFieldUpdateData = Field(..., description="Note field update data")
