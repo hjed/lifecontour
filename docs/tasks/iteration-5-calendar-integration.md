@@ -1,7 +1,7 @@
 # Iteration 5: Calendar Integration
 
-**Status:** 🟡 PLANNED  
-**Dependencies:** Iteration 4 (Journal System)  
+**Status:** 🟡 PLANNED
+**Dependencies:** Iteration 4 (Journal System)
 **Goal:** Integrate Google Calendar with event-based journaling and meeting preparation features
 
 ## Overview
@@ -24,7 +24,7 @@ This iteration adds comprehensive calendar functionality:
 ## Tasks
 
 ### ITER5-001: Calendar Domain Core 🟡 PLANNED
-**Description:** Build calendar domain with event management and recurrence support  
+**Description:** Build calendar domain with event management and recurrence support
 **Strategy:** Break into 3 slices for domain, persistence, and Google integration
 
 #### Slice 1: Domain Models & Database Schema 🟡 PLANNED
@@ -75,7 +75,7 @@ This iteration adds comprehensive calendar functionality:
 - [ ] Add calendar-specific sync state management
 
 ### ITER5-002: Calendar API & Search Integration 🟡 PLANNED
-**Description:** Create comprehensive calendar API with advanced search capabilities  
+**Description:** Create comprehensive calendar API with advanced search capabilities
 **Strategy:** Single focused task for API and search implementation
 
 **PR Size:** ~6 files (API controllers, search integration, schemas, tests)
@@ -105,7 +105,7 @@ This iteration adds comprehensive calendar functionality:
 - `GET /api/calendar/analytics` - Calendar usage analytics
 
 ### ITER5-003: Calendar UI & Meeting Preparation 🔴 PLANNED
-**Description:** Build comprehensive calendar interface with meeting preparation features  
+**Description:** Build comprehensive calendar interface with meeting preparation features
 **Strategy:** Break into 3 slices for views, meeting prep, and mobile support
 
 #### Slice 1: Calendar Views & Event Management 🟡 PLANNED
@@ -148,7 +148,7 @@ This iteration adds comprehensive calendar functionality:
 - [ ] Implement calendar sharing and collaboration features
 
 ### ITER5-004: Calendar MCP Tools 🟡 PLANNED
-**Description:** Add comprehensive calendar management and scheduling assistance tools  
+**Description:** Add comprehensive calendar management and scheduling assistance tools
 **Strategy:** Single focused task for MCP integration
 
 **PR Size:** ~5 files (MCP tools, scheduling AI, meeting assistance, tests)
@@ -176,7 +176,7 @@ This iteration adds comprehensive calendar functionality:
 - `get_calendar_insights()` - Time management and productivity insights
 
 ### ITER5-005: Advanced Calendar Features 🟡 PLANNED
-**Description:** Implement advanced scheduling and productivity features  
+**Description:** Implement advanced scheduling and productivity features
 **Strategy:** Single task for advanced functionality
 
 **PR Size:** ~6 files (Advanced features, AI integration, productivity tools, tests)

@@ -19,7 +19,7 @@ A comprehensive personal management system with Python FastAPI backend, Next.js 
 - **Architecture Consistency:** Follow established patterns (Dishka DI, ARQ workers, etc.)
 - **AI-Optimized:** Design for AI assistant understanding and integration
 
-The [architecture document](./architecture.md) provides a high-level overview of the system architecture and navigation. 
+The [architecture document](./architecture.md) provides a high-level overview of the system architecture and navigation.
 
 The [AI guidelines](./ai-guidelines.md) provide essential information for AI assistants working on the project. The AI Guidelines MUST be followed at all times. NO EXCEPTIONS.
 

@@ -91,16 +91,38 @@ repos:
         pass_filenames: false
         require_serial: true
 
-  # General hooks
-  - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v4.1.0
+  # General hooks (local implementations to avoid Python 3.13 compatibility issues)
+  - repo: local
     hooks:
       - id: trailing-whitespace
-      - id: end-of-file-fixer
-        exclude: ^docker/oauth-ui/package-lock\.json$
+        name: trim trailing whitespace
+        entry: bash -c 'git diff --cached --name-only | grep -E "\.(py|js|ts|tsx|json|yaml|yml|md)$" | xargs -r sed -i "s/[[:space:]]*$//"'
+        language: system
+        pass_filenames: false
+
       - id: check-yaml
+        name: check yaml
+        entry: python3 -c "import sys, yaml; [yaml.safe_load(open(f)) for f in sys.argv[1:]]"
+        language: system
+        files: \.(yaml|yml)$
       - id: check-json
+        name: check json
+        entry: python3 -c "import sys, json; [json.load(open(f)) for f in sys.argv[1:]]"
+        language: system
+        files: \.json$
       - id: check-toml
+        name: check toml
+        entry: python3 -c "import sys, tomllib; [tomllib.load(open(f, 'rb')) for f in sys.argv[1:]]"
+        language: system
+        files: \.toml$
       - id: check-merge-conflict
+        name: check for merge conflicts
+        entry: bash -c 'if [ "$#" -gt 0 ]; then for file in "$@"; do if grep -q "^<<<<<<<\|^=======\|^>>>>>>>" "$file" 2>/dev/null; then echo "Merge conflict markers found in $file"; exit 1; fi; done; fi'
+        language: system
+        types: [text]
+        exclude: '^\.pre-commit-config\.yaml$'
       - id: check-added-large-files
-        args: [--maxkb=1000]
+        name: check for added large files
+        entry: bash -c 'git diff --cached --name-only | xargs -r ls -la | awk '\''$5 > 1024000 {print $9 " is " $5 " bytes"; exit 1}'\'''
+        language: system
+        pass_filenames: false
