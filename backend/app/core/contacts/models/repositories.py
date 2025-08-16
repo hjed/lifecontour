@@ -1,9 +1,9 @@
 """Repository interfaces for the contacts domain."""
 
 from abc import ABC, abstractmethod
-from typing import Any
+from typing import Any, Union
 
-from .entities import Contact, ContactAddress, ContactMethod, ContactNote, Tag
+from .entities import Contact, ContactAddress, ContactMethod, ContactNote, ContactRelationship, Tag
 from .events import DomainEvent
 
 
@@ -299,4 +299,56 @@ class ContactEventPublisher(ABC):
     @abstractmethod
     async def publish_batch(self, events: list[DomainEvent]) -> None:
         """Publish multiple domain events."""
+        pass
+
+
+class ContactRelationshipRepository(ABC):
+    """Repository interface for contact relationship operations."""
+
+    @abstractmethod
+    async def create(self, relationship: "ContactRelationship") -> "ContactRelationship":
+        """Create a new contact relationship."""
+        pass
+
+    @abstractmethod
+    async def get_by_id(self, relationship_id: int) -> Union["ContactRelationship", None]:
+        """Get a relationship by ID."""
+        pass
+
+    @abstractmethod
+    async def get_relationships_for_contact(
+        self, contact_id: int
+    ) -> list["ContactRelationship"]:
+        """Get all relationships for a specific contact (both from and to)."""
+        pass
+
+    @abstractmethod
+    async def get_relationships_from_contact(
+        self, contact_id: int
+    ) -> list["ContactRelationship"]:
+        """Get relationships where the contact is the 'from' contact."""
+        pass
+
+    @abstractmethod
+    async def get_relationships_to_contact(
+        self, contact_id: int
+    ) -> list["ContactRelationship"]:
+        """Get relationships where the contact is the 'to' contact."""
+        pass
+
+    @abstractmethod
+    async def update(self, relationship: "ContactRelationship") -> "ContactRelationship":
+        """Update an existing relationship."""
+        pass
+
+    @abstractmethod
+    async def delete(self, relationship_id: int) -> None:
+        """Delete a relationship by ID."""
+        pass
+
+    @abstractmethod
+    async def relationship_exists(
+        self, from_contact_id: int, to_contact_id: int, relationship_type: str
+    ) -> bool:
+        """Check if a specific relationship already exists."""
         pass

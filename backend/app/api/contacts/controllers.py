@@ -22,10 +22,15 @@ from app.api.contacts.converters import (
     TagConverter,
 )
 from app.api.contacts.schemas import (
+    AddressFieldUpdateRequest,
     ContactCreateRequest,
+    ContactFieldResponse,
     ContactListResponse,
     ContactResponse,
     ContactUpdateRequest,
+    FieldUpdateRequest,
+    MethodFieldUpdateRequest,
+    NoteFieldUpdateRequest,
     TagAssignmentRequest,
     TagListResponse,
 )
@@ -307,6 +312,210 @@ async def toggle_contact_favourite(
         return ContactResponse(
             data=ContactConverter.to_resource(updated_contact, base_url)
         )
+    except ContactValidationError as e:
+        if "Contact not found" in str(e):
+            raise ContactNotFoundError(contact_id) from e
+        raise
+
+
+@router.patch("/{contact_id}/fields/{field_name}", response_model=ContactFieldResponse)
+@inject
+async def update_contact_field(
+    contact_id: int,
+    field_name: str,
+    field_request: FieldUpdateRequest,
+    contact_service: FromDishka[ContactService],
+    connection: FromDishka[AsyncConnection],
+    user: FromDishka[SessionUser],  # Require authentication
+) -> ContactFieldResponse:
+    """
+    Update a single contact field.
+
+    Updates only the specified field of a contact and returns the field update details.
+    This endpoint is optimized for inline editing functionality where only one field
+    is changed at a time.
+
+    Supported fields: first_name, last_name, middle_name, nick_name, is_favourite
+    """
+    # Extract the field value from the request
+    field_value = field_request.data.attributes.get("value")
+    if field_value is None:
+        raise ContactValidationError("value", "Field value is required")
+
+    try:
+        old_value, new_value = await contact_service.update_contact_field(
+            contact_id, field_name, field_value, connection
+        )
+
+        # Create response
+        from app.api.contacts.schemas import ContactFieldAttributes, ContactFieldResource
+        from datetime import datetime
+
+        field_resource = ContactFieldResource(
+            id=f"{contact_id}:{field_name}",
+            attributes=ContactFieldAttributes(
+                field_name=field_name,
+                old_value=old_value,
+                new_value=new_value,
+                updated_at=datetime.now(),
+            ),
+        )
+
+        return ContactFieldResponse(data=field_resource)
+
+    except ContactValidationError as e:
+        if "Contact not found" in str(e):
+            raise ContactNotFoundError(contact_id) from e
+        raise
+
+
+@router.patch("/{contact_id}/methods/{method_id}/fields/{field_name}", response_model=ContactFieldResponse)
+@inject
+async def update_contact_method_field(
+    contact_id: int,
+    method_id: int,
+    field_name: str,
+    field_request: MethodFieldUpdateRequest,
+    contact_service: FromDishka[ContactService],
+    connection: FromDishka[AsyncConnection],
+    user: FromDishka[SessionUser],  # Require authentication
+) -> ContactFieldResponse:
+    """
+    Update a single contact method field.
+
+    Updates only the specified field of a contact method (email/phone).
+    Supported fields: value, label, is_primary
+    """
+    # Extract the field value from the request
+    field_value = field_request.data.attributes.get("value")
+    if field_value is None:
+        raise ContactValidationError("value", "Field value is required")
+
+    try:
+        old_value, new_value = await contact_service.update_contact_method_field(
+            contact_id, method_id, field_name, field_value, connection
+        )
+
+        # Create response
+        from app.api.contacts.schemas import ContactFieldAttributes, ContactFieldResource
+        from datetime import datetime
+
+        field_resource = ContactFieldResource(
+            id=f"{contact_id}:method:{method_id}:{field_name}",
+            attributes=ContactFieldAttributes(
+                field_name=field_name,
+                field_type="method",
+                entity_id=method_id,
+                old_value=old_value,
+                new_value=new_value,
+                updated_at=datetime.now(),
+            ),
+        )
+
+        return ContactFieldResponse(data=field_resource)
+
+    except ContactValidationError as e:
+        if "Contact not found" in str(e):
+            raise ContactNotFoundError(contact_id) from e
+        raise
+
+
+@router.patch("/{contact_id}/addresses/{address_id}/fields/{field_name}", response_model=ContactFieldResponse)
+@inject
+async def update_contact_address_field(
+    contact_id: int,
+    address_id: int,
+    field_name: str,
+    field_request: AddressFieldUpdateRequest,
+    contact_service: FromDishka[ContactService],
+    connection: FromDishka[AsyncConnection],
+    user: FromDishka[SessionUser],  # Require authentication
+) -> ContactFieldResponse:
+    """
+    Update a single contact address field.
+
+    Updates only the specified field of a contact address.
+    Supported fields: label, street_line_1, street_line_2, locality, region, postal_code, country_code, is_primary
+    """
+    # Extract the field value from the request
+    field_value = field_request.data.attributes.get("value")
+    if field_value is None:
+        raise ContactValidationError("value", "Field value is required")
+
+    try:
+        old_value, new_value = await contact_service.update_contact_address_field(
+            contact_id, address_id, field_name, field_value, connection
+        )
+
+        # Create response
+        from app.api.contacts.schemas import ContactFieldAttributes, ContactFieldResource
+        from datetime import datetime
+
+        field_resource = ContactFieldResource(
+            id=f"{contact_id}:address:{address_id}:{field_name}",
+            attributes=ContactFieldAttributes(
+                field_name=field_name,
+                field_type="address",
+                entity_id=address_id,
+                old_value=old_value,
+                new_value=new_value,
+                updated_at=datetime.now(),
+            ),
+        )
+
+        return ContactFieldResponse(data=field_resource)
+
+    except ContactValidationError as e:
+        if "Contact not found" in str(e):
+            raise ContactNotFoundError(contact_id) from e
+        raise
+
+
+@router.patch("/{contact_id}/notes/{note_id}/fields/{field_name}", response_model=ContactFieldResponse)
+@inject
+async def update_contact_note_field(
+    contact_id: int,
+    note_id: int,
+    field_name: str,
+    field_request: NoteFieldUpdateRequest,
+    contact_service: FromDishka[ContactService],
+    connection: FromDishka[AsyncConnection],
+    user: FromDishka[SessionUser],  # Require authentication
+) -> ContactFieldResponse:
+    """
+    Update a single contact note field.
+
+    Updates only the specified field of a contact note.
+    Supported fields: content
+    """
+    # Extract the field value from the request
+    field_value = field_request.data.attributes.get("value")
+    if field_value is None:
+        raise ContactValidationError("value", "Field value is required")
+
+    try:
+        old_value, new_value = await contact_service.update_contact_note_field(
+            contact_id, note_id, field_name, field_value, connection
+        )
+
+        # Create response
+        from app.api.contacts.schemas import ContactFieldAttributes, ContactFieldResource
+        from datetime import datetime
+
+        field_resource = ContactFieldResource(
+            id=f"{contact_id}:note:{note_id}:{field_name}",
+            attributes=ContactFieldAttributes(
+                field_name=field_name,
+                field_type="note",
+                entity_id=note_id,
+                old_value=old_value,
+                new_value=new_value,
+                updated_at=datetime.now(),
+            ),
+        )
+
+        return ContactFieldResponse(data=field_resource)
+
     except ContactValidationError as e:
         if "Contact not found" in str(e):
             raise ContactNotFoundError(contact_id) from e

@@ -166,6 +166,25 @@ This iteration follows established patterns:
 - Integration tests for all new functionality
 - Performance tests for multiple simultaneous edits
 
+### Task 2.5H: MCP Server Integration
+**Estimated Effort:** 1-2 hours
+**Files Changed:** ~3 files
+
+#### Implementation
+- Update MCP (Model Context Protocol) server to expose new PATCH endpoints
+- Add field update endpoints to MCP API interface:
+  - Basic contact field updates (`/api/contacts/{id}/fields/{field_name}`)
+  - Contact method field updates (`/api/contacts/{id}/methods/{method_id}/fields/{field_name}`)
+  - Contact address field updates (`/api/contacts/{id}/addresses/{address_id}/fields/{field_name}`)
+  - Contact note field updates (`/api/contacts/{id}/notes/{note_id}/fields/{field_name}`)
+- Ensure proper request/response schema mapping for MCP protocol
+- Update MCP documentation and examples
+
+#### Testing
+- MCP endpoint integration tests
+- Protocol compliance validation
+- Request/response schema verification
+
 ## Technical Implementation Details
 
 ### Backend API Design

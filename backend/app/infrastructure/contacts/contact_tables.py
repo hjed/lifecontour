@@ -226,3 +226,47 @@ contact_edit_event_table = Table(
         nullable=False,
     ),
 )
+
+# Contact relationships table
+contact_relationships_table = Table(
+    "contact_relationships",
+    metadata,
+    Column("id", Integer, primary_key=True),
+    Column(
+        "from_contact_id",
+        Integer,
+        ForeignKey("contacts.id", ondelete="CASCADE"),
+        nullable=False,
+    ),
+    Column(
+        "to_contact_id",
+        Integer,
+        ForeignKey("contacts.id", ondelete="CASCADE"),
+        nullable=False,
+    ),
+    Column("relationship_type", String(20), nullable=False),
+    Column(
+        "created_at",
+        DateTime(timezone=True),
+        server_default=text("now()"),
+        nullable=False,
+    ),
+    Column(
+        "updated_at",
+        DateTime(timezone=True),
+        server_default=text("now()"),
+        nullable=False,
+    ),
+    CheckConstraint(
+        "relationship_type IN ('partner', 'child', 'parent', 'sibling', 'friend', 'colleague', 'family', 'other')",
+        name="ck_contact_relationships_relationship_type"
+    ),
+    CheckConstraint(
+        "from_contact_id != to_contact_id",
+        name="ck_contact_relationships_no_self_reference"
+    ),
+    UniqueConstraint(
+        "from_contact_id", "to_contact_id", "relationship_type",
+        name="uq_contact_relationships_unique_relationship"
+    ),
+)
