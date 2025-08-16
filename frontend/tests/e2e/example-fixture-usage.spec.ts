@@ -251,9 +251,16 @@ test.describe('Example: Fixture-Based Testing', () => {
       await expect(
         authenticatedPage.locator('[data-testid="error-message"]')
       ).toBeVisible({ timeout: 15000 });
-      await expect(
-        authenticatedPage.locator('[data-testid="error-message"]')
-      ).toContainText('Failed to fetch');
+
+      // Different browsers return different error messages for network failures
+      // Chromium: "Failed to fetch"
+      // Firefox: "NetworkError when attempting to fetch resource."
+      const errorMessage = authenticatedPage.locator(
+        '[data-testid="error-message"]'
+      );
+      await expect(errorMessage).toContainText(
+        /Failed to fetch|NetworkError when attempting to fetch/
+      );
     });
   });
 });

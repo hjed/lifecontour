@@ -44,14 +44,21 @@ show_help() {
     echo "  help      Show this help message"
     echo ""
     echo "Options:"
-    echo "  --headed  Run tests in headed mode (visible browser)"
-    echo "  --debug   Run tests in debug mode"
-    echo "  --ui      Run tests with Playwright UI"
-    echo "  --cleanup Force cleanup after tests"
+    echo "  --headed     Run tests in headed mode (visible browser)"
+    echo "  --debug      Run tests in debug mode"
+    echo "  --ui         Run tests with Playwright UI"
+    echo "  --cleanup    Force cleanup after tests"
+    echo "  --browser    Specify browser project (e.g., --browser chromium)"
+    echo "  --chromium   Run tests in Chromium only"
+    echo "  --firefox    Run tests in Firefox only"
+    echo "  --mobile     Run tests in Mobile Chrome only"
     echo ""
     echo "Examples:"
     echo "  $0 setup                    # Set up environment"
-    echo "  $0 test                     # Run all tests"
+    echo "  $0 test                     # Run all tests in all browsers"
+    echo "  $0 test --chromium          # Run tests in Chromium only"
+    echo "  $0 test --firefox           # Run tests in Firefox only"
+    echo "  $0 test --mobile            # Run tests in Mobile Chrome only"
     echo "  $0 test --headed            # Run tests with visible browser"
     echo "  $0 test --ui                # Run tests with Playwright UI"
     echo "  $0 test auth/login.spec.ts  # Run specific test file"
@@ -134,6 +141,22 @@ run_tests() {
                 export CLEANUP_AFTER_TESTS=true
                 shift
                 ;;
+            --browser)
+                playwright_args+=("--project=$2")
+                shift 2
+                ;;
+            --chromium)
+                playwright_args+=("--project=chromium")
+                shift
+                ;;
+            --firefox)
+                playwright_args+=("--project=firefox")
+                shift
+                ;;
+            --mobile)
+                playwright_args+=("--project=Mobile Chrome")
+                shift
+                ;;
             *.spec.ts)
                 test_args+=("$1")
                 shift
@@ -152,7 +175,7 @@ run_tests() {
     # Install Playwright browsers if needed
     if [[ ! -d ~/.cache/ms-playwright ]]; then
         print_status "Installing Playwright browsers..."
-        pnpm exec playwright install chromium
+        pnpm exec playwright install chromium firefox
     fi
 
     # Run tests
