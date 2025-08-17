@@ -5,6 +5,8 @@ Handles contact-related HTTP endpoints following JSON API specification.
 Controllers act as adapters between HTTP and domain services.
 """
 
+from datetime import datetime
+
 import structlog
 from dishka.integrations.fastapi import FromDishka, inject
 from fastapi import APIRouter, Query, Request, status
@@ -24,6 +26,8 @@ from app.api.contacts.converters import (
 from app.api.contacts.schemas import (
     AddressFieldUpdateRequest,
     ContactCreateRequest,
+    ContactFieldAttributes,
+    ContactFieldResource,
     ContactFieldResponse,
     ContactListResponse,
     ContactResponse,
@@ -352,13 +356,6 @@ async def update_contact_field(
         )
 
         # Create response
-        from datetime import datetime
-
-        from app.api.contacts.schemas import (
-            ContactFieldAttributes,
-            ContactFieldResource,
-        )
-
         field_resource = ContactFieldResource(
             id=f"{contact_id}:{field_name}",
             attributes=ContactFieldAttributes(
@@ -409,13 +406,6 @@ async def update_contact_method_field(
         )
 
         # Create response
-        from datetime import datetime
-
-        from app.api.contacts.schemas import (
-            ContactFieldAttributes,
-            ContactFieldResource,
-        )
-
         field_resource = ContactFieldResource(
             id=f"{contact_id}:method:{method_id}:{field_name}",
             attributes=ContactFieldAttributes(
@@ -467,13 +457,6 @@ async def update_contact_address_field(
         )
 
         # Create response
-        from datetime import datetime
-
-        from app.api.contacts.schemas import (
-            ContactFieldAttributes,
-            ContactFieldResource,
-        )
-
         field_resource = ContactFieldResource(
             id=f"{contact_id}:address:{address_id}:{field_name}",
             attributes=ContactFieldAttributes(
@@ -525,13 +508,6 @@ async def update_contact_note_field(
         )
 
         # Create response
-        from datetime import datetime
-
-        from app.api.contacts.schemas import (
-            ContactFieldAttributes,
-            ContactFieldResource,
-        )
-
         field_resource = ContactFieldResource(
             id=f"{contact_id}:note:{note_id}:{field_name}",
             attributes=ContactFieldAttributes(
