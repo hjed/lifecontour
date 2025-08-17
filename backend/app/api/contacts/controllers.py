@@ -43,6 +43,10 @@ from app.infrastructure.auth.models import SessionUser
 
 logger = structlog.get_logger()
 
+# Constants for error messages
+CONTACT_NOT_FOUND_ERROR = "Contact not found"
+FIELD_VALUE_REQUIRED_ERROR = "Field value is required"
+
 router = APIRouter(
     prefix="/contacts",
     tags=["contacts"],
@@ -313,7 +317,7 @@ async def toggle_contact_favourite(
             data=ContactConverter.to_resource(updated_contact, base_url)
         )
     except ContactValidationError as e:
-        if "Contact not found" in str(e):
+        if CONTACT_NOT_FOUND_ERROR in str(e):
             raise ContactNotFoundError(contact_id) from e
         raise
 
@@ -340,7 +344,7 @@ async def update_contact_field(
     # Extract the field value from the request
     field_value = field_request.data.attributes.get("value")
     if field_value is None:
-        raise ContactValidationError("value", "Field value is required")
+        raise ContactValidationError("value", FIELD_VALUE_REQUIRED_ERROR)
 
     try:
         old_value, new_value = await contact_service.update_contact_field(
@@ -364,7 +368,7 @@ async def update_contact_field(
         return ContactFieldResponse(data=field_resource)
 
     except ContactValidationError as e:
-        if "Contact not found" in str(e):
+        if CONTACT_NOT_FOUND_ERROR in str(e):
             raise ContactNotFoundError(contact_id) from e
         raise
 
@@ -389,7 +393,7 @@ async def update_contact_method_field(
     # Extract the field value from the request
     field_value = field_request.data.attributes.get("value")
     if field_value is None:
-        raise ContactValidationError("value", "Field value is required")
+        raise ContactValidationError("value", FIELD_VALUE_REQUIRED_ERROR)
 
     try:
         old_value, new_value = await contact_service.update_contact_method_field(
@@ -415,7 +419,7 @@ async def update_contact_method_field(
         return ContactFieldResponse(data=field_resource)
 
     except ContactValidationError as e:
-        if "Contact not found" in str(e):
+        if CONTACT_NOT_FOUND_ERROR in str(e):
             raise ContactNotFoundError(contact_id) from e
         raise
 
@@ -440,7 +444,7 @@ async def update_contact_address_field(
     # Extract the field value from the request
     field_value = field_request.data.attributes.get("value")
     if field_value is None:
-        raise ContactValidationError("value", "Field value is required")
+        raise ContactValidationError("value", FIELD_VALUE_REQUIRED_ERROR)
 
     try:
         old_value, new_value = await contact_service.update_contact_address_field(
@@ -466,7 +470,7 @@ async def update_contact_address_field(
         return ContactFieldResponse(data=field_resource)
 
     except ContactValidationError as e:
-        if "Contact not found" in str(e):
+        if CONTACT_NOT_FOUND_ERROR in str(e):
             raise ContactNotFoundError(contact_id) from e
         raise
 
@@ -491,7 +495,7 @@ async def update_contact_note_field(
     # Extract the field value from the request
     field_value = field_request.data.attributes.get("value")
     if field_value is None:
-        raise ContactValidationError("value", "Field value is required")
+        raise ContactValidationError("value", FIELD_VALUE_REQUIRED_ERROR)
 
     try:
         old_value, new_value = await contact_service.update_contact_note_field(
@@ -517,6 +521,6 @@ async def update_contact_note_field(
         return ContactFieldResponse(data=field_resource)
 
     except ContactValidationError as e:
-        if "Contact not found" in str(e):
+        if CONTACT_NOT_FOUND_ERROR in str(e):
             raise ContactNotFoundError(contact_id) from e
         raise
