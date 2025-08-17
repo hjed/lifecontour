@@ -9,8 +9,8 @@ from app.core.contacts.services.contact_service import ContactService
 
 # Import shared fixtures and factory functions
 from tests.fixtures.contact_fixtures import (
-    create_contact_with_methods,
     create_basic_contact,
+    create_contact_with_methods,
 )
 
 
