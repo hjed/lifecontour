@@ -363,6 +363,7 @@ async def update_contact_field(
             id=f"{contact_id}:{field_name}",
             attributes=ContactFieldAttributes(
                 field_name=field_name,
+                field_type="basic",
                 old_value=old_value,
                 new_value=new_value,
                 updated_at=datetime.now(),

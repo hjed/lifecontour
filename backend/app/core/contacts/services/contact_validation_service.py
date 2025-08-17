@@ -2,7 +2,7 @@
 
 from sqlalchemy.ext.asyncio import AsyncConnection
 
-from app.core.contacts.models.entities import MethodType
+from app.core.contacts.models.entities import Contact, MethodType
 from app.core.contacts.models.exceptions import (
     ContactNotFoundError,
     ContactValidationError,
@@ -85,3 +85,17 @@ class ContactValidationService:
             from app.core.contacts.models.exceptions import TooManyTagsError
 
             raise TooManyTagsError(len(contact.tags), contact_id)
+
+    async def validate_contact_update(
+        self,
+        contact: Contact,
+        transaction: AsyncConnection,
+        exclude_contact_id: int | None = None
+    ) -> None:
+        """Validate contact data for updates."""
+        # Validate email uniqueness if contact has email methods
+        for method in contact.methods:
+            if method.method_type == MethodType.EMAIL:
+                await self.validate_email_uniqueness(
+                    method.value, transaction, exclude_contact_id
+                )

@@ -58,6 +58,9 @@ def run_test_migrations():
             "script_location", str(backend_dir / "app" / "migrations")
         )
 
+        # Override the database URL to use the test database
+        alembic_cfg.set_main_option("sqlalchemy.url", SQLALCHEMY_DATABASE_URL)
+
         # Run migrations to head
         command.upgrade(alembic_cfg, "head")
 
@@ -80,6 +83,9 @@ def drop_test_database():
         alembic_cfg.set_main_option(
             "script_location", str(backend_dir / "app" / "migrations")
         )
+
+        # Override the database URL to use the test database
+        alembic_cfg.set_main_option("sqlalchemy.url", SQLALCHEMY_DATABASE_URL)
 
         # Downgrade to base (drops all tables)
         command.downgrade(alembic_cfg, "base")

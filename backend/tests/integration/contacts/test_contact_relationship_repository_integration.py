@@ -39,7 +39,17 @@ async def test_contacts(contact_repo: SqlContactRepository) -> tuple[Contact, Co
     saved_contact1 = await contact_repo.save(contact1)
     saved_contact2 = await contact_repo.save(contact2)
 
+    # Ensure contacts have IDs after saving
+    assert saved_contact1.id is not None
+    assert saved_contact2.id is not None
+
     return saved_contact1, saved_contact2
+
+
+def assert_contact_has_id(contact: Contact) -> int:
+    """Assert that a contact has an ID and return it."""
+    assert contact.id is not None, "Contact must have an ID"
+    return contact.id
 
 
 class TestSqlContactRelationshipRepository:
@@ -55,8 +65,8 @@ class TestSqlContactRelationshipRepository:
         contact1, contact2 = test_contacts
 
         relationship = ContactRelationship(
-            from_contact_id=contact1.id,
-            to_contact_id=contact2.id,
+            from_contact_id=assert_contact_has_id(contact1),
+            to_contact_id=assert_contact_has_id(contact2),
             relationship_type=RelationshipType.FRIEND,
         )
 
@@ -79,8 +89,8 @@ class TestSqlContactRelationshipRepository:
         contact1, contact2 = test_contacts
 
         relationship1 = ContactRelationship(
-            from_contact_id=contact1.id,
-            to_contact_id=contact2.id,
+            from_contact_id=assert_contact_has_id(contact1),
+            to_contact_id=assert_contact_has_id(contact2),
             relationship_type=RelationshipType.FRIEND,
         )
 
@@ -89,8 +99,8 @@ class TestSqlContactRelationshipRepository:
 
         # Try to create duplicate
         relationship2 = ContactRelationship(
-            from_contact_id=contact1.id,
-            to_contact_id=contact2.id,
+            from_contact_id=assert_contact_has_id(contact1),
+            to_contact_id=assert_contact_has_id(contact2),
             relationship_type=RelationshipType.FRIEND,
         )
 
@@ -111,8 +121,8 @@ class TestSqlContactRelationshipRepository:
             ValueError, match="Contact cannot have a relationship with itself"
         ):
             ContactRelationship(
-                from_contact_id=contact1.id,
-                to_contact_id=contact1.id,
+                from_contact_id=assert_contact_has_id(contact1),
+                to_contact_id=assert_contact_has_id(contact1),
                 relationship_type=RelationshipType.FRIEND,
             )
 
@@ -126,12 +136,13 @@ class TestSqlContactRelationshipRepository:
         contact1, contact2 = test_contacts
 
         relationship = ContactRelationship(
-            from_contact_id=contact1.id,
-            to_contact_id=contact2.id,
+            from_contact_id=assert_contact_has_id(contact1),
+            to_contact_id=assert_contact_has_id(contact2),
             relationship_type=RelationshipType.COLLEAGUE,
         )
 
         saved_relationship = await relationship_repo.create(relationship)
+        assert saved_relationship.id is not None
         retrieved_relationship = await relationship_repo.get_by_id(
             saved_relationship.id
         )
@@ -161,23 +172,23 @@ class TestSqlContactRelationshipRepository:
 
         # Create relationship from contact1 to contact2
         relationship1 = ContactRelationship(
-            from_contact_id=contact1.id,
-            to_contact_id=contact2.id,
+            from_contact_id=assert_contact_has_id(contact1),
+            to_contact_id=assert_contact_has_id(contact2),
             relationship_type=RelationshipType.FRIEND,
         )
         await relationship_repo.create(relationship1)
 
         # Create relationship from contact2 to contact1
         relationship2 = ContactRelationship(
-            from_contact_id=contact2.id,
-            to_contact_id=contact1.id,
+            from_contact_id=assert_contact_has_id(contact2),
+            to_contact_id=assert_contact_has_id(contact1),
             relationship_type=RelationshipType.COLLEAGUE,
         )
         await relationship_repo.create(relationship2)
 
         # Get all relationships for contact1 (should include both)
         relationships = await relationship_repo.get_relationships_for_contact(
-            contact1.id
+            assert_contact_has_id(contact1)
         )
 
         assert len(relationships) == 2
@@ -195,15 +206,15 @@ class TestSqlContactRelationshipRepository:
         contact1, contact2 = test_contacts
 
         relationship = ContactRelationship(
-            from_contact_id=contact1.id,
-            to_contact_id=contact2.id,
+            from_contact_id=assert_contact_has_id(contact1),
+            to_contact_id=assert_contact_has_id(contact2),
             relationship_type=RelationshipType.PARTNER,
         )
         await relationship_repo.create(relationship)
 
         # Get relationships from contact1
         from_relationships = await relationship_repo.get_relationships_from_contact(
-            contact1.id
+            assert_contact_has_id(contact1)
         )
         assert len(from_relationships) == 1
         assert from_relationships[0].from_contact_id == contact1.id
@@ -225,15 +236,15 @@ class TestSqlContactRelationshipRepository:
         contact1, contact2 = test_contacts
 
         relationship = ContactRelationship(
-            from_contact_id=contact1.id,
-            to_contact_id=contact2.id,
+            from_contact_id=assert_contact_has_id(contact1),
+            to_contact_id=assert_contact_has_id(contact2),
             relationship_type=RelationshipType.SIBLING,
         )
         await relationship_repo.create(relationship)
 
         # Get relationships to contact2
         to_relationships = await relationship_repo.get_relationships_to_contact(
-            contact2.id
+            assert_contact_has_id(contact2)
         )
         assert len(to_relationships) == 1
         assert to_relationships[0].from_contact_id == contact1.id
@@ -257,8 +268,8 @@ class TestSqlContactRelationshipRepository:
         contact1, contact2 = test_contacts
 
         relationship = ContactRelationship(
-            from_contact_id=contact1.id,
-            to_contact_id=contact2.id,
+            from_contact_id=assert_contact_has_id(contact1),
+            to_contact_id=assert_contact_has_id(contact2),
             relationship_type=RelationshipType.FRIEND,
         )
         saved_relationship = await relationship_repo.create(relationship)
@@ -294,8 +305,8 @@ class TestSqlContactRelationshipRepository:
         contact1, contact2 = test_contacts
 
         relationship = ContactRelationship(
-            from_contact_id=contact1.id,
-            to_contact_id=contact2.id,
+            from_contact_id=assert_contact_has_id(contact1),
+            to_contact_id=assert_contact_has_id(contact2),
             relationship_type=RelationshipType.FRIEND,
         )
 
@@ -314,13 +325,14 @@ class TestSqlContactRelationshipRepository:
         contact1, contact2 = test_contacts
 
         relationship = ContactRelationship(
-            from_contact_id=contact1.id,
-            to_contact_id=contact2.id,
+            from_contact_id=assert_contact_has_id(contact1),
+            to_contact_id=assert_contact_has_id(contact2),
             relationship_type=RelationshipType.FAMILY,
         )
         saved_relationship = await relationship_repo.create(relationship)
 
         # Delete the relationship
+        assert saved_relationship.id is not None
         await relationship_repo.delete(saved_relationship.id)
 
         # Verify it's deleted
@@ -348,20 +360,20 @@ class TestSqlContactRelationshipRepository:
 
         # Check non-existent relationship
         exists = await relationship_repo.relationship_exists(
-            contact1.id, contact2.id, RelationshipType.FRIEND.value
+            assert_contact_has_id(contact1), assert_contact_has_id(contact2), RelationshipType.FRIEND.value
         )
         assert exists is False
 
         # Create relationship
         relationship = ContactRelationship(
-            from_contact_id=contact1.id,
-            to_contact_id=contact2.id,
+            from_contact_id=assert_contact_has_id(contact1),
+            to_contact_id=assert_contact_has_id(contact2),
             relationship_type=RelationshipType.FRIEND,
         )
         await relationship_repo.create(relationship)
 
         # Check existing relationship
         exists = await relationship_repo.relationship_exists(
-            contact1.id, contact2.id, RelationshipType.FRIEND.value
+            assert_contact_has_id(contact1), assert_contact_has_id(contact2), RelationshipType.FRIEND.value
         )
         assert exists is True
