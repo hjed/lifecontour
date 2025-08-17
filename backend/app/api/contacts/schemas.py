@@ -241,7 +241,7 @@ class ContactFieldAttributes(BaseModel):
     entity_id: int | None = Field(default=None, description="ID of the related entity (for methods, addresses, notes)")
     old_value: str | None = Field(default=None, description="Previous field value")
     new_value: str | None = Field(default=None, description="New field value")
-    updated_at: datetime = Field(..., description="Timestamp of the update")
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(), description="Timestamp of the update")
 
 
 class ContactFieldResource(BaseModel):

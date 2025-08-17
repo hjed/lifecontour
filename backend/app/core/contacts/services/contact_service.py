@@ -49,6 +49,95 @@ from app.core.contacts.services.tag_hierarchy_service import TagHierarchyService
 logger = structlog.get_logger()
 
 
+def _normalize_field_value(value: Any) -> str | None:
+    """Normalize field values for comparison.
+
+    Converts all values to strings for consistent comparison,
+    handling booleans and None values appropriately.
+    """
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return str(value).lower()  # "true" or "false"
+    return str(value)
+
+
+def _validate_contact_field_name(field_name: str) -> None:
+    """Validate that the field name is allowed for contact updates."""
+    valid_fields = {"first_name", "last_name", "middle_name", "nick_name", "is_favourite"}
+    if field_name not in valid_fields:
+        raise ContactValidationError(
+            "field_name",
+            f"Invalid field name '{field_name}'. Valid fields: {', '.join(valid_fields)}"
+        )
+
+
+def _convert_contact_field_value(field_name: str, field_value: Any) -> Any:
+    """Convert field value to appropriate type based on field name."""
+    if field_name == "is_favourite":
+        if isinstance(field_value, str):
+            return field_value.lower() in ("true", "1", "yes")
+        else:
+            return bool(field_value)
+    else:
+        return str(field_value) if field_value is not None else None
+
+
+def _validate_method_field_name(field_name: str) -> None:
+    """Validate that the field name is allowed for method updates."""
+    valid_fields = {"value", "label", "is_primary"}
+    if field_name not in valid_fields:
+        raise ContactValidationError(
+            "field_name",
+            f"Invalid method field name '{field_name}'. Valid fields: {', '.join(valid_fields)}"
+        )
+
+
+def _convert_method_field_value(field_name: str, field_value: Any) -> Any:
+    """Convert method field value to appropriate type based on field name."""
+    if field_name == "is_primary":
+        if isinstance(field_value, str):
+            return field_value.lower() in ("true", "1", "yes")
+        else:
+            return bool(field_value)
+    else:
+        return str(field_value) if field_value is not None else None
+
+
+def _validate_address_field_name(field_name: str) -> None:
+    """Validate that the field name is allowed for address updates."""
+    valid_fields = {
+        "label", "street_line_1", "street_line_2",
+        "locality", "region", "postal_code", "country_code", "is_primary"
+    }
+    if field_name not in valid_fields:
+        raise ContactValidationError(
+            "field_name",
+            f"Invalid address field name '{field_name}'. Valid fields: {', '.join(valid_fields)}"
+        )
+
+
+def _convert_address_field_value(field_name: str, field_value: Any) -> Any:
+    """Convert address field value to appropriate type based on field name."""
+    if field_name == "is_primary":
+        if isinstance(field_value, str):
+            return field_value.lower() in ("true", "1", "yes")
+        else:
+            return bool(field_value)
+    else:
+        return str(field_value) if field_value is not None else None
+
+
+def _validate_note_field_name(field_name: str) -> None:
+    """Validate that the field name is allowed for note updates."""
+    valid_fields = {"content"}
+    if field_name not in valid_fields:
+        raise ContactValidationError(
+            "field_name",
+            f"Invalid note field name '{field_name}'. Valid fields: {', '.join(valid_fields)}"
+        )
+
+
 class ContactService:
     """Main contact service with transaction management and retry logic."""
 
@@ -283,12 +372,7 @@ class ContactService:
             ContactNotFoundError: If contact doesn't exist
         """
         # Validate field name
-        valid_fields = {"first_name", "last_name", "middle_name", "nick_name", "is_favourite"}
-        if field_name not in valid_fields:
-            raise ContactValidationError(
-                "field_name",
-                f"Invalid field name '{field_name}'. Valid fields: {', '.join(valid_fields)}"
-            )
+        _validate_contact_field_name(field_name)
 
         async def _update_field_operation() -> Tuple[Union[str, None], Union[str, None]]:
             # Get current contact
@@ -298,16 +382,10 @@ class ContactService:
             old_value = getattr(current_contact, field_name)
 
             # Convert field_value to appropriate type
-            if field_name == "is_favourite":
-                if isinstance(field_value, str):
-                    new_value = field_value.lower() in ("true", "1", "yes")
-                else:
-                    new_value = bool(field_value)
-            else:
-                new_value = str(field_value) if field_value is not None else None
+            new_value = _convert_contact_field_value(field_name, field_value)
 
-            # Skip update if value hasn't changed
-            if old_value == new_value:
+            # Skip update if value hasn't changed (normalize for comparison)
+            if _normalize_field_value(old_value) == _normalize_field_value(new_value):
                 return (str(old_value) if old_value is not None else None,
                        str(new_value) if new_value is not None else None)
 
@@ -374,12 +452,7 @@ class ContactService:
             ContactValidationError: If method not found or field name invalid
         """
         # Validate field name
-        valid_fields = {"value", "label", "is_primary"}
-        if field_name not in valid_fields:
-            raise ContactValidationError(
-                "field_name",
-                f"Invalid method field name '{field_name}'. Valid fields: {', '.join(valid_fields)}"
-            )
+        _validate_method_field_name(field_name)
 
         async def _update_method_field_operation() -> Tuple[Union[str, None], Union[str, None]]:
             # Get current contact with methods
@@ -399,16 +472,10 @@ class ContactService:
             old_value = getattr(method_to_update, field_name)
 
             # Convert field_value to appropriate type
-            if field_name == "is_primary":
-                if isinstance(field_value, str):
-                    new_value = field_value.lower() in ("true", "1", "yes")
-                else:
-                    new_value = bool(field_value)
-            else:
-                new_value = str(field_value) if field_value is not None else None
+            new_value = _convert_method_field_value(field_name, field_value)
 
-            # Skip update if value hasn't changed
-            if old_value == new_value:
+            # Skip update if value hasn't changed (normalize for comparison)
+            if _normalize_field_value(old_value) == _normalize_field_value(new_value):
                 return (str(old_value) if old_value is not None else None,
                        str(new_value) if new_value is not None else None)
 
@@ -460,12 +527,7 @@ class ContactService:
             Tuple of (old_value, new_value) for the updated field
         """
         # Validate field name
-        valid_fields = {"label", "street_line_1", "street_line_2", "locality", "region", "postal_code", "country_code", "is_primary"}
-        if field_name not in valid_fields:
-            raise ContactValidationError(
-                "field_name",
-                f"Invalid address field name '{field_name}'. Valid fields: {', '.join(valid_fields)}"
-            )
+        _validate_address_field_name(field_name)
 
         async def _update_address_field_operation() -> Tuple[Union[str, None], Union[str, None]]:
             # Get current contact with addresses
@@ -485,16 +547,10 @@ class ContactService:
             old_value = getattr(address_to_update, field_name)
 
             # Convert field_value to appropriate type
-            if field_name == "is_primary":
-                if isinstance(field_value, str):
-                    new_value = field_value.lower() in ("true", "1", "yes")
-                else:
-                    new_value = bool(field_value)
-            else:
-                new_value = str(field_value) if field_value is not None else None
+            new_value = _convert_address_field_value(field_name, field_value)
 
-            # Skip update if value hasn't changed
-            if old_value == new_value:
+            # Skip update if value hasn't changed (normalize for comparison)
+            if _normalize_field_value(old_value) == _normalize_field_value(new_value):
                 return (str(old_value) if old_value is not None else None,
                        str(new_value) if new_value is not None else None)
 
@@ -544,12 +600,7 @@ class ContactService:
             Tuple of (old_value, new_value) for the updated field
         """
         # Validate field name
-        valid_fields = {"content"}
-        if field_name not in valid_fields:
-            raise ContactValidationError(
-                "field_name",
-                f"Invalid note field name '{field_name}'. Valid fields: {', '.join(valid_fields)}"
-            )
+        _validate_note_field_name(field_name)
 
         async def _update_note_field_operation() -> Tuple[Union[str, None], Union[str, None]]:
             # Get current contact with notes
@@ -569,8 +620,8 @@ class ContactService:
             old_value = getattr(note_to_update, field_name)
             new_value = str(field_value) if field_value is not None else None
 
-            # Skip update if value hasn't changed
-            if old_value == new_value:
+            # Skip update if value hasn't changed (normalize for comparison)
+            if _normalize_field_value(old_value) == _normalize_field_value(new_value):
                 return (str(old_value) if old_value is not None else None,
                        str(new_value) if new_value is not None else None)
 

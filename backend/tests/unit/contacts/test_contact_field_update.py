@@ -7,6 +7,14 @@ from app.core.contacts.models.entities import Contact
 from app.core.contacts.models.exceptions import ContactValidationError
 from app.core.contacts.services.contact_service import ContactService
 
+# Import shared fixtures and factory functions
+from tests.fixtures.contact_fixtures import (
+    sample_contact,
+    contact_with_methods,
+    full_contact,
+    create_contact_with_methods,
+)
+
 
 class TestContactFieldUpdate:
     """Test contact field update functionality."""
@@ -75,17 +83,7 @@ class TestContactFieldUpdate:
             tag_hierarchy_service=mock_tag_hierarchy_service,
         )
 
-    @pytest.fixture
-    def sample_contact(self):
-        """Create a sample contact for testing."""
-        return Contact(
-            id=1,
-            first_name="John",
-            last_name="Doe",
-            middle_name="William",
-            nick_name="Johnny",
-            is_favourite=False,
-        )
+
 
     @pytest.mark.asyncio
     async def test_update_first_name(
@@ -331,25 +329,12 @@ class TestContactMethodFieldUpdate:
 
     @pytest.fixture
     def sample_contact_with_method(self):
-        """Create a sample contact with a method for testing."""
-        from app.core.contacts.models.entities import Contact, ContactMethod, MethodType
-
-        method = ContactMethod(
-            id=1,
+        """Create a contact with a method that has ID=1 for testing."""
+        return create_contact_with_methods(
             contact_id=1,
-            method_type=MethodType.EMAIL,
-            value="john@example.com",
-            label="Work",
-            is_primary=False,
+            email_method_id=1,
+            phone_method_id=2,
         )
-
-        contact = Contact(
-            id=1,
-            first_name="John",
-            last_name="Doe",
-            methods=[method],
-        )
-        return contact
 
     @pytest.mark.asyncio
     async def test_update_method_value(
@@ -367,7 +352,7 @@ class TestContactMethodFieldUpdate:
             transaction=mock_transaction,
         )
 
-        assert old_value == "john@example.com"
+        assert old_value == "john.doe@example.com"
         assert new_value == "newemail@example.com"
 
         # Verify method was updated
@@ -390,15 +375,15 @@ class TestContactMethodFieldUpdate:
             contact_id=1,
             method_id=1,
             field_name="is_primary",
-            field_value="true",
+            field_value="false",
             transaction=mock_transaction,
         )
 
-        assert old_value == "False"
-        assert new_value == "True"
+        assert old_value == "True"
+        assert new_value == "False"
 
         updated_method = mock_contact_repo.update_method.call_args[0][0]
-        assert updated_method.is_primary is True
+        assert updated_method.is_primary is False
 
     @pytest.mark.asyncio
     async def test_update_method_invalid_field(
