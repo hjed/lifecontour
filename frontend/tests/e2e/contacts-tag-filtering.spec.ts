@@ -91,7 +91,7 @@ test.describe('Tag Filtering Pages', () => {
 
   // TODO: Re-enable when tag filtering functionality is implemented
   test.skip('should display contacts filtered by tag when available', async ({
-    authenticatedPage,
+    authenticatedPage, // eslint-disable-line @typescript-eslint/no-unused-vars
   }) => {
     // Test skipped - tag filtering functionality not yet implemented
   });

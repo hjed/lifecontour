@@ -86,7 +86,7 @@ test.describe('Example: Fixture-Based Testing', () => {
 
     // TODO: Re-enable when contact tag display functionality is implemented
     test.skip('should display contacts with tags correctly', async ({
-      contactsWithTags,
+      contactsWithTags, // eslint-disable-line @typescript-eslint/no-unused-vars
     }) => {
       // Test skipped - contact tag display functionality not yet implemented
     });
@@ -321,14 +321,14 @@ test.describe('Advanced Data Fixtures Examples', () => {
 
     // TODO: Re-enable when dataset functionality is stable
     test.skip('should work with medium dataset for comprehensive tests', async ({
-      mediumDataSet,
+      mediumDataSet, // eslint-disable-line @typescript-eslint/no-unused-vars
     }) => {
       // Test skipped - dataset functionality has server errors
     });
 
     // TODO: Re-enable when search functionality is implemented
     test.skip('should work with search test data for search functionality', async ({
-      searchTestData,
+      searchTestData, // eslint-disable-line @typescript-eslint/no-unused-vars
     }) => {
       // Test skipped - search functionality not yet implemented
     });

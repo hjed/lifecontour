@@ -10,7 +10,7 @@ This module provides REST API endpoints for:
 from typing import Any
 
 from dishka.integrations.fastapi import FromDishka
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter
 from pydantic import BaseModel
 
 from app.infrastructure.auth.models import SessionUser
