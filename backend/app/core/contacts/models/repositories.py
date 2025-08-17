@@ -3,7 +3,14 @@
 from abc import ABC, abstractmethod
 from typing import Any, Union
 
-from .entities import Contact, ContactAddress, ContactMethod, ContactNote, ContactRelationship, Tag
+from .entities import (
+    Contact,
+    ContactAddress,
+    ContactMethod,
+    ContactNote,
+    ContactRelationship,
+    Tag,
+)
 from .events import DomainEvent
 
 
@@ -306,12 +313,16 @@ class ContactRelationshipRepository(ABC):
     """Repository interface for contact relationship operations."""
 
     @abstractmethod
-    async def create(self, relationship: "ContactRelationship") -> "ContactRelationship":
+    async def create(
+        self, relationship: "ContactRelationship"
+    ) -> "ContactRelationship":
         """Create a new contact relationship."""
         pass
 
     @abstractmethod
-    async def get_by_id(self, relationship_id: int) -> Union["ContactRelationship", None]:
+    async def get_by_id(
+        self, relationship_id: int
+    ) -> Union["ContactRelationship", None]:
         """Get a relationship by ID."""
         pass
 
@@ -337,7 +348,9 @@ class ContactRelationshipRepository(ABC):
         pass
 
     @abstractmethod
-    async def update(self, relationship: "ContactRelationship") -> "ContactRelationship":
+    async def update(
+        self, relationship: "ContactRelationship"
+    ) -> "ContactRelationship":
         """Update an existing relationship."""
         pass
 

@@ -1,7 +1,7 @@
 """Main contact service with transaction management."""
 
 import asyncio
-from typing import Any, Tuple, Union, cast
+from typing import Any, cast
 
 import structlog
 from sqlalchemy.exc import IntegrityError
@@ -64,11 +64,17 @@ def _normalize_field_value(value: Any) -> str | None:
 
 def _validate_contact_field_name(field_name: str) -> None:
     """Validate that the field name is allowed for contact updates."""
-    valid_fields = {"first_name", "last_name", "middle_name", "nick_name", "is_favourite"}
+    valid_fields = {
+        "first_name",
+        "last_name",
+        "middle_name",
+        "nick_name",
+        "is_favourite",
+    }
     if field_name not in valid_fields:
         raise ContactValidationError(
             "field_name",
-            f"Invalid field name '{field_name}'. Valid fields: {', '.join(valid_fields)}"
+            f"Invalid field name '{field_name}'. Valid fields: {', '.join(valid_fields)}",
         )
 
 
@@ -89,7 +95,7 @@ def _validate_method_field_name(field_name: str) -> None:
     if field_name not in valid_fields:
         raise ContactValidationError(
             "field_name",
-            f"Invalid method field name '{field_name}'. Valid fields: {', '.join(valid_fields)}"
+            f"Invalid method field name '{field_name}'. Valid fields: {', '.join(valid_fields)}",
         )
 
 
@@ -107,13 +113,19 @@ def _convert_method_field_value(field_name: str, field_value: Any) -> Any:
 def _validate_address_field_name(field_name: str) -> None:
     """Validate that the field name is allowed for address updates."""
     valid_fields = {
-        "label", "street_line_1", "street_line_2",
-        "locality", "region", "postal_code", "country_code", "is_primary"
+        "label",
+        "street_line_1",
+        "street_line_2",
+        "locality",
+        "region",
+        "postal_code",
+        "country_code",
+        "is_primary",
     }
     if field_name not in valid_fields:
         raise ContactValidationError(
             "field_name",
-            f"Invalid address field name '{field_name}'. Valid fields: {', '.join(valid_fields)}"
+            f"Invalid address field name '{field_name}'. Valid fields: {', '.join(valid_fields)}",
         )
 
 
@@ -134,7 +146,7 @@ def _validate_note_field_name(field_name: str) -> None:
     if field_name not in valid_fields:
         raise ContactValidationError(
             "field_name",
-            f"Invalid note field name '{field_name}'. Valid fields: {', '.join(valid_fields)}"
+            f"Invalid note field name '{field_name}'. Valid fields: {', '.join(valid_fields)}",
         )
 
 
@@ -350,7 +362,7 @@ class ContactService:
         field_name: str,
         field_value: Any,
         transaction: AsyncConnection,
-    ) -> Tuple[Union[str, None], Union[str, None]]:
+    ) -> tuple[str | None, str | None]:
         """
         Update a single contact field with transaction management.
 
@@ -374,7 +386,7 @@ class ContactService:
         # Validate field name
         _validate_contact_field_name(field_name)
 
-        async def _update_field_operation() -> Tuple[Union[str, None], Union[str, None]]:
+        async def _update_field_operation() -> tuple[str | None, str | None]:
             # Get current contact
             current_contact = await self._get_existing_contact(contact_id)
 
@@ -386,8 +398,10 @@ class ContactService:
 
             # Skip update if value hasn't changed (normalize for comparison)
             if _normalize_field_value(old_value) == _normalize_field_value(new_value):
-                return (str(old_value) if old_value is not None else None,
-                       str(new_value) if new_value is not None else None)
+                return (
+                    str(old_value) if old_value is not None else None,
+                    str(new_value) if new_value is not None else None,
+                )
 
             # Create updated contact with only the changed field
             updated_contact = Contact(
@@ -422,10 +436,15 @@ class ContactService:
             event = ContactUpdated(contact_id, changed_fields, transaction=transaction)
             await self.event_publisher.publish(event)
 
-            return (str(old_value) if old_value is not None else None,
-                   str(new_value) if new_value is not None else None)
+            return (
+                str(old_value) if old_value is not None else None,
+                str(new_value) if new_value is not None else None,
+            )
 
-        return cast(Tuple[Union[str, None], Union[str, None]], await self._execute_with_retry(_update_field_operation))
+        return cast(
+            tuple[str | None, str | None],
+            await self._execute_with_retry(_update_field_operation),
+        )
 
     async def update_contact_method_field(
         self,
@@ -434,7 +453,7 @@ class ContactService:
         field_name: str,
         field_value: Any,
         transaction: AsyncConnection,
-    ) -> Tuple[Union[str, None], Union[str, None]]:
+    ) -> tuple[str | None, str | None]:
         """
         Update a single contact method field.
 
@@ -454,7 +473,7 @@ class ContactService:
         # Validate field name
         _validate_method_field_name(field_name)
 
-        async def _update_method_field_operation() -> Tuple[Union[str, None], Union[str, None]]:
+        async def _update_method_field_operation() -> tuple[str | None, str | None]:
             # Get current contact with methods
             current_contact = await self._get_existing_contact(contact_id)
 
@@ -466,7 +485,9 @@ class ContactService:
                     break
 
             if not method_to_update:
-                raise ContactValidationError("method_id", f"Method with ID {method_id} not found")
+                raise ContactValidationError(
+                    "method_id", f"Method with ID {method_id} not found"
+                )
 
             # Get current field value
             old_value = getattr(method_to_update, field_name)
@@ -476,8 +497,10 @@ class ContactService:
 
             # Skip update if value hasn't changed (normalize for comparison)
             if _normalize_field_value(old_value) == _normalize_field_value(new_value):
-                return (str(old_value) if old_value is not None else None,
-                       str(new_value) if new_value is not None else None)
+                return (
+                    str(old_value) if old_value is not None else None,
+                    str(new_value) if new_value is not None else None,
+                )
 
             # Update the method field
             setattr(method_to_update, field_name, new_value)
@@ -497,13 +520,22 @@ class ContactService:
             )
 
             # Publish update event (method-specific event could be added)
-            event = ContactUpdated(contact_id, {f"method_{method_id}_{field_name}": (old_value, new_value)}, transaction=transaction)
+            event = ContactUpdated(
+                contact_id,
+                {f"method_{method_id}_{field_name}": (old_value, new_value)},
+                transaction=transaction,
+            )
             await self.event_publisher.publish(event)
 
-            return (str(old_value) if old_value is not None else None,
-                   str(new_value) if new_value is not None else None)
+            return (
+                str(old_value) if old_value is not None else None,
+                str(new_value) if new_value is not None else None,
+            )
 
-        return cast(Tuple[Union[str, None], Union[str, None]], await self._execute_with_retry(_update_method_field_operation))
+        return cast(
+            tuple[str | None, str | None],
+            await self._execute_with_retry(_update_method_field_operation),
+        )
 
     async def update_contact_address_field(
         self,
@@ -512,7 +544,7 @@ class ContactService:
         field_name: str,
         field_value: Any,
         transaction: AsyncConnection,
-    ) -> Tuple[Union[str, None], Union[str, None]]:
+    ) -> tuple[str | None, str | None]:
         """
         Update a single contact address field.
 
@@ -529,7 +561,7 @@ class ContactService:
         # Validate field name
         _validate_address_field_name(field_name)
 
-        async def _update_address_field_operation() -> Tuple[Union[str, None], Union[str, None]]:
+        async def _update_address_field_operation() -> tuple[str | None, str | None]:
             # Get current contact with addresses
             current_contact = await self._get_existing_contact(contact_id)
 
@@ -541,7 +573,9 @@ class ContactService:
                     break
 
             if not address_to_update:
-                raise ContactValidationError("address_id", f"Address with ID {address_id} not found")
+                raise ContactValidationError(
+                    "address_id", f"Address with ID {address_id} not found"
+                )
 
             # Get current field value
             old_value = getattr(address_to_update, field_name)
@@ -551,8 +585,10 @@ class ContactService:
 
             # Skip update if value hasn't changed (normalize for comparison)
             if _normalize_field_value(old_value) == _normalize_field_value(new_value):
-                return (str(old_value) if old_value is not None else None,
-                       str(new_value) if new_value is not None else None)
+                return (
+                    str(old_value) if old_value is not None else None,
+                    str(new_value) if new_value is not None else None,
+                )
 
             # Update the address field
             setattr(address_to_update, field_name, new_value)
@@ -570,13 +606,22 @@ class ContactService:
             )
 
             # Publish update event
-            event = ContactUpdated(contact_id, {f"address_{address_id}_{field_name}": (old_value, new_value)}, transaction=transaction)
+            event = ContactUpdated(
+                contact_id,
+                {f"address_{address_id}_{field_name}": (old_value, new_value)},
+                transaction=transaction,
+            )
             await self.event_publisher.publish(event)
 
-            return (str(old_value) if old_value is not None else None,
-                   str(new_value) if new_value is not None else None)
+            return (
+                str(old_value) if old_value is not None else None,
+                str(new_value) if new_value is not None else None,
+            )
 
-        return cast(Tuple[Union[str, None], Union[str, None]], await self._execute_with_retry(_update_address_field_operation))
+        return cast(
+            tuple[str | None, str | None],
+            await self._execute_with_retry(_update_address_field_operation),
+        )
 
     async def update_contact_note_field(
         self,
@@ -585,7 +630,7 @@ class ContactService:
         field_name: str,
         field_value: Any,
         transaction: AsyncConnection,
-    ) -> Tuple[Union[str, None], Union[str, None]]:
+    ) -> tuple[str | None, str | None]:
         """
         Update a single contact note field.
 
@@ -602,7 +647,7 @@ class ContactService:
         # Validate field name
         _validate_note_field_name(field_name)
 
-        async def _update_note_field_operation() -> Tuple[Union[str, None], Union[str, None]]:
+        async def _update_note_field_operation() -> tuple[str | None, str | None]:
             # Get current contact with notes
             current_contact = await self._get_existing_contact(contact_id)
 
@@ -614,7 +659,9 @@ class ContactService:
                     break
 
             if not note_to_update:
-                raise ContactValidationError("note_id", f"Note with ID {note_id} not found")
+                raise ContactValidationError(
+                    "note_id", f"Note with ID {note_id} not found"
+                )
 
             # Get current field value
             old_value = getattr(note_to_update, field_name)
@@ -622,8 +669,10 @@ class ContactService:
 
             # Skip update if value hasn't changed (normalize for comparison)
             if _normalize_field_value(old_value) == _normalize_field_value(new_value):
-                return (str(old_value) if old_value is not None else None,
-                       str(new_value) if new_value is not None else None)
+                return (
+                    str(old_value) if old_value is not None else None,
+                    str(new_value) if new_value is not None else None,
+                )
 
             # Update the note field
             setattr(note_to_update, field_name, new_value)
@@ -641,13 +690,22 @@ class ContactService:
             )
 
             # Publish update event
-            event = ContactUpdated(contact_id, {f"note_{note_id}_{field_name}": (old_value, new_value)}, transaction=transaction)
+            event = ContactUpdated(
+                contact_id,
+                {f"note_{note_id}_{field_name}": (old_value, new_value)},
+                transaction=transaction,
+            )
             await self.event_publisher.publish(event)
 
-            return (str(old_value) if old_value is not None else None,
-                   str(new_value) if new_value is not None else None)
+            return (
+                str(old_value) if old_value is not None else None,
+                str(new_value) if new_value is not None else None,
+            )
 
-        return cast(Tuple[Union[str, None], Union[str, None]], await self._execute_with_retry(_update_note_field_operation))
+        return cast(
+            tuple[str | None, str | None],
+            await self._execute_with_retry(_update_note_field_operation),
+        )
 
     def _calculate_changed_fields(
         self, current_contact: Contact, updated_contact: Contact

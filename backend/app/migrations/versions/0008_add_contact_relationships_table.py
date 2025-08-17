@@ -50,9 +50,7 @@ def upgrade() -> None:
         sa.ForeignKeyConstraint(
             ["from_contact_id"], ["contacts.id"], ondelete="CASCADE"
         ),
-        sa.ForeignKeyConstraint(
-            ["to_contact_id"], ["contacts.id"], ondelete="CASCADE"
-        ),
+        sa.ForeignKeyConstraint(["to_contact_id"], ["contacts.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint(
             "from_contact_id",
@@ -78,8 +76,12 @@ def upgrade() -> None:
 def downgrade() -> None:
     """Downgrade database schema."""
     # Drop indexes
-    op.drop_index("ix_contact_relationships_to_contact_id", table_name="contact_relationships")
-    op.drop_index("ix_contact_relationships_from_contact_id", table_name="contact_relationships")
-    
+    op.drop_index(
+        "ix_contact_relationships_to_contact_id", table_name="contact_relationships"
+    )
+    op.drop_index(
+        "ix_contact_relationships_from_contact_id", table_name="contact_relationships"
+    )
+
     # Drop table
     op.drop_table("contact_relationships")

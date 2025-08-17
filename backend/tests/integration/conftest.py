@@ -172,7 +172,7 @@ class DockerManager:
             test_env = {
                 **os.environ,
                 "ENVIRONMENT": "test",
-                "DATABASE_URL": "postgresql+asyncpg://postgres:postgres@localhost:5433/personal_management_test"
+                "DATABASE_URL": "postgresql+asyncpg://postgres:postgres@localhost:5433/personal_management_test",
             }
 
             print(f"Running migrations from directory: {self.backend_dir}")
@@ -394,7 +394,7 @@ def _is_dev_database_available() -> bool:
             port=5432,
             database="personal_management_dev",
             user="dev_user",
-            password="dev_password"
+            password="dev_password",
         )
         conn.close()
         return True

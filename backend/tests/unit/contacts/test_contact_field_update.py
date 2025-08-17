@@ -1,18 +1,16 @@
 """Unit tests for contact field update functionality."""
 
-import pytest
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock
 
-from app.core.contacts.models.entities import Contact
+import pytest
+
 from app.core.contacts.models.exceptions import ContactValidationError
 from app.core.contacts.services.contact_service import ContactService
 
 # Import shared fixtures and factory functions
 from tests.fixtures.contact_fixtures import (
-    sample_contact,
-    contact_with_methods,
-    full_contact,
     create_contact_with_methods,
+    create_basic_contact,
 )
 
 
@@ -83,11 +81,25 @@ class TestContactFieldUpdate:
             tag_hierarchy_service=mock_tag_hierarchy_service,
         )
 
-
+    @pytest.fixture
+    def sample_contact(self):
+        """Create a sample contact for basic field testing."""
+        return create_basic_contact(
+            contact_id=1,
+            first_name="John",
+            last_name="Doe",
+            middle_name="William",
+            nick_name="Johnny",
+        )
 
     @pytest.mark.asyncio
     async def test_update_first_name(
-        self, contact_service, mock_contact_repo, mock_history_service, mock_event_publisher, sample_contact
+        self,
+        contact_service,
+        mock_contact_repo,
+        mock_history_service,
+        mock_event_publisher,
+        sample_contact,
     ):
         """Test updating first name field."""
         mock_contact_repo.find_by_id.return_value = sample_contact
@@ -102,18 +114,18 @@ class TestContactFieldUpdate:
 
         assert old_value == "John"
         assert new_value == "Jonathan"
-        
+
         # Verify contact was saved with updated value
         mock_contact_repo.save.assert_called_once()
         saved_contact = mock_contact_repo.save.call_args[0][0]
         assert saved_contact.first_name == "Jonathan"
-        
+
         # Verify history was recorded
         mock_history_service.record_contact_change.assert_called_once()
         history_call = mock_history_service.record_contact_change.call_args
         assert history_call[0][0] == 1  # contact_id
         assert history_call[0][1] == {"first_name": ("John", "Jonathan")}
-        
+
         # Verify event was published
         mock_event_publisher.publish.assert_called_once()
 
@@ -134,7 +146,7 @@ class TestContactFieldUpdate:
 
         assert old_value == "False"
         assert new_value == "True"
-        
+
         # Verify contact was saved with boolean value
         saved_contact = mock_contact_repo.save.call_args[0][0]
         assert saved_contact.is_favourite is True
@@ -156,13 +168,18 @@ class TestContactFieldUpdate:
 
         assert old_value == "False"
         assert new_value == "True"
-        
+
         saved_contact = mock_contact_repo.save.call_args[0][0]
         assert saved_contact.is_favourite is True
 
     @pytest.mark.asyncio
     async def test_update_field_no_change(
-        self, contact_service, mock_contact_repo, mock_history_service, mock_event_publisher, sample_contact
+        self,
+        contact_service,
+        mock_contact_repo,
+        mock_history_service,
+        mock_event_publisher,
+        sample_contact,
     ):
         """Test updating field with same value (no change)."""
         mock_contact_repo.find_by_id.return_value = sample_contact
@@ -177,7 +194,7 @@ class TestContactFieldUpdate:
 
         assert old_value == "John"
         assert new_value == "John"
-        
+
         # Verify no save, history, or event operations were performed
         mock_contact_repo.save.assert_not_called()
         mock_history_service.record_contact_change.assert_not_called()
@@ -200,7 +217,7 @@ class TestContactFieldUpdate:
 
         assert old_value == "William"
         assert new_value is None
-        
+
         saved_contact = mock_contact_repo.save.call_args[0][0]
         assert saved_contact.middle_name is None
 
@@ -212,7 +229,9 @@ class TestContactFieldUpdate:
         mock_contact_repo.find_by_id.return_value = sample_contact
         mock_transaction = AsyncMock()
 
-        with pytest.raises(ContactValidationError, match="Invalid field name 'invalid_field'"):
+        with pytest.raises(
+            ContactValidationError, match="Invalid field name 'invalid_field'"
+        ):
             await contact_service.update_contact_field(
                 contact_id=1,
                 field_name="invalid_field",
@@ -228,7 +247,9 @@ class TestContactFieldUpdate:
         mock_contact_repo.find_by_id.return_value = None
         mock_transaction = AsyncMock()
 
-        with pytest.raises(Exception):  # Should raise an exception when contact not found
+        with pytest.raises(
+            ContactValidationError
+        ):  # Should raise an exception when contact not found
             await contact_service.update_contact_field(
                 contact_id=999,
                 field_name="first_name",
@@ -244,8 +265,14 @@ class TestContactFieldUpdate:
         mock_contact_repo.find_by_id.return_value = sample_contact
         mock_transaction = AsyncMock()
 
-        valid_fields = ["first_name", "last_name", "middle_name", "nick_name", "is_favourite"]
-        
+        valid_fields = [
+            "first_name",
+            "last_name",
+            "middle_name",
+            "nick_name",
+            "is_favourite",
+        ]
+
         for field_name in valid_fields:
             mock_contact_repo.reset_mock()
 
@@ -338,7 +365,12 @@ class TestContactMethodFieldUpdate:
 
     @pytest.mark.asyncio
     async def test_update_method_value(
-        self, contact_service, mock_contact_repo, mock_history_service, mock_event_publisher, sample_contact_with_method
+        self,
+        contact_service,
+        mock_contact_repo,
+        mock_history_service,
+        mock_event_publisher,
+        sample_contact_with_method,
     ):
         """Test updating method value field."""
         mock_contact_repo.find_by_id.return_value = sample_contact_with_method
@@ -393,7 +425,9 @@ class TestContactMethodFieldUpdate:
         mock_contact_repo.find_by_id.return_value = sample_contact_with_method
         mock_transaction = AsyncMock()
 
-        with pytest.raises(ContactValidationError, match="Invalid method field name 'invalid_field'"):
+        with pytest.raises(
+            ContactValidationError, match="Invalid method field name 'invalid_field'"
+        ):
             await contact_service.update_contact_method_field(
                 contact_id=1,
                 method_id=1,
@@ -410,7 +444,9 @@ class TestContactMethodFieldUpdate:
         mock_contact_repo.find_by_id.return_value = sample_contact_with_method
         mock_transaction = AsyncMock()
 
-        with pytest.raises(ContactValidationError, match="Method with ID 999 not found"):
+        with pytest.raises(
+            ContactValidationError, match="Method with ID 999 not found"
+        ):
             await contact_service.update_contact_method_field(
                 contact_id=1,
                 method_id=999,  # Non-existent method ID

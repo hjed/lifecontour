@@ -1,6 +1,5 @@
 """SQL implementation of ContactRelationshipRepository."""
 
-from typing import Union
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncConnection
@@ -20,13 +19,13 @@ class SqlContactRelationshipRepository(ContactRelationshipRepository):
         """Create a new contact relationship."""
         query = text(
             """
-            INSERT INTO contact_relationships 
+            INSERT INTO contact_relationships
             (from_contact_id, to_contact_id, relationship_type)
             VALUES (:from_contact_id, :to_contact_id, :relationship_type)
             RETURNING id, created_at, updated_at
         """
         )
-        
+
         try:
             result = await self.conn.execute(
                 query,
@@ -37,10 +36,12 @@ class SqlContactRelationshipRepository(ContactRelationshipRepository):
                 },
             )
             row = result.fetchone()
-            
+
             if not row:
-                raise ContactValidationError("relationship", "Failed to create relationship")
-            
+                raise ContactValidationError(
+                    "relationship", "Failed to create relationship"
+                )
+
             # Return the relationship with the assigned ID and timestamps
             return ContactRelationship(
                 id=row.id,
@@ -50,27 +51,28 @@ class SqlContactRelationshipRepository(ContactRelationshipRepository):
                 created_at=row.created_at,
                 updated_at=row.updated_at,
             )
-            
+
         except IntegrityError as e:
             if "uq_contact_relationships_unique_relationship" in str(e):
                 raise ContactValidationError(
-                    "relationship", 
-                    f"Relationship already exists between contacts {relationship.from_contact_id} and {relationship.to_contact_id}"
+                    "relationship",
+                    f"Relationship already exists between contacts {relationship.from_contact_id} and {relationship.to_contact_id}",
                 ) from e
             elif "ck_contact_relationships_no_self_reference" in str(e):
                 raise ContactValidationError(
-                    "relationship", 
-                    "Contact cannot have a relationship with itself"
+                    "relationship", "Contact cannot have a relationship with itself"
                 ) from e
             else:
-                raise ContactValidationError("relationship", "Failed to create relationship") from e
+                raise ContactValidationError(
+                    "relationship", "Failed to create relationship"
+                ) from e
 
-    async def get_by_id(self, relationship_id: int) -> Union[ContactRelationship, None]:
+    async def get_by_id(self, relationship_id: int) -> ContactRelationship | None:
         """Get a relationship by ID."""
         query = text(
             """
             SELECT id, from_contact_id, to_contact_id, relationship_type, created_at, updated_at
-            FROM contact_relationships 
+            FROM contact_relationships
             WHERE id = :relationship_id
         """
         )
@@ -96,7 +98,7 @@ class SqlContactRelationshipRepository(ContactRelationshipRepository):
         query = text(
             """
             SELECT id, from_contact_id, to_contact_id, relationship_type, created_at, updated_at
-            FROM contact_relationships 
+            FROM contact_relationships
             WHERE from_contact_id = :contact_id OR to_contact_id = :contact_id
             ORDER BY created_at DESC
         """
@@ -123,7 +125,7 @@ class SqlContactRelationshipRepository(ContactRelationshipRepository):
         query = text(
             """
             SELECT id, from_contact_id, to_contact_id, relationship_type, created_at, updated_at
-            FROM contact_relationships 
+            FROM contact_relationships
             WHERE from_contact_id = :contact_id
             ORDER BY created_at DESC
         """
@@ -150,7 +152,7 @@ class SqlContactRelationshipRepository(ContactRelationshipRepository):
         query = text(
             """
             SELECT id, from_contact_id, to_contact_id, relationship_type, created_at, updated_at
-            FROM contact_relationships 
+            FROM contact_relationships
             WHERE to_contact_id = :contact_id
             ORDER BY created_at DESC
         """
@@ -173,7 +175,9 @@ class SqlContactRelationshipRepository(ContactRelationshipRepository):
     async def update(self, relationship: ContactRelationship) -> ContactRelationship:
         """Update an existing relationship."""
         if relationship.id is None:
-            raise ContactValidationError("id", "Relationship ID is required for updates")
+            raise ContactValidationError(
+                "id", "Relationship ID is required for updates"
+            )
 
         query = text(
             """
@@ -183,7 +187,7 @@ class SqlContactRelationshipRepository(ContactRelationshipRepository):
             RETURNING id, from_contact_id, to_contact_id, relationship_type, created_at, updated_at
         """
         )
-        
+
         try:
             result = await self.conn.execute(
                 query,
@@ -193,10 +197,12 @@ class SqlContactRelationshipRepository(ContactRelationshipRepository):
                 },
             )
             row = result.fetchone()
-            
+
             if not row:
-                raise ContactValidationError("relationship", f"Relationship with ID {relationship.id} not found")
-            
+                raise ContactValidationError(
+                    "relationship", f"Relationship with ID {relationship.id} not found"
+                )
+
             return ContactRelationship(
                 id=row.id,
                 from_contact_id=row.from_contact_id,
@@ -205,28 +211,32 @@ class SqlContactRelationshipRepository(ContactRelationshipRepository):
                 created_at=row.created_at,
                 updated_at=row.updated_at,
             )
-            
+
         except IntegrityError as e:
             if "uq_contact_relationships_unique_relationship" in str(e):
                 raise ContactValidationError(
-                    "relationship", 
-                    f"Relationship already exists between contacts {relationship.from_contact_id} and {relationship.to_contact_id}"
+                    "relationship",
+                    f"Relationship already exists between contacts {relationship.from_contact_id} and {relationship.to_contact_id}",
                 ) from e
             else:
-                raise ContactValidationError("relationship", "Failed to update relationship") from e
+                raise ContactValidationError(
+                    "relationship", "Failed to update relationship"
+                ) from e
 
     async def delete(self, relationship_id: int) -> None:
         """Delete a relationship by ID."""
         query = text(
             """
-            DELETE FROM contact_relationships 
+            DELETE FROM contact_relationships
             WHERE id = :relationship_id
         """
         )
         result = await self.conn.execute(query, {"relationship_id": relationship_id})
-        
+
         if result.rowcount == 0:
-            raise ContactValidationError("relationship", f"Relationship with ID {relationship_id} not found")
+            raise ContactValidationError(
+                "relationship", f"Relationship with ID {relationship_id} not found"
+            )
 
     async def relationship_exists(
         self, from_contact_id: int, to_contact_id: int, relationship_type: str
@@ -234,9 +244,9 @@ class SqlContactRelationshipRepository(ContactRelationshipRepository):
         """Check if a specific relationship already exists."""
         query = text(
             """
-            SELECT 1 FROM contact_relationships 
-            WHERE from_contact_id = :from_contact_id 
-            AND to_contact_id = :to_contact_id 
+            SELECT 1 FROM contact_relationships
+            WHERE from_contact_id = :from_contact_id
+            AND to_contact_id = :to_contact_id
             AND relationship_type = :relationship_type
         """
         )
