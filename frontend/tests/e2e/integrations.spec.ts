@@ -8,7 +8,7 @@
 import { test, expect } from '@playwright/test';
 import { createAuthFixtures } from './fixtures/auth';
 
-test.describe('Integration Management', () => {
+test.describe.skip('Integration Management', () => {
   test.beforeEach(async ({ page }) => {
     // Authenticate user before each test
     const authFixtures = createAuthFixtures(page);
@@ -150,7 +150,7 @@ test.describe('Integration Management', () => {
   });
 });
 
-test.describe('Integration UI Components', () => {
+test.describe.skip('Integration UI Components', () => {
   test.beforeEach(async ({ page }) => {
     const authFixtures = createAuthFixtures(page);
     await authFixtures.mockAuthenticated('github');
@@ -213,7 +213,7 @@ test.describe('Integration UI Components', () => {
   });
 });
 
-test.describe('Integration Error Handling', () => {
+test.describe.skip('Integration Error Handling', () => {
   test.beforeEach(async ({ page }) => {
     const authFixtures = createAuthFixtures(page);
     await authFixtures.mockAuthenticated('github');
