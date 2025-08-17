@@ -7,15 +7,19 @@ for unit, integration, and end-to-end tests.
 
 from __future__ import annotations
 
+import os
 from collections.abc import Generator
+from pathlib import Path
 
 import pytest
+from alembic import command
+from alembic.config import Config
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.infrastructure.config import Settings
-from app.infrastructure.database import get_database_session, metadata
+from app.infrastructure.database import get_database_session
 from app.main import create_app
 
 # Test database URL (PostgreSQL test database)
@@ -39,12 +43,60 @@ def override_get_database_session() -> Generator[Session, None, None]:
         db.close()
 
 
+def run_test_migrations():
+    """Run Alembic migrations for test database."""
+    try:
+        # Set test environment
+        os.environ["ENVIRONMENT"] = "test"
+
+        # Get backend directory
+        backend_dir = Path(__file__).parent.parent
+
+        # Configure Alembic
+        alembic_cfg = Config(str(backend_dir / "alembic.ini"))
+        alembic_cfg.set_main_option(
+            "script_location", str(backend_dir / "app" / "migrations")
+        )
+
+        # Run migrations to head
+        command.upgrade(alembic_cfg, "head")
+
+    except Exception as e:
+        print(f"Error running test migrations: {e}")
+        raise
+
+
+def drop_test_database():
+    """Drop all tables in test database."""
+    try:
+        # Set test environment
+        os.environ["ENVIRONMENT"] = "test"
+
+        # Get backend directory
+        backend_dir = Path(__file__).parent.parent
+
+        # Configure Alembic
+        alembic_cfg = Config(str(backend_dir / "alembic.ini"))
+        alembic_cfg.set_main_option(
+            "script_location", str(backend_dir / "app" / "migrations")
+        )
+
+        # Downgrade to base (drops all tables)
+        command.downgrade(alembic_cfg, "base")
+
+    except Exception as e:
+        print(f"Error dropping test database: {e}")
+        raise
+
+
 @pytest.fixture(scope="function")
 def test_db() -> Generator[None, None, None]:
-    """Create test database tables."""
-    metadata.create_all(bind=engine)
+    """Create test database tables using Alembic migrations."""
+    # Run migrations to create all tables
+    run_test_migrations()
     yield
-    metadata.drop_all(bind=engine)
+    # Drop all tables by downgrading to base
+    drop_test_database()
 
 
 def override_get_settings() -> Settings:
