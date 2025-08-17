@@ -14,11 +14,14 @@ from sqlalchemy import Engine, create_engine, text
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 from sqlalchemy.orm import Session, sessionmaker
 
-# Import table definitions to register them with metadata
-# This import must be after metadata is imported to avoid circular imports
 # Import Google Contacts integration models
 from app.core.integrations.google_contacts.models import UserGoogleAuth  # noqa: F401
 from app.infrastructure.config import get_settings
+
+# Import table definitions to register them with metadata
+# This import must be after metadata is imported to avoid circular imports
+# Import contact domain tables
+from app.infrastructure.contacts import contact_tables  # noqa: F401
 from app.infrastructure.database_metadata import metadata
 
 logger = structlog.get_logger()
