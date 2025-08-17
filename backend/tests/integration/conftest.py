@@ -569,7 +569,9 @@ async def authenticated_client(test_settings, test_user):
 
         @provide(scope=Scope.REQUEST)
         def get_session_user(self) -> SessionUser:
-            return test_user
+            from typing import cast
+
+            return cast(SessionUser, test_user)
 
     # Create app with test settings
     app = create_app(settings=test_settings)
@@ -591,7 +593,7 @@ async def authenticated_client(test_settings, test_user):
 @pytest.fixture
 def redis_pool():
     """Create a mock Redis pool for testing."""
-    from unittest.mock import AsyncMock, MagicMock
+    from unittest.mock import AsyncMock
 
     mock_redis = AsyncMock()
     mock_redis.ping = AsyncMock(return_value=True)
