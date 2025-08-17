@@ -90,7 +90,7 @@ class ContactValidationService:
         self,
         contact: Contact,
         transaction: AsyncConnection,
-        exclude_contact_id: int | None = None
+        exclude_contact_id: int | None = None,
     ) -> None:
         """Validate contact data for updates."""
         # Validate email uniqueness if contact has email methods

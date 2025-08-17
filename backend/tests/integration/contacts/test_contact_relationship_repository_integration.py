@@ -360,7 +360,9 @@ class TestSqlContactRelationshipRepository:
 
         # Check non-existent relationship
         exists = await relationship_repo.relationship_exists(
-            assert_contact_has_id(contact1), assert_contact_has_id(contact2), RelationshipType.FRIEND.value
+            assert_contact_has_id(contact1),
+            assert_contact_has_id(contact2),
+            RelationshipType.FRIEND.value,
         )
         assert exists is False
 
@@ -374,6 +376,8 @@ class TestSqlContactRelationshipRepository:
 
         # Check existing relationship
         exists = await relationship_repo.relationship_exists(
-            assert_contact_has_id(contact1), assert_contact_has_id(contact2), RelationshipType.FRIEND.value
+            assert_contact_has_id(contact1),
+            assert_contact_has_id(contact2),
+            RelationshipType.FRIEND.value,
         )
         assert exists is True
