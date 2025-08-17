@@ -14,7 +14,7 @@ app_dir = backend_dir / "app"
 sys.path.insert(0, str(app_dir))
 
 
-def run_migrations():
+def run_migrations() -> None:
     """Run Alembic migrations for test database."""
     try:
         # Set test environment
