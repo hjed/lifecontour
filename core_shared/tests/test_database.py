@@ -72,8 +72,10 @@ class TestCreateSessionFactory:
 
         # Verify session factory properties
         assert session_factory is not None
-        assert hasattr(session_factory, "bind")
-        assert "asyncpg" in str(session_factory.bind.url)
+        # async_sessionmaker doesn't have a bind attribute, but we can check the type
+        assert callable(session_factory)
+        # We can access the bind through the session_factory.kw
+        assert "asyncpg" in str(session_factory.kw["bind"].url)
 
     def test_create_session_factory_converts_sync_url(self) -> None:
         """Test that session factory converts sync URL to async."""
@@ -81,7 +83,7 @@ class TestCreateSessionFactory:
         session_factory = create_session_factory(url)
 
         # Should convert to asyncpg
-        assert "asyncpg" in str(session_factory.bind.url)  # type: ignore[attr-defined]
+        assert "asyncpg" in str(session_factory.kw["bind"].url)
 
     def test_create_session_factory_preserves_async_url(self) -> None:
         """Test that session factory preserves async URL."""
@@ -89,4 +91,4 @@ class TestCreateSessionFactory:
         session_factory = create_session_factory(url)
 
         # Should keep asyncpg
-        assert "asyncpg" in str(session_factory.bind.url)  # type: ignore[attr-defined]
+        assert "asyncpg" in str(session_factory.kw["bind"].url)

@@ -213,13 +213,11 @@ test('custom scenario with data factories', async ({
 Look for these patterns in existing tests:
 
 1. **Conditional Authentication Logic:**
-
    - `auth.handleProtectedPageAccess()`
    - `if (result === 'redirected')`
    - `navigateToPageWithAuth()`
 
 2. **Manual Data Setup:**
-
    - `testData.createTestContact()`
    - `testData.setupAuthenticatedUser()`
    - Manual cleanup in `finally` blocks
