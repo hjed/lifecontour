@@ -226,6 +226,7 @@ class DockerManager:
 # SQL DDL statements for test database schema (each statement executed separately)
 TEST_DATABASE_SCHEMA_STATEMENTS = [
     # Drop tables if they exist (in reverse dependency order)
+    "DROP TABLE IF EXISTS contact_relationships CASCADE",
     "DROP TABLE IF EXISTS contact_tags CASCADE",
     "DROP TABLE IF EXISTS contact_notes CASCADE",
     "DROP TABLE IF EXISTS contact_addresses CASCADE",
@@ -318,6 +319,16 @@ TEST_DATABASE_SCHEMA_STATEMENTS = [
         event_data JSONB NOT NULL,
         occurred_at TIMESTAMP NOT NULL,
         correlation_id VARCHAR(255)
+    )""",
+    """CREATE TABLE contact_relationships (
+        id SERIAL PRIMARY KEY,
+        from_contact_id INTEGER NOT NULL REFERENCES contacts(id) ON DELETE CASCADE,
+        to_contact_id INTEGER NOT NULL REFERENCES contacts(id) ON DELETE CASCADE,
+        relationship_type VARCHAR(50) NOT NULL CHECK (relationship_type IN ('partner', 'child', 'parent', 'sibling', 'friend', 'colleague', 'family', 'other')),
+        created_at TIMESTAMP DEFAULT NOW() NOT NULL,
+        updated_at TIMESTAMP DEFAULT NOW() NOT NULL,
+        CONSTRAINT ck_contact_relationships_no_self_reference CHECK (from_contact_id != to_contact_id),
+        CONSTRAINT uq_contact_relationships_unique_relationship UNIQUE (from_contact_id, to_contact_id, relationship_type)
     )""",
     """CREATE TABLE user_google_auth (
         id SERIAL PRIMARY KEY,

@@ -42,6 +42,12 @@ def override_get_database_session() -> Generator[Session, None, None]:
 @pytest.fixture(scope="function")
 def test_db() -> Generator[None, None, None]:
     """Create test database tables."""
+    # Ensure all table definitions are imported and registered
+    from app.core.integrations.google_contacts.models import (
+        UserGoogleAuth,  # noqa: F401
+    )
+    from app.infrastructure.contacts import contact_tables  # noqa: F401
+
     metadata.create_all(bind=engine)
     yield
     metadata.drop_all(bind=engine)

@@ -101,8 +101,24 @@ def check_database_connection() -> bool:
         return False
 
 
+def ensure_tables_registered() -> None:
+    """Ensure all table definitions are registered with metadata."""
+    # Force import of all table definitions to register them with metadata
+    # This is needed for environments where imports might not happen automatically
+    try:
+        from app.core.integrations.google_contacts.models import (
+            UserGoogleAuth,  # noqa: F401
+        )
+        from app.infrastructure.contacts import contact_tables  # noqa: F401
+
+        logger.debug("Table definitions registered with metadata")
+    except ImportError as e:
+        logger.warning("Failed to import table definitions", error=str(e))
+
+
 def create_tables() -> None:
     """Create all database tables."""
+    ensure_tables_registered()
     engine = get_database_engine()
     metadata.create_all(bind=engine)
     logger.info("Database tables created")
@@ -110,6 +126,7 @@ def create_tables() -> None:
 
 def drop_tables() -> None:
     """Drop all database tables (for testing)."""
+    ensure_tables_registered()
     engine = get_database_engine()
     metadata.drop_all(bind=engine)
     logger.info("Database tables dropped")
