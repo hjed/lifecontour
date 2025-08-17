@@ -1,92 +1,37 @@
 """
 Tests for database utilities.
 
-Tests database URL generation and engine creation without requiring
+Tests async engine and session factory creation without requiring
 an actual database connection.
 """
 
-import os
-from unittest.mock import patch
-
-from core_shared.database import (
-    create_engine_from_env,
-    create_engine_from_url,
-    get_database_url,
+from core_shared.database.engine import (
+    create_async_engine_from_url,
+    create_session_factory,
 )
 
 
-class TestGetDatabaseUrl:
-    """Test database URL generation."""
+class TestCreateAsyncEngineFromUrl:
+    """Test async engine creation from URL."""
 
-    def test_get_database_url_from_env_var(self) -> None:
-        """Test getting database URL from DATABASE_URL environment variable."""
-        expected_url = "postgresql://user:pass@host:5432/db"
-
-        with patch.dict(os.environ, {"DATABASE_URL": expected_url}):
-            url = get_database_url()
-            assert url == expected_url
-
-    def test_get_database_url_from_components(self) -> None:
-        """Test building database URL from individual components."""
-        # Clear DATABASE_URL to force component-based building
-        with patch.dict(os.environ, {}, clear=True):
-            url = get_database_url(
-                host="testhost",
-                port=5433,
-                database="testdb",
-                username="testuser",
-                password="testpass",
-            )
-
-            expected = "postgresql://testuser:testpass@testhost:5433/testdb"
-            assert url == expected
-
-    def test_get_database_url_defaults(self) -> None:
-        """Test database URL with default values."""
-        # Clear all database environment variables
-        with patch.dict(os.environ, {}, clear=True):
-            url = get_database_url()
-            expected = (
-                "postgresql://postgres:postgres@localhost:5432/personal_management"
-            )
-            assert url == expected
-
-    def test_get_database_url_from_env_components(self) -> None:
-        """Test building URL from environment variable components."""
-        env_vars = {
-            "DATABASE_HOST": "envhost",
-            "DATABASE_PORT": "5434",
-            "DATABASE_NAME": "envdb",
-            "DATABASE_USER": "envuser",
-            "DATABASE_PASSWORD": "envpass",
-        }
-
-        with patch.dict(os.environ, env_vars, clear=True):
-            url = get_database_url()
-            expected = "postgresql://envuser:envpass@envhost:5434/envdb"
-            assert url == expected
-
-
-class TestCreateEngineFromUrl:
-    """Test engine creation from URL."""
-
-    def test_create_engine_from_url_defaults(self) -> None:
-        """Test creating engine with default parameters."""
+    def test_create_async_engine_from_url_basic(self) -> None:
+        """Test creating async engine from basic URL."""
         url = "postgresql://user:pass@localhost:5432/testdb"
-        engine = create_engine_from_url(url)
+        engine = create_async_engine_from_url(url)
 
+        # Verify engine properties
         assert engine is not None
-        # SQLAlchemy masks passwords in URL strings for security
-        assert "postgresql://user:" in str(engine.url)
-        assert "@localhost:5432/testdb" in str(engine.url)
-        # Check pool configuration (using type: ignore for mypy)
-        assert engine.pool.size() == 5  # type: ignore[attr-defined]
-        assert engine.pool._max_overflow == 10  # type: ignore[attr-defined]
+        assert "asyncpg" in str(engine.url)
+        assert engine.url.username == "user"
+        assert engine.url.password == "pass"
+        assert engine.url.host == "localhost"
+        assert engine.url.port == 5432
+        assert engine.url.database == "testdb"
 
-    def test_create_engine_from_url_custom_params(self) -> None:
-        """Test creating engine with custom parameters."""
+    def test_create_async_engine_from_url_with_options(self) -> None:
+        """Test creating async engine with custom options."""
         url = "postgresql://user:pass@localhost:5432/testdb"
-        engine = create_engine_from_url(
+        engine = create_async_engine_from_url(
             url,
             pool_size=10,
             max_overflow=20,
@@ -95,56 +40,53 @@ class TestCreateEngineFromUrl:
             echo=True,
         )
 
+        # Verify pool configuration
         assert engine is not None
-        # SQLAlchemy masks passwords in URL strings for security
-        assert "postgresql://user:" in str(engine.url)
-        assert "@localhost:5432/testdb" in str(engine.url)
-        # Check pool configuration (using type: ignore for mypy)
         assert engine.pool.size() == 10  # type: ignore[attr-defined]
         assert engine.pool._max_overflow == 20  # type: ignore[attr-defined]
+        assert engine.pool._timeout == 60  # type: ignore[attr-defined]
+        assert engine.pool._recycle == 7200
         assert engine.echo is True
 
+    def test_create_async_engine_from_url_already_async(self) -> None:
+        """Test creating async engine with already async URL."""
+        url = "postgresql+asyncpg://user:pass@localhost:5432/testdb"
+        engine = create_async_engine_from_url(url)
 
-class TestCreateEngineFromEnv:
-    """Test engine creation from environment."""
+        assert engine is not None
+        assert "asyncpg" in str(engine.url)
+        assert engine.url.username == "user"
+        assert engine.url.password == "pass"
+        assert engine.url.host == "localhost"
+        assert engine.url.port == 5432
+        assert engine.url.database == "testdb"
 
-    def test_create_engine_from_env_defaults(self) -> None:
-        """Test creating engine from environment with defaults."""
-        env_vars = {"DATABASE_URL": "postgresql://user:pass@localhost:5432/testdb"}
 
-        with patch.dict(os.environ, env_vars, clear=True):
-            engine = create_engine_from_env()
+class TestCreateSessionFactory:
+    """Test session factory creation."""
 
-            assert engine is not None
-            # SQLAlchemy masks passwords in URL strings for security
-            assert "postgresql://user:" in str(engine.url)
-            assert "@localhost:5432/testdb" in str(engine.url)
-            assert engine.pool.size() == 5  # type: ignore[attr-defined]
+    def test_create_session_factory_basic(self) -> None:
+        """Test creating session factory from basic URL."""
+        url = "postgresql://user:pass@localhost:5432/testdb"
+        session_factory = create_session_factory(url)
 
-    def test_create_engine_from_env_debug_echo(self) -> None:
-        """Test that DEBUG environment variable controls echo."""
-        env_vars = {
-            "DATABASE_URL": "postgresql://user:pass@localhost:5432/testdb",
-            "DEBUG": "true",
-        }
+        # Verify session factory properties
+        assert session_factory is not None
+        assert hasattr(session_factory, "bind")
+        assert "asyncpg" in str(session_factory.bind.url)
 
-        with patch.dict(os.environ, env_vars, clear=True):
-            engine = create_engine_from_env()
-            assert engine.echo is True
+    def test_create_session_factory_converts_sync_url(self) -> None:
+        """Test that session factory converts sync URL to async."""
+        url = "postgresql://user:pass@localhost:5432/testdb"
+        session_factory = create_session_factory(url)
 
-        env_vars["DEBUG"] = "false"
-        with patch.dict(os.environ, env_vars, clear=True):
-            engine = create_engine_from_env()
-            assert engine.echo is False
+        # Should convert to asyncpg
+        assert "asyncpg" in str(session_factory.bind.url)  # type: ignore[attr-defined]
 
-    def test_create_engine_from_env_custom_params(self) -> None:
-        """Test creating engine from environment with custom parameters."""
-        env_vars = {"DATABASE_URL": "postgresql://user:pass@localhost:5432/testdb"}
+    def test_create_session_factory_preserves_async_url(self) -> None:
+        """Test that session factory preserves async URL."""
+        url = "postgresql+asyncpg://user:pass@localhost:5432/testdb"
+        session_factory = create_session_factory(url)
 
-        with patch.dict(os.environ, env_vars, clear=True):
-            engine = create_engine_from_env(pool_size=15, max_overflow=25, echo=True)
-
-            assert engine is not None
-            assert engine.pool.size() == 15  # type: ignore[attr-defined]
-            assert engine.pool._max_overflow == 25  # type: ignore[attr-defined]
-            assert engine.echo is True
+        # Should keep asyncpg
+        assert "asyncpg" in str(session_factory.bind.url)  # type: ignore[attr-defined]

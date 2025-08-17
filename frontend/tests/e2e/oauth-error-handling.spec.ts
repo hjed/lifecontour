@@ -487,7 +487,7 @@ test.describe('OAuth Session and State Management Errors', () => {
       try {
         await button.click({ timeout: 1000 });
         await button.click({ timeout: 1000 });
-      } catch (error) {
+      } catch {
         // Expected - button may no longer be available after navigation
         console.log('Subsequent clicks failed as expected (page navigated)');
       }

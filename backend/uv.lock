@@ -301,6 +301,12 @@ requires-dist = [
 ]
 provides-extras = ["dev"]
 
+[package.metadata.requires-dev]
+dev = [
+    { name = "mypy", specifier = ">=1.17.1" },
+    { name = "ruff", specifier = ">=0.12.9" },
+]
+
 [[package]]
 name = "coverage"
 version = "7.8.2"

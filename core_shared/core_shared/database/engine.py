@@ -4,21 +4,31 @@ Async database engine and session management for integration workers.
 Provides session-per-task pattern for ARQ workers with proper connection pooling.
 """
 
-from sqlalchemy import create_engine
-from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engine
-from sqlalchemy.orm import sessionmaker
+from typing import TYPE_CHECKING
+
+from sqlalchemy.ext.asyncio import (
+    AsyncEngine,
+    AsyncSession,
+    async_sessionmaker,
+    create_async_engine,
+)
+
+if TYPE_CHECKING:
+    from sqlalchemy.ext.asyncio import async_sessionmaker as AsyncSessionmaker
+else:
+    AsyncSessionmaker = async_sessionmaker
 
 
-def create_session_factory(database_url: str) -> sessionmaker[AsyncSession]:
+def create_session_factory(database_url: str) -> AsyncSessionmaker[AsyncSession]:
     """
     Create async session factory for integration workers.
-    
+
     Uses session-per-task pattern with connection pooling for efficient
     database access in ARQ workers.
-    
+
     Args:
         database_url: PostgreSQL connection URL
-        
+
     Returns:
         Async session factory
     """
@@ -27,7 +37,7 @@ def create_session_factory(database_url: str) -> sessionmaker[AsyncSession]:
         async_url = database_url.replace("postgresql://", "postgresql+asyncpg://", 1)
     else:
         async_url = database_url
-    
+
     # Create async engine with connection pooling
     engine = create_async_engine(
         async_url,
@@ -37,11 +47,10 @@ def create_session_factory(database_url: str) -> sessionmaker[AsyncSession]:
         pool_recycle=3600,
         echo=False,  # Set to True for debugging
     )
-    
+
     # Create session factory
-    return sessionmaker(
+    return async_sessionmaker(
         bind=engine,
-        class_=AsyncSession,
         expire_on_commit=False,
     )
 
@@ -56,7 +65,7 @@ def create_async_engine_from_url(
 ) -> AsyncEngine:
     """
     Create async SQLAlchemy engine with optimized connection pooling.
-    
+
     Args:
         database_url: PostgreSQL connection URL
         pool_size: Number of connections to maintain in the pool
@@ -64,7 +73,7 @@ def create_async_engine_from_url(
         pool_timeout: Timeout in seconds for getting connection from pool
         pool_recycle: Number of seconds after which a connection is recreated
         echo: Whether to log all SQL statements
-        
+
     Returns:
         Configured async SQLAlchemy engine
     """
@@ -73,7 +82,7 @@ def create_async_engine_from_url(
         async_url = database_url.replace("postgresql://", "postgresql+asyncpg://", 1)
     else:
         async_url = database_url
-    
+
     return create_async_engine(
         async_url,
         pool_size=pool_size,
