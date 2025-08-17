@@ -237,11 +237,18 @@ class ContactFieldAttributes(BaseModel):
     """Attributes for a contact field response."""
 
     field_name: str = Field(..., description="Name of the updated field")
-    field_type: str = Field(..., description="Type of field (basic, method, address, note)")
-    entity_id: int | None = Field(default=None, description="ID of the related entity (for methods, addresses, notes)")
+    field_type: str = Field(
+        ..., description="Type of field (basic, method, address, note)"
+    )
+    entity_id: int | None = Field(
+        default=None,
+        description="ID of the related entity (for methods, addresses, notes)",
+    )
     old_value: str | None = Field(default=None, description="Previous field value")
     new_value: str | None = Field(default=None, description="New field value")
-    updated_at: datetime = Field(default_factory=lambda: datetime.now(), description="Timestamp of the update")
+    updated_at: datetime = Field(
+        default_factory=lambda: datetime.now(), description="Timestamp of the update"
+    )
 
 
 class ContactFieldResource(BaseModel):
@@ -263,7 +270,9 @@ class MethodFieldUpdateData(BaseModel):
     """Data for updating a contact method field."""
 
     type: str = Field(default="contact_method_fields", description="Resource type")
-    attributes: dict[str, Any] = Field(..., description="Method field update attributes")
+    attributes: dict[str, Any] = Field(
+        ..., description="Method field update attributes"
+    )
 
 
 class MethodFieldUpdateRequest(BaseModel):
@@ -277,7 +286,9 @@ class AddressFieldUpdateData(BaseModel):
     """Data for updating a contact address field."""
 
     type: str = Field(default="contact_address_fields", description="Resource type")
-    attributes: dict[str, Any] = Field(..., description="Address field update attributes")
+    attributes: dict[str, Any] = Field(
+        ..., description="Address field update attributes"
+    )
 
 
 class AddressFieldUpdateRequest(BaseModel):

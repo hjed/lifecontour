@@ -352,8 +352,12 @@ async def update_contact_field(
         )
 
         # Create response
-        from app.api.contacts.schemas import ContactFieldAttributes, ContactFieldResource
         from datetime import datetime
+
+        from app.api.contacts.schemas import (
+            ContactFieldAttributes,
+            ContactFieldResource,
+        )
 
         field_resource = ContactFieldResource(
             id=f"{contact_id}:{field_name}",
@@ -373,7 +377,10 @@ async def update_contact_field(
         raise
 
 
-@router.patch("/{contact_id}/methods/{method_id}/fields/{field_name}", response_model=ContactFieldResponse)
+@router.patch(
+    "/{contact_id}/methods/{method_id}/fields/{field_name}",
+    response_model=ContactFieldResponse,
+)
 @inject
 async def update_contact_method_field(
     contact_id: int,
@@ -401,8 +408,12 @@ async def update_contact_method_field(
         )
 
         # Create response
-        from app.api.contacts.schemas import ContactFieldAttributes, ContactFieldResource
         from datetime import datetime
+
+        from app.api.contacts.schemas import (
+            ContactFieldAttributes,
+            ContactFieldResource,
+        )
 
         field_resource = ContactFieldResource(
             id=f"{contact_id}:method:{method_id}:{field_name}",
@@ -424,7 +435,10 @@ async def update_contact_method_field(
         raise
 
 
-@router.patch("/{contact_id}/addresses/{address_id}/fields/{field_name}", response_model=ContactFieldResponse)
+@router.patch(
+    "/{contact_id}/addresses/{address_id}/fields/{field_name}",
+    response_model=ContactFieldResponse,
+)
 @inject
 async def update_contact_address_field(
     contact_id: int,
@@ -452,8 +466,12 @@ async def update_contact_address_field(
         )
 
         # Create response
-        from app.api.contacts.schemas import ContactFieldAttributes, ContactFieldResource
         from datetime import datetime
+
+        from app.api.contacts.schemas import (
+            ContactFieldAttributes,
+            ContactFieldResource,
+        )
 
         field_resource = ContactFieldResource(
             id=f"{contact_id}:address:{address_id}:{field_name}",
@@ -475,7 +493,10 @@ async def update_contact_address_field(
         raise
 
 
-@router.patch("/{contact_id}/notes/{note_id}/fields/{field_name}", response_model=ContactFieldResponse)
+@router.patch(
+    "/{contact_id}/notes/{note_id}/fields/{field_name}",
+    response_model=ContactFieldResponse,
+)
 @inject
 async def update_contact_note_field(
     contact_id: int,
@@ -503,8 +524,12 @@ async def update_contact_note_field(
         )
 
         # Create response
-        from app.api.contacts.schemas import ContactFieldAttributes, ContactFieldResource
         from datetime import datetime
+
+        from app.api.contacts.schemas import (
+            ContactFieldAttributes,
+            ContactFieldResource,
+        )
 
         field_resource = ContactFieldResource(
             id=f"{contact_id}:note:{note_id}:{field_name}",

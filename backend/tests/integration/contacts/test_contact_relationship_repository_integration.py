@@ -4,8 +4,15 @@ import pytest
 import pytest_asyncio
 from sqlalchemy.ext.asyncio import AsyncConnection
 
-from app.core.contacts.adapters.sql import SqlContactRelationshipRepository, SqlContactRepository
-from app.core.contacts.models.entities import Contact, ContactRelationship, RelationshipType
+from app.core.contacts.adapters.sql import (
+    SqlContactRelationshipRepository,
+    SqlContactRepository,
+)
+from app.core.contacts.models.entities import (
+    Contact,
+    ContactRelationship,
+    RelationshipType,
+)
 from app.core.contacts.models.exceptions import ContactValidationError
 
 
@@ -16,7 +23,9 @@ async def contact_repo(async_connection: AsyncConnection) -> SqlContactRepositor
 
 
 @pytest_asyncio.fixture
-async def relationship_repo(async_connection: AsyncConnection) -> SqlContactRelationshipRepository:
+async def relationship_repo(
+    async_connection: AsyncConnection,
+) -> SqlContactRelationshipRepository:
     """Create a relationship repository for testing."""
     return SqlContactRelationshipRepository(async_connection)
 
@@ -38,19 +47,21 @@ class TestSqlContactRelationshipRepository:
 
     @pytest.mark.asyncio
     async def test_create_relationship(
-        self, relationship_repo: SqlContactRelationshipRepository, test_contacts: tuple[Contact, Contact]
+        self,
+        relationship_repo: SqlContactRelationshipRepository,
+        test_contacts: tuple[Contact, Contact],
     ):
         """Test creating a new relationship."""
         contact1, contact2 = test_contacts
-        
+
         relationship = ContactRelationship(
             from_contact_id=contact1.id,
             to_contact_id=contact2.id,
-            relationship_type=RelationshipType.FRIEND
+            relationship_type=RelationshipType.FRIEND,
         )
-        
+
         saved_relationship = await relationship_repo.create(relationship)
-        
+
         assert saved_relationship.id is not None
         assert saved_relationship.from_contact_id == contact1.id
         assert saved_relationship.to_contact_id == contact2.id
@@ -60,61 +71,71 @@ class TestSqlContactRelationshipRepository:
 
     @pytest.mark.asyncio
     async def test_create_duplicate_relationship_fails(
-        self, relationship_repo: SqlContactRelationshipRepository, test_contacts: tuple[Contact, Contact]
+        self,
+        relationship_repo: SqlContactRelationshipRepository,
+        test_contacts: tuple[Contact, Contact],
     ):
         """Test that creating duplicate relationships fails."""
         contact1, contact2 = test_contacts
-        
+
         relationship1 = ContactRelationship(
             from_contact_id=contact1.id,
             to_contact_id=contact2.id,
-            relationship_type=RelationshipType.FRIEND
+            relationship_type=RelationshipType.FRIEND,
         )
-        
+
         # Create first relationship
         await relationship_repo.create(relationship1)
-        
+
         # Try to create duplicate
         relationship2 = ContactRelationship(
             from_contact_id=contact1.id,
             to_contact_id=contact2.id,
-            relationship_type=RelationshipType.FRIEND
+            relationship_type=RelationshipType.FRIEND,
         )
-        
+
         with pytest.raises(ContactValidationError, match="Relationship already exists"):
             await relationship_repo.create(relationship2)
 
     @pytest.mark.asyncio
     async def test_create_self_relationship_fails(
-        self, relationship_repo: SqlContactRelationshipRepository, test_contacts: tuple[Contact, Contact]
+        self,
+        relationship_repo: SqlContactRelationshipRepository,
+        test_contacts: tuple[Contact, Contact],
     ):
         """Test that self-relationships fail at entity validation level."""
         contact1, _ = test_contacts
 
         # Should fail at entity validation level
-        with pytest.raises(ValueError, match="Contact cannot have a relationship with itself"):
+        with pytest.raises(
+            ValueError, match="Contact cannot have a relationship with itself"
+        ):
             ContactRelationship(
                 from_contact_id=contact1.id,
                 to_contact_id=contact1.id,
-                relationship_type=RelationshipType.FRIEND
+                relationship_type=RelationshipType.FRIEND,
             )
 
     @pytest.mark.asyncio
     async def test_get_by_id(
-        self, relationship_repo: SqlContactRelationshipRepository, test_contacts: tuple[Contact, Contact]
+        self,
+        relationship_repo: SqlContactRelationshipRepository,
+        test_contacts: tuple[Contact, Contact],
     ):
         """Test getting a relationship by ID."""
         contact1, contact2 = test_contacts
-        
+
         relationship = ContactRelationship(
             from_contact_id=contact1.id,
             to_contact_id=contact2.id,
-            relationship_type=RelationshipType.COLLEAGUE
+            relationship_type=RelationshipType.COLLEAGUE,
         )
-        
+
         saved_relationship = await relationship_repo.create(relationship)
-        retrieved_relationship = await relationship_repo.get_by_id(saved_relationship.id)
-        
+        retrieved_relationship = await relationship_repo.get_by_id(
+            saved_relationship.id
+        )
+
         assert retrieved_relationship is not None
         assert retrieved_relationship.id == saved_relationship.id
         assert retrieved_relationship.from_contact_id == contact1.id
@@ -122,37 +143,43 @@ class TestSqlContactRelationshipRepository:
         assert retrieved_relationship.relationship_type == RelationshipType.COLLEAGUE
 
     @pytest.mark.asyncio
-    async def test_get_by_id_not_found(self, relationship_repo: SqlContactRelationshipRepository):
+    async def test_get_by_id_not_found(
+        self, relationship_repo: SqlContactRelationshipRepository
+    ):
         """Test getting a non-existent relationship returns None."""
         result = await relationship_repo.get_by_id(99999)
         assert result is None
 
     @pytest.mark.asyncio
     async def test_get_relationships_for_contact(
-        self, relationship_repo: SqlContactRelationshipRepository, test_contacts: tuple[Contact, Contact]
+        self,
+        relationship_repo: SqlContactRelationshipRepository,
+        test_contacts: tuple[Contact, Contact],
     ):
         """Test getting all relationships for a contact."""
         contact1, contact2 = test_contacts
-        
+
         # Create relationship from contact1 to contact2
         relationship1 = ContactRelationship(
             from_contact_id=contact1.id,
             to_contact_id=contact2.id,
-            relationship_type=RelationshipType.FRIEND
+            relationship_type=RelationshipType.FRIEND,
         )
         await relationship_repo.create(relationship1)
-        
+
         # Create relationship from contact2 to contact1
         relationship2 = ContactRelationship(
             from_contact_id=contact2.id,
             to_contact_id=contact1.id,
-            relationship_type=RelationshipType.COLLEAGUE
+            relationship_type=RelationshipType.COLLEAGUE,
         )
         await relationship_repo.create(relationship2)
-        
+
         # Get all relationships for contact1 (should include both)
-        relationships = await relationship_repo.get_relationships_for_contact(contact1.id)
-        
+        relationships = await relationship_repo.get_relationships_for_contact(
+            contact1.id
+        )
+
         assert len(relationships) == 2
         relationship_types = {rel.relationship_type for rel in relationships}
         assert RelationshipType.FRIEND in relationship_types
@@ -160,55 +187,69 @@ class TestSqlContactRelationshipRepository:
 
     @pytest.mark.asyncio
     async def test_get_relationships_from_contact(
-        self, relationship_repo: SqlContactRelationshipRepository, test_contacts: tuple[Contact, Contact]
+        self,
+        relationship_repo: SqlContactRelationshipRepository,
+        test_contacts: tuple[Contact, Contact],
     ):
         """Test getting relationships where contact is the 'from' contact."""
         contact1, contact2 = test_contacts
-        
+
         relationship = ContactRelationship(
             from_contact_id=contact1.id,
             to_contact_id=contact2.id,
-            relationship_type=RelationshipType.PARTNER
+            relationship_type=RelationshipType.PARTNER,
         )
         await relationship_repo.create(relationship)
-        
+
         # Get relationships from contact1
-        from_relationships = await relationship_repo.get_relationships_from_contact(contact1.id)
+        from_relationships = await relationship_repo.get_relationships_from_contact(
+            contact1.id
+        )
         assert len(from_relationships) == 1
         assert from_relationships[0].from_contact_id == contact1.id
         assert from_relationships[0].to_contact_id == contact2.id
-        
+
         # Get relationships from contact2 (should be empty)
-        from_relationships_2 = await relationship_repo.get_relationships_from_contact(contact2.id)
+        from_relationships_2 = await relationship_repo.get_relationships_from_contact(
+            contact2.id
+        )
         assert len(from_relationships_2) == 0
 
     @pytest.mark.asyncio
     async def test_get_relationships_to_contact(
-        self, relationship_repo: SqlContactRelationshipRepository, test_contacts: tuple[Contact, Contact]
+        self,
+        relationship_repo: SqlContactRelationshipRepository,
+        test_contacts: tuple[Contact, Contact],
     ):
         """Test getting relationships where contact is the 'to' contact."""
         contact1, contact2 = test_contacts
-        
+
         relationship = ContactRelationship(
             from_contact_id=contact1.id,
             to_contact_id=contact2.id,
-            relationship_type=RelationshipType.SIBLING
+            relationship_type=RelationshipType.SIBLING,
         )
         await relationship_repo.create(relationship)
-        
+
         # Get relationships to contact2
-        to_relationships = await relationship_repo.get_relationships_to_contact(contact2.id)
+        to_relationships = await relationship_repo.get_relationships_to_contact(
+            contact2.id
+        )
         assert len(to_relationships) == 1
         assert to_relationships[0].from_contact_id == contact1.id
         assert to_relationships[0].to_contact_id == contact2.id
-        
+
         # Get relationships to contact1 (should be empty)
-        to_relationships_1 = await relationship_repo.get_relationships_to_contact(contact1.id)
+        to_relationships_1 = await relationship_repo.get_relationships_to_contact(
+            contact1.id
+        )
         assert len(to_relationships_1) == 0
 
     @pytest.mark.asyncio
     async def test_update_relationship(
-        self, relationship_repo: SqlContactRelationshipRepository, test_contacts: tuple[Contact, Contact]
+        self,
+        relationship_repo: SqlContactRelationshipRepository,
+        test_contacts: tuple[Contact, Contact],
     ):
         """Test updating a relationship."""
         import asyncio
@@ -218,7 +259,7 @@ class TestSqlContactRelationshipRepository:
         relationship = ContactRelationship(
             from_contact_id=contact1.id,
             to_contact_id=contact2.id,
-            relationship_type=RelationshipType.FRIEND
+            relationship_type=RelationshipType.FRIEND,
         )
         saved_relationship = await relationship_repo.create(relationship)
 
@@ -239,41 +280,49 @@ class TestSqlContactRelationshipRepository:
         # For now, just check that the timestamp is not None and the relationship was updated
         # The timestamp issue might be due to transaction rollback in tests
         assert updated_relationship.updated_at is not None
-        assert updated_relationship.created_at == saved_relationship.created_at  # Should not change
+        assert (
+            updated_relationship.created_at == saved_relationship.created_at
+        )  # Should not change
 
     @pytest.mark.asyncio
     async def test_update_relationship_without_id_fails(
-        self, relationship_repo: SqlContactRelationshipRepository, test_contacts: tuple[Contact, Contact]
+        self,
+        relationship_repo: SqlContactRelationshipRepository,
+        test_contacts: tuple[Contact, Contact],
     ):
         """Test that updating a relationship without ID fails."""
         contact1, contact2 = test_contacts
-        
+
         relationship = ContactRelationship(
             from_contact_id=contact1.id,
             to_contact_id=contact2.id,
-            relationship_type=RelationshipType.FRIEND
+            relationship_type=RelationshipType.FRIEND,
         )
-        
-        with pytest.raises(ContactValidationError, match="Relationship ID is required for updates"):
+
+        with pytest.raises(
+            ContactValidationError, match="Relationship ID is required for updates"
+        ):
             await relationship_repo.update(relationship)
 
     @pytest.mark.asyncio
     async def test_delete_relationship(
-        self, relationship_repo: SqlContactRelationshipRepository, test_contacts: tuple[Contact, Contact]
+        self,
+        relationship_repo: SqlContactRelationshipRepository,
+        test_contacts: tuple[Contact, Contact],
     ):
         """Test deleting a relationship."""
         contact1, contact2 = test_contacts
-        
+
         relationship = ContactRelationship(
             from_contact_id=contact1.id,
             to_contact_id=contact2.id,
-            relationship_type=RelationshipType.FAMILY
+            relationship_type=RelationshipType.FAMILY,
         )
         saved_relationship = await relationship_repo.create(relationship)
-        
+
         # Delete the relationship
         await relationship_repo.delete(saved_relationship.id)
-        
+
         # Verify it's deleted
         deleted_relationship = await relationship_repo.get_by_id(saved_relationship.id)
         assert deleted_relationship is None
@@ -283,30 +332,34 @@ class TestSqlContactRelationshipRepository:
         self, relationship_repo: SqlContactRelationshipRepository
     ):
         """Test that deleting a non-existent relationship fails."""
-        with pytest.raises(ContactValidationError, match="Relationship with ID 99999 not found"):
+        with pytest.raises(
+            ContactValidationError, match="Relationship with ID 99999 not found"
+        ):
             await relationship_repo.delete(99999)
 
     @pytest.mark.asyncio
     async def test_relationship_exists(
-        self, relationship_repo: SqlContactRelationshipRepository, test_contacts: tuple[Contact, Contact]
+        self,
+        relationship_repo: SqlContactRelationshipRepository,
+        test_contacts: tuple[Contact, Contact],
     ):
         """Test checking if a relationship exists."""
         contact1, contact2 = test_contacts
-        
+
         # Check non-existent relationship
         exists = await relationship_repo.relationship_exists(
             contact1.id, contact2.id, RelationshipType.FRIEND.value
         )
         assert exists is False
-        
+
         # Create relationship
         relationship = ContactRelationship(
             from_contact_id=contact1.id,
             to_contact_id=contact2.id,
-            relationship_type=RelationshipType.FRIEND
+            relationship_type=RelationshipType.FRIEND,
         )
         await relationship_repo.create(relationship)
-        
+
         # Check existing relationship
         exists = await relationship_repo.relationship_exists(
             contact1.id, contact2.id, RelationshipType.FRIEND.value

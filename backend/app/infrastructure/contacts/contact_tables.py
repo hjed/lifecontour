@@ -259,14 +259,16 @@ contact_relationships_table = Table(
     ),
     CheckConstraint(
         "relationship_type IN ('partner', 'child', 'parent', 'sibling', 'friend', 'colleague', 'family', 'other')",
-        name="ck_contact_relationships_relationship_type"
+        name="ck_contact_relationships_relationship_type",
     ),
     CheckConstraint(
         "from_contact_id != to_contact_id",
-        name="ck_contact_relationships_no_self_reference"
+        name="ck_contact_relationships_no_self_reference",
     ),
     UniqueConstraint(
-        "from_contact_id", "to_contact_id", "relationship_type",
-        name="uq_contact_relationships_unique_relationship"
+        "from_contact_id",
+        "to_contact_id",
+        "relationship_type",
+        name="uq_contact_relationships_unique_relationship",
     ),
 )
