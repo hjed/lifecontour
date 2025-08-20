@@ -4,6 +4,16 @@ import { Badge } from '@/components/ui/badge';
 import { cn, generateDisplayName } from '@/lib/utils';
 import { TagResource } from '@/types/contacts';
 
+/**
+ * @deprecated ContactHeader is deprecated. Use page-level CSS Grid layout with ContactAvatar and ContactIdentity components instead.
+ *
+ * This component was designed for flexbox layout but the new design uses CSS Grid with:
+ * - ContactAvatar in the first column
+ * - ContactIdentity in the second column
+ * - Activity/relationships sidebar in the third column
+ *
+ * See the contact detail page (/app/contacts/[id]/page.tsx) for the new implementation.
+ */
 interface ContactHeaderProps {
   contact: {
     id: string;
@@ -19,6 +29,8 @@ interface ContactHeaderProps {
 
 /**
  * ContactHeader component displays contact name, avatar, tags, and favourite toggle.
+ *
+ * @deprecated ContactHeader is deprecated. Use page-level CSS Grid layout with ContactAvatar and ContactIdentity components instead.
  *
  * Features:
  * - Large avatar with initials fallback
