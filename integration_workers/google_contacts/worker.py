@@ -377,7 +377,7 @@ async def sync_google_contacts(
         "contacts_deleted": 0,
         "sync_type_used": sync_type,
         "worker_id": settings.worker_id,
-        "started_at": datetime.now().isoformat(),
+        "started_at": datetime.now(UTC).isoformat(),
     }
 
     try:
@@ -456,7 +456,7 @@ async def sync_google_contacts(
             "error": str(e),
             "error_type": type(e).__name__,
             "worker_id": settings.worker_id,
-            "failed_at": datetime.now().isoformat(),
+            "failed_at": datetime.now(UTC).isoformat(),
         }
 
 
