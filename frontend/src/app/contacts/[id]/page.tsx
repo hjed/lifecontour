@@ -35,7 +35,8 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 
 import { ContactForm } from '@/components/contacts/ContactForm';
-import { FavouriteToggle } from '@/components/contacts/FavouriteToggle';
+import { ContactAvatar } from '@/components/contacts/ContactAvatar';
+import { ContactIdentity } from '@/components/contacts/ContactIdentity';
 import { AuthGuard } from '@/components/auth/AuthGuard';
 import { DATE_FORMATS } from '@/lib/constants';
 
@@ -157,63 +158,121 @@ function ContactDetailPageContent() {
         </Button>
       </div>
 
-      {/* Contact Information */}
+      {/* Contact Header - Three Column Grid Layout */}
+      <header className='mb-8 grid grid-cols-1 items-start gap-x-8 gap-y-4 md:grid-cols-[128px,1fr] lg:grid-cols-[128px,1fr,280px]'>
+        {/* Column 1: Avatar */}
+        <div className='col-start-1'>
+          <ContactAvatar
+            firstName={contact.attributes.first_name}
+            lastName={contact.attributes.last_name}
+            size='lg'
+            className='h-32 w-32'
+          />
+        </div>
+
+        {/* Column 2: Identity and Actions */}
+        <div className='col-start-1 space-y-4 md:col-start-2'>
+          <ContactIdentity contact={contact} />
+
+          {/* Action Buttons */}
+          <div className='flex gap-2'>
+            {!isEditing && (
+              <>
+                <Button
+                  variant='outline'
+                  size='sm'
+                  onClick={handleEdit}
+                  data-testid='edit-contact-button'
+                >
+                  <Edit className='mr-2 h-4 w-4' />
+                  Edit
+                </Button>
+                <Button
+                  variant='outline'
+                  size='sm'
+                  onClick={() => setShowDeleteConfirm(true)}
+                  className='text-destructive hover:text-destructive'
+                  aria-label='Delete contact'
+                >
+                  <Trash2 className='h-4 w-4' />
+                </Button>
+              </>
+            )}
+            {isEditing && (
+              <Button variant='outline' size='sm' onClick={handleCancelEdit}>
+                <X className='mr-2 h-4 w-4' />
+                Cancel
+              </Button>
+            )}
+          </div>
+        </div>
+
+        {/* Column 3: Sidebar (hidden on smaller screens) */}
+        <aside className='hidden space-y-4 lg:col-start-3 lg:block'>
+          {/* Tags */}
+          {tags.length > 0 && (
+            <Card>
+              <CardHeader>
+                <CardTitle className='text-lg'>Tags</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className='flex flex-wrap gap-2'>
+                  {tags.map(tag => (
+                    <Badge key={tag.id} variant='secondary'>
+                      {tag.attributes.name}
+                    </Badge>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Metadata */}
+          <Card>
+            <CardHeader>
+              <CardTitle className='text-lg'>Information</CardTitle>
+            </CardHeader>
+            <CardContent className='space-y-3'>
+              <div className='flex items-center gap-2 text-sm'>
+                <Calendar className='text-muted-foreground h-4 w-4' />
+                <div>
+                  <p className='font-medium'>Created</p>
+                  <p className='text-muted-foreground'>
+                    {format(
+                      new Date(contact.attributes.created_at),
+                      DATE_FORMATS.LONG,
+                      { locale: enAU }
+                    )}
+                  </p>
+                </div>
+              </div>
+              {contact.attributes.updated_at !==
+                contact.attributes.created_at && (
+                <div className='flex items-center gap-2 text-sm'>
+                  <Calendar className='text-muted-foreground h-4 w-4' />
+                  <div>
+                    <p className='font-medium'>Last Updated</p>
+                    <p className='text-muted-foreground'>
+                      {format(
+                        new Date(contact.attributes.updated_at),
+                        DATE_FORMATS.LONG,
+                        { locale: enAU }
+                      )}
+                    </p>
+                  </div>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </aside>
+      </header>
+
+      {/* Contact Details */}
       <div className='grid gap-6 lg:grid-cols-3'>
         <div className='lg:col-span-2'>
           <Card>
             <CardHeader>
-              <div className='flex items-start justify-between'>
-                <div>
-                  <CardTitle className='text-2xl' data-testid='contact-name'>
-                    {fullName}
-                  </CardTitle>
-                  {contact.attributes.nick_name && (
-                    <p className='text-muted-foreground mt-1'>
-                      &ldquo;{contact.attributes.nick_name}&rdquo;
-                    </p>
-                  )}
-                </div>
-                <div className='flex gap-2'>
-                  {!isEditing && (
-                    <>
-                      <FavouriteToggle
-                        contactId={contact.id}
-                        isFavourite={contact.attributes.is_favourite || false}
-                        contactName={fullName}
-                        size='sm'
-                      />
-                      <Button
-                        variant='outline'
-                        size='sm'
-                        onClick={handleEdit}
-                        data-testid='edit-contact-button'
-                      >
-                        <Edit className='mr-2 h-4 w-4' />
-                        Edit
-                      </Button>
-                      <Button
-                        variant='outline'
-                        size='sm'
-                        onClick={() => setShowDeleteConfirm(true)}
-                        className='text-destructive hover:text-destructive'
-                        aria-label='Delete contact'
-                      >
-                        <Trash2 className='h-4 w-4' />
-                      </Button>
-                    </>
-                  )}
-                  {isEditing && (
-                    <Button
-                      variant='outline'
-                      size='sm'
-                      onClick={handleCancelEdit}
-                    >
-                      <X className='mr-2 h-4 w-4' />
-                      Cancel
-                    </Button>
-                  )}
-                </div>
-              </div>
+              <CardTitle className='text-xl'>Contact Details</CardTitle>
             </CardHeader>
             <CardContent>
               {isEditing ? (
@@ -356,9 +415,9 @@ function ContactDetailPageContent() {
           </Card>
         </div>
 
-        {/* Sidebar */}
-        <div className='space-y-6'>
-          {/* Tags */}
+        {/* Sidebar - Mobile fallback for tags and metadata */}
+        <div className='space-y-6 lg:hidden'>
+          {/* Tags - Mobile Only */}
           {tags.length > 0 && (
             <Card>
               <CardHeader>
@@ -376,7 +435,7 @@ function ContactDetailPageContent() {
             </Card>
           )}
 
-          {/* Metadata */}
+          {/* Metadata - Mobile Only */}
           <Card>
             <CardHeader>
               <CardTitle className='text-lg'>Information</CardTitle>

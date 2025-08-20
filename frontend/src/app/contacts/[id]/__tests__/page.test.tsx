@@ -161,8 +161,8 @@ describe('ContactDetailPage', () => {
     expect(await screen.findByText('John Doe')).toBeInTheDocument();
     // Check for nickname text - just check that Johnny appears somewhere
     expect(screen.getByText(/Johnny/)).toBeInTheDocument();
-    // Check that the contact information section is rendered
-    expect(screen.getByText('Information')).toBeInTheDocument();
+    // Check that the contact information section is rendered (there may be multiple on different screen sizes)
+    expect(screen.getAllByText('Information')).toHaveLength(2); // Desktop sidebar + mobile fallback
   });
 
   it('handles edit mode toggle', async () => {
