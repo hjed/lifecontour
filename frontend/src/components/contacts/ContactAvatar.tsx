@@ -1,5 +1,5 @@
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
-import { cn } from '@/lib/utils';
+import { cn, generateDisplayName } from '@/lib/utils';
 
 interface ContactAvatarProps {
   firstName: string;
@@ -45,22 +45,6 @@ export function ContactAvatar({
     return firstInitial || lastInitial;
   };
 
-  // Generate display name for alt text and aria-label
-  const generateDisplayName = (first: string, last?: string): string => {
-    const cleanFirst = first?.trim() || '';
-    const cleanLast = last?.trim() || '';
-
-    if (!cleanFirst && !cleanLast) {
-      return 'Contact avatar';
-    }
-
-    if (cleanFirst && cleanLast) {
-      return `${cleanFirst} ${cleanLast}`;
-    }
-
-    return cleanFirst || cleanLast;
-  };
-
   // Size classes mapping
   const sizeClasses = {
     sm: 'h-8 w-8',
@@ -69,7 +53,8 @@ export function ContactAvatar({
   };
 
   const initials = generateInitials(firstName, lastName);
-  const displayName = generateDisplayName(firstName, lastName);
+  const displayName =
+    generateDisplayName(firstName, lastName || '') || 'Contact avatar';
 
   return (
     <Avatar
