@@ -1,7 +1,7 @@
 import { ContactAvatar } from './ContactAvatar';
 import { FavouriteToggle } from './FavouriteToggle';
 import { Badge } from '@/components/ui/badge';
-import { cn } from '@/lib/utils';
+import { cn, generateDisplayName } from '@/lib/utils';
 import { TagResource } from '@/types/contacts';
 
 interface ContactHeaderProps {
@@ -33,22 +33,10 @@ export function ContactHeader({
   avatarSize = 'lg',
   className,
 }: ContactHeaderProps) {
-  // Generate display name
-  const generateDisplayName = (
-    firstName: string,
-    lastName?: string
-  ): string => {
-    const cleanFirst = firstName?.trim() || '';
-    const cleanLast = lastName?.trim() || '';
-
-    if (cleanFirst && cleanLast) {
-      return `${cleanFirst} ${cleanLast}`;
-    }
-
-    return cleanFirst || cleanLast || '';
-  };
-
-  const displayName = generateDisplayName(contact.firstName, contact.lastName);
+  const displayName = generateDisplayName(
+    contact.firstName,
+    contact.lastName || ''
+  );
 
   return (
     <header
