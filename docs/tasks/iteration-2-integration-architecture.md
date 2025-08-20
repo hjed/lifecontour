@@ -1,18 +1,18 @@
 # Iteration 2: Integration Architecture Foundation
 
-**Status:** 🟡 IN PROGRESS (75% complete)
+**Status:** 🟡 IN PROGRESS (85% complete)
 **Dependencies:** Iteration 1.5
 **Goal:** Establish robust integration architecture with Google Contacts sync using modern patterns
 
 ## Overview
 
 This iteration implements a production-ready integration architecture:
-- Dishka dependency injection framework migration
-- ARQ task queue with Redis for background processing
-- Google Contacts bidirectional synchronization
-- Isolated worker architecture for scalability
-- Production resilience patterns (idempotency, retry logic, monitoring)
-- FastMCP v2 integration for AI assistant capabilities
+- ✅ Dishka dependency injection framework migration (COMPLETED)
+- ✅ ARQ task queue with Redis for background processing (COMPLETED)
+- 🟡 Google Contacts bidirectional synchronization (Infrastructure complete, sync logic needed)
+- ✅ Isolated worker architecture for scalability (COMPLETED)
+- 🔴 Production resilience patterns (idempotency, retry logic, monitoring) (PENDING)
+- ✅ FastMCP v2 integration for AI assistant capabilities (COMPLETED)
 
 ## Tasks
 
@@ -97,13 +97,13 @@ This iteration implements a production-ready integration architecture:
 - **Atomic Operations:** Transaction-based persistence for contacts and sync metadata with proper rollback handling
 - **Comprehensive Testing:** 17 new unit tests + 13 integration tests covering all scenarios including edge cases
 
-#### Slice 4: ARQ Worker with Smart Sync Strategy 🟢 ✅ COMPLETED
+#### Slice 4: ARQ Worker with Smart Sync Strategy � ✅ INFRASTRUCTURE COMPLETED
 **PR Size:** ~20 files (ARQ worker, integration APIs, Docker infrastructure, tests)
 
 **Acceptance Criteria:**
 - [x] Create isolated Google Contacts worker with ARQ task queue
 - [x] Implement Docker container architecture for worker isolation
-- [x] Create integration API endpoints for sync management
+- [x] Create integration API endpoints for sync management (mock implementation)
 - [x] Implement core shared package for worker communication
 - [x] Add comprehensive test framework for integration flows
 - [x] Configure Redis task queue with proper health monitoring
@@ -111,88 +111,62 @@ This iteration implements a production-ready integration architecture:
 
 **Implementation Details:**
 - **Worker Architecture:** Isolated Docker container with ARQ task processing
-- **Integration APIs:** Complete REST API for sync management (`/api/integrations/google/contacts/`)
+- **Integration APIs:** REST API structure for sync management (`/api/integrations/google/contacts/`) - currently returns mock responses
 - **Core Shared Package:** Shared models and database utilities for worker communication
 - **Docker Infrastructure:** Production-ready containers with proper dependency management
-- **Testing Framework:** Comprehensive E2E test suite with 5/5 tests passing
-- **Health Monitoring:** Full health check system for worker and Redis connectivity
+- **Testing Framework:** E2E test suite exists but currently skipped due to mock endpoints
+- **Health Monitoring:** Health check system for worker and Redis connectivity
+
+**Status:** Infrastructure is complete, but worker contains placeholder sync logic. Actual Google People API integration needed.
 
 ## 🚀 IMMEDIATE NEXT STEPS
 
-With the integration worker architecture now complete, the next priority is implementing the actual Google Contacts sync logic. The infrastructure is ready - we need to add the business logic.
+The integration architecture foundation is complete. The next priority is implementing the actual Google Contacts sync business logic to make the integration functional.
 
 ### ITER2-004: Google Contacts Sync Implementation 🔴 HIGH PRIORITY
 **Description:** Implement actual Google Contacts synchronization logic in the worker
-**Dependencies:** Slice 4 (ARQ Worker Architecture) - ✅ COMPLETED
+**Dependencies:** Integration infrastructure (✅ COMPLETED)
 **Target:** Complete functional Google Contacts sync
 
-#### Phase 1: Google API Integration 🟡 NEXT UP
-**PR Size:** ~8 files (Google API client, auth service, models, tests)
+**Current State:** All infrastructure exists (API client, auth service, data models, transformers, worker container, API endpoints), but the worker contains placeholder sync logic and API endpoints return mock responses.
+
+#### Phase 1: Worker Sync Logic Implementation � IMMEDIATE
+**PR Size:** ~6 files (Worker sync logic, API endpoint connections, tests)
 **Estimated Effort:** 2-3 days
 
 **Acceptance Criteria:**
-- [ ] Implement Google People API client with OAuth2 authentication
-- [ ] Create Google Contacts data models and transformers
-- [ ] Add OAuth flow for Google account linking
-- [ ] Implement token refresh and error handling
-- [ ] Add comprehensive unit tests for API integration
-- [ ] Create integration tests with mock Google API responses
+- [ ] Replace placeholder sync logic in `integration_workers/google_contacts/worker.py`
+- [ ] Implement actual Google People API calls using existing GoogleContactsAPIClient
+- [ ] Connect existing GoogleContactsService to worker tasks
+- [ ] Implement full sync and incremental sync using existing service methods
+- [ ] Add proper error handling and logging in worker
+- [ ] Connect API endpoints to real ARQ task queue instead of mock responses
 
 **Implementation Plan:**
-1. **Google API Client Setup**
-   - Install `google-auth` and `google-api-python-client` dependencies
-   - Create `GoogleContactsAPIClient` class with proper authentication
-   - Implement rate limiting and retry logic for API calls
+1. **Worker Business Logic**
+   - Use existing GoogleContactsService.full_sync() and incremental_sync() methods
+   - Implement proper database session management in worker
+   - Add comprehensive error handling and retry logic
 
-2. **OAuth2 Authentication Flow**
-   - Add OAuth2 endpoints for Google account linking
-   - Implement secure token storage with encryption
-   - Add token refresh logic for expired credentials
+2. **API Endpoint Integration**
+   - Connect `/api/integrations/google/contacts/sync` to ARQ task queue
+   - Implement real job status tracking using ARQ job IDs
+   - Connect health endpoints to actual Redis and worker status
 
-3. **Data Models & Transformation**
-   - Create Pydantic models for Google Contacts API responses
-   - Implement data transformer to convert Google contacts to our Contact model
-   - Handle field mapping and data validation
+3. **Testing Integration**
+   - Update worker tests to use real sync logic
+   - Re-enable integration E2E tests once endpoints are functional
 
-#### Phase 2: Sync Logic Implementation 🟡 FOLLOWING
-**PR Size:** ~6 files (Sync service, worker tasks, persistence, tests)
+#### Phase 2: OAuth Integration & UI Flow 🟡 FOLLOWING
+**PR Size:** ~4 files (OAuth endpoints, frontend integration, tests)
 **Estimated Effort:** 2-3 days
 
 **Acceptance Criteria:**
-- [ ] Implement full sync logic for initial contact import
-- [ ] Add incremental sync using Google's sync tokens
-- [ ] Implement conflict resolution for bidirectional sync
-- [ ] Add sync metadata tracking and status reporting
-- [ ] Create comprehensive sync monitoring and logging
-- [ ] Add error handling and retry mechanisms
-
-**Implementation Plan:**
-1. **Full Sync Implementation**
-   - Implement `sync_google_contacts_full(user_id)` ARQ task
-   - Add pagination handling for large contact lists
-   - Implement batch processing for efficient database operations
-
-2. **Incremental Sync Logic**
-   - Implement `sync_google_contacts_incremental(user_id)` ARQ task
-   - Use Google's sync tokens for efficient updates
-   - Handle created, updated, and deleted contacts
-
-3. **Sync Orchestration**
-   - Add sync scheduling and triggering mechanisms
-   - Implement sync status tracking and reporting
-   - Add user-facing sync controls in the API
-
-#### Phase 3: Production Readiness 🟡 FINAL
-**PR Size:** ~4 files (Monitoring, error handling, documentation, tests)
-**Estimated Effort:** 1-2 days
-
-**Acceptance Criteria:**
-- [ ] Add comprehensive error handling and logging
-- [ ] Implement sync monitoring and alerting
-- [ ] Add user-facing sync status and controls
-- [ ] Create production deployment documentation
-- [ ] Add performance monitoring and optimization
-- [ ] Complete end-to-end testing with real Google accounts
+- [ ] Add OAuth2 endpoints for Google account linking in main API
+- [ ] Implement frontend OAuth flow for Google account connection
+- [ ] Add user-facing sync controls and status display
+- [ ] Implement sync job monitoring and progress tracking
+- [ ] Add comprehensive end-to-end testing with OAuth flow
 
 #### Slice 5: Two-Way Sync & Conflict Resolution 🟡 PENDING
 **PR Size:** ~6 files (Push logic, conflict resolution, API client updates, tests)
@@ -205,42 +179,60 @@ With the integration worker architecture now complete, the next priority is impl
 - [ ] Update SyncMetadata with new ETag from Google API response after successful push
 - [ ] Create comprehensive integration tests mocking API for two-way sync, conflicts, token expiration
 
-### ITER2-003: Dishka Migration & Architecture Modernization 🟡 PENDING
+### ITER2-003: Dishka Migration & Architecture Modernization ✅ COMPLETED
 **Description:** Migrate entire application to use Dishka dependency injection framework
-**PR Size:** Split into 3 sub-tasks for manageable changes
+**Status:** All phases completed successfully
 
-#### Phase 1: Core Domain Migration 🟡 PENDING
+#### Phase 1: Core Domain Migration ✅ COMPLETED
 **PR Size:** ~8 files (Domain providers, service updates, tests)
 
 **Acceptance Criteria:**
-- [ ] Create domain-specific Dishka providers (ContactProvider, TagProvider, etc.)
-- [ ] Migrate ContactService and related services to use Dishka injection
-- [ ] Update repository interfaces to use Dishka patterns
-- [ ] Implement proper scope management (APP for singletons, REQUEST for per-request)
-- [ ] Update unit tests to use Dishka testing utilities
-- [ ] Ensure all existing functionality continues to work
+- [x] Create domain-specific Dishka providers (ContactProvider, TagProvider, etc.)
+- [x] Migrate ContactService and related services to use Dishka injection
+- [x] Update repository interfaces to use Dishka patterns
+- [x] Implement proper scope management (APP for singletons, REQUEST for per-request)
+- [x] Update unit tests to use Dishka testing utilities
+- [x] Ensure all existing functionality continues to work
 
-#### Phase 2: API Layer Migration 🟡 PENDING
+**Implementation Details:**
+- **Domain Providers:** ContactProvider, AuthProvider, IntegrationProvider, DatabaseProvider all implemented
+- **Service Migration:** All services use constructor injection with typed interfaces
+- **Scope Management:** Proper APP/REQUEST scope separation implemented
+- **Type Safety:** All dependencies use `FromDishka[Type]` annotations
+
+#### Phase 2: API Layer Migration ✅ COMPLETED
 **PR Size:** ~6 files (API controllers, middleware, tests)
 
 **Acceptance Criteria:**
-- [ ] Update FastAPI controllers to use `FromDishka[Type]` annotations
-- [ ] Set up Dishka with `setup_dishka(container, app)` in app factory
-- [ ] Implement proper lifespan management for container cleanup
-- [ ] Update API integration tests to work with Dishka
-- [ ] Ensure all endpoints continue to function correctly
+- [x] Update FastAPI controllers to use `FromDishka[Type]` annotations
+- [x] Set up Dishka with `setup_dishka(container, app)` in app factory
+- [x] Implement proper lifespan management for container cleanup
+- [x] Update API integration tests to work with Dishka
+- [x] Ensure all endpoints continue to function correctly
 
-#### Phase 3: MCP Server Migration 🟡 PENDING
+**Implementation Details:**
+- **Controller Migration:** All API controllers use `FromDishka[Type]` for dependency injection
+- **Container Setup:** Dishka integrated with FastAPI using `setup_dishka(container, app)`
+- **Lifespan Management:** Proper container cleanup in application lifespan
+- **Testing Integration:** All tests work with Dishka container
+
+#### Phase 3: MCP Server Migration ✅ COMPLETED
 **PR Size:** ~4 files (MCP tools, FastMCP v2 setup, tests)
 
 **Acceptance Criteria:**
-- [ ] Migrate MCP server to FastMCP v2 framework
-- [ ] Update MCP tools to use Dishka dependency injection
-- [ ] Share Dishka container between REST API and MCP server
-- [ ] Implement proper cleanup of resources after tool execution
-- [ ] Update MCP integration tests
+- [x] Migrate MCP server to FastMCP v2 framework
+- [x] Update MCP tools to use Dishka dependency injection
+- [x] Share Dishka container between REST API and MCP server
+- [x] Implement proper cleanup of resources after tool execution
+- [x] Update MCP integration tests
 
-### ITER2-004: Production Resilience Patterns 🔴 PENDING
+**Implementation Details:**
+- **FastMCP v2:** MCP server uses FastMCP v2 framework with domain-based tools
+- **Dishka Integration:** MCP tools use `FromDishka[Type]` for dependency injection
+- **Shared Container:** Same Dishka container used by both REST API and MCP server
+- **Resource Management:** Proper cleanup of database connections and resources
+
+### ITER2-005: Production Resilience Patterns 🔴 PENDING
 **Description:** Implement production-grade resilience and observability patterns
 **PR Size:** Split into 4 sub-tasks for comprehensive coverage
 
@@ -284,7 +276,7 @@ With the integration worker architecture now complete, the next priority is impl
 - [ ] Add security audit logging for integration operations
 - [ ] Create production readiness tests and monitoring
 
-### ITER2-005: Integration Management UI 🟡 PENDING
+### ITER2-006: Integration Management UI 🟡 PENDING
 **Description:** Create UI for managing integrations and sync status
 **PR Size:** Split into 3 sub-tasks for focused development
 
@@ -328,44 +320,58 @@ With the integration worker architecture now complete, the next priority is impl
 
 ## Current Status
 
-**Completed (60%):**
+**Completed (85%):**
 - ✅ Integration foundation with ARQ and Redis
 - ✅ Google API client with automatic token refresh
 - ✅ Data modeling and transformation
 - ✅ Idempotent persistence and incremental sync logic
+- ✅ ARQ worker infrastructure and Docker containers
+- ✅ Dishka dependency injection migration (all phases)
+- ✅ FastMCP v2 integration with Dishka
+- ✅ Integration API endpoint structure
 
 **In Progress:**
-- 🟡 ARQ worker implementation with Dishka integration
-- 🟡 Two-way sync and conflict resolution
+- 🟡 Google Contacts sync business logic implementation
+- 🟡 API endpoint connection to real functionality
 
 **Pending:**
-- 🟡 Dishka migration for entire application
-- 🟡 Production resilience patterns
-- 🟡 Integration management UI
+- � Two-way sync and conflict resolution
+- � Production resilience patterns
+- � Integration management UI
 
 ## Testing Status
 
 ### E2E Integration Tests - Temporarily Skipped ⚠️
-**Status:** Integration e2e tests have been temporarily skipped due to testing non-existent endpoints
+**Status:** Integration e2e tests have been temporarily skipped due to mock endpoint implementations
 
-**Issue:** The integration e2e tests (`frontend/tests/e2e/integrations.spec.ts`) were testing API endpoints (`/api/integrations/*`) that don't exist in the actual running application, causing CI failures.
+**Issue:** The integration e2e tests (`frontend/tests/e2e/integrations.spec.ts`) were testing API endpoints (`/api/integrations/*`) that exist but return mock responses instead of real functionality, causing test failures.
+
+**Current State:**
+- API endpoints exist at `/api/integrations/google/contacts/*` and `/api/integrations/health`
+- Endpoints return mock responses instead of connecting to real ARQ tasks and Redis
+- Worker infrastructure exists but contains placeholder sync logic
 
 **Resolution Applied:**
 - Skipped `Integration Management` test suite - Tests for sync triggers and status monitoring
 - Skipped `Integration UI Components` test suite - Tests for integration UI interactions
 - Skipped `Integration Error Handling` test suite - Tests for error scenarios
 
-**Re-enablement Plan:** These tests can be re-enabled once the actual integration endpoints are implemented in the backend API. The mock integration controllers created provide the foundation, but they need to be connected to real integration logic.
+**Re-enablement Plan:** These tests can be re-enabled once:
+1. API endpoints are connected to real ARQ task queue (ITER2-004 Phase 1)
+2. Worker implements actual Google Contacts sync logic (ITER2-004 Phase 1)
+3. Health endpoints return real Redis and worker status
 
 **Files Affected:**
 - `frontend/tests/e2e/integrations.spec.ts` - All test suites marked with `.skip`
-- `backend/app/api/integrations/controllers.py` - Mock endpoints created but not functional
+- `backend/app/api/integrations/controllers.py` - Endpoints exist but return mock responses
+- `integration_workers/google_contacts/worker.py` - Contains placeholder sync logic
 
 ## Next Steps
 
-1. Complete Google Contacts integration (Slices 4-5)
-2. Migrate application to Dishka dependency injection
-3. Implement production resilience patterns
-4. Build integration management UI
-5. **Re-enable integration e2e tests** once endpoints are functional
-6. Prepare for additional integrations (Immich, Calendar)
+1. **Implement Google Contacts sync business logic** (ITER2-004 Phase 1) - HIGH PRIORITY
+2. **Connect API endpoints to real functionality** (ITER2-004 Phase 1) - HIGH PRIORITY
+3. **Re-enable integration e2e tests** once endpoints are functional
+4. Complete two-way sync and conflict resolution (Slice 5)
+5. Implement production resilience patterns (ITER2-005)
+6. Build integration management UI (ITER2-006)
+7. Prepare for additional integrations (Immich, Calendar)
