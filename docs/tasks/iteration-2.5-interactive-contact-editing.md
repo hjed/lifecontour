@@ -1,6 +1,6 @@
 # Iteration 2.5: Interactive Contact Editing
 
-**Status:** 🟡 PLANNED  
+**Status:** 🟡 PLANNED
 **Goal:** Transform contact view/edit screen into a powerful, interactive interface with inline field editing capabilities
 
 ## Overview
@@ -81,15 +81,23 @@ This iteration follows established patterns:
 **Files Changed:** ~6 files
 
 #### Frontend Changes
-- Add profile picture/avatar display with placeholder support
+- Add profile picture/avatar display with placeholder support using existing shadcn/ui Avatar components
+- Create ContactAvatar component that generates initials from contact names
 - Redesign contact detail page layout (three-column with profile picture)
 - Update contact header with improved visual hierarchy
 - Implement responsive design for new layout
+
+#### Technical Notes
+- Leverages existing shadcn/ui Avatar, AvatarImage, and AvatarFallback components
+- ContactAvatar component handles initials generation (e.g., "John Doe" → "JD")
+- Supports different sizes and future image URL integration
+- Built-in fallback behavior when images fail to load
 
 #### Testing
 - Component tests for avatar display and layout
 - Responsive design tests across breakpoints
 - Accessibility tests for new layout structure
+- Tests for initials generation logic
 
 ### Task 2.5C: Frontend Inline Editing Components
 **Estimated Effort:** 3-4 hours
