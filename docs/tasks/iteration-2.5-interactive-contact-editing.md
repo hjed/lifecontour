@@ -1,6 +1,6 @@
 # Iteration 2.5: Interactive Contact Editing
 
-**Status:** 🟡 PLANNED
+**Status:** 🟡 IN PROGRESS (Task 2.5B Complete)
 **Goal:** Transform contact view/edit screen into a powerful, interactive interface with inline field editing capabilities
 
 ## Overview
@@ -79,7 +79,7 @@ This iteration follows established patterns:
 ### Task 2.5B: Profile Picture & Layout Enhancement
 **Estimated Effort:** 2-3 hours
 **Files Changed:** ~6 files
-**Status:** 🟡 IN PROGRESS
+**Status:** ✅ COMPLETE
 
 #### Implementation Steps
 
@@ -95,31 +95,52 @@ This iteration follows established patterns:
 - Shows tags as badges with correct TagResource structure
 - 20 comprehensive test cases, all passing
 
-**Step 3: Architecture Refactoring** 🔄 IN PROGRESS
-- **Step 3A**: Extract shared utilities and create ContactIdentity component
-- **Step 3B**: Implement page-level CSS Grid three-column layout
-- **Step 3C**: Update tests for new component structure
+**Step 3: Architecture Refactoring** ✅ COMPLETE
+- **Step 3A**: Extract shared utilities and create ContactIdentity component ✅
+  - Extracted `generateDisplayName` utility to shared `/lib/utils.ts` with comprehensive tests
+  - Created ContactIdentity component for name, nickname, and favourite toggle display
+  - Updated components to use proper ContactResource structure with snake_case fields
+  - 13 comprehensive test cases for ContactIdentity component
+  - Removed tag duplication (tags now only displayed in sidebar)
+- **Step 3B**: Implement page-level CSS Grid three-column layout ✅
+  - Responsive three-column CSS Grid: `grid-cols-1` → `md:grid-cols-[128px,1fr]` → `lg:grid-cols-[128px,1fr,280px]`
+  - Mobile-first design with proper semantic HTML (`<header>` landmark)
+  - Desktop sidebar for tags and metadata, mobile fallback below main content
+  - Deprecated ContactHeader with proper JSDoc warnings
+  - 8 contact detail page tests passing
 
-**Step 4: Responsive Design** 🔄 PLANNED
+**Step 4: Responsive Design** ✅ COMPLETE
 - Mobile-first approach with proper stacking on small screens
-- Tablet and desktop optimizations for three-column display
+- Tablet: Two columns (128px avatar + flexible identity)
+- Desktop: Three columns (128px avatar + flexible identity + 280px sidebar)
+- Mobile fallback for tags and metadata shown below main content
 
-**Step 5: Integration Testing** 🔄 PLANNED
-- Test with various contact data scenarios
-- Ensure accessibility compliance across all breakpoints
+**Step 5: Integration Testing** ✅ COMPLETE
+- All 370 tests passing (35 test suites)
+- Comprehensive test coverage across all components
+- Accessibility compliance with proper semantic HTML and ARIA labels
+- Quality gates passing: formatting, linting, type checking
 
 #### Technical Notes
 - Leverages existing shadcn/ui Avatar, AvatarImage, and AvatarFallback components
 - ContactAvatar component handles initials generation (e.g., "John Doe" → "JD")
 - Supports different sizes and future image URL integration
 - Built-in fallback behavior when images fail to load
-- Three-column layout: Profile picture, contact details, activity/relationships sidebar
+- Three-column responsive CSS Grid layout: Profile picture, contact details, activity/relationships sidebar
+- Mobile-first design: `grid-cols-1` → `md:grid-cols-[128px,1fr]` → `lg:grid-cols-[128px,1fr,280px]`
+- Shared utilities extracted to `/lib/utils.ts` for DRY principle
+- ContactIdentity component handles name, nickname, and favourite toggle display (tags moved to sidebar)
+- Deprecated ContactHeader with proper JSDoc warnings for future removal
+- Removed legacy editing functionality to prepare clean foundation for inline editing
+- Proper semantic HTML with `<header>` landmark for accessibility
 
 #### Testing
-- Component tests for avatar display and layout
-- Responsive design tests across breakpoints
-- Accessibility tests for new layout structure
-- Tests for initials generation logic
+- Component tests for avatar display and layout (18 ContactAvatar + 20 ContactHeader + 13 ContactIdentity tests)
+- Responsive design tests across breakpoints (6 contact detail page tests)
+- Accessibility tests for new layout structure with semantic HTML
+- Tests for initials generation logic and shared utilities (10 utility tests)
+- All 57 layout-related tests passing with comprehensive coverage
+- Removed 5 tests related to legacy editing functionality and tag duplication
 
 ### Task 2.5C: Frontend Inline Editing Components
 **Estimated Effort:** 3-4 hours
