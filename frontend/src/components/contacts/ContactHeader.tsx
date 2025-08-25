@@ -15,16 +15,16 @@ import { TagResource } from '@/types/contacts';
  * See the contact detail page (/app/contacts/[id]/page.tsx) for the new implementation.
  */
 interface ContactHeaderProps {
-  contact: {
-    id: string;
-    firstName: string;
-    lastName?: string;
-    nickName?: string;
-    isFavourite: boolean;
-    tags?: TagResource[];
+  readonly contact: {
+    readonly id: string;
+    readonly firstName: string;
+    readonly lastName?: string;
+    readonly nickName?: string;
+    readonly isFavourite: boolean;
+    readonly tags?: TagResource[];
   };
-  avatarSize?: 'sm' | 'md' | 'lg';
-  className?: string;
+  readonly avatarSize?: 'sm' | 'md' | 'lg';
+  readonly className?: string;
 }
 
 /**

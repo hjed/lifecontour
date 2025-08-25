@@ -2,11 +2,11 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { cn, generateDisplayName } from '@/lib/utils';
 
 interface ContactAvatarProps {
-  firstName: string;
-  lastName?: string;
-  imageUrl?: string;
-  size?: 'sm' | 'md' | 'lg';
-  className?: string;
+  readonly firstName: string;
+  readonly lastName?: string;
+  readonly imageUrl?: string;
+  readonly size?: 'sm' | 'md' | 'lg';
+  readonly className?: string;
 }
 
 /**
