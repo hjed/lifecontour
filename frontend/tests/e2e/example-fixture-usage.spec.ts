@@ -129,7 +129,9 @@ test.describe('Example: Fixture-Based Testing', () => {
       ).toBeVisible();
     });
 
-    test('should edit existing contact', async ({ contactsWithData }) => {
+    // TODO: Re-enable this test in Task 2.5C when inline editing is implemented
+    // Currently skipped because legacy edit functionality was removed to prepare for inline editing
+    test.skip('should edit existing contact', async ({ contactsWithData }) => {
       const { page, contacts } = contactsWithData;
 
       // Navigate to contacts page
