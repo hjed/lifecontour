@@ -1,17 +1,16 @@
 """
-Google Contacts API Client for Worker.
+Google Contacts API client for worker.
 
-Handles communication with Google People API for contacts synchronization.
+Simplified version of the core client adapted for worker environment.
+Migrated from backend/app/core/integrations/google_contacts/client.py
 """
 
-import logging
 from typing import Any, cast
 
 import structlog
+from google.oauth2.credentials import Credentials as OAuth2Credentials
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
-from google.auth.credentials import Credentials
-from google.oauth2.credentials import Credentials as OAuth2Credentials
 
 from google_auth_service import GoogleAuthService, GoogleAuthTokensNotFoundError
 
