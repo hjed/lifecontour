@@ -10,13 +10,51 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 
+class GoogleSource(BaseModel):
+    """Google People API source structure for field metadata."""
+
+    type: str | None = None
+    id: str | None = None
+    etag: str | None = None
+    update_time: str | None = Field(default=None, alias="updateTime")
+
+
+class GoogleDate(BaseModel):
+    """Google People API date structure."""
+
+    year: int | None = None
+    month: int | None = None
+    day: int | None = None
+
+
+class GoogleNickname(BaseModel):
+    """Google People API nickname structure."""
+
+    metadata: "GoogleFieldMetadata" = Field(default_factory=lambda: GoogleFieldMetadata())
+    value: str | None = None
+    type: str | None = None
+
+
+class GoogleContactGroupMembership(BaseModel):
+    """Google People API contact group membership structure."""
+
+    contact_group_resource_name: str | None = Field(default=None, alias="contactGroupResourceName")
+    contact_group_id: str | None = Field(default=None, alias="contactGroupId")
+
+
+class GoogleDomainMembership(BaseModel):
+    """Google People API domain membership structure."""
+
+    in_viewer_domain: bool | None = Field(default=None, alias="inViewerDomain")
+
+
 class GoogleFieldMetadata(BaseModel):
     """Metadata for Google People API fields."""
 
     primary: bool = False
     source_primary: bool = Field(default=False, alias="sourcePrimary")
     verified: bool = False
-    source: dict[str, Any] = Field(default_factory=dict)
+    source: GoogleSource = Field(default_factory=GoogleSource)
 
 
 class GoogleName(BaseModel):
@@ -83,8 +121,8 @@ class GoogleOrganization(BaseModel):
     metadata: GoogleFieldMetadata = Field(default_factory=GoogleFieldMetadata)
     type: str | None = None
     formatted_type: str | None = Field(default=None, alias="formattedType")
-    start_date: dict[str, Any] | None = Field(default=None, alias="startDate")
-    end_date: dict[str, Any] | None = Field(default=None, alias="endDate")
+    start_date: GoogleDate | None = Field(default=None, alias="startDate")
+    end_date: GoogleDate | None = Field(default=None, alias="endDate")
     current: bool | None = None
     name: str | None = None
     phonetic_name: str | None = Field(default=None, alias="phoneticName")
@@ -100,7 +138,7 @@ class GoogleBirthday(BaseModel):
     """Google People API birthday structure."""
 
     metadata: GoogleFieldMetadata = Field(default_factory=GoogleFieldMetadata)
-    date: dict[str, Any] | None = None
+    date: GoogleDate | None = None
     text: str | None = None
 
 
@@ -116,10 +154,10 @@ class GoogleMembership(BaseModel):
     """Google People API membership structure (for contact groups/labels)."""
 
     metadata: GoogleFieldMetadata = Field(default_factory=GoogleFieldMetadata)
-    contact_group_membership: dict[str, Any] | None = Field(
+    contact_group_membership: GoogleContactGroupMembership | None = Field(
         default=None, alias="contactGroupMembership"
     )
-    domain_membership: dict[str, Any] | None = Field(
+    domain_membership: GoogleDomainMembership | None = Field(
         default=None, alias="domainMembership"
     )
 
@@ -130,7 +168,7 @@ class GooglePerson(BaseModel):
     resource_name: str = Field(alias="resourceName")
     etag: str | None = None
     names: list[GoogleName] = Field(default_factory=list)
-    nicknames: list[dict[str, Any]] = Field(default_factory=list)
+    nicknames: list[GoogleNickname] = Field(default_factory=list)
     email_addresses: list[GoogleEmailAddress] = Field(
         default_factory=list, alias="emailAddresses"
     )

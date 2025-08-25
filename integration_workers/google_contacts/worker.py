@@ -82,6 +82,9 @@ structlog.configure(
 
 logger = structlog.get_logger()
 
+# Constants
+SITE_USER_ID = 1  # Single-user system assumption - change if multi-user support needed
+
 
 async def startup(ctx: dict[str, Any]) -> None:
     """
@@ -132,10 +135,10 @@ async def _determine_smart_sync_type(session: AsyncSession, google_account_email
     stmt = text("""
         SELECT sync_token
         FROM user_google_auth
-        WHERE user_id = 1 AND google_account_email = :email
+        WHERE user_id = :user_id AND google_account_email = :email
         AND sync_token IS NOT NULL
     """)
-    result = await session.execute(stmt, {"email": google_account_email})
+    result = await session.execute(stmt, {"user_id": SITE_USER_ID, "email": google_account_email})
     sync_token = result.scalar()
 
     if sync_token:
@@ -188,12 +191,28 @@ async def _perform_full_sync(
         if not contacts_response.connections:
             break
 
+        # Batch serialize contacts for better performance
+        try:
+            # Pre-serialize all contacts in batch to avoid repeated model_dump() calls
+            serialized_contacts = [
+                (person, person.model_dump()) for person in contacts_response.connections
+            ]
+        except Exception as e:
+            logger.error(
+                "Failed to serialize contacts batch",
+                google_account_email=google_account_email,
+                batch_size=len(contacts_response.connections),
+                error=str(e)
+            )
+            metrics["errors"] = metrics.get("errors", 0) + len(contacts_response.connections)
+            continue
+
         # Process each contact using outbox pattern
-        for google_person in contacts_response.connections:
+        for google_person, contact_data in serialized_contacts:
             try:
                 # Create outbox event for contact sync
                 outbox_event = OutboxEvent.create_contact_sync_event(
-                    contact_data=google_person.model_dump(),
+                    contact_data=contact_data,
                     integration_source="google_contacts",
                     external_id=google_person.resource_name,
                     sync_type="created"
@@ -256,9 +275,9 @@ async def _perform_incremental_sync(
     stmt = text("""
         SELECT sync_token
         FROM user_google_auth
-        WHERE user_id = 1 AND google_account_email = :email
+        WHERE user_id = :user_id AND google_account_email = :email
     """)
-    result = await session.execute(stmt, {"email": google_account_email})
+    result = await session.execute(stmt, {"user_id": SITE_USER_ID, "email": google_account_email})
     sync_token = result.scalar()
 
     if not sync_token:
@@ -274,12 +293,27 @@ async def _perform_incremental_sync(
 
     total_processed = 0
 
+    # Batch serialize contacts for better performance
+    try:
+        # Pre-serialize all contacts in batch to avoid repeated model_dump() calls
+        serialized_contacts = [
+            (person, person.model_dump()) for person in contacts_response.connections
+        ]
+    except Exception as e:
+        logger.error(
+            "Failed to serialize contacts batch",
+            google_account_email=google_account_email,
+            batch_size=len(contacts_response.connections),
+            error=str(e)
+        )
+        return {"contacts_updated": 0, "errors": len(contacts_response.connections)}
+
     # Process changed contacts using outbox pattern
-    for google_person in contacts_response.connections:
+    for google_person, contact_data in serialized_contacts:
         try:
             # Create outbox event for contact sync
             outbox_event = OutboxEvent.create_contact_sync_event(
-                contact_data=google_person.model_dump(),
+                contact_data=contact_data,
                 integration_source="google_contacts",
                 external_id=google_person.resource_name,
                 sync_type="updated"
@@ -325,12 +359,13 @@ async def _save_sync_token(session: AsyncSession, google_account_email: str, syn
     stmt = text("""
         UPDATE user_google_auth
         SET sync_token = :sync_token, updated_at = :updated_at
-        WHERE user_id = 1 AND google_account_email = :email
+        WHERE user_id = :user_id AND google_account_email = :email
     """)
 
     await session.execute(stmt, {
         "sync_token": sync_token,
         "updated_at": datetime.now(UTC),
+        "user_id": SITE_USER_ID,
         "email": google_account_email
     })
 
