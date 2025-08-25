@@ -128,36 +128,53 @@ The integration architecture foundation is complete. The next priority is implem
 **Dependencies:** Integration infrastructure (✅ COMPLETED)
 **Target:** Complete functional Google Contacts sync
 
-**Current State:** All infrastructure exists (API client, auth service, data models, transformers, worker container, API endpoints), but the worker contains placeholder sync logic and API endpoints return mock responses.
+**Current State:** ✅ Worker sync logic implemented with outbox pattern. Google Contacts integration migrated from core to worker. Architecture compliance achieved - worker uses message-based communication via outbox events.
 
-#### Phase 1: Worker Sync Logic Implementation � IMMEDIATE
-**PR Size:** ~6 files (Worker sync logic, API endpoint connections, tests)
+#### Phase 1: Worker Sync Logic Implementation ✅ COMPLETED
+**Status:** Worker now implements actual Google People API sync using outbox pattern
+
+**Completed:**
+- [x] Implemented actual Google People API calls in worker
+- [x] Migrated Google Contacts integration from core to worker (resolved code duplication)
+- [x] Added outbox pattern for message-based architecture compliance
+- [x] Implemented full sync and incremental sync with smart sync strategy
+- [x] Added comprehensive error handling and structured logging
+- [x] Fixed timezone consistency issues (UTC throughout)
+
+#### Phase 2: Outbox Event Processing & API Integration 🔴 IMMEDIATE
+**PR Size:** ~8 files (Outbox processor, API endpoints, core cleanup, tests)
 **Estimated Effort:** 2-3 days
 
 **Acceptance Criteria:**
-- [ ] Replace placeholder sync logic in `integration_workers/google_contacts/worker.py`
-- [ ] Implement actual Google People API calls using existing GoogleContactsAPIClient
-- [ ] Connect existing GoogleContactsService to worker tasks
-- [ ] Implement full sync and incremental sync using existing service methods
-- [ ] Add proper error handling and logging in worker
+- [ ] Create outbox event processor in core to handle contact creation/updates
+- [ ] Remove Google Contacts integration from core (keep only outbox processing)
 - [ ] Connect API endpoints to real ARQ task queue instead of mock responses
 
-**Implementation Plan:**
-1. **Worker Business Logic**
-   - Use existing GoogleContactsService.full_sync() and incremental_sync() methods
-   - Implement proper database session management in worker
-   - Add comprehensive error handling and retry logic
+- [ ] Implement real job status tracking using ARQ job IDs
+- [ ] Connect health endpoints to actual Redis and worker status
+- [ ] Re-enable integration E2E tests once endpoints are functional
 
-2. **API Endpoint Integration**
+**Implementation Plan:**
+1. **Outbox Event Processor**
+   - Create `OutboxEventProcessor` service in core to process contact sync events
+   - Use existing `ContactService` to create/update contacts from outbox events
+   - Implement event processing with proper error handling and retry logic
+
+2. **Core Integration Cleanup**
+   - Remove Google Contacts services from core (migrate to worker completed)
+   - Keep only outbox processing and database models in core
+   - Update dependency injection to remove Google Contacts providers
+
+3. **API Endpoint Integration**
    - Connect `/api/integrations/google/contacts/sync` to ARQ task queue
    - Implement real job status tracking using ARQ job IDs
    - Connect health endpoints to actual Redis and worker status
 
-3. **Testing Integration**
-   - Update worker tests to use real sync logic
+4. **Testing Integration**
+   - Update integration tests to use outbox pattern
    - Re-enable integration E2E tests once endpoints are functional
 
-#### Phase 2: OAuth Integration & UI Flow 🟡 FOLLOWING
+#### Phase 3: OAuth Integration & UI Flow 🟡 FOLLOWING
 **PR Size:** ~4 files (OAuth endpoints, frontend integration, tests)
 **Estimated Effort:** 2-3 days
 
