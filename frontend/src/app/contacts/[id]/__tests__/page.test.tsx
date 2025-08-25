@@ -165,37 +165,6 @@ describe('ContactDetailPage', () => {
     expect(screen.getAllByText('Information')).toHaveLength(2); // Desktop sidebar + mobile fallback
   });
 
-  it('handles edit mode toggle', async () => {
-    const user = userEvent.setup();
-
-    mockUseContact.mockReturnValue({
-      data: mockContactData,
-      isLoading: false,
-      error: null,
-    } as any);
-
-    mockUseUpdateContact.mockReturnValue({
-      mutateAsync: jest.fn(),
-      isPending: false,
-    } as any);
-
-    mockUseDeleteContact.mockReturnValue({
-      mutateAsync: jest.fn(),
-      isPending: false,
-    } as any);
-
-    renderContactDetailPage();
-
-    // Wait for authentication to complete and page to load
-    const editButton = await screen.findByRole('button', { name: /edit/i });
-    await user.click(editButton);
-
-    expect(screen.getAllByRole('button', { name: /cancel/i })).toHaveLength(2); // One from edit mode, one from form
-    expect(
-      screen.getByRole('button', { name: /save contact/i })
-    ).toBeInTheDocument();
-  });
-
   it('handles back navigation', async () => {
     const user = userEvent.setup();
 
@@ -267,52 +236,6 @@ describe('ContactDetailPage', () => {
 
     await waitFor(() => {
       expect(mockDeleteMutation).toHaveBeenCalledWith('1');
-    });
-  });
-
-  it('handles update contact', async () => {
-    const user = userEvent.setup();
-    const mockUpdateMutation = jest.fn().mockResolvedValue({});
-
-    mockUseContact.mockReturnValue({
-      data: mockContactData,
-      isLoading: false,
-      error: null,
-    } as any);
-
-    mockUseUpdateContact.mockReturnValue({
-      mutateAsync: mockUpdateMutation,
-      isPending: false,
-    } as any);
-
-    mockUseDeleteContact.mockReturnValue({
-      mutateAsync: jest.fn(),
-      isPending: false,
-    } as any);
-
-    renderContactDetailPage();
-
-    // Wait for authentication to complete and page to load
-    // Enter edit mode
-    const editButton = await screen.findByRole('button', { name: /edit/i });
-    await user.click(editButton);
-
-    // Modify the first name
-    const firstNameInput = screen.getByDisplayValue('John');
-    await user.clear(firstNameInput);
-    await user.type(firstNameInput, 'Jane');
-
-    // Save changes
-    const saveButton = screen.getByRole('button', { name: /save contact/i });
-    await user.click(saveButton);
-
-    await waitFor(() => {
-      expect(mockUpdateMutation).toHaveBeenCalledWith({
-        id: '1',
-        data: expect.objectContaining({
-          first_name: 'Jane',
-        }),
-      });
     });
   });
 

@@ -1,7 +1,6 @@
-import { Badge } from '@/components/ui/badge';
 import { generateDisplayName } from '@/lib/utils';
 import { FavouriteToggle } from './FavouriteToggle';
-import type { ContactResource, TagResource } from '@/types/contacts';
+import type { ContactResource } from '@/types/contacts';
 
 interface ContactIdentityProps {
   contact: ContactResource;
@@ -36,22 +35,6 @@ export function ContactIdentity({ contact, className }: ContactIdentityProps) {
           )}
         <FavouriteToggle {...favouriteProps} />
       </div>
-
-      {contact.relationships?.tags?.data &&
-        contact.relationships.tags.data.length > 0 && (
-          <div className='flex flex-wrap gap-2'>
-            {contact.relationships.tags.data.map((tag: TagResource) => (
-              <Badge
-                key={tag.id}
-                variant='secondary'
-                className='text-xs'
-                data-testid={`tag-${tag.attributes.name}`}
-              >
-                {tag.attributes.name}
-              </Badge>
-            ))}
-          </div>
-        )}
     </div>
   );
 }

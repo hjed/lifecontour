@@ -120,42 +120,6 @@ describe('ContactIdentity', () => {
     });
   });
 
-  describe('tags display', () => {
-    it('shows tags as badges', () => {
-      render(<ContactIdentity contact={mockContact} />);
-
-      expect(screen.getByTestId('tag-Work')).toBeInTheDocument();
-      expect(screen.getByTestId('tag-Client')).toBeInTheDocument();
-      expect(screen.getByText('Work')).toBeInTheDocument();
-      expect(screen.getByText('Client')).toBeInTheDocument();
-    });
-
-    it('handles contact without tags', () => {
-      const contactWithoutTags = {
-        ...mockContact,
-        relationships: { ...mockContact.relationships, tags: undefined },
-      };
-      render(<ContactIdentity contact={contactWithoutTags} />);
-
-      expect(screen.queryByTestId('tag-Work')).not.toBeInTheDocument();
-      expect(screen.queryByTestId('tag-Client')).not.toBeInTheDocument();
-    });
-
-    it('handles contact with empty tags array', () => {
-      const contactWithEmptyTags = {
-        ...mockContact,
-        relationships: {
-          ...mockContact.relationships,
-          tags: { ...mockContact.relationships?.tags, data: [] },
-        },
-      };
-      render(<ContactIdentity contact={contactWithEmptyTags} />);
-
-      expect(screen.queryByTestId('tag-Work')).not.toBeInTheDocument();
-      expect(screen.queryByTestId('tag-Client')).not.toBeInTheDocument();
-    });
-  });
-
   describe('favourite toggle functionality', () => {
     it('displays favourite toggle with correct state', () => {
       render(<ContactIdentity contact={mockContact} />);
