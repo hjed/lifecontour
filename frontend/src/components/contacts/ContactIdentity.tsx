@@ -3,8 +3,8 @@ import { FavouriteToggle } from './FavouriteToggle';
 import type { ContactResource } from '@/types/contacts';
 
 interface ContactIdentityProps {
-  contact: ContactResource;
-  className?: string;
+  readonly contact: ContactResource;
+  readonly className?: string;
 }
 
 /**
@@ -27,12 +27,11 @@ export function ContactIdentity({ contact, className }: ContactIdentityProps) {
     <div className={className}>
       <div className='mb-2 flex items-center gap-3'>
         <h1 className='text-2xl font-bold tracking-tight'>{displayName}</h1>
-        {contact.attributes.nick_name &&
-          contact.attributes.nick_name.trim() && (
-            <span className='text-muted-foreground text-lg font-medium'>
-              &ldquo;{contact.attributes.nick_name}&rdquo;
-            </span>
-          )}
+        {contact.attributes.nick_name?.trim() && (
+          <span className='text-muted-foreground text-lg font-medium'>
+            &ldquo;{contact.attributes.nick_name}&rdquo;
+          </span>
+        )}
         <FavouriteToggle {...favouriteProps} />
       </div>
     </div>

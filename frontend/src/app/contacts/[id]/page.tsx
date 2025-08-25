@@ -25,6 +25,23 @@ import { ContactIdentity } from '@/components/contacts/ContactIdentity';
 import { AuthGuard } from '@/components/auth/AuthGuard';
 import { DATE_FORMATS } from '@/lib/constants';
 
+// Helper components to reduce duplication
+const PrimaryBadge = () => (
+  <Badge variant='secondary' className='ml-2 text-xs'>
+    Primary
+  </Badge>
+);
+
+const MetadataItem = ({ label, value }: { label: string; value: string }) => (
+  <div className='flex items-center gap-2 text-sm'>
+    <Calendar className='text-muted-foreground h-4 w-4' />
+    <div>
+      <p className='font-medium'>{label}</p>
+      <p className='text-muted-foreground'>{value}</p>
+    </div>
+  </div>
+);
+
 export default function ContactDetailPage() {
   return (
     <AuthGuard>
@@ -165,34 +182,24 @@ function ContactDetailPageContent() {
               <CardTitle className='text-lg'>Information</CardTitle>
             </CardHeader>
             <CardContent className='space-y-3'>
-              <div className='flex items-center gap-2 text-sm'>
-                <Calendar className='text-muted-foreground h-4 w-4' />
-                <div>
-                  <p className='font-medium'>Created</p>
-                  <p className='text-muted-foreground'>
-                    {format(
-                      new Date(contact.attributes.created_at),
-                      DATE_FORMATS.LONG,
-                      { locale: enAU }
-                    )}
-                  </p>
-                </div>
-              </div>
+              <MetadataItem
+                label='Created'
+                value={format(
+                  new Date(contact.attributes.created_at),
+                  DATE_FORMATS.LONG,
+                  { locale: enAU }
+                )}
+              />
               {contact.attributes.updated_at !==
                 contact.attributes.created_at && (
-                <div className='flex items-center gap-2 text-sm'>
-                  <Calendar className='text-muted-foreground h-4 w-4' />
-                  <div>
-                    <p className='font-medium'>Last Updated</p>
-                    <p className='text-muted-foreground'>
-                      {format(
-                        new Date(contact.attributes.updated_at),
-                        DATE_FORMATS.LONG,
-                        { locale: enAU }
-                      )}
-                    </p>
-                  </div>
-                </div>
+                <MetadataItem
+                  label='Last Updated'
+                  value={format(
+                    new Date(contact.attributes.updated_at),
+                    DATE_FORMATS.LONG,
+                    { locale: enAU }
+                  )}
+                />
               )}
             </CardContent>
           </Card>
@@ -232,12 +239,7 @@ function ContactDetailPageContent() {
                               <p className='text-sm'>
                                 {method.attributes.value}
                                 {method.attributes.is_primary && (
-                                  <Badge
-                                    variant='secondary'
-                                    className='ml-2 text-xs'
-                                  >
-                                    Primary
-                                  </Badge>
+                                  <PrimaryBadge />
                                 )}
                               </p>
                               {method.attributes.label && (
@@ -271,12 +273,7 @@ function ContactDetailPageContent() {
                               <p className='text-sm'>
                                 {address.attributes.street_line_1}
                                 {address.attributes.is_primary && (
-                                  <Badge
-                                    variant='secondary'
-                                    className='ml-2 text-xs'
-                                  >
-                                    Primary
-                                  </Badge>
+                                  <PrimaryBadge />
                                 )}
                               </p>
                               {address.attributes.street_line_2 && (
@@ -364,34 +361,24 @@ function ContactDetailPageContent() {
               <CardTitle className='text-lg'>Information</CardTitle>
             </CardHeader>
             <CardContent className='space-y-3'>
-              <div className='flex items-center gap-2 text-sm'>
-                <Calendar className='text-muted-foreground h-4 w-4' />
-                <div>
-                  <p className='font-medium'>Created</p>
-                  <p className='text-muted-foreground'>
-                    {format(
-                      new Date(contact.attributes.created_at),
-                      DATE_FORMATS.LONG,
-                      { locale: enAU }
-                    )}
-                  </p>
-                </div>
-              </div>
+              <MetadataItem
+                label='Created'
+                value={format(
+                  new Date(contact.attributes.created_at),
+                  DATE_FORMATS.LONG,
+                  { locale: enAU }
+                )}
+              />
               {contact.attributes.updated_at !==
                 contact.attributes.created_at && (
-                <div className='flex items-center gap-2 text-sm'>
-                  <Calendar className='text-muted-foreground h-4 w-4' />
-                  <div>
-                    <p className='font-medium'>Last Updated</p>
-                    <p className='text-muted-foreground'>
-                      {format(
-                        new Date(contact.attributes.updated_at),
-                        DATE_FORMATS.LONG,
-                        { locale: enAU }
-                      )}
-                    </p>
-                  </div>
-                </div>
+                <MetadataItem
+                  label='Last Updated'
+                  value={format(
+                    new Date(contact.attributes.updated_at),
+                    DATE_FORMATS.LONG,
+                    { locale: enAU }
+                  )}
+                />
               )}
             </CardContent>
           </Card>
