@@ -32,6 +32,12 @@ class GoogleName(BaseModel):
     phonetic_family_name: str | None = Field(default=None, alias="phoneticFamilyName")
     phonetic_given_name: str | None = Field(default=None, alias="phoneticGivenName")
     phonetic_middle_name: str | None = Field(default=None, alias="phoneticMiddleName")
+    phonetic_honorific_prefix: str | None = Field(
+        default=None, alias="phoneticHonorificPrefix"
+    )
+    phonetic_honorific_suffix: str | None = Field(
+        default=None, alias="phoneticHonorificSuffix"
+    )
 
 
 class GoogleEmailAddress(BaseModel):
@@ -99,7 +105,7 @@ class GoogleBirthday(BaseModel):
 
 
 class GoogleBiography(BaseModel):
-    """Google People API biography structure."""
+    """Google People API biography/note structure."""
 
     metadata: GoogleFieldMetadata = Field(default_factory=GoogleFieldMetadata)
     value: str

@@ -1,18 +1,15 @@
 """
-Google Authentication Service for Worker.
+Google authentication service for managing OAuth tokens in worker.
 
-Handles Google OAuth token management for the Google Contacts worker.
-This is a simplified version focused on worker needs.
+Migrated from backend/app/core/integrations/google_contacts/service.py
+and adapted for worker environment with simplified dependencies.
 """
 
-import logging
-from datetime import datetime, UTC, timedelta
-from typing import Optional
+from datetime import UTC, datetime, timedelta
 
 import httpx
 import structlog
 from cryptography.fernet import Fernet
-from pydantic import SecretStr
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -23,17 +20,23 @@ SITE_USER_ID = 1
 
 
 class GoogleAuthTokensNotFoundError(Exception):
-    """Raised when Google auth tokens are not found for a user."""
+    """Raised when no Google OAuth tokens are found for the user."""
     pass
 
 
 class TokenRefreshFailedError(Exception):
-    """Raised when token refresh fails permanently."""
+    """Raised when Google token refresh fails permanently."""
     pass
 
 
 class GoogleAuthService:
-    """Service for managing Google OAuth tokens in the worker."""
+    """
+    Service for managing Google OAuth credentials in worker.
+
+    Provides secure storage and retrieval of Google OAuth tokens with
+    automatic encryption/decryption and concurrency-safe token refresh.
+    Adapted for worker environment.
+    """
 
     def __init__(
         self,
@@ -43,7 +46,7 @@ class GoogleAuthService:
         google_client_secret: str,
     ) -> None:
         """
-        Initialize the Google auth service.
+        Initialize Google auth service.
 
         Args:
             session: Database session
