@@ -23,6 +23,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 
 import { ContactAvatar } from '@/components/contacts/ContactAvatar';
 import { ContactIdentity } from '@/components/contacts/ContactIdentity';
+import type { TagResource } from '@/types/contacts';
 import { AuthGuard } from '@/components/auth/AuthGuard';
 import { DATE_FORMATS } from '@/lib/constants';
 
@@ -39,6 +40,81 @@ const MetadataItem = ({ label, value }: { label: string; value: string }) => (
     <div>
       <p className='font-medium'>{label}</p>
       <p className='text-muted-foreground'>{value}</p>
+    </div>
+  </div>
+);
+
+const TagsCard = ({
+  tags,
+  title = 'Tags',
+}: {
+  tags: TagResource[];
+  title?: string;
+}) =>
+  tags.length > 0 ? (
+    <Card>
+      <CardHeader>
+        <CardTitle className='text-lg'>{title}</CardTitle>
+      </CardHeader>
+      <CardContent>
+        <div className='flex flex-wrap gap-2'>
+          {tags.map(tag => (
+            <Badge key={tag.id} variant='secondary'>
+              {tag.attributes.name}
+            </Badge>
+          ))}
+        </div>
+      </CardContent>
+    </Card>
+  ) : null;
+
+const ContactMethodItem = ({ method }: { method: any }) => (
+  <div className='flex items-center gap-3'>
+    {method.attributes.method_type === 'email' && (
+      <Mail className='text-muted-foreground h-4 w-4' />
+    )}
+    {method.attributes.method_type === 'phone' && (
+      <Phone className='text-muted-foreground h-4 w-4' />
+    )}
+    <div>
+      <p className='text-sm'>
+        {method.attributes.value}
+        {method.attributes.is_primary && <PrimaryBadge />}
+      </p>
+      {method.attributes.label && (
+        <p className='text-muted-foreground text-xs'>
+          {method.attributes.label}
+        </p>
+      )}
+    </div>
+  </div>
+);
+
+const AddressItem = ({ address }: { address: any }) => (
+  <div className='flex items-start gap-3'>
+    <MapPin className='text-muted-foreground mt-0.5 h-4 w-4' />
+    <div>
+      <p className='text-sm'>
+        {address.attributes.street_line_1}
+        {address.attributes.is_primary && <PrimaryBadge />}
+      </p>
+      {address.attributes.street_line_2 && (
+        <p className='text-muted-foreground text-sm'>
+          {address.attributes.street_line_2}
+        </p>
+      )}
+      <p className='text-muted-foreground text-sm'>
+        {address.attributes.locality}, {address.attributes.region}{' '}
+        {address.attributes.postal_code}
+      </p>
+      <p className='text-muted-foreground text-sm'>
+        {address.attributes.country_code}
+      </p>
+      {address.attributes.label && (
+        <p className='text-muted-foreground text-xs'>
+          {address.attributes.label}
+        </p>
+      )}
     </div>
   </div>
 );
@@ -162,22 +238,7 @@ function ContactDetailPageContent() {
         {/* Column 3: Sidebar (hidden on smaller screens) */}
         <aside className='hidden space-y-4 lg:col-start-3 lg:block'>
           {/* Tags */}
-          {tags.length > 0 && (
-            <Card>
-              <CardHeader>
-                <CardTitle className='text-lg'>Tags</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className='flex flex-wrap gap-2'>
-                  {tags.map(tag => (
-                    <Badge key={tag.id} variant='secondary'>
-                      {tag.attributes.name}
-                    </Badge>
-                  ))}
-                </div>
-              </CardContent>
-            </Card>
-          )}
+          <TagsCard tags={tags} />
 
           {/* Metadata */}
           <Card>
@@ -225,33 +286,13 @@ function ContactDetailPageContent() {
                       <h3 className='mb-3 font-semibold'>Contact Methods</h3>
                       <div className='space-y-2'>
                         {contact.attributes.contact_methods.map(method => (
-                          <div
+                          <ContactMethodItem
                             key={
                               method.id ||
                               `${method.attributes.method_type}-${method.attributes.value}`
                             }
-                            className='flex items-center gap-3'
-                          >
-                            {method.attributes.method_type === 'email' && (
-                              <Mail className='text-muted-foreground h-4 w-4' />
-                            )}
-                            {method.attributes.method_type === 'phone' && (
-                              <Phone className='text-muted-foreground h-4 w-4' />
-                            )}
-                            <div>
-                              <p className='text-sm'>
-                                {method.attributes.value}
-                                {method.attributes.is_primary && (
-                                  <PrimaryBadge />
-                                )}
-                              </p>
-                              {method.attributes.label && (
-                                <p className='text-muted-foreground text-xs'>
-                                  {method.attributes.label}
-                                </p>
-                              )}
-                            </div>
-                          </div>
+                            method={method}
+                          />
                         ))}
                       </div>
                     </div>
@@ -264,41 +305,13 @@ function ContactDetailPageContent() {
                       <h3 className='mb-3 font-semibold'>Addresses</h3>
                       <div className='space-y-3'>
                         {contact.attributes.addresses.map(address => (
-                          <div
+                          <AddressItem
                             key={
                               address.id ||
                               `${address.attributes.street_line_1}-${address.attributes.postal_code || address.attributes.locality}`
                             }
-                            className='flex items-start gap-3'
-                          >
-                            <MapPin className='text-muted-foreground mt-0.5 h-4 w-4' />
-                            <div>
-                              <p className='text-sm'>
-                                {address.attributes.street_line_1}
-                                {address.attributes.is_primary && (
-                                  <PrimaryBadge />
-                                )}
-                              </p>
-                              {address.attributes.street_line_2 && (
-                                <p className='text-muted-foreground text-sm'>
-                                  {address.attributes.street_line_2}
-                                </p>
-                              )}
-                              <p className='text-muted-foreground text-sm'>
-                                {address.attributes.locality},{' '}
-                                {address.attributes.region}{' '}
-                                {address.attributes.postal_code}
-                              </p>
-                              <p className='text-muted-foreground text-sm'>
-                                {address.attributes.country_code}
-                              </p>
-                              {address.attributes.label && (
-                                <p className='text-muted-foreground text-xs'>
-                                  {address.attributes.label}
-                                </p>
-                              )}
-                            </div>
-                          </div>
+                            address={address}
+                          />
                         ))}
                       </div>
                     </div>
@@ -341,22 +354,7 @@ function ContactDetailPageContent() {
         {/* Sidebar - Mobile fallback for tags and metadata */}
         <div className='space-y-6 lg:hidden'>
           {/* Tags - Mobile Only */}
-          {tags.length > 0 && (
-            <Card>
-              <CardHeader>
-                <CardTitle className='text-lg'>Tags</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className='flex flex-wrap gap-2'>
-                  {tags.map(tag => (
-                    <Badge key={tag.id} variant='secondary'>
-                      {tag.attributes.name}
-                    </Badge>
-                  ))}
-                </div>
-              </CardContent>
-            </Card>
-          )}
+          <TagsCard tags={tags} />
 
           {/* Metadata - Mobile Only */}
           <Card>
