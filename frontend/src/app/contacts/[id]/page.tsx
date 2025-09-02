@@ -14,6 +14,7 @@ import { ArrowLeft, Trash2, Mail, Phone, MapPin, Calendar } from 'lucide-react';
 import { format } from 'date-fns';
 import { enAU } from 'date-fns/locale';
 import { useContact, useDeleteContact } from '@/lib/api/contacts';
+import { generateDisplayName } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -108,8 +109,10 @@ function ContactDetailPageContent() {
     );
   }
 
-  const fullName =
-    `${contact.attributes.first_name} ${contact.attributes.last_name || ''}`.trim();
+  const fullName = generateDisplayName(
+    contact.attributes.first_name,
+    contact.attributes.last_name || ''
+  );
   const tags = contact.relationships?.tags?.data || [];
 
   return (
