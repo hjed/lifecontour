@@ -190,7 +190,9 @@ class TaskQueueService:
             return result
 
         except Exception as e:
-            logger.error("Failed to get job status", job_id=job_id, error=str(e))
+            logger.error(
+                "Failed to get job status", job_id=job_id, error=str(e)
+            )
             raise
 
     async def get_queue_health(self) -> dict[str, Any]:

@@ -108,6 +108,9 @@ class TestTaskQueueService:
         job_id = "test-job-123"
         user_id = 123
 
+        # Mock user-job ownership verification
+        service.redis_pool.hexists = AsyncMock(return_value=True)
+
         # Mock ARQ pool and job info
         mock_pool = AsyncMock()
         mock_job = AsyncMock()
@@ -145,10 +148,7 @@ class TestTaskQueueService:
                 assert status["job_id"] == job_id
                 assert status["status"] == "completed"
                 assert status["message"] == "Job completed successfully"
-                assert status["result"] == {
-                    "status": "success",
-                    "contacts_processed": 5,
-                }
+                assert status["result"] == {"status": "success", "contacts_processed": 5}
 
     @pytest.mark.asyncio
     async def test_get_job_status_running(self, service: TaskQueueService):
@@ -156,7 +156,8 @@ class TestTaskQueueService:
         job_id = "test-job-456"
         user_id = 123
 
-        # Mock user-job ownership verification will be done with patch.object
+        # Mock user-job ownership verification
+        service.redis_pool.hexists = AsyncMock(return_value=True)
 
         # Mock ARQ pool and job info
         mock_pool = AsyncMock()

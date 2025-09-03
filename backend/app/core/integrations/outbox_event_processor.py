@@ -96,10 +96,10 @@ class OutboxEventProcessor:
 
     async def _process_contact_created(self, event: OutboxEvent) -> dict[str, Any]:
         """Process a contact.created event."""
-        event_data: dict[str, Any] = event.event_data  # type: ignore
-        integration_source: str = event_data["integration_source"]
-        external_id: str = event_data["external_id"]
-        contact_data: dict[str, Any] = event_data["contact_data"]
+        event_data = event.event_data
+        integration_source = event_data["integration_source"]
+        external_id = event_data["external_id"]
+        contact_data = event_data["contact_data"]
 
         # IDEMPOTENCY CHECK: Ensure we don't create duplicate contacts
         try:

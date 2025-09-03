@@ -89,9 +89,7 @@ class TestIntegrationsControllers:
 
     def test_trigger_google_contacts_sync_failure(self, client: TestClient):
         """Test Google Contacts sync trigger failure."""
-        with patch(
-            "app.core.integrations.task_queue_service.TaskQueueService.enqueue_google_contacts_sync"
-        ) as mock_enqueue:
+        with patch("app.core.integrations.task_queue_service.TaskQueueService.enqueue_google_contacts_sync") as mock_enqueue:
             # Mock job enqueueing failure
             mock_enqueue.side_effect = Exception("Redis connection failed")
 
