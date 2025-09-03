@@ -1397,6 +1397,27 @@ class ContactService:
         """Get a contact by email."""
         return await self.contact_repo.find_by_email(email)
 
+    async def find_contact_by_external_reference(
+        self,
+        integration_source: str,
+        external_id: str,
+        transaction: AsyncConnection,
+    ) -> Contact | None:
+        """
+        Find a contact by external reference.
+
+        Args:
+            integration_source: Name of the integration source (e.g., 'google_contacts')
+            external_id: External system's ID for the contact
+            transaction: Database transaction (for consistency)
+
+        Returns:
+            Contact if found, None otherwise
+        """
+        return await self.contact_repo.find_by_external_reference(
+            external_system=integration_source, external_entity_id=external_id
+        )
+
     async def search_contacts(self, query: str, limit: int = 50) -> list[Contact]:
         """Search contacts."""
         return await self.contact_repo.search(query, limit)

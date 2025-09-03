@@ -28,6 +28,13 @@ class ContactRepository(ABC):
         pass
 
     @abstractmethod
+    async def find_by_external_reference(
+        self, external_system: str, external_entity_id: str
+    ) -> Contact | None:
+        """Find a contact by external reference."""
+        pass
+
+    @abstractmethod
     async def search(self, query: str, limit: int = 50) -> list[Contact]:
         """Search contacts by name, email, or notes."""
         pass

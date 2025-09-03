@@ -1,0 +1,336 @@
+"""
+Unit tests for OutboxEventProcessor service.
+
+Tests the processing of outbox events from integration workers,
+including contact sync events and sync completion events.
+"""
+
+from datetime import UTC, datetime
+from unittest.mock import AsyncMock
+from uuid import uuid4
+
+import pytest
+from core_shared.models.outbox import OutboxEvent
+from sqlalchemy.ext.asyncio import AsyncConnection
+
+from app.core.contacts.models.entities import Contact, ContactMethod, MethodType
+from app.core.contacts.services.contact_service import ContactService
+from app.core.integrations.outbox_event_processor import (
+    OutboxEventProcessingError,
+    OutboxEventProcessor,
+)
+
+
+class TestOutboxEventProcessor:
+    """Test cases for OutboxEventProcessor."""
+
+    @pytest.fixture
+    def mock_contact_service(self) -> AsyncMock:
+        """Create mock contact service."""
+        return AsyncMock(spec=ContactService)
+
+    @pytest.fixture
+    def mock_connection(self) -> AsyncMock:
+        """Create mock database connection."""
+        return AsyncMock(spec=AsyncConnection)
+
+    @pytest.fixture
+    def processor(
+        self, mock_contact_service: AsyncMock, mock_connection: AsyncConnection
+    ) -> OutboxEventProcessor:
+        """Create OutboxEventProcessor instance."""
+        return OutboxEventProcessor(
+            contact_service=mock_contact_service, connection=mock_connection
+        )
+
+    @pytest.fixture
+    def sample_google_contact_data(self) -> dict:
+        """Sample Google contact data from outbox event."""
+        return {
+            "resourceName": "people/c123456789",
+            "etag": "abc123",
+            "names": [
+                {
+                    "displayName": "John Doe",
+                    "familyName": "Doe",
+                    "givenName": "John",
+                    "metadata": {"primary": True, "source": {"type": "CONTACT"}},
+                }
+            ],
+            "emailAddresses": [
+                {
+                    "value": "john.doe@example.com",
+                    "type": "work",
+                    "metadata": {"primary": True, "source": {"type": "CONTACT"}},
+                }
+            ],
+            "phoneNumbers": [
+                {
+                    "value": "+1-555-123-4567",
+                    "type": "mobile",
+                    "metadata": {"primary": True, "source": {"type": "CONTACT"}},
+                }
+            ],
+        }
+
+    @pytest.fixture
+    def contact_created_event(self, sample_google_contact_data: dict) -> OutboxEvent:
+        """Create a contact.created outbox event."""
+        return OutboxEvent(
+            id=uuid4(),
+            event_type="contact.created",
+            event_data={
+                "integration_source": "google_contacts",
+                "external_id": "people/c123456789",
+                "contact_data": sample_google_contact_data,
+                "sync_timestamp": datetime.now(UTC).isoformat(),
+                "sync_type": "created",
+            },
+            created_at=datetime.now(UTC),
+            processed_at=None,
+            retry_count=0,
+        )
+
+    @pytest.fixture
+    def contact_updated_event(self, sample_google_contact_data: dict) -> OutboxEvent:
+        """Create a contact.updated outbox event."""
+        updated_data = sample_google_contact_data.copy()
+        updated_data["names"][0]["givenName"] = "Johnny"  # Updated name
+
+        return OutboxEvent(
+            id=uuid4(),
+            event_type="contact.updated",
+            event_data={
+                "integration_source": "google_contacts",
+                "external_id": "people/c123456789",
+                "contact_data": updated_data,
+                "sync_timestamp": datetime.now(UTC).isoformat(),
+                "sync_type": "updated",
+            },
+            created_at=datetime.now(UTC),
+            processed_at=None,
+            retry_count=0,
+        )
+
+    @pytest.fixture
+    def sync_completed_event(self) -> OutboxEvent:
+        """Create a sync.completed outbox event."""
+        return OutboxEvent(
+            id=uuid4(),
+            event_type="sync.completed",
+            event_data={
+                "integration_source": "google_contacts",
+                "google_account_email": "user@example.com",
+                "metrics": {
+                    "contacts_processed": 5,
+                    "contacts_created": 3,
+                    "contacts_updated": 2,
+                    "errors": 0,
+                    "sync_type": "full",
+                    "started_at": "2024-01-01T10:00:00Z",
+                    "completed_at": "2024-01-01T10:05:00Z",
+                },
+                "completed_at": datetime.now(UTC).isoformat(),
+            },
+            created_at=datetime.now(UTC),
+            processed_at=None,
+            retry_count=0,
+        )
+
+    @pytest.mark.asyncio
+    async def test_process_contact_created_event(
+        self,
+        processor: OutboxEventProcessor,
+        contact_created_event: OutboxEvent,
+        mock_contact_service: AsyncMock,
+        mock_connection: AsyncConnection,
+    ):
+        """Test processing a contact.created event."""
+        # Mock contact service to return created contact
+        expected_contact = Contact(
+            id=123,
+            first_name="John",
+            last_name="Doe",
+            methods=[
+                ContactMethod(
+                    id=1,
+                    method_type=MethodType.EMAIL,
+                    value="john.doe@example.com",
+                    contact_id=123,
+                    is_primary=True,
+                )
+            ],
+        )
+        mock_contact_service.create_contact.return_value = expected_contact
+
+        # Process the event
+        result = await processor.process_event(contact_created_event)
+
+        # Verify contact service was called correctly
+        mock_contact_service.create_contact.assert_called_once()
+        created_contact_arg = mock_contact_service.create_contact.call_args[0][0]
+
+        assert created_contact_arg.first_name == "John"
+        assert created_contact_arg.last_name == "Doe"
+        assert len(created_contact_arg.methods) == 2  # Email + phone
+        assert any(m.value == "john.doe@example.com" for m in created_contact_arg.methods)
+        assert any(m.value == "+1-555-123-4567" for m in created_contact_arg.methods)
+
+        # Verify transaction was passed
+        assert mock_contact_service.create_contact.call_args[0][1] == mock_connection
+
+        # Verify result
+        assert result["status"] == "success"
+        assert result["event_type"] == "contact.created"
+        assert result["contact_id"] == 123
+
+    @pytest.mark.asyncio
+    async def test_process_contact_updated_event(
+        self,
+        processor: OutboxEventProcessor,
+        contact_updated_event: OutboxEvent,
+        mock_contact_service: AsyncMock,
+        mock_connection: AsyncConnection,
+    ):
+        """Test processing a contact.updated event."""
+        # Mock existing contact lookup
+        existing_contact = Contact(
+            id=123,
+            first_name="John",
+            last_name="Doe",
+        )
+        mock_contact_service.find_contact_by_external_reference.return_value = existing_contact
+
+        # Mock contact service to return updated contact
+        updated_contact = Contact(
+            id=123,
+            first_name="Johnny",  # Updated name
+            last_name="Doe",
+        )
+        mock_contact_service.update_contact.return_value = updated_contact
+
+        # Process the event
+        result = await processor.process_event(contact_updated_event)
+
+        # Verify existing contact was looked up
+        mock_contact_service.find_contact_by_external_reference.assert_called_once_with(
+            integration_source="google_contacts",
+            external_id="people/c123456789",
+            transaction=mock_connection,
+        )
+
+        # Verify contact service was called correctly
+        mock_contact_service.update_contact.assert_called_once()
+        updated_contact_arg = mock_contact_service.update_contact.call_args[0][0]
+
+        assert updated_contact_arg.id == 123
+        assert updated_contact_arg.first_name == "Johnny"  # Updated name
+        assert updated_contact_arg.last_name == "Doe"
+
+        # Verify result
+        assert result["status"] == "success"
+        assert result["event_type"] == "contact.updated"
+        assert result["contact_id"] == 123
+
+    @pytest.mark.asyncio
+    async def test_process_sync_completed_event(
+        self,
+        processor: OutboxEventProcessor,
+        sync_completed_event: OutboxEvent,
+    ):
+        """Test processing a sync.completed event."""
+        # Process the event
+        result = await processor.process_event(sync_completed_event)
+
+        # Verify result (sync completed events are just logged)
+        assert result["status"] == "success"
+        assert result["event_type"] == "sync.completed"
+        assert result["google_account_email"] == "user@example.com"
+        assert result["metrics"]["contacts_processed"] == 5
+
+    @pytest.mark.asyncio
+    async def test_process_unknown_event_type(
+        self,
+        processor: OutboxEventProcessor,
+    ):
+        """Test processing an unknown event type."""
+        unknown_event = OutboxEvent(
+            id=uuid4(),
+            event_type="unknown.event",
+            event_data={"test": "data"},
+            created_at=datetime.now(UTC),
+            processed_at=None,
+            retry_count=0,
+        )
+
+        # Should raise an error for unknown event types
+        with pytest.raises(OutboxEventProcessingError) as exc_info:
+            await processor.process_event(unknown_event)
+
+        assert "Unknown event type" in str(exc_info.value)
+        assert "unknown.event" in str(exc_info.value)
+
+    @pytest.mark.asyncio
+    async def test_process_contact_created_with_service_error(
+        self,
+        processor: OutboxEventProcessor,
+        contact_created_event: OutboxEvent,
+        mock_contact_service: AsyncMock,
+    ):
+        """Test handling contact service errors during contact creation."""
+        # Mock contact service to raise an error
+        mock_contact_service.create_contact.side_effect = Exception("Database error")
+
+        # Should raise OutboxEventProcessingError
+        with pytest.raises(OutboxEventProcessingError) as exc_info:
+            await processor.process_event(contact_created_event)
+
+        assert "Failed to process contact.created event" in str(exc_info.value)
+        assert "Database error" in str(exc_info.value)
+
+    @pytest.mark.asyncio
+    async def test_process_contact_updated_contact_not_found(
+        self,
+        processor: OutboxEventProcessor,
+        contact_updated_event: OutboxEvent,
+        mock_contact_service: AsyncMock,
+        mock_connection: AsyncConnection,
+    ):
+        """Test handling contact.updated when contact doesn't exist."""
+        # Mock contact service to return None (contact not found)
+        mock_contact_service.find_contact_by_external_reference.return_value = None
+
+        # Should raise OutboxEventProcessingError
+        with pytest.raises(OutboxEventProcessingError) as exc_info:
+            await processor.process_event(contact_updated_event)
+
+        assert "Contact not found for update" in str(exc_info.value)
+        assert "people/c123456789" in str(exc_info.value)
+
+    @pytest.mark.asyncio
+    async def test_process_event_with_invalid_contact_data(
+        self,
+        processor: OutboxEventProcessor,
+        mock_contact_service: AsyncMock,
+    ):
+        """Test processing event with invalid contact data."""
+        invalid_event = OutboxEvent(
+            id=uuid4(),
+            event_type="contact.created",
+            event_data={
+                "integration_source": "google_contacts",
+                "external_id": "people/invalid",
+                "contact_data": {"invalid": "data"},  # Missing required fields
+                "sync_timestamp": datetime.now(UTC).isoformat(),
+                "sync_type": "created",
+            },
+            created_at=datetime.now(UTC),
+            processed_at=None,
+            retry_count=0,
+        )
+
+        # Should raise OutboxEventProcessingError due to transformation failure
+        with pytest.raises(OutboxEventProcessingError) as exc_info:
+            await processor.process_event(invalid_event)
+
+        assert "Failed to transform Google contact data" in str(exc_info.value)

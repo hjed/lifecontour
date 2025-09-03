@@ -14,8 +14,8 @@ from sqlalchemy import Engine, create_engine, text
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 from sqlalchemy.orm import Session, sessionmaker
 
-# Import Google Contacts integration models
-from app.core.integrations.google_contacts.models import UserGoogleAuth  # noqa: F401
+# Google Contacts integration models are now in the worker
+# No longer imported here since they're not part of the core system
 from app.infrastructure.config import get_settings
 
 # Import table definitions to register them with metadata
