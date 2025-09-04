@@ -96,10 +96,10 @@ class OutboxEventProcessor:
 
     async def _process_contact_created(self, event: OutboxEvent) -> dict[str, Any]:
         """Process a contact.created event."""
-        event_data = event.event_data
-        integration_source = event_data["integration_source"]
-        external_id = event_data["external_id"]
-        contact_data = event_data["contact_data"]
+        event_data: dict[str, Any] = event.event_data  # type: ignore
+        integration_source: str = event_data["integration_source"]
+        external_id: str = event_data["external_id"]
+        contact_data: dict[str, Any] = event_data["contact_data"]
 
         # IDEMPOTENCY CHECK: Ensure we don't create duplicate contacts
         try:
@@ -155,6 +155,9 @@ class OutboxEventProcessor:
             ) from e
 
         # Create external reference to link contact with external system
+        if created_contact.id is None:
+            raise OutboxEventProcessingError("Created contact has no ID")
+
         try:
             await self.external_reference_service.create_external_reference(
                 internal_entity_type="contact",
@@ -195,10 +198,10 @@ class OutboxEventProcessor:
 
     async def _process_contact_updated(self, event: OutboxEvent) -> dict[str, Any]:
         """Process a contact.updated event."""
-        event_data = event.event_data
-        integration_source = event_data["integration_source"]
-        external_id = event_data["external_id"]
-        contact_data = event_data["contact_data"]
+        event_data: dict[str, Any] = event.event_data  # type: ignore
+        integration_source: str = event_data["integration_source"]
+        external_id: str = event_data["external_id"]
+        contact_data: dict[str, Any] = event_data["contact_data"]
 
         logger.info(
             "Processing contact update",
@@ -210,10 +213,12 @@ class OutboxEventProcessor:
         # TODO: Implement find_contact_by_external_reference in ContactService
         # For now, we'll raise an error to indicate this needs implementation
         try:
-            existing_contact = await self.contact_service.find_contact_by_external_reference(
-                integration_source=integration_source,
-                external_id=external_id,
-                transaction=self.connection,
+            existing_contact = (
+                await self.contact_service.find_contact_by_external_reference(
+                    integration_source=integration_source,
+                    external_id=external_id,
+                    transaction=self.connection,
+                )
             )
         except AttributeError as e:
             # Method doesn't exist yet - this is expected during development
@@ -229,7 +234,9 @@ class OutboxEventProcessor:
         # Transform Google contact data to our Contact entity
         try:
             google_person = GooglePerson.model_validate(contact_data)
-            updated_contact_data = self.google_transformer.transform_person(google_person)
+            updated_contact_data = self.google_transformer.transform_person(
+                google_person
+            )
 
             # Preserve the existing contact ID
             updated_contact_data.id = existing_contact.id

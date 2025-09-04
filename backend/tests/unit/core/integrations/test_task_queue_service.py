@@ -48,7 +48,9 @@ class TestTaskQueueService:
         mock_job.job_id = "test-job-123"
         mock_pool.enqueue_job.return_value = mock_job
 
-        with patch("app.core.integrations.task_queue_service.create_pool") as mock_create_pool:
+        with patch(
+            "app.core.integrations.task_queue_service.create_pool"
+        ) as mock_create_pool:
             mock_create_pool.return_value = mock_pool
 
             # Mock Redis operations for user-job association
@@ -75,7 +77,9 @@ class TestTaskQueueService:
             assert job_id == "test-job-123"
 
             # Verify user-job association was stored
-            mock_redis_pool.hset.assert_called_once_with("user_jobs:123", "test-job-123", "enqueued")
+            mock_redis_pool.hset.assert_called_once_with(
+                "user_jobs:123", "test-job-123", "enqueued"
+            )
             mock_redis_pool.expire.assert_called_once_with("user_jobs:123", 86400)
 
     @pytest.mark.asyncio
@@ -83,13 +87,17 @@ class TestTaskQueueService:
         self, service: TaskQueueService
     ):
         """Test job enqueueing failure."""
-        with patch("app.core.integrations.task_queue_service.create_pool") as mock_create_pool:
+        with patch(
+            "app.core.integrations.task_queue_service.create_pool"
+        ) as mock_create_pool:
             mock_create_pool.side_effect = Exception("Redis connection failed")
 
             # Should raise exception
             with pytest.raises(Exception) as exc_info:
                 await service.enqueue_google_contacts_sync(
-                    google_account_email="test@example.com", user_id=123, sync_type="smart"
+                    google_account_email="test@example.com",
+                    user_id=123,
+                    sync_type="smart",
                 )
 
             assert "Redis connection failed" in str(exc_info.value)
@@ -99,9 +107,6 @@ class TestTaskQueueService:
         """Test getting status of completed job."""
         job_id = "test-job-123"
         user_id = 123
-
-        # Mock user-job ownership verification
-        service.redis_pool.hexists = AsyncMock(return_value=True)
 
         # Mock ARQ pool and job info
         mock_pool = AsyncMock()
@@ -114,16 +119,23 @@ class TestTaskQueueService:
         mock_job_info.result = {"status": "success", "contacts_processed": 5}
         mock_job.info.return_value = mock_job_info
 
-        with patch("app.core.integrations.task_queue_service.create_pool") as mock_create_pool:
-            mock_create_pool.return_value = mock_pool
-            with patch("app.core.integrations.task_queue_service.Job") as mock_job_class:
-                mock_job_class.return_value = mock_job
+        with patch.object(
+            service.redis_pool, "hexists", new=AsyncMock(return_value=True)
+        ) as mock_hexists:
+            with patch(
+                "app.core.integrations.task_queue_service.create_pool"
+            ) as mock_create_pool:
+                mock_create_pool.return_value = mock_pool
+                with patch(
+                    "app.core.integrations.task_queue_service.Job"
+                ) as mock_job_class:
+                    mock_job_class.return_value = mock_job
 
-                # Get job status
-                status = await service.get_job_status(job_id, user_id)
+                    # Get job status
+                    status = await service.get_job_status(job_id, user_id)
 
-                # Verify correct calls
-                service.redis_pool.hexists.assert_called_once_with("user_jobs:123", job_id)
+                    # Verify correct calls
+                    mock_hexists.assert_called_once_with("user_jobs:123", job_id)
                 mock_create_pool.assert_called_once_with(service.redis_settings)
                 mock_job_class.assert_called_once_with(job_id, redis=mock_pool)
                 mock_job.info.assert_called_once()
@@ -133,7 +145,10 @@ class TestTaskQueueService:
                 assert status["job_id"] == job_id
                 assert status["status"] == "completed"
                 assert status["message"] == "Job completed successfully"
-                assert status["result"] == {"status": "success", "contacts_processed": 5}
+                assert status["result"] == {
+                    "status": "success",
+                    "contacts_processed": 5,
+                }
 
     @pytest.mark.asyncio
     async def test_get_job_status_running(self, service: TaskQueueService):
@@ -141,8 +156,7 @@ class TestTaskQueueService:
         job_id = "test-job-456"
         user_id = 123
 
-        # Mock user-job ownership verification
-        service.redis_pool.hexists = AsyncMock(return_value=True)
+        # Mock user-job ownership verification will be done with patch.object
 
         # Mock ARQ pool and job info
         mock_pool = AsyncMock()
@@ -155,16 +169,23 @@ class TestTaskQueueService:
         mock_job_info.result = None
         mock_job.info.return_value = mock_job_info
 
-        with patch("app.core.integrations.task_queue_service.create_pool") as mock_create_pool:
-            mock_create_pool.return_value = mock_pool
-            with patch("app.core.integrations.task_queue_service.Job") as mock_job_class:
-                mock_job_class.return_value = mock_job
+        with patch.object(
+            service.redis_pool, "hexists", new=AsyncMock(return_value=True)
+        ) as mock_hexists:
+            with patch(
+                "app.core.integrations.task_queue_service.create_pool"
+            ) as mock_create_pool:
+                mock_create_pool.return_value = mock_pool
+                with patch(
+                    "app.core.integrations.task_queue_service.Job"
+                ) as mock_job_class:
+                    mock_job_class.return_value = mock_job
 
-                # Get job status
-                status = await service.get_job_status(job_id, user_id)
+                    # Get job status
+                    status = await service.get_job_status(job_id, user_id)
 
-                # Verify status response
-                service.redis_pool.hexists.assert_called_once_with("user_jobs:123", job_id)
+                    # Verify status response
+                    mock_hexists.assert_called_once_with("user_jobs:123", job_id)
                 assert status["job_id"] == job_id
                 assert status["status"] == "running"
                 assert status["message"] == "Job is currently being processed"
@@ -176,21 +197,27 @@ class TestTaskQueueService:
         job_id = "non-existent-job"
         user_id = 123
 
-        # Mock user-job ownership verification
-        service.redis_pool.hexists = AsyncMock(return_value=True)
+        # Mock user-job ownership verification will be done with patch.object
 
         # Mock ARQ pool and job info
         mock_pool = AsyncMock()
         mock_job = AsyncMock()
         mock_job.info.return_value = None  # Job not found
 
-        with patch("app.core.integrations.task_queue_service.create_pool") as mock_create_pool:
-            mock_create_pool.return_value = mock_pool
-            with patch("app.core.integrations.task_queue_service.Job") as mock_job_class:
-                mock_job_class.return_value = mock_job
+        with patch.object(
+            service.redis_pool, "hexists", new=AsyncMock(return_value=True)
+        ):
+            with patch(
+                "app.core.integrations.task_queue_service.create_pool"
+            ) as mock_create_pool:
+                mock_create_pool.return_value = mock_pool
+                with patch(
+                    "app.core.integrations.task_queue_service.Job"
+                ) as mock_job_class:
+                    mock_job_class.return_value = mock_job
 
-                # Get job status
-                status = await service.get_job_status(job_id, user_id)
+                    # Get job status
+                    status = await service.get_job_status(job_id, user_id)
 
                 # Verify status response
                 assert status["job_id"] == job_id
@@ -211,7 +238,9 @@ class TestTaskQueueService:
         health = await service.get_queue_health()
 
         # Verify Redis calls
-        assert mock_redis_pool.ping.call_count == 2  # Called twice for connectivity and response time
+        assert (
+            mock_redis_pool.ping.call_count == 2
+        )  # Called twice for connectivity and response time
         mock_redis_pool.llen.assert_called_once_with("arq:queue")
 
         # Verify health response
@@ -247,8 +276,23 @@ class TestTaskQueueService:
         mock_job_info.result = {"status": "success"}
 
         # Test different status messages
-        assert service._get_status_message("queued", mock_job_info) == "Job is queued and waiting to be processed"
-        assert service._get_status_message("running", mock_job_info) == "Job is currently being processed"
-        assert service._get_status_message("completed", mock_job_info) == "Job completed successfully"
-        assert service._get_status_message("not_found", mock_job_info) == "Job not found or expired"
-        assert service._get_status_message("unknown", mock_job_info) == "Job status: unknown"
+        assert (
+            service._get_status_message("queued", mock_job_info)
+            == "Job is queued and waiting to be processed"
+        )
+        assert (
+            service._get_status_message("running", mock_job_info)
+            == "Job is currently being processed"
+        )
+        assert (
+            service._get_status_message("completed", mock_job_info)
+            == "Job completed successfully"
+        )
+        assert (
+            service._get_status_message("not_found", mock_job_info)
+            == "Job not found or expired"
+        )
+        assert (
+            service._get_status_message("unknown", mock_job_info)
+            == "Job status: unknown"
+        )

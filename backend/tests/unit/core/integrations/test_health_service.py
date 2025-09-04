@@ -33,10 +33,12 @@ class TestIntegrationHealthService:
         """Test overall health when all services are healthy."""
         # Mock Redis responses for healthy state
         mock_redis_pool.ping = AsyncMock(return_value=True)
-        mock_redis_pool.info = AsyncMock(return_value={
-            "used_memory_human": "1.5M",
-            "connected_clients": 3,
-        })
+        mock_redis_pool.info = AsyncMock(
+            return_value={
+                "used_memory_human": "1.5M",
+                "connected_clients": 3,
+            }
+        )
         mock_redis_pool.llen = AsyncMock(return_value=2)
 
         # Get overall health
@@ -80,10 +82,12 @@ class TestIntegrationHealthService:
         """Test Redis health check when healthy."""
         # Mock Redis responses
         mock_redis_pool.ping = AsyncMock(return_value=True)
-        mock_redis_pool.info = AsyncMock(return_value={
-            "used_memory_human": "2.1M",
-            "connected_clients": 5,
-        })
+        mock_redis_pool.info = AsyncMock(
+            return_value={
+                "used_memory_human": "2.1M",
+                "connected_clients": 5,
+            }
+        )
         mock_redis_pool.llen = AsyncMock(return_value=3)
 
         # Check Redis health
@@ -142,7 +146,9 @@ class TestIntegrationHealthService:
     ):
         """Test worker health check when unhealthy."""
         # Mock Redis to fail
-        mock_redis_pool.llen = AsyncMock(side_effect=Exception("Redis connection failed"))
+        mock_redis_pool.llen = AsyncMock(
+            side_effect=Exception("Redis connection failed")
+        )
 
         # Check worker health
         health = await service._check_worker_health()

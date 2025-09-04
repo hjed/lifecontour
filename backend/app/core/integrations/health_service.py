@@ -83,7 +83,10 @@ class IntegrationHealthService:
             connected_clients = info.get("connected_clients", 0)
 
             # Check queue length
-            queue_length = await self.redis_pool.llen("arq:queue")
+            queue_length_result = await self.redis_pool.llen("arq:queue")  # type: ignore
+            queue_length = (
+                int(queue_length_result) if queue_length_result is not None else 0
+            )
 
             return {
                 "status": "healthy",
@@ -111,7 +114,10 @@ class IntegrationHealthService:
 
             # Check if there are any recent jobs in the queue or completed
             # This will raise an exception if Redis is not accessible
-            recent_jobs = await self.redis_pool.llen("arq:queue")
+            recent_jobs_result = await self.redis_pool.llen("arq:queue")  # type: ignore
+            recent_jobs = (
+                int(recent_jobs_result) if recent_jobs_result is not None else 0
+            )
 
             # For now, assume worker is healthy if Redis is accessible
             # In a real implementation, you might check:
@@ -169,8 +175,8 @@ class IntegrationHealthService:
             # or use ARQ's built-in job tracking
 
             # For now, just return the current queue length as a proxy
-            queue_length = await self.redis_pool.llen("arq:queue")
-            return queue_length
+            queue_length_result = await self.redis_pool.llen("arq:queue")  # type: ignore
+            return int(queue_length_result) if queue_length_result is not None else 0
 
         except Exception:
             return 0

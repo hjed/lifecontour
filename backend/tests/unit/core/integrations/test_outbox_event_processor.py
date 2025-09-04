@@ -6,6 +6,7 @@ including contact sync events and sync completion events.
 """
 
 from datetime import UTC, datetime
+from typing import Any
 from unittest.mock import AsyncMock
 from uuid import uuid4
 
@@ -44,7 +45,7 @@ class TestOutboxEventProcessor:
         )
 
     @pytest.fixture
-    def sample_google_contact_data(self) -> dict:
+    def sample_google_contact_data(self) -> dict[str, Any]:
         """Sample Google contact data from outbox event."""
         return {
             "resourceName": "people/c123456789",
@@ -74,7 +75,9 @@ class TestOutboxEventProcessor:
         }
 
     @pytest.fixture
-    def contact_created_event(self, sample_google_contact_data: dict) -> OutboxEvent:
+    def contact_created_event(
+        self, sample_google_contact_data: dict[str, Any]
+    ) -> OutboxEvent:
         """Create a contact.created outbox event."""
         return OutboxEvent(
             id=uuid4(),
@@ -92,7 +95,9 @@ class TestOutboxEventProcessor:
         )
 
     @pytest.fixture
-    def contact_updated_event(self, sample_google_contact_data: dict) -> OutboxEvent:
+    def contact_updated_event(
+        self, sample_google_contact_data: dict[str, Any]
+    ) -> OutboxEvent:
         """Create a contact.updated outbox event."""
         updated_data = sample_google_contact_data.copy()
         updated_data["names"][0]["givenName"] = "Johnny"  # Updated name
@@ -173,7 +178,9 @@ class TestOutboxEventProcessor:
         assert created_contact_arg.first_name == "John"
         assert created_contact_arg.last_name == "Doe"
         assert len(created_contact_arg.methods) == 2  # Email + phone
-        assert any(m.value == "john.doe@example.com" for m in created_contact_arg.methods)
+        assert any(
+            m.value == "john.doe@example.com" for m in created_contact_arg.methods
+        )
         assert any(m.value == "+1-555-123-4567" for m in created_contact_arg.methods)
 
         # Verify transaction was passed
@@ -199,7 +206,9 @@ class TestOutboxEventProcessor:
             first_name="John",
             last_name="Doe",
         )
-        mock_contact_service.find_contact_by_external_reference.return_value = existing_contact
+        mock_contact_service.find_contact_by_external_reference.return_value = (
+            existing_contact
+        )
 
         # Mock contact service to return updated contact
         updated_contact = Contact(

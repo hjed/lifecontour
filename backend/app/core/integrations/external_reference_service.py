@@ -203,7 +203,7 @@ class ExternalReferenceService:
         """
         # Build dynamic update query based on provided parameters
         update_fields = []
-        params = {"reference_id": reference_id}
+        params: dict[str, Any] = {"reference_id": reference_id}
 
         if external_entity_id is not None:
             update_fields.append("external_entity_id = :external_entity_id")
@@ -211,7 +211,7 @@ class ExternalReferenceService:
 
         if reference_data is not None:
             update_fields.append("reference_data = :reference_data")
-            params["reference_data"] = str(reference_data)
+            params["reference_data"] = reference_data
 
         if not update_fields:
             # No fields to update
@@ -222,7 +222,7 @@ class ExternalReferenceService:
         query = text(
             f"""
             UPDATE external_references
-            SET {', '.join(update_fields)}
+            SET {", ".join(update_fields)}
             WHERE id = :reference_id
             RETURNING id, internal_entity_type, internal_entity_id, external_system,
                       external_entity_type, external_entity_id, reference_data,

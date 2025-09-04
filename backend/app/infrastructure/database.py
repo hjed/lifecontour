@@ -106,9 +106,6 @@ def ensure_tables_registered() -> None:
     # Force import of all table definitions to register them with metadata
     # This is needed for environments where imports might not happen automatically
     try:
-        from app.core.integrations.google_contacts.models import (
-            UserGoogleAuth,  # noqa: F401
-        )
         from app.infrastructure.contacts import contact_tables  # noqa: F401
 
         logger.debug("Table definitions registered with metadata")

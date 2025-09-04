@@ -38,7 +38,9 @@ class TestIntegrationsControllers:
 
     def test_trigger_google_contacts_sync_success(self, client: TestClient):
         """Test successful Google Contacts sync trigger."""
-        with patch("app.core.integrations.task_queue_service.TaskQueueService.enqueue_google_contacts_sync") as mock_enqueue:
+        with patch(
+            "app.core.integrations.task_queue_service.TaskQueueService.enqueue_google_contacts_sync"
+        ) as mock_enqueue:
             # Mock successful job enqueueing
             mock_enqueue.return_value = "test-job-123"
 
@@ -57,7 +59,9 @@ class TestIntegrationsControllers:
 
     def test_trigger_google_contacts_sync_failure(self, client: TestClient):
         """Test Google Contacts sync trigger failure."""
-        with patch("app.core.integrations.task_queue_service.TaskQueueService.enqueue_google_contacts_sync") as mock_enqueue:
+        with patch(
+            "app.core.integrations.task_queue_service.TaskQueueService.enqueue_google_contacts_sync"
+        ) as mock_enqueue:
             # Mock job enqueueing failure
             mock_enqueue.side_effect = Exception("Redis connection failed")
 
@@ -74,7 +78,9 @@ class TestIntegrationsControllers:
         """Test successful job status retrieval."""
         job_id = "test-job-456"
 
-        with patch("app.core.integrations.task_queue_service.TaskQueueService.get_job_status") as mock_get_status:
+        with patch(
+            "app.core.integrations.task_queue_service.TaskQueueService.get_job_status"
+        ) as mock_get_status:
             # Mock successful status retrieval
             mock_get_status.return_value = {
                 "job_id": job_id,
@@ -102,7 +108,9 @@ class TestIntegrationsControllers:
         """Test job status retrieval failure."""
         job_id = "test-job-789"
 
-        with patch("app.core.integrations.task_queue_service.TaskQueueService.get_job_status") as mock_get_status:
+        with patch(
+            "app.core.integrations.task_queue_service.TaskQueueService.get_job_status"
+        ) as mock_get_status:
             # Mock status retrieval failure
             mock_get_status.side_effect = Exception("Job not found")
 
@@ -117,7 +125,9 @@ class TestIntegrationsControllers:
 
     def test_get_integrations_health_success(self, client: TestClient):
         """Test successful health check."""
-        with patch("app.core.integrations.health_service.IntegrationHealthService.get_overall_health") as mock_health:
+        with patch(
+            "app.core.integrations.health_service.IntegrationHealthService.get_overall_health"
+        ) as mock_health:
             # Mock successful health check
             mock_health.return_value = {
                 "status": "healthy",
@@ -158,7 +168,9 @@ class TestIntegrationsControllers:
 
     def test_get_integrations_health_unhealthy(self, client: TestClient):
         """Test health check when services are unhealthy."""
-        with patch("app.core.integrations.health_service.IntegrationHealthService.get_overall_health") as mock_health:
+        with patch(
+            "app.core.integrations.health_service.IntegrationHealthService.get_overall_health"
+        ) as mock_health:
             # Mock unhealthy health check
             mock_health.return_value = {
                 "status": "unhealthy",
@@ -193,7 +205,9 @@ class TestIntegrationsControllers:
 
     def test_get_integrations_health_service_exception(self, client: TestClient):
         """Test health check when health service raises exception."""
-        with patch("app.core.integrations.health_service.IntegrationHealthService.get_overall_health") as mock_health:
+        with patch(
+            "app.core.integrations.health_service.IntegrationHealthService.get_overall_health"
+        ) as mock_health:
             # Mock health service exception
             mock_health.side_effect = Exception("Health service failed")
 

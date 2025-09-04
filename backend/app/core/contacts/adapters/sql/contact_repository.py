@@ -184,10 +184,11 @@ class SqlContactRepository(ContactRepository):
         """
         )
         result = await self.conn.execute(
-            query, {
+            query,
+            {
                 "external_system": external_system,
                 "external_entity_id": external_entity_id,
-            }
+            },
         )
         row = result.fetchone()
 

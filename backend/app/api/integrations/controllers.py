@@ -18,7 +18,7 @@ from app.core.integrations.health_service import IntegrationHealthService
 from app.core.integrations.task_queue_service import TaskQueueService
 from app.infrastructure.auth.models import SessionUser
 
-router = APIRouter(prefix="/api/integrations", tags=["integrations"])
+router = APIRouter(prefix="/integrations", tags=["integrations"])
 logger = structlog.get_logger()
 
 
@@ -66,7 +66,7 @@ async def trigger_google_contacts_sync(
         # Enqueue the sync job
         job_id = await task_queue_service.enqueue_google_contacts_sync(
             google_account_email=google_account_email,
-            user_id=user.id,  # Pass user ID for security
+            user_id=int(user.id),  # Convert string ID to int for security
             sync_type="smart",
         )
 
@@ -80,7 +80,7 @@ async def trigger_google_contacts_sync(
         logger.error("Failed to enqueue sync job", error=str(e), exc_info=True)
         raise HTTPException(
             status_code=500,
-            detail="An unexpected error occurred while queueing the sync job"
+            detail="An unexpected error occurred while queueing the sync job",
         ) from e
 
 
@@ -98,7 +98,7 @@ async def get_sync_job_status(
     """
     try:
         # Get job status from the task queue
-        job_status = await task_queue_service.get_job_status(job_id, user.id)
+        job_status = await task_queue_service.get_job_status(job_id, int(user.id))
 
         return SyncJobResponse(
             job_id=job_id,
@@ -107,17 +107,16 @@ async def get_sync_job_status(
         )
 
     except Exception as e:
-        logger.error("Failed to get job status", job_id=job_id, error=str(e), exc_info=True)
+        logger.error(
+            "Failed to get job status", job_id=job_id, error=str(e), exc_info=True
+        )
         # Check if it's an access denied error
         if "access denied" in str(e).lower() or "not found" in str(e).lower():
-            raise HTTPException(
-                status_code=404,
-                detail="Job not found"
-            ) from e
+            raise HTTPException(status_code=404, detail="Job not found") from e
         else:
             raise HTTPException(
                 status_code=500,
-                detail="An unexpected error occurred while retrieving job status"
+                detail="An unexpected error occurred while retrieving job status",
             ) from e
 
 

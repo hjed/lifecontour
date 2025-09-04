@@ -11,7 +11,7 @@ from typing import Any
 import structlog
 from arq import create_pool
 from arq.connections import RedisSettings
-from arq.jobs import Job, JobStatus
+from arq.jobs import Job, JobDef, JobStatus
 from redis.asyncio import Redis
 
 logger = structlog.get_logger()
@@ -129,7 +129,7 @@ class TaskQueueService:
 
             # Get job information
             job = Job(job_id, redis=pool)
-            job_info = await job.info()
+            job_info: JobDef | None = await job.info()
 
             await pool.close()
 
@@ -154,17 +154,17 @@ class TaskQueueService:
                 JobStatus.not_found: "not_found",
             }
 
-            api_status = status_mapping.get(job_info.job_status, "unknown")
+            api_status = status_mapping.get(job_info.job_status, "unknown")  # type: ignore
 
             # Format timestamps
             created_at = (
                 job_info.enqueue_time.isoformat() if job_info.enqueue_time else None
             )
             started_at = (
-                job_info.start_time.isoformat() if job_info.start_time else None
+                job_info.start_time.isoformat() if job_info.start_time else None  # type: ignore
             )
             completed_at = (
-                job_info.finish_time.isoformat() if job_info.finish_time else None
+                job_info.finish_time.isoformat() if job_info.finish_time else None  # type: ignore
             )
 
             result = {
@@ -174,23 +174,23 @@ class TaskQueueService:
                 "created_at": created_at,
                 "started_at": started_at,
                 "completed_at": completed_at,
-                "result": job_info.result,
-                "error": str(job_info.result) if job_info.job_status == JobStatus.not_found and job_info.result else None,
+                "result": job_info.result,  # type: ignore
+                "error": str(job_info.result)  # type: ignore
+                if job_info.job_status == JobStatus.not_found and job_info.result  # type: ignore
+                else None,
             }
 
             logger.debug(
                 "Retrieved job status",
                 job_id=job_id,
                 status=api_status,
-                arq_status=job_info.job_status,
+                arq_status=job_info.job_status,  # type: ignore
             )
 
             return result
 
         except Exception as e:
-            logger.error(
-                "Failed to get job status", job_id=job_id, error=str(e)
-            )
+            logger.error("Failed to get job status", job_id=job_id, error=str(e))
             raise
 
     async def get_queue_health(self) -> dict[str, Any]:
@@ -207,7 +207,10 @@ class TaskQueueService:
             await self.redis_pool.ping()
 
             # Get queue statistics
-            queue_length = await self.redis_pool.llen("arq:queue")
+            queue_length_result = await self.redis_pool.llen("arq:queue")  # type: ignore
+            queue_length = (
+                int(queue_length_result) if queue_length_result is not None else 0
+            )
 
             # Check if Redis is responsive
             start_time = datetime.now(UTC)
@@ -263,7 +266,7 @@ class TaskQueueService:
         try:
             # Store association with 24-hour expiration
             key = f"user_jobs:{user_id}"
-            await self.redis_pool.hset(key, job_id, "enqueued")
+            await self.redis_pool.hset(key, job_id, "enqueued")  # type: ignore
             await self.redis_pool.expire(key, 86400)  # 24 hours
             logger.debug("Stored user-job association", user_id=user_id, job_id=job_id)
         except Exception as e:
@@ -288,14 +291,15 @@ class TaskQueueService:
         """
         try:
             key = f"user_jobs:{user_id}"
-            result = await self.redis_pool.hexists(key, job_id)
+            result = await self.redis_pool.hexists(key, job_id)  # type: ignore
+            owns_job = bool(result) if result is not None else False
             logger.debug(
                 "Verified user-job ownership",
                 user_id=user_id,
                 job_id=job_id,
-                owns_job=bool(result),
+                owns_job=owns_job,
             )
-            return bool(result)
+            return owns_job
         except Exception as e:
             logger.warning(
                 "Failed to verify user-job ownership",
