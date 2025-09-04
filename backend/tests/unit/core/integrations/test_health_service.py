@@ -82,10 +82,12 @@ class TestIntegrationHealthService:
         """Test Redis health check when healthy."""
         # Mock Redis responses
         mock_redis_pool.ping = AsyncMock(return_value=True)
-        mock_redis_pool.info = AsyncMock(return_value={
-            "used_memory_human": "2.1M",
-            "connected_clients": 5,
-        })
+        mock_redis_pool.info = AsyncMock(
+            return_value={
+                "used_memory_human": "2.1M",
+                "connected_clients": 5,
+            }
+        )
         mock_redis_pool.llen = AsyncMock(return_value=3)
 
         # Check Redis health
