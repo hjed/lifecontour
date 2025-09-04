@@ -22,7 +22,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 
 import { ContactAvatar } from '@/components/contacts/ContactAvatar';
-import { ContactIdentity } from '@/components/contacts/ContactIdentity';
+import { ContactIdentityInline } from '@/components/contacts/ContactIdentityInline';
 import type { TagResource } from '@/types/contacts';
 import { AuthGuard } from '@/components/auth/AuthGuard';
 import { DATE_FORMATS } from '@/lib/constants';
@@ -219,7 +219,7 @@ function ContactDetailPageContent() {
 
         {/* Column 2: Identity and Actions */}
         <div className='col-start-1 space-y-4 md:col-start-2'>
-          <ContactIdentity contact={contact} />
+          <ContactIdentityInline contact={contact} />
 
           {/* Action Buttons */}
           <div className='flex gap-2'>
