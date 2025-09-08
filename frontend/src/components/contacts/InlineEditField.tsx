@@ -8,7 +8,7 @@
 
 'use client';
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useId } from 'react';
 import { Check, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
@@ -17,23 +17,23 @@ import { useInlineEdit } from '@/hooks/useInlineEdit';
 
 export interface InlineEditFieldProps {
   /** Current field value */
-  value: string | null | undefined;
+  readonly value: string | null | undefined;
   /** Function to call when saving changes */
-  onSave: (value: string) => Promise<void>;
+  readonly onSave: (value: string) => Promise<void>;
   /** Field type for input validation and formatting */
-  fieldType?: 'text' | 'email' | 'phone' | 'url';
+  readonly fieldType?: 'text' | 'email' | 'phone' | 'url';
   /** Placeholder text when value is empty */
-  placeholder?: string;
+  readonly placeholder?: string;
   /** Validation function that returns error message or null */
-  validation?: (value: string) => string | null;
+  readonly validation?: (value: string) => string | null;
   /** Whether the field is disabled */
-  disabled?: boolean;
+  readonly disabled?: boolean;
   /** Additional CSS classes */
-  className?: string;
+  readonly className?: string;
   /** Test ID for testing */
-  'data-testid'?: string;
+  readonly 'data-testid'?: string;
   /** ARIA label for accessibility */
-  'aria-label'?: string;
+  readonly 'aria-label'?: string;
 }
 
 /**
@@ -105,7 +105,8 @@ export function InlineEditField({
   };
 
   // Generate unique IDs for accessibility
-  const inputId = `inline-edit-${Math.random().toString(36).substr(2, 9)}`;
+  const baseId = useId();
+  const inputId = `inline-edit-${baseId}`;
   const errorId = `${inputId}-error`;
 
   if (isEditing) {
@@ -170,7 +171,8 @@ export function InlineEditField({
   const isEmpty = !displayValue;
 
   return (
-    <div
+    <button
+      type='button'
       className={cn(
         'inline-flex min-h-[32px] cursor-pointer items-center rounded-md px-2 py-1 text-sm transition-colors',
         'hover:bg-muted focus-visible:ring-ring focus-visible:ring-2 focus-visible:outline-none',
@@ -178,14 +180,13 @@ export function InlineEditField({
         isEmpty && 'text-muted-foreground italic',
         className
       )}
-      role='button'
-      tabIndex={disabled ? -1 : 0}
+      disabled={disabled}
       onClick={handleViewClick}
       onKeyDown={handleViewKeyDown}
       aria-label={ariaLabel || `Click to edit ${displayValue || 'empty field'}`}
       data-testid={testId}
     >
       {displayText}
-    </div>
+    </button>
   );
 }

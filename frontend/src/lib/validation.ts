@@ -26,7 +26,7 @@ export function validateEmail(
   value: string,
   message = 'Please enter a valid email address'
 ): string | null {
-  if (!value || value.trim().length === 0) return message;
+  if (!value || value.trim().length === 0) return null; // Let validateRequired handle required validation
 
   // Basic email regex that covers most common cases
   const emailRegex = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
@@ -54,7 +54,7 @@ export function validatePhone(
   value: string,
   message = 'Please enter a valid phone number'
 ): string | null {
-  if (!value || value.trim().length === 0) return message;
+  if (!value || value.trim().length === 0) return null; // Let validateRequired handle required validation
 
   // Remove all non-digit characters except + for international numbers
   const cleaned = value.replace(/[^\d+]/g, '');
@@ -87,7 +87,7 @@ export function validateUrl(
   value: string,
   message = 'Please enter a valid URL'
 ): string | null {
-  if (!value || value.trim().length === 0) return message;
+  if (!value || value.trim().length === 0) return null; // Let validateRequired handle required validation
 
   try {
     const url = new URL(value);

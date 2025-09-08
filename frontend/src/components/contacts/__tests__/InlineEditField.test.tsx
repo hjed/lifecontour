@@ -114,8 +114,8 @@ describe('InlineEditField', () => {
       render(<InlineEditField {...defaultProps} />);
 
       const viewElement = screen.getByText('test value');
-      expect(viewElement).toHaveAttribute('role', 'button');
-      expect(viewElement).toHaveAttribute('tabIndex', '0');
+      expect(viewElement.tagName).toBe('BUTTON');
+      expect(viewElement).toHaveAttribute('type', 'button');
       expect(viewElement).toHaveAttribute(
         'aria-label',
         'Click to edit test value'

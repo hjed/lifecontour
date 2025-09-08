@@ -57,12 +57,16 @@ describe('validation utilities', () => {
         'user@.com',
         'user@domain.',
         'user name@example.com',
-        '',
       ];
 
       invalidEmails.forEach(email => {
         expect(validateEmail(email)).toBe('Please enter a valid email address');
       });
+    });
+
+    it('should return null for empty values', () => {
+      expect(validateEmail('')).toBeNull();
+      expect(validateEmail('   ')).toBeNull();
     });
 
     it('should use custom message when provided', () => {
@@ -108,13 +112,16 @@ describe('validation utilities', () => {
         'abc123',
         '++61 2 1234 5678',
         '61 2 1234 5678', // Missing +
-        '',
-        '   ',
       ];
 
       invalidPhones.forEach(phone => {
         expect(validatePhone(phone)).toBe('Please enter a valid phone number');
       });
+    });
+
+    it('should return null for empty values', () => {
+      expect(validatePhone('')).toBeNull();
+      expect(validatePhone('   ')).toBeNull();
     });
 
     it('should use custom message when provided', () => {
@@ -148,12 +155,16 @@ describe('validation utilities', () => {
         'example.com', // Missing protocol
         'https://',
         'https://.',
-        '',
       ];
 
       invalidUrls.forEach(url => {
         expect(validateUrl(url)).toBe('Please enter a valid URL');
       });
+    });
+
+    it('should return null for empty values', () => {
+      expect(validateUrl('')).toBeNull();
+      expect(validateUrl('   ')).toBeNull();
     });
 
     it('should use custom message when provided', () => {
