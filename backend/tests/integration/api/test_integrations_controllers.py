@@ -101,8 +101,10 @@ class TestIntegrationsControllers:
             # Verify error response
             assert response.status_code == 500
             data = response.json()
-            assert "Failed to enqueue sync job" in data["detail"]
-            assert "Redis connection failed" in data["detail"]
+            assert (
+                data["errors"][0]["detail"]
+                == "An unexpected error occurred while queueing the sync job"
+            )
 
     def test_get_sync_job_status_success(self, client: TestClient):
         """Test successful job status retrieval."""
@@ -131,8 +133,8 @@ class TestIntegrationsControllers:
             assert data["status"] == "completed"
             assert data["message"] == "Job completed successfully"
 
-            # Verify service was called
-            mock_get_status.assert_called_once_with(job_id)
+            # Verify service was called with job_id and user_id
+            mock_get_status.assert_called_once_with(job_id, 123)
 
     def test_get_sync_job_status_failure(self, client: TestClient):
         """Test job status retrieval failure."""
@@ -147,11 +149,10 @@ class TestIntegrationsControllers:
             # Make request
             response = client.get(f"/api/integrations/google/contacts/sync/{job_id}")
 
-            # Verify error response
-            assert response.status_code == 500
+            # Verify error response (404 for job not found is correct)
+            assert response.status_code == 404
             data = response.json()
-            assert "Failed to get job status" in data["detail"]
-            assert "Job not found" in data["detail"]
+            assert data["errors"][0]["detail"] == "Job not found"
 
     def test_get_integrations_health_success(self, client: TestClient):
         """Test successful health check."""

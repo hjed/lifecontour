@@ -126,6 +126,7 @@ async def get_sync_job_status(
 
 
 @router.get("/google/contacts/status", response_model=IntegrationStatusResponse)
+@inject
 async def get_google_contacts_status(
     user: FromDishka[SessionUser],
 ) -> IntegrationStatusResponse:
