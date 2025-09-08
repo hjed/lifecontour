@@ -2,14 +2,21 @@
 Integration tests for integrations API controllers.
 
 Tests the real API endpoints with actual services and database connections.
+Uses the established authentication pattern from other integration tests.
 """
 
 from unittest.mock import patch
 
 import pytest
+from dishka import Provider, Scope, make_async_container, provide
+from dishka.integrations.fastapi import FastapiProvider, setup_dishka
 from fastapi.testclient import TestClient
 
-from app.infrastructure.config import Settings
+from app.infrastructure.auth.models import SessionUser
+from app.infrastructure.di.contacts import ContactProvider
+from app.infrastructure.di.database import DatabaseProvider
+from app.infrastructure.di.infrastructure import InfrastructureProvider
+from app.infrastructure.di.integrations import IntegrationProvider
 from app.main import create_app
 
 
@@ -17,23 +24,46 @@ class TestIntegrationsControllers:
     """Integration tests for integrations API controllers."""
 
     @pytest.fixture
-    def settings(self) -> Settings:
-        """Create test settings."""
-        return Settings(
-            database_url="sqlite:///test.db",
-            debug=True,
-            disable_auth=True,  # Disable auth for testing
-            redis_url="redis://localhost:6379",
+    def test_user(self) -> SessionUser:
+        """Create a test user."""
+        return SessionUser(
+            id="123",
+            email="test@example.com",
+            name="Test User",
+            provider="test",
         )
 
     @pytest.fixture
-    def app(self, settings: Settings):
-        """Create test FastAPI app."""
-        return create_app(settings)
+    def client(self, test_settings, test_user):
+        """Create authenticated test client with all necessary providers."""
 
-    @pytest.fixture
-    def client(self, app):
-        """Create test client."""
+        class TestAuthProvider(Provider):
+            """Test provider for authenticated client."""
+
+            @provide(scope=Scope.REQUEST)
+            def get_session_user(self) -> SessionUser:
+                return test_user  # type: ignore
+
+        # Create app with test settings
+        app = create_app(settings=test_settings)
+
+        # Replace container with test container that includes all providers
+        test_container = make_async_container(
+            DatabaseProvider(test_settings),
+            InfrastructureProvider(),
+            TestAuthProvider(),  # Override auth with test user
+            ContactProvider(),
+            IntegrationProvider(),  # This is the missing provider!
+            FastapiProvider(),
+        )
+
+        try:
+            app.state.dishka_container.close()
+        except (RuntimeError, AttributeError):
+            pass
+        app.state.dishka_container = test_container
+        setup_dishka(test_container, app)
+
         return TestClient(app)
 
     def test_trigger_google_contacts_sync_success(self, client: TestClient):
