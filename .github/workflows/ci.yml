@@ -243,6 +243,16 @@ jobs:
         ports:
           - 7701:7700
 
+      redis:
+        image: redis:7-alpine
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 5
+        ports:
+          - 6379:6379
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v5
@@ -265,10 +275,10 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-uv-
 
-      - name: Install PostgreSQL client
+      - name: Install PostgreSQL and Redis clients
         run: |
           sudo apt-get update
-          sudo apt-get install -y postgresql-client
+          sudo apt-get install -y postgresql-client redis-tools
 
       - name: Create virtual environment and install dependencies
         run: |
@@ -297,6 +307,16 @@ jobs:
             sleep 2
           done
 
+          echo "Waiting for Redis..."
+          for i in {1..30}; do
+            if redis-cli -h localhost -p 6379 ping | grep -q PONG; then
+              echo "Redis is ready!"
+              break
+            fi
+            echo "Waiting for Redis... ($i/30)"
+            sleep 2
+          done
+
       - name: Run integration tests
         env:
           TEST_DB_HOST: localhost
@@ -306,6 +326,7 @@ jobs:
           TEST_DB_NAME: personal_management_test
           MEILISEARCH_URL: http://localhost:7701
           MEILISEARCH_API_KEY: test_master_key
+          REDIS_URL: redis://localhost:6379
         run: uv run pytest tests/integration/ -v --tb=short
 
   frontend-lint:
