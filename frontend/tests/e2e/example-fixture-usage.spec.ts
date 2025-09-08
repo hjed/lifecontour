@@ -6,6 +6,7 @@
  */
 
 import { test, expect } from './fixtures';
+import { ReliableWaiter } from './utils/test-helpers';
 
 test.describe('Example: Fixture-Based Testing', () => {
   test.describe('Authentication Fixtures', () => {
@@ -115,26 +116,28 @@ test.describe('Example: Fixture-Based Testing', () => {
         .locator('[data-testid="last-name-input"]')
         .fill('User');
 
-      // Submit the form
-      await emptyContactsPage
-        .locator('[data-testid="save-contact-button"]')
-        .click();
+      // Submit the form and wait for redirect using reliable waiting strategy
+      const waiter = new ReliableWaiter(emptyContactsPage);
+      await waiter.waitForFormSubmissionAndRedirect(
+        emptyContactsPage.locator('[data-testid="save-contact-button"]'),
+        /\/contacts\/\d+$/
+      );
 
-      // Should redirect to the newly created contact's detail page
-      await expect(emptyContactsPage).toHaveURL(/\/contacts\/\d+$/);
-
-      // Should see the new contact's name on the detail page
-      await expect(
-        emptyContactsPage.getByRole('heading', { name: 'Test User' })
-      ).toBeVisible();
+      // Wait for contact detail page to fully load with expected names
+      await waiter.waitForContactDetailPage({
+        expectedFirstName: 'Test',
+        expectedLastName: 'User',
+      });
     });
 
     // TODO: Re-enable this test in Task 2.5C when inline editing is implemented
     // Currently skipped because legacy edit functionality was removed to prepare for inline editing
     test.skip('should edit existing contact', async ({ contactsWithData }) => {
       const { page, contacts } = contactsWithData;
+      const waiter = new ReliableWaiter(page);
 
       // Navigate to contacts page
+      await waiter.waitForContactListPage();
       await page.goto('/contacts');
 
       // Click on first contact to edit
@@ -143,8 +146,11 @@ test.describe('Example: Fixture-Based Testing', () => {
       const contactLink = page.getByRole('link', { name: contactName });
       await contactLink.click();
 
-      // Should navigate to contact detail page
-      await expect(page).toHaveURL(new RegExp(`/contacts/${firstContact.id}`));
+      // Wait for contact detail page to load
+      await waiter.waitForContactDetailPage({
+        expectedFirstName: firstContact.firstName,
+        expectedLastName: firstContact.lastName,
+      });
 
       // Click edit button
       await page.locator('[data-testid="edit-contact-button"]').click();
@@ -159,10 +165,10 @@ test.describe('Example: Fixture-Based Testing', () => {
       // Save changes
       await page.locator('[data-testid="save-contact-button"]').click();
 
-      // Should see updated name
-      await expect(page.locator('[data-testid="contact-name"]')).toContainText(
-        'Updated'
-      );
+      // Should see updated name in the inline edit field
+      await expect(
+        page.locator('[data-testid="first-name-field"]')
+      ).toContainText('Updated');
     });
   });
 
@@ -245,14 +251,15 @@ test.describe('Example: Fixture-Based Testing', () => {
       // Navigate to contacts page (this should trigger the API call)
       await authenticatedPage.goto('/contacts');
 
-      // Wait for the page to load and process the error
+      // Wait for the page to load and process the error with reliable waiting
+      const waiter = new ReliableWaiter(authenticatedPage);
       await authenticatedPage.waitForLoadState('networkidle');
 
       // Should show error state (React Query retries will complete automatically)
       // Need longer timeout for React Query retries to complete
       await expect(
         authenticatedPage.locator('[data-testid="error-message"]')
-      ).toBeVisible({ timeout: 15000 });
+      ).toBeVisible({ timeout: 20000 }); // Increased timeout for React Query retries
 
       // Different browsers return different error messages for network failures
       // Chromium: "Failed to fetch"

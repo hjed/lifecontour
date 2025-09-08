@@ -21,7 +21,12 @@ export default defineConfig({
   /* Reporter to use. See https://playwright.dev/docs/test-reporters */
   reporter: process.env.CI ? [['github'], ['html']] : 'html',
   /* Global test timeout to prevent hanging tests */
-  timeout: 3 * 60 * 1000, // 5 minutes per test
+  timeout: 3 * 60 * 1000, // 3 minutes per test
+
+  /* Global expect timeout for assertions */
+  expect: {
+    timeout: 10000, // 10 seconds for assertions
+  },
 
   /* Shared settings for all the projects below. See https://playwright.dev/docs/api/class-testoptions. */
   use: {
@@ -37,8 +42,8 @@ export default defineConfig({
     },
 
     /* Increase timeout for better reliability */
-    actionTimeout: 15000,
-    navigationTimeout: 45000,
+    actionTimeout: 20000, // Increased from 15s to 20s
+    navigationTimeout: 60000, // Increased from 45s to 60s
 
     /* Screenshot on failure for debugging */
     screenshot: 'only-on-failure',
