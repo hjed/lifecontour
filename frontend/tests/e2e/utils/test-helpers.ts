@@ -5,7 +5,7 @@
  * accessibility, and responsive design.
  */
 
-import { Page, expect } from '@playwright/test';
+import { Page, expect, Locator } from '@playwright/test';
 import { TestDataManager } from '../data-management';
 
 /**
@@ -1297,4 +1297,124 @@ export async function verifyUrlMatches(
   });
 
   expect(matches).toBeTruthy();
+}
+
+/**
+ * Reliable waiting strategies for E2E tests
+ */
+export class ReliableWaiter {
+  constructor(private page: Page) {}
+
+  /**
+   * Wait for contact detail page to fully load with proper error handling
+   */
+  async waitForContactDetailPage(options?: {
+    timeout?: number;
+    expectedFirstName?: string;
+    expectedLastName?: string;
+  }): Promise<void> {
+    const {
+      timeout = 15000,
+      expectedFirstName,
+      expectedLastName,
+    } = options || {};
+
+    // Wait for URL to match contact detail pattern
+    await expect(this.page).toHaveURL(/\/contacts\/\d+$/, { timeout });
+
+    // Wait for the page to be in a stable state
+    await this.page.waitForLoadState('networkidle', { timeout });
+
+    // Wait for the contact avatar to be visible (indicates page structure loaded)
+    await expect(
+      this.page.locator('[data-testid="contact-avatar"]')
+    ).toBeVisible({ timeout });
+
+    // If specific names are expected, wait for them
+    if (expectedFirstName) {
+      await expect(
+        this.page.locator('[data-testid="first-name-field"]')
+      ).toContainText(expectedFirstName, { timeout });
+    }
+
+    if (expectedLastName) {
+      await expect(
+        this.page.locator('[data-testid="last-name-field"]')
+      ).toContainText(expectedLastName, { timeout });
+    }
+  }
+
+  /**
+   * Wait for contact list page to fully load
+   */
+  async waitForContactListPage(options?: {
+    timeout?: number;
+    expectEmpty?: boolean;
+  }): Promise<void> {
+    const { timeout = 15000, expectEmpty = false } = options || {};
+
+    // Wait for URL to match contacts list pattern
+    await expect(this.page).toHaveURL(/\/contacts\/?(\?.*)?$/, { timeout });
+
+    // Wait for the page to be in a stable state
+    await this.page.waitForLoadState('networkidle', { timeout });
+
+    // Wait for the main heading
+    await expect(this.page.locator('h1')).toContainText('Contacts', {
+      timeout,
+    });
+
+    if (expectEmpty) {
+      // Wait for empty state
+      await expect(
+        this.page.locator('[data-testid="empty-state"]')
+      ).toBeVisible({ timeout });
+    }
+  }
+
+  /**
+   * Wait for form submission to complete and redirect
+   */
+  async waitForFormSubmissionAndRedirect(
+    submitButton: Locator,
+    expectedUrlPattern: RegExp,
+    options?: { timeout?: number }
+  ): Promise<void> {
+    const { timeout = 20000 } = options || {};
+
+    // Wait for both the navigation and the button click to complete
+    await Promise.all([
+      this.page.waitForURL(expectedUrlPattern, { timeout }),
+      submitButton.click(),
+    ]);
+
+    // Wait for the page to be stable after redirect
+    await this.page.waitForLoadState('networkidle', { timeout: 10000 });
+  }
+
+  /**
+   * Wait for authentication to complete
+   */
+  async waitForAuthentication(options?: { timeout?: number }): Promise<void> {
+    const { timeout = 30000 } = options || {};
+
+    // Wait for either successful authentication (contacts page) or login page
+    try {
+      await this.page.waitForURL(/\/(contacts|auth\/login)/, { timeout });
+    } catch (error) {
+      // If URL doesn't match, check if we're on a valid authenticated page
+      const currentUrl = this.page.url();
+      if (
+        !currentUrl.includes('/contacts') &&
+        !currentUrl.includes('/auth/login')
+      ) {
+        throw new Error(
+          `Authentication wait failed. Current URL: ${currentUrl}`
+        );
+      }
+    }
+
+    // Wait for page to be stable
+    await this.page.waitForLoadState('networkidle', { timeout: 10000 });
+  }
 }

@@ -9,6 +9,7 @@ import {
   useUpdateContact,
   useDeleteContact,
   useToggleContactFavourite,
+  useUpdateContactField,
 } from '@/lib/api/contacts';
 import { ContactResponse } from '@/types/contacts';
 import {
@@ -24,6 +25,7 @@ jest.mock('@/lib/api/contacts', () => ({
   useUpdateContact: jest.fn(),
   useDeleteContact: jest.fn(),
   useToggleContactFavourite: jest.fn(),
+  useUpdateContactField: jest.fn(),
 }));
 
 // Mock Next.js navigation hooks
@@ -54,6 +56,9 @@ const mockUseToggleContactFavourite =
   useToggleContactFavourite as jest.MockedFunction<
     typeof useToggleContactFavourite
   >;
+const mockUseUpdateContactField = useUpdateContactField as jest.MockedFunction<
+  typeof useUpdateContactField
+>;
 
 describe('ContactDetailPage', () => {
   beforeEach(() => {
@@ -76,6 +81,13 @@ describe('ContactDetailPage', () => {
 
     mockUseToggleContactFavourite.mockReturnValue({
       mutate: jest.fn(),
+      isPending: false,
+      isError: false,
+      error: null,
+    } as any);
+
+    mockUseUpdateContactField.mockReturnValue({
+      mutateAsync: jest.fn().mockResolvedValue({}),
       isPending: false,
       isError: false,
       error: null,
@@ -106,6 +118,13 @@ describe('ContactDetailPage', () => {
       isPending: false,
     } as any);
 
+    mockUseUpdateContactField.mockReturnValue({
+      mutateAsync: jest.fn().mockResolvedValue({}),
+      isPending: false,
+      isError: false,
+      error: null,
+    } as any);
+
     renderContactDetailPage();
 
     // Check for skeleton loading components
@@ -128,6 +147,13 @@ describe('ContactDetailPage', () => {
     mockUseDeleteContact.mockReturnValue({
       mutateAsync: jest.fn(),
       isPending: false,
+    } as any);
+
+    mockUseUpdateContactField.mockReturnValue({
+      mutateAsync: jest.fn().mockResolvedValue({}),
+      isPending: false,
+      isError: false,
+      error: null,
     } as any);
 
     renderContactDetailPage();
@@ -155,10 +181,18 @@ describe('ContactDetailPage', () => {
       isPending: false,
     } as any);
 
+    mockUseUpdateContactField.mockReturnValue({
+      mutateAsync: jest.fn().mockResolvedValue({}),
+      isPending: false,
+      isError: false,
+      error: null,
+    } as any);
+
     renderContactDetailPage();
 
     // Wait for authentication to complete and page to load
-    expect(await screen.findByText('John Doe')).toBeInTheDocument();
+    expect(await screen.findByText('John')).toBeInTheDocument();
+    expect(screen.getByText('Doe')).toBeInTheDocument();
     // Check for nickname text - just check that Johnny appears somewhere
     expect(screen.getByText(/Johnny/)).toBeInTheDocument();
     // Check that the contact information section is rendered (there may be multiple on different screen sizes)
@@ -182,6 +216,13 @@ describe('ContactDetailPage', () => {
     mockUseDeleteContact.mockReturnValue({
       mutateAsync: jest.fn(),
       isPending: false,
+    } as any);
+
+    mockUseUpdateContactField.mockReturnValue({
+      mutateAsync: jest.fn().mockResolvedValue({}),
+      isPending: false,
+      isError: false,
+      error: null,
     } as any);
 
     renderContactDetailPage();
@@ -213,6 +254,13 @@ describe('ContactDetailPage', () => {
     mockUseDeleteContact.mockReturnValue({
       mutateAsync: mockDeleteMutation,
       isPending: false,
+    } as any);
+
+    mockUseUpdateContactField.mockReturnValue({
+      mutateAsync: jest.fn().mockResolvedValue({}),
+      isPending: false,
+      isError: false,
+      error: null,
     } as any);
 
     renderContactDetailPage();
@@ -267,10 +315,18 @@ describe('ContactDetailPage', () => {
       isPending: false,
     } as any);
 
+    mockUseUpdateContactField.mockReturnValue({
+      mutateAsync: jest.fn().mockResolvedValue({}),
+      isPending: false,
+      isError: false,
+      error: null,
+    } as any);
+
     renderContactDetailPage();
 
     // Wait for authentication to complete and page to load
-    expect(await screen.findByText('John Doe')).toBeInTheDocument();
+    expect(await screen.findByText('John')).toBeInTheDocument();
+    expect(screen.getByText('Doe')).toBeInTheDocument();
     expect(screen.queryByText('"Johnny"')).not.toBeInTheDocument();
   });
 });

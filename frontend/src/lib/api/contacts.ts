@@ -366,3 +366,65 @@ export function useToggleContactFavourite() {
     },
   });
 }
+
+// Field-level update functions
+export async function updateContactField(
+  contactId: string,
+  fieldName: string,
+  value: string
+): Promise<ContactResponse> {
+  const response = await fetch(
+    `${API_ENDPOINTS.CONTACTS}/${contactId}/fields/${fieldName}`,
+    {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        data: {
+          type: 'contacts',
+          id: contactId,
+          attributes: {
+            [fieldName]: value,
+          },
+        },
+      }),
+    }
+  );
+
+  if (!response.ok) {
+    const errorData: JsonApiErrorResponse = await response.json();
+    const errorMessage =
+      errorData.errors?.[0]?.detail || ERROR_MESSAGES.UPDATE_FAILED;
+    throw new Error(errorMessage);
+  }
+
+  return response.json();
+}
+
+export function useUpdateContactField() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({
+      contactId,
+      fieldName,
+      value,
+    }: {
+      contactId: string;
+      fieldName: string;
+      value: string;
+    }) => updateContactField(contactId, fieldName, value),
+    onSuccess: (data, variables) => {
+      const contactId = variables.contactId;
+      queryClient.invalidateQueries({
+        queryKey: contactKeys.detail(contactId),
+      });
+      queryClient.invalidateQueries({ queryKey: contactKeys.lists() });
+    },
+    onError: (error: Error) => {
+      // Don't show toast here - let the component handle it
+      console.error('Field update failed:', error);
+    },
+  });
+}
