@@ -3,8 +3,14 @@
  *
  * Provides validation functions for different field types including
  * email, phone, URL validation and formatting utilities.
- * Follows Australian conventions where applicable.
+ * Uses libphonenumber-js for international phone number validation and formatting.
  */
+
+import {
+  parsePhoneNumberFromString,
+  isValidPhoneNumber,
+  formatIncompletePhoneNumber,
+} from 'libphonenumber-js';
 
 /**
  * Validates that a field is not empty.
@@ -48,7 +54,9 @@ export function validateEmail(
 }
 
 /**
- * Validates phone number format (Australian and international).
+ * Validates phone number format using libphonenumber-js for international support.
+ * Attempts to parse the phone number and validates it according to international standards.
+ * Uses Australia as the default country for national numbers.
  */
 export function validatePhone(
   value: string,
@@ -56,28 +64,15 @@ export function validatePhone(
 ): string | null {
   if (!value || value.trim().length === 0) return null; // Let validateRequired handle required validation
 
-  // Remove all non-digit characters except + for international numbers
-  const cleaned = value.replace(/[^\d+]/g, '');
-
-  // Check for valid patterns
-  const patterns = [
-    /^\+61[2-9]\d{8}$/, // Australian landline with country code
-    /^\+61[4-5]\d{8}$/, // Australian mobile with country code
-    /^\+61[13]\d{7,9}$/, // Australian special numbers (1300, 1800, 13xx) with country code
-    /^0[2-9]\d{8}$/, // Australian landline
-    /^0[4-5]\d{8}$/, // Australian mobile
-    /^1[38]00\d{6}$/, // 1300/1800 numbers
-    /^13\d{4}$/, // 13xx numbers
-    /^\+\d{7,15}$/, // International numbers (7-15 digits after +)
-  ];
-
-  const isValid = patterns.some(pattern => pattern.test(cleaned));
-
-  if (!isValid) {
-    return message;
+  // First try to validate as international number (if it starts with +)
+  if (value.trim().startsWith('+')) {
+    const isValid = isValidPhoneNumber(value);
+    return isValid ? null : message;
   }
 
-  return null;
+  // For national numbers, use Australia as default country
+  const isValid = isValidPhoneNumber(value, 'AU');
+  return isValid ? null : message;
 }
 
 /**
@@ -105,59 +100,80 @@ export function validateUrl(
 }
 
 /**
- * Formats a phone number for display (Australian format).
+ * Formats a phone number for display using international standards.
+ * Attempts to parse and format the number, falling back to the original value if parsing fails.
+ * Uses Australia as the default country for national numbers.
+ * Formats international numbers in international format, national numbers in national format.
  */
 export function formatPhoneNumber(value: string): string {
   if (!value) return value;
 
-  // Remove all non-digit characters except +
-  const cleaned = value.replace(/[^\d+]/g, '');
-
-  // Australian mobile with country code: +61 4xx xxx xxx
-  if (/^\+61[4-5]\d{8}$/.test(cleaned)) {
-    return cleaned.replace(
-      /^\+61([4-5])(\d{2})(\d{3})(\d{3})$/,
-      '+61 $1$2 $3 $4'
-    );
+  try {
+    // If the input starts with +, treat as international
+    if (value.trim().startsWith('+')) {
+      const phoneNumber = parsePhoneNumberFromString(value);
+      if (phoneNumber && phoneNumber.isValid()) {
+        return phoneNumber.formatInternational();
+      }
+    } else {
+      // For national numbers, use Australia as default country
+      const phoneNumber = parsePhoneNumberFromString(value, 'AU');
+      if (phoneNumber && phoneNumber.isValid()) {
+        return phoneNumber.formatNational();
+      }
+    }
+  } catch {
+    // If parsing fails, fall back to original value
   }
 
-  // Australian landline with country code: +61 x xxxx xxxx
-  if (/^\+61[2-9]\d{8}$/.test(cleaned)) {
-    return cleaned.replace(/^\+61([2-9])(\d{4})(\d{4})$/, '+61 $1 $2 $3');
-  }
-
-  // Australian mobile: 04xx xxx xxx
-  if (/^0[4-5]\d{8}$/.test(cleaned)) {
-    return cleaned.replace(/^(0[4-5]\d{2})(\d{3})(\d{3})$/, '$1 $2 $3');
-  }
-
-  // Australian landline: 0x xxxx xxxx
-  if (/^0[2-9]\d{8}$/.test(cleaned)) {
-    return cleaned.replace(/^(0[2-9])(\d{4})(\d{4})$/, '$1 $2 $3');
-  }
-
-  // 1300/1800 numbers: 1xxx xxx xxx
-  if (/^1[38]00\d{6}$/.test(cleaned)) {
-    return cleaned.replace(/^(1[38]00)(\d{3})(\d{3})$/, '$1 $2 $3');
-  }
-
-  // 13xx numbers: 13 xx xx
-  if (/^13\d{4}$/.test(cleaned)) {
-    return cleaned.replace(/^(13)(\d{2})(\d{2})$/, '$1 $2 $3');
-  }
-
-  // If no pattern matches, return original value
+  // If no valid phone number could be parsed, return original value
   return value;
 }
 
 /**
- * Normalizes a phone number by removing formatting.
+ * Normalizes a phone number to E.164 format (international standard).
+ * Returns the phone number in E.164 format if valid, otherwise returns the original value.
+ * Uses Australia as the default country for national numbers.
  */
 export function normalizePhoneNumber(value: string): string {
   if (!value) return value;
 
-  // Remove all non-digit characters except + at the beginning
-  return value.replace(/(?!^\+)[^\d]/g, '');
+  try {
+    // If the input starts with +, treat as international
+    if (value.trim().startsWith('+')) {
+      const phoneNumber = parsePhoneNumberFromString(value);
+      if (phoneNumber && phoneNumber.isValid()) {
+        return phoneNumber.number;
+      }
+    } else {
+      // For national numbers, use Australia as default country
+      const phoneNumber = parsePhoneNumberFromString(value, 'AU');
+      if (phoneNumber && phoneNumber.isValid()) {
+        return phoneNumber.number;
+      }
+    }
+  } catch {
+    // If parsing fails, fall back to original value
+  }
+
+  // If no valid phone number could be parsed, return original value
+  return value;
+}
+
+/**
+ * Formats an incomplete phone number as the user types.
+ * Useful for real-time formatting in input fields.
+ */
+export function formatIncompletePhone(value: string): string {
+  if (!value) return value;
+
+  try {
+    // Use libphonenumber-js to format incomplete numbers
+    return formatIncompletePhoneNumber(value);
+  } catch {
+    // If formatting fails, return original value
+    return value;
+  }
 }
 
 /**

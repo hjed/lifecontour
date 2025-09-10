@@ -96,9 +96,9 @@ describe('validation utilities', () => {
 
     it('should validate international phone numbers', () => {
       const validPhones = [
-        '+1 555 123 4567',
-        '+44 20 7123 4567',
-        '+33 1 23 45 67 89',
+        '+1 201 234 5678', // US number
+        '+44 20 7123 4567', // UK number
+        '+33 1 23 45 67 89', // French number
       ];
 
       validPhones.forEach(phone => {
@@ -111,7 +111,7 @@ describe('validation utilities', () => {
         '123',
         'abc123',
         '++61 2 1234 5678',
-        '61 2 1234 5678', // Missing +
+        // Note: '61 2 1234 5678' without + is now valid as it gets treated as AU national number
       ];
 
       invalidPhones.forEach(phone => {
@@ -181,7 +181,7 @@ describe('validation utilities', () => {
     });
 
     it('should format Australian landline numbers', () => {
-      expect(formatPhoneNumber('0212345678')).toBe('02 1234 5678');
+      expect(formatPhoneNumber('0212345678')).toBe('(02) 1234 5678');
       expect(formatPhoneNumber('+61212345678')).toBe('+61 2 1234 5678');
     });
 
@@ -202,20 +202,25 @@ describe('validation utilities', () => {
   });
 
   describe('normalizePhoneNumber', () => {
-    it('should remove formatting from phone numbers', () => {
-      expect(normalizePhoneNumber('0412 345 678')).toBe('0412345678');
+    it('should convert phone numbers to E.164 format', () => {
+      expect(normalizePhoneNumber('0412 345 678')).toBe('+61412345678');
       expect(normalizePhoneNumber('+61 2 1234 5678')).toBe('+61212345678');
-      expect(normalizePhoneNumber('(02) 1234-5678')).toBe('0212345678');
+      expect(normalizePhoneNumber('(02) 1234-5678')).toBe('+61212345678');
     });
 
     it('should handle already normalized numbers', () => {
-      expect(normalizePhoneNumber('0412345678')).toBe('0412345678');
+      expect(normalizePhoneNumber('0412345678')).toBe('+61412345678');
       expect(normalizePhoneNumber('+61412345678')).toBe('+61412345678');
     });
 
-    it('should preserve international prefix', () => {
-      expect(normalizePhoneNumber('+1 555 123 4567')).toBe('+15551234567');
+    it('should convert international numbers to E.164 format', () => {
+      expect(normalizePhoneNumber('+1 201 234 5678')).toBe('+12012345678');
       expect(normalizePhoneNumber('+44 20 7123 4567')).toBe('+442071234567');
+    });
+
+    it('should return original value for invalid numbers', () => {
+      expect(normalizePhoneNumber('123')).toBe('123');
+      expect(normalizePhoneNumber('abc')).toBe('abc');
     });
   });
 });
