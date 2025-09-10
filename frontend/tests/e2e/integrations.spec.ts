@@ -115,11 +115,11 @@ test.describe('Integration Management', () => {
       expect(response.status()).toBe(401); // Unauthorized
     }
 
-    // Status endpoint returns 400 due to validation error
+    // Status endpoint requires authentication
     const statusResponse = await page.request.get(
       '/api/integrations/google/contacts/status'
     );
-    expect(statusResponse.status()).toBe(400); // Validation error
+    expect(statusResponse.status()).toBe(401); // Unauthorized
 
     // Health endpoint should not require authentication
     const healthResponse = await page.request.get('/api/integrations/health');
