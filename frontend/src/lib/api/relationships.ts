@@ -21,6 +21,16 @@ import {
   SUCCESS_MESSAGES,
 } from '@/lib/constants';
 
+// Types for relationship types API
+export interface EnumValue {
+  value: string;
+  display_name: string;
+}
+
+export interface RelationshipTypesResponse {
+  relationship_types: EnumValue[];
+}
+
 // Query Keys
 export const relationshipKeys = {
   all: ['relationships'] as const,
@@ -266,5 +276,31 @@ export function useDeleteContactRelationship() {
     onError: (error: Error) => {
       toast.error(error.message);
     },
+  });
+}
+
+// Relationship Types API Functions
+
+/**
+ * Fetch all available relationship types with display names
+ */
+export async function fetchRelationshipTypes(): Promise<RelationshipTypesResponse> {
+  const response = await fetch(`${API_ENDPOINTS.CONTACTS}/relationship-types`);
+
+  if (!response.ok) {
+    throw new Error('Failed to fetch relationship types');
+  }
+
+  return response.json();
+}
+
+/**
+ * Hook to fetch relationship types
+ */
+export function useRelationshipTypes() {
+  return useQuery({
+    queryKey: ['relationship-types'],
+    queryFn: fetchRelationshipTypes,
+    staleTime: 5 * 60 * 1000, // 5 minutes - enum values don't change often
   });
 }

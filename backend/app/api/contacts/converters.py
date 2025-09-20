@@ -330,8 +330,13 @@ class ContactRelationshipConverter:
                 self=f"{base_url}/api/contacts/{relationship.from_contact_id}/relationships/{relationship.id}",
             )
 
+        if relationship.id is None:
+            raise ValueError(
+                "Cannot serialize relationship without ID - relationship must be persisted first"
+            )
+
         return ContactRelationshipResource(
-            id=str(relationship.id) if relationship.id else "0",
+            id=str(relationship.id),
             attributes=attributes,
             links=links,
         )

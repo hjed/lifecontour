@@ -87,8 +87,7 @@ export enum RelationshipType {
   PARTNER = 'partner',
   FRIEND = 'friend',
   COLLEAGUE = 'colleague',
-  BUSINESS = 'business',
-  ACQUAINTANCE = 'acquaintance',
+  FAMILY = 'family',
   OTHER = 'other',
 }
 

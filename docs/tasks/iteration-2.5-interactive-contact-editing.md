@@ -250,6 +250,7 @@ This iteration follows established patterns:
 **📋 REMAINING:**
 - **Frontend: Relationship Management Components**: RelationshipsList, RelationshipItem, AddRelationshipForm
 - **Frontend: Contact Detail Page Integration**: Add to sidebar with responsive design
+- **MCP Protocol Integration**: Add MCP methods for relationship management operations
 - **End-to-End Testing & Quality Assurance**: E2E tests and quality checks
 
 #### Technical Implementation Details
@@ -264,7 +265,8 @@ This iteration follows established patterns:
 - ContactRepository enhanced to load relationships
 
 **Frontend Types & Validation (Complete):**
-- RelationshipType enum with all relationship types (parent, child, sibling, partner, friend, colleague, business, acquaintance, other)
+- RelationshipType enum aligned with backend (parent, child, sibling, partner, friend, colleague, family, other)
+- Relationship types API endpoint with display names for centralized management
 - ContactRelationshipAttributes, ContactRelationshipResource interfaces
 - Comprehensive validation functions with 23 unit tests passing
 - API client functions with React Query hooks

@@ -300,17 +300,7 @@ class ContactRelationship:
 
     def get_inverse_type(self) -> RelationshipType:
         """Get the inverse relationship type for bidirectional relationships."""
-        inverse_map = {
-            RelationshipType.PARENT: RelationshipType.CHILD,
-            RelationshipType.CHILD: RelationshipType.PARENT,
-            RelationshipType.PARTNER: RelationshipType.PARTNER,
-            RelationshipType.SIBLING: RelationshipType.SIBLING,
-            RelationshipType.FRIEND: RelationshipType.FRIEND,
-            RelationshipType.COLLEAGUE: RelationshipType.COLLEAGUE,
-            RelationshipType.FAMILY: RelationshipType.FAMILY,
-            RelationshipType.OTHER: RelationshipType.OTHER,
-        }
-        return inverse_map[self.relationship_type]
+        return self.relationship_type.get_inverse_type()
 
     def is_bidirectional(self) -> bool:
         """Check if this relationship type should be bidirectional."""

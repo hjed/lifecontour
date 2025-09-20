@@ -1,7 +1,5 @@
 """Contact relationship service with business logic for managing relationships."""
 
-from sqlalchemy.ext.asyncio import AsyncConnection
-
 from app.core.contacts.models.entities import ContactRelationship, RelationshipType
 from app.core.contacts.models.exceptions import (
     ContactNotFoundError,
@@ -29,7 +27,6 @@ class ContactRelationshipService:
         from_contact_id: int,
         to_contact_id: int,
         relationship_type: RelationshipType,
-        transaction: AsyncConnection,
         create_bidirectional: bool = False,
     ) -> ContactRelationship | list[ContactRelationship]:
         """
@@ -39,7 +36,6 @@ class ContactRelationshipService:
             from_contact_id: ID of the contact initiating the relationship
             to_contact_id: ID of the contact receiving the relationship
             relationship_type: Type of relationship
-            transaction: Database transaction
             create_bidirectional: Whether to create the inverse relationship
 
         Returns:
@@ -132,7 +128,6 @@ class ContactRelationshipService:
         self,
         relationship_id: int,
         relationship_type: RelationshipType,
-        transaction: AsyncConnection,
     ) -> ContactRelationship:
         """
         Update an existing relationship.
@@ -140,7 +135,6 @@ class ContactRelationshipService:
         Args:
             relationship_id: ID of the relationship to update
             relationship_type: New relationship type
-            transaction: Database transaction
 
         Returns:
             Updated relationship
@@ -170,14 +164,12 @@ class ContactRelationshipService:
     async def delete_relationship(
         self,
         relationship_id: int,
-        transaction: AsyncConnection,
     ) -> None:
         """
         Delete a relationship.
 
         Args:
             relationship_id: ID of the relationship to delete
-            transaction: Database transaction
 
         Raises:
             ContactValidationError: If relationship doesn't exist
@@ -194,14 +186,12 @@ class ContactRelationshipService:
     async def delete_all_relationships_for_contact(
         self,
         contact_id: int,
-        transaction: AsyncConnection,
     ) -> None:
         """
         Delete all relationships for a contact.
 
         Args:
             contact_id: ID of the contact
-            transaction: Database transaction
         """
         relationships = await self.get_relationships_for_contact(contact_id)
         for relationship in relationships:
@@ -227,7 +217,6 @@ class ContactRelationshipService:
         from_contact_id: int,
         to_contact_id: int,
         relationship_type: RelationshipType,
-        transaction: AsyncConnection,
     ) -> None:
         """
         Validate that a relationship type is compatible with existing relationships.
@@ -236,7 +225,6 @@ class ContactRelationshipService:
             from_contact_id: ID of the contact initiating the relationship
             to_contact_id: ID of the contact receiving the relationship
             relationship_type: Type of relationship to validate
-            transaction: Database transaction
 
         Raises:
             ContactValidationError: If relationship type is incompatible

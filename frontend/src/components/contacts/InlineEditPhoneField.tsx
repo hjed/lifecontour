@@ -13,6 +13,7 @@ import { cn } from '@/lib/utils';
 import {
   isValidPhoneNumber,
   parsePhoneNumberFromString,
+  type CountryCode,
 } from 'libphonenumber-js';
 import { InlineEditField, type InlineEditFieldProps } from './InlineEditField';
 
@@ -22,8 +23,8 @@ export interface InlineEditPhoneFieldProps
   readonly showIcon?: boolean;
   /** Custom validation function (will be combined with phone validation) */
   readonly additionalValidation?: (value: string) => string | null;
-  /** Default country code for phone number parsing and formatting (defaults to 'US') */
-  readonly defaultCountry?: string;
+  /** Default country code for phone number parsing and formatting (defaults to 'AU') */
+  readonly defaultCountry?: CountryCode;
 }
 
 /**
@@ -35,7 +36,7 @@ export function InlineEditPhoneField({
   placeholder = 'Add phone number',
   showIcon = true,
   additionalValidation,
-  defaultCountry = 'US',
+  defaultCountry = 'AU',
   className,
   'data-testid': testId,
   'aria-label': ariaLabel,
@@ -53,7 +54,7 @@ export function InlineEditPhoneField({
       }
 
       // For national numbers, use the provided default country
-      const isValid = isValidPhoneNumber(phoneValue, defaultCountry as 'US');
+      const isValid = isValidPhoneNumber(phoneValue, defaultCountry);
       return isValid ? null : 'Please enter a valid phone number';
     },
     [defaultCountry]
@@ -94,7 +95,7 @@ export function InlineEditPhoneField({
           // For national numbers, use the provided default country
           const phoneNumber = parsePhoneNumberFromString(
             phoneValue,
-            defaultCountry as 'US'
+            defaultCountry
           );
           if (phoneNumber && phoneNumber.isValid()) {
             return phoneNumber.formatNational();

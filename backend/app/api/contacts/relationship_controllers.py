@@ -31,7 +31,7 @@ logger = structlog.get_logger()
 
 # Create router for relationship endpoints
 router = APIRouter(
-    prefix="/api/contacts/{contact_id}/relationships", tags=["relationships"]
+    prefix="/contacts/{contact_id}/relationships", tags=["relationships"]
 )
 
 
@@ -134,7 +134,6 @@ async def create_contact_relationship(
         from_contact_id=relationship.from_contact_id,
         to_contact_id=relationship.to_contact_id,
         relationship_type=relationship.relationship_type,
-        transaction=connection,
     )
 
     # Handle both single relationship and list of relationships
@@ -204,7 +203,6 @@ async def update_contact_relationship(
         relationship_type=RelationshipType(
             relationship_request.data.attributes.relationship_type
         ),
-        transaction=connection,
     )
 
     relationship_resource = ContactRelationshipConverter.to_resource(
@@ -249,5 +247,4 @@ async def delete_contact_relationship(
 
     await relationship_service.delete_relationship(
         relationship_id=relationship_id,
-        transaction=connection,
     )
