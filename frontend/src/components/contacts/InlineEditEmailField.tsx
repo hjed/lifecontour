@@ -38,20 +38,33 @@ export function InlineEditEmailField({
   // Combine email validation with any additional validation
   const validation = useCallback(
     (emailValue: string) => {
+      // Normalize email: trim whitespace and convert to lowercase
+      const normalizedEmail = emailValue.trim().toLowerCase();
+
       // First run email validation
-      const emailError = validateEmail(emailValue);
+      const emailError = validateEmail(normalizedEmail);
       if (emailError) {
         return emailError;
       }
 
       // Then run any additional validation
       if (additionalValidation) {
-        return additionalValidation(emailValue);
+        return additionalValidation(normalizedEmail);
       }
 
       return null;
     },
     [additionalValidation]
+  );
+
+  // Handle save with email normalization
+  const handleSave = useCallback(
+    (emailValue: string) => {
+      // Normalize email before saving
+      const normalizedEmail = emailValue.trim().toLowerCase();
+      return onSave(normalizedEmail);
+    },
+    [onSave]
   );
 
   return (
@@ -65,7 +78,7 @@ export function InlineEditEmailField({
       <InlineEditField
         {...props}
         value={value}
-        onSave={onSave}
+        onSave={handleSave}
         fieldType='email'
         placeholder={placeholder}
         validation={validation}

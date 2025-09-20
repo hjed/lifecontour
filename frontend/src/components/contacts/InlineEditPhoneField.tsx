@@ -10,7 +10,10 @@
 import { useCallback } from 'react';
 import { Phone } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { validatePhone, formatPhoneNumber } from '@/lib/validation';
+import {
+  isValidPhoneNumber,
+  parsePhoneNumberFromString,
+} from 'libphonenumber-js';
 import { InlineEditField, type InlineEditFieldProps } from './InlineEditField';
 
 export interface InlineEditPhoneFieldProps
@@ -19,6 +22,8 @@ export interface InlineEditPhoneFieldProps
   readonly showIcon?: boolean;
   /** Custom validation function (will be combined with phone validation) */
   readonly additionalValidation?: (value: string) => string | null;
+  /** Default country code for phone number parsing and formatting (defaults to 'US') */
+  readonly defaultCountry?: string;
 }
 
 /**
@@ -30,16 +35,35 @@ export function InlineEditPhoneField({
   placeholder = 'Add phone number',
   showIcon = true,
   additionalValidation,
+  defaultCountry = 'US',
   className,
   'data-testid': testId,
   'aria-label': ariaLabel,
   ...props
 }: InlineEditPhoneFieldProps) {
+  // Country-aware phone validation
+  const validatePhoneWithCountry = useCallback(
+    (phoneValue: string) => {
+      if (!phoneValue || phoneValue.trim().length === 0) return null;
+
+      // First try to validate as international number (if it starts with +)
+      if (phoneValue.trim().startsWith('+')) {
+        const isValid = isValidPhoneNumber(phoneValue);
+        return isValid ? null : 'Please enter a valid phone number';
+      }
+
+      // For national numbers, use the provided default country
+      const isValid = isValidPhoneNumber(phoneValue, defaultCountry as 'US');
+      return isValid ? null : 'Please enter a valid phone number';
+    },
+    [defaultCountry]
+  );
+
   // Combine phone validation with any additional validation
   const validation = useCallback(
     (phoneValue: string) => {
       // First run phone validation
-      const phoneError = validatePhone(phoneValue);
+      const phoneError = validatePhoneWithCountry(phoneValue);
       if (phoneError) {
         return phoneError;
       }
@@ -51,28 +75,49 @@ export function InlineEditPhoneField({
 
       return null;
     },
-    [additionalValidation]
+    [validatePhoneWithCountry, additionalValidation]
   );
 
-  // Format phone number for display
+  // Country-aware phone formatting for display
   const formatForDisplay = useCallback(
     (phoneValue: string | null | undefined) => {
       if (!phoneValue) return phoneValue;
-      return formatPhoneNumber(phoneValue);
+
+      try {
+        // If the input starts with +, treat as international
+        if (phoneValue.trim().startsWith('+')) {
+          const phoneNumber = parsePhoneNumberFromString(phoneValue);
+          if (phoneNumber && phoneNumber.isValid()) {
+            return phoneNumber.formatInternational();
+          }
+        } else {
+          // For national numbers, use the provided default country
+          const phoneNumber = parsePhoneNumberFromString(
+            phoneValue,
+            defaultCountry as 'US'
+          );
+          if (phoneNumber && phoneNumber.isValid()) {
+            return phoneNumber.formatNational();
+          }
+        }
+      } catch {
+        // If parsing fails, fall back to original value
+      }
+
+      // If no valid phone number could be parsed, return original value
+      return phoneValue;
     },
-    []
+    [defaultCountry]
   );
 
-  // Format phone number during editing (incomplete formatting)
-
-  // Handle save with formatting
+  // Handle save with phone formatting
   const handleSave = useCallback(
-    async (phoneValue: string) => {
-      // Format the phone number before saving
-      const formattedPhone = formatPhoneNumber(phoneValue);
-      await onSave(formattedPhone);
+    (phoneValue: string) => {
+      // Format phone before saving
+      const formattedPhone = formatForDisplay(phoneValue) || phoneValue;
+      return onSave(formattedPhone);
     },
-    [onSave]
+    [onSave, formatForDisplay]
   );
 
   // Format the display value

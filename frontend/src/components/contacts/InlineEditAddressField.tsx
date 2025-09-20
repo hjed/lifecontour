@@ -255,10 +255,34 @@ export function InlineEditAddressField({
       if (event.key === 'Escape') {
         event.preventDefault();
         cancelEdit();
+        return;
       }
-      // Note: We don't handle Enter here since we have multiple inputs
+
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        // Move focus to next field in the address form
+        const currentElement = event.target as HTMLInputElement;
+        const form =
+          currentElement.closest('form') ||
+          currentElement.closest('[role="form"]') ||
+          currentElement.parentElement;
+        if (form) {
+          const inputs = Array.from(
+            form.querySelectorAll('input:not([disabled])')
+          ) as HTMLInputElement[];
+          const currentIndex = inputs.indexOf(currentElement);
+          const nextInput = inputs[currentIndex + 1];
+
+          if (nextInput) {
+            nextInput.focus();
+          } else {
+            // If we're on the last field, save the address
+            saveEdit();
+          }
+        }
+      }
     },
-    [cancelEdit]
+    [cancelEdit, saveEdit]
   );
 
   // Edit mode
