@@ -41,15 +41,6 @@ The CI/CD pipeline is implemented using GitHub Actions and includes:
 - `codeql-analysis`: GitHub's CodeQL analysis
 - `docker-security`: Trivy vulnerability scanning
 
-### 3. Code Quality (`.github/workflows/code-quality.yml`)
-
-**Triggers:** Push/PR to main branches
-
-**Jobs:**
-- `sonarcloud`: SonarCloud analysis with coverage
-- `complexity-analysis`: Code complexity metrics
-- `documentation-check`: Documentation consistency checks
-
 ### 4. Dependency Updates (`.github/workflows/dependency-update.yml`)
 
 **Triggers:** Weekly schedule (Mondays) + manual dispatch
