@@ -1,0 +1,26 @@
+{
+    "target": {
+      "oauth-login-consent-test": {
+        "cache-from": [
+          "type=gha"
+        ],
+        "cache-to": [
+          "type=gha,mode=max"
+        ],
+        "output": [
+          "type=docker"
+        ]
+      },
+      "backend-test": {
+        "cache-from": [
+          "type=gha"
+        ],
+        "cache-to": [
+          "type=gha,mode=max"
+        ],
+        "output": [
+          "type=docker"
+        ]
+      }
+   }
+}

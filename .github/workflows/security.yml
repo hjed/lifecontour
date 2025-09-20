@@ -1,8 +1,6 @@
 name: Security Scan
 
 on:
-  push:
-    branches: [ main, develop ]
   pull_request:
     branches: [ main, develop ]
   schedule:
@@ -30,6 +28,15 @@ jobs:
         uses: astral-sh/setup-uv@v6
         with:
           version: "0.4.18"
+
+      - name: Cache UV dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/uv
+          key: ${{ runner.os }}-uv-${{ hashFiles('backend/pyproject.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-uv-
+
 
       - name: Create virtual environment and install dependencies
         run: |
@@ -78,6 +85,19 @@ jobs:
         with:
           version: "9.12.0"
 
+      - name: Get pnpm store directory
+        shell: bash
+        run: |
+          echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
+
+      - name: Setup pnpm cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.STORE_PATH }}
+          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('frontend/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-
+
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
@@ -88,48 +108,3 @@ jobs:
         run: |
           pnpm add -D eslint-plugin-security
           pnpm lint
-
-
-
-  docker-security:
-    name: Docker Security Scan
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v5
-
-      - name: Build Backend Docker image
-        run: |
-          echo "Building backend Docker image..."
-          docker build -f docker/backend/Dockerfile -t backend:test .
-
-      - name: Build Frontend Docker image
-        run: |
-          echo "Building frontend Docker image..."
-          # Create public directory if it doesn't exist
-          mkdir -p frontend/public
-          docker build -f docker/frontend/Dockerfile -t frontend:test .
-
-      - name: Run Trivy vulnerability scanner - Backend
-        uses: aquasecurity/trivy-action@master
-        with:
-          image-ref: 'backend:test'
-          format: 'sarif'
-          output: 'trivy-backend-results.sarif'
-
-      - name: Run Trivy vulnerability scanner - Frontend
-        uses: aquasecurity/trivy-action@master
-        with:
-          image-ref: 'frontend:test'
-          format: 'sarif'
-          output: 'trivy-frontend-results.sarif'
-
-      - name: Upload Trivy scan results as artifacts
-        uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: trivy-results
-          path: |
-            trivy-backend-results.sarif
-            trivy-frontend-results.sarif

@@ -8,9 +8,9 @@ on:
 
 env:
   PYTHON_VERSION: "3.11"
-  NODE_VERSION: "18"
-  UV_VERSION: "0.4.18"
-  PNPM_VERSION: "9.12.0"
+  NODE_VERSION: "24"
+  UV_VERSION: "0.7.9"
+  PNPM_VERSION: "10.11.0"
 
 jobs:
   backend-lint:
@@ -319,15 +319,17 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v5
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v5
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
         with:
           version: ${{ env.PNPM_VERSION }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'pnpm'
+          cache-dependency-path: frontend/pnpm-lock.yaml
 
       - name: Get pnpm store directory
         shell: bash
@@ -371,15 +373,17 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v5
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v5
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
         with:
           version: ${{ env.PNPM_VERSION }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'pnpm'
+          cache-dependency-path: frontend/pnpm-lock.yaml
 
       - name: Get pnpm store directory
         shell: bash
@@ -397,7 +401,7 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Run Jest tests
+      - name: Run Jest tests with coverage
         run: pnpm test:coverage
 
       - name: Upload coverage to Codecov
@@ -420,15 +424,17 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v5
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v5
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
         with:
           version: ${{ env.PNPM_VERSION }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'pnpm'
+          cache-dependency-path: frontend/pnpm-lock.yaml
 
       - name: Get pnpm store directory
         shell: bash
@@ -447,6 +453,9 @@ jobs:
         working-directory: ./frontend
         run: pnpm install --frozen-lockfile
 
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+
       - name: Check system resources
         run: |
           echo "🔍 System information:"
@@ -458,8 +467,9 @@ jobs:
 
       - name: Setup Docker environment for e2e tests
         run: |
+          docker buildx bake --file docker-compose.test.yml --file docker/gha-compose-testing-cache.json
           echo "🐳 Starting Docker services for e2e tests..."
-          docker compose -f docker-compose.test.yml up -d --build
+          docker compose -f docker-compose.test.yml up -d
 
           echo "📋 Checking Docker services status..."
           docker compose -f docker-compose.test.yml ps
@@ -589,15 +599,31 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v5
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v5
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
         with:
           version: ${{ env.PNPM_VERSION }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'pnpm'
+          cache-dependency-path: frontend/pnpm-lock.yaml
+
+      - name: Get pnpm store directory
+        shell: bash
+        run: |
+          echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
+
+      - name: Setup pnpm cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.STORE_PATH }}
+          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('frontend/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-
+
 
       - name: Install frontend dependencies
         working-directory: ./frontend
@@ -607,7 +633,34 @@ jobs:
         working-directory: ./frontend
         run: pnpm build
 
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+
       - name: Test Docker build
         run: |
-          docker build -f docker/backend/Dockerfile .
-          docker build -f docker/frontend/Dockerfile .
+          docker buildx build -f docker/backend/Dockerfile . -t backend:test --cache-from=type=gha --cache-to=type=gha,mode=max --load
+          docker buildx build -f docker/frontend/Dockerfile . -t frontend:test --cache-from=type=gha --cache-to=type=gha,mode=max --load
+
+      - name: Run Trivy vulnerability scanner - Backend
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: 'backend:test'
+          format: 'sarif'
+          output: 'trivy-backend-results.sarif'
+
+      - name: Run Trivy vulnerability scanner - Frontend
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: 'frontend:test'
+          format: 'sarif'
+          output: 'trivy-frontend-results.sarif'
+
+      - name: Upload Trivy scan results as artifacts
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: trivy-results
+          path: |
+            trivy-backend-results.sarif
+            trivy-frontend-results.sarif
+
