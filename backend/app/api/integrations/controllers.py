@@ -12,13 +12,8 @@ from typing import Any
 import structlog
 from dishka.integrations.fastapi import FromDishka, inject
 from fastapi import APIRouter, HTTPException
-import structlog
-from dishka.integrations.fastapi import FromDishka, inject
-from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from app.core.integrations.health_service import IntegrationHealthService
-from app.core.integrations.task_queue_service import TaskQueueService
 from app.core.integrations.health_service import IntegrationHealthService
 from app.core.integrations.task_queue_service import TaskQueueService
 from app.infrastructure.auth.models import SessionUser

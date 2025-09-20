@@ -23,7 +23,11 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 
 import { ContactAvatar } from '@/components/contacts/ContactAvatar';
 import { ContactIdentityInline } from '@/components/contacts/ContactIdentityInline';
-import type { TagResource } from '@/types/contacts';
+import type {
+  TagResource,
+  ContactMethodResource,
+  ContactAddressResource,
+} from '@/types/contacts';
 import { AuthGuard } from '@/components/auth/AuthGuard';
 import { DATE_FORMATS } from '@/lib/constants';
 
@@ -68,7 +72,7 @@ const TagsCard = ({
     </Card>
   ) : null;
 
-const ContactMethodItem = ({ method }: { method: any }) => (
+const ContactMethodItem = ({ method }: { method: ContactMethodResource }) => (
   <div className='flex items-center gap-3'>
     {method.attributes.method_type === 'email' && (
       <Mail className='text-muted-foreground h-4 w-4' />
@@ -90,7 +94,7 @@ const ContactMethodItem = ({ method }: { method: any }) => (
   </div>
 );
 
-const AddressItem = ({ address }: { address: any }) => (
+const AddressItem = ({ address }: { address: ContactAddressResource }) => (
   <div className='flex items-start gap-3'>
     <MapPin className='text-muted-foreground mt-0.5 h-4 w-4' />
     <div>
