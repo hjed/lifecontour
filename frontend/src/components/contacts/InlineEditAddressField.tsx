@@ -260,7 +260,7 @@ export function InlineEditAddressField({
 
       if (event.key === 'Enter') {
         event.preventDefault();
-        // Move focus to next field in the address form
+        // Handle keyboard navigation: Enter for next field, Shift+Enter for previous field
         const currentElement = event.target as HTMLInputElement;
         const form =
           currentElement.closest('form') ||
@@ -271,13 +271,22 @@ export function InlineEditAddressField({
             form.querySelectorAll('input:not([disabled])')
           ) as HTMLInputElement[];
           const currentIndex = inputs.indexOf(currentElement);
-          const nextInput = inputs[currentIndex + 1];
 
-          if (nextInput) {
-            nextInput.focus();
+          if (event.shiftKey) {
+            // Shift+Enter: Move to previous field
+            const previousInput = inputs[currentIndex - 1];
+            if (previousInput) {
+              previousInput.focus();
+            }
           } else {
-            // If we're on the last field, save the address
-            saveEdit();
+            // Enter: Move to next field or save if on last field
+            const nextInput = inputs[currentIndex + 1];
+            if (nextInput) {
+              nextInput.focus();
+            } else {
+              // If we're on the last field, save the address
+              saveEdit();
+            }
           }
         }
       }
