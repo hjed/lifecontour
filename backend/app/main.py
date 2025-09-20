@@ -142,6 +142,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # Import routers after Dishka setup to avoid type annotation issues
     from app.api.auth.controllers import router as auth_router
     from app.api.contacts.controllers import router as contacts_router
+    from app.api.contacts.relationship_controllers import router as relationships_router
     from app.api.error_handlers import register_error_handlers
     from app.api.health import router as health_router
     from app.api.integrations.controllers import router as integrations_router
@@ -180,6 +181,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(auth_router, prefix="/api/auth", tags=["authentication"])
     app.include_router(search_router, prefix="/api", tags=["search"])
     app.include_router(contacts_router, prefix="/api", tags=["contacts"])
+    app.include_router(relationships_router, tags=["relationships"])
     app.include_router(tags_router, prefix="/api", tags=["tags"])
     app.include_router(integrations_router, prefix="/api", tags=["integrations"])
 

@@ -21,6 +21,7 @@ describe('Contact Types', () => {
         contact_methods: [],
         addresses: [],
         notes: [],
+        relationships: [],
       };
 
       expect(contactAttributes.is_favourite).toBe(true);
@@ -34,6 +35,7 @@ describe('Contact Types', () => {
         contact_methods: [],
         addresses: [],
         notes: [],
+        relationships: [],
       };
 
       // Should be able to create without is_favourite
@@ -85,6 +87,7 @@ describe('Contact Types', () => {
           contact_methods: [],
           addresses: [],
           notes: [],
+          relationships: [],
         },
       };
 

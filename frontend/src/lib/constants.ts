@@ -152,6 +152,9 @@ export const SUCCESS_MESSAGES = {
   CONTACT_CREATED: 'Contact created successfully',
   CONTACT_UPDATED: 'Contact updated successfully',
   CONTACT_DELETED: 'Contact deleted successfully',
+  CREATE_SUCCESS: 'Created successfully',
+  UPDATE_SUCCESS: 'Updated successfully',
+  DELETE_SUCCESS: 'Deleted successfully',
 } as const;
 
 // Validation Messages

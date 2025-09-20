@@ -9,7 +9,9 @@ from app.core.contacts.models.entities import (
     ContactAddress,
     ContactMethod,
     ContactNote,
+    ContactRelationship,
     MethodType,
+    RelationshipType,
     Tag,
 )
 from app.core.contacts.models.exceptions import (
@@ -149,6 +151,29 @@ class SqlContactRepository(ContactRepository):
                 updated_at=tag_row.updated_at,
             )
             contact.tags.append(tag)
+
+        # Load contact relationships
+        relationships_query = text(
+            """
+            SELECT id, from_contact_id, to_contact_id, relationship_type, created_at, updated_at
+            FROM contact_relationships
+            WHERE from_contact_id = :contact_id OR to_contact_id = :contact_id
+            ORDER BY created_at DESC
+        """
+        )
+        relationships_result = await self.conn.execute(
+            relationships_query, {"contact_id": contact_id}
+        )
+        for rel_row in relationships_result.fetchall():
+            relationship = ContactRelationship(
+                id=rel_row.id,
+                from_contact_id=rel_row.from_contact_id,
+                to_contact_id=rel_row.to_contact_id,
+                relationship_type=RelationshipType(rel_row.relationship_type),
+                created_at=rel_row.created_at,
+                updated_at=rel_row.updated_at,
+            )
+            contact.relationships.append(relationship)
 
         return contact
 

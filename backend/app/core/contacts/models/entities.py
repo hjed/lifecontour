@@ -34,6 +34,20 @@ class RelationshipType(Enum):
         """Return the string value of the enum."""
         return self.value
 
+    def get_inverse_type(self) -> "RelationshipType":
+        """Get the inverse relationship type for bidirectional relationships."""
+        inverse_map = {
+            RelationshipType.PARENT: RelationshipType.CHILD,
+            RelationshipType.CHILD: RelationshipType.PARENT,
+            RelationshipType.PARTNER: RelationshipType.PARTNER,
+            RelationshipType.SIBLING: RelationshipType.SIBLING,
+            RelationshipType.FRIEND: RelationshipType.FRIEND,
+            RelationshipType.COLLEAGUE: RelationshipType.COLLEAGUE,
+            RelationshipType.FAMILY: RelationshipType.FAMILY,
+            RelationshipType.OTHER: RelationshipType.OTHER,
+        }
+        return inverse_map[self]
+
 
 @dataclass
 class Tag:
@@ -168,6 +182,7 @@ class Contact:
     addresses: list[ContactAddress] = field(default_factory=list)
     notes: list[ContactNote] = field(default_factory=list)
     tags: list[Tag] = field(default_factory=list)
+    relationships: list["ContactRelationship"] = field(default_factory=list)
 
     def __post_init__(self) -> None:
         """Validate contact."""

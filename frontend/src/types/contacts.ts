@@ -79,6 +79,35 @@ export interface TagResource
   type: 'tags';
 }
 
+// Contact Relationship Types
+export enum RelationshipType {
+  PARENT = 'parent',
+  CHILD = 'child',
+  SIBLING = 'sibling',
+  PARTNER = 'partner',
+  FRIEND = 'friend',
+  COLLEAGUE = 'colleague',
+  BUSINESS = 'business',
+  ACQUAINTANCE = 'acquaintance',
+  OTHER = 'other',
+}
+
+export interface ContactRelationshipAttributes {
+  from_contact_id: number;
+  to_contact_id: number;
+  relationship_type: RelationshipType;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ContactRelationshipResource
+  extends Omit<
+    JsonApiResource<ContactRelationshipAttributes>,
+    'relationships'
+  > {
+  type: 'contact_relationships';
+}
+
 // Contact Types
 export interface ContactAttributes {
   first_name: string;
@@ -92,6 +121,7 @@ export interface ContactAttributes {
   contact_methods: ContactMethodResource[];
   addresses: ContactAddressResource[];
   notes: ContactNoteResource[];
+  relationships: ContactRelationshipResource[];
 }
 
 export interface ContactRelationships {
@@ -173,6 +203,44 @@ export interface TagAssignmentData {
 
 export interface TagAssignmentRequest {
   data: TagAssignmentData;
+}
+
+// Contact Relationship API Types
+export interface ContactRelationshipFormData {
+  from_contact_id: number;
+  to_contact_id: number;
+  relationship_type: RelationshipType;
+}
+
+export interface ContactRelationshipCreateData {
+  type: 'contact_relationships';
+  attributes: ContactRelationshipFormData;
+}
+
+export interface ContactRelationshipUpdateData {
+  type: 'contact_relationships';
+  id: string;
+  attributes: ContactRelationshipFormData;
+}
+
+export interface ContactRelationshipCreateRequest {
+  data: ContactRelationshipCreateData;
+}
+
+export interface ContactRelationshipUpdateRequest {
+  data: ContactRelationshipUpdateData;
+}
+
+export interface ContactRelationshipResponse {
+  data: ContactRelationshipResource;
+  links?: JsonApiLinks;
+  meta?: JsonApiMeta;
+}
+
+export interface ContactRelationshipListResponse {
+  data: ContactRelationshipResource[];
+  links?: JsonApiLinks;
+  meta?: JsonApiMeta;
 }
 
 // Contact Display Types (for UI)

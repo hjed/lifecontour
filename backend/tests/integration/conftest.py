@@ -6,6 +6,7 @@ import subprocess
 import time
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass
+from typing import Any
 
 import pytest
 import pytest_asyncio
@@ -654,8 +655,22 @@ async def authenticated_client(test_settings, test_user):
     # Create app with test settings
     app = create_app(settings=test_settings)
 
-    # Replace container with test container
-    test_container = make_async_container(TestAuthProvider())
+    # Replace container with test container that includes all providers
+    from dishka.integrations.fastapi import FastapiProvider
+
+    from app.infrastructure.di.contacts import ContactProvider
+    from app.infrastructure.di.database import DatabaseProvider
+    from app.infrastructure.di.infrastructure import InfrastructureProvider
+    from app.infrastructure.di.integrations import IntegrationProvider
+
+    test_container = make_async_container(
+        DatabaseProvider(test_settings),
+        InfrastructureProvider(),
+        TestAuthProvider(),
+        ContactProvider(),
+        IntegrationProvider(),
+        FastapiProvider(),
+    )
     try:
         await app.state.dishka_container.close()
     except (RuntimeError, AttributeError):
@@ -683,3 +698,66 @@ def redis_pool():
 def mock_session_user(test_user):
     """Provide a mock session user for testing."""
     return test_user
+
+
+class ContactFactory:
+    """Factory for creating contacts in integration tests."""
+
+    def __init__(self, client):
+        self.client = client
+
+    async def create_contact(
+        self, first_name: str, last_name: str | None = None
+    ) -> dict[str, Any]:
+        """Create a contact via API and return the response data."""
+        request_data = {
+            "data": {
+                "type": "contacts",
+                "attributes": {
+                    "first_name": first_name,
+                    "last_name": last_name,
+                    "contact_methods": [],
+                    "addresses": [],
+                    "notes": [],
+                },
+            }
+        }
+
+        response = await self.client.post("/api/contacts", json=request_data)
+        assert response.status_code == 201
+        return response.json()["data"]  # type: ignore[no-any-return]
+
+    async def create_relationship(
+        self, from_contact_id: int, to_contact_id: int, relationship_type: Any
+    ) -> dict[str, Any]:
+        """Create a relationship via API and return the response data."""
+        from app.core.contacts.models.entities import RelationshipType
+
+        # Convert enum to string if needed
+        if isinstance(relationship_type, RelationshipType):
+            relationship_type_str = relationship_type.value
+        else:
+            relationship_type_str = relationship_type
+
+        request_data = {
+            "data": {
+                "type": "contact_relationships",
+                "attributes": {
+                    "relationship_type": relationship_type_str,
+                    "from_contact_id": from_contact_id,
+                    "to_contact_id": to_contact_id,
+                },
+            }
+        }
+
+        response = await self.client.post(
+            f"/api/contacts/{from_contact_id}/relationships", json=request_data
+        )
+        assert response.status_code == 201
+        return response.json()["data"]  # type: ignore[no-any-return]
+
+
+@pytest_asyncio.fixture
+async def contact_factory(authenticated_client):
+    """Provide a ContactFactory for integration tests."""
+    return ContactFactory(authenticated_client)
