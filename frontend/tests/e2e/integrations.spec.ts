@@ -84,12 +84,12 @@ test.describe('Integration Management', () => {
       '/api/integrations/google/contacts/status'
     );
 
-    // This endpoint returns 400 (validation error) instead of 401 due to request validation
-    expect(response.status()).toBe(400);
+    // This endpoint returns 401 (authentication error) for unauthenticated requests
+    expect(response.status()).toBe(401);
 
     const errorData = await response.json();
     expect(errorData).toHaveProperty('errors');
-    expect(errorData.errors[0]).toHaveProperty('status', '400');
+    expect(errorData.errors[0]).toHaveProperty('status', '401');
   });
 
   test('should require authentication for integration endpoints', async ({
