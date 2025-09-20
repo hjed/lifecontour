@@ -271,7 +271,10 @@ class ContactService:
             )
             # contact_id is guaranteed to be not None after _ensure_contact_has_id
             contact_id = saved_contact.id
-            assert contact_id is not None
+            if contact_id is None:
+                raise ContactValidationError(
+                    "id", "Contact ID is required after save operation"
+                )
 
             # Save all related entities
             saved_entities = await self._save_all_related_entities(
@@ -322,7 +325,10 @@ class ContactService:
             raise ContactValidationError("id", "Contact ID is required for updates")
 
         async def _update_operation() -> Contact:
-            assert contact.id is not None
+            if contact.id is None:
+                raise ContactValidationError(
+                    "id", "Contact ID is required for update operation"
+                )
 
             # Get current contact and calculate changes
             current_contact = await self._get_existing_contact(contact.id)
@@ -334,7 +340,10 @@ class ContactService:
             )
             # contact_id is guaranteed to be not None after _ensure_contact_has_id
             contact_id = saved_contact.id
-            assert contact_id is not None
+            if contact_id is None:
+                raise ContactValidationError(
+                    "id", "Contact ID is required after save operation"
+                )
 
             # Handle related entities update
             saved_entities = await self._handle_update_relations(
@@ -843,7 +852,10 @@ class ContactService:
         self, contact: Contact, transaction: AsyncConnection
     ) -> None:
         """Publish contact created event."""
-        assert contact.id is not None
+        if contact.id is None:
+            raise ContactValidationError(
+                "id", "Contact ID is required for event publishing"
+            )
         event = ContactCreated(
             contact.id,
             contact.first_name,
@@ -926,7 +938,10 @@ class ContactService:
         transaction: AsyncConnection,
     ) -> None:
         """Publish contact updated events and record history."""
-        assert contact.id is not None
+        if contact.id is None:
+            raise ContactValidationError(
+                "id", "Contact ID is required for event publishing"
+            )
         await self.history_service.record_contact_change(
             contact.id, changed_fields, _transaction=transaction
         )

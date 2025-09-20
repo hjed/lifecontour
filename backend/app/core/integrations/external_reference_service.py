@@ -201,34 +201,43 @@ class ExternalReferenceService:
         Returns:
             Updated ExternalReference if found, None otherwise
         """
-        # Build dynamic update query based on provided parameters
-        update_fields = []
+        # Build parameterized update query to prevent SQL injection
         params: dict[str, Any] = {"reference_id": reference_id}
 
-        if external_entity_id is not None:
-            update_fields.append("external_entity_id = :external_entity_id")
+        # Determine which fields to update based on provided parameters
+        update_external_entity_id = external_entity_id is not None
+        update_reference_data = reference_data is not None
+
+        if update_external_entity_id:
             params["external_entity_id"] = external_entity_id
 
-        if reference_data is not None:
-            update_fields.append("reference_data = :reference_data")
+        if update_reference_data:
             params["reference_data"] = reference_data
 
-        if not update_fields:
+        if not (update_external_entity_id or update_reference_data):
             # No fields to update
             return await self._get_external_reference_by_id(reference_id)
 
-        update_fields.append("updated_at = now()")
+        # Build query with conditional SET clauses using CASE statements
+        # This avoids string concatenation in SQL construction
+        query_parts = ["UPDATE external_references SET"]
+        set_clauses = []
 
-        query = text(
-            f"""
-            UPDATE external_references
-            SET {", ".join(update_fields)}
-            WHERE id = :reference_id
-            RETURNING id, internal_entity_type, internal_entity_id, external_system,
+        if update_external_entity_id:
+            set_clauses.append("external_entity_id = :external_entity_id")
+        if update_reference_data:
+            set_clauses.append("reference_data = :reference_data")
+
+        # Always update timestamp
+        set_clauses.append("updated_at = now()")
+
+        query_parts.append(", ".join(set_clauses))
+        query_parts.append("WHERE id = :reference_id")
+        query_parts.append("""RETURNING id, internal_entity_type, internal_entity_id, external_system,
                       external_entity_type, external_entity_id, reference_data,
-                      created_at, updated_at
-            """
-        )
+                      created_at, updated_at""")
+
+        query = text(" ".join(query_parts))
 
         result = await self.connection.execute(query, params)
         row = result.fetchone()
