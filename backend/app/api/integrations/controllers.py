@@ -9,13 +9,18 @@ This module provides REST API endpoints for:
 
 from typing import Any
 
-from dishka.integrations.fastapi import FromDishka
-from fastapi import APIRouter
+import structlog
+from dishka.integrations.fastapi import FromDishka, inject
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
+from app.api.integrations.schemas import SyncJobRequest, SyncType
+from app.core.integrations.health_service import IntegrationHealthService
+from app.core.integrations.task_queue_service import TaskQueueService
 from app.infrastructure.auth.models import SessionUser
 
-router = APIRouter(prefix="/api/integrations", tags=["integrations"])
+router = APIRouter(prefix="/integrations", tags=["integrations"])
+logger = structlog.get_logger()
 
 
 class SyncJobResponse(BaseModel):
@@ -43,8 +48,11 @@ class HealthResponse(BaseModel):
 
 
 @router.post("/google/contacts/sync", response_model=SyncJobResponse)
+@inject
 async def trigger_google_contacts_sync(
+    request: SyncJobRequest,
     user: FromDishka[SessionUser],
+    task_queue_service: FromDishka[TaskQueueService],
 ) -> SyncJobResponse:
     """
     Trigger a Google Contacts synchronization job.
@@ -52,33 +60,109 @@ async def trigger_google_contacts_sync(
     This endpoint queues a background sync job for the authenticated user's
     Google Contacts. The job will run asynchronously in the worker.
     """
-    # TODO: Implement actual sync job triggering
-    # For now, return a mock response
-    return SyncJobResponse(
-        job_id="mock-job-123",
-        status="queued",
-        message="Google Contacts sync job has been queued",
-    )
+    try:
+        # For now, use the user's email as the Google account email
+        # In a real implementation, you'd look up the user's connected Google account
+        google_account_email = user.email
+
+        # Determine sync type from request or force_full_sync flag
+        sync_type = request.sync_type.value
+        if request.force_full_sync:
+            sync_type = SyncType.FULL.value
+
+        # Enqueue the sync job
+        job_id = await task_queue_service.enqueue_google_contacts_sync(
+            google_account_email=google_account_email,
+            user_id=int(user.id),  # Convert string ID to int for security
+            sync_type=sync_type,
+        )
+
+        return SyncJobResponse(
+            job_id=job_id,
+            status="queued",
+            message="Google Contacts sync job has been queued",
+        )
+
+    except ValueError as e:
+        logger.error("Invalid sync parameters", error=str(e), exc_info=True)
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid sync parameters: {str(e)}",
+        ) from e
+    except ConnectionError as e:
+        logger.error("Task queue connection failed", error=str(e), exc_info=True)
+        raise HTTPException(
+            status_code=503,
+            detail="Task queue service is temporarily unavailable",
+        ) from e
+    except Exception as e:
+        logger.error("Failed to enqueue sync job", error=str(e), exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail="An unexpected error occurred while queueing the sync job",
+        ) from e
 
 
 @router.get("/google/contacts/sync/{job_id}", response_model=SyncJobResponse)
+@inject
 async def get_sync_job_status(
     job_id: str,
     user: FromDishka[SessionUser],
+    task_queue_service: FromDishka[TaskQueueService],
 ) -> SyncJobResponse:
     """
     Get the status of a specific sync job.
 
     Returns the current status and progress of a sync job.
     """
-    # TODO: Implement actual job status checking
-    # For now, return a mock response
-    return SyncJobResponse(
-        job_id=job_id, status="completed", message="Sync job completed successfully"
-    )
+    try:
+        # Get job status from the task queue
+        job_status = await task_queue_service.get_job_status(job_id, int(user.id))
+
+        return SyncJobResponse(
+            job_id=job_id,
+            status=job_status["status"],
+            message=job_status["message"],
+        )
+
+    except ValueError as e:
+        logger.error(
+            "Invalid job ID format", job_id=job_id, error=str(e), exc_info=True
+        )
+        raise HTTPException(status_code=400, detail="Invalid job ID format") from e
+    except PermissionError as e:
+        logger.error(
+            "Job access denied",
+            job_id=job_id,
+            user_id=user.id,
+            error=str(e),
+            exc_info=True,
+        )
+        raise HTTPException(status_code=403, detail="Access denied to this job") from e
+    except ConnectionError as e:
+        logger.error(
+            "Task queue connection failed", job_id=job_id, error=str(e), exc_info=True
+        )
+        raise HTTPException(
+            status_code=503,
+            detail="Task queue service is temporarily unavailable",
+        ) from e
+    except Exception as e:
+        logger.error(
+            "Failed to get job status", job_id=job_id, error=str(e), exc_info=True
+        )
+        # Check if it's an access denied error
+        if "access denied" in str(e).lower() or "not found" in str(e).lower():
+            raise HTTPException(status_code=404, detail="Job not found") from e
+        else:
+            raise HTTPException(
+                status_code=500,
+                detail="An unexpected error occurred while retrieving job status",
+            ) from e
 
 
 @router.get("/google/contacts/status", response_model=IntegrationStatusResponse)
+@inject
 async def get_google_contacts_status(
     user: FromDishka[SessionUser],
 ) -> IntegrationStatusResponse:
@@ -99,7 +183,10 @@ async def get_google_contacts_status(
 
 
 @router.get("/health", response_model=HealthResponse)
-async def get_integrations_health() -> HealthResponse:
+@inject
+async def get_integrations_health(
+    health_service: FromDishka[IntegrationHealthService],
+) -> HealthResponse:
     """
     Get the health status of all integration services.
 
@@ -108,16 +195,20 @@ async def get_integrations_health() -> HealthResponse:
     - Integration workers
     - External API connectivity
     """
-    # TODO: Implement actual health checks
-    # For now, return a mock response
-    return HealthResponse(
-        status="healthy",
-        services={
-            "redis": {"status": "healthy", "response_time": "2ms"},
-            "google_contacts_worker": {
-                "status": "healthy",
-                "last_seen": "2024-01-01T12:00:00Z",
+    try:
+        # Get comprehensive health status
+        health_status = await health_service.get_overall_health()
+
+        return HealthResponse(
+            status=health_status["status"],
+            services=health_status["services"],
+        )
+
+    except Exception as e:
+        # Return unhealthy status if health check fails
+        return HealthResponse(
+            status="unhealthy",
+            services={
+                "error": {"status": "unhealthy", "message": str(e)},
             },
-            "google_api": {"status": "healthy", "rate_limit": "90%"},
-        },
-    )
+        )

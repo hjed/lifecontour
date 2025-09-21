@@ -13,13 +13,12 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 from app.core.contacts.services.contact_service import ContactService
 from app.core.integrations.database import IntegrationDatabaseManager
 from app.core.integrations.encryption import EncryptionService
-from app.core.integrations.google_contacts.client_factory import (
-    GoogleContactsClientFactory,
-)
-from app.core.integrations.google_contacts.contacts_service import GoogleContactsService
-from app.core.integrations.google_contacts.service import GoogleAuthService
+from app.core.integrations.external_reference_service import ExternalReferenceService
 from app.core.integrations.google_contacts.transformer import GoogleContactTransformer
+from app.core.integrations.health_service import IntegrationHealthService
+from app.core.integrations.outbox_event_processor import OutboxEventProcessor
 from app.core.integrations.task_queue import get_redis_pool, get_redis_settings
+from app.core.integrations.task_queue_service import TaskQueueService
 from app.infrastructure.config import Settings
 
 
@@ -56,7 +55,7 @@ class IntegrationProvider(Provider):
         """
         return IntegrationDatabaseManager(settings)
 
-    # Google Contacts integration dependencies
+    # Integration processing dependencies
     @provide(scope=Scope.APP)
     def provide_encryption_service(self, settings: Settings) -> EncryptionService:
         """
@@ -81,76 +80,69 @@ class IntegrationProvider(Provider):
         return GoogleContactTransformer()
 
     @provide(scope=Scope.REQUEST)
-    def provide_google_auth_service(
-        self,
-        connection: AsyncConnection,
-        encryption_service: EncryptionService,
-        settings: Settings,
-    ) -> GoogleAuthService:
+    def provide_external_reference_service(
+        self, connection: AsyncConnection
+    ) -> ExternalReferenceService:
         """
-        Provide Google Auth service for request scope.
+        Provide external reference service for request scope.
 
         Args:
             connection: Database connection
-            encryption_service: Encryption service
-            settings: Application settings
 
         Returns:
-            GoogleAuthService: Auth service instance
+            ExternalReferenceService: External reference service instance
         """
-        return GoogleAuthService(
-            connection=connection,
-            encryption_service=encryption_service,
-            google_client_id=settings.google_client_id,
-            google_client_secret=settings.google_client_secret,
-        )
+        return ExternalReferenceService(connection)
 
     @provide(scope=Scope.REQUEST)
-    def provide_google_contacts_client_factory(
-        self, auth_service: GoogleAuthService, settings: Settings
-    ) -> GoogleContactsClientFactory:
+    def provide_outbox_event_processor(
+        self, contact_service: ContactService, connection: AsyncConnection
+    ) -> OutboxEventProcessor:
         """
-        Provide Google Contacts client factory for request scope.
+        Provide outbox event processor for request scope.
 
         Args:
-            auth_service: Google authentication service
-            settings: Application settings
-
-        Returns:
-            GoogleContactsClientFactory: Client factory instance
-        """
-        return GoogleContactsClientFactory(
-            auth_service=auth_service,
-            google_client_id=settings.google_client_id,
-            google_client_secret=settings.google_client_secret,
-        )
-
-    @provide(scope=Scope.REQUEST)
-    def provide_google_contacts_service(
-        self,
-        connection: AsyncConnection,
-        client_factory: GoogleContactsClientFactory,
-        transformer: GoogleContactTransformer,
-        contact_service: ContactService,
-    ) -> GoogleContactsService:
-        """
-        Provide Google Contacts service for request scope.
-
-        Args:
+            contact_service: Contact service for creating/updating contacts
             connection: Database connection
-            client_factory: Google Contacts client factory
-            transformer: Contact transformer
-            contact_service: Contact business logic service
 
         Returns:
-            GoogleContactsService: Service instance
+            OutboxEventProcessor: Outbox event processor instance
         """
-        return GoogleContactsService(
-            connection=connection,
-            client_factory=client_factory,
-            transformer=transformer,
-            contact_service=contact_service,
+        return OutboxEventProcessor(
+            contact_service=contact_service, connection=connection
         )
+
+    @provide(scope=Scope.REQUEST)
+    def provide_task_queue_service(
+        self, redis_pool: Redis, settings: Settings
+    ) -> TaskQueueService:
+        """
+        Provide task queue service for request scope.
+
+        Args:
+            redis_pool: Redis connection pool
+            settings: Application settings
+
+        Returns:
+            TaskQueueService: Task queue service instance
+        """
+        redis_settings = get_redis_settings(settings)
+        return TaskQueueService(
+            redis_pool=redis_pool, redis_settings=redis_settings, settings=settings
+        )
+
+    @provide(scope=Scope.REQUEST)
+    def provide_health_service(self, redis_pool: Redis) -> IntegrationHealthService:
+        """
+        Provide integration health service for request scope.
+
+        Args:
+            redis_pool: Redis connection pool
+
+        Returns:
+            IntegrationHealthService: Health service instance
+        """
+        return IntegrationHealthService(redis_pool=redis_pool)
 
     @provide
     def provide_redis_settings(self, settings: Settings) -> RedisSettings:

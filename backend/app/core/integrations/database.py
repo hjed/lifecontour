@@ -89,7 +89,8 @@ class IntegrationDatabaseManager:
         if self._session_factory is None:
             self._create_engine()
 
-        assert self._session_factory is not None  # For mypy
+        if self._session_factory is None:
+            raise RuntimeError("Database session factory is not initialized")
         session = self._session_factory()
         try:
             logger.debug("Created new database session for integration task")

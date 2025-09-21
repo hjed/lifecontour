@@ -6,6 +6,7 @@ and metadata registration for all domain tables.
 """
 
 import asyncio
+import os
 from logging.config import fileConfig
 
 from alembic import context
@@ -36,8 +37,17 @@ target_metadata = metadata
 
 def get_database_url() -> str:
     """Get database URL from settings."""
-    settings = get_settings()
-    return str(settings.database_url)
+    # First try to get from environment (for tests)
+    database_url = os.environ.get("DATABASE_URL")
+    if not database_url:
+        settings = get_settings()
+        database_url = str(settings.database_url)
+
+    # Convert async URL to sync URL for migrations
+    if database_url.startswith("postgresql+asyncpg://"):
+        database_url = database_url.replace("postgresql+asyncpg://", "postgresql://")
+
+    return database_url
 
 
 def run_migrations_offline() -> None:
