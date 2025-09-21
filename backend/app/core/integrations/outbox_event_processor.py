@@ -120,14 +120,17 @@ class OutboxEventProcessor:
                     "contact_id": existing_ref.internal_entity_id,
                 }
         except Exception as e:
-            # If we can't check for existing references, log and continue
-            # This ensures we don't block processing due to reference service issues
-            logger.warning(
-                "Could not check for existing external reference, proceeding with creation",
+            # If we can't check for existing references, this is a critical issue
+            # We should not proceed with creation as it could create duplicates
+            logger.error(
+                "Failed to check for existing external reference - aborting to prevent duplicates",
                 error=str(e),
                 external_id=external_id,
                 integration_source=integration_source,
             )
+            raise OutboxEventProcessingError(
+                f"Cannot verify idempotency for contact creation: {str(e)}"
+            ) from e
 
         logger.info(
             "Processing contact creation",
@@ -210,8 +213,6 @@ class OutboxEventProcessor:
         )
 
         # Find existing contact by external reference
-        # TODO: Implement find_contact_by_external_reference in ContactService
-        # For now, we'll raise an error to indicate this needs implementation
         try:
             existing_contact = (
                 await self.contact_service.find_contact_by_external_reference(

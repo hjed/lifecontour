@@ -24,46 +24,40 @@ class TestOutboxIntegration:
     @pytest.fixture
     async def database_with_outbox(self, clean_database):
         """Create a database connection with outbox table for testing."""
-        # Add the outbox_events table to the existing PostgreSQL database
-        await clean_database.execute(
+        # The outbox_events table should already exist from migrations
+        # Just ensure it's clean for testing
+        await clean_database.execute(text("DELETE FROM outbox_events"))
+
+        # Verify the table exists and has the expected structure
+        result = await clean_database.execute(
             text("""
-            CREATE TABLE outbox_events (
-                id SERIAL PRIMARY KEY,
-                event_id VARCHAR(255) UNIQUE NOT NULL,
-                event_type VARCHAR(100) NOT NULL,
-                aggregate_id INTEGER NOT NULL,
-                event_data JSONB NOT NULL,
-                occurred_at TIMESTAMP NOT NULL,
-                processed_at TIMESTAMP NULL,
-                retry_count INTEGER NOT NULL DEFAULT 0,
-                created_at TIMESTAMP NOT NULL DEFAULT NOW()
-            )
-        """)
+                SELECT column_name, data_type
+                FROM information_schema.columns
+                WHERE table_name = 'outbox_events'
+                ORDER BY ordinal_position
+            """)
         )
+        columns = result.fetchall()
 
-        # Create indexes
-        await clean_database.execute(
-            text(
-                "CREATE UNIQUE INDEX ix_outbox_events_event_id ON outbox_events (event_id)"
-            )
-        )
-        await clean_database.execute(
-            text(
-                "CREATE INDEX ix_outbox_events_event_type ON outbox_events (event_type)"
-            )
-        )
-        await clean_database.execute(
-            text(
-                "CREATE INDEX ix_outbox_events_aggregate_id ON outbox_events (aggregate_id)"
-            )
-        )
-        await clean_database.execute(
-            text(
-                "CREATE INDEX ix_outbox_events_processed_at ON outbox_events (processed_at)"
-            )
-        )
+        # Ensure we have the expected columns
+        expected_columns = {
+            "id",
+            "event_id",
+            "event_type",
+            "aggregate_id",
+            "event_data",
+            "occurred_at",
+            "processed_at",
+            "retry_count",
+            "created_at",
+        }
+        actual_columns = {col[0] for col in columns}
 
-        # Return the connection itself
+        if not expected_columns.issubset(actual_columns):
+            missing = expected_columns - actual_columns
+            raise RuntimeError(f"Outbox table missing columns: {missing}")
+
+        # Return the connection itself - indexes should already exist from migration
         return clean_database
 
     @pytest.fixture

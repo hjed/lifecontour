@@ -8,6 +8,7 @@ to ensure the integration system is functioning properly.
 from datetime import UTC, datetime
 from typing import Any
 
+import aiohttp
 import structlog
 from redis.asyncio import Redis
 
@@ -125,12 +126,16 @@ class IntegrationHealthService:
             # - Recent job completion rates
             # - Worker process status
 
+            # Check for worker activity indicators
+            # In a production system, workers would set heartbeat keys
+            worker_status = "healthy" if recent_jobs >= 0 else "unknown"
+
             return {
-                "status": "healthy",
-                "recent_jobs": recent_jobs,
-                "last_seen": datetime.now(UTC).isoformat(),  # Mock timestamp
+                "status": worker_status,
+                "queue_length": recent_jobs,
                 "worker_version": "1.0.0",
                 "last_checked": datetime.now(UTC).isoformat(),
+                "note": "Worker health based on queue accessibility - implement heartbeat for better monitoring",
             }
 
         except Exception as e:
@@ -144,21 +149,49 @@ class IntegrationHealthService:
     async def _check_external_api_health(self) -> dict[str, Any]:
         """Check external API health (Google APIs)."""
         try:
-            # For now, return a mock healthy status
-            # In a real implementation, you might:
-            # - Make a test API call to Google
-            # - Check API rate limits
-            # - Verify authentication status
-            # - Monitor API response times
+            # Test Google API connectivity with a simple request
+            start_time = datetime.now(UTC)
 
+            async with aiohttp.ClientSession() as session:
+                # Test Google's OAuth2 discovery endpoint (public, no auth required)
+                async with session.get(
+                    "https://accounts.google.com/.well-known/openid_configuration",
+                    timeout=aiohttp.ClientTimeout(total=10),
+                ) as response:
+                    if response.status == 200:
+                        end_time = datetime.now(UTC)
+                        response_time_ms = (
+                            end_time - start_time
+                        ).total_seconds() * 1000
+
+                        return {
+                            "status": "healthy",
+                            "response_time_ms": round(response_time_ms, 2),
+                            "last_successful_call": end_time.isoformat(),
+                            "endpoint_tested": "Google OAuth2 discovery",
+                            "last_checked": datetime.now(UTC).isoformat(),
+                        }
+                    else:
+                        return {
+                            "status": "degraded",
+                            "error": f"Google API returned status {response.status}",
+                            "last_checked": datetime.now(UTC).isoformat(),
+                        }
+
+        except TimeoutError:
+            logger.error("External API health check timed out")
             return {
-                "status": "healthy",
-                "rate_limit_remaining": "90%",  # Mock data
-                "last_successful_call": datetime.now(UTC).isoformat(),  # Mock timestamp
-                "average_response_time_ms": 150,  # Mock data
+                "status": "unhealthy",
+                "error": "Google API request timed out",
                 "last_checked": datetime.now(UTC).isoformat(),
             }
-
+        except aiohttp.ClientError as e:
+            logger.error("External API health check failed", error=str(e))
+            return {
+                "status": "unhealthy",
+                "error": f"Google API connection failed: {str(e)}",
+                "last_checked": datetime.now(UTC).isoformat(),
+            }
         except Exception as e:
             logger.error("External API health check failed", error=str(e))
             return {

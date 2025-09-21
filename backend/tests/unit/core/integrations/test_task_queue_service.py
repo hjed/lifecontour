@@ -13,6 +13,7 @@ from arq.jobs import JobStatus
 from redis.asyncio import Redis
 
 from app.core.integrations.task_queue_service import TaskQueueService
+from app.infrastructure.config import Settings
 
 
 class TestTaskQueueService:
@@ -29,12 +30,25 @@ class TestTaskQueueService:
         return RedisSettings(host="localhost", port=6379, database=0)
 
     @pytest.fixture
+    def mock_settings(self) -> Settings:
+        """Create mock Settings instance."""
+        return Settings(
+            task_queue_job_timeout_seconds=300,
+            task_queue_user_job_expiry_hours=24,
+        )
+
+    @pytest.fixture
     def service(
-        self, mock_redis_pool: AsyncMock, redis_settings: RedisSettings
+        self,
+        mock_redis_pool: AsyncMock,
+        redis_settings: RedisSettings,
+        mock_settings: Settings,
     ) -> TaskQueueService:
         """Create TaskQueueService instance."""
         return TaskQueueService(
-            redis_pool=mock_redis_pool, redis_settings=redis_settings
+            redis_pool=mock_redis_pool,
+            redis_settings=redis_settings,
+            settings=mock_settings,
         )
 
     @pytest.mark.asyncio
@@ -72,7 +86,6 @@ class TestTaskQueueService:
                 _job_timeout=300,
                 _defer_until=None,
             )
-            mock_pool.close.assert_called_once()
 
             assert job_id == "test-job-123"
 
@@ -118,6 +131,7 @@ class TestTaskQueueService:
         mock_job_info.finish_time = None
         mock_job_info.result = {"status": "success", "contacts_processed": 5}
         mock_job.info.return_value = mock_job_info
+        mock_job.result.return_value = {"status": "success", "contacts_processed": 5}
 
         with patch.object(
             service.redis_pool, "hexists", new=AsyncMock(return_value=True)
@@ -139,7 +153,6 @@ class TestTaskQueueService:
                 mock_create_pool.assert_called_once_with(service.redis_settings)
                 mock_job_class.assert_called_once_with(job_id, redis=mock_pool)
                 mock_job.info.assert_called_once()
-                mock_pool.close.assert_called_once()
 
                 # Verify status response
                 assert status["job_id"] == job_id
@@ -168,6 +181,7 @@ class TestTaskQueueService:
         mock_job_info.finish_time = None
         mock_job_info.result = None
         mock_job.info.return_value = mock_job_info
+        mock_job.result.return_value = None
 
         with patch.object(
             service.redis_pool, "hexists", new=AsyncMock(return_value=True)

@@ -76,6 +76,12 @@ class Settings(BaseSettings):
     redis_url: str = Field(
         default="redis://localhost:6379", description="Redis server URL for task queue"
     )
+    task_queue_job_timeout_seconds: int = Field(
+        default=300, description="Default timeout for task queue jobs in seconds"
+    )
+    task_queue_user_job_expiry_hours: int = Field(
+        default=24, description="Hours to keep user-job associations in Redis"
+    )
 
     # MCP settings
     mcp_enabled: bool = Field(default=True, description="Enable MCP server")

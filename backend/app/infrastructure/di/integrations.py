@@ -127,7 +127,9 @@ class IntegrationProvider(Provider):
             TaskQueueService: Task queue service instance
         """
         redis_settings = get_redis_settings(settings)
-        return TaskQueueService(redis_pool=redis_pool, redis_settings=redis_settings)
+        return TaskQueueService(
+            redis_pool=redis_pool, redis_settings=redis_settings, settings=settings
+        )
 
     @provide(scope=Scope.REQUEST)
     def provide_health_service(self, redis_pool: Redis) -> IntegrationHealthService:

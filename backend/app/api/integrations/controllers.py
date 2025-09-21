@@ -14,6 +14,7 @@ from dishka.integrations.fastapi import FromDishka, inject
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
+from app.api.integrations.schemas import SyncJobRequest, SyncType
 from app.core.integrations.health_service import IntegrationHealthService
 from app.core.integrations.task_queue_service import TaskQueueService
 from app.infrastructure.auth.models import SessionUser
@@ -49,6 +50,7 @@ class HealthResponse(BaseModel):
 @router.post("/google/contacts/sync", response_model=SyncJobResponse)
 @inject
 async def trigger_google_contacts_sync(
+    request: SyncJobRequest,
     user: FromDishka[SessionUser],
     task_queue_service: FromDishka[TaskQueueService],
 ) -> SyncJobResponse:
@@ -63,11 +65,16 @@ async def trigger_google_contacts_sync(
         # In a real implementation, you'd look up the user's connected Google account
         google_account_email = user.email
 
+        # Determine sync type from request or force_full_sync flag
+        sync_type = request.sync_type.value
+        if request.force_full_sync:
+            sync_type = SyncType.FULL.value
+
         # Enqueue the sync job
         job_id = await task_queue_service.enqueue_google_contacts_sync(
             google_account_email=google_account_email,
             user_id=int(user.id),  # Convert string ID to int for security
-            sync_type="smart",
+            sync_type=sync_type,
         )
 
         return SyncJobResponse(
@@ -76,6 +83,18 @@ async def trigger_google_contacts_sync(
             message="Google Contacts sync job has been queued",
         )
 
+    except ValueError as e:
+        logger.error("Invalid sync parameters", error=str(e), exc_info=True)
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid sync parameters: {str(e)}",
+        ) from e
+    except ConnectionError as e:
+        logger.error("Task queue connection failed", error=str(e), exc_info=True)
+        raise HTTPException(
+            status_code=503,
+            detail="Task queue service is temporarily unavailable",
+        ) from e
     except Exception as e:
         logger.error("Failed to enqueue sync job", error=str(e), exc_info=True)
         raise HTTPException(
@@ -106,6 +125,28 @@ async def get_sync_job_status(
             message=job_status["message"],
         )
 
+    except ValueError as e:
+        logger.error(
+            "Invalid job ID format", job_id=job_id, error=str(e), exc_info=True
+        )
+        raise HTTPException(status_code=400, detail="Invalid job ID format") from e
+    except PermissionError as e:
+        logger.error(
+            "Job access denied",
+            job_id=job_id,
+            user_id=user.id,
+            error=str(e),
+            exc_info=True,
+        )
+        raise HTTPException(status_code=403, detail="Access denied to this job") from e
+    except ConnectionError as e:
+        logger.error(
+            "Task queue connection failed", job_id=job_id, error=str(e), exc_info=True
+        )
+        raise HTTPException(
+            status_code=503,
+            detail="Task queue service is temporarily unavailable",
+        ) from e
     except Exception as e:
         logger.error(
             "Failed to get job status", job_id=job_id, error=str(e), exc_info=True

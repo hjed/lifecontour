@@ -74,8 +74,10 @@ class TestIntegrationsControllers:
             # Mock successful job enqueueing
             mock_enqueue.return_value = "test-job-123"
 
-            # Make request
-            response = client.post("/api/integrations/google/contacts/sync")
+            # Make request with proper body
+            response = client.post(
+                "/api/integrations/google/contacts/sync", json={"sync_type": "smart"}
+            )
 
             # Verify response
             assert response.status_code == 200
@@ -95,8 +97,10 @@ class TestIntegrationsControllers:
             # Mock job enqueueing failure
             mock_enqueue.side_effect = Exception("Redis connection failed")
 
-            # Make request
-            response = client.post("/api/integrations/google/contacts/sync")
+            # Make request with proper body
+            response = client.post(
+                "/api/integrations/google/contacts/sync", json={"sync_type": "smart"}
+            )
 
             # Verify error response
             assert response.status_code == 500

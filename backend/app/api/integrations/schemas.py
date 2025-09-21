@@ -5,14 +5,26 @@ This module defines the request and response models used by the integration
 API controllers for data validation and serialization.
 """
 
+from enum import Enum
 from typing import Any
 
 from pydantic import BaseModel, Field
 
 
+class SyncType(str, Enum):
+    """Enumeration of available sync types."""
+
+    FULL = "full"
+    INCREMENTAL = "incremental"
+    SMART = "smart"
+
+
 class SyncJobRequest(BaseModel):
     """Request model for triggering sync jobs."""
 
+    sync_type: SyncType = Field(
+        default=SyncType.SMART, description="Type of sync to perform"
+    )
     force_full_sync: bool = Field(
         default=False, description="Force a full sync instead of incremental"
     )
