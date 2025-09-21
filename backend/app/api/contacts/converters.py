@@ -43,6 +43,14 @@ from app.core.contacts.models.entities import (
 )
 
 
+def _validate_entity_id(entity_id: int | None, entity_type: str) -> None:
+    """Validate that an entity has an ID before serialization."""
+    if entity_id is None:
+        raise ValueError(
+            f"Cannot serialize {entity_type} without ID - {entity_type} must be persisted first"
+        )
+
+
 class ContactConverter:
     """Converter for Contact domain entities to API resources."""
 
@@ -140,10 +148,7 @@ class ContactConverter:
                 self=f"{base_url}/api/contacts/{contact.id}",
             )
 
-        if contact.id is None:
-            raise ValueError(
-                "Cannot serialize contact without ID - contact must be persisted first"
-            )
+        _validate_entity_id(contact.id, "contact")
 
         return ContactResource(
             id=str(contact.id),
@@ -172,10 +177,7 @@ class TagConverter:
                 self=f"{base_url}/api/tags/{tag.id}",
             )
 
-        if tag.id is None:
-            raise ValueError(
-                "Cannot serialize tag without ID - tag must be persisted first"
-            )
+        _validate_entity_id(tag.id, "tag")
 
         return TagResource(
             id=str(tag.id),

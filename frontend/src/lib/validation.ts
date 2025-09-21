@@ -257,7 +257,7 @@ export function validateContactId(
       return message;
     }
   } else {
-    // For number values, check if it's a positive integer
+    // For number values, check if it's a positive integer (including rejecting zero)
     if (!isValidPositiveInteger(value)) {
       return message;
     }
@@ -303,7 +303,7 @@ export function validateRequiredRelationshipType(value: string): string | null {
 export function validateRequiredContactId(
   value: number | string
 ): string | null {
-  // Check required first
+  // Check required first - handle both string and number types
   if (value === null || value === undefined || value === '' || value === 0) {
     return 'This field is required';
   }
