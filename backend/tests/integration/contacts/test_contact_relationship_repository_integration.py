@@ -118,7 +118,8 @@ class TestSqlContactRelationshipRepository:
 
         # Should fail at entity validation level
         with pytest.raises(
-            ValueError, match="Contact cannot have a relationship with itself"
+            ContactValidationError,
+            match="Contact cannot have a relationship with itself",
         ):
             ContactRelationship(
                 from_contact_id=assert_contact_has_id(contact1),

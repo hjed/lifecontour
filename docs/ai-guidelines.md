@@ -207,6 +207,34 @@ pnpm type-check       # TypeScript type checking
 
 **Quality check failures must be fixed before task completion.**
 
+### Pre-commit Hook Setup and Troubleshooting
+
+**NEVER use `git commit --no-verify` to bypass pre-commit hooks.**
+
+All commits must pass the full verification pipeline. If pre-commit hooks fail, fix the underlying issues rather than bypassing them.
+
+#### Pre-commit Hook Installation and Fixes
+
+If pre-commit hooks are failing with Python environment issues:
+
+```bash
+# Install pre-commit using uv (fixes Python version issues)
+uv tool install pre-commit --force
+
+# Install hooks in the repository
+pre-commit install
+
+# Test all hooks
+pre-commit run --all-files
+```
+
+**Common Issue**: If you see `/usr/bin/env: 'python': No such file or found` or similar Python path errors, it means pre-commit was installed with an incompatible Python version (e.g., Python 2). The solution is to reinstall pre-commit using uv as shown above.
+
+**Verification Process**:
+- All backend Python code must pass: `ruff format`, `ruff check`, `mypy`
+- All frontend code must pass: `prettier`, `eslint`, `typescript check`
+- All general checks must pass: trailing whitespace, YAML/JSON/TOML validation, merge conflict detection
+
 ### Integration Testing Patterns
 
 - **Docker PostgreSQL**: Use `docker-compose.test.yml` for real database testing

@@ -123,6 +123,7 @@ describe('ContactsPage - Favourites', () => {
             contact_methods: [],
             addresses: [],
             notes: [],
+            relationships: [],
           },
         },
         {
@@ -137,6 +138,7 @@ describe('ContactsPage - Favourites', () => {
             contact_methods: [],
             addresses: [],
             notes: [],
+            relationships: [],
           },
         },
       ],
@@ -182,6 +184,7 @@ describe('ContactsPage - Favourites', () => {
             contact_methods: [],
             addresses: [],
             notes: [],
+            relationships: [],
           },
         },
       ],

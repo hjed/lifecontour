@@ -283,6 +283,7 @@ export const contactTestUtils = {
         ],
         addresses: [],
         notes: [],
+        relationships: [],
       },
       relationships: {
         tags: {
@@ -341,6 +342,7 @@ export const contactTestUtils = {
           contact_methods: [],
           addresses: [],
           notes: [],
+          relationships: [],
         },
       }),
   }),

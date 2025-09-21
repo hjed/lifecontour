@@ -12,6 +12,8 @@ import {
   formatIncompletePhoneNumber,
 } from 'libphonenumber-js';
 
+import { RelationshipType } from '@/types/contacts';
+
 /**
  * Validates that a field is not empty.
  */
@@ -210,4 +212,137 @@ export function validateRequiredPhone(value: string): string | null {
  */
 export function validateRequiredUrl(value: string): string | null {
   return combineValidators(validateRequired, validateUrl)(value);
+}
+
+/**
+ * Validates that a relationship type is valid.
+ */
+export function validateRelationshipType(
+  value: string,
+  message = 'Please select a valid relationship type'
+): string | null {
+  if (!value || value.trim().length === 0) return null; // Let validateRequired handle required validation
+
+  if (!Object.values(RelationshipType).includes(value as RelationshipType)) {
+    return message;
+  }
+
+  return null;
+}
+
+/**
+ * Helper function to validate a numeric value is a positive integer.
+ */
+function isValidPositiveInteger(value: number): boolean {
+  return !isNaN(value) && value > 0 && Number.isInteger(value);
+}
+
+/**
+ * Validates that a contact ID is valid (positive integer).
+ */
+export function validateContactId(
+  value: number | string,
+  message = 'Please select a valid contact'
+): string | null {
+  if (value === null || value === undefined || value === '') return null; // Let validateRequired handle required validation
+
+  // For string values, check if it's a valid integer string first
+  if (typeof value === 'string') {
+    // Check if the string contains only digits (and optional leading/trailing whitespace)
+    if (!/^\s*\d+\s*$/.test(value)) {
+      return message;
+    }
+    const numValue = parseInt(value.trim(), 10);
+    if (!isValidPositiveInteger(numValue)) {
+      return message;
+    }
+  } else {
+    // For number values, check if it's a positive integer (including rejecting zero)
+    if (!isValidPositiveInteger(value)) {
+      return message;
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Validates that a relationship doesn't create a self-reference.
+ */
+export function validateNotSelfRelationship(
+  fromContactId: number | string,
+  toContactId: number | string,
+  message = 'A contact cannot have a relationship with themselves'
+): string | null {
+  if (!fromContactId || !toContactId) return null; // Let other validators handle empty values
+
+  const fromId =
+    typeof fromContactId === 'string'
+      ? parseInt(fromContactId, 10)
+      : fromContactId;
+  const toId =
+    typeof toContactId === 'string' ? parseInt(toContactId, 10) : toContactId;
+
+  if (fromId === toId) {
+    return message;
+  }
+
+  return null;
+}
+
+/**
+ * Creates a validation function for required relationship type fields.
+ */
+export function validateRequiredRelationshipType(value: string): string | null {
+  return combineValidators(validateRequired, validateRelationshipType)(value);
+}
+
+/**
+ * Creates a validation function for required contact ID fields.
+ */
+export function validateRequiredContactId(
+  value: number | string
+): string | null {
+  // Check required first - handle both string and number types
+  if (value === null || value === undefined || value === '' || value === 0) {
+    return 'This field is required';
+  }
+
+  // Then validate the contact ID
+  return validateContactId(value);
+}
+
+/**
+ * Validates a complete relationship form data object.
+ */
+export function validateRelationshipForm(data: {
+  from_contact_id: number | string;
+  to_contact_id: number | string;
+  relationship_type: string;
+}): Record<string, string | null> {
+  const errors: Record<string, string | null> = {};
+
+  // Validate from_contact_id
+  errors.from_contact_id = validateRequiredContactId(data.from_contact_id);
+
+  // Validate to_contact_id
+  errors.to_contact_id = validateRequiredContactId(data.to_contact_id);
+
+  // Validate relationship_type
+  errors.relationship_type = validateRequiredRelationshipType(
+    data.relationship_type
+  );
+
+  // Validate not self-relationship (only if both IDs are valid)
+  if (!errors.from_contact_id && !errors.to_contact_id) {
+    const selfRelationshipError = validateNotSelfRelationship(
+      data.from_contact_id,
+      data.to_contact_id
+    );
+    if (selfRelationshipError) {
+      errors.to_contact_id = selfRelationshipError;
+    }
+  }
+
+  return errors;
 }

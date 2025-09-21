@@ -121,6 +121,7 @@ describe('FavouritesPage', () => {
             contact_methods: [],
             addresses: [],
             notes: [],
+            relationships: [],
           },
         },
       ],

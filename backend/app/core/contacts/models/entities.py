@@ -34,6 +34,20 @@ class RelationshipType(Enum):
         """Return the string value of the enum."""
         return self.value
 
+    def get_inverse_type(self) -> "RelationshipType":
+        """Get the inverse relationship type for bidirectional relationships."""
+        inverse_map = {
+            RelationshipType.PARENT: RelationshipType.CHILD,
+            RelationshipType.CHILD: RelationshipType.PARENT,
+            RelationshipType.PARTNER: RelationshipType.PARTNER,
+            RelationshipType.SIBLING: RelationshipType.SIBLING,
+            RelationshipType.FRIEND: RelationshipType.FRIEND,
+            RelationshipType.COLLEAGUE: RelationshipType.COLLEAGUE,
+            RelationshipType.FAMILY: RelationshipType.FAMILY,
+            RelationshipType.OTHER: RelationshipType.OTHER,
+        }
+        return inverse_map[self]
+
 
 @dataclass
 class Tag:
@@ -168,6 +182,7 @@ class Contact:
     addresses: list[ContactAddress] = field(default_factory=list)
     notes: list[ContactNote] = field(default_factory=list)
     tags: list[Tag] = field(default_factory=list)
+    relationships: list["ContactRelationship"] = field(default_factory=list)
 
     def __post_init__(self) -> None:
         """Validate contact."""
@@ -265,13 +280,17 @@ class ContactRelationship:
 
     def __post_init__(self) -> None:
         """Validate contact relationship."""
+        from app.core.contacts.models.exceptions import ContactValidationError
+
         # Prevent self-relationships
         if self.from_contact_id == self.to_contact_id:
-            raise ValueError("Contact cannot have a relationship with itself")
+            raise ContactValidationError(
+                "relationship", "Contact cannot have a relationship with itself"
+            )
 
         # Ensure positive contact IDs
         if self.from_contact_id <= 0 or self.to_contact_id <= 0:
-            raise ValueError("Contact IDs must be positive")
+            raise ContactValidationError("relationship", "Contact IDs must be positive")
 
     def __eq__(self, other: object) -> bool:
         """Check equality based on contact IDs and relationship type."""
@@ -285,17 +304,7 @@ class ContactRelationship:
 
     def get_inverse_type(self) -> RelationshipType:
         """Get the inverse relationship type for bidirectional relationships."""
-        inverse_map = {
-            RelationshipType.PARENT: RelationshipType.CHILD,
-            RelationshipType.CHILD: RelationshipType.PARENT,
-            RelationshipType.PARTNER: RelationshipType.PARTNER,
-            RelationshipType.SIBLING: RelationshipType.SIBLING,
-            RelationshipType.FRIEND: RelationshipType.FRIEND,
-            RelationshipType.COLLEAGUE: RelationshipType.COLLEAGUE,
-            RelationshipType.FAMILY: RelationshipType.FAMILY,
-            RelationshipType.OTHER: RelationshipType.OTHER,
-        }
-        return inverse_map[self.relationship_type]
+        return self.relationship_type.get_inverse_type()
 
     def is_bidirectional(self) -> bool:
         """Check if this relationship type should be bidirectional."""
