@@ -284,7 +284,9 @@ class ContactRelationship:
 
         # Prevent self-relationships
         if self.from_contact_id == self.to_contact_id:
-            raise ContactValidationError("relationship", "Contact cannot have a relationship with itself")
+            raise ContactValidationError(
+                "relationship", "Contact cannot have a relationship with itself"
+            )
 
         # Ensure positive contact IDs
         if self.from_contact_id <= 0 or self.to_contact_id <= 0:
