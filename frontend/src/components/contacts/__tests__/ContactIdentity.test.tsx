@@ -28,6 +28,7 @@ const mockContact = {
     contact_methods: [],
     addresses: [],
     notes: [],
+    relationships: [],
   },
   relationships: {
     tags: {

@@ -12,7 +12,12 @@ from typing import TYPE_CHECKING
 from app.api.common.schemas import JsonApiLinks
 
 if TYPE_CHECKING:
-    from app.api.contacts.schemas import ContactCreateData, ContactUpdateData
+    from app.api.contacts.schemas import (
+        ContactCreateData,
+        ContactRelationshipCreateData,
+        ContactRelationshipUpdateData,
+        ContactUpdateData,
+    )
 from app.api.contacts.schemas import (
     ContactAddressAttributes,
     ContactAddressResource,
@@ -21,6 +26,8 @@ from app.api.contacts.schemas import (
     ContactMethodResource,
     ContactNoteAttributes,
     ContactNoteResource,
+    ContactRelationshipAttributes,
+    ContactRelationshipResource,
     ContactRelationships,
     ContactResource,
     TagAttributes,
@@ -31,8 +38,17 @@ from app.core.contacts.models.entities import (
     ContactAddress,
     ContactMethod,
     ContactNote,
+    ContactRelationship,
     Tag,
 )
+
+
+def _validate_entity_id(entity_id: int | None, entity_type: str) -> None:
+    """Validate that an entity has an ID before serialization."""
+    if entity_id is None:
+        raise ValueError(
+            f"Cannot serialize {entity_type} without ID - {entity_type} must be persisted first"
+        )
 
 
 class ContactConverter:
@@ -92,6 +108,10 @@ class ContactConverter:
             for address in contact.addresses
         ]
         notes = [ContactConverter.to_note_resource(note) for note in contact.notes]
+        relationship_resources = [
+            ContactRelationshipConverter.to_resource(relationship, base_url)
+            for relationship in contact.relationships
+        ]
 
         # Create attributes
         attributes = ContactAttributes(
@@ -105,6 +125,7 @@ class ContactConverter:
             contact_methods=contact_methods,
             addresses=addresses,
             notes=notes,
+            relationships=relationship_resources,
         )
 
         # Create relationships (tags will be handled separately)
@@ -127,8 +148,10 @@ class ContactConverter:
                 self=f"{base_url}/api/contacts/{contact.id}",
             )
 
+        _validate_entity_id(contact.id, "contact")
+
         return ContactResource(
-            id=str(contact.id) if contact.id else "0",
+            id=str(contact.id),
             attributes=attributes,
             relationships=relationships,
             links=links,
@@ -154,8 +177,10 @@ class TagConverter:
                 self=f"{base_url}/api/tags/{tag.id}",
             )
 
+        _validate_entity_id(tag.id, "tag")
+
         return TagResource(
-            id=str(tag.id) if tag.id else "0",
+            id=str(tag.id),
             attributes=attributes,
             links=links,
         )
@@ -292,3 +317,74 @@ class ContactRequestConverter:
         )
 
         return updated_contact
+
+
+class ContactRelationshipConverter:
+    """Converter for ContactRelationship domain entities to API resources."""
+
+    @staticmethod
+    def to_resource(
+        relationship: ContactRelationship, base_url: str = ""
+    ) -> ContactRelationshipResource:
+        """Convert ContactRelationship domain entity to API resource."""
+        attributes = ContactRelationshipAttributes(
+            relationship_type=relationship.relationship_type.value,
+            from_contact_id=relationship.from_contact_id,
+            to_contact_id=relationship.to_contact_id,
+            created_at=relationship.created_at,
+            updated_at=relationship.updated_at,
+        )
+
+        # Create links
+        links = None
+        if base_url and relationship.id:
+            links = JsonApiLinks(
+                self=f"{base_url}/api/contacts/{relationship.from_contact_id}/relationships/{relationship.id}",
+            )
+
+        if relationship.id is None:
+            raise ValueError(
+                "Cannot serialize relationship without ID - relationship must be persisted first"
+            )
+
+        return ContactRelationshipResource(
+            id=str(relationship.id),
+            attributes=attributes,
+            links=links,
+        )
+
+
+class ContactRelationshipRequestConverter:
+    """Converter for API requests to ContactRelationship domain entities."""
+
+    @staticmethod
+    def from_create_request(
+        request_data: ContactRelationshipCreateData,
+    ) -> ContactRelationship:
+        """Convert API create request to domain entity."""
+        from app.core.contacts.models.entities import RelationshipType
+
+        attrs = request_data.attributes
+        return ContactRelationship(
+            from_contact_id=attrs.from_contact_id,
+            to_contact_id=attrs.to_contact_id,
+            relationship_type=RelationshipType(attrs.relationship_type),
+        )
+
+    @staticmethod
+    def from_update_request(
+        request_data: ContactRelationshipUpdateData,
+        existing_relationship: ContactRelationship,
+    ) -> ContactRelationship:
+        """Convert API update request to domain entity."""
+        from app.core.contacts.models.entities import RelationshipType
+
+        attrs = request_data.attributes
+        return ContactRelationship(
+            id=existing_relationship.id,
+            from_contact_id=attrs.from_contact_id,
+            to_contact_id=attrs.to_contact_id,
+            relationship_type=RelationshipType(attrs.relationship_type),
+            created_at=existing_relationship.created_at,
+            updated_at=existing_relationship.updated_at,
+        )

@@ -49,6 +49,7 @@ describe('ContactIdentityInline', () => {
       contact_methods: [],
       addresses: [],
       notes: [],
+      relationships: [],
     },
     relationships: {},
   };

@@ -10,18 +10,21 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 from app.core.contacts.adapters.sql import (
     SqlContactEventPublisher,
     SqlContactFieldHistoryRepository,
+    SqlContactRelationshipRepository,
     SqlContactRepository,
     SqlTagRepository,
 )
 from app.core.contacts.models.repositories import (
     ContactEventPublisher,
     ContactFieldHistoryRepository,
+    ContactRelationshipRepository,
     ContactRepository,
     TagRepository,
 )
 from app.core.contacts.services import (
     AddressValidationService,
     ContactHistoryService,
+    ContactRelationshipService,
     ContactService,
     ContactValidationService,
     TagHierarchyService,
@@ -57,6 +60,12 @@ class ContactProvider(Provider):
     ) -> SqlContactEventPublisher:
         return SqlContactEventPublisher(connection)
 
+    @provide(provides=ContactRelationshipRepository)
+    def get_contact_relationship_repository(
+        self, connection: AsyncConnection
+    ) -> SqlContactRelationshipRepository:
+        return SqlContactRelationshipRepository(connection)
+
     # Domain services
     @provide
     def get_address_validation_service(self) -> AddressValidationService:
@@ -77,6 +86,14 @@ class ContactProvider(Provider):
     @provide
     def get_tag_hierarchy_service(self, tag_repo: TagRepository) -> TagHierarchyService:
         return TagHierarchyService(tag_repo)
+
+    @provide
+    def get_contact_relationship_service(
+        self,
+        contact_repo: ContactRepository,
+        relationship_repo: ContactRelationshipRepository,
+    ) -> ContactRelationshipService:
+        return ContactRelationshipService(contact_repo, relationship_repo)
 
     # Main contact service
     @provide

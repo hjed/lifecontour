@@ -106,6 +106,37 @@ class TagResource(BaseModel):
     meta: dict[str, Any] | None = Field(default=None, description="Resource metadata")
 
 
+# Contact Relationship Schemas
+class ContactRelationshipAttributes(BaseModel):
+    """Contact relationship attributes."""
+
+    relationship_type: str = Field(..., description="Type of relationship")
+    from_contact_id: int = Field(
+        ..., description="ID of the contact initiating the relationship"
+    )
+    to_contact_id: int = Field(
+        ..., description="ID of the contact receiving the relationship"
+    )
+    created_at: datetime | None = Field(
+        default=None, description="Relationship creation timestamp"
+    )
+    updated_at: datetime | None = Field(
+        default=None, description="Relationship last update timestamp"
+    )
+
+
+class ContactRelationshipResource(BaseModel):
+    """Contact relationship resource following JSON API specification."""
+
+    type: str = Field(default="contact_relationships", description="Resource type")
+    id: str = Field(..., description="Resource identifier")
+    attributes: ContactRelationshipAttributes = Field(
+        ..., description="Relationship attributes"
+    )
+    links: JsonApiLinks | None = Field(default=None, description="Resource links")
+    meta: dict[str, Any] | None = Field(default=None, description="Resource metadata")
+
+
 # Contact Schemas
 class ContactAttributes(BaseModel):
     """Contact attributes."""
@@ -133,6 +164,9 @@ class ContactAttributes(BaseModel):
     )
     notes: list[ContactNoteResource] = Field(
         default_factory=list, description="Contact notes"
+    )
+    relationships: list[ContactRelationshipResource] = Field(
+        default_factory=list, description="Contact relationships"
     )
 
 
@@ -195,6 +229,56 @@ class ContactResponse(JsonApiResponse[ContactResource]):
 
 class ContactListResponse(JsonApiCollectionResponse[ContactResource]):
     """Response model for a list of contacts."""
+
+    pass
+
+
+# Contact Relationship Request/Response Models
+class ContactRelationshipCreateData(BaseModel):
+    """Data for creating a new contact relationship."""
+
+    type: str = Field(default="contact_relationships", description="Resource type")
+    attributes: ContactRelationshipAttributes = Field(
+        ..., description="Relationship attributes to create"
+    )
+
+
+class ContactRelationshipUpdateData(BaseModel):
+    """Data for updating an existing contact relationship."""
+
+    type: str = Field(default="contact_relationships", description="Resource type")
+    id: str = Field(..., description="Relationship ID to update")
+    attributes: ContactRelationshipAttributes = Field(
+        ..., description="Relationship attributes to update"
+    )
+
+
+class ContactRelationshipCreateRequest(
+    JsonApiCreateRequest[ContactRelationshipCreateData]
+):
+    """Request model for creating a contact relationship."""
+
+    pass
+
+
+class ContactRelationshipUpdateRequest(
+    JsonApiUpdateRequest[ContactRelationshipUpdateData]
+):
+    """Request model for updating a contact relationship."""
+
+    pass
+
+
+class ContactRelationshipResponse(JsonApiResponse[ContactRelationshipResource]):
+    """Response model for a single contact relationship."""
+
+    pass
+
+
+class ContactRelationshipListResponse(
+    JsonApiCollectionResponse[ContactRelationshipResource]
+):
+    """Response model for a list of contact relationships."""
 
     pass
 

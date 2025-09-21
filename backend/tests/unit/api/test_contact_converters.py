@@ -22,7 +22,9 @@ from app.core.contacts.models.entities import (
     ContactAddress,
     ContactMethod,
     ContactNote,
+    ContactRelationship,
     MethodType,
+    RelationshipType,
     Tag,
 )
 from app.core.contacts.models.value_objects import TagName
@@ -159,6 +161,40 @@ class TestContactConverter:
         assert resource.relationships.tags is not None
         assert resource.links is not None
         assert resource.links.self == "http://localhost:8000/api/contacts/1"
+
+    def test_to_resource_with_relationships(self):
+        """Test converting contact with relationships to API resource."""
+        contact = Contact(
+            id=1,
+            first_name="John",
+            last_name="Doe",
+            created_at=datetime(2024, 1, 1, tzinfo=UTC),
+            updated_at=datetime(2024, 1, 2, tzinfo=UTC),
+        )
+
+        # Add a relationship
+        relationship = ContactRelationship(
+            id=1,
+            from_contact_id=1,
+            to_contact_id=2,
+            relationship_type=RelationshipType.FRIEND,
+            created_at=datetime(2024, 1, 1, tzinfo=UTC),
+        )
+        contact.relationships.append(relationship)
+
+        resource = ContactConverter.to_resource(contact, "http://example.com")
+
+        assert resource.id == "1"
+        assert resource.attributes.first_name == "John"
+        assert resource.attributes.last_name == "Doe"
+        assert len(resource.attributes.relationships) == 1
+        assert resource.attributes.relationships[0].id == "1"
+        assert (
+            resource.attributes.relationships[0].attributes.relationship_type
+            == "friend"
+        )
+        assert resource.attributes.relationships[0].attributes.from_contact_id == 1
+        assert resource.attributes.relationships[0].attributes.to_contact_id == 2
 
 
 class TestTagConverter:
