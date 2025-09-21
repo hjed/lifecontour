@@ -71,7 +71,7 @@ class ContactValidationError(ContactDomainError):
     """Contact data validation failed."""
 
     def __init__(self, field: str, message: str):
-        super().__init__(f"Validation error for {field}: {message}", 400)
+        super().__init__(f"Validation error for {field}: {message}", 422)
         self.field = field
 
 

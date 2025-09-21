@@ -280,13 +280,15 @@ class ContactRelationship:
 
     def __post_init__(self) -> None:
         """Validate contact relationship."""
+        from app.core.contacts.models.exceptions import ContactValidationError
+
         # Prevent self-relationships
         if self.from_contact_id == self.to_contact_id:
-            raise ValueError("Contact cannot have a relationship with itself")
+            raise ContactValidationError("relationship", "Contact cannot have a relationship with itself")
 
         # Ensure positive contact IDs
         if self.from_contact_id <= 0 or self.to_contact_id <= 0:
-            raise ValueError("Contact IDs must be positive")
+            raise ContactValidationError("relationship", "Contact IDs must be positive")
 
     def __eq__(self, other: object) -> bool:
         """Check equality based on contact IDs and relationship type."""
