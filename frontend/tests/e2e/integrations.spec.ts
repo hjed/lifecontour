@@ -33,7 +33,12 @@ test.describe('Integration Management', () => {
   test('should trigger Google Contacts sync via API', async ({ page }) => {
     // Test sync trigger endpoint (requires authentication)
     const response = await page.request.post(
-      '/api/integrations/google/contacts/sync'
+      '/api/integrations/google/contacts/sync',
+      {
+        data: {
+          sync_type: 'smart',
+        },
+      }
     );
 
     // Should return 401 since we're not authenticated in this test
@@ -57,7 +62,12 @@ test.describe('Integration Management', () => {
   test('should handle sync trigger errors gracefully', async ({ page }) => {
     // Test sync trigger - requires authentication
     const response = await page.request.post(
-      '/api/integrations/google/contacts/sync'
+      '/api/integrations/google/contacts/sync',
+      {
+        data: {
+          sync_type: 'full',
+        },
+      }
     );
 
     // Should return 401 since we're not authenticated
@@ -107,7 +117,11 @@ test.describe('Integration Management', () => {
     for (const endpoint of auth401Endpoints) {
       let response;
       if (endpoint.method === 'POST') {
-        response = await page.request.post(endpoint.url);
+        response = await page.request.post(endpoint.url, {
+          data: {
+            sync_type: 'incremental',
+          },
+        });
       } else {
         response = await page.request.get(endpoint.url);
       }
@@ -199,7 +213,12 @@ test.describe('Integration Error Handling', () => {
   test('should handle API errors gracefully', async ({ page }) => {
     // Test sync endpoint - requires authentication
     const response = await page.request.post(
-      '/api/integrations/google/contacts/sync'
+      '/api/integrations/google/contacts/sync',
+      {
+        data: {
+          sync_type: 'smart',
+        },
+      }
     );
 
     // Should return 401 since we're not authenticated
