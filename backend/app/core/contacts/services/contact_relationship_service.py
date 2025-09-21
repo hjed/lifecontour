@@ -212,14 +212,17 @@ class ContactRelationshipService:
         """
         return await self.relationship_repo.get_by_id(relationship_id)
 
-    async def validate_relationship_type_compatibility(
+    async def validate_partner_relationship_compatibility(
         self,
         from_contact_id: int,
         to_contact_id: int,
         relationship_type: RelationshipType,
     ) -> None:
         """
-        Validate that a relationship type is compatible with existing relationships.
+        Validate that a partner relationship doesn't conflict with existing ones.
+
+        Currently only validates partner relationship conflicts. This method
+        can be expanded to include other relationship compatibility rules.
 
         Args:
             from_contact_id: ID of the contact initiating the relationship
@@ -227,7 +230,7 @@ class ContactRelationshipService:
             relationship_type: Type of relationship to validate
 
         Raises:
-            ContactValidationError: If relationship type is incompatible
+            ContactValidationError: If partner relationship conflicts exist
         """
         # Get existing relationships between these contacts
         existing_relationships = (

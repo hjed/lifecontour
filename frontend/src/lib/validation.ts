@@ -231,6 +231,13 @@ export function validateRelationshipType(
 }
 
 /**
+ * Helper function to validate a numeric value is a positive integer.
+ */
+function isValidPositiveInteger(value: number): boolean {
+  return !isNaN(value) && value > 0 && Number.isInteger(value);
+}
+
+/**
  * Validates that a contact ID is valid (positive integer).
  */
 export function validateContactId(
@@ -246,12 +253,12 @@ export function validateContactId(
       return message;
     }
     const numValue = parseInt(value.trim(), 10);
-    if (isNaN(numValue) || numValue <= 0) {
+    if (!isValidPositiveInteger(numValue)) {
       return message;
     }
   } else {
     // For number values, check if it's a positive integer
-    if (isNaN(value) || value <= 0 || !Number.isInteger(value)) {
+    if (!isValidPositiveInteger(value)) {
       return message;
     }
   }

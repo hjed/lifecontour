@@ -82,6 +82,10 @@ function parseAddressString(addressString: string): AddressData {
   return result;
 }
 
+// Regex pattern to match state/region followed by postal code
+// Matches: "State PostalCode" or "State 12345" or "NSW 2000"
+const STATE_POSTAL_PATTERN = /^(.+?)\s+([A-Z0-9\s-]+)$/;
+
 /**
  * Parse a location line (city, state, postal code)
  */
@@ -95,7 +99,7 @@ function parseLocationLine(line: string, result: AddressData) {
 
   if (parts.length >= 2) {
     const statePostal = parts[1].trim();
-    const match = statePostal.match(/^(.+?)\s+([A-Z0-9\s-]+)$/);
+    const match = statePostal.match(STATE_POSTAL_PATTERN);
     if (match) {
       result.region = match[1].trim();
       result.postal_code = match[2].trim();

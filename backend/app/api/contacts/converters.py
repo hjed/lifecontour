@@ -140,8 +140,13 @@ class ContactConverter:
                 self=f"{base_url}/api/contacts/{contact.id}",
             )
 
+        if contact.id is None:
+            raise ValueError(
+                "Cannot serialize contact without ID - contact must be persisted first"
+            )
+
         return ContactResource(
-            id=str(contact.id) if contact.id else "0",
+            id=str(contact.id),
             attributes=attributes,
             relationships=relationships,
             links=links,
@@ -167,8 +172,13 @@ class TagConverter:
                 self=f"{base_url}/api/tags/{tag.id}",
             )
 
+        if tag.id is None:
+            raise ValueError(
+                "Cannot serialize tag without ID - tag must be persisted first"
+            )
+
         return TagResource(
-            id=str(tag.id) if tag.id else "0",
+            id=str(tag.id),
             attributes=attributes,
             links=links,
         )

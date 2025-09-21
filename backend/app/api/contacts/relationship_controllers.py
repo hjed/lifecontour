@@ -8,7 +8,6 @@ Controllers act as adapters between HTTP and domain services.
 import structlog
 from dishka.integrations.fastapi import FromDishka, inject
 from fastapi import APIRouter, Request, status
-from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.api.common.schemas import get_request_base_url
 from app.api.contacts.converters import (
@@ -108,7 +107,6 @@ async def create_contact_relationship(
     request: Request,
     relationship_request: ContactRelationshipCreateRequest,
     relationship_service: FromDishka[ContactRelationshipService],
-    connection: FromDishka[AsyncConnection],
     user: FromDishka[SessionUser],  # Require authentication
 ) -> ContactRelationshipResponse:
     """
@@ -159,7 +157,6 @@ async def update_contact_relationship(
     request: Request,
     relationship_request: ContactRelationshipUpdateRequest,
     relationship_service: FromDishka[ContactRelationshipService],
-    connection: FromDishka[AsyncConnection],
     user: FromDishka[SessionUser],  # Require authentication
 ) -> ContactRelationshipResponse:
     """
@@ -218,7 +215,6 @@ async def delete_contact_relationship(
     contact_id: int,
     relationship_id: int,
     relationship_service: FromDishka[ContactRelationshipService],
-    connection: FromDishka[AsyncConnection],
     user: FromDishka[SessionUser],  # Require authentication
 ) -> None:
     """
