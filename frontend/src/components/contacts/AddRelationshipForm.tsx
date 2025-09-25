@@ -86,10 +86,30 @@ export function AddRelationshipForm({
       return;
     }
 
+    // Validate and parse contact IDs
+    const fromContactIdNum = Number(contactId);
+    const toContactIdNum = Number(selectedContact!.id);
+
+    if (!Number.isFinite(fromContactIdNum)) {
+      setErrors((prev) => ({
+        ...prev,
+        contact: 'Invalid contact ID (from_contact_id).',
+      }));
+      return;
+    }
+
+    if (!Number.isFinite(toContactIdNum)) {
+      setErrors((prev) => ({
+        ...prev,
+        contact: 'Invalid contact ID (to_contact_id).',
+      }));
+      return;
+    }
+
     // Submit form data
     const formData: ContactRelationshipFormData = {
-      from_contact_id: parseInt(contactId, 10),
-      to_contact_id: parseInt(selectedContact!.id, 10),
+      from_contact_id: fromContactIdNum,
+      to_contact_id: toContactIdNum,
       relationship_type: selectedType as RelationshipType,
     };
 

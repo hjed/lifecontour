@@ -16,6 +16,10 @@ import { Card, CardContent } from '@/components/ui/card';
 import { ContactResource, ContactListResponse } from '@/types/contacts';
 import { API_ENDPOINTS } from '@/lib/constants';
 
+// Constants
+const SEARCH_DEBOUNCE_MS = 300;
+const BLUR_DELAY_MS = 200; // Delay to prevent dropdown from closing before click events are processed
+
 interface ContactSearchComboboxProps {
   onSelect: (contact: ContactResource) => void;
   placeholder?: string;
@@ -75,7 +79,7 @@ export function ContactSearchCombobox({
   const [searchQuery, setSearchQuery] = useState('');
   const [showResults, setShowResults] = useState(false);
   const [selectedIndex, setSelectedIndex] = useState(-1);
-  const debouncedQuery = useDebounce(searchQuery, 300);
+  const debouncedQuery = useDebounce(searchQuery, SEARCH_DEBOUNCE_MS);
 
   // Search query
   const {
@@ -146,7 +150,7 @@ export function ContactSearchCombobox({
           onChange={handleInputChange}
           onKeyDown={handleKeyDown}
           onFocus={() => searchQuery && setShowResults(true)}
-          onBlur={() => setTimeout(() => setShowResults(false), 200)}
+          onBlur={() => setTimeout(() => setShowResults(false), BLUR_DELAY_MS)}
           className="pl-10"
           disabled={disabled}
           role="combobox"

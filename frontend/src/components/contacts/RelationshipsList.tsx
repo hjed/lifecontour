@@ -117,7 +117,9 @@ export function RelationshipsList({
           </div>
         )}
 
-        {!isLoading && !error && relationships.length === 0 && !showAddForm && (
+        {(() => {
+          const shouldShowEmptyState = !isLoading && !error && relationships.length === 0 && !showAddForm;
+          return shouldShowEmptyState && (
           <div className="py-8 text-center text-muted-foreground">
             <Users className="h-12 w-12 mx-auto mb-4 opacity-50" />
             <p className="text-lg font-medium mb-2">No relationships yet</p>
@@ -125,7 +127,8 @@ export function RelationshipsList({
               Add relationships to connect this contact with others
             </p>
           </div>
-        )}
+          );
+        })()}
 
         {!isLoading && !error && relationships.length > 0 && (
           <div className="space-y-3">
