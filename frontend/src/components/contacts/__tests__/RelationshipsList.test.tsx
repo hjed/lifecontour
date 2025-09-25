@@ -9,12 +9,18 @@ import { RelationshipsList } from '../RelationshipsList';
 import { ContactRelationshipResource, RelationshipType } from '@/types/contacts';
 
 // Mock the API hooks
+const mockUseContactRelationships = jest.fn();
+const mockUseCreateContactRelationship = jest.fn();
+const mockUseUpdateContactRelationship = jest.fn();
+const mockUseDeleteContactRelationship = jest.fn();
+const mockUseRelationshipTypes = jest.fn();
+
 jest.mock('@/lib/api/relationships', () => ({
-  useContactRelationships: jest.fn(),
-  useCreateContactRelationship: jest.fn(),
-  useUpdateContactRelationship: jest.fn(),
-  useDeleteContactRelationship: jest.fn(),
-  useRelationshipTypes: jest.fn(),
+  useContactRelationships: () => mockUseContactRelationships(),
+  useCreateContactRelationship: () => mockUseCreateContactRelationship(),
+  useUpdateContactRelationship: () => mockUseUpdateContactRelationship(),
+  useDeleteContactRelationship: () => mockUseDeleteContactRelationship(),
+  useRelationshipTypes: () => mockUseRelationshipTypes(),
 }));
 
 // Mock toast
@@ -65,24 +71,10 @@ const createWrapper = () => {
   return Wrapper;
 };
 
-// Mock the API hooks
-const mockUseContactRelationships = jest.fn();
-const mockUseCreateContactRelationship = jest.fn();
-const mockUseUpdateContactRelationship = jest.fn();
-const mockUseDeleteContactRelationship = jest.fn();
-const mockUseRelationshipTypes = jest.fn();
-
-jest.mock('@/lib/api/relationships', () => ({
-  useContactRelationships: () => mockUseContactRelationships(),
-  useCreateContactRelationship: () => mockUseCreateContactRelationship(),
-  useUpdateContactRelationship: () => mockUseUpdateContactRelationship(),
-  useDeleteContactRelationship: () => mockUseDeleteContactRelationship(),
-  useRelationshipTypes: () => mockUseRelationshipTypes(),
-}));
-
 describe('RelationshipsList', () => {
 
   beforeEach(() => {
+    jest.clearAllMocks();
     mockUseContactRelationships.mockReturnValue({
       data: { data: mockRelationships },
       isLoading: false,

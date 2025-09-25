@@ -55,6 +55,7 @@ describe('RelationshipItem', () => {
   const mockOnDelete = jest.fn();
 
   beforeEach(() => {
+    jest.clearAllMocks();
     mockUseRelationshipTypes.mockReturnValue({
       data: {
         relationship_types: [

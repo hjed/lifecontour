@@ -73,6 +73,7 @@ const createWrapper = () => {
 
 describe('ContactSearchCombobox', () => {
   beforeEach(() => {
+    jest.clearAllMocks();
     mockFetch.mockClear();
   });
 

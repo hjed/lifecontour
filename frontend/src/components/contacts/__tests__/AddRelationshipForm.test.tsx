@@ -9,8 +9,10 @@ import { AddRelationshipForm } from '../AddRelationshipForm';
 import { RelationshipType } from '@/types/contacts';
 
 // Mock the API hooks
+const mockUseRelationshipTypes = jest.fn();
+
 jest.mock('@/lib/api/relationships', () => ({
-  useRelationshipTypes: jest.fn(),
+  useRelationshipTypes: () => mockUseRelationshipTypes(),
 }));
 
 // Mock ContactSearchCombobox
@@ -67,18 +69,12 @@ const createWrapper = () => {
   return Wrapper;
 };
 
-// Mock the API hooks
-const mockUseRelationshipTypes = jest.fn();
-
-jest.mock('@/lib/api/relationships', () => ({
-  useRelationshipTypes: () => mockUseRelationshipTypes(),
-}));
-
 describe('AddRelationshipForm', () => {
   const mockOnSubmit = jest.fn();
   const mockOnCancel = jest.fn();
 
   beforeEach(() => {
+    jest.clearAllMocks();
     mockUseRelationshipTypes.mockReturnValue({
       data: {
         relationship_types: [
