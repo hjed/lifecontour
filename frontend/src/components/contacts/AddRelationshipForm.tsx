@@ -30,10 +30,10 @@ import {
 } from '@/types/contacts';
 
 interface AddRelationshipFormProps {
-  contactId: string;
-  onSubmit: (data: ContactRelationshipFormData) => void;
-  onCancel: () => void;
-  disabled?: boolean;
+  readonly contactId: string;
+  readonly onSubmit: (data: ContactRelationshipFormData) => void;
+  readonly onCancel: () => void;
+  readonly disabled?: boolean;
 }
 
 export function AddRelationshipForm({
@@ -67,13 +67,13 @@ export function AddRelationshipForm({
     // Validate form
     const newErrors: Record<string, string> = {};
 
-    if (!selectedContact) {
-      newErrors.contact = 'Please select a contact';
-    } else {
+    if (selectedContact) {
       const contactIdError = validateRequiredContactId(selectedContact.id);
       if (contactIdError) {
         newErrors.contact = contactIdError;
       }
+    } else {
+      newErrors.contact = 'Please select a contact';
     }
 
     const typeError = validateRequiredRelationshipType(selectedType);

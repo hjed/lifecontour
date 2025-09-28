@@ -26,10 +26,10 @@ import {
 } from '@/types/contacts';
 
 interface RelationshipItemProps {
-  relationship: ContactRelationshipResource;
-  onUpdate: (data: ContactRelationshipFormData) => void;
-  onDelete: () => void;
-  disabled?: boolean;
+  readonly relationship: ContactRelationshipResource;
+  readonly onUpdate: (data: ContactRelationshipFormData) => void;
+  readonly onDelete: () => void;
+  readonly disabled?: boolean;
 }
 
 export function RelationshipItem({

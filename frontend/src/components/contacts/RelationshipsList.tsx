@@ -22,8 +22,8 @@ import {
 import { ContactRelationshipFormData } from '@/types/contacts';
 
 interface RelationshipsListProps {
-  contactId: string;
-  className?: string;
+  readonly contactId: string;
+  readonly className?: string;
 }
 
 export function RelationshipsList({
@@ -117,9 +117,7 @@ export function RelationshipsList({
           </div>
         )}
 
-        {(() => {
-          const shouldShowEmptyState = !isLoading && !error && relationships.length === 0 && !showAddForm;
-          return shouldShowEmptyState && (
+        {!isLoading && !error && relationships.length === 0 && !showAddForm && (
           <div className="py-8 text-center text-muted-foreground">
             <Users className="h-12 w-12 mx-auto mb-4 opacity-50" />
             <p className="text-lg font-medium mb-2">No relationships yet</p>
@@ -127,8 +125,7 @@ export function RelationshipsList({
               Add relationships to connect this contact with others
             </p>
           </div>
-          );
-        })()}
+        )}
 
         {!isLoading && !error && relationships.length > 0 && (
           <div className="space-y-3">

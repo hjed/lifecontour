@@ -98,12 +98,14 @@ describe('ContactSearchCombobox', () => {
     const Wrapper = createWrapper();
 
     // Mock delayed response
-    mockFetch.mockImplementation(
-      () =>
-        new Promise(resolve =>
-          setTimeout(() => resolve({ ok: true, json: () => mockContacts }), 100)
-        )
-    );
+    const createDelayedResponse = () => {
+      return new Promise(resolve => {
+        const responseHandler = () => resolve({ ok: true, json: () => mockContacts });
+        setTimeout(responseHandler, 100);
+      });
+    };
+
+    mockFetch.mockImplementation(createDelayedResponse);
 
     render(
       <Wrapper>

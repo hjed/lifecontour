@@ -7,7 +7,7 @@
 
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Search, User } from 'lucide-react';
 import { cn, generateDisplayName } from '@/lib/utils';
@@ -21,11 +21,11 @@ const SEARCH_DEBOUNCE_MS = 300;
 const BLUR_DELAY_MS = 200; // Delay to prevent dropdown from closing before click events are processed
 
 interface ContactSearchComboboxProps {
-  onSelect: (contact: ContactResource) => void;
-  placeholder?: string;
-  excludeContactId?: string;
-  className?: string;
-  disabled?: boolean;
+  readonly onSelect: (contact: ContactResource) => void;
+  readonly placeholder?: string;
+  readonly excludeContactId?: string;
+  readonly className?: string;
+  readonly disabled?: boolean;
 }
 
 // Debounce hook
@@ -80,6 +80,7 @@ export function ContactSearchCombobox({
   const [showResults, setShowResults] = useState(false);
   const [selectedIndex, setSelectedIndex] = useState(-1);
   const debouncedQuery = useDebounce(searchQuery, SEARCH_DEBOUNCE_MS);
+  const blurTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   // Search query
   const {
@@ -97,6 +98,15 @@ export function ContactSearchCombobox({
   const filteredContacts = searchResults?.data?.filter(
     contact => contact.id !== excludeContactId
   ) || [];
+
+  // Cleanup timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (blurTimeoutRef.current) {
+        clearTimeout(blurTimeoutRef.current);
+      }
+    };
+  }, []);
 
   const handleSelect = (contact: ContactResource) => {
     onSelect(contact);
@@ -150,12 +160,21 @@ export function ContactSearchCombobox({
           onChange={handleInputChange}
           onKeyDown={handleKeyDown}
           onFocus={() => searchQuery && setShowResults(true)}
-          onBlur={() => setTimeout(() => setShowResults(false), BLUR_DELAY_MS)}
+          onBlur={() => {
+            // Clear any existing timeout
+            if (blurTimeoutRef.current) {
+              clearTimeout(blurTimeoutRef.current);
+            }
+            // Set new timeout
+            blurTimeoutRef.current = setTimeout(() => setShowResults(false), BLUR_DELAY_MS);
+          }}
           className="pl-10"
           disabled={disabled}
+          autoComplete="off"
           role="combobox"
           aria-expanded={showResults}
           aria-haspopup="listbox"
+          aria-controls={showResults ? 'contact-search-results' : undefined}
         />
       </div>
 
@@ -182,7 +201,7 @@ export function ContactSearchCombobox({
             )}
 
             {!isLoading && !error && filteredContacts.length > 0 && (
-              <div role="listbox">
+              <ul id="contact-search-results" role="listbox" className="list-none p-0 m-0">
                 {filteredContacts.map((contact, index) => {
                   const displayName = generateDisplayName(
                     contact.attributes.first_name,
@@ -197,23 +216,22 @@ export function ContactSearchCombobox({
                   const isSelected = index === selectedIndex;
 
                   return (
-                    <button
-                      key={contact.id}
-                      type="button"
-                      className={cn(
-                        "flex w-full items-center gap-2 p-3 text-left hover:bg-muted",
-                        isSelected && "bg-muted"
-                      )}
-                      onClick={() => handleSelect(contact)}
-                      role="option"
-                      aria-selected={isSelected}
-                    >
-                      <User className="h-4 w-4 text-muted-foreground" />
-                      <span>{fullDisplayName}</span>
-                    </button>
+                    <li key={contact.id} role="option" aria-selected={isSelected}>
+                      <button
+                        type="button"
+                        className={cn(
+                          "flex w-full items-center gap-2 p-3 text-left hover:bg-muted",
+                          isSelected && "bg-muted"
+                        )}
+                        onClick={() => handleSelect(contact)}
+                      >
+                        <User className="h-4 w-4 text-muted-foreground" />
+                        <span>{fullDisplayName}</span>
+                      </button>
+                    </li>
                   );
                 })}
-              </div>
+              </ul>
             )}
           </CardContent>
         </Card>
