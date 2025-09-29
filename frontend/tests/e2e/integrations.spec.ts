@@ -141,21 +141,14 @@ test.describe('Integration Management', () => {
   });
 });
 
-test.describe.skip('Integration UI Components', () => {
+test.describe('Integration UI Components', () => {
   test.beforeEach(async ({ page }) => {
     const authFixtures = createAuthFixtures(page);
     await authFixtures.mockAuthenticated('github');
   });
 
-  test.skip('should display integration status in UI', async ({ page }) => {
-    // Skip until integration UI is implemented
-    // This test would navigate to an integrations page and verify:
-    // - Integration status display
-    // - Sync trigger buttons
-    // - Job status monitoring
-    // - Health indicators
-
-    await page.goto('/integrations'); // Assuming this route exists
+  test('should display integration status in UI', async ({ page }) => {
+    await page.goto('/integrations');
 
     // Verify page loads
     await expect(page).toHaveTitle(/Integrations/);
@@ -176,8 +169,7 @@ test.describe.skip('Integration UI Components', () => {
     ).toBeVisible();
   });
 
-  test.skip('should trigger sync through UI', async ({ page }) => {
-    // Skip until integration UI is implemented
+  test('should trigger sync through UI', async ({ page }) => {
     await page.goto('/integrations');
 
     // Click sync trigger button
@@ -192,8 +184,7 @@ test.describe.skip('Integration UI Components', () => {
     );
   });
 
-  test.skip('should display sync history', async ({ page }) => {
-    // Skip until integration UI is implemented
+  test('should display sync history', async ({ page }) => {
     await page.goto('/integrations');
 
     // Should show recent sync jobs

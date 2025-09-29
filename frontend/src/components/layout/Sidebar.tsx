@@ -19,6 +19,7 @@ import {
   ChevronRight,
   Star,
   Menu,
+  Settings,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
@@ -64,6 +65,9 @@ function isActiveLink(href: Route, pathname: string): boolean {
   if (href === '/contacts') {
     return pathname === '/contacts' || pathname === '/contacts/';
   }
+  if (href === '/integrations') {
+    return pathname === '/integrations' || pathname === '/integrations/';
+  }
   return pathname.startsWith(href);
 }
 
@@ -107,6 +111,12 @@ function useNavigationSections(): NavigationSection[] {
       icon: BookOpen,
       defaultExpanded: false,
       items: [{ label: 'Etc', href: '/journals' as Route }],
+    },
+    {
+      label: 'Integrations',
+      icon: Settings,
+      defaultExpanded: false,
+      items: [{ label: 'Manage', href: '/integrations' as Route }],
     },
   ];
 }
