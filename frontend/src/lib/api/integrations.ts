@@ -40,10 +40,11 @@ async function handleApiResponse<T>(response: Response): Promise<T> {
   if (!response.ok) {
     try {
       const errorData: JsonApiErrorResponse = await response.json();
-      const errorMessage = errorData.errors?.[0]?.detail ||
+      const errorMessage =
+        errorData.errors?.[0]?.detail ||
         `Request failed with status ${response.status}`;
       throw new Error(errorMessage);
-    } catch (parseError) {
+    } catch {
       // If JSON parsing fails, use status text
       throw new Error(`HTTP ${response.status}: ${response.statusText}`);
     }
@@ -148,7 +149,7 @@ export async function disconnectGoogleContacts(): Promise<void> {
       const errorMessage =
         errorData.errors?.[0]?.detail || 'Failed to disconnect';
       throw new Error(errorMessage);
-    } catch (parseError) {
+    } catch {
       throw new Error(`HTTP ${response.status}: Failed to disconnect`);
     }
   }
@@ -169,7 +170,7 @@ export async function cancelSyncJob(jobId: string): Promise<void> {
       const errorMessage =
         errorData.errors?.[0]?.detail || 'Failed to cancel sync job';
       throw new Error(errorMessage);
-    } catch (parseError) {
+    } catch {
       throw new Error(`HTTP ${response.status}: Failed to cancel sync job`);
     }
   }

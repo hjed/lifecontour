@@ -90,13 +90,13 @@ describe('IntegrationsPage', () => {
       },
       isLoading: false,
       error: null,
-    });
+    } as any);
 
     mockUseGoogleContactsSync.mockReturnValue({
       mutate: jest.fn(),
       isPending: false,
       error: null,
-    });
+    } as any);
 
     mockUseIntegrationHealth.mockReturnValue({
       data: {
@@ -113,7 +113,7 @@ describe('IntegrationsPage', () => {
       },
       isLoading: false,
       error: null,
-    });
+    } as any);
 
     mockUseSyncHistory.mockReturnValue({
       data: {
@@ -136,7 +136,7 @@ describe('IntegrationsPage', () => {
       },
       isLoading: false,
       error: null,
-    });
+    } as any);
   });
 
   it('should render integrations page with title', () => {
@@ -181,7 +181,7 @@ describe('IntegrationsPage', () => {
       mutate: mockMutate,
       isPending: false,
       error: null,
-    });
+    } as any);
 
     const wrapper = createWrapper();
     render(<IntegrationsPage />, { wrapper });
@@ -211,10 +211,10 @@ describe('IntegrationsPage', () => {
 
   it('should show loading state when data is loading', () => {
     mockUseGoogleContactsStatus.mockReturnValue({
-      data: null,
+      data: undefined,
       isLoading: true,
       error: null,
-    });
+    } as any);
 
     const wrapper = createWrapper();
     render(<IntegrationsPage />, { wrapper });
@@ -224,10 +224,10 @@ describe('IntegrationsPage', () => {
 
   it('should show error state when there is an error', () => {
     mockUseGoogleContactsStatus.mockReturnValue({
-      data: null,
+      data: undefined,
       isLoading: false,
       error: new Error('Failed to fetch status'),
-    });
+    } as any);
 
     const wrapper = createWrapper();
     render(<IntegrationsPage />, { wrapper });
@@ -251,7 +251,7 @@ describe('IntegrationsPage', () => {
       },
       isLoading: false,
       error: null,
-    });
+    } as any);
 
     const wrapper = createWrapper();
     render(<IntegrationsPage />, { wrapper });
@@ -274,7 +274,7 @@ describe('IntegrationsPage', () => {
       mutate: jest.fn(),
       isPending: true,
       error: null,
-    });
+    } as any);
 
     const wrapper = createWrapper();
     render(<IntegrationsPage />, { wrapper });
