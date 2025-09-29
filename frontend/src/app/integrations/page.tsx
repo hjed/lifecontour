@@ -82,7 +82,11 @@ function IntegrationsPageContent() {
             Manage your external integrations and sync settings
           </p>
         </div>
-        <LoadingSpinner size='lg' text='Loading integrations...' />
+        <LoadingSpinner
+          size='lg'
+          text='Loading integrations...'
+          data-testid='loading-spinner'
+        />
       </div>
     );
   }
