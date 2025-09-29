@@ -41,11 +41,19 @@ jest.mock('@/components/auth/AuthGuard', () => ({
   },
 }));
 
-// Get the mocked functions
-const useGoogleContactsStatus = jest.fn();
-const useGoogleContactsSync = jest.fn();
-const useIntegrationHealth = jest.fn();
-const useSyncHistory = jest.fn();
+// Import the mocked functions
+import {
+  useGoogleContactsStatus,
+  useGoogleContactsSync,
+  useIntegrationHealth,
+  useSyncHistory,
+} from '@/lib/api/integrations';
+
+// Get typed mocked functions
+const mockUseGoogleContactsStatus = jest.mocked(useGoogleContactsStatus);
+const mockUseGoogleContactsSync = jest.mocked(useGoogleContactsSync);
+const mockUseIntegrationHealth = jest.mocked(useIntegrationHealth);
+const mockUseSyncHistory = jest.mocked(useSyncHistory);
 
 function createWrapper() {
   const queryClient = new QueryClient({
@@ -67,7 +75,7 @@ describe('IntegrationsPage', () => {
     jest.clearAllMocks();
 
     // Default mock implementations
-    (useGoogleContactsStatus as jest.Mock).mockReturnValue({
+    mockUseGoogleContactsStatus.mockReturnValue({
       data: {
         data: {
           id: 'google-contacts',
@@ -84,13 +92,13 @@ describe('IntegrationsPage', () => {
       error: null,
     });
 
-    (useGoogleContactsSync as jest.Mock).mockReturnValue({
+    mockUseGoogleContactsSync.mockReturnValue({
       mutate: jest.fn(),
       isPending: false,
       error: null,
     });
 
-    (useIntegrationHealth as jest.Mock).mockReturnValue({
+    mockUseIntegrationHealth.mockReturnValue({
       data: {
         data: {
           id: 'health',
@@ -107,7 +115,7 @@ describe('IntegrationsPage', () => {
       error: null,
     });
 
-    (useSyncHistory as jest.Mock).mockReturnValue({
+    mockUseSyncHistory.mockReturnValue({
       data: {
         data: [
           {
@@ -169,7 +177,7 @@ describe('IntegrationsPage', () => {
 
   it('should trigger sync when sync button is clicked', async () => {
     const mockMutate = jest.fn();
-    (useGoogleContactsSync as jest.Mock).mockReturnValue({
+    mockUseGoogleContactsSync.mockReturnValue({
       mutate: mockMutate,
       isPending: false,
       error: null,
@@ -202,7 +210,7 @@ describe('IntegrationsPage', () => {
   });
 
   it('should show loading state when data is loading', () => {
-    (useGoogleContactsStatus as jest.Mock).mockReturnValue({
+    mockUseGoogleContactsStatus.mockReturnValue({
       data: null,
       isLoading: true,
       error: null,
@@ -215,7 +223,7 @@ describe('IntegrationsPage', () => {
   });
 
   it('should show error state when there is an error', () => {
-    (useGoogleContactsStatus as jest.Mock).mockReturnValue({
+    mockUseGoogleContactsStatus.mockReturnValue({
       data: null,
       isLoading: false,
       error: new Error('Failed to fetch status'),
@@ -228,7 +236,7 @@ describe('IntegrationsPage', () => {
   });
 
   it('should show disconnected state when integration is not connected', () => {
-    (useGoogleContactsStatus as jest.Mock).mockReturnValue({
+    mockUseGoogleContactsStatus.mockReturnValue({
       data: {
         data: {
           id: 'google-contacts',
@@ -262,7 +270,7 @@ describe('IntegrationsPage', () => {
   });
 
   it('should show sync progress when sync is running', () => {
-    (useGoogleContactsSync as jest.Mock).mockReturnValue({
+    mockUseGoogleContactsSync.mockReturnValue({
       mutate: jest.fn(),
       isPending: true,
       error: null,
