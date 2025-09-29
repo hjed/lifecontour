@@ -42,12 +42,10 @@ jest.mock('@/components/auth/AuthGuard', () => ({
 }));
 
 // Get the mocked functions
-const {
-  useGoogleContactsStatus,
-  useGoogleContactsSync,
-  useIntegrationHealth,
-  useSyncHistory,
-} = require('@/lib/api/integrations');
+const useGoogleContactsStatus = jest.fn();
+const useGoogleContactsSync = jest.fn();
+const useIntegrationHealth = jest.fn();
+const useSyncHistory = jest.fn();
 
 function createWrapper() {
   const queryClient = new QueryClient({
