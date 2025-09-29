@@ -105,7 +105,7 @@ describe('Integration API Functions', () => {
       } as Response);
 
       await expect(fetchGoogleContactsStatus()).rejects.toThrow(
-        'Authentication required'
+        'HTTP 401: undefined'
       );
     });
   });

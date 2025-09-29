@@ -4,7 +4,7 @@
  * Defines types for Google Contacts integration, sync jobs, and health monitoring.
  */
 
-import React from 'react';
+import type { ReactNode } from 'react';
 
 // Base integration types
 export type SyncType = 'smart' | 'full';
@@ -190,7 +190,7 @@ export interface IntegrationCardProps {
   onConnect?: () => void;
   onDisconnect?: () => void;
   onSync?: (syncType: SyncType) => void;
-  children?: React.ReactNode;
+  children?: ReactNode;
 }
 
 export interface SyncJobCardProps {

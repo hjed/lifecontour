@@ -73,7 +73,7 @@ function IntegrationsPageContent() {
     triggerSync(syncType);
   };
 
-  if (statusLoading || healthLoading) {
+  if (statusLoading || healthLoading || historyLoading) {
     return (
       <div className='container mx-auto py-8'>
         <div className='mb-8'>

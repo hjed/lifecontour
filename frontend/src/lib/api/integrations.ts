@@ -40,7 +40,8 @@ async function handleApiResponse<T>(response: Response): Promise<T> {
   if (!response.ok) {
     try {
       const errorData: JsonApiErrorResponse = await response.json();
-      const errorMessage = errorData.errors?.[0]?.detail || 'An error occurred';
+      const errorMessage = errorData.errors?.[0]?.detail ||
+        `Request failed with status ${response.status}`;
       throw new Error(errorMessage);
     } catch (parseError) {
       // If JSON parsing fails, use status text
@@ -216,9 +217,13 @@ export function useSyncJobStatus(jobId: string | null) {
     queryFn: () => (jobId ? fetchSyncJobStatus(jobId) : Promise.resolve(null)),
     enabled: !!jobId,
     refetchInterval: query => {
-      // Poll every 2 seconds if job is running, stop if completed/failed
+      // Poll with progressive intervals: 5s initially, then 10s for better performance
       const status = query.state.data?.data?.attributes?.status;
-      return status === 'running' || status === 'queued' ? 2000 : false;
+      if (status === 'running' || status === 'queued') {
+        const fetchCount = query.state.dataUpdateCount || 0;
+        return fetchCount < 3 ? 5000 : 10000; // 5s for first 3 polls, then 10s
+      }
+      return false;
     },
     staleTime: 1000, // 1 second
   });
