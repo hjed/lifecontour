@@ -254,12 +254,21 @@ export function useIntegrationStats() {
   });
 }
 
-export function useOAuthConnection() {
+/**
+ * Hook to initiate OAuth connection.
+ * @param redirect Optional function to handle redirect (e.g., for testing or SSR).
+ */
+export function useOAuthConnection(redirect?: (url: string) => void) {
   return useMutation({
     mutationFn: initiateOAuthConnection,
     onSuccess: data => {
-      // Redirect to OAuth URL
-      window.location.href = data.data.attributes.authUrl;
+      // Redirect to OAuth URL using provided function or default to window.location.href
+      const url = data.data.attributes.authUrl;
+      if (redirect) {
+        redirect(url);
+      } else if (typeof window !== 'undefined') {
+        window.location.href = url;
+      }
     },
     onError: (error: Error) => {
       toast.error(`Failed to initiate OAuth: ${error.message}`);
