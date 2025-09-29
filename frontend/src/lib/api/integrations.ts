@@ -38,9 +38,14 @@ export const integrationKeys = {
 // Error handling helper
 async function handleApiResponse<T>(response: Response): Promise<T> {
   if (!response.ok) {
-    const errorData: JsonApiErrorResponse = await response.json();
-    const errorMessage = errorData.errors?.[0]?.detail || 'An error occurred';
-    throw new Error(errorMessage);
+    try {
+      const errorData: JsonApiErrorResponse = await response.json();
+      const errorMessage = errorData.errors?.[0]?.detail || 'An error occurred';
+      throw new Error(errorMessage);
+    } catch (parseError) {
+      // If JSON parsing fails, use status text
+      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+    }
   }
   return response.json();
 }
@@ -137,10 +142,14 @@ export async function disconnectGoogleContacts(): Promise<void> {
   });
 
   if (!response.ok) {
-    const errorData: JsonApiErrorResponse = await response.json();
-    const errorMessage =
-      errorData.errors?.[0]?.detail || 'Failed to disconnect';
-    throw new Error(errorMessage);
+    try {
+      const errorData: JsonApiErrorResponse = await response.json();
+      const errorMessage =
+        errorData.errors?.[0]?.detail || 'Failed to disconnect';
+      throw new Error(errorMessage);
+    } catch (parseError) {
+      throw new Error(`HTTP ${response.status}: Failed to disconnect`);
+    }
   }
 }
 
@@ -154,10 +163,14 @@ export async function cancelSyncJob(jobId: string): Promise<void> {
   );
 
   if (!response.ok) {
-    const errorData: JsonApiErrorResponse = await response.json();
-    const errorMessage =
-      errorData.errors?.[0]?.detail || 'Failed to cancel sync job';
-    throw new Error(errorMessage);
+    try {
+      const errorData: JsonApiErrorResponse = await response.json();
+      const errorMessage =
+        errorData.errors?.[0]?.detail || 'Failed to cancel sync job';
+      throw new Error(errorMessage);
+    } catch (parseError) {
+      throw new Error(`HTTP ${response.status}: Failed to cancel sync job`);
+    }
   }
 }
 
