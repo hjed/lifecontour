@@ -4,6 +4,8 @@
  * Defines types for Google Contacts integration, sync jobs, and health monitoring.
  */
 
+import React from 'react';
+
 // Base integration types
 export type SyncType = 'smart' | 'full';
 export type SyncStatus =
