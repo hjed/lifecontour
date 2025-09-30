@@ -22,6 +22,7 @@ import { useRelationshipTypes } from '@/lib/api/relationships';
 import {
   validateRequiredContactId,
   validateRequiredRelationshipType,
+  parseContactId,
 } from '@/lib/validation';
 import {
   ContactResource,
@@ -86,30 +87,30 @@ export function AddRelationshipForm({
       return;
     }
 
-    // Validate and parse contact IDs
-    const fromContactIdNum = Number(contactId);
-    const toContactIdNum = Number(selectedContact!.id);
+    // Validate and parse contact IDs using utility function
+    const fromContactIdResult = parseContactId(contactId, 'from_contact_id');
+    const toContactIdResult = parseContactId(selectedContact!.id, 'to_contact_id');
 
-    if (!Number.isFinite(fromContactIdNum)) {
+    if (fromContactIdResult.error) {
       setErrors((prev) => ({
         ...prev,
-        contact: 'Invalid contact ID (from_contact_id).',
+        contact: fromContactIdResult.error!,
       }));
       return;
     }
 
-    if (!Number.isFinite(toContactIdNum)) {
+    if (toContactIdResult.error) {
       setErrors((prev) => ({
         ...prev,
-        contact: 'Invalid contact ID (to_contact_id).',
+        contact: toContactIdResult.error!,
       }));
       return;
     }
 
     // Submit form data
     const formData: ContactRelationshipFormData = {
-      from_contact_id: fromContactIdNum,
-      to_contact_id: toContactIdNum,
+      from_contact_id: fromContactIdResult.value!,
+      to_contact_id: toContactIdResult.value!,
       relationship_type: selectedType as RelationshipType,
     };
 

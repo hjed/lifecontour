@@ -205,7 +205,7 @@ export function ContactSearchCombobox({
                 {filteredContacts.map((contact, index) => {
                   const displayName = generateDisplayName(
                     contact.attributes.first_name,
-                    contact.attributes.last_name || ''
+                    contact.attributes.last_name ?? ''
                   );
 
                   // Add nickname in parentheses if present
