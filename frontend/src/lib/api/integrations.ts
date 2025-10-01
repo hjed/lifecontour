@@ -286,6 +286,13 @@ export function useOAuthConnection(redirect?: (url: string) => void) {
         redirect(url);
       } else if (typeof window !== 'undefined') {
         window.location.href = url;
+      } else {
+        toast.error(
+          'OAuth redirect failed: no redirect function provided and window is undefined.'
+        );
+        throw new Error(
+          'OAuth redirect failed: no redirect function provided and window is undefined.'
+        );
       }
     },
     onError: (error: Error) => {

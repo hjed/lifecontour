@@ -32,6 +32,19 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { AuthGuard } from '@/components/auth/AuthGuard';
 import { LoadingSpinner } from '@/components/ui/loading';
 
+// Helper function for safe date formatting
+function formatDateSafely(dateString: string | null): string {
+  if (!dateString) return 'Never';
+
+  try {
+    return format(new Date(dateString), 'PPp', {
+      locale: enAU,
+    });
+  } catch {
+    return 'Invalid date';
+  }
+}
+
 export default function IntegrationsPage() {
   return (
     <AuthGuard>
@@ -136,16 +149,7 @@ function IntegrationsPageContent() {
                       </div>
                       {status.lastSync && (
                         <p className='text-muted-foreground text-sm'>
-                          Last sync:{' '}
-                          {(() => {
-                            try {
-                              return format(new Date(status.lastSync), 'PPp', {
-                                locale: enAU,
-                              });
-                            } catch {
-                              return 'Invalid date';
-                            }
-                          })()}
+                          Last sync: {formatDateSafely(status.lastSync)}
                         </p>
                       )}
                     </div>
@@ -246,19 +250,7 @@ function IntegrationsPageContent() {
                           </span>
                         </div>
                         <p className='text-muted-foreground text-sm'>
-                          {(() => {
-                            try {
-                              return format(
-                                new Date(job.attributes.createdAt),
-                                'PPp',
-                                {
-                                  locale: enAU,
-                                }
-                              );
-                            } catch {
-                              return 'Invalid date';
-                            }
-                          })()}
+                          {formatDateSafely(job.attributes.createdAt)}
                         </p>
                       </div>
                       {job.attributes.contactsProcessed && (
