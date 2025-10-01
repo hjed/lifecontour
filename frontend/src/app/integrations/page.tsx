@@ -137,9 +137,15 @@ function IntegrationsPageContent() {
                       {status.lastSync && (
                         <p className='text-muted-foreground text-sm'>
                           Last sync:{' '}
-                          {format(new Date(status.lastSync), 'PPp', {
-                            locale: enAU,
-                          })}
+                          {(() => {
+                            try {
+                              return format(new Date(status.lastSync), 'PPp', {
+                                locale: enAU,
+                              });
+                            } catch {
+                              return 'Invalid date';
+                            }
+                          })()}
                         </p>
                       )}
                     </div>
@@ -240,9 +246,19 @@ function IntegrationsPageContent() {
                           </span>
                         </div>
                         <p className='text-muted-foreground text-sm'>
-                          {format(new Date(job.attributes.createdAt), 'PPp', {
-                            locale: enAU,
-                          })}
+                          {(() => {
+                            try {
+                              return format(
+                                new Date(job.attributes.createdAt),
+                                'PPp',
+                                {
+                                  locale: enAU,
+                                }
+                              );
+                            } catch {
+                              return 'Invalid date';
+                            }
+                          })()}
                         </p>
                       </div>
                       {job.attributes.contactsProcessed && (

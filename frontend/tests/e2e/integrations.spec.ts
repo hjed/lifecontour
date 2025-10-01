@@ -18,7 +18,7 @@ test.describe('Integration Management', () => {
   test('should display integration health status', async ({ page }) => {
     // Skip API tests if using mock backend
     if (process.env.USE_MOCK_BACKEND === 'true') {
-      test.skip('Skipping API test in mock mode');
+      test.skip();
       return;
     }
 
@@ -39,7 +39,7 @@ test.describe('Integration Management', () => {
   test('should trigger Google Contacts sync via API', async ({ page }) => {
     // Skip API tests if using mock backend
     if (process.env.USE_MOCK_BACKEND === 'true') {
-      test.skip('Skipping API test in mock mode');
+      test.skip();
       return;
     }
 
@@ -162,7 +162,7 @@ test.describe('Integration UI Components', () => {
   test('should display integration status in UI', async ({ page }) => {
     // Mock API responses if in mock mode
     if (process.env.USE_MOCK_BACKEND === 'true') {
-      await page.route('/api/integrations/**', (route) => {
+      await page.route('/api/integrations/**', route => {
         const url = route.request().url();
         if (url.includes('/health')) {
           route.fulfill({
@@ -174,7 +174,10 @@ test.describe('Integration UI Components', () => {
                 type: 'integration-health',
                 attributes: {
                   redis: { status: 'healthy', latency: 5 },
-                  worker: { status: 'healthy', lastSeen: new Date().toISOString() },
+                  worker: {
+                    status: 'healthy',
+                    lastSeen: new Date().toISOString(),
+                  },
                   overall: 'healthy',
                   lastChecked: new Date().toISOString(),
                 },

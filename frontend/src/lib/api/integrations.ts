@@ -21,6 +21,11 @@ import {
 } from '@/types/integrations';
 import { JsonApiErrorResponse } from '@/types/api';
 
+// Polling configuration constants
+const INITIAL_POLL_COUNT = 3;
+const INITIAL_POLL_INTERVAL = 5000; // 5 seconds
+const EXTENDED_POLL_INTERVAL = 10000; // 10 seconds
+
 // Query Keys
 export const integrationKeys = {
   all: ['integrations'] as const,
@@ -40,9 +45,19 @@ async function handleApiResponse<T>(response: Response): Promise<T> {
   if (!response.ok) {
     try {
       const errorData: JsonApiErrorResponse = await response.json();
-      const errorMessage =
-        errorData.errors?.[0]?.detail ||
-        `Request failed with status ${response.status}`;
+
+      // Validate error structure and provide appropriate message
+      let errorMessage: string;
+      if (
+        Array.isArray(errorData.errors) &&
+        errorData.errors.length > 0 &&
+        typeof errorData.errors[0].detail === 'string'
+      ) {
+        errorMessage = errorData.errors[0].detail;
+      } else {
+        errorMessage = `Request failed with status ${response.status}`;
+      }
+
       throw new Error(errorMessage);
     } catch {
       // If JSON parsing fails, use status text
@@ -218,11 +233,13 @@ export function useSyncJobStatus(jobId: string | null) {
     queryFn: () => (jobId ? fetchSyncJobStatus(jobId) : Promise.resolve(null)),
     enabled: !!jobId,
     refetchInterval: query => {
-      // Poll with progressive intervals: 5s initially, then 10s for better performance
+      // Poll with progressive intervals for better performance
       const status = query.state.data?.data?.attributes?.status;
       if (status === 'running' || status === 'queued') {
         const fetchCount = query.state.dataUpdateCount || 0;
-        return fetchCount < 3 ? 5000 : 10000; // 5s for first 3 polls, then 10s
+        return fetchCount < INITIAL_POLL_COUNT
+          ? INITIAL_POLL_INTERVAL
+          : EXTENDED_POLL_INTERVAL;
       }
       return false;
     },
