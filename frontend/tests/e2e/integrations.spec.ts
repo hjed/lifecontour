@@ -16,6 +16,12 @@ test.describe('Integration Management', () => {
   });
 
   test('should display integration health status', async ({ page }) => {
+    // Skip API tests if using mock backend
+    if (process.env.USE_MOCK_BACKEND === 'true') {
+      test.skip('Skipping API test in mock mode');
+      return;
+    }
+
     // Navigate to integrations page (assuming it exists)
     // For now, we'll test the API endpoints directly
 
@@ -31,6 +37,12 @@ test.describe('Integration Management', () => {
   });
 
   test('should trigger Google Contacts sync via API', async ({ page }) => {
+    // Skip API tests if using mock backend
+    if (process.env.USE_MOCK_BACKEND === 'true') {
+      test.skip('Skipping API test in mock mode');
+      return;
+    }
+
     // Test sync trigger endpoint (requires authentication)
     const response = await page.request.post(
       '/api/integrations/google/contacts/sync',
@@ -148,6 +160,50 @@ test.describe('Integration UI Components', () => {
   });
 
   test('should display integration status in UI', async ({ page }) => {
+    // Mock API responses if in mock mode
+    if (process.env.USE_MOCK_BACKEND === 'true') {
+      await page.route('/api/integrations/**', (route) => {
+        const url = route.request().url();
+        if (url.includes('/health')) {
+          route.fulfill({
+            status: 200,
+            contentType: 'application/json',
+            body: JSON.stringify({
+              data: {
+                id: 'health',
+                type: 'integration-health',
+                attributes: {
+                  redis: { status: 'healthy', latency: 5 },
+                  worker: { status: 'healthy', lastSeen: new Date().toISOString() },
+                  overall: 'healthy',
+                  lastChecked: new Date().toISOString(),
+                },
+              },
+            }),
+          });
+        } else if (url.includes('/status')) {
+          route.fulfill({
+            status: 200,
+            contentType: 'application/json',
+            body: JSON.stringify({
+              data: {
+                id: 'google-contacts',
+                type: 'integration-status',
+                attributes: {
+                  connected: false,
+                  lastSync: null,
+                  syncCount: 0,
+                  status: 'disconnected',
+                },
+              },
+            }),
+          });
+        } else {
+          route.fulfill({ status: 404 });
+        }
+      });
+    }
+
     await page.goto('/integrations');
 
     // Verify page loads
