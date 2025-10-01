@@ -31,6 +31,8 @@ export default [
       'test-results/**',
       '*.config.js',
       '*.config.ts',
+      '*.config.mjs',
+      '*.config.cjs',
       'next-env.d.ts',
     ],
   },
@@ -101,7 +103,7 @@ export default [
     },
   },
   {
-    files: ['**/*.test.ts', '**/*.test.tsx', '**/*.spec.ts', 'tests/**/*.ts', 'jest.setup.js'],
+    files: ['**/*.test.{ts,tsx,js,jsx}', '**/*.spec.{ts,tsx,js,jsx}', 'tests/**/*.{ts,tsx,js,jsx}', 'jest.setup.{js,ts}', '**/__tests__/**/*.{ts,tsx,js,jsx}'],
 
     languageOptions: {
       globals: {
