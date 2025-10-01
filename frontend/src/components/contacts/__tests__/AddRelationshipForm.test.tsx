@@ -16,12 +16,15 @@ jest.mock('@/lib/api/relationships', () => ({
 
 // Mock ContactSearchCombobox
 jest.mock('../ContactSearchCombobox', () => ({
-  ContactSearchCombobox: function MockContactSearchCombobox({ onSelect, placeholder }: any) {
+  ContactSearchCombobox: function MockContactSearchCombobox({
+    onSelect,
+    placeholder,
+  }: any) {
     return (
       <div>
         <input
           placeholder={placeholder}
-          onChange={(e) => {
+          onChange={e => {
             if (e.target.value === 'test') {
               onSelect({
                 type: 'contacts',
@@ -95,7 +98,7 @@ describe('AddRelationshipForm', () => {
     render(
       <Wrapper>
         <AddRelationshipForm
-          contactId="1"
+          contactId='1'
           onSubmit={mockOnSubmit}
           onCancel={mockOnCancel}
         />
@@ -110,14 +113,16 @@ describe('AddRelationshipForm', () => {
     render(
       <Wrapper>
         <AddRelationshipForm
-          contactId="1"
+          contactId='1'
           onSubmit={mockOnSubmit}
           onCancel={mockOnCancel}
         />
       </Wrapper>
     );
 
-    expect(screen.getByPlaceholderText('Search for a contact...')).toBeInTheDocument();
+    expect(
+      screen.getByPlaceholderText('Search for a contact...')
+    ).toBeInTheDocument();
   });
 
   it('renders relationship type select', () => {
@@ -125,7 +130,7 @@ describe('AddRelationshipForm', () => {
     render(
       <Wrapper>
         <AddRelationshipForm
-          contactId="1"
+          contactId='1'
           onSubmit={mockOnSubmit}
           onCancel={mockOnCancel}
         />
@@ -140,7 +145,7 @@ describe('AddRelationshipForm', () => {
     render(
       <Wrapper>
         <AddRelationshipForm
-          contactId="1"
+          contactId='1'
           onSubmit={mockOnSubmit}
           onCancel={mockOnCancel}
         />
@@ -157,7 +162,7 @@ describe('AddRelationshipForm', () => {
     render(
       <Wrapper>
         <AddRelationshipForm
-          contactId="1"
+          contactId='1'
           onSubmit={mockOnSubmit}
           onCancel={mockOnCancel}
         />
@@ -175,7 +180,7 @@ describe('AddRelationshipForm', () => {
     render(
       <Wrapper>
         <AddRelationshipForm
-          contactId="1"
+          contactId='1'
           onSubmit={mockOnSubmit}
           onCancel={mockOnCancel}
         />
@@ -192,7 +197,7 @@ describe('AddRelationshipForm', () => {
     render(
       <Wrapper>
         <AddRelationshipForm
-          contactId="1"
+          contactId='1'
           onSubmit={mockOnSubmit}
           onCancel={mockOnCancel}
         />
@@ -228,7 +233,7 @@ describe('AddRelationshipForm', () => {
     render(
       <Wrapper>
         <AddRelationshipForm
-          contactId="1"
+          contactId='1'
           onSubmit={mockOnSubmit}
           onCancel={mockOnCancel}
         />
@@ -263,7 +268,7 @@ describe('AddRelationshipForm', () => {
     render(
       <Wrapper>
         <AddRelationshipForm
-          contactId="1"
+          contactId='1'
           onSubmit={mockOnSubmit}
           onCancel={mockOnCancel}
         />
@@ -278,7 +283,9 @@ describe('AddRelationshipForm', () => {
     expect(submitButton).toBeDisabled();
 
     // Verify the form shows the contact search field
-    expect(screen.getByPlaceholderText('Search for a contact...')).toBeInTheDocument();
+    expect(
+      screen.getByPlaceholderText('Search for a contact...')
+    ).toBeInTheDocument();
   });
 
   it('validates that relationship type is required', async () => {
@@ -287,7 +294,7 @@ describe('AddRelationshipForm', () => {
     render(
       <Wrapper>
         <AddRelationshipForm
-          contactId="1"
+          contactId='1'
           onSubmit={mockOnSubmit}
           onCancel={mockOnCancel}
         />
@@ -316,7 +323,7 @@ describe('AddRelationshipForm', () => {
     render(
       <Wrapper>
         <AddRelationshipForm
-          contactId="1"
+          contactId='1'
           onSubmit={mockOnSubmit}
           onCancel={mockOnCancel}
           disabled={true}
@@ -341,14 +348,16 @@ describe('AddRelationshipForm', () => {
     render(
       <Wrapper>
         <AddRelationshipForm
-          contactId="1"
+          contactId='1'
           onSubmit={mockOnSubmit}
           onCancel={mockOnCancel}
         />
       </Wrapper>
     );
 
-    expect(screen.getByText('Loading relationship types...')).toBeInTheDocument();
+    expect(
+      screen.getByText('Loading relationship types...')
+    ).toBeInTheDocument();
   });
 
   it('handles form state correctly', async () => {
@@ -357,7 +366,7 @@ describe('AddRelationshipForm', () => {
     render(
       <Wrapper>
         <AddRelationshipForm
-          contactId="1"
+          contactId='1'
           onSubmit={mockOnSubmit}
           onCancel={mockOnCancel}
         />

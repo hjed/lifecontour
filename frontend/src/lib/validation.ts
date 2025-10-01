@@ -353,7 +353,10 @@ export function validateRelationshipForm(data: {
  * @param fieldName - The field name for error messages (e.g., 'from_contact_id', 'to_contact_id')
  * @returns Object with either the parsed number or an error message
  */
-export function parseContactId(contactId: string, fieldName: string = 'contact_id'): {
+export function parseContactId(
+  contactId: string,
+  fieldName: string = 'contact_id'
+): {
   value?: number;
   error?: string;
 } {
@@ -361,11 +364,11 @@ export function parseContactId(contactId: string, fieldName: string = 'contact_i
 
   if (!Number.isFinite(parsedId)) {
     return {
-      error: `Invalid contact ID (${fieldName}).`
+      error: `Invalid contact ID (${fieldName}).`,
     };
   }
 
   return {
-    value: parsedId
+    value: parsedId,
   };
 }

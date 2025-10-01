@@ -85,19 +85,19 @@ export function RelationshipsList({
   return (
     <Card className={className}>
       <CardHeader>
-        <div className="flex items-center justify-between">
-          <CardTitle className="flex items-center gap-2">
-            <Users className="h-5 w-5" />
+        <div className='flex items-center justify-between'>
+          <CardTitle className='flex items-center gap-2'>
+            <Users className='h-5 w-5' />
             Relationships
           </CardTitle>
           {!showAddForm && (
             <Button
-              variant="outline"
-              size="sm"
+              variant='outline'
+              size='sm'
               onClick={() => setShowAddForm(true)}
               disabled={isAnyMutationPending}
             >
-              <Plus className="h-4 w-4 mr-1" />
+              <Plus className='mr-1 h-4 w-4' />
               Add Relationship
             </Button>
           )}
@@ -105,35 +105,35 @@ export function RelationshipsList({
       </CardHeader>
       <CardContent>
         {isLoading && (
-          <div className="flex items-center gap-2 py-4">
-            <Loader2 className="h-4 w-4 animate-spin" />
+          <div className='flex items-center gap-2 py-4'>
+            <Loader2 className='h-4 w-4 animate-spin' />
             <span>Loading relationships...</span>
           </div>
         )}
 
         {error && (
-          <div className="py-4 text-destructive">
+          <div className='text-destructive py-4'>
             <span>Error loading relationships</span>
           </div>
         )}
 
         {!isLoading && !error && relationships.length === 0 && !showAddForm && (
-          <div className="py-8 text-center text-muted-foreground">
-            <Users className="h-12 w-12 mx-auto mb-4 opacity-50" />
-            <p className="text-lg font-medium mb-2">No relationships yet</p>
-            <p className="text-sm">
+          <div className='text-muted-foreground py-8 text-center'>
+            <Users className='mx-auto mb-4 h-12 w-12 opacity-50' />
+            <p className='mb-2 text-lg font-medium'>No relationships yet</p>
+            <p className='text-sm'>
               Add relationships to connect this contact with others
             </p>
           </div>
         )}
 
         {!isLoading && !error && relationships.length > 0 && (
-          <div className="space-y-3">
-            {relationships.map((relationship) => (
+          <div className='space-y-3'>
+            {relationships.map(relationship => (
               <RelationshipItem
                 key={relationship.id}
                 relationship={relationship}
-                onUpdate={(data) =>
+                onUpdate={data =>
                   handleUpdateRelationship(relationship.id, data)
                 }
                 onDelete={() => handleDeleteRelationship(relationship.id)}
@@ -144,7 +144,7 @@ export function RelationshipsList({
         )}
 
         {showAddForm && (
-          <div className="mt-4">
+          <div className='mt-4'>
             <AddRelationshipForm
               contactId={contactId}
               onSubmit={handleAddRelationship}

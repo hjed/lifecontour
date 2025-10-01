@@ -43,9 +43,8 @@ export function AddRelationshipForm({
   onCancel,
   disabled = false,
 }: AddRelationshipFormProps) {
-  const [selectedContact, setSelectedContact] = useState<ContactResource | null>(
-    null
-  );
+  const [selectedContact, setSelectedContact] =
+    useState<ContactResource | null>(null);
   const [selectedType, setSelectedType] = useState<RelationshipType | ''>('');
   const [errors, setErrors] = useState<Record<string, string>>({});
 
@@ -55,13 +54,13 @@ export function AddRelationshipForm({
   const handleContactSelect = (contact: ContactResource) => {
     setSelectedContact(contact);
     // Clear contact-related errors
-    setErrors((prev) => ({ ...prev, contact: '' }));
+    setErrors(prev => ({ ...prev, contact: '' }));
   };
 
   const handleTypeChange = (value: string) => {
     setSelectedType(value as RelationshipType);
     // Clear type-related errors
-    setErrors((prev) => ({ ...prev, relationship_type: '' }));
+    setErrors(prev => ({ ...prev, relationship_type: '' }));
   };
 
   const handleSubmit = () => {
@@ -89,10 +88,13 @@ export function AddRelationshipForm({
 
     // Validate and parse contact IDs using utility function
     const fromContactIdResult = parseContactId(contactId, 'from_contact_id');
-    const toContactIdResult = parseContactId(selectedContact!.id, 'to_contact_id');
+    const toContactIdResult = parseContactId(
+      selectedContact!.id,
+      'to_contact_id'
+    );
 
     if (fromContactIdResult.error) {
-      setErrors((prev) => ({
+      setErrors(prev => ({
         ...prev,
         contact: fromContactIdResult.error!,
       }));
@@ -100,7 +102,7 @@ export function AddRelationshipForm({
     }
 
     if (toContactIdResult.error) {
-      setErrors((prev) => ({
+      setErrors(prev => ({
         ...prev,
         contact: toContactIdResult.error!,
       }));
@@ -133,24 +135,24 @@ export function AddRelationshipForm({
   const isFormValid = selectedContact && selectedType && !disabled;
 
   return (
-    <div className="space-y-4 p-4 border rounded-lg bg-card">
-      <h3 className="text-lg font-semibold">Add New Relationship</h3>
+    <div className='bg-card space-y-4 rounded-lg border p-4'>
+      <h3 className='text-lg font-semibold'>Add New Relationship</h3>
 
-      <div className="space-y-4">
+      <div className='space-y-4'>
         {/* Contact Selection */}
-        <div className="space-y-2">
-          <Label htmlFor="contact-search">Contact</Label>
+        <div className='space-y-2'>
+          <Label htmlFor='contact-search'>Contact</Label>
           <ContactSearchCombobox
             onSelect={handleContactSelect}
-            placeholder="Search for a contact..."
+            placeholder='Search for a contact...'
             excludeContactId={contactId}
             disabled={disabled}
           />
           {errors.contact && (
-            <p className="text-sm text-destructive">{errors.contact}</p>
+            <p className='text-destructive text-sm'>{errors.contact}</p>
           )}
           {selectedContact && (
-            <p className="text-sm text-muted-foreground">
+            <p className='text-muted-foreground text-sm'>
               Selected: {selectedContact.attributes.first_name}{' '}
               {selectedContact.attributes.last_name}
             </p>
@@ -158,10 +160,10 @@ export function AddRelationshipForm({
         </div>
 
         {/* Relationship Type Selection */}
-        <div className="space-y-2">
-          <Label htmlFor="relationship-type">Relationship Type</Label>
+        <div className='space-y-2'>
+          <Label htmlFor='relationship-type'>Relationship Type</Label>
           {typesLoading ? (
-            <div className="text-sm text-muted-foreground">
+            <div className='text-muted-foreground text-sm'>
               Loading relationship types...
             </div>
           ) : (
@@ -171,10 +173,10 @@ export function AddRelationshipForm({
               disabled={disabled}
             >
               <SelectTrigger>
-                <SelectValue placeholder="Select relationship type" />
+                <SelectValue placeholder='Select relationship type' />
               </SelectTrigger>
               <SelectContent>
-                {relationshipTypes?.relationship_types?.map((type) => (
+                {relationshipTypes?.relationship_types?.map(type => (
                   <SelectItem key={type.value} value={type.value}>
                     {type.display_name}
                   </SelectItem>
@@ -183,7 +185,7 @@ export function AddRelationshipForm({
             </Select>
           )}
           {errors.relationship_type && (
-            <p className="text-sm text-destructive">
+            <p className='text-destructive text-sm'>
               {errors.relationship_type}
             </p>
           )}
@@ -191,19 +193,19 @@ export function AddRelationshipForm({
       </div>
 
       {/* Form Actions */}
-      <div className="flex items-center gap-2 pt-4">
+      <div className='flex items-center gap-2 pt-4'>
         <Button
           onClick={handleSubmit}
           disabled={!isFormValid}
-          className="flex-1"
+          className='flex-1'
         >
           Add Relationship
         </Button>
         <Button
-          variant="outline"
+          variant='outline'
           onClick={handleCancel}
           disabled={disabled}
-          className="flex-1"
+          className='flex-1'
         >
           Cancel
         </Button>

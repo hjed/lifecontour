@@ -6,7 +6,10 @@ import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { RelationshipsList } from '../RelationshipsList';
-import { ContactRelationshipResource, RelationshipType } from '@/types/contacts';
+import {
+  ContactRelationshipResource,
+  RelationshipType,
+} from '@/types/contacts';
 
 // Mock the API hooks
 const mockUseContactRelationships = jest.fn();
@@ -72,7 +75,6 @@ const createWrapper = () => {
 };
 
 describe('RelationshipsList', () => {
-
   beforeEach(() => {
     jest.clearAllMocks();
     mockUseContactRelationships.mockReturnValue({
@@ -116,7 +118,7 @@ describe('RelationshipsList', () => {
     const Wrapper = createWrapper();
     render(
       <Wrapper>
-        <RelationshipsList contactId="1" />
+        <RelationshipsList contactId='1' />
       </Wrapper>
     );
 
@@ -127,7 +129,7 @@ describe('RelationshipsList', () => {
     const Wrapper = createWrapper();
     render(
       <Wrapper>
-        <RelationshipsList contactId="1" />
+        <RelationshipsList contactId='1' />
       </Wrapper>
     );
 
@@ -145,7 +147,7 @@ describe('RelationshipsList', () => {
     const Wrapper = createWrapper();
     render(
       <Wrapper>
-        <RelationshipsList contactId="1" />
+        <RelationshipsList contactId='1' />
       </Wrapper>
     );
 
@@ -162,7 +164,7 @@ describe('RelationshipsList', () => {
     const Wrapper = createWrapper();
     render(
       <Wrapper>
-        <RelationshipsList contactId="1" />
+        <RelationshipsList contactId='1' />
       </Wrapper>
     );
 
@@ -179,7 +181,7 @@ describe('RelationshipsList', () => {
     const Wrapper = createWrapper();
     render(
       <Wrapper>
-        <RelationshipsList contactId="1" />
+        <RelationshipsList contactId='1' />
       </Wrapper>
     );
 
@@ -190,7 +192,7 @@ describe('RelationshipsList', () => {
     const Wrapper = createWrapper();
     render(
       <Wrapper>
-        <RelationshipsList contactId="1" />
+        <RelationshipsList contactId='1' />
       </Wrapper>
     );
 
@@ -202,7 +204,7 @@ describe('RelationshipsList', () => {
     const Wrapper = createWrapper();
     render(
       <Wrapper>
-        <RelationshipsList contactId="1" />
+        <RelationshipsList contactId='1' />
       </Wrapper>
     );
 
@@ -217,7 +219,7 @@ describe('RelationshipsList', () => {
     const Wrapper = createWrapper();
     render(
       <Wrapper>
-        <RelationshipsList contactId="1" />
+        <RelationshipsList contactId='1' />
       </Wrapper>
     );
 
@@ -241,7 +243,7 @@ describe('RelationshipsList', () => {
     const Wrapper = createWrapper();
     render(
       <Wrapper>
-        <RelationshipsList contactId="1" />
+        <RelationshipsList contactId='1' />
       </Wrapper>
     );
 
@@ -263,7 +265,7 @@ describe('RelationshipsList', () => {
     const Wrapper = createWrapper();
     render(
       <Wrapper>
-        <RelationshipsList contactId="1" />
+        <RelationshipsList contactId='1' />
       </Wrapper>
     );
 
@@ -282,7 +284,7 @@ describe('RelationshipsList', () => {
     const Wrapper = createWrapper();
     render(
       <Wrapper>
-        <RelationshipsList contactId="1" />
+        <RelationshipsList contactId='1' />
       </Wrapper>
     );
 

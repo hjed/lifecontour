@@ -6,7 +6,10 @@ import { render, screen, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { RelationshipItem } from '../RelationshipItem';
-import { ContactRelationshipResource, RelationshipType } from '@/types/contacts';
+import {
+  ContactRelationshipResource,
+  RelationshipType,
+} from '@/types/contacts';
 
 // Mock the API hooks
 const mockUseRelationshipTypes = jest.fn();

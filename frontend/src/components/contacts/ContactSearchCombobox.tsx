@@ -95,9 +95,9 @@ export function ContactSearchCombobox({
   });
 
   // Filter out excluded contact
-  const filteredContacts = searchResults?.data?.filter(
-    contact => contact.id !== excludeContactId
-  ) || [];
+  const filteredContacts =
+    searchResults?.data?.filter(contact => contact.id !== excludeContactId) ||
+    [];
 
   // Cleanup timeout on unmount
   useEffect(() => {
@@ -151,10 +151,10 @@ export function ContactSearchCombobox({
 
   return (
     <div className={cn('relative w-full', className)}>
-      <div className="relative">
-        <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+      <div className='relative'>
+        <Search className='text-muted-foreground absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2' />
         <Input
-          type="text"
+          type='text'
           placeholder={placeholder}
           value={searchQuery}
           onChange={handleInputChange}
@@ -166,42 +166,52 @@ export function ContactSearchCombobox({
               clearTimeout(blurTimeoutRef.current);
             }
             // Set new timeout
-            blurTimeoutRef.current = setTimeout(() => setShowResults(false), BLUR_DELAY_MS);
+            blurTimeoutRef.current = setTimeout(
+              () => setShowResults(false),
+              BLUR_DELAY_MS
+            );
           }}
-          className="pl-10"
+          className='pl-10'
           disabled={disabled}
-          autoComplete="off"
-          role="combobox"
+          autoComplete='off'
+          role='combobox'
           aria-expanded={showResults}
-          aria-haspopup="listbox"
+          aria-haspopup='listbox'
           aria-controls={showResults ? 'contact-search-results' : undefined}
         />
       </div>
 
       {showResults && (debouncedQuery.length > 0 || isLoading) && (
-        <Card className="absolute top-full left-0 right-0 z-50 mt-1 max-h-60 overflow-auto">
-          <CardContent className="p-0">
+        <Card className='absolute top-full right-0 left-0 z-50 mt-1 max-h-60 overflow-auto'>
+          <CardContent className='p-0'>
             {isLoading && (
-              <div className="flex items-center gap-2 p-3">
-                <div className="h-4 w-4 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+              <div className='flex items-center gap-2 p-3'>
+                <div className='border-primary h-4 w-4 animate-spin rounded-full border-2 border-t-transparent' />
                 <span>Searching...</span>
               </div>
             )}
 
             {error && (
-              <div className="p-3 text-destructive">
+              <div className='text-destructive p-3'>
                 <span>Error searching contacts</span>
               </div>
             )}
 
-            {!isLoading && !error && filteredContacts.length === 0 && debouncedQuery && (
-              <div className="p-3 text-muted-foreground">
-                <span>No contacts found</span>
-              </div>
-            )}
+            {!isLoading &&
+              !error &&
+              filteredContacts.length === 0 &&
+              debouncedQuery && (
+                <div className='text-muted-foreground p-3'>
+                  <span>No contacts found</span>
+                </div>
+              )}
 
             {!isLoading && !error && filteredContacts.length > 0 && (
-              <ul id="contact-search-results" role="listbox" className="list-none p-0 m-0">
+              <ul
+                id='contact-search-results'
+                role='listbox'
+                className='m-0 list-none p-0'
+              >
                 {filteredContacts.map((contact, index) => {
                   const displayName = generateDisplayName(
                     contact.attributes.first_name,
@@ -216,16 +226,20 @@ export function ContactSearchCombobox({
                   const isSelected = index === selectedIndex;
 
                   return (
-                    <li key={contact.id} role="option" aria-selected={isSelected}>
+                    <li
+                      key={contact.id}
+                      role='option'
+                      aria-selected={isSelected}
+                    >
                       <button
-                        type="button"
+                        type='button'
                         className={cn(
-                          "flex w-full items-center gap-2 p-3 text-left hover:bg-muted",
-                          isSelected && "bg-muted"
+                          'hover:bg-muted flex w-full items-center gap-2 p-3 text-left',
+                          isSelected && 'bg-muted'
                         )}
                         onClick={() => handleSelect(contact)}
                       >
-                        <User className="h-4 w-4 text-muted-foreground" />
+                        <User className='text-muted-foreground h-4 w-4' />
                         <span>{fullDisplayName}</span>
                       </button>
                     </li>

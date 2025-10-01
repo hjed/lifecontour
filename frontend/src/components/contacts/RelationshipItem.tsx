@@ -48,7 +48,9 @@ export function RelationshipItem({
 
   // Get display name for relationship type
   const getTypeDisplayName = (type: RelationshipType) => {
-    const typeData = relationshipTypes?.relationship_types?.find((t) => t.value === type);
+    const typeData = relationshipTypes?.relationship_types?.find(
+      t => t.value === type
+    );
     return typeData?.display_name || type;
   };
 
@@ -85,21 +87,23 @@ export function RelationshipItem({
 
   if (isEditing) {
     return (
-      <div className="flex items-center gap-2 p-3 border rounded-lg bg-muted/50">
-        <User className="h-4 w-4 text-muted-foreground" />
-        <div className="flex-1">
+      <div className='bg-muted/50 flex items-center gap-2 rounded-lg border p-3'>
+        <User className='text-muted-foreground h-4 w-4' />
+        <div className='flex-1'>
           {typesLoading ? (
-            <div className="text-sm text-muted-foreground">Loading...</div>
+            <div className='text-muted-foreground text-sm'>Loading...</div>
           ) : (
             <Select
               value={selectedType}
-              onValueChange={(value) => setSelectedType(value as RelationshipType)}
+              onValueChange={value =>
+                setSelectedType(value as RelationshipType)
+              }
             >
-              <SelectTrigger className="w-full">
-                <SelectValue placeholder="Select relationship type" />
+              <SelectTrigger className='w-full'>
+                <SelectValue placeholder='Select relationship type' />
               </SelectTrigger>
               <SelectContent>
-                {relationshipTypes?.relationship_types?.map((type) => (
+                {relationshipTypes?.relationship_types?.map(type => (
                   <SelectItem key={type.value} value={type.value}>
                     {type.display_name}
                   </SelectItem>
@@ -108,25 +112,25 @@ export function RelationshipItem({
             </Select>
           )}
         </div>
-        <div className="flex items-center gap-1">
+        <div className='flex items-center gap-1'>
           <Button
-            variant="ghost"
-            size="sm"
+            variant='ghost'
+            size='sm'
             onClick={handleSave}
             disabled={disabled || typesLoading}
-            aria-label="Save changes"
+            aria-label='Save changes'
           >
-            <Check className="h-4 w-4" />
+            <Check className='h-4 w-4' />
             Save
           </Button>
           <Button
-            variant="ghost"
-            size="sm"
+            variant='ghost'
+            size='sm'
             onClick={handleCancel}
             disabled={disabled}
-            aria-label="Cancel editing"
+            aria-label='Cancel editing'
           >
-            <X className="h-4 w-4" />
+            <X className='h-4 w-4' />
             Cancel
           </Button>
         </div>
@@ -135,31 +139,31 @@ export function RelationshipItem({
   }
 
   return (
-    <div className="flex items-center gap-2 p-3 border rounded-lg hover:bg-muted/50">
-      <User className="h-4 w-4 text-muted-foreground" />
-      <div className="flex-1">
-        <span className="font-medium">
+    <div className='hover:bg-muted/50 flex items-center gap-2 rounded-lg border p-3'>
+      <User className='text-muted-foreground h-4 w-4' />
+      <div className='flex-1'>
+        <span className='font-medium'>
           {getTypeDisplayName(relationship.attributes.relationship_type)}
         </span>
       </div>
-      <div className="flex items-center gap-1">
+      <div className='flex items-center gap-1'>
         <Button
-          variant="ghost"
-          size="sm"
+          variant='ghost'
+          size='sm'
           onClick={handleEdit}
           disabled={disabled}
-          aria-label="Edit relationship"
+          aria-label='Edit relationship'
         >
-          <Edit2 className="h-4 w-4" />
+          <Edit2 className='h-4 w-4' />
         </Button>
         <Button
-          variant="ghost"
-          size="sm"
+          variant='ghost'
+          size='sm'
           onClick={handleDelete}
           disabled={disabled}
-          aria-label="Delete relationship"
+          aria-label='Delete relationship'
         >
-          <Trash2 className="h-4 w-4" />
+          <Trash2 className='h-4 w-4' />
         </Button>
       </div>
     </div>

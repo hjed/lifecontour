@@ -83,14 +83,16 @@ describe('ContactSearchCombobox', () => {
       <Wrapper>
         <ContactSearchCombobox
           onSelect={jest.fn()}
-          placeholder="Search contacts..."
-          excludeContactId="1"
+          placeholder='Search contacts...'
+          excludeContactId='1'
         />
       </Wrapper>
     );
 
     expect(screen.getByRole('combobox')).toBeInTheDocument();
-    expect(screen.getByPlaceholderText('Search contacts...')).toBeInTheDocument();
+    expect(
+      screen.getByPlaceholderText('Search contacts...')
+    ).toBeInTheDocument();
   });
 
   it('shows loading state when searching', async () => {
@@ -100,7 +102,8 @@ describe('ContactSearchCombobox', () => {
     // Mock delayed response
     const createDelayedResponse = () => {
       return new Promise(resolve => {
-        const responseHandler = () => resolve({ ok: true, json: () => mockContacts });
+        const responseHandler = () =>
+          resolve({ ok: true, json: () => mockContacts });
         setTimeout(responseHandler, 100);
       });
     };
@@ -157,7 +160,7 @@ describe('ContactSearchCombobox', () => {
 
     render(
       <Wrapper>
-        <ContactSearchCombobox onSelect={jest.fn()} excludeContactId="1" />
+        <ContactSearchCombobox onSelect={jest.fn()} excludeContactId='1' />
       </Wrapper>
     );
 
@@ -328,7 +331,7 @@ describe('ContactSearchCombobox', () => {
     );
 
     const input = screen.getByRole('combobox');
-    
+
     // Type quickly
     await user.type(input, 'J');
     await user.type(input, 'o');

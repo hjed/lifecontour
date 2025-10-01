@@ -103,7 +103,13 @@ export default [
     },
   },
   {
-    files: ['**/*.test.{ts,tsx,js,jsx}', '**/*.spec.{ts,tsx,js,jsx}', 'tests/**/*.{ts,tsx,js,jsx}', 'jest.setup.{js,ts}', '**/__tests__/**/*.{ts,tsx,js,jsx}'],
+    files: [
+      '**/*.test.{ts,tsx,js,jsx}',
+      '**/*.spec.{ts,tsx,js,jsx}',
+      'tests/**/*.{ts,tsx,js,jsx}',
+      'jest.setup.{js,ts}',
+      '**/__tests__/**/*.{ts,tsx,js,jsx}',
+    ],
 
     languageOptions: {
       globals: {
