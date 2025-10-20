@@ -2,16 +2,16 @@
 
 **Status:** 🟡 PLANNED
 **Dependencies:** Iteration 2 (Integration Architecture Foundation)
-**Goal:** Expand integration capabilities with Immich photos, Strava activities, and financial data
+**Goal:** Expand integration capabilities with Firefly III financial data and unified integration management
 
 ## Overview
 
 This iteration leverages the integration architecture established in Iteration 2 to add:
-- Immich photo service integration with person-to-contact matching
-- Strava activity integration with automatic journal entry creation
 - Firefly III financial integration with transaction linking
 - Enhanced MCP tools for cross-integration search and management
 - Unified integration management dashboard
+
+**Note:** Strava and Immich integrations have been moved to Iterations 5 and 6 respectively, after the journal system is implemented in Iteration 4.
 
 ## Prerequisites
 
@@ -22,104 +22,7 @@ This iteration leverages the integration architecture established in Iteration 2
 
 ## Tasks
 
-### ITER3-001: Immich Integration 🟡 PLANNED
-**Description:** Implement Immich photo service integration with person matching
-**Strategy:** Break into 4 manageable slices following established integration patterns
-
-#### Slice 1: Immich API Client & Authentication 🟡 PLANNED
-**PR Size:** ~5 files (API client, auth models, configuration, tests)
-
-**Acceptance Criteria:**
-- [ ] Create `integrations/immich` package structure following Google Contacts pattern
-- [ ] Implement `ImmichAPIClient` using Immich REST API
-- [ ] Create `UserImmichAuth` DB model for API key storage with encryption
-- [ ] Implement `ImmichAuthService` for credential management
-- [ ] Add Immich configuration to worker secrets management
-- [ ] Write integration tests for API client connectivity and authentication
-- [ ] Add database migration for Immich auth tables
-
-**Architecture Notes:**
-- Follow established patterns from Google Contacts integration
-- Use EncryptionService for secure API key storage
-- Implement proper error handling and retry logic
-
-#### Slice 2: Album & Photo Data Modeling 🟡 PLANNED
-**PR Size:** ~6 files (Data models, transformer, sync service, tests)
-
-**Acceptance Criteria:**
-- [ ] Define Pydantic models for Immich API responses (albums, photos, people)
-- [ ] Create `Album` and `Photo` domain entities in core_shared
-- [ ] Implement `ImmichDataTransformer` for API data to domain model mapping
-- [ ] Create `UserImmichIntegration` DB model for sync state management
-- [ ] Implement `ImmichSyncService.full_sync_albums()` and `full_sync_photos()`
-- [ ] Write comprehensive unit tests for data transformation and sync logic
-- [ ] Add database migrations for album and photo tables
-
-#### Slice 3: Person-to-Contact Matching 🟡 PLANNED
-**PR Size:** ~4 files (Matching service, algorithms, tests)
-
-**Acceptance Criteria:**
-- [ ] Create `PersonMatchingService` for name-based contact matching
-- [ ] Implement fuzzy name matching algorithms with confidence scoring
-- [ ] Add manual person-to-contact linking capabilities
-- [ ] Create `PersonContactLink` model for storing confirmed matches
-- [ ] Implement matching result review and approval workflow
-- [ ] Write unit tests for matching algorithms and edge cases
-- [ ] Add database migration for person-contact link table
-
-#### Slice 4: ARQ Worker & Album Linking 🟡 PLANNED
-**PR Size:** ~5 files (ARQ task, album linking, UI integration, tests)
-
-**Acceptance Criteria:**
-- [ ] Create ARQ task `sync_immich_data(ctx, user_id)` using Dishka patterns
-- [ ] Implement album linking to journal entries and calendar events
-- [ ] Add photo metadata extraction and indexing for search
-- [ ] Create album browsing and management UI components
-- [ ] Implement person-to-contact linking UI with confidence indicators
-- [ ] Write integration tests for complete Immich sync workflow
-- [ ] Add Immich health checks to integration monitoring
-
-### ITER3-002: Strava Integration 🟡 PLANNED
-**Description:** Implement Strava activity integration with journal automation
-**Strategy:** Break into 3 slices focusing on activity sync and journal integration
-
-#### Slice 1: Strava API Client & OAuth 🟡 PLANNED
-**PR Size:** ~5 files (OAuth flow, API client, auth models, tests)
-
-**Acceptance Criteria:**
-- [ ] Create `integrations/strava` package structure
-- [ ] Implement Strava OAuth 2.0 flow with refresh token management
-- [ ] Create `UserStravaAuth` DB model with encrypted token storage
-- [ ] Implement `StravaAPIClient` using Strava API v3
-- [ ] Add automatic token refresh logic for expired access tokens
-- [ ] Write integration tests for OAuth flow and API connectivity
-- [ ] Add database migration for Strava auth tables
-
-#### Slice 2: Activity Data Sync 🟡 PLANNED
-**PR Size:** ~6 files (Activity models, sync service, transformation, tests)
-
-**Acceptance Criteria:**
-- [ ] Define Pydantic models for Strava activity API responses
-- [ ] Create `Activity` domain entity in core_shared
-- [ ] Implement `StravaDataTransformer` for activity data mapping
-- [ ] Create `StravaSyncService` with incremental sync using activity timestamps
-- [ ] Implement activity deduplication and conflict resolution
-- [ ] Write unit tests for activity sync and transformation logic
-- [ ] Add database migrations for activity tables
-
-#### Slice 3: Journal Integration & ARQ Worker 🟡 PLANNED
-**PR Size:** ~5 files (Journal automation, ARQ task, UI components, tests)
-
-**Acceptance Criteria:**
-- [ ] Create ARQ task `sync_strava_activities(ctx, user_id)` using Dishka
-- [ ] Implement automatic journal entry creation from activities
-- [ ] Add activity linking to existing journal entries and events
-- [ ] Create activity statistics and analytics components
-- [ ] Implement activity-based insights and recommendations
-- [ ] Write integration tests for complete Strava workflow
-- [ ] Add Strava monitoring to integration health checks
-
-### ITER3-003: Firefly III Integration 🟡 PLANNED
+### ITER3-001: Firefly III Integration 🟡 PLANNED
 **Description:** Implement financial data integration with transaction linking
 **Strategy:** Break into 3 slices for transaction sync and financial insights
 
@@ -159,32 +62,40 @@ This iteration leverages the integration architecture established in Iteration 2
 - [ ] Write integration tests for complete Firefly workflow
 - [ ] Add Firefly monitoring to integration health checks
 
-### ITER3-004: Integration MCP Tools 🟡 PLANNED
-**Description:** Add comprehensive integration management tools to MCP interface
-**Strategy:** Single focused task for MCP tool enhancement
+### ITER3-002: Integration Management Dashboard 🟡 PLANNED
+**Description:** Build unified integration management UI
+**Strategy:** Single task for integration management interface
 
-**PR Size:** ~6 files (MCP tools, search integration, management tools, tests)
+**PR Size:** ~5 files (Dashboard component, integration cards, sync controls, tests)
 
 **Acceptance Criteria:**
-- [ ] Implement cross-integration search tools (photos, activities, transactions)
-- [ ] Add integration status monitoring and control tools via MCP
-- [ ] Create sync management tools for all integrations
-- [ ] Implement conflict resolution tools via MCP interface
-- [ ] Add integration analytics and insights tools
-- [ ] Create bulk sync and management operations
-- [ ] Implement data export and import tools via MCP
-- [ ] Add integration health monitoring tools
-- [ ] Write comprehensive MCP integration tests
-- [ ] Document integration MCP capabilities for AI assistants
+- [ ] Create `IntegrationDashboard` component in `frontend/src/components/integrations/`:
+  - List all integrations (Google Contacts, Firefly III)
+  - Show connection status for each integration
+  - Display last sync time and sync statistics
+  - Manual sync trigger buttons
+  - Connect/disconnect controls
+- [ ] Create integration-specific management cards:
+  - Google Contacts: sync status, contact count, last sync
+  - Firefly III: sync status, transaction count, last sync
+- [ ] Implement sync status monitoring:
+  - Real-time sync progress (polling or WebSocket)
+  - Sync history with timestamps
+  - Error display with retry options
+- [ ] Add integration health checks:
+  - Connection status indicators
+  - API health monitoring
+  - Error rate tracking
+- [ ] Write Jest unit tests for components
+- [ ] Write Playwright e2e tests for integration management workflows
+- [ ] Document integration management UI in code comments
 
-**MCP Tools to Implement:**
-- `search_across_integrations()` - Global search across all integrated data
-- `get_integration_status()` - Status of all user integrations
-- `trigger_sync()` - Manual sync trigger for specific integrations
-- `resolve_conflicts()` - Conflict resolution assistance
-- `get_integration_insights()` - Analytics and insights across integrations
-- `export_integration_data()` - Data export capabilities
-- `manage_integration_auth()` - Authentication management
+**UI Features:**
+- Unified dashboard for all integrations
+- Connection status indicators
+- Manual sync triggers
+- Sync history and statistics
+- Error handling and retry options
 
 ## Architecture Notes
 
@@ -208,11 +119,32 @@ Each integration follows this established pattern:
 6. **UI Components:** Management interface for configuration and monitoring
 7. **MCP Tools:** AI assistant integration for data access and management
 
+**Integration Preparation for Journal System:**
+- Firefly III transactions will link to journal entries (Iteration 4)
+- Strava and Immich integrations moved to Iterations 5 and 6 after journal system
+- Integration architecture ready for additional integrations
+
+## Testing Strategy
+
+**Unit Tests:**
+- Firefly III API data transformation
+- Transaction categorization logic
+- Sync service business logic
+
+**Integration Tests:**
+- Firefly III API client with mock API
+- Transaction sync with real database
+- ARQ worker with Dishka DI
+
+**E2E Tests (Playwright):**
+- Connect Firefly III account
+- Trigger transaction sync
+- View transactions in dashboard
+- Link transaction to contact
+
 ## Dependencies
 
 - **External Services:**
-  - Immich instance with API access
-  - Strava developer account and API credentials
   - Firefly III instance with personal access tokens
 - **Internal Dependencies:**
   - Iteration 2 completed (Dishka, ARQ, production patterns)
@@ -221,16 +153,25 @@ Each integration follows this established pattern:
 
 ## Success Criteria
 
-- All three integrations working with bidirectional sync where applicable
-- Unified integration management dashboard
-- Cross-integration search and analytics
-- Comprehensive MCP tools for AI assistant integration
-- Production-ready monitoring and error handling
-- Complete test coverage for all integration workflows
+- ✅ Firefly III financial integration with transaction linking functional
+- ✅ Integration management dashboard with monitoring
+- ✅ All integrations following established patterns and best practices
+- ✅ All integration workers using Dishka dependency injection
+- ✅ Production-ready error handling and monitoring
+- ✅ Complete test coverage for all integration workflows
+- ✅ System in working state after each PR
 
 ## Next Steps
 
-This iteration sets the foundation for:
-- Journal system with automatic content from integrations (Iteration 4)
-- Calendar integration with event linking (Iteration 5)
-- Advanced analytics and insights across all data sources (Iteration 6)
+**Immediate:** Iteration 4 (Journal Core & Base Types)
+- Journal system with integration linking
+- Preparation for Strava and Immich integrations
+- Event-based architecture for integrations
+
+**Then:** Iteration 5 (Strava Integration)
+- Strava activity sync with automatic journal creation
+- GPX track import and display
+
+**Then:** Iteration 6 (Immich Integration)
+- Photo album linking to journals
+- Photo display in journal entries

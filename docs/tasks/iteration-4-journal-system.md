@@ -1,238 +1,551 @@
-# Iteration 4: Journal System
+# Iteration 4: Journal System - Core & Base Types
 
 **Status:** 🟡 PLANNED
-**Dependencies:** Iteration 3 (Extended Integrations)
-**Goal:** Build comprehensive journal system with integration-powered content and AI-assisted insights
+**Dependencies:** Iteration 2 (Integration Architecture Foundation)
+**Goal:** Build comprehensive journal system with hierarchical structure, base types, and integration preparation
 
 ## Overview
 
-This iteration creates a rich journaling experience that leverages all integrated data:
-- Core journal domain with rich text editing and mood tracking
-- Automatic journal entries from Strava activities and other integrations
-- Photo album linking and visual storytelling
-- AI-powered insights and sentiment analysis
-- Advanced search across journal content with MeiliSearch
-- MCP tools for AI-assisted journaling and reflection
+This iteration establishes the journal system foundation following the [journal system specification](../journal-system-specification.md):
+
+**Core Features:**
+- Flexible journal domain with hierarchical parent-child relationships (max depth 5)
+- Base journal types: NOTE, EVENT, MOOD_RATING, PLAN, TRAVEL, PHOTO_ALBUM
+- Type system with automatic dependency resolution
+- Contact relationships (PARTICIPANT, INVITEE, MENTION, ABOUT)
+- Hierarchical tag system for journals
+- Calendar support for EVENT type journals
+- MeiliSearch-powered search and filtering
+- REST API and MCP tools for AI integration
+
+**Integration Preparation:**
+- PHOTO_ALBUM type with `immich_album_id` field (ready for Iteration 6)
+- FITNESS type preparation in domain models (implemented in Iteration 4.5)
+- Change event tracking with source attribution
 
 ## Prerequisites
 
-- Iteration 3 completed (Immich, Strava, Firefly III integrations)
-- Integration architecture with ARQ workers established
-- Dishka dependency injection framework in use
+- Iteration 2 completed (Dishka DI, ARQ workers, integration patterns)
 - MeiliSearch indexing infrastructure available
+- Contact domain established (for contact relationships)
+- Outbox pattern for event-driven indexing
 
 ## Tasks
 
-### ITER4-001: Journal Domain Core 🟡 PLANNED
-**Description:** Build journal domain with rich content support and mood tracking
-**Strategy:** Break into 3 slices for domain, persistence, and business logic
+### ITER4-001: Journal Domain Foundation 🟡 PLANNED
+**Description:** Establish base journal entity with hierarchical structure and validation
+**Strategy:** Single focused task for core domain model
+**Specification Reference:** [Domain Model](../journal-system-specification.md#domain-model)
 
-#### Slice 1: Domain Models & Database Schema 🟡 PLANNED
-**PR Size:** ~5 files (Domain entities, database migration, core models, tests)
-
-**Acceptance Criteria:**
-- [ ] Create `Journal` domain entity in core_shared with rich text content support
-- [ ] Implement `JournalEntry` with mood tracking, tags, and metadata
-- [ ] Add `JournalMood` enum for standardized mood tracking
-- [ ] Create database schema for journal entries with full-text search support
-- [ ] Implement journal entry versioning for edit history
-- [ ] Add foreign key relationships to albums, activities, and transactions
-- [ ] Write unit tests for domain entities and business rules
-- [ ] Create database migration with proper indexes for search and filtering
-
-**Domain Model Features:**
-- Rich text content with markdown support
-- Mood tracking with predefined scales
-- Tag system integration for categorization
-- Automatic timestamps and versioning
-- Integration linking (photos, activities, transactions)
-
-#### Slice 2: Repository & Persistence Layer 🟡 PLANNED
-**PR Size:** ~4 files (Repository interfaces, SQL implementation, tests)
+**PR Size:** ~6 files (domain model, validation, migration, tests)
 
 **Acceptance Criteria:**
-- [ ] Create `JournalRepository` interface following established patterns
-- [ ] Implement `SqlJournalRepository` using SQLAlchemy Core with explicit SQL
-- [ ] Add journal entry CRUD operations with transaction support
-- [ ] Implement advanced filtering (date ranges, moods, tags, linked content)
-- [ ] Add full-text search capabilities for journal content
-- [ ] Create journal statistics and analytics queries
+- [ ] Create `Journal` entity in `core_shared/models/` with all required fields:
+  - `id` (UUID), `user_id`, `title` (max 500 chars), `content` (markdown)
+  - `event_date_range` (start_date, end_date as UTC timestamps)
+  - `parent_id` (nullable, for hierarchy), `order` (integer)
+  - `created_at`, `updated_at`
+- [ ] Implement hierarchical validation:
+  - Maximum nesting depth: 5 levels
+  - Prevent cycles (parent cannot be descendant)
+  - `event_date_range.start` <= `event_date_range.end`
+  - Future dates allowed for planned events
+- [ ] Create `journals` table migration with proper indexes:
+  - Index on `event_date_range` for date queries
+  - Index on `parent_id` for hierarchy queries
+  - Index on `user_id` for user filtering
+  - Foreign key constraints with proper cascading
+- [ ] Implement child ordering logic (by event_date_range.start, then order field)
+- [ ] Write unit tests for domain validation rules
+- [ ] Write integration tests for database constraints
+- [ ] Document domain model in code comments
+
+**Database Schema:**
+```sql
+CREATE TABLE journals (
+    id UUID PRIMARY KEY,
+    user_id UUID NOT NULL REFERENCES users(id),
+    title VARCHAR(500) NOT NULL,
+    content TEXT NOT NULL,
+    event_date_range_start TIMESTAMP WITH TIME ZONE NOT NULL,
+    event_date_range_end TIMESTAMP WITH TIME ZONE NOT NULL,
+    parent_id UUID REFERENCES journals(id) ON DELETE SET NULL,
+    "order" INTEGER,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    CONSTRAINT event_date_range_valid CHECK (event_date_range_start <= event_date_range_end)
+);
+```
+
+### ITER4-002: Base Journal Types - Part 1 (NOTE, EVENT, MOOD_RATING) 🟡 PLANNED
+**Description:** Implement first set of base journal types with calendar support
+**Strategy:** Single task for three foundational types
+**Specification Reference:** [Journal Types](../journal-system-specification.md#journal-types), [Calendar Info](../journal-system-specification.md#calendar-info-event-type)
+
+**PR Size:** ~7 files (3 type tables, calendars table, type detection, migrations, tests)
+
+**Acceptance Criteria:**
+- [ ] **NOTE type:** No additional table (uses only base journal fields)
+- [ ] **EVENT type:** Create `journal_calendar_info` table:
+  - `journal_id` (PK, FK to journals)
+  - `calendar_id` (FK to calendars, required)
+  - `start_time`, `end_time` (nullable for all-day events)
+  - `is_all_day` (boolean, default false)
+  - `location` (string, nullable)
+  - `sync_invitees` (boolean, default based on import source)
+  - `created_at`, `updated_at`
+- [ ] **MOOD_RATING type:** Create `journal_mood_data` table:
+  - `journal_id` (PK, FK to journals)
+  - `mood_value` (integer 1-10, nullable)
+  - `mood_label` (string, nullable)
+  - `energy_level` (integer 1-10, nullable)
+  - `created_at`, `updated_at`
+- [ ] Create `calendars` table:
+  - `id` (UUID), `user_id`, `name`, `description` (nullable)
+  - `color` (hex color), `is_synced_to_google` (boolean)
+  - `google_calendar_id` (string, nullable)
+  - `created_at`, `updated_at`
+- [ ] Implement type detection logic (journal has type if row exists in type table)
+- [ ] Add database migrations with proper foreign key constraints
+- [ ] Write unit tests for type-specific validation
+- [ ] Write integration tests for type data persistence
+- [ ] Document type system architecture in code comments
+
+### ITER4-003: Base Journal Types - Part 2 (PLAN, TRAVEL, PHOTO_ALBUM) 🟡 PLANNED
+**Description:** Implement remaining base journal types with Immich preparation
+**Strategy:** Single task for three complex types
+**Specification Reference:** [Plan Data](../journal-system-specification.md#plan-data-plan-type), [Travel Data](../journal-system-specification.md#travel-data-travel-type), [Photo Album Data](../journal-system-specification.md#photo-album-data-photo_album-type)
+
+**PR Size:** ~8 files (multiple tables for TRAVEL, migrations, tests)
+
+**Acceptance Criteria:**
+- [ ] **PLAN type:** Create tables:
+  - `journal_plan_data` (journal_id PK, created_at, updated_at)
+  - `journal_plan_documents` (id, journal_id FK, url, title, description, order, created_at)
+- [ ] **TRAVEL type:** Create tables:
+  - `journal_travel_data` (journal_id PK, created_at, updated_at)
+  - `journal_travel_flights` (id, journal_id FK, flight_number, airline, airports, times, booking info, order, created_at)
+  - `journal_travel_accommodations` (id, journal_id FK, name, address, check-in/out dates, booking info, order, created_at)
+  - `journal_travel_transportation` (id, journal_id FK, type, details, booking_reference, order, created_at)
+- [ ] **PHOTO_ALBUM type:** Create `journal_photo_album_data` table:
+  - `journal_id` (PK, FK to journals)
+  - `immich_album_id` (string, Immich album identifier)
+  - `created_at`, `updated_at`
+  - **Note:** Prepares for Immich integration (Iteration 6)
+- [ ] Add database migrations with proper constraints and indexes
+- [ ] Implement order field handling for child items (flights, accommodations, etc.)
+- [ ] Write unit tests for type-specific validation
+- [ ] Write integration tests for complex type data persistence
+- [ ] Document Immich integration preparation in code comments
+
+### ITER4-004: Contact Relationships & Tags 🟡 PLANNED
+**Description:** Implement journal-contact relationships and hierarchical tag system
+**Strategy:** Single task for relationship and tag infrastructure
+**Specification Reference:** [Contact Relationships](../journal-system-specification.md#contact-relationships), [Tags](../journal-system-specification.md#tags)
+
+**PR Size:** ~6 files (2 main tables + assignments, migrations, tests)
+
+**Acceptance Criteria:**
+- [ ] Create `journal_contact_relationships` table:
+  - `journal_id` (FK to journals)
+  - `contact_id` (FK to contacts)
+  - `relationship_type` (enum: PARTICIPANT, INVITEE, MENTION, ABOUT)
+  - `created_at`
+  - Primary key: (journal_id, contact_id, relationship_type)
+- [ ] Create `journal_tags` table (hierarchical like contact tags):
+  - `id` (UUID), `name`, `parent_id` (FK to journal_tags, nullable)
+  - `color` (hex color), `created_at`, `updated_at`
+- [ ] Create `journal_tag_assignments` table:
+  - `journal_id` (FK to journals)
+  - `tag_id` (FK to journal_tags)
+  - `created_at`
+  - Primary key: (journal_id, tag_id)
+- [ ] Implement relationship type validation (enum enforcement)
+- [ ] Implement tag hierarchy validation (prevent cycles)
+- [ ] Add database migrations with proper constraints
+- [ ] Write unit tests for relationship and tag validation
+- [ ] Write integration tests for relationship and tag persistence
+- [ ] Document relationship types and tag hierarchy in code comments
+
+**Relationship Types:**
+- **PARTICIPANT:** Contact attended/participated in the event
+- **INVITEE:** Contact was invited to the event
+- **MENTION:** Contact is mentioned in journal content (manually tagged)
+- **ABOUT:** Journal is specifically about this contact
+
+### ITER4-005: Journal Repository & Service Layer 🟡 PLANNED
+**Description:** Implement repository and service layer with type dependency resolution
+**Strategy:** Single task for data access and business logic
+**Specification Reference:** [Type Dependency Rules](../journal-system-specification.md#journal-types)
+
+**PR Size:** ~8 files (repository interface, implementation, service, tests)
+
+**Acceptance Criteria:**
+- [ ] Create `JournalRepository` interface in `backend/app/core/journal/adapters/sql/`:
+  - CRUD operations (create, get, update, delete)
+  - Filtering methods (by date range, types, contacts, tags, calendar, parent)
+  - Hierarchy queries (get children, get descendants, get ancestors)
+  - Type detection queries (check which types a journal has)
+- [ ] Implement `SqlJournalRepository` using SQLAlchemy Core with explicit SQL:
+  - Parameterized queries for security
+  - Transaction support
+  - Proper error handling with IntegrityError conversion
+- [ ] Create `JournalService` in `backend/app/core/journal/` using Dishka DI:
+  - Journal CRUD with validation
+  - Type dependency resolution (automatic type addition)
+  - Hierarchy validation (max depth, cycle prevention)
+  - Change event publishing via outbox pattern
+- [ ] Implement type dependency logic:
+  - When type added, automatically add all dependent types
+  - Create type data rows with NULL values for optional fields
+  - Validate dependencies are transitive (e.g., CANYONING → BUSHWALKING → OUTDOOR_ACTIVITY → FITNESS)
+- [ ] Add domain events: JournalCreated, JournalUpdated, JournalDeleted, JournalTypeAdded, JournalTypeRemoved
+- [ ] Write unit tests for service business logic (with mocked repository)
 - [ ] Write integration tests with real PostgreSQL database
-- [ ] Implement proper error handling and constraint validation
+- [ ] Document type dependency resolution algorithm in code comments
 
-#### Slice 3: Journal Service & Business Logic 🟡 PLANNED
-**PR Size:** ~5 files (Service layer, validation, domain events, tests)
+**Type Dependency Examples:**
+- Adding FITNESS: No dependencies, just create journal_fitness_data row
+- Adding OUTDOOR_ACTIVITY: Automatically adds FITNESS
+- Adding CANYONING: Automatically adds BUSHWALKING, ABSEILING_TRIP, OUTDOOR_ACTIVITY, FITNESS
 
-**Acceptance Criteria:**
-- [ ] Create `JournalService` using Dishka dependency injection
-- [ ] Implement journal entry creation, updating, and deletion with validation
-- [ ] Add automatic integration content linking (activities, photos, transactions)
-- [ ] Create mood analysis and sentiment tracking features
-- [ ] Implement journal entry templates and prompts
-- [ ] Add domain events for journal operations (JournalEntryCreated, Updated, etc.)
-- [ ] Write comprehensive unit tests for business logic
-- [ ] Integrate with outbox pattern for MeiliSearch indexing
+### ITER4-006: Journal REST API 🟡 PLANNED
+**Description:** Create comprehensive REST API endpoints with JSON API compliance
+**Strategy:** Single task for complete API layer
+**Specification Reference:** [REST API Endpoints](../journal-system-specification.md#rest-api-endpoints)
 
-### ITER4-002: Journal REST API with Search 🟡 PLANNED
-**Description:** Create comprehensive API endpoints with advanced search capabilities
-**Strategy:** Single focused task for API layer implementation
-
-**PR Size:** ~6 files (API controllers, schemas, search integration, tests)
+**PR Size:** ~9 files (controller, schemas, tests)
 
 **Acceptance Criteria:**
-- [ ] Create `JournalController` with JSON API compliant endpoints
-- [ ] Implement CRUD operations for journal entries with proper validation
-- [ ] Add mood tracking and analytics endpoints
-- [ ] Implement MeiliSearch-powered journal search (`/api/journal/search`)
-- [ ] Add journal entries to global search index with proper faceting
-- [ ] Create journal statistics and insights endpoints
-- [ ] Add integration content linking endpoints (albums, activities, transactions)
-- [ ] Implement journal export functionality (PDF, markdown, JSON)
-- [ ] Generate comprehensive OpenAPI documentation
-- [ ] Write integration tests for all endpoints including search functionality
+- [ ] Create `JournalController` in `backend/app/api/journals/` with JSON API compliance
+- [ ] Implement core CRUD endpoints:
+  - `GET /api/journals` - List with filtering (type, date_range, contact_id, tag_id, calendar_id, parent_id, search)
+  - `POST /api/journals` - Create with type data and relationships
+  - `GET /api/journals/{id}` - Get single journal with all data
+  - `PUT /api/journals/{id}` - Full replacement update
+  - `PATCH /api/journals/{id}` - Partial update
+  - `DELETE /api/journals/{id}` - Delete with cascade/orphan options
+- [ ] Implement type management endpoints:
+  - `POST /api/journals/{id}/types` - Add type(s) with automatic dependencies
+  - `DELETE /api/journals/{id}/types/{type}` - Remove type with validation
+  - `PUT /api/journals/{id}/types/{type}/data` - Update type-specific data
+- [ ] Implement relationship management endpoints:
+  - `POST /api/journals/{id}/contacts` - Add contact relationship
+  - `DELETE /api/journals/{id}/contacts/{contact_id}` - Remove relationship(s)
+  - `GET /api/contacts/{id}/journals` - Get journals for contact
+- [ ] Create Pydantic schemas for request/response validation
+- [ ] Implement proper error handling with FastAPI exception handlers
+- [ ] Generate OpenAPI documentation
+- [ ] Write integration tests for all endpoints
+- [ ] Document API patterns in code comments
 
-**API Endpoints:**
-- `GET /api/journal/entries` - List journal entries with filtering
-- `POST /api/journal/entries` - Create new journal entry
-- `GET /api/journal/entries/{id}` - Get specific journal entry
-- `PUT /api/journal/entries/{id}` - Update journal entry
-- `DELETE /api/journal/entries/{id}` - Delete journal entry
-- `GET /api/journal/search` - Search journal entries with MeiliSearch
-- `GET /api/journal/moods` - Mood tracking analytics
-- `GET /api/journal/insights` - AI-powered insights and trends
-- `POST /api/journal/entries/{id}/link` - Link integration content
+**Response Format:**
+- Embedded type data organized by type
+- Embedded relationships (contacts, tags, calendar)
+- Child count for parent journals
+- Pagination metadata
 
-### ITER4-003: Journal UI with Rich Editor 🔴 PLANNED
-**Description:** Build comprehensive journal interface with rich text editing
-**Strategy:** Break into 3 slices for editor, views, and integration features
+### ITER4-007: MeiliSearch Integration 🟡 PLANNED
+**Description:** Implement event-driven journal indexing and search
+**Strategy:** Single task for search infrastructure
+**Specification Reference:** [MeiliSearch Integration](../journal-system-specification.md#meilisearch-integration)
 
-#### Slice 1: Rich Text Editor & Core UI 🟡 PLANNED
-**PR Size:** ~6 files (Editor component, entry forms, basic views, tests)
-
-**Acceptance Criteria:**
-- [ ] Implement rich text editor using TipTap or similar React editor
-- [ ] Create journal entry creation and editing forms with validation
-- [ ] Add mood tracking interface with visual mood selectors
-- [ ] Implement tag management integration with existing tag system
-- [ ] Create journal entry list view with filtering and sorting
-- [ ] Add responsive design for mobile and desktop journaling
-- [ ] Write Jest unit tests for editor components and functionality
-- [ ] Implement auto-save functionality for draft entries
-
-#### Slice 2: Search & Analytics Dashboard 🟡 PLANNED
-**PR Size:** ~5 files (Search components, analytics views, charts, tests)
+**PR Size:** ~5 files (indexing service, search endpoint, tests)
 
 **Acceptance Criteria:**
-- [ ] Create journal search interface with MeiliSearch integration
-- [ ] Implement advanced filtering (date ranges, moods, tags, linked content)
-- [ ] Add search result highlighting for journal content
-- [ ] Create mood analytics dashboard with trend visualization
-- [ ] Implement journal statistics (word counts, entry frequency, mood patterns)
-- [ ] Add journal insights and reflection prompts
-- [ ] Create calendar view for journal entries
-- [ ] Write comprehensive component tests for search and analytics
+- [ ] Create `JournalIndexingService` in `backend/app/infrastructure/search/`:
+  - Index journals on create/update/delete via outbox events
+  - Index type data changes
+  - Index relationship changes
+- [ ] Configure MeiliSearch index with:
+  - Searchable fields: title (high weight), content (medium weight), location
+  - Filterable fields: event_date_range, types, contact_ids, tag_ids, calendar_id, parent_id
+  - Sortable fields: event_date_range, created_at, title
+- [ ] Implement search endpoint `GET /api/journals/search`:
+  - Full-text search across title and content
+  - Filter by type(s), date range, contacts, tags, calendar, parent
+  - Sort by date, relevance, title
+  - Pagination support
+- [ ] Add journals to global search index (`/api/search`)
+- [ ] Implement search result highlighting
+- [ ] Write integration tests for indexing and search
+- [ ] Document search capabilities in API documentation
 
-#### Slice 3: Integration Content & Visual Features 🟡 PLANNED
-**PR Size:** ~5 files (Integration linking, photo galleries, activity displays, tests)
+**Indexed Fields:**
+```json
+{
+  "id": "uuid",
+  "title": "searchable",
+  "content": "searchable",
+  "event_date_range_start": "filterable, sortable",
+  "event_date_range_end": "filterable, sortable",
+  "types": ["filterable"],
+  "contact_ids": ["filterable"],
+  "tag_ids": ["filterable"],
+  "calendar_id": "filterable",
+  "parent_id": "filterable",
+  "location": "searchable"
+}
+```
 
-**Acceptance Criteria:**
-- [ ] Implement photo album linking and gallery display in entries
-- [ ] Add Strava activity integration with automatic entry creation
-- [ ] Create transaction linking for financial context in entries
-- [ ] Implement visual timeline view for journal entries
-- [ ] Add journal entry templates based on integration data
-- [ ] Create sharing and export functionality
-- [ ] Implement journal entry collaboration features
-- [ ] Write Playwright e2e tests for complete journaling workflows
+### ITER4-008: Journal UI - List & Detail Views 🟡 PLANNED
+**Description:** Build journal list and detail views with inline editing
+**Strategy:** Single task for core UI components
+**Specification Reference:** [Display Requirements](../journal-system-specification.md#display-requirements), [Frontend Components](../journal-system-specification.md#frontend-components)
 
-### ITER4-004: Journal MCP Tools 🟡 PLANNED
-**Description:** Add comprehensive journal management and AI assistance tools
-**Strategy:** Single focused task for MCP integration
-
-**PR Size:** ~5 files (MCP tools, AI integration, analysis tools, tests)
-
-**Acceptance Criteria:**
-- [ ] Implement journal entry creation and management tools via MCP
-- [ ] Add journal search tools with mood, date, and content filtering
-- [ ] Create mood analysis and sentiment tracking tools
-- [ ] Implement journal insights and pattern recognition tools
-- [ ] Add automatic journal prompts and reflection questions
-- [ ] Create journal entry summarization and analysis tools
-- [ ] Implement integration-based journal suggestions (activities, photos, etc.)
-- [ ] Add journal analytics and trend analysis tools
-- [ ] Write comprehensive MCP integration tests
-- [ ] Document journal MCP capabilities for AI assistants
-
-**MCP Tools to Implement:**
-- `create_journal_entry()` - Create new journal entry with AI assistance
-- `search_journal()` - Search journal entries with advanced filtering
-- `analyze_mood_trends()` - Mood pattern analysis and insights
-- `get_journal_insights()` - AI-powered insights and reflections
-- `suggest_journal_prompts()` - Context-aware writing prompts
-- `summarize_journal_period()` - Summarize journal entries for time periods
-- `link_integration_content()` - Suggest content linking from integrations
-- `export_journal_data()` - Export journal entries in various formats
-
-### ITER4-005: Automatic Content Generation 🟡 PLANNED
-**Description:** Implement AI-powered automatic journal content from integrations
-**Strategy:** Single task for automation and AI features
-
-**PR Size:** ~6 files (Content generators, AI integration, automation, tests)
+**PR Size:** ~8 files (list component, detail component, sub-components, tests)
 
 **Acceptance Criteria:**
-- [ ] Create automatic journal entries from Strava activities
-- [ ] Implement photo-based journal entry suggestions
-- [ ] Add transaction-based spending reflection prompts
-- [ ] Create weekly/monthly journal summaries from integration data
-- [ ] Implement mood prediction based on activity and spending patterns
-- [ ] Add AI-powered writing assistance and suggestions
-- [ ] Create automatic tagging based on content analysis
-- [ ] Implement journal entry quality scoring and improvement suggestions
-- [ ] Write integration tests for automatic content generation
-- [ ] Add configuration options for automation preferences
+- [ ] Create `JournalList` component in `frontend/src/components/journals/`:
+  - Filterable list with sidebar filters (date range, types, contacts, tags, calendar)
+  - Date grouping (day/week/month)
+  - Type icons for visual identification
+  - Color-coding by calendar (primary) or tag (secondary)
+  - Contact chips display
+  - Expandable content preview (first 200 chars)
+  - Infinite scroll pagination
+  - Quick actions (edit, delete, duplicate)
+- [ ] Create `JournalDetail` component:
+  - Inline editing (similar to contact detail page)
+  - Markdown content rendering with live preview
+  - Type-specific data sections (collapsible, inline editable)
+  - Contact relationship display (grouped by type, inline editable)
+  - Tag chips (clickable to filter, inline editable)
+  - Calendar badge (color-coded, inline editable)
+  - Type icons for visual identification
+  - Parent breadcrumb navigation
+  - Child journal cards (expandable)
+  - Delete confirmation dialog
+- [ ] Implement responsive design for mobile and desktop
+- [ ] Add accessibility features (ARIA attributes, keyboard navigation)
+- [ ] Write Jest unit tests for components
+- [ ] Write React Testing Library tests for user interactions
+- [ ] Document component patterns in code comments
+
+**UI Patterns:**
+- Calendar color bar on left edge of journal cards
+- Type icons next to title
+- Tag badges with tag colors
+- Inline editing for all fields (click to edit)
+- Optimistic UI updates
+
+### ITER4-009: Journal UI - Forms & Editing 🟡 PLANNED
+**Description:** Build journal creation and editing forms with type management
+**Strategy:** Single task for form components
+**Specification Reference:** [Journal Form Component](../journal-system-specification.md#journal-form-component)
+
+**PR Size:** ~9 files (form component, type-specific forms, tests)
+
+**Acceptance Criteria:**
+- [ ] Create `JournalForm` component in `frontend/src/components/journals/`:
+  - Title and content fields (markdown editor with preview)
+  - Date range picker with time selection
+  - Type selector with dependency handling (show dependent types automatically)
+  - Type-specific field forms (conditional rendering based on selected types)
+  - Contact relationship builder (add/remove contacts with relationship type)
+  - Tag selector (hierarchical tag tree)
+  - Calendar selector (with color preview)
+  - Parent journal selector (for creating child journals)
+  - Validation and error handling
+  - Auto-save draft functionality
+- [ ] Create type-specific form components:
+  - `EventForm` (calendar, times, location, all-day toggle)
+  - `MoodRatingForm` (mood value slider, mood label, energy level slider)
+  - `PlanForm` (document links with title/description/order)
+  - `TravelForm` (flights, accommodations, transportation with order)
+  - `PhotoAlbumForm` (Immich album selector - preparation for Iteration 6)
+- [ ] Implement form validation with Zod schemas
+- [ ] Add error messages with accessibility (FormMessage components)
+- [ ] Write Jest unit tests for form components
+- [ ] Write React Testing Library tests for form interactions
+- [ ] Document form patterns and validation rules in code comments
+
+**Form Features:**
+- Real-time validation with error messages
+- Type dependency visualization (show which types will be auto-added)
+- Markdown editor with toolbar and preview
+- Date/time picker with timezone support
+- Hierarchical tag selector with search
+- Contact autocomplete with relationship type selection
+
+### ITER4-010: Journal MCP Tools 🟡 PLANNED
+**Description:** Implement MCP tools for AI-assisted journal management
+**Strategy:** Single task for MCP integration
+**Specification Reference:** [MCP Tools](../journal-system-specification.md#mcp-tools), [MCP Response Format](../journal-system-specification.md#mcp-response-format)
+
+**PR Size:** ~6 files (MCP tools, response formatting, tests)
+
+**Acceptance Criteria:**
+- [ ] Create MCP tools in `backend/app/mcp/journals/`:
+  - `create_journal_entry()` - Create with types, type_data, relationships, tags
+  - `update_journal_entry()` - Update with partial data
+  - `get_journal()` - Get with optional children
+  - `search_journals()` - Search with filters (types, date_range, contact_id, tags, calendar_id)
+  - `delete_journal()` - Delete with optional children deletion
+  - `get_contact_journals()` - Get journals for contact with relationship filtering
+  - `link_journal_to_contact()` - Create contact relationship
+- [ ] Implement AI-optimized response format:
+  - Include `summary` field (AI-friendly summary of journal)
+  - Embed related data (contacts, tags, calendar, parent, children)
+  - Type data organized by type for clarity
+  - Children included as summaries (not full content)
+- [ ] Use Dishka DI for service injection (share with REST API)
+- [ ] Implement proper error handling with user-friendly messages
+- [ ] Write MCP integration tests
+- [ ] Document MCP tools in `docs/mcp-tools.md`
+
+**MCP Response Example:**
+```python
+{
+    "id": "uuid",
+    "title": "string",
+    "content": "markdown",
+    "summary": "AI-friendly summary",  # Generated for AI
+    "event_date_range": {"start": "datetime", "end": "datetime"},
+    "types": ["EVENT", "MOOD_RATING"],
+    "type_data": {
+        "EVENT": {"calendar_id": "uuid", "location": "string", ...},
+        "MOOD_RATING": {"mood_value": 8, "energy_level": 7, ...}
+    },
+    "contacts": [{"id": "uuid", "name": "string", "relationship_type": "PARTICIPANT"}],
+    "tags": ["tag1", "tag2"],
+    "calendar": {"id": "uuid", "name": "string"},
+    "parent": {"id": "uuid", "title": "string"},
+    "children": [{"id": "uuid", "title": "string", "summary": "string"}]
+}
+```
+
+### ITER4-011: Contact Page Journal Display 🟡 PLANNED
+**Description:** Add journal section to contact detail page
+**Strategy:** Single task for contact-journal integration
+**Specification Reference:** [Contact Page Display](../journal-system-specification.md#contact-page-display)
+
+**PR Size:** ~5 files (component, integration with contact page, tests)
+
+**Acceptance Criteria:**
+- [ ] Create `ContactJournals` component in `frontend/src/components/contacts/`:
+  - Embedded in contact detail page
+  - Show all journals where contact appears (any relationship type)
+  - Group by relationship type (sections for Participant, Invitee, About, Mention)
+  - Collapsible sections for each relationship type
+  - Show parent journals with children grouped underneath
+  - Sort by event_date_range (most recent first)
+  - Display journal type badges
+  - Show excerpt of content (first 200 chars)
+  - Link to full journal view
+  - Quick add journal button (pre-fills contact as participant)
+- [ ] Integrate with existing contact detail page
+- [ ] Add API call to fetch contact journals (`GET /api/contacts/{id}/journals`)
+- [ ] Implement responsive design for mobile
+- [ ] Write Jest unit tests for component
+- [ ] Write Playwright e2e tests for complete workflow:
+  - View journals on contact page
+  - Click to view full journal
+  - Create new journal from contact page
+  - Verify journal appears on contact page
+- [ ] Document integration pattern in code comments
+
+**Display Features:**
+- Relationship type badges (color-coded)
+- Journal type icons
+- Calendar color indicators
+- Expandable journal cards
+- Quick actions (view, edit)
 
 ## Architecture Notes
 
-- **Domain Design:** Rich domain entities with business logic and validation
-- **Dependency Injection:** Full Dishka integration following established patterns
-- **Rich Text:** Modern editor with markdown support and extensibility
-- **Search Integration:** MeiliSearch with faceted search and highlighting
-- **AI Integration:** MCP tools for AI-assisted journaling and insights
-- **Integration Linking:** Automatic content suggestions from all integrated services
-- **Mobile Support:** Responsive design optimized for mobile journaling
-- **Performance:** Efficient pagination and lazy loading for large journal collections
+**Domain-Driven Design:**
+- Clear separation: domain entities, repositories, services, API controllers
+- Type system with automatic dependency resolution at service layer
+- Hierarchical structure with validation (max depth 5, cycle prevention)
+- Event-driven indexing via outbox pattern
 
-## Integration Features
+**Dependency Injection:**
+- Full Dishka integration following established patterns
+- Shared container between REST API and MCP server
+- REQUEST scope for per-request objects
+- Proper resource cleanup with yield providers
 
-- **Strava Activities:** Automatic workout journal entries with stats and routes
-- **Immich Photos:** Visual storytelling with album integration and photo memories
-- **Firefly III Transactions:** Financial reflection and spending pattern insights
-- **Google Contacts:** People-focused journaling with relationship tracking
-- **Calendar Events:** Event-based journal prompts and reflection
+**Type System Architecture:**
+- Type detection by presence of data table row
+- Automatic dependency addition (transitive)
+- Type-specific data tables with optional fields
+- Validation at service layer (not database constraints)
 
-## AI-Powered Features
+**Search Integration:**
+- MeiliSearch with event-driven indexing
+- Faceted search (types, dates, contacts, tags, calendar)
+- Full-text search across title and content
+- Search result highlighting
 
-- **Sentiment Analysis:** Automatic mood detection from journal content
-- **Writing Assistance:** AI-powered suggestions and improvements
-- **Pattern Recognition:** Insights into mood, activity, and life patterns
-- **Reflection Prompts:** Context-aware questions based on recent activities
-- **Content Suggestions:** Integration-based writing prompts and ideas
-- **Trend Analysis:** Long-term pattern analysis and insights
+**UI Patterns:**
+- Inline editing (similar to contact detail page)
+- Markdown editor with live preview
+- Type-specific conditional forms
+- Calendar color coding
+- Responsive design for mobile and desktop
+
+**Integration Preparation:**
+- PHOTO_ALBUM type ready for Immich (Iteration 6)
+- FITNESS type preparation in domain models (Iteration 4.5)
+- Change event tracking with source attribution
+- Merge logic foundation for Strava (Iteration 5)
+
+## Testing Strategy
+
+**Unit Tests:**
+- Domain entity validation rules
+- Type dependency resolution logic
+- Service layer business logic (with mocked repositories)
+- Form validation and error handling
+
+**Integration Tests:**
+- Repository operations with real PostgreSQL
+- API endpoints with full request/response cycle
+- MeiliSearch indexing and search
+- MCP tools with Dishka DI
+
+**E2E Tests (Playwright):**
+- Complete journal creation workflow
+- Inline editing on detail page
+- Contact-journal integration
+- Search and filtering
+- Type management with dependencies
 
 ## Success Criteria
 
-- Rich journaling experience with modern editor and mobile support
-- Seamless integration with all external data sources
-- AI-powered insights and writing assistance
-- Comprehensive search and analytics capabilities
-- MCP tools enabling AI assistant collaboration
-- Automatic content generation reducing friction for regular journaling
-- Export capabilities for data portability
+- ✅ Base journal domain with hierarchical structure (max depth 5)
+- ✅ Six base journal types implemented (NOTE, EVENT, MOOD_RATING, PLAN, TRAVEL, PHOTO_ALBUM)
+- ✅ Contact relationships (4 types) and hierarchical tags
+- ✅ Calendar support for EVENT type journals
+- ✅ Type system with automatic dependency resolution
+- ✅ REST API with JSON API compliance
+- ✅ MeiliSearch integration with faceted search
+- ✅ Journal UI with inline editing
+- ✅ MCP tools for AI integration
+- ✅ Contact page journal display
+- ✅ All tests passing (unit, integration, e2e)
+- ✅ System in working state after each PR
 
 ## Next Steps
 
-This iteration enables:
-- Calendar integration with event-based journaling (Iteration 5)
-- Advanced analytics across all personal data (Iteration 6)
-- Long-term pattern recognition and life insights
-- AI-powered personal assistant capabilities
+**Immediate:** Iteration 4.5 (Fitness & Activity Types)
+- Routes domain for reusable route names
+- FITNESS base type with GPX tracks
+- All specialized activity types (BUSHWALKING, CANYONING, etc.)
+- Activity UI components with GPX display
+
+**Then:** Iteration 5 (Strava Integration)
+- Strava OAuth and API client
+- Activity sync with automatic journal creation
+- Merge logic for duplicate detection
+
+**Then:** Iteration 6 (Immich Integration)
+- Immich API client and album sync
+- Photo display in journals
+- Album linking to journal entries
+
+**Then:** Iteration 7 (Google Calendar Integration)
+- Calendar sync with EVENT journals
+- Bidirectional synchronization
+- Advanced calendar features

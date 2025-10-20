@@ -195,19 +195,14 @@ CREATE TABLE events (
 );
 ```
 
-### Journal System (Iteration 3)
-```sql
--- To be implemented when journal features are added
-CREATE TABLE journal_entries (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    title VARCHAR(255),
-    content TEXT NOT NULL,
-    mood INTEGER CHECK (mood >= 1 AND mood <= 10),
-    metadata JSONB DEFAULT '{}',
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-);
-```
+### Journal System (Iteration 3+)
+See [Journal System Specification](../journal-system-specification.md) for complete database schema including:
+- Base `journals` table with title, content, event_date_range, parent_id, order
+- Type-specific data tables (15 types):
+  - Base types: `journal_calendar_info`, `journal_mood_data`, `journal_plan_data`, `journal_travel_data`, `journal_photo_album_data`
+  - Activity types: `journal_fitness_data`, `journal_outdoor_activity_data`, `journal_bushwalking_data`, `journal_abseiling_data`, `journal_canyoning_data`, `journal_climbing_data`, `journal_kayaking_data`, `journal_skiing_data`, `journal_jogging_data`
+- Supporting tables: `routes`, `journal_tags`, `journal_contacts`, `journal_events`
+- Proper foreign key constraints and indexes for search/filtering
 
 ### Photo Integration (Iteration 4)
 ```sql

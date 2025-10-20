@@ -105,44 +105,117 @@ Tasks are organized into **feature iterations** that deliver end-to-end value in
 
 ### [Iteration 3: Extended Integrations](./tasks/iteration-3-extended-integrations.md)
 **Status:** 🟡 PLANNED
-**Goal:** Expand integration capabilities with Immich photos, Strava activities, and financial data
+**Goal:** Expand integration capabilities with financial data and unified integration management
 
 **Planned Integrations:**
-- **Immich Integration:** Photo service with person-to-contact matching
-- **Strava Integration:** Activity tracking with automatic journal entries
 - **Firefly III Integration:** Financial data with transaction linking
 - **Enhanced MCP Tools:** Cross-integration search and management
+- **Integration Dashboard:** Unified management interface
 
 **Architecture Benefits:**
 - Leverages integration patterns established in Iteration 2
 - Unified integration management dashboard
 - Cross-integration analytics and insights
 
-### [Iteration 4: Journal System](./tasks/iteration-4-journal-system.md)
+**Note:** Strava and Immich integrations moved to Iterations 5 and 6 to align with journal system dependencies.
+
+### [Iteration 4: Journal System - Core & Base Types](./tasks/iteration-4-journal-system.md)
 **Status:** 🟡 PLANNED
-**Goal:** Build comprehensive journal system with integration-powered content
+**Dependencies:** Iteration 2 (Integration Architecture Foundation)
+**Goal:** Build comprehensive journal system with hierarchical structure, base types, and integration preparation
 
 **Key Features:**
-- Rich text editor with mood tracking and sentiment analysis
-- Automatic journal entries from Strava activities and other integrations
-- Photo album linking and visual storytelling
-- AI-powered insights and writing assistance
-- Advanced search across journal content with MeiliSearch
-- MCP tools for AI-assisted journaling and reflection
+- Flexible journal domain with hierarchical parent-child relationships
+- Base journal types: NOTE, EVENT, MOOD_RATING, PLAN, TRAVEL, PHOTO_ALBUM
+- Contact relationships (PARTICIPANT, INVITEE, MENTION, ABOUT)
+- Hierarchical tag system for journals
+- Calendar support for EVENT type journals
+- MeiliSearch-powered search and filtering
+- REST API and MCP tools for AI integration
+- Preparation for Strava and Immich integrations
 
-### [Iteration 5: Calendar Integration](./tasks/iteration-5-calendar-integration.md)
+**Architecture Established:**
+- Type system with automatic dependency resolution
+- Event-driven MeiliSearch indexing
+- Inline editing UI patterns
+- Integration-ready domain models
+
+### [Iteration 4.5: Journal System - Fitness & Activity Types](./tasks/iteration-4.5-fitness-activity-types.md)
 **Status:** 🟡 PLANNED
-**Goal:** Integrate Google Calendar with event-based journaling and meeting preparation
+**Dependencies:** Iteration 4 (Journal Core)
+**Goal:** Add comprehensive fitness and outdoor activity tracking with specialized activity types
 
 **Key Features:**
-- Google Calendar bidirectional synchronization
-- Event-based journal entry automation
-- Meeting preparation with contact and context integration
+- Routes domain for reusable route/track names
+- FITNESS base type with GPX tracks, heart rate, elevation data
+- OUTDOOR_ACTIVITY type with weather, role, leadership tracking
+- Specialized activity types: BUSHWALKING, ABSEILING_TRIP, CANYONING, CLIMBING, KAYAKING, CROSS_COUNTRY_SKIING, JOGGING
+- Australian Track Grading System for bushwalking
+- French grading system for canyoning
+- GPX track display using Google Maps API
+- Activity statistics and analytics
+- Preparation for Strava integration
+
+### [Iteration 5: Strava Integration](./tasks/iteration-5-strava-integration.md)
+**Status:** 🟡 PLANNED
+**Dependencies:** Iteration 4.5 (Fitness & Activity Types)
+**Goal:** Integrate Strava activities with automatic journal entry creation and merge capabilities
+
+**Key Features:**
+- Strava OAuth 2.0 authentication with token refresh
+- Activity data synchronization (incremental sync)
+- Automatic FITNESS journal creation from Strava activities
+- GPX track import and storage
+- Merge logic for duplicate detection and conflict resolution
+- ARQ worker for background sync
+- Integration management UI
+
+**Architecture:**
+- Follows isolated worker architecture pattern
+- Message-based communication via ARQ
+- Idempotent operations for safe redelivery
+- Change event tracking with source attribution
+
+### [Iteration 6: Immich Integration](./tasks/iteration-6-immich-integration.md)
+**Status:** 🟡 PLANNED
+**Dependencies:** Iteration 4 (Journal Core with PHOTO_ALBUM type)
+**Goal:** Integrate Immich photo service with album linking and photo display in journals
+
+**Key Features:**
+- Immich API client with authentication
+- Album and photo data synchronization
+- Photo gallery display in journals
+- Album linking to journal entries
+- Photo metadata extraction
+- ARQ worker for background sync
+- Optional: Person-to-contact matching (future enhancement)
+
+**Architecture:**
+- Follows isolated worker architecture pattern
+- On-demand photo fetching (no local caching)
+- Integration with PHOTO_ALBUM journal type
+
+### [Iteration 7: Google Calendar Integration](./tasks/iteration-7-calendar-integration.md)
+**Status:** 🟡 PLANNED
+**Dependencies:** Iteration 4 (Journal Core with EVENT type)
+**Goal:** Integrate Google Calendar with bidirectional sync and advanced calendar features
+
+**Key Features:**
+- Google Calendar API integration (extends existing Google integration)
+- Bidirectional calendar synchronization
+- EVENT journal sync to Google Calendar
+- Calendar views (month, week, day, agenda)
+- Meeting preparation with contact context
 - Calendar analytics and scheduling insights
-- Time-based pattern recognition across all personal data
-- MCP tools for AI-assisted scheduling and meeting management
+- ARQ worker for background sync
 
-### [Iteration 6: Advanced Features & Analytics](./tasks/iteration-6-advanced-features.md)
+**Architecture:**
+- Extends Google Contacts integration patterns
+- Bidirectional sync with conflict resolution
+- EVENT journals as calendar events
+- Advanced features: meeting prep, analytics
+
+### [Iteration 8: Advanced Features & Analytics](./tasks/iteration-8-advanced-features.md)
 **Status:** 🟡 PLANNED
 **Goal:** Deliver advanced analytics, AI insights, and comprehensive personal data intelligence
 
@@ -164,16 +237,25 @@ Tasks are organized into **feature iterations** that deliver end-to-end value in
 - Implement production resilience patterns
 - Build integration management UI
 
+**Next Priority:** Begin Iteration 4 (Journal System - Core & Base Types)
+- Establish journal domain with hierarchical structure
+- Implement base journal types (NOTE, EVENT, MOOD_RATING, PLAN, TRAVEL, PHOTO_ALBUM)
+- Build REST API and MCP tools
+- Create journal UI with inline editing
+- Prepare integration points for Strava and Immich
+
 **Development Guidelines:**
-- Each task creates reviewable PRs (max 10 files changed)
+- Each task creates reviewable PRs (~5-10 files changed preferred)
 - All tests, linting, and type checking must pass before completion
 - Follow established architecture patterns (Dishka DI, ARQ workers, FastMCP v2)
 - Maintain comprehensive test coverage across all layers
+- Reference [journal system specification](../journal-system-specification.md) for detailed requirements
 
 **Quality Standards:**
 - Test-first development approach
 - Real database testing with Docker PostgreSQL
 - Comprehensive error handling and monitoring
 - Security-first design with encrypted credential storage
+- All changes must leave system in working state with passing tests
 
 For detailed task breakdowns, acceptance criteria, and implementation notes, see the individual iteration files linked above.

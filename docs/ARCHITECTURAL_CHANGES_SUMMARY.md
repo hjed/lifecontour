@@ -132,8 +132,8 @@ This document summarizes the major architectural changes and milestones achieved
 4. Add search endpoints to contacts API
 
 ### Phase 2: Extension (ITER3+)
-1. Extend outbox pattern to journal domain
-2. Add journal search capabilities
+1. Extend outbox pattern to journal domain (see [Journal System Specification](./journal-system-specification.md))
+2. Add journal search capabilities with MeiliSearch
 3. Repeat for calendar and photo domains
 4. Add MCP tools as part of each domain iteration
 
