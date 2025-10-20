@@ -23,6 +23,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 
 import { ContactAvatar } from '@/components/contacts/ContactAvatar';
 import { ContactIdentityInline } from '@/components/contacts/ContactIdentityInline';
+import { RelationshipsList } from '@/components/contacts/RelationshipsList';
 import type {
   TagResource,
   ContactMethodResource,
@@ -241,6 +242,9 @@ function ContactDetailPageContent() {
 
         {/* Column 3: Sidebar (hidden on smaller screens) */}
         <aside className='hidden space-y-4 lg:col-start-3 lg:block'>
+          {/* Relationships */}
+          <RelationshipsList contactId={contact.id} />
+
           {/* Tags */}
           <TagsCard tags={tags} />
 

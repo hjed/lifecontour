@@ -346,3 +346,29 @@ export function validateRelationshipForm(data: {
 
   return errors;
 }
+
+/**
+ * Parse and validate a contact ID string to ensure it's a valid number
+ * @param contactId - The contact ID string to parse
+ * @param fieldName - The field name for error messages (e.g., 'from_contact_id', 'to_contact_id')
+ * @returns Object with either the parsed number or an error message
+ */
+export function parseContactId(
+  contactId: string,
+  fieldName: string = 'contact_id'
+): {
+  value?: number;
+  error?: string;
+} {
+  const parsedId = Number(contactId);
+
+  if (!Number.isFinite(parsedId)) {
+    return {
+      error: `Invalid contact ID (${fieldName}).`,
+    };
+  }
+
+  return {
+    value: parsedId,
+  };
+}

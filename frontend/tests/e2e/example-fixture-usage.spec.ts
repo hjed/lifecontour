@@ -252,7 +252,7 @@ test.describe('Example: Fixture-Based Testing', () => {
       await authenticatedPage.goto('/contacts');
 
       // Wait for the page to load and process the error with reliable waiting
-      const waiter = new ReliableWaiter(authenticatedPage);
+      const _waiter = new ReliableWaiter(authenticatedPage);
       await authenticatedPage.waitForLoadState('networkidle');
 
       // Should show error state (React Query retries will complete automatically)
