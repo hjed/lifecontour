@@ -99,15 +99,17 @@ domain/
   - Meeting preparation workflows
 
 #### Journal Domain
-- **Entities**: JournalEntry, Tag
-- **Value Objects**: Mood, Sentiment
-- **Domain Services**: SentimentAnalysisService, TaggingService
-- **Ports**: JournalRepository, SentimentAnalysisService, JournalEventPublisher
+See [Journal System Specification](../journal-system-specification.md) for comprehensive domain design including:
+- **Entities**: Journal (base), 15 journal types with type-specific data tables
+- **Value Objects**: DateRange, Route, TypeDependencies
+- **Domain Services**: JournalService, TypeManagementService, MergeService
+- **Ports**: JournalRepository, RouteRepository, IntegrationWorkerInterface
 - **Business Rules**:
-  - Entry privacy controls
-  - Mood tracking logic
-  - Tag categorization
-  - Search and filtering rules
+  - Type system with automatic dependency resolution
+  - Hierarchical organization (max 5 levels)
+  - Contact relationship management (4 types)
+  - Integration conflict resolution
+  - Route tracking and reuse
 
 #### Photos Domain
 - **Entities**: Photo, ImmichPerson, PersonMatch

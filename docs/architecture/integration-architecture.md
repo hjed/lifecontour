@@ -325,6 +325,22 @@ class WorkerSettings:
 4. Create/update internal entities
 5. Record sync metadata
 
+**Journal Integration Example**: Strava activities are imported as journal entries with FITNESS + OUTDOOR_ACTIVITY types. See [Journal System Specification](../journal-system-specification.md) for merge behavior and conflict resolution patterns.
+
+### 4. Bi-Directional Sync (Google Calendar)
+
+**Challenge**: Keep two systems in sync with conflict resolution
+**Solution**: Last-write-wins with change tracking
+
+**Process**:
+1. Poll external service for changes
+2. Compare with local change tracking
+3. Determine which side has newer data
+4. Update stale side
+5. Record sync metadata
+
+**Journal Integration Example**: Calendar events sync bi-directionally with journal EVENT type entries. See [Journal System Specification](../journal-system-specification.md) for sync behavior and attendee handling.
+
 ## Deployment Architecture
 
 ### Development Environment

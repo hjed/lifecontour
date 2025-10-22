@@ -87,6 +87,15 @@ External service integration patterns and implementation:
 - ARQ task queue system with Redis
 - Sync metadata and conflict resolution patterns
 
+### 📔 **[Journal System Specification](./journal-system-specification.md)**
+Comprehensive journal system design and requirements:
+- Core journal domain model with flexible type system
+- 15 journal types (NOTE, EVENT, MOOD_RATING, PLAN, TRAVEL, PHOTO_ALBUM, FITNESS, OUTDOOR_ACTIVITY, and activity subtypes)
+- Hierarchical organization with parent-child relationships
+- Integration with Strava, Google Calendar, and Immich
+- Route tracking and activity analytics
+- Frontend components with inline editing and visual organization
+
 ### 🔮 **[Future Roadmap](./architecture/future-roadmap.md)**
 Future features, extensibility plans, and long-term vision:
 - Custom field support

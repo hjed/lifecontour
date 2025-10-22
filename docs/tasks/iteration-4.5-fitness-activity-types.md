@@ -1,0 +1,374 @@
+# Iteration 4.5: Journal System - Fitness & Activity Types
+
+**Status:** 🟡 PLANNED
+**Dependencies:** Iteration 4 (Journal Core & Base Types)
+**Goal:** Add comprehensive fitness and outdoor activity tracking with specialized activity types
+
+## Overview
+
+This iteration extends the journal system with fitness and outdoor activity types following the [journal system specification](../journal-system-specification.md):
+
+**Core Features:**
+- Routes domain for reusable route/track names
+- FITNESS base type with GPX tracks, heart rate, elevation data
+- OUTDOOR_ACTIVITY type with weather, role, leadership tracking
+- Specialized activity types with Australian and French grading systems
+- GPX track display using Google Maps API
+- Activity statistics and analytics
+- Preparation for Strava integration (Iteration 5)
+
+**Activity Types Implemented:**
+- **FITNESS:** Base type for all fitness activities (heart rate, distance, elevation, GPX, Strava preparation)
+- **OUTDOOR_ACTIVITY:** Outdoor-specific data (weather, role, leadership)
+- **BUSHWALKING:** Australian Track Grading System
+- **ABSEILING_TRIP:** Abseiling/rappelling with anchor details
+- **CANYONING:** French grading system, water gauge data
+- **CLIMBING:** Rock climbing with grades
+- **KAYAKING:** Water type tracking
+- **CROSS_COUNTRY_SKIING:** Snow conditions
+- **JOGGING:** Running/jogging with pace tracking
+
+## Prerequisites
+
+- Iteration 4 completed (Journal core with type system)
+- Type dependency resolution implemented
+- Journal UI with type-specific forms
+- MeiliSearch indexing for journals
+
+## Tasks
+
+### ITER4.5-001: Routes Domain 🟡 PLANNED
+**Description:** Create routes table for reusable route/track names
+**Strategy:** Single task for routes infrastructure
+**Specification Reference:** Multiple activity types reference routes table
+
+**PR Size:** ~6 files (domain, repository, service, API, tests)
+
+**Acceptance Criteria:**
+- [ ] Create `routes` table in database:
+  - `id` (UUID), `user_id` (FK to users)
+  - `name` (string, required)
+  - `description` (text, nullable)
+  - `created_at`, `updated_at`
+- [ ] Create `Route` entity in `core_shared/models/`
+- [ ] Create `RouteRepository` interface and `SqlRouteRepository` implementation
+- [ ] Create `RouteService` with Dishka DI
+- [ ] Implement routes API endpoints:
+  - `GET /api/routes` - List routes with filtering
+  - `POST /api/routes` - Create route
+  - `GET /api/routes/{id}` - Get route
+  - `PUT /api/routes/{id}` - Update route
+  - `DELETE /api/routes/{id}` - Delete route (check for usage in journals)
+- [ ] Add database migration with proper indexes
+- [ ] Write unit tests for route service
+- [ ] Write integration tests for route API
+- [ ] Document routes domain in code comments
+
+**Note:** Routes are referenced by BUSHWALKING, CANYONING, CLIMBING, KAYAKING, CROSS_COUNTRY_SKIING, and JOGGING types.
+
+### ITER4.5-002: Fitness Base Type 🟡 PLANNED
+**Description:** Implement FITNESS base type with GPX tracks and Strava preparation
+**Strategy:** Single task for fitness foundation
+**Specification Reference:** [Fitness Data](../journal-system-specification.md#fitness-data-fitness-type)
+
+**PR Size:** ~5 files (fitness data table, type implementation, tests, migration)
+
+**Acceptance Criteria:**
+- [ ] Create `journal_fitness_data` table:
+  - `journal_id` (PK, FK to journals)
+  - `heart_rate_avg` (integer bpm, nullable)
+  - `heart_rate_max` (integer bpm, nullable)
+  - `distance` (integer meters, nullable)
+  - `elevation_gain` (integer meters, nullable)
+  - `elevation_loss` (integer meters, nullable)
+  - `duration` (integer seconds, nullable)
+  - `calories` (integer, nullable)
+  - `gpx_track_data` (text, nullable, GPX XML format)
+  - `strava_activity_id` (string, nullable, external reference)
+  - `created_at`, `updated_at`
+- [ ] Implement FITNESS type in type system (no dependencies)
+- [ ] Add GPX validation (XML format validation)
+- [ ] Implement GPX storage and retrieval
+- [ ] Add Strava preparation (`strava_activity_id` field for Iteration 5)
+- [ ] Add database migration with proper constraints
+- [ ] Write unit tests for FITNESS type validation
+- [ ] Write integration tests for FITNESS data persistence
+- [ ] Document GPX storage format and Strava preparation in code comments
+
+**GPX Storage:**
+- Store as TEXT column in PostgreSQL
+- Validate GPX XML format on import
+- Extract key metrics (distance, elevation) for indexing
+- Consider compression for large tracks (>1MB)
+- Provide GPX download endpoint for export
+
+### ITER4.5-003: Outdoor Activity Types - Part 1 (OUTDOOR_ACTIVITY, BUSHWALKING, JOGGING) 🟡 PLANNED
+**Description:** Implement outdoor activity base type and first specialized types
+**Strategy:** Single task for three related types
+**Specification Reference:** [Outdoor Activity Data](../journal-system-specification.md#outdoor-activity-data-outdoor_activity-type), [Bushwalking Data](../journal-system-specification.md#bushwalking-data-bushwalking-type), [Jogging Data](../journal-system-specification.md#jogging-data-jogging-type)
+
+**PR Size:** ~8 files (3 type tables, dependency logic, tests, migrations)
+
+**Acceptance Criteria:**
+- [ ] Create `journal_outdoor_activity_data` table:
+  - `journal_id` (PK, FK to journals)
+  - `activity_type` (string, e.g., "hiking", "climbing", "kayaking")
+  - `weather_conditions` (text, nullable)
+  - `role` (string, nullable, e.g., "leader", "participant", "spectator")
+  - `in_leadership_role` (boolean, nullable)
+  - `participant_notes` (text, nullable)
+  - `created_at`, `updated_at`
+- [ ] Implement OUTDOOR_ACTIVITY type (requires FITNESS, automatically added)
+- [ ] Create `journal_bushwalking_data` table:
+  - `journal_id` (PK, FK to journals)
+  - `route_id` (FK to routes, nullable)
+  - `track_grading` (string, nullable, Australian Track Grading System: Grade 1-5)
+  - `created_at`, `updated_at`
+- [ ] Implement BUSHWALKING type (requires OUTDOOR_ACTIVITY, FITNESS)
+- [ ] Create `journal_jogging_data` table:
+  - `journal_id` (PK, FK to journals)
+  - `route_id` (FK to routes, nullable)
+  - `pace` (integer seconds per km, nullable)
+  - `created_at`, `updated_at`
+- [ ] Implement JOGGING type (requires FITNESS, not OUTDOOR_ACTIVITY)
+- [ ] Update type dependency resolution to handle these types
+- [ ] Add database migrations with proper foreign key constraints
+- [ ] Write unit tests for type-specific validation and dependencies
+- [ ] Write integration tests for type data persistence
+- [ ] Document Australian Track Grading System in code comments
+
+**Australian Track Grading System:**
+- Grade 1: Well-formed track, suitable for wheelchairs
+- Grade 2: Well-formed track, suitable for most ages and fitness
+- Grade 3: Formed track, some steep sections
+- Grade 4: Rough track, very steep sections
+- Grade 5: Route only, very rough, very steep
+
+### ITER4.5-004: Outdoor Activity Types - Part 2 (ABSEILING_TRIP, CANYONING, CLIMBING) 🟡 PLANNED
+**Description:** Implement abseiling, canyoning, and climbing types
+**Strategy:** Single task for three complex types
+**Specification Reference:** [Abseiling Data](../journal-system-specification.md#abseiling-data-abseiling_trip-type), [Canyoning Data](../journal-system-specification.md#canyoning-data-canyoning-type), [Climbing Data](../journal-system-specification.md#climbing-data-climbing-type)
+
+**PR Size:** ~8 files (3 type tables, dependency logic, tests, migrations)
+
+**Acceptance Criteria:**
+- [ ] Create `journal_abseiling_data` table:
+  - `journal_id` (PK, FK to journals)
+  - `number_of_abseils` (integer, nullable)
+  - `total_length` (integer meters, nullable)
+  - `created_at`, `updated_at`
+  - **Note:** Individual abseils are child journals with their own abseiling data
+- [ ] Implement ABSEILING_TRIP type (requires OUTDOOR_ACTIVITY, FITNESS)
+- [ ] Create `journal_canyoning_data` table:
+  - `journal_id` (PK, FK to journals)
+  - `route_id` (FK to routes, nullable)
+  - `french_grade` (string, nullable, e.g., "v3a2IV**")
+  - `water_guage_name` (string, nullable)
+  - `water_guage_level` (integer, nullable)
+  - `is_vertical` (boolean, nullable)
+  - `is_night_canyon` (boolean, nullable)
+  - `is_white_water` (boolean, nullable)
+  - `created_at`, `updated_at`
+- [ ] Implement CANYONING type (requires BUSHWALKING, ABSEILING_TRIP, OUTDOOR_ACTIVITY, FITNESS)
+- [ ] Create `journal_climbing_data` table:
+  - `journal_id` (PK, FK to journals)
+  - `route_id` (FK to routes, nullable)
+  - `climbing_type` (enum: "sport", "trad", "bouldering", nullable)
+  - `grade` (integer, nullable)
+  - `length` (integer meters, nullable)
+  - `created_at`, `updated_at`
+- [ ] Implement CLIMBING type (requires OUTDOOR_ACTIVITY, FITNESS)
+- [ ] Update type dependency resolution for complex dependencies (CANYONING)
+- [ ] Add database migrations with proper constraints
+- [ ] Write unit tests for type-specific validation and complex dependencies
+- [ ] Write integration tests for type data persistence
+- [ ] Document French grading system for canyoning in code comments
+
+**French Canyoning Grading System:**
+- Format: v[vertical]a[aquatic][engagement][duration][stars]
+- Example: v3a2IV** = vertical grade 3, aquatic grade 2, engagement IV, 2 stars
+- Vertical: 1-7 (difficulty of abseils)
+- Aquatic: 1-7 (difficulty of water sections)
+- Engagement: I-VI (commitment level)
+- Stars: * to *** (quality/beauty)
+
+### ITER4.5-005: Outdoor Activity Types - Part 3 (KAYAKING, CROSS_COUNTRY_SKIING) 🟡 PLANNED
+**Description:** Implement remaining outdoor activity types
+**Strategy:** Single task for two types
+**Specification Reference:** [Kayaking Data](../journal-system-specification.md#kayaking-data-kayaking-type), [Cross-Country Skiing Data](../journal-system-specification.md#cross-country-skiing-data-cross_country_skiing-type)
+
+**PR Size:** ~6 files (2 type tables, dependency logic, tests, migrations)
+
+**Acceptance Criteria:**
+- [ ] Create `journal_kayaking_data` table:
+  - `journal_id` (PK, FK to journals)
+  - `route_id` (FK to routes, nullable)
+  - `water_type` (string, nullable, e.g., "river", "sea", "lake")
+  - `created_at`, `updated_at`
+- [ ] Implement KAYAKING type (requires OUTDOOR_ACTIVITY, FITNESS)
+- [ ] Create `journal_skiing_data` table:
+  - `journal_id` (PK, FK to journals)
+  - `route_id` (FK to routes, nullable)
+  - `snow_conditions` (text, nullable)
+  - `created_at`, `updated_at`
+- [ ] Implement CROSS_COUNTRY_SKIING type (requires BUSHWALKING, OUTDOOR_ACTIVITY, FITNESS)
+- [ ] Update type dependency resolution for these types
+- [ ] Add database migrations with proper constraints
+- [ ] Write unit tests for type-specific validation and dependencies
+- [ ] Write integration tests for type data persistence
+- [ ] Document activity types in code comments
+
+### ITER4.5-006: Activity UI Components 🟡 PLANNED
+**Description:** Build UI components for activity display and GPX visualization
+**Strategy:** Single task for activity-specific UI
+**Specification Reference:** [Frontend Components](../journal-system-specification.md#frontend-components)
+
+**PR Size:** ~7 files (GPX component, stats component, forms, tests)
+
+**Acceptance Criteria:**
+- [ ] Create `GPXTrackDisplay` component using Google Maps API:
+  - Display GPX track on map
+  - Show elevation profile
+  - Display track statistics (distance, elevation gain/loss)
+  - Interactive map with zoom and pan
+  - Marker for start/end points
+- [ ] Create `ActivityStats` component:
+  - Display fitness metrics (heart rate, distance, elevation, duration, calories)
+  - Show activity-specific data (grading, weather, role, etc.)
+  - Format metrics appropriately (pace, duration, etc.)
+  - Responsive design for mobile
+- [ ] Create type-specific form components:
+  - `FitnessForm` (heart rate, distance, elevation, duration, calories, GPX upload)
+  - `OutdoorActivityForm` (activity type, weather, role, leadership, participant notes)
+  - `BushwalkingForm` (route selector, track grading dropdown)
+  - `AbseilingForm` (number of abseils, total length)
+  - `CanyoningForm` (route, French grade, water gauge, flags)
+  - `ClimbingForm` (route, climbing type, grade, length)
+  - `KayakingForm` (route, water type)
+  - `SkiingForm` (route, snow conditions)
+  - `JoggingForm` (route, pace)
+- [ ] Integrate Google Maps API for GPX display
+- [ ] Add GPX file upload and validation
+- [ ] Write Jest unit tests for components
+- [ ] Write React Testing Library tests for user interactions
+- [ ] Document Google Maps API integration in code comments
+
+**Google Maps Integration:**
+- Use Google Maps JavaScript API
+- Display GPX track as polyline
+- Show elevation profile chart
+- Add markers for start/end points
+- Support zoom and pan interactions
+
+### ITER4.5-007: Activity MCP Tools & Analytics 🟡 PLANNED
+**Description:** Add activity-specific MCP tools and analytics
+**Strategy:** Single task for MCP and analytics
+**Specification Reference:** [MCP Tools](../journal-system-specification.md#mcp-tools)
+
+**PR Size:** ~5 files (MCP tools, analytics, tests)
+
+**Acceptance Criteria:**
+- [ ] Create activity-specific MCP tools in `backend/app/mcp/journals/`:
+  - `get_activity_stats()` - Statistics for fitness activities (total distance, elevation, duration by type)
+  - `search_activities()` - Search activities with type filtering
+  - `analyze_activity_trends()` - Activity pattern analysis
+  - `get_route_history()` - History of activities on specific route
+- [ ] Implement activity analytics:
+  - Total distance, elevation, duration by activity type
+  - Activity frequency over time
+  - Personal records (longest distance, highest elevation, etc.)
+  - Route usage statistics
+- [ ] Add activity filtering to existing search tools
+- [ ] Write MCP integration tests
+- [ ] Document activity MCP tools in `docs/mcp-tools.md`
+
+**Analytics Features:**
+- Activity type breakdown (pie chart data)
+- Timeline chart data (activities over time)
+- Personal records tracking
+- Route popularity statistics
+- Comparison to previous periods
+
+## Architecture Notes
+
+**Type Dependency System:**
+- FITNESS: No dependencies (base type for all fitness activities)
+- OUTDOOR_ACTIVITY: Requires FITNESS (automatically added)
+- BUSHWALKING: Requires OUTDOOR_ACTIVITY, FITNESS
+- ABSEILING_TRIP: Requires OUTDOOR_ACTIVITY, FITNESS
+- CANYONING: Requires BUSHWALKING, ABSEILING_TRIP, OUTDOOR_ACTIVITY, FITNESS (most complex)
+- CLIMBING: Requires OUTDOOR_ACTIVITY, FITNESS
+- KAYAKING: Requires OUTDOOR_ACTIVITY, FITNESS
+- CROSS_COUNTRY_SKIING: Requires BUSHWALKING, OUTDOOR_ACTIVITY, FITNESS
+- JOGGING: Requires FITNESS only (not OUTDOOR_ACTIVITY)
+
+**Routes Domain:**
+- Shared across multiple activity types
+- User-specific (each user has their own routes)
+- Reusable for tracking favorite routes
+- Optional (activities can exist without route reference)
+
+**GPX Storage:**
+- Store as TEXT in PostgreSQL (XML format)
+- Validate XML structure on import
+- Extract metrics for indexing (distance, elevation)
+- Consider compression for large files
+- Provide download endpoint for export
+
+**Strava Preparation:**
+- `strava_activity_id` field in FITNESS type
+- Ready for automatic journal creation (Iteration 5)
+- Merge logic foundation for duplicate detection
+
+## Testing Strategy
+
+**Unit Tests:**
+- Type dependency resolution (especially CANYONING)
+- GPX validation and parsing
+- Activity-specific validation rules
+- Grading system validation (Australian, French)
+
+**Integration Tests:**
+- Type data persistence with dependencies
+- Routes CRUD operations
+- GPX storage and retrieval
+- Activity analytics queries
+
+**E2E Tests (Playwright):**
+- Create activity journal with GPX upload
+- View GPX track on map
+- Add activity with route selection
+- Type dependency visualization in form
+- Activity statistics display
+
+## Success Criteria
+
+- ✅ Routes domain implemented and tested
+- ✅ FITNESS base type with GPX support
+- ✅ All 8 specialized activity types implemented
+- ✅ Type dependency resolution working for complex types (CANYONING)
+- ✅ GPX track display with Google Maps API
+- ✅ Activity-specific UI forms for all types
+- ✅ Activity statistics and analytics
+- ✅ MCP tools for activity management
+- ✅ All tests passing (unit, integration, e2e)
+- ✅ System in working state after each PR
+- ✅ Ready for Strava integration (Iteration 5)
+
+## Next Steps
+
+**Immediate:** Iteration 5 (Strava Integration)
+- Strava OAuth and API client
+- Activity data synchronization
+- Automatic FITNESS journal creation from Strava
+- GPX track import from Strava
+- Merge logic for duplicate detection
+
+**Then:** Iteration 6 (Immich Integration)
+- Photo display in activity journals
+- Album linking to outdoor activities
+
+**Then:** Iteration 7 (Google Calendar Integration)
+- Calendar sync for planned activities
+- Event-based activity scheduling
+
