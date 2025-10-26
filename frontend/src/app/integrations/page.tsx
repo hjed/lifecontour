@@ -45,6 +45,19 @@ function formatDateSafely(dateString: string | null): string {
   }
 }
 
+// Helper function for safe time formatting
+function formatTimeSafely(dateString: string | null): string {
+  if (!dateString) return 'Never';
+
+  try {
+    return format(new Date(dateString), 'p', {
+      locale: enAU,
+    });
+  } catch {
+    return 'Invalid time';
+  }
+}
+
 export default function IntegrationsPage() {
   return (
     <AuthGuard>
@@ -330,17 +343,12 @@ function IntegrationsPageContent() {
                     </span>
                     {health.worker.lastSeen && (
                       <span className='text-muted-foreground text-xs'>
-                        {format(new Date(health.worker.lastSeen), 'p', {
-                          locale: enAU,
-                        })}
+                        {formatTimeSafely(health.worker.lastSeen)}
                       </span>
                     )}
                   </div>
                   <p className='text-muted-foreground text-xs'>
-                    Last checked:{' '}
-                    {format(new Date(health.lastChecked), 'p', {
-                      locale: enAU,
-                    })}
+                    Last checked: {formatTimeSafely(health.lastChecked)}
                   </p>
                 </div>
               ) : null}

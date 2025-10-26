@@ -59,9 +59,13 @@ async function handleApiResponse<T>(response: Response): Promise<T> {
       }
 
       throw new Error(errorMessage);
-    } catch {
-      // If JSON parsing fails, use status text
-      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+    } catch (parseError) {
+      // If JSON parsing fails, include the parsing error in the message for better debugging
+      const errorDetails =
+        parseError instanceof Error ? parseError.message : String(parseError);
+      throw new Error(
+        `HTTP ${response.status}: ${response.statusText} (JSON parsing failed: ${errorDetails})`
+      );
     }
   }
   return response.json();
