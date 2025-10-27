@@ -605,7 +605,7 @@ jobs:
         run: pnpm exec playwright test --project="${{ matrix.browser }}"
 
       - name: Upload Playwright Report
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         if: always()
         with:
           name: playwright-report-${{ matrix.browser }}
@@ -685,7 +685,7 @@ jobs:
           output: 'trivy-frontend-results.sarif'
 
       - name: Upload Trivy scan results as artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         if: always()
         with:
           name: trivy-results
