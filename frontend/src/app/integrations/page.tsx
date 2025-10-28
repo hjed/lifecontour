@@ -32,30 +32,31 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { AuthGuard } from '@/components/auth/AuthGuard';
 import { LoadingSpinner } from '@/components/ui/loading';
 
-// Helper function for safe date formatting
-function formatDateSafely(dateString: string | null): string {
+// Generic helper function for safe date/time formatting
+function formatDateGenericSafely(
+  dateString: string | null,
+  formatString: string,
+  fallback: string
+): string {
   if (!dateString) return 'Never';
 
   try {
-    return format(new Date(dateString), 'PPp', {
+    return format(new Date(dateString), formatString, {
       locale: enAU,
     });
   } catch {
-    return 'Invalid date';
+    return fallback;
   }
+}
+
+// Helper function for safe date formatting
+function formatDateSafely(dateString: string | null): string {
+  return formatDateGenericSafely(dateString, 'PPp', 'Invalid date');
 }
 
 // Helper function for safe time formatting
 function formatTimeSafely(dateString: string | null): string {
-  if (!dateString) return 'Never';
-
-  try {
-    return format(new Date(dateString), 'p', {
-      locale: enAU,
-    });
-  } catch {
-    return 'Invalid time';
-  }
+  return formatDateGenericSafely(dateString, 'p', 'Invalid time');
 }
 
 export default function IntegrationsPage() {

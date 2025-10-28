@@ -5,46 +5,29 @@
  * status monitoring, and health checks through the UI.
  */
 
-import { test, expect } from '@playwright/test';
-import { createAuthFixtures } from './fixtures/auth';
+import { test, expect } from './fixtures';
 
-test.describe('Integration Management', () => {
-  test.beforeEach(async ({ page }) => {
-    // Authenticate user before each test
-    const authFixtures = createAuthFixtures(page);
-    await authFixtures.mockAuthenticated('github');
-  });
-
-  test('should display integration health status', async ({ page }) => {
-    // Skip API tests if using mock backend
-    if (process.env.USE_MOCK_BACKEND === 'true') {
-      test.skip();
-      return;
-    }
-
-    // Navigate to integrations page (assuming it exists)
-    // For now, we'll test the API endpoints directly
-
+test.describe('Integration Management - Authenticated User', () => {
+  test('should display integration health status', async ({
+    authenticatedPage,
+  }) => {
     // Test integration health endpoint
-    const response = await page.request.get('/api/integrations/health');
+    const response = await authenticatedPage.request.get(
+      '/api/integrations/health'
+    );
     expect(response.ok()).toBeTruthy();
 
     const healthData = await response.json();
-    expect(healthData).toHaveProperty('status');
-    expect(healthData).toHaveProperty('services');
-    expect(healthData.services).toHaveProperty('redis');
-    expect(healthData.services).toHaveProperty('google_contacts_worker');
+    expect(healthData).toHaveProperty('data');
+    expect(healthData.data).toHaveProperty('type', 'integration-health');
+    expect(healthData.data).toHaveProperty('attributes');
   });
 
-  test('should trigger Google Contacts sync via API', async ({ page }) => {
-    // Skip API tests if using mock backend
-    if (process.env.USE_MOCK_BACKEND === 'true') {
-      test.skip();
-      return;
-    }
-
+  test('should trigger Google Contacts sync via API', async ({
+    authenticatedPage,
+  }) => {
     // Test sync trigger endpoint (requires authentication)
-    const response = await page.request.post(
+    const response = await authenticatedPage.request.post(
       '/api/integrations/google/contacts/sync',
       {
         data: {
@@ -61,7 +44,7 @@ test.describe('Integration Management', () => {
     expect(errorData.errors[0]).toHaveProperty('status', '401');
 
     // Test job status endpoint (also requires authentication)
-    const statusResponse = await page.request.get(
+    const statusResponse = await authenticatedPage.request.get(
       `/api/integrations/google/contacts/sync/test-job-id`
     );
     expect(statusResponse.status()).toBe(401);
@@ -71,9 +54,11 @@ test.describe('Integration Management', () => {
     expect(statusErrorData.errors[0]).toHaveProperty('status', '401');
   });
 
-  test('should handle sync trigger errors gracefully', async ({ page }) => {
+  test('should handle sync trigger errors gracefully', async ({
+    authenticatedPage,
+  }) => {
     // Test sync trigger - requires authentication
-    const response = await page.request.post(
+    const response = await authenticatedPage.request.post(
       '/api/integrations/google/contacts/sync',
       {
         data: {
@@ -89,8 +74,10 @@ test.describe('Integration Management', () => {
     expect(errorData.errors[0]).toHaveProperty('status', '401');
   });
 
-  test('should handle non-existent job status requests', async ({ page }) => {
-    const response = await page.request.get(
+  test('should handle non-existent job status requests', async ({
+    authenticatedPage,
+  }) => {
+    const response = await authenticatedPage.request.get(
       '/api/integrations/google/contacts/sync/non-existent-job'
     );
     // Should return 401 since we're not authenticated
@@ -101,8 +88,10 @@ test.describe('Integration Management', () => {
     expect(errorData.errors[0]).toHaveProperty('status', '401');
   });
 
-  test('should get Google Contacts integration status', async ({ page }) => {
-    const response = await page.request.get(
+  test('should get Google Contacts integration status', async ({
+    authenticatedPage,
+  }) => {
+    const response = await authenticatedPage.request.get(
       '/api/integrations/google/contacts/status'
     );
 
@@ -113,156 +102,116 @@ test.describe('Integration Management', () => {
     expect(errorData).toHaveProperty('errors');
     expect(errorData.errors[0]).toHaveProperty('status', '401');
   });
-
-  test('should require authentication for integration endpoints', async ({
-    page,
-  }) => {
-    // Clear authentication
-    await page.context().clearCookies();
-
-    // Endpoints that require authentication and return 401
-    const auth401Endpoints = [
-      { method: 'POST', url: '/api/integrations/google/contacts/sync' },
-      { method: 'GET', url: '/api/integrations/google/contacts/sync/test-job' },
-    ];
-
-    for (const endpoint of auth401Endpoints) {
-      let response;
-      if (endpoint.method === 'POST') {
-        response = await page.request.post(endpoint.url, {
-          data: {
-            sync_type: 'incremental',
-          },
-        });
-      } else {
-        response = await page.request.get(endpoint.url);
-      }
-
-      expect(response.status()).toBe(401); // Unauthorized
-    }
-
-    // Status endpoint requires authentication
-    const statusResponse = await page.request.get(
-      '/api/integrations/google/contacts/status'
-    );
-    expect(statusResponse.status()).toBe(401); // Unauthorized
-
-    // Health endpoint should not require authentication
-    const healthResponse = await page.request.get('/api/integrations/health');
-    expect(healthResponse.status()).toBe(200);
-  });
 });
 
 test.describe('Integration UI Components', () => {
-  test.beforeEach(async ({ page }) => {
-    const authFixtures = createAuthFixtures(page);
-    await authFixtures.mockAuthenticated('github');
-  });
-
-  test('should display integration status in UI', async ({ page }) => {
-    // Mock API responses if in mock mode
-    if (process.env.USE_MOCK_BACKEND === 'true') {
-      await page.route('/api/integrations/**', route => {
-        const url = route.request().url();
-        if (url.includes('/health')) {
-          route.fulfill({
-            status: 200,
-            contentType: 'application/json',
-            body: JSON.stringify({
-              data: {
-                id: 'health',
-                type: 'integration-health',
-                attributes: {
-                  redis: { status: 'healthy', latency: 5 },
-                  worker: {
-                    status: 'healthy',
-                    lastSeen: new Date().toISOString(),
-                  },
-                  overall: 'healthy',
-                  lastChecked: new Date().toISOString(),
+  test('should display integration status in UI', async ({
+    authenticatedPage,
+  }) => {
+    // Mock API responses
+    await authenticatedPage.route('/api/integrations/**', route => {
+      const url = route.request().url();
+      if (url.includes('/health')) {
+        route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            data: {
+              id: 'health',
+              type: 'integration-health',
+              attributes: {
+                redis: { status: 'healthy', latency: 5 },
+                worker: {
+                  status: 'healthy',
+                  lastSeen: new Date().toISOString(),
                 },
+                overall: 'healthy',
+                lastChecked: new Date().toISOString(),
               },
-            }),
-          });
-        } else if (url.includes('/status')) {
-          route.fulfill({
-            status: 200,
-            contentType: 'application/json',
-            body: JSON.stringify({
-              data: {
-                id: 'google-contacts',
-                type: 'integration-status',
-                attributes: {
-                  connected: false,
-                  lastSync: null,
-                  syncCount: 0,
-                  status: 'disconnected',
-                },
+            },
+          }),
+        });
+      } else if (url.includes('/status')) {
+        route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            data: {
+              id: 'google-contacts',
+              type: 'integration-status',
+              attributes: {
+                connected: false,
+                lastSync: null,
+                syncCount: 0,
+                status: 'disconnected',
               },
-            }),
-          });
-        } else {
-          route.fulfill({ status: 404 });
-        }
-      });
-    }
+            },
+          }),
+        });
+      } else {
+        route.fulfill({ status: 404 });
+      }
+    });
 
-    await page.goto('/integrations');
+    await authenticatedPage.goto('/integrations');
 
     // Verify page loads
-    await expect(page).toHaveTitle(/Integrations/);
+    await expect(authenticatedPage).toHaveTitle(/Integrations/);
 
     // Check for Google Contacts integration section
     await expect(
-      page.locator('[data-testid="google-contacts-integration"]')
+      authenticatedPage.locator('[data-testid="google-contacts-integration"]')
     ).toBeVisible();
 
     // Check for sync trigger button
     await expect(
-      page.locator('[data-testid="trigger-google-sync"]')
+      authenticatedPage.locator('[data-testid="trigger-google-sync"]')
     ).toBeVisible();
 
     // Check for status display
     await expect(
-      page.locator('[data-testid="integration-status"]')
+      authenticatedPage.locator('[data-testid="integration-status"]')
     ).toBeVisible();
   });
 
-  test('should trigger sync through UI', async ({ page }) => {
-    await page.goto('/integrations');
+  test('should trigger sync through UI', async ({ authenticatedPage }) => {
+    await authenticatedPage.goto('/integrations');
 
     // Click sync trigger button
-    await page.click('[data-testid="trigger-google-sync"]');
+    await authenticatedPage.click('[data-testid="trigger-google-sync"]');
 
     // Should show confirmation or progress indicator
-    await expect(page.locator('[data-testid="sync-progress"]')).toBeVisible();
+    await expect(
+      authenticatedPage.locator('[data-testid="sync-progress"]')
+    ).toBeVisible();
 
     // Should update status
-    await expect(page.locator('[data-testid="sync-status"]')).toContainText(
-      'In Progress'
-    );
+    await expect(
+      authenticatedPage.locator('[data-testid="sync-status"]')
+    ).toContainText('In Progress');
   });
 
-  test('should display sync history', async ({ page }) => {
-    await page.goto('/integrations');
+  test('should display sync history', async ({ authenticatedPage }) => {
+    await authenticatedPage.goto('/integrations');
 
     // Should show recent sync jobs
-    await expect(page.locator('[data-testid="sync-history"]')).toBeVisible();
+    await expect(
+      authenticatedPage.locator('[data-testid="sync-history"]')
+    ).toBeVisible();
 
     // Should show job details
-    await expect(page.locator('[data-testid="sync-job-item"]')).toBeVisible();
+    await expect(
+      authenticatedPage.locator('[data-testid="sync-job-item"]')
+    ).toBeVisible();
   });
 });
 
 test.describe('Integration Error Handling', () => {
-  test.beforeEach(async ({ page }) => {
-    const authFixtures = createAuthFixtures(page);
-    await authFixtures.mockAuthenticated('github');
-  });
-
-  test('should handle API errors gracefully', async ({ page }) => {
+  test('should handle API errors gracefully', async ({
+    authenticatedPage,
+  }) => {
     // Test sync endpoint - requires authentication
-    const response = await page.request.post(
+    const response = await authenticatedPage.request.post(
       '/api/integrations/google/contacts/sync',
       {
         data: {
@@ -282,20 +231,67 @@ test.describe('Integration Error Handling', () => {
     );
   });
 
-  test('should handle worker unavailability', async ({ page }) => {
+  test('should handle worker unavailability', async ({
+    authenticatedPage,
+  }) => {
     // This test would verify behavior when workers are down
     // For now, we just test that the API responds appropriately
 
-    const response = await page.request.get('/api/integrations/health');
+    const response = await authenticatedPage.request.get(
+      '/api/integrations/health'
+    );
     expect(response.ok()).toBeTruthy();
 
     const healthData = await response.json();
 
     // Health status should indicate if workers are unavailable
-    if (healthData.status === 'unhealthy') {
-      expect(healthData.services.google_contacts_worker.status).toBe(
-        'unhealthy'
-      );
+    if (
+      healthData.data?.attributes?.overall === 'unhealthy' &&
+      healthData.data?.attributes?.worker
+    ) {
+      expect(healthData.data.attributes.worker.status).toBe('unhealthy');
     }
+  });
+});
+
+test.describe('Integration Management - Unauthenticated User', () => {
+  test('should require authentication for integration endpoints', async ({
+    unauthenticatedPage,
+  }) => {
+    // Endpoints that require authentication and return 401
+    const auth401Endpoints = [
+      { method: 'POST', url: '/api/integrations/google/contacts/sync' },
+      {
+        method: 'GET',
+        url: '/api/integrations/google/contacts/sync/test-job',
+      },
+    ];
+
+    for (const endpoint of auth401Endpoints) {
+      let response;
+      if (endpoint.method === 'POST') {
+        response = await unauthenticatedPage.request.post(endpoint.url, {
+          data: {
+            sync_type: 'incremental',
+          },
+        });
+      } else {
+        response = await unauthenticatedPage.request.get(endpoint.url);
+      }
+
+      expect(response.status()).toBe(401); // Unauthorized
+    }
+
+    // Status endpoint requires authentication
+    const statusResponse = await unauthenticatedPage.request.get(
+      '/api/integrations/google/contacts/status'
+    );
+    expect(statusResponse.status()).toBe(401); // Unauthorized
+
+    // Health endpoint should not require authentication
+    const healthResponse = await unauthenticatedPage.request.get(
+      '/api/integrations/health'
+    );
+    expect(healthResponse.status()).toBe(200);
   });
 });
