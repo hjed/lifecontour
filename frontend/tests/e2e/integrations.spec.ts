@@ -207,9 +207,7 @@ test.describe('Integration UI Components', () => {
 });
 
 test.describe('Integration Error Handling', () => {
-  test('should handle API errors gracefully', async ({
-    authenticatedPage,
-  }) => {
+  test('should handle API errors gracefully', async ({ authenticatedPage }) => {
     // Test sync endpoint - requires authentication
     const response = await authenticatedPage.request.post(
       '/api/integrations/google/contacts/sync',
@@ -231,9 +229,7 @@ test.describe('Integration Error Handling', () => {
     );
   });
 
-  test('should handle worker unavailability', async ({
-    authenticatedPage,
-  }) => {
+  test('should handle worker unavailability', async ({ authenticatedPage }) => {
     // This test would verify behavior when workers are down
     // For now, we just test that the API responds appropriately
 
