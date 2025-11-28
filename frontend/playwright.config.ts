@@ -1,7 +1,15 @@
 import { defineConfig, devices } from '@playwright/test';
 
 /**
+ * Playwright E2E Test Configuration
+ *
+ * Configuration optimized for reliability following Playwright best practices:
+ * - Web-first assertions with auto-retry
+ * - Proper timeout configuration
+ * - CI-specific settings for flaky test detection
+ *
  * @see https://playwright.dev/docs/test-configuration
+ * @see https://playwright.dev/docs/best-practices
  */
 export default defineConfig({
   testDir: './tests/e2e',
@@ -12,20 +20,28 @@ export default defineConfig({
 
   /* Run tests in files in parallel */
   fullyParallel: true,
-  /* Fail the build on CI if you accidentally left test.only in the source code. */
+
+  /* Fail the build on CI if you accidentally left test.only in the source code */
   forbidOnly: !!process.env.CI,
-  /* Retry on CI only */
-  retries: process.env.CI ? 1 : 0,
-  /* Opt out of parallel tests on CI. */
-  workers: 1, // Use single worker to prevent OAuth race conditions
-  /* Reporter to use. See https://playwright.dev/docs/test-reporters */
+
+  /* Fail on CI if any tests are marked as flaky - helps catch unreliable tests */
+  failOnFlakyTests: !!process.env.CI,
+
+  /* Retry failed tests to identify flaky tests vs genuine failures */
+  retries: process.env.CI ? 2 : 0,
+
+  /* Use single worker to prevent OAuth race conditions between parallel tests */
+  workers: 1,
+
+  /* Reporter configuration: GitHub annotations + HTML report on CI */
   reporter: process.env.CI ? [['github'], ['html']] : 'html',
-  /* Global test timeout to prevent hanging tests */
+
+  /* Global test timeout - generous but prevents hanging tests */
   timeout: 3 * 60 * 1000, // 3 minutes per test
 
-  /* Global expect timeout for assertions */
+  /* Global expect timeout - web-first assertions auto-retry until this timeout */
   expect: {
-    timeout: 10000, // 10 seconds for assertions
+    timeout: 15000, // 15 seconds for assertions (increased for network latency)
   },
 
   /* Shared settings for all the projects below. See https://playwright.dev/docs/api/class-testoptions. */
@@ -33,7 +49,7 @@ export default defineConfig({
     /* Base URL to use in actions like `await page.goto('/')`. */
     baseURL: 'http://localhost:3000',
 
-    /* Collect trace when retrying the failed test. See https://playwright.dev/docs/trace-viewer */
+    /* Collect trace on first retry - essential for debugging flaky tests */
     trace: 'on-first-retry',
 
     /* Set environment variables for tests */
@@ -41,14 +57,22 @@ export default defineConfig({
       'X-Test-Backend-URL': 'http://localhost:8001',
     },
 
-    /* Increase timeout for better reliability */
-    actionTimeout: 20000, // Increased from 15s to 20s
-    navigationTimeout: 60000, // Increased from 45s to 60s
+    /*
+     * Action timeout - time to wait for individual actions (clicks, fills, etc.)
+     * Playwright auto-waits for elements to be actionable before performing actions
+     */
+    actionTimeout: 20000, // 20 seconds
+
+    /*
+     * Navigation timeout - time to wait for page navigations
+     * Should be generous to handle slow network conditions in CI
+     */
+    navigationTimeout: 60000, // 60 seconds
 
     /* Screenshot on failure for debugging */
     screenshot: 'only-on-failure',
 
-    /* Video recording for CI */
+    /* Video recording - only on failure in CI to save resources */
     video: process.env.CI ? 'retain-on-failure' : 'off',
   },
 
