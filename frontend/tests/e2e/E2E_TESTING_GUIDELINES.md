@@ -132,7 +132,7 @@ expect(response.ok()).toBe(true);
 
 // ✅ GOOD - Wait for element state change
 await page.getByRole('button', { name: 'Favourite' }).click();
-await expect(page.getByRole('button', { name: 'Unfavourite' })).toBeVisible();
+await expect(page.getByRole('button', { name: 'Unfavorite' })).toBeVisible();
 ```
 
 ### 7. Use Explicit Assertions Over Conditional Logic
