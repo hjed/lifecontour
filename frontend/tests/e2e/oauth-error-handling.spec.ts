@@ -31,16 +31,7 @@ test.describe('OAuth Error Handling', () => {
       sessionStorage.setItem('oauth_provider', 'generic');
     });
 
-    // Navigate to callback with invalid state and wait for response
-    const responsePromise = page
-      .waitForResponse(
-        response =>
-          response.url().includes('/api/auth/callback') ||
-          response.url().includes('/auth/callback'),
-        { timeout: 10000 }
-      )
-      .catch(() => null); // Don't fail if no API call is made
-
+    // Navigate to callback with invalid state
     await page.goto(
       '/auth/callback?code=valid-code&state=invalid-state-that-does-not-match'
     );
@@ -51,12 +42,6 @@ test.describe('OAuth Error Handling', () => {
       const onLoginPage = page.url().includes('/auth/login');
       expect(hasError || onLoginPage).toBe(true);
     }).toPass({ timeout: 10000 });
-
-    // Verify the response if we caught one
-    const response = await responsePromise;
-    if (response && !response.ok()) {
-      console.log('Error response received:', response.status());
-    }
   });
 
   test('should handle expired OAuth authorization codes', async ({

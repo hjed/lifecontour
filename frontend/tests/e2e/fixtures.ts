@@ -192,16 +192,10 @@ async function completeWorkerOAuthFlow(browser: any): Promise<AuthState> {
 
         // Wait for callback to complete by watching for the final redirect
         // The callback page should redirect to /contacts or another authenticated route
-        await page
-          .waitForURL(
-            (url: URL) => !url.toString().includes('/auth/callback'),
-            { timeout: 15000 }
-          )
-          .catch(() => {
-            console.log(
-              '🔐 [Worker Auth] No redirect from callback (may already be processed)'
-            );
-          });
+        await page.waitForURL(
+          (url: URL) => !url.toString().includes('/auth/callback'),
+          { timeout: 15000 }
+        );
 
         console.log('🔐 [Worker Auth] Final URL after callback:', page.url());
       }
@@ -219,46 +213,24 @@ async function completeWorkerOAuthFlow(browser: any): Promise<AuthState> {
       );
     }
 
-    // Step 4: Verify authentication by checking auth status API with retry
-    // The session cookie may take a moment to be fully established
-    let authVerified = false;
-    let lastError: string | null = null;
+    // Step 4: Verify authentication using web-first assertion pattern
+    // Uses toPass for automatic retry instead of manual loops
+    console.log('🔐 [Worker Auth] Verifying authentication...');
 
-    for (let attempt = 1; attempt <= 2; attempt++) {
-      console.log(
-        `🔐 [Worker Auth] Verifying authentication (attempt ${attempt}/2)...`
-      );
+    let authUser: string | undefined;
+    await playwrightExpect(async () => {
       const statusResponse = await page.request.get('/api/auth/status');
+      playwrightExpect(statusResponse.ok()).toBe(true);
 
-      if (statusResponse.ok()) {
-        const authStatus = await statusResponse.json();
-        if (authStatus.authenticated) {
-          console.log(
-            '🔐 [Worker Auth] Real OAuth authentication successful!',
-            authStatus.user?.email
-          );
-          authVerified = true;
-          break;
-        } else {
-          lastError = 'Authentication status check returned not authenticated';
-          console.log(`🔐 [Worker Auth] Not authenticated yet, waiting...`);
-        }
-      } else {
-        lastError = `Authentication status check failed: ${statusResponse.status()}`;
-        console.log(
-          `🔐 [Worker Auth] Status check failed: ${statusResponse.status()}`
-        );
-      }
+      const authStatus = await statusResponse.json();
+      playwrightExpect(authStatus.authenticated).toBe(true);
+      authUser = authStatus.user?.email;
+    }).toPass({ timeout: 5000 });
 
-      // Wait before retry (only on first attempt)
-      if (attempt < 2) {
-        await new Promise(resolve => setTimeout(resolve, 500));
-      }
-    }
-
-    if (!authVerified) {
-      throw new Error(lastError || 'Authentication verification failed');
-    }
+    console.log(
+      '🔐 [Worker Auth] Real OAuth authentication successful!',
+      authUser
+    );
 
     // Step 5: Extract authentication cookies from browser context
     const cookies = await context.cookies();

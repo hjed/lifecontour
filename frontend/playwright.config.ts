@@ -41,7 +41,7 @@ export default defineConfig({
 
   /* Global expect timeout - web-first assertions auto-retry until this timeout */
   expect: {
-    timeout: 15000, // 15 seconds for assertions (increased for network latency)
+    timeout: 15000, // 15 seconds to account for network latency
   },
 
   /* Shared settings for all the projects below. See https://playwright.dev/docs/api/class-testoptions. */
