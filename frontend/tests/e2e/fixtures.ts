@@ -219,25 +219,45 @@ async function completeWorkerOAuthFlow(browser: any): Promise<AuthState> {
       );
     }
 
-    // Step 4: Verify authentication by checking auth status API
-    // Use waitForResponse pattern for reliable API verification
-    const statusResponse = await page.request.get('/api/auth/status');
-    if (statusResponse.ok()) {
-      const authStatus = await statusResponse.json();
-      if (authStatus.authenticated) {
-        console.log(
-          '🔐 [Worker Auth] Real OAuth authentication successful!',
-          authStatus.user?.email
-        );
+    // Step 4: Verify authentication by checking auth status API with retry
+    // The session cookie may take a moment to be fully established
+    let authVerified = false;
+    let lastError: string | null = null;
+
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      console.log(
+        `🔐 [Worker Auth] Verifying authentication (attempt ${attempt}/2)...`
+      );
+      const statusResponse = await page.request.get('/api/auth/status');
+
+      if (statusResponse.ok()) {
+        const authStatus = await statusResponse.json();
+        if (authStatus.authenticated) {
+          console.log(
+            '🔐 [Worker Auth] Real OAuth authentication successful!',
+            authStatus.user?.email
+          );
+          authVerified = true;
+          break;
+        } else {
+          lastError = 'Authentication status check returned not authenticated';
+          console.log(`🔐 [Worker Auth] Not authenticated yet, waiting...`);
+        }
       } else {
-        throw new Error(
-          'Authentication status check failed: not authenticated'
+        lastError = `Authentication status check failed: ${statusResponse.status()}`;
+        console.log(
+          `🔐 [Worker Auth] Status check failed: ${statusResponse.status()}`
         );
       }
-    } else {
-      throw new Error(
-        `Authentication status check failed: ${statusResponse.status()}`
-      );
+
+      // Wait before retry (only on first attempt)
+      if (attempt < 2) {
+        await new Promise(resolve => setTimeout(resolve, 500));
+      }
+    }
+
+    if (!authVerified) {
+      throw new Error(lastError || 'Authentication verification failed');
     }
 
     // Step 5: Extract authentication cookies from browser context

@@ -15,6 +15,9 @@
 
 import { test, expect } from './fixtures';
 
+/** Common selector for error elements used across OAuth error handling tests */
+const ERROR_SELECTOR = '[role="alert"], .alert, .error, [data-testid="error"]';
+
 test.describe('OAuth Error Handling', () => {
   test('should handle invalid OAuth state parameter', async ({
     unauthenticatedPage: page,
@@ -44,10 +47,7 @@ test.describe('OAuth Error Handling', () => {
 
     // Wait for either error display or redirect to login
     await expect(async () => {
-      const hasError =
-        (await page
-          .locator('[role="alert"], .alert, .error, [data-testid="error"]')
-          .count()) > 0;
+      const hasError = (await page.locator(ERROR_SELECTOR).count()) > 0;
       const onLoginPage = page.url().includes('/auth/login');
       expect(hasError || onLoginPage).toBe(true);
     }).toPass({ timeout: 10000 });
@@ -119,7 +119,7 @@ test.describe('OAuth Error Handling', () => {
       // Wait for error handling - either error element or redirect to login
       await expect(async () => {
         const hasErrorElement =
-          (await page.locator('[role="alert"], .alert, .error').count()) > 0;
+          (await page.locator(ERROR_SELECTOR).count()) > 0;
         const redirectedToLogin = page.url().includes('/auth/login');
         expect(hasErrorElement || redirectedToLogin).toBe(true);
       }).toPass({ timeout: 5000 });
@@ -184,15 +184,15 @@ test.describe('OAuth Session and State Management Errors', () => {
     // Navigate directly to callback without establishing session
     await page.goto('/auth/callback?code=test-code&state=test-state');
 
-    // Verify graceful error handling
+    // Verify graceful error handling - page should show error message or redirect to login
     await expect(async () => {
       const bodyText = await page.textContent('body');
-      const hasHandling =
+      const hasErrorHandling =
         bodyText !== null &&
         (bodyText.includes('error') ||
           bodyText.includes('invalid') ||
           page.url().includes('/auth/login'));
-      expect(hasHandling || bodyText !== null).toBe(true);
+      expect(hasErrorHandling).toBe(true);
     }).toPass({ timeout: 10000 });
   });
 
