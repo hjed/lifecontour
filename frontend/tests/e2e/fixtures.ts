@@ -3,13 +3,24 @@
  *
  * Provides deterministic test fixtures for authentication, data setup, and cleanup.
  * Eliminates conditional logic and ensures each test has exactly the data it needs.
+ *
+ * IMPORTANT: This file follows Playwright best practices:
+ * - Web-first assertions with auto-retry instead of hard-coded waits
+ * - Proper navigation waiting with Promise.all
+ * - No waitForTimeout() - use waitForURL, waitForResponse, or assertions instead
+ *
+ * @see E2E_TESTING_GUIDELINES.md for best practices documentation
  */
 
 /* eslint-disable react-hooks/rules-of-hooks */
 // This file contains Playwright fixtures that use the `use()` function,
 // which is not a React hook but triggers the React hooks ESLint rule
 
-import { test as base, Page } from '@playwright/test';
+import {
+  test as base,
+  Page,
+  expect as playwrightExpect,
+} from '@playwright/test';
 import {
   TestDataManager,
   ContactFactory,
@@ -90,26 +101,38 @@ export interface WorkerFixtures {
 let oauthFlowInProgress = false;
 
 /**
+ * Helper to wait for OAuth lock with proper timeout
+ * Uses Promise-based waiting instead of polling loops
+ */
+async function waitForOAuthLock(timeoutMs: number = 30000): Promise<boolean> {
+  const startTime = Date.now();
+  while (oauthFlowInProgress && Date.now() - startTime < timeoutMs) {
+    console.log(
+      '🔐 [Worker Auth] Waiting for ongoing OAuth flow to complete...'
+    );
+    await new Promise(resolve => setTimeout(resolve, 1000));
+  }
+  return !oauthFlowInProgress;
+}
+
+/**
  * Complete OAuth flow once per worker and store authentication state
  * Uses the real Hydra OAuth provider for authentic E2E testing
+ *
+ * RELIABILITY IMPROVEMENTS:
+ * - Uses waitForURL instead of polling loops
+ * - Uses web-first assertions for element readiness
+ * - Uses waitForResponse for API call completion
+ * - Removed all waitForTimeout calls where possible
  */
 async function completeWorkerOAuthFlow(browser: any): Promise<AuthState> {
   // Wait for any ongoing OAuth flow to complete with timeout
-  let waitAttempts = 0;
-  const maxWaitAttempts = 30; // 30 seconds max wait
-  while (oauthFlowInProgress && waitAttempts < maxWaitAttempts) {
-    console.log(
-      `🔐 [Worker Auth] Waiting for ongoing OAuth flow to complete... (${waitAttempts}/${maxWaitAttempts})`
-    );
-    await new Promise(resolve => setTimeout(resolve, 1000));
-    waitAttempts++;
-  }
-
-  if (oauthFlowInProgress && waitAttempts >= maxWaitAttempts) {
+  const lockAcquired = await waitForOAuthLock(30000);
+  if (!lockAcquired) {
     console.warn(
       '🔐 [Worker Auth] OAuth flow wait timed out, proceeding anyway'
     );
-    oauthFlowInProgress = false; // Reset the flag to prevent permanent blocking
+    oauthFlowInProgress = false;
   }
 
   oauthFlowInProgress = true;
@@ -119,80 +142,47 @@ async function completeWorkerOAuthFlow(browser: any): Promise<AuthState> {
   const page = await context.newPage();
 
   try {
-    // Step 1: Navigate to login page
+    // Step 1: Navigate to login page and wait for OAuth button to be ready
     console.log('🔐 [Worker Auth] Navigating to login page...');
     await page.goto('http://localhost:3000/auth/login');
-    await page.waitForLoadState('networkidle');
 
-    // Step 2: Find and click OAuth button
-    const oauthButtons = page.locator('button:has-text("Continue with")');
-    await oauthButtons.first().waitFor({ timeout: 10000 });
+    // Wait for OAuth button to be visible and enabled (web-first assertion)
+    const oauthButton = page
+      .locator('button:has-text("Continue with")')
+      .first();
+    await playwrightExpect(oauthButton).toBeVisible({ timeout: 15000 });
+    await playwrightExpect(oauthButton).toBeEnabled({ timeout: 5000 });
 
     console.log(
       '🔐 [Worker Auth] Clicking OAuth button to start real OAuth flow...'
     );
 
-    // Set up callback tracking before clicking OAuth button
-    let callbackCompleted = false;
-    let callbackError: string | null = null;
-
-    // Track callback requests to detect completion
-    page.on('response', async (response: any) => {
-      if (response.url().includes('/auth/callback')) {
-        console.log(`🔐 [Worker Auth] Callback response: ${response.status()}`);
-        if (response.ok()) {
-          callbackCompleted = true;
-        } else {
-          try {
-            const errorData = await response.text();
-            callbackError = `${response.status()}: ${errorData}`;
-          } catch {
-            callbackError = `${response.status()}: Unknown error`;
-          }
-        }
-      }
-    });
-
-    // Click OAuth button and wait for navigation
-    // WebKit sometimes needs different handling for redirects
-    const browserName = page.context().browser()?.browserType().name();
-
-    if (browserName === 'webkit') {
-      // WebKit-specific handling: click and wait with longer timeout
-      await oauthButtons.first().click();
-      await page.waitForTimeout(2000); // Give WebKit more time to process
-
-      // Wait for URL change or timeout
-      let attempts = 0;
-      const maxAttempts = 15; // 15 seconds total
-      let currentUrl = page.url();
-
-      while (currentUrl.includes('/auth/login') && attempts < maxAttempts) {
-        await page.waitForTimeout(1000);
-        currentUrl = page.url();
-        attempts++;
-      }
-
-      console.log('🔐 [Worker Auth] WebKit URL after OAuth click:', currentUrl);
-    } else {
-      // Standard handling for Chromium/Firefox
-      await Promise.all([
-        page.waitForNavigation({ timeout: 30000 }),
-        oauthButtons.first().click(),
-      ]);
-    }
+    // Step 2: Click OAuth button and wait for navigation away from login page
+    // Use waitForURL to wait for redirect - more reliable than waitForNavigation
+    await Promise.all([
+      page.waitForURL((url: URL) => !url.toString().includes('/auth/login'), {
+        timeout: 30000,
+      }),
+      oauthButton.click(),
+    ]);
 
     const currentUrl = page.url();
     console.log('🔐 [Worker Auth] Current URL after OAuth click:', currentUrl);
 
-    // Step 4: Handle OAuth provider interaction
+    // Step 3: Handle OAuth provider interaction
     if (currentUrl.includes('localhost:4646') || currentUrl.includes('hydra')) {
       console.log(
         '🔐 [Worker Auth] Successfully redirected to Hydra OAuth provider'
       );
 
-      // Wait for automatic redirect back to callback (Hydra is configured with skip_consent: true)
-      await page.waitForNavigation({ timeout: 30000 });
+      // Wait for Hydra to process and redirect back to callback
+      // Hydra is configured with skip_consent: true, so it auto-redirects
+      await page.waitForURL(
+        (url: URL) =>
+          url.toString().includes('/auth/callback') ||
+          url.toString().includes('/contacts'),
+        { timeout: 30000 }
+      );
 
       const callbackUrl = page.url();
       console.log('🔐 [Worker Auth] URL after Hydra processing:', callbackUrl);
@@ -200,96 +190,50 @@ async function completeWorkerOAuthFlow(browser: any): Promise<AuthState> {
       if (callbackUrl.includes('/auth/callback')) {
         console.log('🔐 [Worker Auth] OAuth callback received, processing...');
 
-        // Wait for callback processing to complete or fail
-        const maxWaitTime = 15000; // 15 seconds
-        const startTime = Date.now();
-        let waitAttempts = 0;
-        const maxWaitAttempts = 30; // 30 attempts = 15 seconds
-
-        while (
-          !callbackCompleted &&
-          !callbackError &&
-          Date.now() - startTime < maxWaitTime &&
-          waitAttempts < maxWaitAttempts
-        ) {
-          await page.waitForTimeout(500);
-          waitAttempts++;
-
-          // Log progress every 5 seconds
-          if (waitAttempts % 10 === 0) {
-            console.log(
-              `🔐 [Worker Auth] Still waiting for callback... (${waitAttempts * 0.5}s)`
-            );
-          }
-        }
-
-        if (callbackError) {
-          throw new Error(`OAuth callback failed: ${callbackError}`);
-        }
-
-        if (!callbackCompleted) {
-          console.warn(
-            '🔐 [Worker Auth] OAuth callback timed out, but continuing...'
-          );
-          // Don't throw error, just log warning and continue
-          // This allows tests to continue even if OAuth doesn't complete perfectly
-        }
-
-        // Wait for final redirect after successful callback
-        await page.waitForNavigation({ timeout: 10000 }).catch(() => {
-          // Navigation might not happen if already on the target page
-          console.log(
-            '🔐 [Worker Auth] No final navigation (might already be on target page)'
-          );
-        });
-
-        const finalUrl = page.url();
-        console.log(
-          '🔐 [Worker Auth] Final URL after callback processing:',
-          finalUrl
+        // Wait for callback to complete by watching for the final redirect
+        // The callback page should redirect to /contacts or another authenticated route
+        await page.waitForURL(
+          (url: URL) => !url.toString().includes('/auth/callback'),
+          { timeout: 15000 }
         );
 
-        // Verify authentication by checking auth status
-        const statusResponse = await page.request.get('/api/auth/status');
-        if (statusResponse.ok()) {
-          const authStatus = await statusResponse.json();
-          if (authStatus.authenticated) {
-            console.log(
-              '🔐 [Worker Auth] Real OAuth authentication successful!',
-              authStatus.user?.email
-            );
-          } else {
-            throw new Error(
-              'Authentication status check failed: not authenticated'
-            );
-          }
-        } else {
-          throw new Error(
-            `Authentication status check failed: ${statusResponse.status()}`
-          );
-        }
+        console.log('🔐 [Worker Auth] Final URL after callback:', page.url());
       }
     } else if (currentUrl.includes('/auth/login')) {
       console.warn(
-        '🔐 [Worker Auth] Still on login page - OAuth provider may not be configured properly'
+        '🔐 [Worker Auth] Still on login page - OAuth provider may not be configured'
       );
       throw new Error(
         'OAuth provider not responding - cannot complete real OAuth flow'
       );
     } else {
-      console.log('🔐 [Worker Auth] Unexpected redirect to:', currentUrl);
+      console.log(
+        '🔐 [Worker Auth] Already redirected past OAuth provider:',
+        currentUrl
+      );
     }
 
-    // Wait a bit more for browser to fully process the session cookie
+    // Step 4: Verify authentication using web-first assertion pattern
+    // Uses toPass for automatic retry instead of manual loops
+    console.log('🔐 [Worker Auth] Verifying authentication...');
+
+    let authUser: string | undefined;
+    await playwrightExpect(async () => {
+      const statusResponse = await page.request.get('/api/auth/status');
+      playwrightExpect(statusResponse.ok()).toBe(true);
+
+      const authStatus = await statusResponse.json();
+      playwrightExpect(authStatus.authenticated).toBe(true);
+      authUser = authStatus.user?.email;
+    }).toPass({ timeout: 5000 });
+
     console.log(
-      '🔐 [Worker Auth] Waiting for browser to process session cookie...'
+      '🔐 [Worker Auth] Real OAuth authentication successful!',
+      authUser
     );
-    await page.waitForTimeout(1000);
 
-    // Extract real authentication state from the browser context
+    // Step 5: Extract authentication cookies from browser context
     const cookies = await context.cookies();
-
-    // Filter and validate cookies
     const validCookies = cookies
       .filter((cookie: any) => cookie.name && cookie.value)
       .map((cookie: any) => ({
@@ -307,14 +251,13 @@ async function completeWorkerOAuthFlow(browser: any): Promise<AuthState> {
     return {
       cookies: validCookies,
       sessionData: {
-        // These will be populated from the real OAuth flow
-        oauth_provider: 'generic', // The Hydra provider
+        oauth_provider: 'generic',
         oauth_tokens: JSON.stringify({
-          access_token: 'real-oauth-token', // This will be set by the real flow
+          access_token: 'real-oauth-token',
           token_type: 'Bearer',
         }),
         user_session: JSON.stringify({
-          id: 'real-user-id', // This will be set by the real flow
+          id: 'real-user-id',
           email: 'test@example.com',
           name: 'Test User',
         }),
@@ -323,9 +266,9 @@ async function completeWorkerOAuthFlow(browser: any): Promise<AuthState> {
     };
   } catch (error) {
     console.error('🔐 [Worker Auth] Real OAuth flow failed:', error);
-    throw error; // Don't fall back to mocks - fail the test if real OAuth doesn't work
+    throw error;
   } finally {
-    oauthFlowInProgress = false; // Release the lock
+    oauthFlowInProgress = false;
     await context.close();
   }
 }

@@ -289,32 +289,27 @@ test.describe('Login Page - Unauthenticated Users', () => {
       // Navigate to login page
       await unauthenticatedPage.goto('/auth/login');
 
-      // Wait for providers to load
-      await unauthenticatedPage.waitForLoadState('networkidle');
-
-      // Capture login requests to verify the flow is triggered
-      let loginRequested = false;
-      const requestPromise =
-        unauthenticatedPage.waitForRequest('**/api/auth/login');
-
-      await unauthenticatedPage.route('**/api/auth/login', route => {
-        loginRequested = true;
-        route.continue();
-      });
-
+      // Wait for OAuth button to be ready using web-first assertion
       const oauthButtons = unauthenticatedPage.locator(
         'button:has-text("Continue with")'
       );
       const firstButton = oauthButtons.first();
-      await expect(firstButton).toBeVisible();
+      await expect(firstButton).toBeVisible({ timeout: 10000 });
+      await expect(firstButton).toBeEnabled();
 
-      // Focus and press Enter
+      // Set up request tracking BEFORE triggering the action
+      const requestPromise = unauthenticatedPage.waitForRequest(
+        request => request.url().includes('/api/auth/login'),
+        { timeout: 10000 }
+      );
+
+      // Focus and press Enter to trigger OAuth flow
       await firstButton.focus();
       await unauthenticatedPage.keyboard.press('Enter');
 
       // Wait for the login request to be made
-      await requestPromise;
-      expect(loginRequested).toBe(true);
+      const request = await requestPromise;
+      expect(request.url()).toContain('/api/auth/login');
     });
   });
 
