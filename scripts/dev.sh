@@ -245,8 +245,8 @@ docker_rebuild_prod() {
     docker compose down
 
     # Rebuild images with no cache
-    log_info "Rebuilding backend, frontend, and nginx images (no cache)..."
-    docker compose build --no-cache backend frontend nginx
+    log_info "Rebuilding backend, frontend, nginx, and google-contacts-worker images (no cache)..."
+    docker compose build --no-cache backend frontend nginx google-contacts-worker
 
     log_success "Production Docker images rebuilt successfully!"
     log_info "Use 'docker compose up -d' to start the services with new images"

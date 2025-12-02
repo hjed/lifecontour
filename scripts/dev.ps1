@@ -82,8 +82,8 @@ function Invoke-DockerRebuildProd {
     docker compose down
 
     # Rebuild images with no cache
-    Write-Info "Rebuilding backend, frontend, and nginx images (no cache)..."
-    docker compose build --no-cache backend frontend nginx
+    Write-Info "Rebuilding backend, frontend, nginx, and google-contacts-worker images (no cache)..."
+    docker compose build --no-cache backend frontend nginx google-contacts-worker
 
     Write-Success "Production Docker images rebuilt successfully!"
     Write-Info "Use 'docker compose up -d' to start the services with new images"

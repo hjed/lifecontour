@@ -67,11 +67,13 @@ scripts\rebuild-docker.bat help
 ### Development Services
 - `backend-dev`: Python FastAPI backend with development dependencies
 - `frontend-dev`: Next.js frontend with hot reload
+- `google-contacts-worker-dev`: Google Contacts integration worker with development dependencies
 
 ### Production Services
 - `backend`: Python FastAPI backend (production build)
 - `frontend`: Next.js frontend (production build)
 - `nginx`: Nginx reverse proxy
+- `google-contacts-worker`: Google Contacts integration worker (production build)
 
 ## Detailed Process
 
