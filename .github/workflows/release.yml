@@ -30,7 +30,7 @@ jobs:
 
     strategy:
       matrix:
-        component: [backend, frontend]
+        component: [backend, frontend, google-contacts-worker]
 
     steps:
       - name: Checkout code
@@ -55,11 +55,20 @@ jobs:
             type=ref,event=tag
             type=raw,value=latest,enable={{is_default_branch}}
 
+      - name: Set Dockerfile path
+        id: dockerfile
+        run: |
+          if [ "${{ matrix.component }}" = "google-contacts-worker" ]; then
+            echo "path=integration_workers/google_contacts/Dockerfile" >> $GITHUB_OUTPUT
+          else
+            echo "path=docker/${{ matrix.component }}/Dockerfile" >> $GITHUB_OUTPUT
+          fi
+
       - name: Build and push Docker image
         uses: docker/build-push-action@v6
         with:
           context: .
-          file: ./docker/${{ matrix.component }}/Dockerfile
+          file: ${{ steps.dockerfile.outputs.path }}
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
@@ -126,6 +135,7 @@ jobs:
 
             - Backend: `${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-backend:${{ steps.version.outputs.version }}`
             - Frontend: `${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-frontend:${{ steps.version.outputs.version }}`
+            - Google Contacts Worker: `${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-google-contacts-worker:${{ steps.version.outputs.version }}`
 
             ## Installation
 
