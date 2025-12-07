@@ -19,11 +19,15 @@ interface ActivityItemProps {
 
 /**
  * Format a field name for display (e.g., "first_name" -> "First Name").
+ * Handles edge cases like empty strings and ensures proper capitalization.
  */
 function formatFieldName(fieldName: string): string {
+  if (!fieldName) return '';
   return fieldName
-    .replace(/_/g, ' ')
-    .replace(/\b\w/g, char => char.toUpperCase());
+    .split('_')
+    .filter(word => word.length > 0)
+    .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+    .join(' ');
 }
 
 /**

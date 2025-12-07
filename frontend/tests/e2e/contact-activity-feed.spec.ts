@@ -62,9 +62,9 @@ test.describe('Contact Activity Feed', () => {
     await expect(page).toHaveURL(new RegExp(`/contacts/${contactId}`));
 
     // Wait for page content to load
-    await expect(
-      page.getByRole('heading', { name: /Activity/i })
-    ).toBeVisible({ timeout: 10000 });
+    await expect(page.getByRole('heading', { name: /Activity/i })).toBeVisible({
+      timeout: 10000,
+    });
 
     // Check for empty state or "No activity" message
     // The empty state should show either "No activity" or similar message
@@ -102,9 +102,9 @@ test.describe('Contact Activity Feed', () => {
     await expect(page).toHaveURL(new RegExp(`/contacts/${contact.id}`));
 
     // Wait for Activity Feed to load
-    await expect(
-      page.getByRole('heading', { name: /Activity/i })
-    ).toBeVisible({ timeout: 10000 });
+    await expect(page.getByRole('heading', { name: /Activity/i })).toBeVisible({
+      timeout: 10000,
+    });
 
     // The Activity Feed should be present on the page
     // Check for the activity section wrapper
@@ -158,4 +158,3 @@ test.describe('Contact Activity Feed', () => {
     expect(historyData.data.length).toBeLessThanOrEqual(5);
   });
 });
-

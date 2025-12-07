@@ -10,12 +10,13 @@
 
 'use client';
 
-import { useState } from 'react';
+import { useState, useCallback, useRef } from 'react';
 import { Clock, Loader2 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { useContactHistory } from '@/lib/api/contacts';
 import { ActivityItem } from './ActivityItem';
+import type { ContactHistoryResource } from '@/types/contacts';
 
 interface ActivityFeedProps {
   readonly contactId: string;
@@ -32,21 +33,54 @@ export function ActivityFeed({
   pageSize = DEFAULT_PAGE_SIZE,
 }: ActivityFeedProps) {
   const [page, setPage] = useState(1);
+  const [allActivities, setAllActivities] = useState<ContactHistoryResource[]>(
+    []
+  );
+  // Track the previous contactId to detect changes
+  const [prevContactId, setPrevContactId] = useState(contactId);
 
   const { data, isLoading, error, isFetching } = useContactHistory(contactId, {
     page,
     limit: pageSize,
   });
 
-  const activities = data?.data ?? [];
+  // Reset when contactId changes
+  if (contactId !== prevContactId) {
+    setPrevContactId(contactId);
+    setPage(1);
+    setAllActivities([]);
+  }
+
+  // Accumulate activities as pages are loaded
+  // Use a ref to track what data we've already processed
+  const processedDataRef = useRef<string | null>(null);
+  const currentDataKey = data
+    ? `${page}-${data.data.map(a => a.id).join(',')}`
+    : null;
+
+  if (currentDataKey && processedDataRef.current !== currentDataKey) {
+    processedDataRef.current = currentDataKey;
+    if (page === 1) {
+      // Reset on first page
+      setAllActivities(data!.data);
+    } else {
+      // Append new activities, avoiding duplicates
+      const existingIds = new Set(allActivities.map(a => a.id));
+      const newActivities = data!.data.filter(a => !existingIds.has(a.id));
+      if (newActivities.length > 0) {
+        setAllActivities(prev => [...prev, ...newActivities]);
+      }
+    }
+  }
+
   const hasMore =
     data?.meta?.current_page !== undefined &&
     data?.meta?.page_count !== undefined &&
     data.meta.current_page < data.meta.page_count;
 
-  const handleLoadMore = () => {
+  const handleLoadMore = useCallback(() => {
     setPage(prev => prev + 1);
-  };
+  }, []);
 
   return (
     <Card className={className} data-testid='activity-feed'>
@@ -74,7 +108,7 @@ export function ActivityFeed({
         )}
 
         {/* Empty state */}
-        {!isLoading && !error && activities.length === 0 && (
+        {!isLoading && !error && allActivities.length === 0 && (
           <div className='text-muted-foreground py-8 text-center'>
             <Clock className='mx-auto mb-4 h-12 w-12 opacity-50' />
             <p className='text-lg font-medium'>No activity yet</p>
@@ -83,9 +117,9 @@ export function ActivityFeed({
         )}
 
         {/* Activity list */}
-        {!isLoading && !error && activities.length > 0 && (
+        {!isLoading && !error && allActivities.length > 0 && (
           <div className='space-y-1'>
-            {activities.map(activity => (
+            {allActivities.map(activity => (
               <ActivityItem key={activity.id} activity={activity} />
             ))}
 

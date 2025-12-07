@@ -18,10 +18,14 @@ if TYPE_CHECKING:
         ContactRelationshipUpdateData,
         ContactUpdateData,
     )
+from datetime import datetime
+
 from app.api.contacts.schemas import (
     ContactAddressAttributes,
     ContactAddressResource,
     ContactAttributes,
+    ContactHistoryAttributes,
+    ContactHistoryResource,
     ContactMethodAttributes,
     ContactMethodResource,
     ContactNoteAttributes,
@@ -41,6 +45,7 @@ from app.core.contacts.models.entities import (
     ContactRelationship,
     Tag,
 )
+from app.core.contacts.models.repositories import ContactFieldHistoryEntry
 
 
 def _validate_entity_id(entity_id: int | None, entity_type: str) -> None:
@@ -398,13 +403,6 @@ class ContactHistoryConverter:
         entry: ContactFieldHistoryEntry,
     ) -> ContactHistoryResource:
         """Convert ContactFieldHistoryEntry to API resource."""
-        from datetime import datetime
-
-        from app.api.contacts.schemas import (
-            ContactHistoryAttributes,
-            ContactHistoryResource,
-        )
-
         # Parse created_at if it's a string
         created_at = None
         if entry.created_at:
@@ -434,9 +432,3 @@ class ContactHistoryConverter:
             id=str(entry.id),
             attributes=attributes,
         )
-
-
-# Import for type checking
-if TYPE_CHECKING:
-    from app.api.contacts.schemas import ContactHistoryResource
-    from app.core.contacts.models.repositories import ContactFieldHistoryEntry

@@ -2,7 +2,7 @@
  * Tests for ActivityFeed component.
  */
 
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ActivityFeed } from '../ActivityFeed';
 import type { ContactHistoryListResponse } from '@/types/contacts';
@@ -98,7 +98,7 @@ describe('ActivityFeed', () => {
     ).toBeInTheDocument();
   });
 
-  it('renders activity items', () => {
+  it('renders activity items', async () => {
     mockUseContactHistory.mockReturnValue({
       data: mockHistoryData,
       isLoading: false,
@@ -109,7 +109,11 @@ describe('ActivityFeed', () => {
     render(<ActivityFeed contactId='123' />, { wrapper: createWrapper() });
 
     expect(screen.getByTestId('activity-feed')).toBeInTheDocument();
-    expect(screen.getByTestId('activity-item-1')).toBeInTheDocument();
+
+    // Wait for useEffect to populate allActivities
+    await waitFor(() => {
+      expect(screen.getByTestId('activity-item-1')).toBeInTheDocument();
+    });
     expect(screen.getByTestId('activity-item-2')).toBeInTheDocument();
   });
 
@@ -127,7 +131,7 @@ describe('ActivityFeed', () => {
     expect(screen.getByText(/Failed to load history/i)).toBeInTheDocument();
   });
 
-  it('shows Load More button when there are more items', () => {
+  it('shows Load More button when there are more items', async () => {
     mockUseContactHistory.mockReturnValue({
       data: {
         data: mockHistoryData.data,
@@ -140,12 +144,15 @@ describe('ActivityFeed', () => {
 
     render(<ActivityFeed contactId='123' />, { wrapper: createWrapper() });
 
-    expect(
-      screen.getByRole('button', { name: /Load More/i })
-    ).toBeInTheDocument();
+    // Wait for useEffect to populate allActivities
+    await waitFor(() => {
+      expect(
+        screen.getByRole('button', { name: /Load More/i })
+      ).toBeInTheDocument();
+    });
   });
 
-  it('does not show Load More button when all items are loaded', () => {
+  it('does not show Load More button when all items are loaded', async () => {
     mockUseContactHistory.mockReturnValue({
       data: mockHistoryData,
       isLoading: false,
@@ -154,6 +161,11 @@ describe('ActivityFeed', () => {
     });
 
     render(<ActivityFeed contactId='123' />, { wrapper: createWrapper() });
+
+    // Wait for useEffect to populate allActivities
+    await waitFor(() => {
+      expect(screen.getByTestId('activity-item-1')).toBeInTheDocument();
+    });
 
     expect(
       screen.queryByRole('button', { name: /Load More/i })
