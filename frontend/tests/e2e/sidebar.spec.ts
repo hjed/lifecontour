@@ -283,8 +283,11 @@ test.describe('Sidebar Navigation', () => {
       await page.getByRole('button', { name: /journals/i }).click();
       await expect(page.getByRole('link', { name: 'Etc' })).toBeVisible();
 
-      // Switch to mobile
+      // Switch to mobile - wait for UI to stabilize after viewport change
       await page.setViewportSize({ width: 375, height: 667 });
+      // Wait for desktop sidebar to hide and mobile nav trigger to appear
+      await expect(page.getByTestId('sidebar')).not.toBeVisible();
+      await expect(page.getByTestId('mobile-nav-trigger')).toBeVisible();
       await page.getByTestId('mobile-nav-trigger').click();
 
       // Journals should still be expanded

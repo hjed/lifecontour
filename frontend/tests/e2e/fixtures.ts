@@ -485,19 +485,12 @@ export const test = base.extend<TestFixtures, WorkerFixtures>({
     // Create contacts with tags (tags will be auto-created)
     const createdContacts = await dataManager.createContacts(dataset.contacts);
 
-    // Extract created tags from the contacts
-    const createdTags: { id: string; name: string }[] = [];
-    for (const contact of createdContacts) {
-      if (contact.tags) {
-        for (const tagName of contact.tags) {
-          if (!createdTags.find(tag => tag.name === tagName)) {
-            // We don't have the tag ID here, but we can use the tag name
-            // The actual tag IDs will be available when the contacts are fetched
-            createdTags.push({ id: `tag-${tagName}`, name: tagName });
-          }
-        }
-      }
-    }
+    // Use the original dataset tags to avoid race conditions in tag extraction
+    // The dataset.tags contains the authoritative list of tags that were intended to be created
+    const createdTags = dataset.tags.map(tag => ({
+      id: `tag-${tag.name}`,
+      name: tag.name,
+    }));
 
     testCleanup(async () => {
       await dataManager.cleanup();
@@ -519,17 +512,11 @@ export const test = base.extend<TestFixtures, WorkerFixtures>({
     // Create contacts with tags (tags will be auto-created)
     const createdContacts = await dataManager.createContacts(dataset.contacts);
 
-    // Extract created tags from the contacts
-    const createdTags: { id: string; name: string }[] = [];
-    for (const contact of createdContacts) {
-      if (contact.tags) {
-        for (const tagName of contact.tags) {
-          if (!createdTags.find(tag => tag.name === tagName)) {
-            createdTags.push({ id: `tag-${tagName}`, name: tagName });
-          }
-        }
-      }
-    }
+    // Use the original dataset tags to avoid race conditions in tag extraction
+    const createdTags = dataset.tags.map(tag => ({
+      id: `tag-${tag.name}`,
+      name: tag.name,
+    }));
 
     testCleanup(async () => {
       await dataManager.cleanup();
@@ -551,17 +538,11 @@ export const test = base.extend<TestFixtures, WorkerFixtures>({
     // Create contacts with tags (tags will be auto-created)
     const createdContacts = await dataManager.createContacts(dataset.contacts);
 
-    // Extract created tags from the contacts
-    const createdTags: { id: string; name: string }[] = [];
-    for (const contact of createdContacts) {
-      if (contact.tags) {
-        for (const tagName of contact.tags) {
-          if (!createdTags.find(tag => tag.name === tagName)) {
-            createdTags.push({ id: `tag-${tagName}`, name: tagName });
-          }
-        }
-      }
-    }
+    // Use the original dataset tags to avoid race conditions in tag extraction
+    const createdTags = dataset.tags.map(tag => ({
+      id: `tag-${tag.name}`,
+      name: tag.name,
+    }));
 
     testCleanup(async () => {
       await dataManager.cleanup();
@@ -583,17 +564,11 @@ export const test = base.extend<TestFixtures, WorkerFixtures>({
     // Create contacts with tags (tags will be auto-created)
     const createdContacts = await dataManager.createContacts(dataset.contacts);
 
-    // Extract created tags from the contacts
-    const createdTags: { id: string; name: string }[] = [];
-    for (const contact of createdContacts) {
-      if (contact.tags) {
-        for (const tagName of contact.tags) {
-          if (!createdTags.find(tag => tag.name === tagName)) {
-            createdTags.push({ id: `tag-${tagName}`, name: tagName });
-          }
-        }
-      }
-    }
+    // Use the original dataset tags to avoid race conditions in tag extraction
+    const createdTags = dataset.tags.map(tag => ({
+      id: `tag-${tag.name}`,
+      name: tag.name,
+    }));
 
     testCleanup(async () => {
       await dataManager.cleanup();
@@ -615,17 +590,11 @@ export const test = base.extend<TestFixtures, WorkerFixtures>({
     // Create contacts with tags (tags will be auto-created)
     const createdContacts = await dataManager.createContacts(dataset.contacts);
 
-    // Extract created tags from the contacts
-    const createdTags: { id: string; name: string }[] = [];
-    for (const contact of createdContacts) {
-      if (contact.tags) {
-        for (const tagName of contact.tags) {
-          if (!createdTags.find(tag => tag.name === tagName)) {
-            createdTags.push({ id: `tag-${tagName}`, name: tagName });
-          }
-        }
-      }
-    }
+    // Use the original dataset tags to avoid race conditions in tag extraction
+    const createdTags = dataset.tags.map(tag => ({
+      id: `tag-${tag.name}`,
+      name: tag.name,
+    }));
 
     testCleanup(async () => {
       await dataManager.cleanup();
@@ -647,17 +616,11 @@ export const test = base.extend<TestFixtures, WorkerFixtures>({
     // Create contacts with tags (tags will be auto-created)
     const createdContacts = await dataManager.createContacts(dataset.contacts);
 
-    // Extract created tags from the contacts
-    const createdTags: { id: string; name: string }[] = [];
-    for (const contact of createdContacts) {
-      if (contact.tags) {
-        for (const tagName of contact.tags) {
-          if (!createdTags.find(tag => tag.name === tagName)) {
-            createdTags.push({ id: `tag-${tagName}`, name: tagName });
-          }
-        }
-      }
-    }
+    // Use the original dataset tags to avoid race conditions in tag extraction
+    const createdTags = dataset.tags.map(tag => ({
+      id: `tag-${tag.name}`,
+      name: tag.name,
+    }));
 
     testCleanup(async () => {
       await dataManager.cleanup();
@@ -681,17 +644,11 @@ export const test = base.extend<TestFixtures, WorkerFixtures>({
     // Create contacts with tags (tags will be auto-created)
     const createdContacts = await dataManager.createContacts(dataset.contacts);
 
-    // Extract created tags from the contacts
-    const createdTags: { id: string; name: string }[] = [];
-    for (const contact of createdContacts) {
-      if (contact.tags) {
-        for (const tagName of contact.tags) {
-          if (!createdTags.find(tag => tag.name === tagName)) {
-            createdTags.push({ id: `tag-${tagName}`, name: tagName });
-          }
-        }
-      }
-    }
+    // Use the original dataset tags to avoid race conditions in tag extraction
+    const createdTags = dataset.tags.map(tag => ({
+      id: `tag-${tag.name}`,
+      name: tag.name,
+    }));
 
     testCleanup(async () => {
       await dataManager.cleanup();
