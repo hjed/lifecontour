@@ -9,6 +9,7 @@ from core_shared.models.base import Base
 from core_shared.models.external_reference import ExternalReference
 from core_shared.models.outbox import OutboxEvent
 from core_shared.models.sync_metadata import SyncMetadata, SyncStatus
+from core_shared.models.user_google_auth import UserGoogleAuth
 
 __all__ = [
     "Base",
@@ -16,4 +17,5 @@ __all__ = [
     "SyncStatus",
     "ExternalReference",
     "OutboxEvent",
+    "UserGoogleAuth",
 ]

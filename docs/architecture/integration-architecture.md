@@ -341,6 +341,107 @@ class WorkerSettings:
 
 **Journal Integration Example**: Calendar events sync bi-directionally with journal EVENT type entries. See [Journal System Specification](../journal-system-specification.md) for sync behavior and attendee handling.
 
+### 5. OAuth Authentication Flow
+
+**Challenge**: User must authorize access before workers can sync data
+**Solution**: OAuth flow in main API, token usage in workers
+
+**Key Principle**: OAuth authorization is user-initiated and synchronous, making it appropriate for the main API layer. Workers should only consume stored tokens, not initiate OAuth flows.
+
+#### Architecture Split
+
+**Main API (`app/core/integrations/<service>_oauth/` or `app/api/integrations/`):**
+- Generate OAuth authorization URLs with appropriate scopes
+- Handle OAuth callbacks (code exchange)
+- Store encrypted tokens in database
+- Provide account connection/disconnection endpoints
+- User-facing status endpoints
+
+**Integration Workers (`integration_workers/<service>/`):**
+- Read encrypted tokens from database
+- Refresh expired tokens using refresh tokens
+- Make API calls to external services
+- Publish outbox events for data processing
+
+**Shared Code (`core_shared/`):**
+- `UserGoogleAuth` model (or equivalent) for token storage
+- `FernetEncryptionService` for encryption/decryption
+- Common constants and exceptions
+
+#### OAuth Flow Sequence
+
+```
+User clicks "Connect Google"
+        │
+        ▼
+┌─────────────────────────┐
+│   Main API (core/)      │
+│   Generate auth URL     │
+│   with state token      │
+└─────────────────────────┘
+        │
+        ▼
+┌─────────────────────────┐
+│   Google OAuth Server   │
+│   User grants consent   │
+└─────────────────────────┘
+        │
+        ▼
+┌─────────────────────────┐
+│   Main API (core/)      │
+│   Handle callback       │
+│   Exchange code for     │
+│   tokens, encrypt,      │
+│   store in DB           │
+└─────────────────────────┘
+        │
+        ▼
+┌─────────────────────────┐
+│   Worker (async)        │
+│   Read tokens from DB   │
+│   Refresh if expired    │
+│   Call external APIs    │
+│   Publish outbox events │
+└─────────────────────────┘
+        │
+        ▼
+┌─────────────────────────┐
+│   Outbox Processor      │
+│   (core/)               │
+│   Process sync events   │
+│   Create/update         │
+│   internal entities     │
+└─────────────────────────┘
+```
+
+#### Why Not OAuth in Workers?
+
+1. **OAuth is synchronous**: User must be redirected and return with a code
+2. **OAuth needs HTTP endpoints**: Workers don't expose HTTP endpoints
+3. **OAuth is user-initiated**: Workers run background tasks
+4. **Token refresh IS in workers**: Because it's async and doesn't need user interaction
+
+#### Implementation Pattern
+
+```python
+# core_shared/models/user_google_auth.py
+class UserGoogleAuth(Base):
+    """Shared model for OAuth token storage."""
+    __tablename__ = "user_google_auth"
+    id: Mapped[int]
+    user_id: Mapped[str]
+    google_account_email: Mapped[str]
+    encrypted_access_token: Mapped[bytes]
+    encrypted_refresh_token: Mapped[bytes | None]
+    expires_at: Mapped[datetime]
+
+# core_shared/encryption.py
+class FernetEncryptionService:
+    """Shared encryption for both API and workers."""
+    def encrypt(self, plaintext: str) -> bytes: ...
+    def decrypt(self, ciphertext: bytes) -> str: ...
+```
+
 ## Deployment Architecture
 
 ### Development Environment

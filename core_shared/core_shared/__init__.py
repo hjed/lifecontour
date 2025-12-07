@@ -21,19 +21,38 @@ from core_shared.database.engine import (
     create_async_engine_from_url,
     create_session_factory,
 )
-from core_shared.models import Base, ExternalReference, SyncMetadata, SyncStatus
+from core_shared.encryption import (
+    EncryptionServiceProtocol,
+    FernetEncryptionService,
+    generate_encryption_key,
+)
+from core_shared.models import (
+    Base,
+    ExternalReference,
+    SyncMetadata,
+    SyncStatus,
+    UserGoogleAuth,
+)
 
 __all__ = [
+    # Models
     "Base",
     "SyncMetadata",
     "ExternalReference",
     "SyncStatus",
+    "UserGoogleAuth",
+    # Database utilities
     "create_async_engine_from_url",
     "create_session_factory",
+    # Integration base classes
     "BaseIntegrationService",
     "SyncResult",
     "SyncDirection",
     "IntegrationError",
     "SyncError",
     "TransformationError",
+    # Encryption utilities
+    "EncryptionServiceProtocol",
+    "FernetEncryptionService",
+    "generate_encryption_key",
 ]

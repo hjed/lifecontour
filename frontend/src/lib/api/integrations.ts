@@ -24,7 +24,7 @@ import type {
   SyncTriggerRequest,
   SyncType,
 } from '@/types/integrations';
-import type { JsonApiErrorResponse } from '@/types/api';
+import { handleApiResponse, handleApiVoidResponse } from '@/lib/api/utils';
 
 // Polling configuration constants
 const INITIAL_POLL_COUNT = 3;
@@ -45,37 +45,6 @@ export const integrationKeys = {
   health: () => [...integrationKeys.all, 'health'] as const,
   stats: () => [...integrationKeys.all, 'stats'] as const,
 };
-
-// Error handling helper
-async function handleApiResponse<T>(response: Response): Promise<T> {
-  if (!response.ok) {
-    try {
-      const errorData: JsonApiErrorResponse = await response.json();
-
-      // Validate error structure and provide appropriate message
-      let errorMessage: string;
-      if (
-        Array.isArray(errorData.errors) &&
-        errorData.errors.length > 0 &&
-        typeof errorData.errors[0].detail === 'string'
-      ) {
-        errorMessage = errorData.errors[0].detail;
-      } else {
-        errorMessage = `Request failed with status ${response.status}`;
-      }
-
-      throw new Error(errorMessage);
-    } catch (parseError) {
-      // If JSON parsing fails, include the parsing error in the message for better debugging
-      const errorDetails =
-        parseError instanceof Error ? parseError.message : String(parseError);
-      throw new Error(
-        `HTTP ${response.status}: ${response.statusText} (JSON parsing failed: ${errorDetails})`
-      );
-    }
-  }
-  return response.json();
-}
 
 // API Functions
 export async function fetchGoogleContactsStatus(): Promise<GoogleContactsStatusResponse> {
@@ -206,17 +175,7 @@ export async function disconnectGoogleAccount(email: string): Promise<void> {
       credentials: 'include',
     }
   );
-
-  if (!response.ok) {
-    try {
-      const errorData: JsonApiErrorResponse = await response.json();
-      const errorMessage =
-        errorData.errors?.[0]?.detail || 'Failed to disconnect';
-      throw new Error(errorMessage);
-    } catch {
-      throw new Error(`HTTP ${response.status}: Failed to disconnect`);
-    }
-  }
+  await handleApiVoidResponse(response, 'Failed to disconnect Google account');
 }
 
 export async function disconnectGoogleContacts(): Promise<void> {
@@ -224,17 +183,7 @@ export async function disconnectGoogleContacts(): Promise<void> {
     method: 'POST',
     credentials: 'include',
   });
-
-  if (!response.ok) {
-    try {
-      const errorData: JsonApiErrorResponse = await response.json();
-      const errorMessage =
-        errorData.errors?.[0]?.detail || 'Failed to disconnect';
-      throw new Error(errorMessage);
-    } catch {
-      throw new Error(`HTTP ${response.status}: Failed to disconnect`);
-    }
-  }
+  await handleApiVoidResponse(response, 'Failed to disconnect Google Contacts');
 }
 
 export async function cancelSyncJob(jobId: string): Promise<void> {
@@ -245,17 +194,7 @@ export async function cancelSyncJob(jobId: string): Promise<void> {
       credentials: 'include',
     }
   );
-
-  if (!response.ok) {
-    try {
-      const errorData: JsonApiErrorResponse = await response.json();
-      const errorMessage =
-        errorData.errors?.[0]?.detail || 'Failed to cancel sync job';
-      throw new Error(errorMessage);
-    } catch {
-      throw new Error(`HTTP ${response.status}: Failed to cancel sync job`);
-    }
-  }
+  await handleApiVoidResponse(response, 'Failed to cancel sync job');
 }
 
 // React Query Hooks

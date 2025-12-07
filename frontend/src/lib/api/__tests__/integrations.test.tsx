@@ -101,11 +101,13 @@ describe('Integration API Functions', () => {
       mockFetch.mockResolvedValueOnce({
         ok: false,
         status: 401,
+        statusText: 'Unauthorized',
+        headers: new Headers({ 'content-type': 'application/json' }),
         json: async () => mockError,
       } as Response);
 
       await expect(fetchGoogleContactsStatus()).rejects.toThrow(
-        'HTTP 401: undefined'
+        'Authentication required'
       );
     });
   });

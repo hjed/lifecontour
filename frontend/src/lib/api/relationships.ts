@@ -14,12 +14,12 @@ import {
   ContactRelationshipUpdateData,
   ContactRelationshipFormData,
 } from '@/types/contacts';
-import { JsonApiErrorResponse } from '@/types/api';
 import {
   API_ENDPOINTS,
   ERROR_MESSAGES,
   SUCCESS_MESSAGES,
 } from '@/lib/constants';
+import { handleApiResponse, handleApiVoidResponse } from '@/lib/api/utils';
 
 // Types for relationship types API
 export interface EnumValue {
@@ -29,32 +29,6 @@ export interface EnumValue {
 
 export interface RelationshipTypesResponse {
   relationship_types: EnumValue[];
-}
-
-/**
- * Helper function to handle API error responses safely
- */
-async function handleApiError(
-  response: Response,
-  defaultMessage: string
-): Promise<never> {
-  let errorMessage = defaultMessage;
-  const contentType = response.headers.get('content-type');
-
-  if (contentType && contentType.includes('application/json')) {
-    try {
-      const errorData: JsonApiErrorResponse = await response.json();
-      errorMessage = errorData.errors?.[0]?.detail || errorMessage;
-    } catch {
-      // If JSON parsing fails, use default message with status info
-      errorMessage = `${defaultMessage} (Status: ${response.status} ${response.statusText})`;
-    }
-  } else {
-    // Non-JSON response, include status info
-    errorMessage = `${defaultMessage} (Status: ${response.status} ${response.statusText})`;
-  }
-
-  throw new Error(errorMessage);
 }
 
 // Query Keys
@@ -83,11 +57,10 @@ export async function fetchContactRelationships(
     }
   );
 
-  if (!response.ok) {
-    await handleApiError(response, ERROR_MESSAGES.FETCH_FAILED);
-  }
-
-  return response.json();
+  return handleApiResponse<ContactRelationshipListResponse>(
+    response,
+    ERROR_MESSAGES.FETCH_FAILED
+  );
 }
 
 export async function fetchContactRelationship(
@@ -105,11 +78,10 @@ export async function fetchContactRelationship(
     }
   );
 
-  if (!response.ok) {
-    await handleApiError(response, ERROR_MESSAGES.FETCH_FAILED);
-  }
-
-  return response.json();
+  return handleApiResponse<ContactRelationshipResponse>(
+    response,
+    ERROR_MESSAGES.FETCH_FAILED
+  );
 }
 
 async function createContactRelationship(
@@ -133,11 +105,10 @@ async function createContactRelationship(
     }
   );
 
-  if (!response.ok) {
-    await handleApiError(response, ERROR_MESSAGES.CREATE_FAILED);
-  }
-
-  return response.json();
+  return handleApiResponse<ContactRelationshipResponse>(
+    response,
+    ERROR_MESSAGES.CREATE_FAILED
+  );
 }
 
 async function updateContactRelationship(
@@ -163,11 +134,10 @@ async function updateContactRelationship(
     }
   );
 
-  if (!response.ok) {
-    await handleApiError(response, ERROR_MESSAGES.UPDATE_FAILED);
-  }
-
-  return response.json();
+  return handleApiResponse<ContactRelationshipResponse>(
+    response,
+    ERROR_MESSAGES.UPDATE_FAILED
+  );
 }
 
 async function deleteContactRelationship(
@@ -182,9 +152,7 @@ async function deleteContactRelationship(
     }
   );
 
-  if (!response.ok) {
-    await handleApiError(response, ERROR_MESSAGES.DELETE_FAILED);
-  }
+  await handleApiVoidResponse(response, ERROR_MESSAGES.DELETE_FAILED);
 }
 
 // React Query Hooks
@@ -298,11 +266,10 @@ export function useDeleteContactRelationship() {
 export async function fetchRelationshipTypes(): Promise<RelationshipTypesResponse> {
   const response = await fetch(`${API_ENDPOINTS.CONTACTS}/relationship-types`);
 
-  if (!response.ok) {
-    await handleApiError(response, 'Failed to fetch relationship types');
-  }
-
-  return response.json();
+  return handleApiResponse<RelationshipTypesResponse>(
+    response,
+    'Failed to fetch relationship types'
+  );
 }
 
 /**

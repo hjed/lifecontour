@@ -16,12 +16,12 @@ import {
   ContactFilters,
   TagListResponse,
 } from '@/types/contacts';
-import { JsonApiErrorResponse } from '@/types/api';
 import {
   API_ENDPOINTS,
   ERROR_MESSAGES,
   SUCCESS_MESSAGES,
 } from '@/lib/constants';
+import { handleApiResponse, handleApiVoidResponse } from '@/lib/api/utils';
 
 // Query Keys
 export const contactKeys = {
@@ -71,14 +71,10 @@ export async function fetchContacts(
     },
   });
 
-  if (!response.ok) {
-    const errorData: JsonApiErrorResponse = await response.json();
-    throw new Error(
-      errorData.errors?.[0]?.detail || ERROR_MESSAGES.FETCH_FAILED
-    );
-  }
-
-  return response.json();
+  return handleApiResponse<ContactListResponse>(
+    response,
+    ERROR_MESSAGES.FETCH_FAILED
+  );
 }
 
 async function fetchContact(id: string): Promise<ContactResponse> {
@@ -89,14 +85,10 @@ async function fetchContact(id: string): Promise<ContactResponse> {
     },
   });
 
-  if (!response.ok) {
-    const errorData: JsonApiErrorResponse = await response.json();
-    throw new Error(
-      errorData.errors?.[0]?.detail || ERROR_MESSAGES.FETCH_FAILED
-    );
-  }
-
-  return response.json();
+  return handleApiResponse<ContactResponse>(
+    response,
+    ERROR_MESSAGES.FETCH_FAILED
+  );
 }
 
 async function createContact(data: ContactFormData): Promise<ContactResponse> {
@@ -114,14 +106,10 @@ async function createContact(data: ContactFormData): Promise<ContactResponse> {
     body: JSON.stringify({ data: requestData }),
   });
 
-  if (!response.ok) {
-    const errorData: JsonApiErrorResponse = await response.json();
-    throw new Error(
-      errorData.errors?.[0]?.detail || ERROR_MESSAGES.CREATE_FAILED
-    );
-  }
-
-  return response.json();
+  return handleApiResponse<ContactResponse>(
+    response,
+    ERROR_MESSAGES.CREATE_FAILED
+  );
 }
 
 async function updateContact(
@@ -143,14 +131,10 @@ async function updateContact(
     body: JSON.stringify({ data: requestData }),
   });
 
-  if (!response.ok) {
-    const errorData: JsonApiErrorResponse = await response.json();
-    throw new Error(
-      errorData.errors?.[0]?.detail || ERROR_MESSAGES.UPDATE_FAILED
-    );
-  }
-
-  return response.json();
+  return handleApiResponse<ContactResponse>(
+    response,
+    ERROR_MESSAGES.UPDATE_FAILED
+  );
 }
 
 async function deleteContact(id: string): Promise<void> {
@@ -159,12 +143,7 @@ async function deleteContact(id: string): Promise<void> {
     credentials: 'include',
   });
 
-  if (!response.ok) {
-    const errorData: JsonApiErrorResponse = await response.json();
-    throw new Error(
-      errorData.errors?.[0]?.detail || ERROR_MESSAGES.DELETE_FAILED
-    );
-  }
+  await handleApiVoidResponse(response, ERROR_MESSAGES.DELETE_FAILED);
 }
 
 async function searchContacts(
@@ -194,14 +173,10 @@ async function searchContacts(
     },
   });
 
-  if (!response.ok) {
-    const errorData: JsonApiErrorResponse = await response.json();
-    throw new Error(
-      errorData.errors?.[0]?.detail || ERROR_MESSAGES.SEARCH_FAILED
-    );
-  }
-
-  return response.json();
+  return handleApiResponse<ContactListResponse>(
+    response,
+    ERROR_MESSAGES.SEARCH_FAILED
+  );
 }
 
 async function fetchTags(): Promise<TagListResponse> {
@@ -212,14 +187,10 @@ async function fetchTags(): Promise<TagListResponse> {
     },
   });
 
-  if (!response.ok) {
-    const errorData: JsonApiErrorResponse = await response.json();
-    throw new Error(
-      errorData.errors?.[0]?.detail || ERROR_MESSAGES.FETCH_FAILED
-    );
-  }
-
-  return response.json();
+  return handleApiResponse<TagListResponse>(
+    response,
+    ERROR_MESSAGES.FETCH_FAILED
+  );
 }
 
 export async function toggleContactFavourite(
@@ -236,14 +207,10 @@ export async function toggleContactFavourite(
     }
   );
 
-  if (!response.ok) {
-    const errorData: JsonApiErrorResponse = await response.json();
-    throw new Error(
-      errorData.errors?.[0]?.detail || ERROR_MESSAGES.UPDATE_FAILED
-    );
-  }
-
-  return response.json();
+  return handleApiResponse<ContactResponse>(
+    response,
+    ERROR_MESSAGES.UPDATE_FAILED
+  );
 }
 
 // React Query Hooks
@@ -392,14 +359,10 @@ export async function updateContactField(
     }
   );
 
-  if (!response.ok) {
-    const errorData: JsonApiErrorResponse = await response.json();
-    const errorMessage =
-      errorData.errors?.[0]?.detail || ERROR_MESSAGES.UPDATE_FAILED;
-    throw new Error(errorMessage);
-  }
-
-  return response.json();
+  return handleApiResponse<ContactResponse>(
+    response,
+    ERROR_MESSAGES.UPDATE_FAILED
+  );
 }
 
 export function useUpdateContactField() {

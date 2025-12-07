@@ -125,6 +125,9 @@ describe('Contacts API', () => {
     it('should handle fetch error', async () => {
       mockFetch.mockResolvedValueOnce({
         ok: false,
+        status: 500,
+        statusText: 'Internal Server Error',
+        headers: new Headers({ 'content-type': 'application/json' }),
         json: async () => ({
           errors: [{ detail: 'Server error' }],
         }),
