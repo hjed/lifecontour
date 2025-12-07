@@ -28,16 +28,20 @@ jest.mock('@/lib/api/contacts', () => ({
   useUpdateContactField: jest.fn(),
 }));
 
+// Create trackable mock for router
+const mockRouterPush = jest.fn();
+const mockRouter = {
+  push: mockRouterPush,
+  replace: jest.fn(),
+  prefetch: jest.fn(),
+  back: jest.fn(),
+  forward: jest.fn(),
+  refresh: jest.fn(),
+};
+
 // Mock Next.js navigation hooks
 jest.mock('next/navigation', () => ({
-  useRouter: jest.fn(() => ({
-    push: jest.fn(),
-    replace: jest.fn(),
-    prefetch: jest.fn(),
-    back: jest.fn(),
-    forward: jest.fn(),
-    refresh: jest.fn(),
-  })),
+  useRouter: jest.fn(() => mockRouter),
   usePathname: jest.fn(() => '/contacts/1'),
   useSearchParams: jest.fn(() => new URLSearchParams()),
   useParams: jest.fn(() => ({ id: '1' })),
@@ -65,6 +69,7 @@ describe('ContactDetailPage', () => {
     contactTestUtils.setupContactTest();
     setupMocks.clearMocks();
     setupMocks.fetch();
+    mockRouterPush.mockClear();
 
     // Mock authenticated session for all tests
     (fetch as jest.Mock).mockResolvedValue({
@@ -233,7 +238,7 @@ describe('ContactDetailPage', () => {
     });
     await user.click(backButton);
 
-    expect(window.location.href).toBe('/contacts');
+    expect(mockRouterPush).toHaveBeenCalledWith('/contacts');
   });
 
   it('handles delete confirmation', async () => {

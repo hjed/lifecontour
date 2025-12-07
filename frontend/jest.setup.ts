@@ -145,7 +145,7 @@ declare global {
   };
 }
 
-global.__mockRouter = {
+globalThis.__mockRouter = {
   push: mockPush,
   replace: mockReplace,
   prefetch: mockPrefetch,

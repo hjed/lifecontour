@@ -8,7 +8,7 @@
 'use client';
 
 import { useState } from 'react';
-import { useParams } from 'next/navigation';
+import { useParams, useRouter } from 'next/navigation';
 import { ArrowLeft, Trash2, Mail, Phone, MapPin, Calendar } from 'lucide-react';
 
 import { format } from 'date-fns';
@@ -134,6 +134,7 @@ export default function ContactDetailPage() {
 
 function ContactDetailPageContent() {
   const params = useParams();
+  const router = useRouter();
   const contactId = params.id as string;
 
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
@@ -147,7 +148,7 @@ function ContactDetailPageContent() {
   const handleDelete = async () => {
     try {
       await deleteContactMutation.mutateAsync(contactId);
-      window.location.href = '/contacts';
+      router.push('/contacts');
     } catch (error) {
       // Error is handled by the mutation
       console.error('Failed to delete contact:', error);
@@ -203,7 +204,7 @@ function ContactDetailPageContent() {
         <Button
           variant='ghost'
           size='sm'
-          onClick={() => (window.location.href = '/contacts')}
+          onClick={() => router.push('/contacts')}
         >
           <ArrowLeft className='mr-2 h-4 w-4' />
           Back to Contacts
