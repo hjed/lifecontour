@@ -1,6 +1,6 @@
 # Iteration 4: Journal System - Core & Base Types
 
-**Status:** 🟡 PLANNED
+**Status:** 🟢 IN PROGRESS
 **Dependencies:** Iteration 2 (Integration Architecture Foundation)
 **Goal:** Build comprehensive journal system with hierarchical structure, base types, and integration preparation
 
@@ -32,48 +32,67 @@ This iteration establishes the journal system foundation following the [journal 
 
 ## Tasks
 
-### ITER4-001: Journal Domain Foundation 🟡 PLANNED
+### ITER4-001: Journal Domain Foundation 🟢 IN PROGRESS
 **Description:** Establish base journal entity with hierarchical structure and validation
 **Strategy:** Single focused task for core domain model
 **Specification Reference:** [Domain Model](../journal-system-specification.md#domain-model)
+**PR:** [#210](https://github.com/hjed/personal-management-system/pull/210) - Awaiting CI
 
-**PR Size:** ~6 files (domain model, validation, migration, tests)
+**PR Size:** ~18 files (domain model, validation, migration, repository, DI, tests)
+
+**Implementation Notes:**
+- Used Integer IDs instead of UUID for consistency with contacts domain (better SQL performance)
+- Used VARCHAR(50) for user_id to match existing user_google_auth patterns (no users table yet)
+- Entity placed in `backend/app/core/journal/models/` following existing domain patterns
+- Repository includes hierarchy queries (get_children, get_ancestors, get_depth)
 
 **Acceptance Criteria:**
-- [ ] Create `Journal` entity in `core_shared/models/` with all required fields:
-  - `id` (UUID), `user_id`, `title` (max 500 chars), `content` (markdown)
+- [x] Create `Journal` entity in `backend/app/core/journal/models/` with all required fields:
+  - `id` (Integer), `user_id`, `title` (max 500 chars), `content` (markdown)
   - `event_date_range` (start_date, end_date as UTC timestamps)
   - `parent_id` (nullable, for hierarchy), `order` (integer)
   - `created_at`, `updated_at`
-- [ ] Implement hierarchical validation:
-  - Maximum nesting depth: 5 levels
-  - Prevent cycles (parent cannot be descendant)
-  - `event_date_range.start` <= `event_date_range.end`
+- [x] Implement hierarchical validation:
+  - Maximum nesting depth: 5 levels (constant MAX_HIERARCHY_DEPTH)
+  - Repository provides get_depth() for cycle prevention
+  - `event_date_range.start` <= `event_date_range.end` (EventDateRange value object)
   - Future dates allowed for planned events
-- [ ] Create `journals` table migration with proper indexes:
+- [x] Create `journals` table migration with proper indexes:
   - Index on `event_date_range` for date queries
   - Index on `parent_id` for hierarchy queries
   - Index on `user_id` for user filtering
-  - Foreign key constraints with proper cascading
-- [ ] Implement child ordering logic (by event_date_range.start, then order field)
-- [ ] Write unit tests for domain validation rules
-- [ ] Write integration tests for database constraints
-- [ ] Document domain model in code comments
+  - Foreign key constraints with proper cascading (ON DELETE SET NULL)
+- [x] Implement child ordering logic (by event_date_range.start, then order field)
+- [x] Write unit tests for domain validation rules (18 tests)
+- [x] Write integration tests for database constraints
+- [x] Document domain model in code comments
 
-**Database Schema:**
+**Files Created:**
+- `backend/app/core/journal/models/entities.py` - Journal entity
+- `backend/app/core/journal/models/value_objects.py` - EventDateRange
+- `backend/app/core/journal/models/constants.py` - MAX_HIERARCHY_DEPTH, MAX_TITLE_LENGTH
+- `backend/app/core/journal/models/exceptions.py` - Domain exceptions
+- `backend/app/core/journal/models/repositories.py` - JournalRepository interface
+- `backend/app/core/journal/adapters/sql/journal_repository.py` - SqlJournalRepository
+- `backend/app/infrastructure/di/journal.py` - Dishka DI provider
+- `backend/app/migrations/versions/0009_create_journals_table.py` - Migration
+- `backend/tests/unit/journal/test_entities.py` - Unit tests
+- `backend/tests/integration/journal/test_journal_repository_integration.py` - Integration tests
+
+**Database Schema (Actual):**
 ```sql
 CREATE TABLE journals (
-    id UUID PRIMARY KEY,
-    user_id UUID NOT NULL REFERENCES users(id),
+    id SERIAL PRIMARY KEY,
+    user_id VARCHAR(50) NOT NULL,
     title VARCHAR(500) NOT NULL,
     content TEXT NOT NULL,
     event_date_range_start TIMESTAMP WITH TIME ZONE NOT NULL,
     event_date_range_end TIMESTAMP WITH TIME ZONE NOT NULL,
-    parent_id UUID REFERENCES journals(id) ON DELETE SET NULL,
+    parent_id INTEGER REFERENCES journals(id) ON DELETE SET NULL,
     "order" INTEGER,
     created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
-    CONSTRAINT event_date_range_valid CHECK (event_date_range_start <= event_date_range_end)
+    CONSTRAINT ck_journals_event_date_range_valid CHECK (event_date_range_start <= event_date_range_end)
 );
 ```
 

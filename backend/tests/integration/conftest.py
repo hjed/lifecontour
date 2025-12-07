@@ -227,6 +227,7 @@ class DockerManager:
 # SQL DDL statements for test database schema (each statement executed separately)
 TEST_DATABASE_SCHEMA_STATEMENTS = [
     # Drop tables if they exist (in reverse dependency order)
+    "DROP TABLE IF EXISTS journals CASCADE",
     "DROP TABLE IF EXISTS contact_relationships CASCADE",
     "DROP TABLE IF EXISTS contact_tags CASCADE",
     "DROP TABLE IF EXISTS contact_notes CASCADE",
@@ -344,6 +345,25 @@ TEST_DATABASE_SCHEMA_STATEMENTS = [
     )""",
     """CREATE INDEX idx_user_google_auth_user_id ON user_google_auth (user_id)""",
     """CREATE INDEX idx_user_google_auth_email ON user_google_auth (google_account_email)""",
+    # Journals table
+    """CREATE TABLE journals (
+        id SERIAL PRIMARY KEY,
+        user_id VARCHAR(50) NOT NULL,
+        title VARCHAR(500) NOT NULL,
+        content TEXT NOT NULL,
+        event_date_range_start TIMESTAMP WITH TIME ZONE NOT NULL,
+        event_date_range_end TIMESTAMP WITH TIME ZONE NOT NULL,
+        parent_id INTEGER REFERENCES journals(id) ON DELETE SET NULL,
+        "order" INTEGER,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL,
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL,
+        CONSTRAINT ck_journals_event_date_range_valid CHECK (event_date_range_start <= event_date_range_end)
+    )""",
+    """CREATE INDEX idx_journals_user_id ON journals (user_id)""",
+    """CREATE INDEX idx_journals_parent_id ON journals (parent_id)""",
+    """CREATE INDEX idx_journals_event_date_range ON journals (event_date_range_start, event_date_range_end)""",
+    """CREATE INDEX idx_journals_child_ordering ON journals (parent_id, event_date_range_start, "order")""",
+    """CREATE INDEX idx_journals_created_at ON journals (created_at)""",
 ]
 
 
