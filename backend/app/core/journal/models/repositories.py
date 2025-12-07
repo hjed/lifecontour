@@ -1,8 +1,12 @@
 """Repository interfaces for the journal domain."""
 
 from abc import ABC, abstractmethod
+from uuid import UUID
 
+from .calendar import Calendar
+from .calendar_info import CalendarInfo
 from .entities import Journal
+from .mood_data import MoodData
 
 
 class JournalRepository(ABC):
@@ -138,5 +142,184 @@ class JournalRepository(ABC):
 
         Returns:
             Total count of journals
+        """
+        pass
+
+
+class CalendarRepository(ABC):
+    """
+    Repository interface for calendar operations.
+
+    Calendars are used to organize journals and optionally sync with Google Calendar.
+    """
+
+    @abstractmethod
+    async def find_by_id(self, calendar_id: UUID) -> Calendar | None:
+        """
+        Find a calendar by ID.
+
+        Args:
+            calendar_id: The calendar UUID to look up
+
+        Returns:
+            The Calendar if found, None otherwise
+        """
+        pass
+
+    @abstractmethod
+    async def save(self, calendar: Calendar) -> Calendar:
+        """
+        Save a calendar (insert or update).
+
+        Args:
+            calendar: The calendar to save
+
+        Returns:
+            The saved calendar with updated fields (id, timestamps)
+        """
+        pass
+
+    @abstractmethod
+    async def delete(self, calendar_id: UUID) -> None:
+        """
+        Delete a calendar by ID.
+
+        Args:
+            calendar_id: The calendar UUID to delete
+        """
+        pass
+
+    @abstractmethod
+    async def get_all(self, user_id: str) -> list[Calendar]:
+        """
+        Get all calendars for a user.
+
+        Args:
+            user_id: The user ID to filter by
+
+        Returns:
+            List of calendars
+        """
+        pass
+
+    @abstractmethod
+    async def get_synced_calendars(self, user_id: str) -> list[Calendar]:
+        """
+        Get all calendars synced to Google Calendar for a user.
+
+        Args:
+            user_id: The user ID to filter by
+
+        Returns:
+            List of synced calendars
+        """
+        pass
+
+
+class CalendarInfoRepository(ABC):
+    """
+    Repository interface for calendar info (EVENT type) operations.
+
+    A journal has the EVENT type if a CalendarInfo row exists for its journal_id.
+    """
+
+    @abstractmethod
+    async def find_by_journal_id(self, journal_id: int) -> CalendarInfo | None:
+        """
+        Find calendar info by journal ID.
+
+        Args:
+            journal_id: The journal ID to look up
+
+        Returns:
+            The CalendarInfo if found (journal has EVENT type), None otherwise
+        """
+        pass
+
+    @abstractmethod
+    async def save(self, calendar_info: CalendarInfo) -> CalendarInfo:
+        """
+        Save calendar info (insert or update).
+
+        This effectively adds or updates the EVENT type for a journal.
+
+        Args:
+            calendar_info: The calendar info to save
+
+        Returns:
+            The saved calendar info with updated timestamps
+        """
+        pass
+
+    @abstractmethod
+    async def delete(self, journal_id: int) -> None:
+        """
+        Delete calendar info by journal ID.
+
+        This effectively removes the EVENT type from a journal.
+
+        Args:
+            journal_id: The journal ID to delete calendar info for
+        """
+        pass
+
+    @abstractmethod
+    async def get_by_calendar_id(self, calendar_id: UUID) -> list[CalendarInfo]:
+        """
+        Get all calendar info entries for a calendar.
+
+        Args:
+            calendar_id: The calendar UUID to filter by
+
+        Returns:
+            List of calendar info entries
+        """
+        pass
+
+
+class MoodDataRepository(ABC):
+    """
+    Repository interface for mood data (MOOD_RATING type) operations.
+
+    A journal has the MOOD_RATING type if a MoodData row exists for its journal_id.
+    """
+
+    @abstractmethod
+    async def find_by_journal_id(self, journal_id: int) -> MoodData | None:
+        """
+        Find mood data by journal ID.
+
+        Args:
+            journal_id: The journal ID to look up
+
+        Returns:
+            The MoodData if found (journal has MOOD_RATING type), None otherwise
+        """
+        pass
+
+    @abstractmethod
+    async def save(self, mood_data: MoodData) -> MoodData:
+        """
+        Save mood data (insert or update).
+
+        This effectively adds or updates the MOOD_RATING type for a journal.
+
+        Args:
+            mood_data: The mood data to save
+
+        Returns:
+            The saved mood data with updated timestamps
+        """
+        pass
+
+    @abstractmethod
+    async def delete(self, journal_id: int) -> None:
+        """
+        Delete mood data by journal ID.
+
+        This effectively removes the MOOD_RATING type from a journal.
+
+        Args:
+            journal_id: The journal ID to delete mood data for
         """
         pass

@@ -227,7 +227,10 @@ class DockerManager:
 # SQL DDL statements for test database schema (each statement executed separately)
 TEST_DATABASE_SCHEMA_STATEMENTS = [
     # Drop tables if they exist (in reverse dependency order)
+    "DROP TABLE IF EXISTS journal_mood_data CASCADE",
+    "DROP TABLE IF EXISTS journal_calendar_info CASCADE",
     "DROP TABLE IF EXISTS journals CASCADE",
+    "DROP TABLE IF EXISTS calendars CASCADE",
     "DROP TABLE IF EXISTS contact_relationships CASCADE",
     "DROP TABLE IF EXISTS contact_tags CASCADE",
     "DROP TABLE IF EXISTS contact_notes CASCADE",
@@ -364,6 +367,41 @@ TEST_DATABASE_SCHEMA_STATEMENTS = [
     """CREATE INDEX idx_journals_event_date_range ON journals (event_date_range_start, event_date_range_end)""",
     """CREATE INDEX idx_journals_child_ordering ON journals (parent_id, event_date_range_start, "order")""",
     """CREATE INDEX idx_journals_created_at ON journals (created_at)""",
+    # Calendars table
+    """CREATE TABLE calendars (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        user_id VARCHAR(50) NOT NULL,
+        name VARCHAR(100) NOT NULL,
+        color VARCHAR(7) NOT NULL,
+        description TEXT,
+        is_synced_to_google BOOLEAN DEFAULT FALSE NOT NULL,
+        google_calendar_id VARCHAR(255),
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL,
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL
+    )""",
+    """CREATE INDEX idx_calendars_user_id ON calendars (user_id)""",
+    # Journal calendar info table (EVENT type)
+    """CREATE TABLE journal_calendar_info (
+        journal_id INTEGER PRIMARY KEY REFERENCES journals(id) ON DELETE CASCADE,
+        calendar_id UUID NOT NULL REFERENCES calendars(id) ON DELETE CASCADE,
+        start_time TIME,
+        end_time TIME,
+        is_all_day BOOLEAN DEFAULT FALSE NOT NULL,
+        location VARCHAR(500),
+        sync_invitees BOOLEAN DEFAULT FALSE NOT NULL,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL,
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL
+    )""",
+    """CREATE INDEX idx_journal_calendar_info_calendar_id ON journal_calendar_info (calendar_id)""",
+    # Journal mood data table (MOOD_RATING type)
+    """CREATE TABLE journal_mood_data (
+        journal_id INTEGER PRIMARY KEY REFERENCES journals(id) ON DELETE CASCADE,
+        mood_value INTEGER CHECK (mood_value IS NULL OR (mood_value >= 1 AND mood_value <= 10)),
+        mood_label VARCHAR(50),
+        energy_level INTEGER CHECK (energy_level IS NULL OR (energy_level >= 1 AND energy_level <= 10)),
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL,
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL
+    )""",
 ]
 
 
