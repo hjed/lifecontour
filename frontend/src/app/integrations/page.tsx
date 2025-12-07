@@ -96,10 +96,8 @@ function IntegrationsPageContent() {
     error: historyError,
   } = useSyncHistory({ limit: 5 });
 
-  const {
-    data: accountsData,
-    isLoading: accountsLoading,
-  } = useGoogleAccounts();
+  const { data: accountsData, isLoading: accountsLoading } =
+    useGoogleAccounts();
 
   const {
     mutate: triggerSync,
@@ -258,7 +256,9 @@ function IntegrationsPageContent() {
                   {/* Connected Accounts */}
                   {googleAccounts.length > 0 && (
                     <div className='space-y-2'>
-                      <h4 className='text-sm font-medium'>Connected Accounts</h4>
+                      <h4 className='text-sm font-medium'>
+                        Connected Accounts
+                      </h4>
                       {googleAccounts.map(account => (
                         <div
                           key={account.id}
@@ -274,7 +274,9 @@ function IntegrationsPageContent() {
                           <Button
                             variant='ghost'
                             size='sm'
-                            onClick={() => handleDisconnectAccount(account.email)}
+                            onClick={() =>
+                              handleDisconnectAccount(account.email)
+                            }
                             disabled={disconnectLoading}
                           >
                             <Unlink className='h-4 w-4' />

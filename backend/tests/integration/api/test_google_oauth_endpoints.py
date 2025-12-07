@@ -5,7 +5,7 @@ Tests the real API endpoints with mocked Google OAuth services.
 """
 
 from datetime import UTC, datetime, timedelta
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import patch
 
 import pytest
 from dishka import Provider, Scope, make_async_container, provide
@@ -16,7 +16,6 @@ from app.core.integrations.google_oauth import (
     GoogleAccount,
     GoogleAccountNotFoundError,
     GoogleOAuthConfigurationError,
-    GoogleOAuthService,
     GoogleOAuthState,
     GoogleOAuthTokens,
 )
@@ -42,44 +41,22 @@ class TestGoogleOAuthEndpoints:
         )
 
     @pytest.fixture
-    def mock_oauth_service(self) -> MagicMock:
-        """Create mock OAuth service."""
-        mock = MagicMock(spec=GoogleOAuthService)
+    def client(self, test_settings, test_user):
+        """Create authenticated test client."""
 
-        # Setup default returns
-        mock.create_oauth_state.return_value = GoogleOAuthState(
-            user_id="123",
-            nonce="test-nonce",
-            created_at=datetime.now(UTC),
-            redirect_url="/integrations",
-        )
-        mock.get_authorization_url.return_value = (
-            "https://accounts.google.com/o/oauth2/v2/auth?test=params"
-        )
-
-        return mock
-
-    @pytest.fixture
-    def client(self, test_settings, test_user, mock_oauth_service):
-        """Create authenticated test client with mocked OAuth service."""
-
-        class TestProvider(Provider):
-            """Test provider with mocked OAuth service."""
+        class TestAuthProvider(Provider):
+            """Test provider for authenticated client."""
 
             @provide(scope=Scope.REQUEST)
             def get_session_user(self) -> SessionUser:
                 return test_user  # type: ignore
-
-            @provide(scope=Scope.REQUEST)
-            def get_oauth_service(self) -> GoogleOAuthService:
-                return mock_oauth_service  # type: ignore
 
         app = create_app(settings=test_settings)
 
         test_container = make_async_container(
             DatabaseProvider(test_settings),
             InfrastructureProvider(),
-            TestProvider(),
+            TestAuthProvider(),
             ContactProvider(),
             IntegrationProvider(),
             FastapiProvider(),
@@ -94,60 +71,78 @@ class TestGoogleOAuthEndpoints:
 
         return TestClient(app)
 
-    def test_initiate_google_oauth_success(
-        self,
-        client: TestClient,
-        mock_oauth_service: MagicMock,
-    ):
+    def test_initiate_google_oauth_success(self, client: TestClient):
         """Test successful OAuth initiation."""
-        response = client.post(
-            "/api/integrations/google/oauth/connect",
-            json={"redirect_url": "/integrations"},
-        )
+        with (
+            patch(
+                "app.core.integrations.google_oauth.service.GoogleOAuthService.create_oauth_state"
+            ) as mock_create_state,
+            patch(
+                "app.core.integrations.google_oauth.service.GoogleOAuthService.get_authorization_url"
+            ) as mock_get_auth_url,
+        ):
+            mock_create_state.return_value = GoogleOAuthState(
+                user_id="123",
+                nonce="test-nonce",
+                created_at=datetime.now(UTC),
+                redirect_url="/integrations",
+            )
+            mock_get_auth_url.return_value = (
+                "https://accounts.google.com/o/oauth2/v2/auth?test=params"
+            )
 
-        assert response.status_code == 200
-        data = response.json()
-        assert "authorization_url" in data
-        assert "accounts.google.com" in data["authorization_url"]
+            response = client.post(
+                "/api/integrations/google/oauth/connect",
+                json={"redirect_url": "/integrations"},
+            )
 
-    def test_initiate_google_oauth_not_configured(
-        self,
-        client: TestClient,
-        mock_oauth_service: MagicMock,
-    ):
+            assert response.status_code == 200
+            data = response.json()
+            assert "authorization_url" in data
+            assert "accounts.google.com" in data["authorization_url"]
+
+    def test_initiate_google_oauth_not_configured(self, client: TestClient):
         """Test OAuth initiation when not configured."""
-        mock_oauth_service.get_authorization_url.side_effect = (
-            GoogleOAuthConfigurationError("Not configured")
-        )
+        with (
+            patch(
+                "app.core.integrations.google_oauth.service.GoogleOAuthService.create_oauth_state"
+            ) as mock_create_state,
+            patch(
+                "app.core.integrations.google_oauth.service.GoogleOAuthService.get_authorization_url"
+            ) as mock_get_auth_url,
+        ):
+            mock_create_state.return_value = GoogleOAuthState(
+                user_id="123",
+                nonce="test-nonce",
+                created_at=datetime.now(UTC),
+            )
+            mock_get_auth_url.side_effect = GoogleOAuthConfigurationError(
+                "Not configured"
+            )
 
-        response = client.post(
-            "/api/integrations/google/oauth/connect",
-            json={},
-        )
+            response = client.post(
+                "/api/integrations/google/oauth/connect",
+                json={},
+            )
 
-        assert response.status_code == 501
-        data = response.json()
-        assert "not configured" in data["errors"][0]["detail"].lower()
+            assert response.status_code == 501
+            data = response.json()
+            assert "not configured" in data["errors"][0]["detail"].lower()
 
-    def test_list_google_accounts_empty(
-        self,
-        client: TestClient,
-        mock_oauth_service: MagicMock,
-    ):
+    def test_list_google_accounts_empty(self, client: TestClient):
         """Test listing accounts when none connected."""
-        mock_oauth_service.get_accounts = AsyncMock(return_value=[])
+        with patch(
+            "app.core.integrations.google_oauth.service.GoogleOAuthService.get_accounts"
+        ) as mock_get_accounts:
+            mock_get_accounts.return_value = []
 
-        response = client.get("/api/integrations/google/accounts")
+            response = client.get("/api/integrations/google/accounts")
 
-        assert response.status_code == 200
-        data = response.json()
-        assert data["accounts"] == []
+            assert response.status_code == 200
+            data = response.json()
+            assert data["accounts"] == []
 
-    def test_list_google_accounts_with_accounts(
-        self,
-        client: TestClient,
-        mock_oauth_service: MagicMock,
-    ):
+    def test_list_google_accounts_with_accounts(self, client: TestClient):
         """Test listing connected accounts."""
         mock_accounts = [
             GoogleAccount(
@@ -159,61 +154,51 @@ class TestGoogleOAuthEndpoints:
                 expires_at=datetime.now(UTC) + timedelta(hours=1),
             )
         ]
-        mock_oauth_service.get_accounts = AsyncMock(return_value=mock_accounts)
 
-        response = client.get("/api/integrations/google/accounts")
+        with patch(
+            "app.core.integrations.google_oauth.service.GoogleOAuthService.get_accounts"
+        ) as mock_get_accounts:
+            mock_get_accounts.return_value = mock_accounts
 
-        assert response.status_code == 200
-        data = response.json()
-        assert len(data["accounts"]) == 1
-        assert data["accounts"][0]["email"] == "user@gmail.com"
+            response = client.get("/api/integrations/google/accounts")
 
-    def test_disconnect_google_account_success(
-        self,
-        client: TestClient,
-        mock_oauth_service: MagicMock,
-    ):
+            assert response.status_code == 200
+            data = response.json()
+            assert len(data["accounts"]) == 1
+            assert data["accounts"][0]["email"] == "user@gmail.com"
+
+    def test_disconnect_google_account_success(self, client: TestClient):
         """Test successful account disconnection."""
-        mock_oauth_service.disconnect_account = AsyncMock(return_value=True)
+        with patch(
+            "app.core.integrations.google_oauth.service.GoogleOAuthService.disconnect_account"
+        ) as mock_disconnect:
+            mock_disconnect.return_value = True
 
-        response = client.delete("/api/integrations/google/accounts/user@gmail.com")
+            response = client.delete("/api/integrations/google/accounts/user@gmail.com")
 
-        assert response.status_code == 200
-        data = response.json()
-        assert "disconnected" in data["message"].lower()
+            assert response.status_code == 200
+            data = response.json()
+            assert "disconnected" in data["message"].lower()
 
-    def test_disconnect_google_account_not_found(
-        self,
-        client: TestClient,
-        mock_oauth_service: MagicMock,
-    ):
+    def test_disconnect_google_account_not_found(self, client: TestClient):
         """Test disconnecting non-existent account."""
-        mock_oauth_service.disconnect_account = AsyncMock(
-            side_effect=GoogleAccountNotFoundError("nonexistent@gmail.com")
-        )
+        with patch(
+            "app.core.integrations.google_oauth.service.GoogleOAuthService.disconnect_account"
+        ) as mock_disconnect:
+            mock_disconnect.side_effect = GoogleAccountNotFoundError(
+                "nonexistent@gmail.com"
+            )
 
-        response = client.delete(
-            "/api/integrations/google/accounts/nonexistent@gmail.com"
-        )
+            response = client.delete(
+                "/api/integrations/google/accounts/nonexistent@gmail.com"
+            )
 
-        assert response.status_code == 404
-        data = response.json()
-        assert "not found" in data["errors"][0]["detail"].lower()
+            assert response.status_code == 404
+            data = response.json()
+            assert "not found" in data["errors"][0]["detail"].lower()
 
-    def test_oauth_callback_success(
-        self,
-        client: TestClient,
-        mock_oauth_service: MagicMock,
-    ):
+    def test_oauth_callback_success(self, client: TestClient):
         """Test successful OAuth callback."""
-        # Mock state decoding
-        mock_oauth_service.decode_state.return_value = GoogleOAuthState(
-            user_id="123",
-            nonce="test-nonce",
-            created_at=datetime.now(UTC),
-        )
-
-        # Mock token exchange
         mock_tokens = GoogleOAuthTokens(
             access_token="access-token",
             refresh_token="refresh-token",
@@ -221,14 +206,6 @@ class TestGoogleOAuthEndpoints:
             token_type="Bearer",
             scope="contacts.readonly",
         )
-        mock_oauth_service.exchange_code_for_tokens = AsyncMock(
-            return_value=mock_tokens
-        )
-
-        # Mock get user email
-        mock_oauth_service.get_user_email = AsyncMock(return_value="user@gmail.com")
-
-        # Mock save account
         mock_account = GoogleAccount(
             id=1,
             user_id="123",
@@ -237,36 +214,56 @@ class TestGoogleOAuthEndpoints:
             updated_at=datetime.now(UTC),
             expires_at=datetime.now(UTC) + timedelta(hours=1),
         )
-        mock_oauth_service.save_account = AsyncMock(return_value=mock_account)
 
-        response = client.post(
-            "/api/integrations/google/oauth/callback",
-            json={"code": "auth-code", "state": "encoded-state"},
-        )
+        with (
+            patch(
+                "app.core.integrations.google_oauth.service.GoogleOAuthService.decode_state"
+            ) as mock_decode,
+            patch(
+                "app.core.integrations.google_oauth.service.GoogleOAuthService.exchange_code_for_tokens"
+            ) as mock_exchange,
+            patch(
+                "app.core.integrations.google_oauth.service.GoogleOAuthService.get_user_email"
+            ) as mock_get_email,
+            patch(
+                "app.core.integrations.google_oauth.service.GoogleOAuthService.save_account"
+            ) as mock_save,
+        ):
+            mock_decode.return_value = GoogleOAuthState(
+                user_id="123",
+                nonce="test-nonce",
+                created_at=datetime.now(UTC),
+            )
+            mock_exchange.return_value = mock_tokens
+            mock_get_email.return_value = "user@gmail.com"
+            mock_save.return_value = mock_account
 
-        assert response.status_code == 200
-        data = response.json()
-        assert data["email"] == "user@gmail.com"
-        assert "connected successfully" in data["message"].lower()
+            response = client.post(
+                "/api/integrations/google/oauth/callback",
+                json={"code": "auth-code", "state": "encoded-state"},
+            )
 
-    def test_oauth_callback_user_mismatch(
-        self,
-        client: TestClient,
-        mock_oauth_service: MagicMock,
-    ):
+            assert response.status_code == 200
+            data = response.json()
+            assert data["email"] == "user@gmail.com"
+            assert "connected successfully" in data["message"].lower()
+
+    def test_oauth_callback_user_mismatch(self, client: TestClient):
         """Test OAuth callback with user mismatch."""
-        # Mock state with different user
-        mock_oauth_service.decode_state.return_value = GoogleOAuthState(
-            user_id="different-user-456",
-            nonce="test-nonce",
-            created_at=datetime.now(UTC),
-        )
+        with patch(
+            "app.core.integrations.google_oauth.service.GoogleOAuthService.decode_state"
+        ) as mock_decode:
+            mock_decode.return_value = GoogleOAuthState(
+                user_id="different-user-456",
+                nonce="test-nonce",
+                created_at=datetime.now(UTC),
+            )
 
-        response = client.post(
-            "/api/integrations/google/oauth/callback",
-            json={"code": "auth-code", "state": "encoded-state"},
-        )
+            response = client.post(
+                "/api/integrations/google/oauth/callback",
+                json={"code": "auth-code", "state": "encoded-state"},
+            )
 
-        assert response.status_code == 403
-        data = response.json()
-        assert "does not match" in data["errors"][0]["detail"].lower()
+            assert response.status_code == 403
+            data = response.json()
+            assert "does not match" in data["errors"][0]["detail"].lower()

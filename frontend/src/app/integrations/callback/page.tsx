@@ -71,15 +71,15 @@ export default function OAuthCallbackPage() {
   }, [searchParams, mutate, router]);
 
   return (
-    <div className="flex min-h-screen items-center justify-center">
-      <div className="text-center space-y-4">
+    <div className='flex min-h-screen items-center justify-center'>
+      <div className='space-y-4 text-center'>
         {isPending && (
           <>
-            <Loader2 className="h-12 w-12 animate-spin mx-auto text-primary" />
-            <h1 className="text-xl font-semibold">
+            <Loader2 className='text-primary mx-auto h-12 w-12 animate-spin' />
+            <h1 className='text-xl font-semibold'>
               Connecting your Google account...
             </h1>
-            <p className="text-muted-foreground">
+            <p className='text-muted-foreground'>
               Please wait while we complete the connection.
             </p>
           </>
@@ -87,11 +87,11 @@ export default function OAuthCallbackPage() {
 
         {isSuccess && (
           <>
-            <CheckCircle className="h-12 w-12 mx-auto text-green-500" />
-            <h1 className="text-xl font-semibold text-green-600">
+            <CheckCircle className='mx-auto h-12 w-12 text-green-500' />
+            <h1 className='text-xl font-semibold text-green-600'>
               Google account connected!
             </h1>
-            <p className="text-muted-foreground">
+            <p className='text-muted-foreground'>
               Redirecting you back to integrations...
             </p>
           </>
@@ -99,14 +99,14 @@ export default function OAuthCallbackPage() {
 
         {isError && (
           <>
-            <XCircle className="h-12 w-12 mx-auto text-red-500" />
-            <h1 className="text-xl font-semibold text-red-600">
+            <XCircle className='mx-auto h-12 w-12 text-red-500' />
+            <h1 className='text-xl font-semibold text-red-600'>
               Connection failed
             </h1>
-            <p className="text-muted-foreground">
+            <p className='text-muted-foreground'>
               {(error as Error)?.message || 'An error occurred'}
             </p>
-            <p className="text-sm text-muted-foreground">
+            <p className='text-muted-foreground text-sm'>
               Redirecting you back to integrations...
             </p>
           </>
@@ -115,4 +115,3 @@ export default function OAuthCallbackPage() {
     </div>
   );
 }
-
