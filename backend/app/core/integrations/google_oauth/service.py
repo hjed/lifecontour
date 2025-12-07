@@ -64,7 +64,10 @@ class GoogleOAuthService:
         self._encryption = encryption_service
         self._settings = settings
 
-        # Validate configuration
+        # Log warning for unconfigured state. We intentionally allow the service
+        # to be created without credentials because Google OAuth is an optional
+        # feature. Actual validation happens via _ensure_configured() which is
+        # called before any OAuth operations that require credentials.
         if not settings.google_client_id or not settings.google_client_secret:
             logger.warning("Google OAuth credentials not configured")
 
@@ -287,7 +290,7 @@ class GoogleOAuthService:
 
                 if not email:
                     raise GoogleOAuthTokenError(
-                        message="Email not found in Google user info"
+                        message="Email not found in Google user info - ensure email scope is granted"
                     )
 
                 return str(email)

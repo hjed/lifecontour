@@ -8,6 +8,15 @@ OAuth state management and connected account representation.
 from dataclasses import dataclass
 from datetime import datetime
 
+# Constants (defined at module level to be available for default values)
+GOOGLE_OAUTH_STATE_MAX_AGE_SECONDS = 600  # 10 minutes
+GOOGLE_CONTACTS_READONLY_SCOPE = "https://www.googleapis.com/auth/contacts.readonly"
+GOOGLE_CONTACTS_FULL_SCOPE = "https://www.googleapis.com/auth/contacts"
+GOOGLE_USERINFO_EMAIL_SCOPE = "https://www.googleapis.com/auth/userinfo.email"
+GOOGLE_OAUTH_AUTHORIZATION_URL = "https://accounts.google.com/o/oauth2/v2/auth"
+GOOGLE_OAUTH_TOKEN_URL = "https://oauth2.googleapis.com/token"
+GOOGLE_USERINFO_URL = "https://www.googleapis.com/oauth2/v2/userinfo"
+
 
 @dataclass(frozen=True)
 class GoogleOAuthState:
@@ -23,12 +32,15 @@ class GoogleOAuthState:
     created_at: datetime
     redirect_url: str | None = None
 
-    def is_expired(self, max_age_seconds: int = 600) -> bool:
+    def is_expired(
+        self, max_age_seconds: int = GOOGLE_OAUTH_STATE_MAX_AGE_SECONDS
+    ) -> bool:
         """
         Check if the OAuth state has expired.
 
         Args:
-            max_age_seconds: Maximum age in seconds (default 10 minutes)
+            max_age_seconds: Maximum age in seconds (defaults to
+                GOOGLE_OAUTH_STATE_MAX_AGE_SECONDS)
 
         Returns:
             True if state has expired
@@ -77,13 +89,3 @@ class GoogleOAuthTokens:
     expires_in: int
     token_type: str
     scope: str
-
-
-# Constants
-GOOGLE_OAUTH_STATE_MAX_AGE_SECONDS = 600  # 10 minutes
-GOOGLE_CONTACTS_READONLY_SCOPE = "https://www.googleapis.com/auth/contacts.readonly"
-GOOGLE_CONTACTS_FULL_SCOPE = "https://www.googleapis.com/auth/contacts"
-GOOGLE_USERINFO_EMAIL_SCOPE = "https://www.googleapis.com/auth/userinfo.email"
-GOOGLE_OAUTH_AUTHORIZATION_URL = "https://accounts.google.com/o/oauth2/v2/auth"
-GOOGLE_OAUTH_TOKEN_URL = "https://oauth2.googleapis.com/token"
-GOOGLE_USERINFO_URL = "https://www.googleapis.com/oauth2/v2/userinfo"

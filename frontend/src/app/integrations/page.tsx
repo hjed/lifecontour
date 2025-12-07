@@ -57,6 +57,14 @@ function formatDateGenericSafely(
   }
 }
 
+// Predefined error messages for security (prevents XSS via URL params)
+const OAUTH_ERROR_MESSAGES: Record<string, string> = {
+  oauth_cancelled: 'Google OAuth was cancelled or failed',
+  invalid_callback: 'Invalid OAuth callback',
+  connection_failed: 'Failed to connect Google account',
+  unknown: 'An unexpected error occurred',
+} as const;
+
 // Helper function for safe date formatting
 function formatDateSafely(dateString: string | null): string {
   return formatDateGenericSafely(dateString, 'PPp', 'Invalid date');
@@ -116,14 +124,6 @@ function IntegrationsPageContent() {
   const recentJobs = historyData?.data || [];
   const googleAccounts = accountsData?.accounts || [];
 
-  // Predefined error messages for security (prevents XSS via URL params)
-  const ERROR_MESSAGES: Record<string, string> = {
-    oauth_cancelled: 'Google OAuth was cancelled or failed',
-    invalid_callback: 'Invalid OAuth callback',
-    connection_failed: 'Failed to connect Google account',
-    unknown: 'An unexpected error occurred',
-  };
-
   // Show success toast when connected
   useEffect(() => {
     if (searchParams.get('connected') === 'true') {
@@ -134,7 +134,8 @@ function IntegrationsPageContent() {
     const errorParam = searchParams.get('error');
     if (errorParam) {
       // Use predefined message or fallback to generic error (XSS safe)
-      const safeMessage = ERROR_MESSAGES[errorParam] || ERROR_MESSAGES.unknown;
+      const safeMessage =
+        OAUTH_ERROR_MESSAGES[errorParam] || OAUTH_ERROR_MESSAGES.unknown;
       toast.error(safeMessage);
       window.history.replaceState({}, '', '/integrations');
     }
@@ -149,6 +150,9 @@ function IntegrationsPageContent() {
   };
 
   const handleDisconnectAccount = (email: string) => {
+    // TODO: Replace native confirm() with a custom accessible dialog component
+    // for better screen reader and keyboard support. See:
+    // https://www.w3.org/WAI/ARIA/apg/patterns/dialog-modal/
     if (confirm(`Are you sure you want to disconnect ${email}?`)) {
       disconnectAccount(email);
     }
