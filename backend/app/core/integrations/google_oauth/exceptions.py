@@ -82,3 +82,21 @@ class GoogleOAuthConfigurationError(GoogleOAuthError):
             message: Error message describing configuration issue
         """
         super().__init__(message)
+
+
+class GoogleOAuthTokenSaveError(GoogleOAuthError):
+    """Exception raised when token save operation fails."""
+
+    def __init__(self, user_id: str, email: str):
+        """
+        Initialize token save error.
+
+        Args:
+            user_id: User ID that the save was attempted for
+            email: Google account email that was being saved
+        """
+        super().__init__(
+            f"Failed to save Google OAuth tokens for user {user_id}, email {email}"
+        )
+        self.user_id = user_id
+        self.email = email

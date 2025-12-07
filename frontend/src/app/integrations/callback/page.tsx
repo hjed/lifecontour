@@ -31,19 +31,15 @@ export default function OAuthCallbackPage() {
     // Handle OAuth error from Google
     if (errorParam) {
       console.error('OAuth error from Google:', errorParam);
-      // Redirect to integrations page with error
-      router.push(
-        `/integrations?error=${encodeURIComponent('Google OAuth was cancelled or failed')}`
-      );
+      // Redirect to integrations page with error key (XSS safe)
+      router.push('/integrations?error=oauth_cancelled');
       return;
     }
 
     // Handle missing parameters
     if (!code || !state) {
       console.error('Missing OAuth parameters');
-      router.push(
-        `/integrations?error=${encodeURIComponent('Invalid OAuth callback')}`
-      );
+      router.push('/integrations?error=invalid_callback');
       return;
     }
 
@@ -72,10 +68,18 @@ export default function OAuthCallbackPage() {
 
   return (
     <div className='flex min-h-screen items-center justify-center'>
-      <div className='space-y-4 text-center'>
+      <div
+        className='space-y-4 text-center'
+        role='status'
+        aria-live='polite'
+        aria-busy={isPending}
+      >
         {isPending && (
           <>
-            <Loader2 className='text-primary mx-auto h-12 w-12 animate-spin' />
+            <Loader2
+              className='text-primary mx-auto h-12 w-12 animate-spin'
+              aria-hidden='true'
+            />
             <h1 className='text-xl font-semibold'>
               Connecting your Google account...
             </h1>

@@ -116,6 +116,14 @@ function IntegrationsPageContent() {
   const recentJobs = historyData?.data || [];
   const googleAccounts = accountsData?.accounts || [];
 
+  // Predefined error messages for security (prevents XSS via URL params)
+  const ERROR_MESSAGES: Record<string, string> = {
+    oauth_cancelled: 'Google OAuth was cancelled or failed',
+    invalid_callback: 'Invalid OAuth callback',
+    connection_failed: 'Failed to connect Google account',
+    unknown: 'An unexpected error occurred',
+  };
+
   // Show success toast when connected
   useEffect(() => {
     if (searchParams.get('connected') === 'true') {
@@ -125,7 +133,9 @@ function IntegrationsPageContent() {
     }
     const errorParam = searchParams.get('error');
     if (errorParam) {
-      toast.error(errorParam);
+      // Use predefined message or fallback to generic error (XSS safe)
+      const safeMessage = ERROR_MESSAGES[errorParam] || ERROR_MESSAGES.unknown;
+      toast.error(safeMessage);
       window.history.replaceState({}, '', '/integrations');
     }
   }, [searchParams]);

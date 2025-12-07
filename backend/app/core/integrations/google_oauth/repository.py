@@ -11,7 +11,10 @@ import structlog
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
-from app.core.integrations.google_oauth.exceptions import GoogleAccountNotFoundError
+from app.core.integrations.google_oauth.exceptions import (
+    GoogleAccountNotFoundError,
+    GoogleOAuthTokenSaveError,
+)
 from app.core.integrations.google_oauth.models import GoogleAccount
 
 logger = structlog.get_logger()
@@ -164,7 +167,7 @@ class GoogleOAuthRepository:
         )
         row = result.fetchone()
         if not row:
-            raise RuntimeError("Failed to save Google OAuth tokens")
+            raise GoogleOAuthTokenSaveError(user_id=user_id, email=email)
 
         logger.info(
             "Saved Google OAuth tokens",

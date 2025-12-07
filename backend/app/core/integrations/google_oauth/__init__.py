@@ -11,6 +11,7 @@ from app.core.integrations.google_oauth.exceptions import (
     GoogleOAuthError,
     GoogleOAuthStateError,
     GoogleOAuthTokenError,
+    GoogleOAuthTokenSaveError,
 )
 from app.core.integrations.google_oauth.models import (
     GoogleAccount,
@@ -28,6 +29,7 @@ __all__ = [
     "GoogleOAuthService",
     "GoogleOAuthStateError",
     "GoogleOAuthTokenError",
+    "GoogleOAuthTokenSaveError",
     "GoogleAccount",
     "GoogleOAuthState",
     "GoogleOAuthTokens",

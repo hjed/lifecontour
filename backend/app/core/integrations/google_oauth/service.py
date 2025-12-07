@@ -5,6 +5,8 @@ Provides OAuth2 flow management including authorization URL generation,
 token exchange, and account management for Google Contacts integration.
 """
 
+import base64
+import json
 import secrets
 from datetime import UTC, datetime, timedelta
 from urllib.parse import urlencode
@@ -109,8 +111,6 @@ class GoogleOAuthService:
         Returns:
             Encrypted state string
         """
-        import json
-
         state_data = {
             "user_id": state.user_id,
             "nonce": state.nonce,
@@ -120,8 +120,6 @@ class GoogleOAuthService:
         state_json = json.dumps(state_data)
         encrypted = self._encryption.encrypt(state_json)
         # Convert bytes to base64 string for URL safety
-        import base64
-
         return base64.urlsafe_b64encode(encrypted).decode("utf-8")
 
     def decode_state(self, encoded_state: str) -> GoogleOAuthState:
@@ -137,9 +135,6 @@ class GoogleOAuthService:
         Raises:
             GoogleOAuthStateError: If state is invalid or expired
         """
-        import base64
-        import json
-
         try:
             encrypted = base64.urlsafe_b64decode(encoded_state.encode("utf-8"))
             state_json = self._encryption.decrypt(encrypted)
