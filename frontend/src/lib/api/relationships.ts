@@ -264,7 +264,9 @@ export function useDeleteContactRelationship() {
  * Fetch all available relationship types with display names
  */
 export async function fetchRelationshipTypes(): Promise<RelationshipTypesResponse> {
-  const response = await fetch(`${API_ENDPOINTS.CONTACTS}/relationship-types`);
+  const response = await fetch(
+    `${API_ENDPOINTS.CONTACTS.BASE}/relationship-types`
+  );
 
   return handleApiResponse<RelationshipTypesResponse>(
     response,

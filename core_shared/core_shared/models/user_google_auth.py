@@ -12,6 +12,9 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from core_shared.models.base import Base
 
+# SQL function constant to avoid duplication
+SQL_NOW_FUNCTION = "now()"
+
 
 class UserGoogleAuth(Base):
     """
@@ -65,14 +68,14 @@ class UserGoogleAuth(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
-        server_default=text("now()"),
+        server_default=text(SQL_NOW_FUNCTION),
         comment="When this auth record was created",
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
-        server_default=text("now()"),
-        onupdate=text("now()"),
+        server_default=text(SQL_NOW_FUNCTION),
+        onupdate=text(SQL_NOW_FUNCTION),
         comment="When this auth record was last updated",
     )
 

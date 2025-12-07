@@ -6,7 +6,7 @@ import { fetchContacts, toggleContactFavourite } from '../contacts';
 import { ContactFilters } from '@/types/contacts';
 
 // Mock fetch globally
-global.fetch = jest.fn();
+globalThis.fetch = jest.fn();
 const mockFetch = fetch as jest.MockedFunction<typeof fetch>;
 
 describe('Contact API - Favourites', () => {

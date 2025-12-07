@@ -95,7 +95,8 @@ export async function fetchSyncHistory(
   if (filters.offset) params.append('offset', filters.offset.toString());
 
   const queryString = params.toString();
-  const url = `/api/integrations/google/contacts/sync${queryString ? `?${queryString}` : ''}`;
+  const baseUrl = '/api/integrations/google/contacts/sync';
+  const url = queryString ? `${baseUrl}?${queryString}` : baseUrl;
 
   const response = await fetch(url, {
     credentials: 'include',
@@ -290,15 +291,15 @@ export function useOAuthConnection(redirect?: (url: string) => void) {
       const url = data.data.attributes.authUrl;
       if (redirect) {
         redirect(url);
-      } else if (typeof window !== 'undefined') {
-        window.location.href = url;
-      } else {
+      } else if (typeof globalThis.window === 'undefined') {
         toast.error(
           'OAuth redirect failed: no redirect function provided and window is undefined.'
         );
         throw new Error(
           'OAuth redirect failed: no redirect function provided and window is undefined.'
         );
+      } else {
+        globalThis.window.location.href = url;
       }
     },
     onError: (error: Error) => {
@@ -356,8 +357,8 @@ export function useInitiateGoogleOAuth() {
     mutationFn: initiateGoogleOAuth,
     onSuccess: data => {
       // Redirect to Google OAuth
-      if (typeof window !== 'undefined') {
-        window.location.href = data.authorization_url;
+      if (typeof globalThis.window !== 'undefined') {
+        globalThis.window.location.href = data.authorization_url;
       }
     },
     onError: (error: Error) => {

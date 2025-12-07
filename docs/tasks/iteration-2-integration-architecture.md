@@ -198,16 +198,33 @@ The integration architecture foundation and core Google Contacts sync functional
    - Added integration tests for API controllers
    - Fixed critical security vulnerabilities identified in code review
 
-#### Phase 3: OAuth Integration & UI Flow 🟡 FOLLOWING
-**PR Size:** ~4 files (OAuth endpoints, frontend integration, tests)
-**Estimated Effort:** 2-3 days
+#### Phase 3: OAuth Integration & UI Flow ✅ COMPLETED
+**PR Size:** ~20 files (OAuth endpoints, frontend integration, comprehensive tests)
+**Actual Effort:** 3 days
 
 **Acceptance Criteria:**
-- [ ] Add OAuth2 endpoints for Google account linking in main API
-- [ ] Implement frontend OAuth flow for Google account connection
-- [ ] Add user-facing sync controls and status display
-- [ ] Implement sync job monitoring and progress tracking
-- [ ] Add comprehensive end-to-end testing with OAuth flow
+- [x] Add OAuth2 endpoints for Google account linking in main API
+- [x] Implement frontend OAuth flow for Google account connection
+- [x] Add user-facing sync controls and status display
+- [x] Implement sync job monitoring and progress tracking
+- [x] Add comprehensive end-to-end testing with OAuth flow
+
+**Implementation Details:**
+- **OAuth Service:** `GoogleOAuthService` in `app/core/integrations/google_oauth/` with CSRF state management, token encryption, and multi-account support
+- **Repository Pattern:** `GoogleOAuthRepository` with PostgreSQL upsert operations and encrypted token storage
+- **API Endpoints:** REST endpoints for OAuth initiation, callback, account listing, and disconnection
+- **Frontend Integration:** Complete OAuth flow UI in `/integrations` page with account management and sync controls
+- **Shared Model:** `UserGoogleAuth` model in `core_shared/` accessible by both main API and workers
+- **Security:** CSRF state tokens, encrypted token storage, generic error messages, proper logging
+- **Testing:** Comprehensive unit tests for OAuth service, repository, and API controllers
+
+**Architecture Note:** OAuth is correctly placed in the main API layer (not workers) because:
+1. OAuth is user-initiated and synchronous (requires browser redirect)
+2. OAuth callbacks need HTTP endpoints (workers don't expose HTTP)
+3. Workers only consume stored tokens for background API calls
+4. Token refresh CAN happen in workers since it's async and doesn't need user interaction
+
+See [Integration Architecture - OAuth Authentication Flow](../architecture/integration-architecture.md#5-oauth-authentication-flow) for detailed documentation.
 
 #### Slice 5: Two-Way Sync & Conflict Resolution 🟡 PENDING
 **PR Size:** ~6 files (Push logic, conflict resolution, API client updates, tests)
@@ -375,11 +392,12 @@ The integration architecture foundation and core Google Contacts sync functional
 - ✅ Outbox event processing with message-based architecture
 - ✅ Critical security fixes (idempotency, user authorization, error sanitization)
 - ✅ Comprehensive test coverage (76 passing unit tests)
+- ✅ **OAuth integration & UI flow (Phase 3)** - Complete OAuth flow in main API with frontend integration
 
 **Ready for Future Enhancement:**
 - 🟡 Two-way sync and conflict resolution (optional enhancement)
 - 🟡 Production resilience patterns (performance optimization, monitoring)
-- 🟡 Integration management UI (user experience enhancement)
+- 🟡 Integration management UI enhancements (user experience improvement)
 
 ## Testing Status
 

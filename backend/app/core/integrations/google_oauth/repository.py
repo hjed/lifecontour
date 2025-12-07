@@ -132,6 +132,10 @@ class GoogleOAuthRepository:
         now = datetime.now(UTC)
 
         # Use PostgreSQL upsert (INSERT ... ON CONFLICT)
+        # Note on COALESCE for refresh_token: Preserve existing refresh token if
+        # new token exchange does not provide one. Google only issues refresh tokens
+        # on initial authorization, not on subsequent token refreshes, so we must
+        # preserve the original refresh token for future access token renewals.
         stmt = text("""
             INSERT INTO user_google_auth (
                 user_id, google_account_email, encrypted_access_token,

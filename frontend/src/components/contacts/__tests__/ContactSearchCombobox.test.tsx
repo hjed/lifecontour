@@ -10,7 +10,7 @@ import { ContactListResponse } from '@/types/contacts';
 
 // Mock the API
 const mockFetch = jest.fn();
-global.fetch = mockFetch;
+globalThis.fetch = mockFetch;
 
 // Mock toast
 jest.mock('sonner', () => ({

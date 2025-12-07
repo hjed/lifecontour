@@ -299,11 +299,17 @@ async def handle_google_oauth_callback(
         # Decode and validate OAuth state
         state = oauth_service.decode_state(request.state)
 
-        # Verify user matches the state
+        # Verify user matches the state (security check to prevent CSRF attacks)
         if state.user_id != user.id:
+            logger.warning(
+                "OAuth state mismatch",
+                expected_user_id=state.user_id,
+                actual_user_id=user.id,
+            )
+            # Use generic error message to avoid leaking implementation details
             raise HTTPException(
                 status_code=403,
-                detail="OAuth state does not match current user",
+                detail="Invalid OAuth request",
             )
 
         # Build callback URL (must match the one used in authorization)

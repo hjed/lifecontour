@@ -24,7 +24,7 @@ export async function extractErrorMessage(
   defaultMessage: string
 ): Promise<string> {
   // Safely get content-type, handling cases where headers might not be defined
-  const contentType = response.headers?.get?.('content-type');
+  const contentType = response.headers?.get('content-type');
 
   // Only try to parse JSON if content-type indicates JSON
   if (contentType && contentType.includes('application/json')) {

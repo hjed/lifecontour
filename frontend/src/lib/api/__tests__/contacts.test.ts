@@ -17,7 +17,7 @@ import {
 import { ContactFormData } from '@/types/contacts';
 
 // Mock fetch
-global.fetch = jest.fn();
+globalThis.fetch = jest.fn();
 
 // Mock toast
 jest.mock('sonner', () => ({

@@ -31,7 +31,7 @@ jest.mock('next-themes', () => ({
 }));
 
 // Mock fetch for auth
-global.fetch = jest.fn(() =>
+globalThis.fetch = jest.fn(() =>
   Promise.resolve({
     ok: false,
     json: () => Promise.resolve({ authenticated: false, user: null }),
@@ -77,7 +77,7 @@ describe('Header with Theme Toggle', () => {
 
   it('renders theme toggle button when user is authenticated', async () => {
     // Mock authenticated user
-    global.fetch = jest.fn(() =>
+    globalThis.fetch = jest.fn(() =>
       Promise.resolve({
         ok: true,
         json: () =>

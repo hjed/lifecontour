@@ -72,7 +72,14 @@ class GoogleOAuthService:
             logger.warning("Google OAuth credentials not configured")
 
     def _ensure_configured(self) -> None:
-        """Raise error if Google OAuth is not configured."""
+        """
+        Raise error if Google OAuth is not configured.
+
+        This method is the validation point for Google OAuth credentials.
+        The service can be instantiated without credentials because Google OAuth
+        is an optional feature. See the constructor for details. This method
+        should be called before any OAuth operations that require credentials.
+        """
         if not self._settings.google_client_id:
             raise GoogleOAuthConfigurationError("Google OAuth client ID not configured")
         if not self._settings.google_client_secret:

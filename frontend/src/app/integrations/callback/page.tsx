@@ -12,13 +12,13 @@ import { useGoogleOAuthCallback } from '@/lib/api/integrations';
 function LoadingFallback() {
   return (
     <div className='flex min-h-screen items-center justify-center'>
-      <div className='space-y-4 text-center' role='status' aria-busy='true'>
+      <output className='block space-y-4 text-center' aria-busy='true'>
         <Loader2
           className='text-primary mx-auto h-12 w-12 animate-spin'
           aria-hidden='true'
         />
         <h1 className='text-xl font-semibold'>Loading...</h1>
-      </div>
+      </output>
     </div>
   );
 }
@@ -84,9 +84,8 @@ function OAuthCallbackContent() {
 
   return (
     <div className='flex min-h-screen items-center justify-center'>
-      <div
-        className='space-y-4 text-center'
-        role='status'
+      <output
+        className='block space-y-4 text-center'
         aria-live='polite'
         aria-busy={isPending}
       >
@@ -131,7 +130,7 @@ function OAuthCallbackContent() {
             </p>
           </>
         )}
-      </div>
+      </output>
     </div>
   );
 }

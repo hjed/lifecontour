@@ -346,9 +346,19 @@ class WorkerSettings:
 **Challenge**: User must authorize access before workers can sync data
 **Solution**: OAuth flow in main API, token usage in workers
 
+> ⚠️ **IMPORTANT ARCHITECTURAL DECISION**: OAuth endpoints MUST be in the main API layer, NOT in integration workers. This is a fundamental architectural boundary that applies to ALL integrations (Google, Strava, Immich, etc.).
+
 **Key Principle**: OAuth authorization is user-initiated and synchronous, making it appropriate for the main API layer. Workers should only consume stored tokens, not initiate OAuth flows.
 
+**Why This Matters for Future Integrations**: When adding new OAuth-based integrations (e.g., Strava, Calendar, Immich), always place OAuth handling in `app/core/integrations/<service>_oauth/` or `app/api/integrations/`, never in `integration_workers/`. This separation is required because workers cannot handle HTTP redirects or user interaction.
+
 #### Architecture Split
+
+| Component | OAuth Initiation | Token Storage | Token Refresh | API Calls |
+|-----------|-----------------|---------------|---------------|-----------|
+| Main API  | ✅ Yes          | ✅ Yes        | ❌ No         | ❌ No     |
+| Workers   | ❌ No           | Read Only     | ✅ Yes        | ✅ Yes    |
+| Shared    | N/A             | ✅ Models     | N/A           | N/A       |
 
 **Main API (`app/core/integrations/<service>_oauth/` or `app/api/integrations/`):**
 - Generate OAuth authorization URLs with appropriate scopes
@@ -441,6 +451,37 @@ class FernetEncryptionService:
     def encrypt(self, plaintext: str) -> bytes: ...
     def decrypt(self, ciphertext: bytes) -> str: ...
 ```
+
+#### Reference Implementation: Google OAuth
+
+The Google OAuth implementation serves as a reference for future OAuth integrations:
+
+```
+backend/
+├── app/
+│   ├── api/integrations/
+│   │   ├── controllers.py     # OAuth endpoints (initiate, callback, disconnect)
+│   │   ├── schemas.py         # OAuth request/response models
+│   │   └── router.py          # Route definitions
+│   └── core/integrations/
+│       └── google_oauth/
+│           ├── service.py     # OAuth business logic (URL generation, token exchange)
+│           ├── repository.py  # Token storage with encryption
+│           ├── entities.py    # Domain entities (OAuthState, ConnectedAccount)
+│           └── exceptions.py  # Domain-specific exceptions
+core_shared/
+└── core_shared/models/
+    └── user_google_auth.py    # SQLAlchemy model (shared with workers)
+integration_workers/
+└── google_contacts/
+    └── worker.py              # Token consumption (NOT OAuth initiation)
+```
+
+**Key Files for New OAuth Integrations:**
+1. Copy `google_oauth/` structure for the new service
+2. Add model to `core_shared/models/` for token storage
+3. Add API endpoints to `app/api/integrations/`
+4. Workers only read tokens from database
 
 ## Deployment Architecture
 

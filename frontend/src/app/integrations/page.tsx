@@ -8,7 +8,7 @@
 'use client';
 
 import { useEffect } from 'react';
-import { useSearchParams } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import {
   RefreshCw,
   Settings,
@@ -75,6 +75,41 @@ function formatTimeSafely(dateString: string | null): string {
   return formatDateGenericSafely(dateString, 'p', 'Invalid time');
 }
 
+// Badge variant helpers to avoid nested ternaries
+type BadgeVariant = 'default' | 'secondary' | 'destructive' | 'outline';
+
+function getSyncJobBadgeVariant(status: string): BadgeVariant {
+  if (status === 'completed') return 'default';
+  if (status === 'failed') return 'destructive';
+  return 'secondary';
+}
+
+function getHealthBadgeVariant(status: string): BadgeVariant {
+  return status === 'healthy' ? 'default' : 'destructive';
+}
+
+// Sub-component: Sync History Loading Skeleton
+function SyncHistorySkeleton() {
+  return (
+    <div className='space-y-2'>
+      {[1, 2, 3].map(i => (
+        <Skeleton key={`history-skeleton-${i}`} className='h-16 w-full' />
+      ))}
+    </div>
+  );
+}
+
+// Sub-component: Health Loading Skeleton
+function HealthSkeleton() {
+  return (
+    <div className='space-y-2'>
+      <Skeleton className='h-4 w-full' />
+      <Skeleton className='h-4 w-3/4' />
+      <Skeleton className='h-4 w-1/2' />
+    </div>
+  );
+}
+
 export default function IntegrationsPage() {
   return (
     <AuthGuard>
@@ -84,6 +119,7 @@ export default function IntegrationsPage() {
 }
 
 function IntegrationsPageContent() {
+  const router = useRouter();
   const searchParams = useSearchParams();
 
   const {
@@ -128,8 +164,8 @@ function IntegrationsPageContent() {
   useEffect(() => {
     if (searchParams.get('connected') === 'true') {
       toast.success('Google account connected successfully!');
-      // Clear the query parameter
-      window.history.replaceState({}, '', '/integrations');
+      // Clear the query parameter using Next.js router (maintains routing state)
+      router.replace('/integrations');
     }
     const errorParam = searchParams.get('error');
     if (errorParam) {
@@ -137,9 +173,10 @@ function IntegrationsPageContent() {
       const safeMessage =
         OAUTH_ERROR_MESSAGES[errorParam] || OAUTH_ERROR_MESSAGES.unknown;
       toast.error(safeMessage);
-      window.history.replaceState({}, '', '/integrations');
+      // Clear the query parameter using Next.js router (maintains routing state)
+      router.replace('/integrations');
     }
-  }, [searchParams]);
+  }, [searchParams, router]);
 
   const handleSync = (syncType: SyncType) => {
     triggerSync(syncType);
@@ -328,11 +365,7 @@ function IntegrationsPageContent() {
             </CardHeader>
             <CardContent>
               {historyLoading ? (
-                <div className='space-y-2'>
-                  {[...Array(3)].map((_, i) => (
-                    <Skeleton key={i} className='h-16 w-full' />
-                  ))}
-                </div>
+                <SyncHistorySkeleton />
               ) : historyError ? (
                 <Alert>
                   <AlertCircle className='h-4 w-4' />
@@ -351,13 +384,9 @@ function IntegrationsPageContent() {
                       <div className='space-y-1'>
                         <div className='flex items-center gap-2'>
                           <Badge
-                            variant={
-                              job.attributes.status === 'completed'
-                                ? 'default'
-                                : job.attributes.status === 'failed'
-                                  ? 'destructive'
-                                  : 'secondary'
-                            }
+                            variant={getSyncJobBadgeVariant(
+                              job.attributes.status
+                            )}
                           >
                             {job.attributes.status}
                           </Badge>
@@ -402,11 +431,7 @@ function IntegrationsPageContent() {
             </CardHeader>
             <CardContent>
               {healthLoading ? (
-                <div className='space-y-2'>
-                  <Skeleton className='h-4 w-full' />
-                  <Skeleton className='h-4 w-3/4' />
-                  <Skeleton className='h-4 w-1/2' />
-                </div>
+                <HealthSkeleton />
               ) : healthError ? (
                 <Alert>
                   <AlertCircle className='h-4 w-4' />
@@ -418,11 +443,7 @@ function IntegrationsPageContent() {
                 <div className='space-y-3'>
                   <div className='flex items-center justify-between'>
                     <span className='text-sm'>Overall</span>
-                    <Badge
-                      variant={
-                        health.overall === 'healthy' ? 'default' : 'destructive'
-                      }
-                    >
+                    <Badge variant={getHealthBadgeVariant(health.overall)}>
                       {health.overall}
                     </Badge>
                   </div>
@@ -430,13 +451,7 @@ function IntegrationsPageContent() {
                     <span className='text-sm'>
                       Redis: {health.redis.status}
                     </span>
-                    <Badge
-                      variant={
-                        health.redis.status === 'healthy'
-                          ? 'default'
-                          : 'destructive'
-                      }
-                    >
+                    <Badge variant={getHealthBadgeVariant(health.redis.status)}>
                       {health.redis.latency}ms
                     </Badge>
                   </div>
