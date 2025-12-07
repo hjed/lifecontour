@@ -16,6 +16,41 @@ class JournalValidationError(JournalError):
         super().__init__(f"{field}: {message}")
 
 
+class CalendarValidationError(JournalError):
+    """Exception raised when calendar validation fails."""
+
+    def __init__(self, field: str, message: str):
+        self.field = field
+        self.message = message
+        super().__init__(f"{field}: {message}")
+
+
+class CalendarNotFoundError(JournalError):
+    """Exception raised when a calendar is not found."""
+
+    def __init__(self, calendar_id: str):
+        self.calendar_id = calendar_id
+        super().__init__(f"Calendar with ID {calendar_id} not found")
+
+
+class CalendarInfoValidationError(JournalError):
+    """Exception raised when calendar info (EVENT type) validation fails."""
+
+    def __init__(self, field: str, message: str):
+        self.field = field
+        self.message = message
+        super().__init__(f"{field}: {message}")
+
+
+class MoodDataValidationError(JournalError):
+    """Exception raised when mood data (MOOD_RATING type) validation fails."""
+
+    def __init__(self, field: str, message: str):
+        self.field = field
+        self.message = message
+        super().__init__(f"{field}: {message}")
+
+
 class JournalNotFoundError(JournalError):
     """Exception raised when a journal is not found."""
 

@@ -96,7 +96,7 @@ CREATE TABLE journals (
 );
 ```
 
-### ITER4-002: Base Journal Types - Part 1 (NOTE, EVENT, MOOD_RATING) 🟡 PLANNED
+### ITER4-002: Base Journal Types - Part 1 (NOTE, EVENT, MOOD_RATING) ✅ COMPLETE
 **Description:** Implement first set of base journal types with calendar support
 **Strategy:** Single task for three foundational types
 **Specification Reference:** [Journal Types](../journal-system-specification.md#journal-types), [Calendar Info](../journal-system-specification.md#calendar-info-event-type)
@@ -104,8 +104,8 @@ CREATE TABLE journals (
 **PR Size:** ~7 files (3 type tables, calendars table, type detection, migrations, tests)
 
 **Acceptance Criteria:**
-- [ ] **NOTE type:** No additional table (uses only base journal fields)
-- [ ] **EVENT type:** Create `journal_calendar_info` table:
+- [x] **NOTE type:** No additional table (uses only base journal fields)
+- [x] **EVENT type:** Create `journal_calendar_info` table:
   - `journal_id` (PK, FK to journals)
   - `calendar_id` (FK to calendars, required)
   - `start_time`, `end_time` (nullable for all-day events)
@@ -113,22 +113,56 @@ CREATE TABLE journals (
   - `location` (string, nullable)
   - `sync_invitees` (boolean, default based on import source)
   - `created_at`, `updated_at`
-- [ ] **MOOD_RATING type:** Create `journal_mood_data` table:
+- [x] **MOOD_RATING type:** Create `journal_mood_data` table:
   - `journal_id` (PK, FK to journals)
   - `mood_value` (integer 1-10, nullable)
   - `mood_label` (string, nullable)
   - `energy_level` (integer 1-10, nullable)
   - `created_at`, `updated_at`
-- [ ] Create `calendars` table:
+- [x] Create `calendars` table:
   - `id` (UUID), `user_id`, `name`, `description` (nullable)
   - `color` (hex color), `is_synced_to_google` (boolean)
   - `google_calendar_id` (string, nullable)
   - `created_at`, `updated_at`
-- [ ] Implement type detection logic (journal has type if row exists in type table)
-- [ ] Add database migrations with proper foreign key constraints
-- [ ] Write unit tests for type-specific validation
-- [ ] Write integration tests for type data persistence
-- [ ] Document type system architecture in code comments
+- [x] Implement type detection logic (journal has type if row exists in type table)
+- [x] Add database migrations with proper foreign key constraints
+- [x] Write unit tests for type-specific validation
+- [x] Write integration tests for type data persistence
+- [x] Document type system architecture in code comments
+
+**Implementation Notes:**
+- Type detection is implemented via repository pattern: `CalendarInfoRepository.find_by_journal_id()` returns non-None if journal has EVENT type
+- JournalType enum defined with all 15 planned types for future expansion
+- Domain entities (Calendar, CalendarInfo, MoodData) are dataclasses with validation
+- SQL repositories use raw SQL with SQLAlchemy Core for consistency with existing patterns
+- DI providers added for CalendarRepository, CalendarInfoRepository, MoodDataRepository
+- Migration 0010 creates all three tables with proper FK constraints and check constraints
+
+**Files Created:**
+- `backend/app/core/journal/models/calendar.py` - Calendar domain entity
+- `backend/app/core/journal/models/calendar_info.py` - CalendarInfo (EVENT type) entity
+- `backend/app/core/journal/models/mood_data.py` - MoodData (MOOD_RATING type) entity
+- `backend/app/core/journal/models/journal_types.py` - JournalType enum
+- `backend/app/core/journal/adapters/sql/calendar_repository.py` - SqlCalendarRepository
+- `backend/app/core/journal/adapters/sql/calendar_info_repository.py` - SqlCalendarInfoRepository
+- `backend/app/core/journal/adapters/sql/mood_data_repository.py` - SqlMoodDataRepository
+- `backend/app/migrations/versions/0010_create_journal_types_tables.py` - Migration
+- `backend/tests/unit/journal/test_calendar_entity.py` - Calendar unit tests
+- `backend/tests/unit/journal/test_calendar_info_entity.py` - CalendarInfo unit tests
+- `backend/tests/unit/journal/test_mood_data_entity.py` - MoodData unit tests
+- `backend/tests/unit/journal/test_journal_types.py` - JournalType enum tests
+- `backend/tests/integration/journal/test_calendar_repository_integration.py` - Integration tests
+- `backend/tests/integration/journal/test_calendar_info_repository_integration.py` - Integration tests
+- `backend/tests/integration/journal/test_mood_data_repository_integration.py` - Integration tests
+
+**Files Modified:**
+- `backend/app/core/journal/models/__init__.py` - Export new entities and repositories
+- `backend/app/core/journal/models/constants.py` - Add calendar and mood constants
+- `backend/app/core/journal/models/exceptions.py` - Add type-specific exceptions
+- `backend/app/core/journal/models/repositories.py` - Add repository interfaces
+- `backend/app/core/journal/adapters/sql/__init__.py` - Export SQL repositories
+- `backend/app/infrastructure/di/journal.py` - Add DI providers
+- `backend/tests/integration/conftest.py` - Add test schema for new tables
 
 ### ITER4-003: Base Journal Types - Part 2 (PLAN, TRAVEL, PHOTO_ALBUM) 🟡 PLANNED
 **Description:** Implement remaining base journal types with Immich preparation
