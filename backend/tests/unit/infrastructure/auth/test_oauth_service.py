@@ -4,7 +4,7 @@ Unit tests for OAuth service.
 Tests OAuth provider configuration and user information extraction.
 """
 
-from unittest.mock import AsyncMock, Mock
+from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 from fastapi import HTTPException
@@ -291,3 +291,156 @@ class TestOAuthService:
 
         assert exc_info.value.status_code == 400
         assert "redirect URI mismatch" in str(exc_info.value.detail)
+
+    async def test_get_authorization_url_generates_pkce_code_verifier(self):
+        """Test that get_authorization_url generates and stores PKCE code verifier."""
+        settings = Settings(
+            github_client_id="test_client_id", github_client_secret="test_client_secret"
+        )
+        oauth_service = OAuthService(settings)
+
+        # Create a mock request with session
+        mock_request = Mock()
+        mock_request.session = {}
+
+        # Mock the OAuth client
+        mock_client = Mock()
+        mock_client.create_authorization_url = AsyncMock(
+            return_value={
+                "url": "https://github.com/login/oauth/authorize?code_challenge=test"
+            }
+        )
+        oauth_service.oauth._clients = {"github": mock_client}  # type: ignore
+
+        # Call get_authorization_url
+        await oauth_service.get_authorization_url(
+            mock_request, "github", "http://localhost:3000/auth/callback"
+        )
+
+        # Verify code verifier was generated and stored in session
+        assert "oauth_code_verifier" in mock_request.session
+        assert len(mock_request.session["oauth_code_verifier"]) > 0
+        assert "oauth_csrf_token" in mock_request.session
+
+        # Verify create_authorization_url was called with code_verifier
+        mock_client.create_authorization_url.assert_called_once()
+        call_args = mock_client.create_authorization_url.call_args
+        assert "code_verifier" in call_args.kwargs
+        assert (
+            call_args.kwargs["code_verifier"]
+            == mock_request.session["oauth_code_verifier"]
+        )
+
+    async def test_handle_callback_uses_pkce_code_verifier(self):
+        """Test that handle_callback uses PKCE code verifier when available."""
+        settings = Settings(
+            github_client_id="test_client_id", github_client_secret="test_client_secret"
+        )
+        oauth_service = OAuthService(settings)
+
+        # Create a mock request with session containing code verifier
+        mock_request = Mock()
+        mock_request.session = {
+            "oauth_code_verifier": "test_code_verifier_123",
+            "oauth_csrf_token": "test_csrf_token",
+        }
+        mock_request.query_params = {
+            "state": oauth_service._encode_state(
+                "github", "http://localhost:3000/auth/callback", "test_csrf_token"
+            ),
+            "code": "test_code",
+        }
+
+        # Mock the OAuth client and token response
+        mock_client = Mock()
+        mock_client.authorize_access_token = AsyncMock(
+            return_value={"access_token": "test_token", "token_type": "bearer"}
+        )
+        oauth_service.oauth._clients = {"github": mock_client}  # type: ignore
+
+        # Mock _get_user_info
+        mock_user_info = OAuthUserInfo(
+            id="12345", email="test@example.com", name="Test User", provider="github"
+        )
+        oauth_service._get_user_info = AsyncMock(return_value=mock_user_info)  # type: ignore
+
+        # Call handle_callback
+        result = await oauth_service.handle_callback(mock_request)
+
+        # Verify authorize_access_token was called with code_verifier
+        mock_client.authorize_access_token.assert_called_once_with(
+            mock_request, code_verifier="test_code_verifier_123"
+        )
+
+        # Verify session cleanup
+        assert "oauth_code_verifier" not in mock_request.session
+        assert "oauth_csrf_token" not in mock_request.session
+
+        # Verify result
+        assert result == mock_user_info
+
+    async def test_handle_callback_with_code_includes_pkce_verifier(self):
+        """Test that handle_callback_with_code includes PKCE code verifier in token request."""
+        settings = Settings(
+            github_client_id="test_client_id", github_client_secret="test_client_secret"
+        )
+        oauth_service = OAuthService(settings)
+
+        # Create a mock request with session containing code verifier
+        mock_request = Mock()
+        mock_request.session = {
+            "oauth_code_verifier": "test_code_verifier_456",
+            "oauth_csrf_token": "test_csrf_token",
+        }
+
+        # Mock the OAuth client
+        mock_client = Mock()
+        mock_client.client_id = "test_client_id"
+        mock_client.client_secret = "test_client_secret"
+        mock_client.access_token_url = "https://github.com/login/oauth/access_token"
+        oauth_service.oauth._clients = {"github": mock_client}  # type: ignore
+
+        # Mock httpx response
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
+            "access_token": "test_token",
+            "token_type": "bearer",
+        }
+
+        # Mock _get_user_info
+        mock_user_info = OAuthUserInfo(
+            id="12345", email="test@example.com", name="Test User", provider="github"
+        )
+        oauth_service._get_user_info = AsyncMock(return_value=mock_user_info)  # type: ignore
+
+        with patch("httpx.AsyncClient") as mock_httpx:
+            mock_client_instance = AsyncMock()
+            mock_client_instance.post.return_value = mock_response
+            mock_httpx.return_value.__aenter__.return_value = mock_client_instance
+
+            # Call handle_callback_with_code
+            state = oauth_service._encode_state(
+                "github", "http://localhost:3000/auth/callback", "test_csrf_token"
+            )
+            result = await oauth_service.handle_callback_with_code(
+                mock_request,
+                "github",
+                "test_code",
+                state,
+                "http://localhost:3000/auth/callback",
+            )
+
+            # Verify the POST request included code_verifier
+            mock_client_instance.post.assert_called_once()
+            call_args = mock_client_instance.post.call_args
+            posted_data = call_args.kwargs["data"]
+            assert "code_verifier" in posted_data
+            assert posted_data["code_verifier"] == "test_code_verifier_456"
+
+            # Verify session cleanup
+            assert "oauth_code_verifier" not in mock_request.session
+            assert "oauth_csrf_token" not in mock_request.session
+
+            # Verify result
+            assert result == mock_user_info
