@@ -78,18 +78,17 @@ test.describe('Contact Activity Feed', () => {
     const { page, contacts } = contactsWithData;
     const contact = contacts[0];
 
-    // Make an update to the contact to generate history
-    // Note: Playwright's request.patch automatically serializes objects as JSON
+    // Make an inline field update to generate history
+    // Uses the PATCH /contacts/{id}/fields/{field_name} endpoint
     const updateResponse = await page.request.patch(
-      `/api/contacts/${contact.id}`,
+      `/api/contacts/${contact.id}/fields/nickname`,
       {
         headers: { 'Content-Type': 'application/json' },
         data: {
           data: {
-            type: 'contacts',
-            id: contact.id,
+            type: 'contact_fields',
             attributes: {
-              nickname: 'Updated Nickname',
+              value: 'Updated Nickname',
             },
           },
         },
