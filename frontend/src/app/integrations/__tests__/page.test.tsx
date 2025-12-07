@@ -20,6 +20,9 @@ jest.mock('@/lib/api/integrations', () => ({
   useGoogleContactsSync: jest.fn(),
   useIntegrationHealth: jest.fn(),
   useSyncHistory: jest.fn(),
+  useGoogleAccounts: jest.fn(),
+  useInitiateGoogleOAuth: jest.fn(),
+  useDisconnectGoogleAccount: jest.fn(),
 }));
 
 // Mock toast
@@ -47,6 +50,9 @@ import {
   useGoogleContactsSync,
   useIntegrationHealth,
   useSyncHistory,
+  useGoogleAccounts,
+  useInitiateGoogleOAuth,
+  useDisconnectGoogleAccount,
 } from '@/lib/api/integrations';
 
 // Get typed mocked functions
@@ -54,6 +60,9 @@ const mockUseGoogleContactsStatus = jest.mocked(useGoogleContactsStatus);
 const mockUseGoogleContactsSync = jest.mocked(useGoogleContactsSync);
 const mockUseIntegrationHealth = jest.mocked(useIntegrationHealth);
 const mockUseSyncHistory = jest.mocked(useSyncHistory);
+const mockUseGoogleAccounts = jest.mocked(useGoogleAccounts);
+const mockUseInitiateGoogleOAuth = jest.mocked(useInitiateGoogleOAuth);
+const mockUseDisconnectGoogleAccount = jest.mocked(useDisconnectGoogleAccount);
 
 function createWrapper() {
   const queryClient = new QueryClient({
@@ -136,6 +145,24 @@ describe('IntegrationsPage', () => {
       },
       isLoading: false,
       error: null,
+    } as any);
+
+    mockUseGoogleAccounts.mockReturnValue({
+      data: {
+        accounts: [],
+      },
+      isLoading: false,
+      error: null,
+    } as any);
+
+    mockUseInitiateGoogleOAuth.mockReturnValue({
+      mutate: jest.fn(),
+      isPending: false,
+    } as any);
+
+    mockUseDisconnectGoogleAccount.mockReturnValue({
+      mutate: jest.fn(),
+      isPending: false,
     } as any);
   });
 

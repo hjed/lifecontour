@@ -15,6 +15,8 @@ from app.core.integrations.database import IntegrationDatabaseManager
 from app.core.integrations.encryption import EncryptionService
 from app.core.integrations.external_reference_service import ExternalReferenceService
 from app.core.integrations.google_contacts.transformer import GoogleContactTransformer
+from app.core.integrations.google_oauth.repository import GoogleOAuthRepository
+from app.core.integrations.google_oauth.service import GoogleOAuthService
 from app.core.integrations.health_service import IntegrationHealthService
 from app.core.integrations.outbox_event_processor import OutboxEventProcessor
 from app.core.integrations.task_queue import get_redis_pool, get_redis_settings
@@ -156,3 +158,42 @@ class IntegrationProvider(Provider):
             RedisSettings: Redis settings for ARQ
         """
         return get_redis_settings(settings)
+
+    @provide(scope=Scope.REQUEST)
+    def provide_google_oauth_repository(
+        self, connection: AsyncConnection
+    ) -> GoogleOAuthRepository:
+        """
+        Provide Google OAuth repository for request scope.
+
+        Args:
+            connection: Database connection
+
+        Returns:
+            GoogleOAuthRepository: Repository instance
+        """
+        return GoogleOAuthRepository(connection)
+
+    @provide(scope=Scope.REQUEST)
+    def provide_google_oauth_service(
+        self,
+        repository: GoogleOAuthRepository,
+        encryption_service: EncryptionService,
+        settings: Settings,
+    ) -> GoogleOAuthService:
+        """
+        Provide Google OAuth service for request scope.
+
+        Args:
+            repository: Repository for token storage
+            encryption_service: Service for token encryption
+            settings: Application settings
+
+        Returns:
+            GoogleOAuthService: Service instance
+        """
+        return GoogleOAuthService(
+            repository=repository,
+            encryption_service=encryption_service,
+            settings=settings,
+        )

@@ -7,6 +7,8 @@
 
 'use client';
 
+import { useEffect } from 'react';
+import { useSearchParams } from 'next/navigation';
 import {
   RefreshCw,
   Settings,
@@ -14,12 +16,18 @@ import {
   Clock,
   Users,
   AlertCircle,
+  CheckCircle,
+  Unlink,
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { enAU } from 'date-fns/locale';
+import { toast } from 'sonner';
 import {
+  useGoogleAccounts,
   useGoogleContactsStatus,
   useGoogleContactsSync,
+  useInitiateGoogleOAuth,
+  useDisconnectGoogleAccount,
   useIntegrationHealth,
   useSyncHistory,
 } from '@/lib/api/integrations';
@@ -68,6 +76,8 @@ export default function IntegrationsPage() {
 }
 
 function IntegrationsPageContent() {
+  const searchParams = useSearchParams();
+
   const {
     data: statusData,
     isLoading: statusLoading,
@@ -87,20 +97,56 @@ function IntegrationsPageContent() {
   } = useSyncHistory({ limit: 5 });
 
   const {
+    data: accountsData,
+    isLoading: accountsLoading,
+  } = useGoogleAccounts();
+
+  const {
     mutate: triggerSync,
     isPending: syncLoading,
     error: syncError,
   } = useGoogleContactsSync();
 
+  const { mutate: initiateOAuth, isPending: oauthLoading } =
+    useInitiateGoogleOAuth();
+
+  const { mutate: disconnectAccount, isPending: disconnectLoading } =
+    useDisconnectGoogleAccount();
+
   const status = statusData?.data?.attributes;
   const health = healthData?.data?.attributes;
   const recentJobs = historyData?.data || [];
+  const googleAccounts = accountsData?.accounts || [];
+
+  // Show success toast when connected
+  useEffect(() => {
+    if (searchParams.get('connected') === 'true') {
+      toast.success('Google account connected successfully!');
+      // Clear the query parameter
+      window.history.replaceState({}, '', '/integrations');
+    }
+    const errorParam = searchParams.get('error');
+    if (errorParam) {
+      toast.error(errorParam);
+      window.history.replaceState({}, '', '/integrations');
+    }
+  }, [searchParams]);
 
   const handleSync = (syncType: SyncType) => {
     triggerSync(syncType);
   };
 
-  if (statusLoading || healthLoading || historyLoading) {
+  const handleConnectGoogle = () => {
+    initiateOAuth({ redirect_url: '/integrations' });
+  };
+
+  const handleDisconnectAccount = (email: string) => {
+    if (confirm(`Are you sure you want to disconnect ${email}?`)) {
+      disconnectAccount(email);
+    }
+  };
+
+  if (statusLoading || healthLoading || historyLoading || accountsLoading) {
     return (
       <div className='container mx-auto py-8'>
         <div className='mb-8'>
@@ -194,9 +240,49 @@ function IntegrationsPageContent() {
                         </Button>
                       </>
                     ) : (
-                      <Button>Connect Google Account</Button>
+                      <Button
+                        onClick={handleConnectGoogle}
+                        disabled={oauthLoading}
+                        data-testid='connect-google-btn'
+                      >
+                        {oauthLoading ? (
+                          <RefreshCw className='mr-2 h-4 w-4 animate-spin' />
+                        ) : (
+                          <Users className='mr-2 h-4 w-4' />
+                        )}
+                        Connect Google Account
+                      </Button>
                     )}
                   </div>
+
+                  {/* Connected Accounts */}
+                  {googleAccounts.length > 0 && (
+                    <div className='space-y-2'>
+                      <h4 className='text-sm font-medium'>Connected Accounts</h4>
+                      {googleAccounts.map(account => (
+                        <div
+                          key={account.id}
+                          className='flex items-center justify-between rounded-lg border p-3'
+                        >
+                          <div className='flex items-center gap-2'>
+                            <CheckCircle className='h-4 w-4 text-green-500' />
+                            <span className='text-sm'>{account.email}</span>
+                            {account.is_token_expired && (
+                              <Badge variant='destructive'>Token Expired</Badge>
+                            )}
+                          </div>
+                          <Button
+                            variant='ghost'
+                            size='sm'
+                            onClick={() => handleDisconnectAccount(account.email)}
+                            disabled={disconnectLoading}
+                          >
+                            <Unlink className='h-4 w-4' />
+                          </Button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
 
                   {/* Sync Progress */}
                   {syncLoading && (

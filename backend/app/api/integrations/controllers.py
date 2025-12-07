@@ -3,6 +3,7 @@ Integration API controllers for managing external service integrations.
 
 This module provides REST API endpoints for:
 - Google Contacts synchronization
+- Google OAuth account linking
 - Integration health monitoring
 - Sync job management and status tracking
 """
@@ -11,13 +12,30 @@ from typing import Any
 
 import structlog
 from dishka.integrations.fastapi import FromDishka, inject
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
-from app.api.integrations.schemas import SyncJobRequest, SyncType
+from app.api.integrations.schemas import (
+    GoogleAccountResponse,
+    GoogleAccountsListResponse,
+    GoogleOAuthCallbackRequest,
+    GoogleOAuthCallbackResponse,
+    GoogleOAuthConnectRequest,
+    GoogleOAuthConnectResponse,
+    SyncJobRequest,
+    SyncType,
+)
+from app.core.integrations.google_oauth import (
+    GoogleAccountNotFoundError,
+    GoogleOAuthConfigurationError,
+    GoogleOAuthService,
+    GoogleOAuthStateError,
+    GoogleOAuthTokenError,
+)
 from app.core.integrations.health_service import IntegrationHealthService
 from app.core.integrations.task_queue_service import TaskQueueService
 from app.infrastructure.auth.models import SessionUser
+from app.infrastructure.config import Settings
 
 router = APIRouter(prefix="/integrations", tags=["integrations"])
 logger = structlog.get_logger()
@@ -212,3 +230,180 @@ async def get_integrations_health(
                 "error": {"status": "unhealthy", "message": str(e)},
             },
         )
+
+
+# Google OAuth Endpoints
+@router.post("/google/oauth/connect", response_model=GoogleOAuthConnectResponse)
+@inject
+async def initiate_google_oauth(
+    request: GoogleOAuthConnectRequest,
+    http_request: Request,
+    user: FromDishka[SessionUser],
+    oauth_service: FromDishka[GoogleOAuthService],
+    settings: FromDishka[Settings],
+) -> GoogleOAuthConnectResponse:
+    """
+    Initiate Google OAuth connection flow.
+
+    Returns an authorization URL to redirect the user to Google's OAuth
+    consent page. After user authorization, Google will redirect back
+    to the callback endpoint.
+    """
+    try:
+        # Create OAuth state for CSRF protection
+        state = oauth_service.create_oauth_state(
+            user_id=user.id,
+            redirect_url=request.redirect_url,
+        )
+
+        # Build callback URL
+        callback_url = f"{settings.frontend_url}/integrations/callback"
+
+        # Get authorization URL
+        authorization_url = oauth_service.get_authorization_url(
+            state=state,
+            callback_url=callback_url,
+            scopes=request.scopes,
+        )
+
+        logger.info(
+            "Initiated Google OAuth flow",
+            user_id=user.id,
+        )
+
+        return GoogleOAuthConnectResponse(authorization_url=authorization_url)
+
+    except GoogleOAuthConfigurationError as e:
+        logger.error("Google OAuth not configured", error=str(e))
+        raise HTTPException(
+            status_code=501,
+            detail="Google OAuth is not configured on this server",
+        ) from e
+
+
+@router.post("/google/oauth/callback", response_model=GoogleOAuthCallbackResponse)
+@inject
+async def handle_google_oauth_callback(
+    request: GoogleOAuthCallbackRequest,
+    user: FromDishka[SessionUser],
+    oauth_service: FromDishka[GoogleOAuthService],
+    settings: FromDishka[Settings],
+) -> GoogleOAuthCallbackResponse:
+    """
+    Handle Google OAuth callback.
+
+    Exchanges the authorization code for access tokens and stores
+    the encrypted tokens for the connected Google account.
+    """
+    try:
+        # Decode and validate OAuth state
+        state = oauth_service.decode_state(request.state)
+
+        # Verify user matches the state
+        if state.user_id != user.id:
+            raise HTTPException(
+                status_code=403,
+                detail="OAuth state does not match current user",
+            )
+
+        # Build callback URL (must match the one used in authorization)
+        callback_url = f"{settings.frontend_url}/integrations/callback"
+
+        # Exchange authorization code for tokens
+        tokens = await oauth_service.exchange_code_for_tokens(
+            code=request.code,
+            callback_url=callback_url,
+        )
+
+        # Get user's Google email
+        email = await oauth_service.get_user_email(tokens.access_token)
+
+        # Save the account with encrypted tokens
+        await oauth_service.save_account(
+            user_id=user.id,
+            tokens=tokens,
+            email=email,
+        )
+
+        logger.info(
+            "Google OAuth connection successful",
+            user_id=user.id,
+            google_email=email,
+        )
+
+        return GoogleOAuthCallbackResponse(
+            email=email,
+            message="Google account connected successfully",
+        )
+
+    except GoogleOAuthStateError as e:
+        logger.error("OAuth state validation failed", error=str(e))
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid or expired OAuth state",
+        ) from e
+    except GoogleOAuthTokenError as e:
+        logger.error("OAuth token exchange failed", error=str(e))
+        raise HTTPException(
+            status_code=400,
+            detail=f"Failed to exchange authorization code: {str(e)}",
+        ) from e
+
+
+@router.get("/google/accounts", response_model=GoogleAccountsListResponse)
+@inject
+async def list_google_accounts(
+    user: FromDishka[SessionUser],
+    oauth_service: FromDishka[GoogleOAuthService],
+) -> GoogleAccountsListResponse:
+    """
+    List all connected Google accounts for the current user.
+
+    Returns account information including email and connection status.
+    """
+    accounts = await oauth_service.get_accounts(user_id=user.id)
+
+    return GoogleAccountsListResponse(
+        accounts=[
+            GoogleAccountResponse(
+                id=account.id,
+                email=account.email,
+                created_at=account.created_at,
+                is_token_expired=account.is_token_expired,
+            )
+            for account in accounts
+        ]
+    )
+
+
+@router.delete("/google/accounts/{email}")
+@inject
+async def disconnect_google_account(
+    email: str,
+    user: FromDishka[SessionUser],
+    oauth_service: FromDishka[GoogleOAuthService],
+) -> dict[str, str]:
+    """
+    Disconnect a Google account.
+
+    Removes the stored OAuth tokens for the specified Google account.
+    """
+    try:
+        await oauth_service.disconnect_account(
+            user_id=user.id,
+            email=email,
+        )
+
+        logger.info(
+            "Google account disconnected",
+            user_id=user.id,
+            email=email,
+        )
+
+        return {"message": f"Google account {email} disconnected successfully"}
+
+    except GoogleAccountNotFoundError:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Google account {email} not found",
+        ) from None

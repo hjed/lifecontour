@@ -151,6 +151,37 @@ export interface OAuthConnectionResponse {
   };
 }
 
+// New Google OAuth Types (simplified API)
+export interface GoogleOAuthConnectRequest {
+  redirect_url?: string;
+  scopes?: string[];
+}
+
+export interface GoogleOAuthConnectResponse {
+  authorization_url: string;
+}
+
+export interface GoogleOAuthCallbackRequest {
+  code: string;
+  state: string;
+}
+
+export interface GoogleOAuthCallbackResponse {
+  email: string;
+  message: string;
+}
+
+export interface GoogleAccount {
+  id: number;
+  email: string;
+  created_at: string;
+  is_token_expired: boolean;
+}
+
+export interface GoogleAccountsListResponse {
+  accounts: GoogleAccount[];
+}
+
 // Integration Statistics
 export interface IntegrationStats {
   totalContacts: number;

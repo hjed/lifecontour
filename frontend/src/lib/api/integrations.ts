@@ -7,19 +7,24 @@
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import {
+import type {
+  GoogleAccountsListResponse,
   GoogleContactsStatusResponse,
-  SyncJobResponse,
-  SyncJobListResponse,
+  GoogleOAuthCallbackRequest,
+  GoogleOAuthCallbackResponse,
+  GoogleOAuthConnectRequest,
+  GoogleOAuthConnectResponse,
   IntegrationHealthResponse,
-  SyncType,
-  SyncTriggerRequest,
-  SyncHistoryFilters,
+  IntegrationStatsResponse,
   OAuthConnectionRequest,
   OAuthConnectionResponse,
-  IntegrationStatsResponse,
+  SyncHistoryFilters,
+  SyncJobListResponse,
+  SyncJobResponse,
+  SyncTriggerRequest,
+  SyncType,
 } from '@/types/integrations';
-import { JsonApiErrorResponse } from '@/types/api';
+import type { JsonApiErrorResponse } from '@/types/api';
 
 // Polling configuration constants
 const INITIAL_POLL_COUNT = 3;
@@ -32,6 +37,7 @@ export const integrationKeys = {
   googleContacts: () => [...integrationKeys.all, 'google-contacts'] as const,
   googleContactsStatus: () =>
     [...integrationKeys.googleContacts(), 'status'] as const,
+  googleAccounts: () => [...integrationKeys.all, 'google-accounts'] as const,
   syncJobs: () => [...integrationKeys.all, 'sync-jobs'] as const,
   syncJob: (jobId: string) => [...integrationKeys.syncJobs(), jobId] as const,
   syncHistory: (filters: SyncHistoryFilters) =>
@@ -154,6 +160,63 @@ export async function initiateOAuthConnection(
     body: JSON.stringify(request),
   });
   return handleApiResponse<OAuthConnectionResponse>(response);
+}
+
+// New Google OAuth API functions
+export async function initiateGoogleOAuth(
+  request: GoogleOAuthConnectRequest = {}
+): Promise<GoogleOAuthConnectResponse> {
+  const response = await fetch('/api/integrations/google/oauth/connect', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    credentials: 'include',
+    body: JSON.stringify(request),
+  });
+  return handleApiResponse<GoogleOAuthConnectResponse>(response);
+}
+
+export async function handleGoogleOAuthCallback(
+  request: GoogleOAuthCallbackRequest
+): Promise<GoogleOAuthCallbackResponse> {
+  const response = await fetch('/api/integrations/google/oauth/callback', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    credentials: 'include',
+    body: JSON.stringify(request),
+  });
+  return handleApiResponse<GoogleOAuthCallbackResponse>(response);
+}
+
+export async function fetchGoogleAccounts(): Promise<GoogleAccountsListResponse> {
+  const response = await fetch('/api/integrations/google/accounts', {
+    credentials: 'include',
+  });
+  return handleApiResponse<GoogleAccountsListResponse>(response);
+}
+
+export async function disconnectGoogleAccount(email: string): Promise<void> {
+  const response = await fetch(
+    `/api/integrations/google/accounts/${encodeURIComponent(email)}`,
+    {
+      method: 'DELETE',
+      credentials: 'include',
+    }
+  );
+
+  if (!response.ok) {
+    try {
+      const errorData: JsonApiErrorResponse = await response.json();
+      const errorMessage =
+        errorData.errors?.[0]?.detail || 'Failed to disconnect';
+      throw new Error(errorMessage);
+    } catch {
+      throw new Error(`HTTP ${response.status}: Failed to disconnect`);
+    }
+  }
 }
 
 export async function disconnectGoogleContacts(): Promise<void> {
@@ -336,6 +399,72 @@ export function useCancelSyncJob() {
     },
     onError: (error: Error) => {
       toast.error(`Failed to cancel sync: ${error.message}`);
+    },
+  });
+}
+
+// New Google OAuth hooks
+export function useGoogleAccounts() {
+  return useQuery({
+    queryKey: integrationKeys.googleAccounts(),
+    queryFn: fetchGoogleAccounts,
+    staleTime: 60 * 1000, // 1 minute
+  });
+}
+
+export function useInitiateGoogleOAuth() {
+  return useMutation({
+    mutationFn: initiateGoogleOAuth,
+    onSuccess: data => {
+      // Redirect to Google OAuth
+      if (typeof window !== 'undefined') {
+        window.location.href = data.authorization_url;
+      }
+    },
+    onError: (error: Error) => {
+      toast.error(`Failed to connect Google account: ${error.message}`);
+    },
+  });
+}
+
+export function useGoogleOAuthCallback() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: handleGoogleOAuthCallback,
+    onSuccess: data => {
+      // Invalidate accounts list
+      queryClient.invalidateQueries({
+        queryKey: integrationKeys.googleAccounts(),
+      });
+      queryClient.invalidateQueries({
+        queryKey: integrationKeys.googleContactsStatus(),
+      });
+      toast.success(`Connected Google account: ${data.email}`);
+    },
+    onError: (error: Error) => {
+      toast.error(`OAuth failed: ${error.message}`);
+    },
+  });
+}
+
+export function useDisconnectGoogleAccount() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: disconnectGoogleAccount,
+    onSuccess: (_, email) => {
+      // Invalidate accounts and status
+      queryClient.invalidateQueries({
+        queryKey: integrationKeys.googleAccounts(),
+      });
+      queryClient.invalidateQueries({
+        queryKey: integrationKeys.googleContactsStatus(),
+      });
+      toast.success(`Disconnected Google account: ${email}`);
+    },
+    onError: (error: Error) => {
+      toast.error(`Failed to disconnect: ${error.message}`);
     },
   });
 }

@@ -5,6 +5,7 @@ This module defines the request and response models used by the integration
 API controllers for data validation and serialization.
 """
 
+from datetime import datetime
 from enum import Enum
 from typing import Any
 
@@ -17,6 +18,55 @@ class SyncType(str, Enum):
     FULL = "full"
     INCREMENTAL = "incremental"
     SMART = "smart"
+
+
+# OAuth Schemas
+class GoogleOAuthConnectRequest(BaseModel):
+    """Request to initiate Google OAuth connection."""
+
+    redirect_url: str | None = Field(
+        default=None, description="URL to redirect after OAuth completion"
+    )
+    scopes: list[str] | None = Field(
+        default=None, description="OAuth scopes to request"
+    )
+
+
+class GoogleOAuthConnectResponse(BaseModel):
+    """Response with OAuth authorization URL."""
+
+    authorization_url: str = Field(description="URL to redirect user for OAuth")
+
+
+class GoogleOAuthCallbackRequest(BaseModel):
+    """Request from OAuth callback."""
+
+    code: str = Field(description="Authorization code from Google")
+    state: str = Field(description="State parameter for CSRF validation")
+
+
+class GoogleOAuthCallbackResponse(BaseModel):
+    """Response after successful OAuth callback."""
+
+    email: str = Field(description="Connected Google account email")
+    message: str = Field(description="Success message")
+
+
+class GoogleAccountResponse(BaseModel):
+    """Response with Google account details."""
+
+    id: int = Field(description="Account ID")
+    email: str = Field(description="Google account email")
+    created_at: datetime = Field(description="When account was connected")
+    is_token_expired: bool = Field(description="Whether access token has expired")
+
+
+class GoogleAccountsListResponse(BaseModel):
+    """Response with list of connected Google accounts."""
+
+    accounts: list[GoogleAccountResponse] = Field(
+        description="List of connected accounts"
+    )
 
 
 class SyncJobRequest(BaseModel):
