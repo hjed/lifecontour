@@ -17,16 +17,20 @@ jest.mock('@/lib/api/contacts', () => ({
   useCreateContact: jest.fn(),
 }));
 
+// Create trackable mock for router
+const mockRouterPush = jest.fn();
+const mockRouter = {
+  push: mockRouterPush,
+  replace: jest.fn(),
+  prefetch: jest.fn(),
+  back: jest.fn(),
+  forward: jest.fn(),
+  refresh: jest.fn(),
+};
+
 // Mock Next.js navigation
 jest.mock('next/navigation', () => ({
-  useRouter: () => ({
-    push: jest.fn(),
-    replace: jest.fn(),
-    prefetch: jest.fn(),
-    back: jest.fn(),
-    forward: jest.fn(),
-    refresh: jest.fn(),
-  }),
+  useRouter: () => mockRouter,
   usePathname: () => '/contacts/new',
   useSearchParams: () => new URLSearchParams(),
   useParams: () => ({}),
@@ -131,6 +135,7 @@ describe('NewContactPage', () => {
     contactTestUtils.setupContactTest();
     setupMocks.clearMocks();
     setupMocks.fetch();
+    mockRouterPush.mockClear();
 
     // Mock authenticated session for all tests
     (fetch as jest.Mock).mockResolvedValue({
@@ -205,7 +210,7 @@ describe('NewContactPage', () => {
     });
     await user.click(backButton);
 
-    expect(window.location.href).toBe('/contacts');
+    expect(mockRouterPush).toHaveBeenCalledWith('/contacts');
   });
 
   it('handles cancel navigation', async () => {
@@ -222,7 +227,7 @@ describe('NewContactPage', () => {
     const cancelButton = await screen.findByRole('button', { name: /cancel/i });
     await user.click(cancelButton);
 
-    expect(window.location.href).toBe('/contacts');
+    expect(mockRouterPush).toHaveBeenCalledWith('/contacts');
   });
 
   it('handles form submission', async () => {
@@ -263,7 +268,9 @@ describe('NewContactPage', () => {
     });
 
     // Should navigate to the created contact
-    expect(window.location.href).toBe('/contacts/123');
+    await waitFor(() => {
+      expect(mockRouterPush).toHaveBeenCalledWith('/contacts/123');
+    });
   });
 
   it('handles form submission with all fields', async () => {
@@ -302,7 +309,9 @@ describe('NewContactPage', () => {
       });
     });
 
-    expect(window.location.href).toBe('/contacts/456');
+    await waitFor(() => {
+      expect(mockRouterPush).toHaveBeenCalledWith('/contacts/456');
+    });
   });
 
   it('handles form submission error', async () => {

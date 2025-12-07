@@ -8,6 +8,7 @@
 'use client';
 
 import { ArrowLeft } from 'lucide-react';
+import { useRouter } from 'next/navigation';
 
 import { useCreateContact } from '@/lib/api/contacts';
 import { ContactFormData } from '@/types/contacts';
@@ -25,13 +26,14 @@ export default function NewContactPage() {
 }
 
 function NewContactPageContent() {
+  const router = useRouter();
   const createContactMutation = useCreateContact();
 
   const handleSubmit = async (data: ContactFormData) => {
     try {
       const result = await createContactMutation.mutateAsync(data);
       // Navigate to the created contact's detail page
-      window.location.href = `/contacts/${result.data.id}`;
+      router.push(`/contacts/${result.data.id}`);
     } catch (error) {
       // Error is handled by the mutation
       console.error('Failed to create contact:', error);
@@ -39,7 +41,7 @@ function NewContactPageContent() {
   };
 
   const handleCancel = () => {
-    window.location.href = '/contacts';
+    router.push('/contacts');
   };
 
   return (
@@ -49,7 +51,7 @@ function NewContactPageContent() {
         <Button
           variant='ghost'
           size='sm'
-          onClick={() => (window.location.href = '/contacts')}
+          onClick={() => router.push('/contacts')}
         >
           <ArrowLeft className='mr-2 h-4 w-4' />
           Back to Contacts
