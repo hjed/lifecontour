@@ -119,7 +119,7 @@ export function renderWithProviders(
 // Mock setup utilities
 export const setupMocks = {
   fetch: () => {
-    global.fetch = jest.fn();
+    globalThis.fetch = jest.fn();
   },
 
   windowLocation: () => {
@@ -164,16 +164,20 @@ export const setupMocks = {
       [key: string]: unknown;
     } = {}
   ) => {
+    const baseRouter = {
+      push: jest.fn(),
+      replace: jest.fn(),
+      prefetch: jest.fn(),
+      back: jest.fn(),
+      forward: jest.fn(),
+      refresh: jest.fn(),
+    };
+    const router = overrides.router
+      ? { ...baseRouter, ...overrides.router }
+      : baseRouter;
+
     jest.mock('next/navigation', () => ({
-      useRouter: () => ({
-        push: jest.fn(),
-        replace: jest.fn(),
-        prefetch: jest.fn(),
-        back: jest.fn(),
-        forward: jest.fn(),
-        refresh: jest.fn(),
-        ...(overrides.router || {}),
-      }),
+      useRouter: () => router,
       usePathname: () => overrides.pathname || '/contacts',
       useSearchParams: () => new URLSearchParams(),
       useParams: () => overrides.params || {},
