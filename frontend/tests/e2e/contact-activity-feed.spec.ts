@@ -80,8 +80,9 @@ test.describe('Contact Activity Feed', () => {
 
     // Make an inline field update to generate history
     // Uses the PATCH /contacts/{id}/fields/{field_name} endpoint
+    // Using 'nick_name' as the field name (snake_case as used in the API)
     const updateResponse = await page.request.patch(
-      `/api/contacts/${contact.id}/fields/nickname`,
+      `/api/contacts/${contact.id}/fields/nick_name`,
       {
         headers: { 'Content-Type': 'application/json' },
         data: {
