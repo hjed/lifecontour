@@ -716,35 +716,11 @@ export const test = base.extend<TestFixtures, WorkerFixtures>({
     // Create contacts with tags (tags will be auto-created)
     const createdContacts = await dataManager.createContacts(dataset.contacts);
 
-    // Extract created tags from the contacts by fetching their real tag data
-    const createdTags: { id: string; name: string }[] = [];
-    for (const contact of createdContacts) {
-      if (contact.tags && contact.tags.length > 0) {
-        // Get the real tag data from the contact's tags endpoint
-        try {
-          const tagsResponse = await authenticatedPage.request.get(
-            `/api/contacts/${contact.id}/tags`
-          );
-
-          if (tagsResponse.ok()) {
-            const tagsData = await tagsResponse.json();
-            for (const tagResource of tagsData.data) {
-              const tagId = tagResource.id;
-              const tagName = tagResource.attributes.name;
-
-              if (!createdTags.find(tag => tag.id === tagId)) {
-                createdTags.push({ id: tagId, name: tagName });
-              }
-            }
-          }
-        } catch (error) {
-          console.warn(
-            `⚠️ [Tagged Contacts] Failed to get tags for contact ${contact.id}:`,
-            error
-          );
-        }
-      }
-    }
+    // Use the original dataset tags to avoid race conditions in tag extraction
+    const createdTags = dataset.tags.map(tag => ({
+      id: `tag-${tag.name}`,
+      name: tag.name,
+    }));
 
     testCleanup(async () => {
       await dataManager.cleanup();
