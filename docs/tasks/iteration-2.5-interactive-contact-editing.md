@@ -299,6 +299,7 @@ This iteration follows established patterns:
 - ✅ ActivityFeed component tests (7 tests)
 - ✅ ContactHistoryConverter unit tests (6 tests)
 - ✅ Integration tests for history endpoint (5 tests)
+- ✅ E2E tests for Activity Feed (5 tests)
 - ✅ Pagination and loading state tests
 
 ### Task 2.5F: Contact Methods & Address Inline Editing
