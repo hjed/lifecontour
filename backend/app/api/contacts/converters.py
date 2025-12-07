@@ -7,6 +7,7 @@ ensuring proper separation between domain and API layers.
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import TYPE_CHECKING
 
 from app.api.common.schemas import JsonApiLinks
@@ -18,7 +19,6 @@ if TYPE_CHECKING:
         ContactRelationshipUpdateData,
         ContactUpdateData,
     )
-from datetime import datetime
 
 from app.api.contacts.schemas import (
     ContactAddressAttributes,

@@ -40,7 +40,7 @@ test.describe('Contact Activity Feed', () => {
         data: {
           type: 'contacts',
           attributes: {
-            first_name: `Fresh_${Date.now()}`,
+            first_name: `E2ETest_${Date.now()}`,
             last_name: 'Contact',
             is_favourite: false,
           },

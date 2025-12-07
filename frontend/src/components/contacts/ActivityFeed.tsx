@@ -10,7 +10,7 @@
 
 'use client';
 
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { Clock, Loader2 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -36,42 +36,48 @@ export function ActivityFeed({
   const [allActivities, setAllActivities] = useState<ContactHistoryResource[]>(
     []
   );
-  // Track the previous contactId to detect changes
-  const [prevContactId, setPrevContactId] = useState(contactId);
 
   const { data, isLoading, error, isFetching } = useContactHistory(contactId, {
     page,
     limit: pageSize,
   });
 
+  // Track the previous contactId to reset state on change
+  const prevContactIdRef = useRef(contactId);
+
   // Reset when contactId changes
-  if (contactId !== prevContactId) {
-    setPrevContactId(contactId);
-    setPage(1);
-    setAllActivities([]);
-  }
+  useEffect(() => {
+    if (contactId !== prevContactIdRef.current) {
+      prevContactIdRef.current = contactId;
+      setPage(1);
+      setAllActivities([]);
+    }
+  }, [contactId]);
+
+  // Track what data we've already processed to avoid duplicates
+  const processedDataRef = useRef<string | null>(null);
 
   // Accumulate activities as pages are loaded
-  // Use a ref to track what data we've already processed
-  const processedDataRef = useRef<string | null>(null);
-  const currentDataKey = data
-    ? `${page}-${data.data.map(a => a.id).join(',')}`
-    : null;
+  useEffect(() => {
+    if (!data) return;
 
-  if (currentDataKey && processedDataRef.current !== currentDataKey) {
-    processedDataRef.current = currentDataKey;
-    if (page === 1) {
-      // Reset on first page
-      setAllActivities(data!.data);
-    } else {
-      // Append new activities, avoiding duplicates
-      const existingIds = new Set(allActivities.map(a => a.id));
-      const newActivities = data!.data.filter(a => !existingIds.has(a.id));
-      if (newActivities.length > 0) {
-        setAllActivities(prev => [...prev, ...newActivities]);
+    const currentDataKey = `${page}-${data.data.map(a => a.id).join(',')}`;
+
+    if (processedDataRef.current !== currentDataKey) {
+      processedDataRef.current = currentDataKey;
+      if (page === 1) {
+        // Reset on first page
+        setAllActivities(data.data);
+      } else {
+        // Append new activities, avoiding duplicates
+        setAllActivities(prev => {
+          const existingIds = new Set(prev.map(a => a.id));
+          const newActivities = data.data.filter(a => !existingIds.has(a.id));
+          return newActivities.length > 0 ? [...prev, ...newActivities] : prev;
+        });
       }
     }
-  }
+  }, [data, page]);
 
   const hasMore =
     data?.meta?.current_page !== undefined &&
