@@ -1,17 +1,33 @@
 'use client';
 
-import { useEffect, useRef } from 'react';
+import { Suspense, useEffect, useRef } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Loader2, CheckCircle, XCircle } from 'lucide-react';
 import { useGoogleOAuthCallback } from '@/lib/api/integrations';
 
 /**
- * Google OAuth callback page.
- *
- * Handles the OAuth callback from Google by exchanging the authorization
- * code for tokens and storing the connected account.
+ * Loading fallback for the OAuth callback page.
+ * Shown while search params are being loaded.
  */
-export default function OAuthCallbackPage() {
+function LoadingFallback() {
+  return (
+    <div className='flex min-h-screen items-center justify-center'>
+      <div className='space-y-4 text-center' role='status' aria-busy='true'>
+        <Loader2
+          className='text-primary mx-auto h-12 w-12 animate-spin'
+          aria-hidden='true'
+        />
+        <h1 className='text-xl font-semibold'>Loading...</h1>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Inner component that handles the OAuth callback logic.
+ * Separated to work with Suspense boundary for useSearchParams.
+ */
+function OAuthCallbackContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { mutate, isPending, isSuccess, isError, error } =
@@ -117,5 +133,22 @@ export default function OAuthCallbackPage() {
         )}
       </div>
     </div>
+  );
+}
+
+/**
+ * Google OAuth callback page.
+ *
+ * Handles the OAuth callback from Google by exchanging the authorization
+ * code for tokens and storing the connected account.
+ *
+ * Uses Suspense boundary to properly handle useSearchParams() which
+ * requires client-side rendering.
+ */
+export default function OAuthCallbackPage() {
+  return (
+    <Suspense fallback={<LoadingFallback />}>
+      <OAuthCallbackContent />
+    </Suspense>
   );
 }
