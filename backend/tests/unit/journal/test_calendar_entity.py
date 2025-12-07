@@ -60,16 +60,12 @@ class TestCalendar:
 
     def test_empty_name_raises_error(self):
         """Test that empty name raises error."""
-        with pytest.raises(
-            CalendarValidationError, match="Calendar name is required"
-        ):
+        with pytest.raises(CalendarValidationError, match="Calendar name is required"):
             Calendar(user_id="test-user", name="", color="#000000")
 
     def test_whitespace_name_raises_error(self):
         """Test that whitespace-only name raises error."""
-        with pytest.raises(
-            CalendarValidationError, match="Calendar name is required"
-        ):
+        with pytest.raises(CalendarValidationError, match="Calendar name is required"):
             Calendar(user_id="test-user", name="   ", color="#000000")
 
     def test_name_too_long_raises_error(self):
@@ -101,9 +97,7 @@ class TestCalendarColorValidation:
 
     def test_empty_color_raises_error(self):
         """Test that empty color raises error."""
-        with pytest.raises(
-            CalendarValidationError, match="Calendar color is required"
-        ):
+        with pytest.raises(CalendarValidationError, match="Calendar color is required"):
             Calendar(user_id="test-user", name="Test", color="")
 
     def test_invalid_color_format_raises_error(self):
@@ -116,9 +110,7 @@ class TestCalendarColorValidation:
             "red",  # Color name
         ]
         for color in invalid_colors:
-            with pytest.raises(
-                CalendarValidationError, match="hex format"
-            ):
+            with pytest.raises(CalendarValidationError, match="hex format"):
                 Calendar(user_id="test-user", name="Test", color=color)
 
 
@@ -162,4 +154,3 @@ class TestCalendarGoogleSync:
         )
         assert calendar.is_synced_to_google is False
         assert calendar.google_calendar_id is None
-

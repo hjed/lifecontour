@@ -55,4 +55,3 @@ class TestJournalType:
         assert JournalType.NOTE in all_types
         assert JournalType.EVENT in all_types
         assert JournalType.MOOD_RATING in all_types
-

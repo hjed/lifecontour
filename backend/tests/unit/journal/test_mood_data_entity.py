@@ -162,4 +162,3 @@ class TestMoodDataMoodLabelValidation:
             match=f"Mood label cannot exceed {MAX_MOOD_LABEL_LENGTH}",
         ):
             MoodData(journal_id=1, mood_label=long_label)
-

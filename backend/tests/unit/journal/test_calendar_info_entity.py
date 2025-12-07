@@ -160,4 +160,3 @@ class TestCalendarInfoTimeValidation:
             match=f"Location cannot exceed {MAX_LOCATION_LENGTH}",
         ):
             CalendarInfo(journal_id=1, calendar_id=calendar_id, location=long_location)
-
