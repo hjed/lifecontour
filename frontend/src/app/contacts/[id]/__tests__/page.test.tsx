@@ -26,6 +26,12 @@ jest.mock('@/lib/api/contacts', () => ({
   useDeleteContact: jest.fn(),
   useToggleContactFavourite: jest.fn(),
   useUpdateContactField: jest.fn(),
+  useContactHistory: jest.fn(() => ({
+    data: { data: [], meta: { total_count: 0 } },
+    isLoading: false,
+    error: null,
+    isFetching: false,
+  })),
 }));
 
 // Mock Next.js navigation hooks

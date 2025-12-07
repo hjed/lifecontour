@@ -388,3 +388,55 @@ class ContactRelationshipRequestConverter:
             created_at=existing_relationship.created_at,
             updated_at=existing_relationship.updated_at,
         )
+
+
+class ContactHistoryConverter:
+    """Converter for ContactFieldHistoryEntry to API resources."""
+
+    @staticmethod
+    def to_resource(
+        entry: ContactFieldHistoryEntry,
+    ) -> ContactHistoryResource:
+        """Convert ContactFieldHistoryEntry to API resource."""
+        from datetime import datetime
+
+        from app.api.contacts.schemas import (
+            ContactHistoryAttributes,
+            ContactHistoryResource,
+        )
+
+        # Parse created_at if it's a string
+        created_at = None
+        if entry.created_at:
+            if isinstance(entry.created_at, str):
+                try:
+                    created_at = datetime.fromisoformat(entry.created_at)
+                except ValueError:
+                    created_at = None
+            else:
+                created_at = entry.created_at
+
+        attributes = ContactHistoryAttributes(
+            entity_type=entry.entity_type,
+            entity_id=entry.entity_id,
+            field_name=entry.field_name,
+            old_value=entry.old_value,
+            new_value=entry.new_value,
+            changed_by=entry.changed_by,
+            created_at=created_at,
+        )
+
+        if entry.id is None:
+            raise ValueError("Cannot serialize history entry without ID")
+
+        return ContactHistoryResource(
+            type="contact_history",
+            id=str(entry.id),
+            attributes=attributes,
+        )
+
+
+# Import for type checking
+if TYPE_CHECKING:
+    from app.api.contacts.schemas import ContactHistoryResource
+    from app.core.contacts.models.repositories import ContactFieldHistoryEntry

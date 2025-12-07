@@ -277,3 +277,33 @@ export const TAG_COLORS = [
 ] as const;
 
 export type TagColor = (typeof TAG_COLORS)[number];
+
+// Contact History/Activity Types
+export interface ContactHistoryAttributes {
+  entity_type: string;
+  entity_id: number;
+  field_name: string;
+  old_value: string | null;
+  new_value: string | null;
+  changed_by: string | null;
+  created_at: string | null;
+}
+
+export interface ContactHistoryResource {
+  type: 'contact_history';
+  id: string;
+  attributes: ContactHistoryAttributes;
+}
+
+export interface ContactHistoryPaginationMeta {
+  total_count: number;
+  page_count: number;
+  current_page: number;
+  per_page: number;
+}
+
+export interface ContactHistoryListResponse {
+  data: ContactHistoryResource[];
+  meta?: ContactHistoryPaginationMeta;
+  links?: JsonApiLinks;
+}

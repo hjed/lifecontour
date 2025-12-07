@@ -24,6 +24,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { ContactAvatar } from '@/components/contacts/ContactAvatar';
 import { ContactIdentityInline } from '@/components/contacts/ContactIdentityInline';
 import { RelationshipsList } from '@/components/contacts/RelationshipsList';
+import { ActivityFeed } from '@/components/contacts/ActivityFeed';
 import type {
   TagResource,
   ContactMethodResource,
@@ -275,6 +276,9 @@ function ContactDetailPageContent() {
               )}
             </CardContent>
           </Card>
+
+          {/* Activity Feed */}
+          <ActivityFeed contactId={contact.id} pageSize={5} />
         </aside>
       </header>
 
@@ -391,6 +395,9 @@ function ContactDetailPageContent() {
               )}
             </CardContent>
           </Card>
+
+          {/* Activity Feed - Mobile Only */}
+          <ActivityFeed contactId={contact.id} pageSize={5} />
         </div>
       </div>
 
