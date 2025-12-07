@@ -571,7 +571,9 @@ export const test = base.extend<TestFixtures, WorkerFixtures>({
   performanceTestData: async ({ authenticatedPage, testCleanup }, use) => {
     const dataManager = new TestDataManager(authenticatedPage);
     const dataset = DataSetFactory.createPerformanceTestData();
-    console.log('🚀 [Performance Dataset] Creating performance test dataset...');
+    console.log(
+      '🚀 [Performance Dataset] Creating performance test dataset...'
+    );
     const createdContacts = await dataManager.createContacts(dataset.contacts);
     testCleanup(async () => await dataManager.cleanup());
     await use({
