@@ -555,25 +555,27 @@ async def get_contact_history(
     if not contact:
         raise ContactNotFoundError(contact_id)
 
-    # Get history entries (we pass limit * page to get enough entries)
-    # For proper pagination, we need total count from history service
+    # Calculate offset for database-level pagination
+    offset = (page - 1) * limit
+
+    # Get paginated history entries from database
     history_entries = await history_service.get_contact_history(
         contact_id=contact_id,
-        limit=limit * page,
+        limit=limit,
+        offset=offset,
     )
 
-    # Calculate pagination (simple offset-based pagination)
-    start_idx = (page - 1) * limit
-    end_idx = start_idx + limit
-    paginated_entries = history_entries[start_idx:end_idx]
+    # Get total count for pagination metadata
+    total_count = await history_service.get_contact_history_count(
+        contact_id=contact_id,
+    )
 
     # Convert to resources
     history_resources = [
-        ContactHistoryConverter.to_resource(entry) for entry in paginated_entries
+        ContactHistoryConverter.to_resource(entry) for entry in history_entries
     ]
 
     # Create pagination metadata
-    total_count = len(history_entries)
     meta = create_pagination_meta(total_count, page, limit)
     links = create_pagination_links(
         f"{base_url}/api/contacts/{contact_id}/history", page, limit, total_count

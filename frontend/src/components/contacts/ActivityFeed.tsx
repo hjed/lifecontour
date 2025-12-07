@@ -39,9 +39,10 @@ export function ActivityFeed({
   });
 
   const activities = data?.data ?? [];
-  const totalCount = data?.meta?.total_count ?? 0;
   const hasMore =
-    activities.length < totalCount && page * pageSize < totalCount;
+    data?.meta?.current_page !== undefined &&
+    data?.meta?.page_count !== undefined &&
+    data.meta.current_page < data.meta.page_count;
 
   const handleLoadMore = () => {
     setPage(prev => prev + 1);

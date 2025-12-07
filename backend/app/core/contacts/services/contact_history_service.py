@@ -115,10 +115,19 @@ class ContactHistoryService:
         self,
         contact_id: int,
         limit: int = 50,
+        offset: int = 0,
         _transaction: AsyncConnection | None = None,
     ) -> list[ContactFieldHistoryEntry]:
-        """Get field history for a specific contact."""
-        return await self.history_repo.get_contact_history(contact_id, limit)
+        """Get field history for a specific contact with pagination."""
+        return await self.history_repo.get_contact_history(contact_id, limit, offset)
+
+    async def get_contact_history_count(
+        self,
+        contact_id: int,
+        _transaction: AsyncConnection | None = None,
+    ) -> int:
+        """Get total count of history entries for a specific contact."""
+        return await self.history_repo.get_contact_history_count(contact_id)
 
     async def get_entity_history(
         self,
