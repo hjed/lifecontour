@@ -79,11 +79,12 @@ test.describe('Contact Activity Feed', () => {
     const contact = contacts[0];
 
     // Make an update to the contact to generate history
+    // Note: Playwright's request.patch automatically serializes objects as JSON
     const updateResponse = await page.request.patch(
       `/api/contacts/${contact.id}`,
       {
         headers: { 'Content-Type': 'application/json' },
-        data: JSON.stringify({
+        data: {
           data: {
             type: 'contacts',
             id: contact.id,
@@ -91,7 +92,7 @@ test.describe('Contact Activity Feed', () => {
               nickname: 'Updated Nickname',
             },
           },
-        }),
+        },
       }
     );
 
