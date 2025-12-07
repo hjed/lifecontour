@@ -12,6 +12,7 @@ from typing import Any
 
 import httpx
 import structlog
+from authlib.common.security import generate_token
 from authlib.integrations.starlette_client import OAuth
 from fastapi import HTTPException, Request, status
 
@@ -78,8 +79,9 @@ class OAuthService:
                     authorize_url="https://github.com/login/oauth/authorize",
                     access_token_url="https://github.com/login/oauth/access_token",
                     client_kwargs={"scope": "user:email"},
+                    code_challenge_method="S256",
                 )
-                logger.info("Configured GitHub OAuth provider")
+                logger.info("Configured GitHub OAuth provider with PKCE")
             except Exception as e:
                 logger.warning(
                     "Failed to configure GitHub OAuth provider", error=str(e)
@@ -95,8 +97,9 @@ class OAuthService:
                     authorize_url="https://login.microsoftonline.com/common/oauth2/v2.0/authorize",
                     access_token_url="https://login.microsoftonline.com/common/oauth2/v2.0/token",
                     client_kwargs={"scope": "openid email profile"},
+                    code_challenge_method="S256",
                 )
-                logger.info("Configured Microsoft OAuth provider")
+                logger.info("Configured Microsoft OAuth provider with PKCE")
             except Exception as e:
                 logger.warning(
                     "Failed to configure Microsoft OAuth provider", error=str(e)
@@ -112,8 +115,9 @@ class OAuthService:
                     authorize_url="https://discord.com/api/oauth2/authorize",
                     access_token_url="https://discord.com/api/oauth2/token",
                     client_kwargs={"scope": "identify email"},
+                    code_challenge_method="S256",
                 )
-                logger.info("Configured Discord OAuth provider")
+                logger.info("Configured Discord OAuth provider with PKCE")
             except Exception as e:
                 logger.warning(
                     "Failed to configure Discord OAuth provider", error=str(e)
@@ -142,9 +146,10 @@ class OAuthService:
                     authorize_url=self.settings.oauth_authorization_url,
                     access_token_url=self.settings.oauth_token_url,
                     client_kwargs=client_kwargs,
+                    code_challenge_method="S256",
                 )
                 logger.info(
-                    "Configured generic OAuth provider",
+                    "Configured generic OAuth provider with PKCE",
                     provider_name=self.settings.oauth_provider_name,
                     userinfo_url=self.settings.oauth_userinfo_url,
                 )
@@ -162,7 +167,7 @@ class OAuthService:
     async def get_authorization_url(
         self, request: Request, provider: str, redirect_uri: str
     ) -> str:
-        """Get OAuth authorization URL for provider."""
+        """Get OAuth authorization URL for provider with PKCE support."""
         if provider not in self.oauth._clients:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -175,19 +180,24 @@ class OAuthService:
         csrf_token = secrets.token_urlsafe(32)
         encoded_state = self._encode_state(provider, redirect_uri, csrf_token)
 
-        # Store CSRF token in session for validation (only the CSRF token, not all state)
+        # Generate PKCE code verifier and store in session
+        code_verifier = generate_token(48)
+        request.session["oauth_code_verifier"] = code_verifier
+
+        # Store CSRF token in session for validation
         request.session["oauth_csrf_token"] = csrf_token
 
-        # Get authorization URL with encoded state
+        # Get authorization URL with encoded state and PKCE code verifier
         authorization_url = await client.create_authorization_url(
-            redirect_uri, state=encoded_state
+            redirect_uri, state=encoded_state, code_verifier=code_verifier
         )
 
         logger.info(
-            "Generated OAuth authorization URL",
+            "Generated OAuth authorization URL with PKCE",
             provider=provider,
             has_state=bool(encoded_state),
             has_csrf_token=bool(csrf_token),
+            has_code_verifier=bool(code_verifier),
         )
 
         return str(authorization_url["url"])
@@ -230,20 +240,30 @@ class OAuthService:
         client = self.oauth._clients[provider]
 
         try:
-            # Exchange authorization code for access token
-            token = await client.authorize_access_token(request)
+            # Get code verifier from session for PKCE
+            code_verifier = request.session.get("oauth_code_verifier")
+
+            # Exchange authorization code for access token with PKCE
+            if code_verifier:
+                # Use code verifier for PKCE flow
+                token = await client.authorize_access_token(request, code_verifier=code_verifier)
+            else:
+                # Fallback for non-PKCE flow (backward compatibility)
+                token = await client.authorize_access_token(request)
 
             # Get user information
             user_info = await self._get_user_info(client, token, provider)
 
-            # Clean up session (only need to remove CSRF token now)
+            # Clean up session
             request.session.pop("oauth_csrf_token", None)
+            request.session.pop("oauth_code_verifier", None)
 
             logger.info(
-                "OAuth authentication successful",
+                "OAuth authentication successful with PKCE",
                 provider=provider,
                 user_id=user_info.id,
                 email=user_info.email,
+                used_pkce=bool(code_verifier),
             )
 
             return user_info
@@ -357,6 +377,9 @@ class OAuthService:
                 redirect_uri=redirect_uri,
             )
 
+            # Get code verifier from session for PKCE
+            code_verifier = request.session.get("oauth_code_verifier")
+
             # Exchange authorization code for access token using direct HTTP request
             # This avoids the state validation issues with Authlib's authorize_access_token
             token_data = {
@@ -366,6 +389,10 @@ class OAuthService:
                 "client_id": client.client_id,
                 "client_secret": client.client_secret,
             }
+
+            # Add code verifier for PKCE if available
+            if code_verifier:
+                token_data["code_verifier"] = code_verifier
 
             async with httpx.AsyncClient() as http_client:
                 token_response = await http_client.post(
@@ -399,14 +426,16 @@ class OAuthService:
             # Get user information
             user_info = await self._get_user_info(client, token, provider)
 
-            # Clean up session (only need to remove CSRF token now)
+            # Clean up session
             request.session.pop("oauth_csrf_token", None)
+            request.session.pop("oauth_code_verifier", None)
 
             logger.info(
-                "OAuth code exchange successful",
+                "OAuth code exchange successful with PKCE",
                 provider=provider,
                 user_id=user_info.id,
                 email=user_info.email,
+                used_pkce=bool(code_verifier),
             )
 
             return user_info
