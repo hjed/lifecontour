@@ -21,11 +21,11 @@ class TestJournalType:
         assert str(JournalType.EVENT) == "event"
         assert str(JournalType.MOOD_RATING) == "mood_rating"
 
-    def test_journal_type_comparison(self):
-        """Test that JournalType can be compared as string."""
-        assert JournalType.NOTE == "note"
-        assert JournalType.EVENT == "event"
-        assert JournalType.MOOD_RATING == "mood_rating"
+    def test_journal_type_value_comparison(self):
+        """Test that JournalType values can be compared as strings."""
+        assert JournalType.NOTE.value == "note"
+        assert JournalType.EVENT.value == "event"
+        assert JournalType.MOOD_RATING.value == "mood_rating"
 
     def test_journal_type_requires_data_table(self):
         """Test requires_data_table method."""
