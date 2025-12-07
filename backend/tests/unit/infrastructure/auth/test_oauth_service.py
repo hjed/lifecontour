@@ -306,7 +306,9 @@ class TestOAuthService:
         # Mock the OAuth client
         mock_client = Mock()
         mock_client.create_authorization_url = AsyncMock(
-            return_value={"url": "https://github.com/login/oauth/authorize?code_challenge=test"}
+            return_value={
+                "url": "https://github.com/login/oauth/authorize?code_challenge=test"
+            }
         )
         oauth_service.oauth._clients = {"github": mock_client}  # type: ignore
 
@@ -324,7 +326,10 @@ class TestOAuthService:
         mock_client.create_authorization_url.assert_called_once()
         call_args = mock_client.create_authorization_url.call_args
         assert "code_verifier" in call_args.kwargs
-        assert call_args.kwargs["code_verifier"] == mock_request.session["oauth_code_verifier"]
+        assert (
+            call_args.kwargs["code_verifier"]
+            == mock_request.session["oauth_code_verifier"]
+        )
 
     async def test_handle_callback_uses_pkce_code_verifier(self):
         """Test that handle_callback uses PKCE code verifier when available."""
@@ -337,11 +342,13 @@ class TestOAuthService:
         mock_request = Mock()
         mock_request.session = {
             "oauth_code_verifier": "test_code_verifier_123",
-            "oauth_csrf_token": "test_csrf_token"
+            "oauth_csrf_token": "test_csrf_token",
         }
         mock_request.query_params = {
-            "state": oauth_service._encode_state("github", "http://localhost:3000/auth/callback", "test_csrf_token"),
-            "code": "test_code"
+            "state": oauth_service._encode_state(
+                "github", "http://localhost:3000/auth/callback", "test_csrf_token"
+            ),
+            "code": "test_code",
         }
 
         # Mock the OAuth client and token response
@@ -353,10 +360,7 @@ class TestOAuthService:
 
         # Mock _get_user_info
         mock_user_info = OAuthUserInfo(
-            id="12345",
-            email="test@example.com",
-            name="Test User",
-            provider="github"
+            id="12345", email="test@example.com", name="Test User", provider="github"
         )
         oauth_service._get_user_info = AsyncMock(return_value=mock_user_info)  # type: ignore
 
@@ -386,7 +390,7 @@ class TestOAuthService:
         mock_request = Mock()
         mock_request.session = {
             "oauth_code_verifier": "test_code_verifier_456",
-            "oauth_csrf_token": "test_csrf_token"
+            "oauth_csrf_token": "test_csrf_token",
         }
 
         # Mock the OAuth client
@@ -401,15 +405,12 @@ class TestOAuthService:
         mock_response.status_code = 200
         mock_response.json.return_value = {
             "access_token": "test_token",
-            "token_type": "bearer"
+            "token_type": "bearer",
         }
 
         # Mock _get_user_info
         mock_user_info = OAuthUserInfo(
-            id="12345",
-            email="test@example.com",
-            name="Test User",
-            provider="github"
+            id="12345", email="test@example.com", name="Test User", provider="github"
         )
         oauth_service._get_user_info = AsyncMock(return_value=mock_user_info)  # type: ignore
 
@@ -419,9 +420,15 @@ class TestOAuthService:
             mock_httpx.return_value.__aenter__.return_value = mock_client_instance
 
             # Call handle_callback_with_code
-            state = oauth_service._encode_state("github", "http://localhost:3000/auth/callback", "test_csrf_token")
+            state = oauth_service._encode_state(
+                "github", "http://localhost:3000/auth/callback", "test_csrf_token"
+            )
             result = await oauth_service.handle_callback_with_code(
-                mock_request, "github", "test_code", state, "http://localhost:3000/auth/callback"
+                mock_request,
+                "github",
+                "test_code",
+                state,
+                "http://localhost:3000/auth/callback",
             )
 
             # Verify the POST request included code_verifier

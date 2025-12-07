@@ -246,7 +246,9 @@ class OAuthService:
             # Exchange authorization code for access token with PKCE
             if code_verifier:
                 # Use code verifier for PKCE flow
-                token = await client.authorize_access_token(request, code_verifier=code_verifier)
+                token = await client.authorize_access_token(
+                    request, code_verifier=code_verifier
+                )
             else:
                 # Fallback for non-PKCE flow (backward compatibility)
                 token = await client.authorize_access_token(request)
