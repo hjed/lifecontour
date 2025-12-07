@@ -154,17 +154,8 @@ global.__mockRouter = {
   refresh: mockRefresh,
 };
 
-// Mock window.location
-Object.defineProperty(window, 'location', {
-  value: {
-    href: 'http://localhost:3000',
-    origin: 'http://localhost:3000',
-    pathname: '/',
-    search: '',
-    hash: '',
-    assign: jest.fn(),
-    replace: jest.fn(),
-    reload: jest.fn(),
-  },
-  writable: true,
-});
+// Note: window.location cannot be mocked globally in Jest 30+ with jsdom
+// due to JSDOM v21+ making it non-configurable.
+// If individual tests need to mock window.location methods, use:
+// jest.spyOn(window.location, 'assign').mockImplementation(() => {});
+// Or use JSDOM's reconfigure method if you need to change the URL.
