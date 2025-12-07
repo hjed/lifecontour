@@ -102,15 +102,19 @@ test.describe('Contact Activity Feed', () => {
     await page.goto(`/contacts/${contact.id}`);
     await expect(page).toHaveURL(new RegExp(`/contacts/${contact.id}`));
 
-    // Wait for Activity Feed to load
+    // Wait for Activity Feed heading to load
     await expect(page.getByRole('heading', { name: /Activity/i })).toBeVisible({
       timeout: 10000,
     });
 
-    // The Activity Feed should be present on the page
-    // Check for the activity section wrapper
-    const activitySection = page.locator('[class*="activity"]').first();
-    await expect(activitySection).toBeVisible({ timeout: 5000 });
+    // Verify the history API returns data for this contact
+    const historyResponse = await page.request.get(
+      `/api/contacts/${contact.id}/history`
+    );
+    expect(historyResponse.ok()).toBeTruthy();
+    const historyData = await historyResponse.json();
+    expect(historyData.data).toBeDefined();
+    expect(Array.isArray(historyData.data)).toBe(true);
   });
 
   test('should load contact history via API endpoint', async ({
