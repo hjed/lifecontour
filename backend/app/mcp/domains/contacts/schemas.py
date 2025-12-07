@@ -7,7 +7,7 @@ structured, contextual data for AI analysis and decision making.
 
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class ContactResponse(BaseModel):
@@ -45,10 +45,8 @@ class ContactResponse(BaseModel):
         description="AI-friendly summary of the contact including relationship context and key details"
     )
 
-    class Config:
-        """Pydantic configuration."""
-
-        json_schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "id": "contact-123",
                 "name": "John Doe",
@@ -59,6 +57,7 @@ class ContactResponse(BaseModel):
                 "summary": "John is a software engineer and close friend who works at TechCorp. We collaborate on side projects and meet regularly for coffee.",
             }
         }
+    )
 
 
 class ContactSearchResult(BaseModel):
