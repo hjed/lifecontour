@@ -7,6 +7,7 @@ ensuring proper separation between domain and API layers.
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import TYPE_CHECKING
 
 from app.api.common.schemas import JsonApiLinks
@@ -18,10 +19,13 @@ if TYPE_CHECKING:
         ContactRelationshipUpdateData,
         ContactUpdateData,
     )
+
 from app.api.contacts.schemas import (
     ContactAddressAttributes,
     ContactAddressResource,
     ContactAttributes,
+    ContactHistoryAttributes,
+    ContactHistoryResource,
     ContactMethodAttributes,
     ContactMethodResource,
     ContactNoteAttributes,
@@ -41,6 +45,7 @@ from app.core.contacts.models.entities import (
     ContactRelationship,
     Tag,
 )
+from app.core.contacts.models.repositories import ContactFieldHistoryEntry
 
 
 def _validate_entity_id(entity_id: int | None, entity_type: str) -> None:
@@ -387,4 +392,43 @@ class ContactRelationshipRequestConverter:
             relationship_type=RelationshipType(attrs.relationship_type),
             created_at=existing_relationship.created_at,
             updated_at=existing_relationship.updated_at,
+        )
+
+
+class ContactHistoryConverter:
+    """Converter for ContactFieldHistoryEntry to API resources."""
+
+    @staticmethod
+    def to_resource(
+        entry: ContactFieldHistoryEntry,
+    ) -> ContactHistoryResource:
+        """Convert ContactFieldHistoryEntry to API resource."""
+        # Parse created_at if it's a string
+        created_at = None
+        if entry.created_at:
+            if isinstance(entry.created_at, str):
+                try:
+                    created_at = datetime.fromisoformat(entry.created_at)
+                except ValueError:
+                    created_at = None
+            else:
+                created_at = entry.created_at
+
+        attributes = ContactHistoryAttributes(
+            entity_type=entry.entity_type,
+            entity_id=entry.entity_id,
+            field_name=entry.field_name,
+            old_value=entry.old_value,
+            new_value=entry.new_value,
+            changed_by=entry.changed_by,
+            created_at=created_at,
+        )
+
+        if entry.id is None:
+            raise ValueError("Cannot serialize history entry without ID")
+
+        return ContactHistoryResource(
+            type="contact_history",
+            id=str(entry.id),
+            attributes=attributes,
         )

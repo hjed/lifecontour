@@ -20,6 +20,7 @@ from app.api.common.schemas import (
 )
 from app.api.contacts.converters import (
     ContactConverter,
+    ContactHistoryConverter,
     ContactRequestConverter,
     TagConverter,
 )
@@ -29,6 +30,7 @@ from app.api.contacts.schemas import (
     ContactFieldAttributes,
     ContactFieldResource,
     ContactFieldResponse,
+    ContactHistoryListResponse,
     ContactListResponse,
     ContactResponse,
     ContactUpdateRequest,
@@ -43,6 +45,7 @@ from app.core.contacts.models.exceptions import (
     ContactValidationError,
 )
 from app.core.contacts.services import ContactService
+from app.core.contacts.services.contact_history_service import ContactHistoryService
 from app.infrastructure.auth.models import SessionUser
 
 logger = structlog.get_logger()
@@ -526,3 +529,60 @@ async def update_contact_note_field(
         if CONTACT_NOT_FOUND_ERROR in str(e):
             raise ContactNotFoundError(contact_id) from e
         raise
+
+
+@router.get("/{contact_id}/history", response_model=ContactHistoryListResponse)
+@inject
+async def get_contact_history(
+    contact_id: int,
+    request: Request,
+    contact_service: FromDishka[ContactService],
+    history_service: FromDishka[ContactHistoryService],
+    user: FromDishka[SessionUser],  # Require authentication
+    page: int = Query(default=1, description="Page number", ge=1),
+    limit: int = Query(default=20, description="Items per page", ge=1, le=100),
+) -> ContactHistoryListResponse:
+    """
+    Get field change history for a contact.
+
+    Returns a paginated list of history entries showing field-level changes
+    made to the contact over time.
+    """
+    base_url = get_request_base_url(request)
+
+    # Verify contact exists
+    contact = await contact_service.get_contact_by_id(contact_id)
+    if not contact:
+        raise ContactNotFoundError(contact_id)
+
+    # Calculate offset for database-level pagination
+    offset = (page - 1) * limit
+
+    # Get paginated history entries from database
+    history_entries = await history_service.get_contact_history(
+        contact_id=contact_id,
+        limit=limit,
+        offset=offset,
+    )
+
+    # Get total count for pagination metadata
+    total_count = await history_service.get_contact_history_count(
+        contact_id=contact_id,
+    )
+
+    # Convert to resources
+    history_resources = [
+        ContactHistoryConverter.to_resource(entry) for entry in history_entries
+    ]
+
+    # Create pagination metadata
+    meta = create_pagination_meta(total_count, page, limit)
+    links = create_pagination_links(
+        f"{base_url}/api/contacts/{contact_id}/history", page, limit, total_count
+    )
+
+    return ContactHistoryListResponse(
+        data=history_resources,
+        meta=meta,
+        links=links,
+    )

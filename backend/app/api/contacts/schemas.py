@@ -393,3 +393,42 @@ class NoteFieldUpdateRequest(BaseModel):
     """Request model for updating a contact note field."""
 
     data: NoteFieldUpdateData = Field(..., description="Note field update data")
+
+
+# Contact History Schemas
+class ContactHistoryAttributes(BaseModel):
+    """Attributes for a contact history entry."""
+
+    entity_type: str = Field(..., description="Type of entity that was changed")
+    entity_id: int = Field(..., description="ID of the entity that was changed")
+    field_name: str = Field(..., description="Name of the field that was changed")
+    old_value: str | None = Field(
+        default=None, description="Previous value of the field"
+    )
+    new_value: str | None = Field(default=None, description="New value of the field")
+    changed_by: str | None = Field(
+        default=None, description="User or system that made the change"
+    )
+    created_at: datetime | None = Field(
+        default=None, description="Timestamp when the change was recorded"
+    )
+
+
+class ContactHistoryResource(BaseModel):
+    """JSON API resource for a contact history entry."""
+
+    type: str = Field(default="contact_history", description="Resource type")
+    id: str = Field(..., description="History entry ID")
+    attributes: ContactHistoryAttributes = Field(
+        ..., description="History entry attributes"
+    )
+
+
+class ContactHistoryListResponse(BaseModel):
+    """JSON API list response for contact history."""
+
+    data: list[ContactHistoryResource] = Field(
+        ..., description="List of history entries"
+    )
+    meta: Any = Field(default=None, description="Response metadata")
+    links: Any = Field(default=None, description="Response links")

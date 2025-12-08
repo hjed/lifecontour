@@ -259,9 +259,14 @@ class ContactFieldHistoryRepository(ABC):
 
     @abstractmethod
     async def get_contact_history(
-        self, contact_id: int, limit: int = 50
+        self, contact_id: int, limit: int = 50, offset: int = 0
     ) -> list[ContactFieldHistoryEntry]:
-        """Get field history for a specific contact."""
+        """Get field history for a specific contact with pagination."""
+        pass
+
+    @abstractmethod
+    async def get_contact_history_count(self, contact_id: int) -> int:
+        """Get total count of history entries for a specific contact."""
         pass
 
     @abstractmethod

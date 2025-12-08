@@ -12,35 +12,41 @@ from app.core.contacts.models.repositories import (
 class SqlContactFieldHistoryRepository(ContactFieldHistoryRepository):
     """SQL implementation of ContactFieldHistoryRepository using SQLAlchemy Core."""
 
+    # Shared WHERE clause for contact history queries
+    # Matches history entries for the contact itself and all related entities
+    _CONTACT_HISTORY_WHERE_CLAUSE = """
+        (entity_type = 'contact' AND entity_id = :contact_id)
+        OR (entity_type IN ('contact_method', 'contact_address', 'contact_note', 'contact_tag')
+            AND entity_id IN (
+                SELECT id FROM contact_methods WHERE contact_id = :contact_id
+                UNION
+                SELECT id FROM contact_addresses WHERE contact_id = :contact_id
+                UNION
+                SELECT id FROM contact_notes WHERE contact_id = :contact_id
+                UNION
+                SELECT tag_id FROM contact_tags WHERE contact_id = :contact_id
+            ))
+    """
+
     def __init__(self, connection: AsyncConnection):
         self.conn = connection
 
     async def get_contact_history(
-        self, contact_id: int, limit: int = 50
+        self, contact_id: int, limit: int = 50, offset: int = 0
     ) -> list[ContactFieldHistoryEntry]:
-        """Get field history for a specific contact."""
+        """Get field history for a specific contact with pagination."""
         query = text(
-            """
+            f"""
             SELECT id, entity_type, entity_id, field_name, old_value, new_value,
                    changed_by, created_at
             FROM contact_field_history
-            WHERE (entity_type = 'contact' AND entity_id = :contact_id)
-               OR (entity_type IN ('contact_method', 'contact_address', 'contact_note', 'contact_tag')
-                   AND entity_id IN (
-                       SELECT id FROM contact_methods WHERE contact_id = :contact_id
-                       UNION
-                       SELECT id FROM contact_addresses WHERE contact_id = :contact_id
-                       UNION
-                       SELECT id FROM contact_notes WHERE contact_id = :contact_id
-                       UNION
-                       SELECT tag_id FROM contact_tags WHERE contact_id = :contact_id
-                   ))
+            WHERE {self._CONTACT_HISTORY_WHERE_CLAUSE}
             ORDER BY created_at DESC
-            LIMIT :limit
+            LIMIT :limit OFFSET :offset
         """
         )
         result = await self.conn.execute(
-            query, {"contact_id": contact_id, "limit": limit}
+            query, {"contact_id": contact_id, "limit": limit, "offset": offset}
         )
 
         entries = []
@@ -58,6 +64,19 @@ class SqlContactFieldHistoryRepository(ContactFieldHistoryRepository):
             entries.append(entry)
 
         return entries
+
+    async def get_contact_history_count(self, contact_id: int) -> int:
+        """Get total count of history entries for a specific contact."""
+        query = text(
+            f"""
+            SELECT COUNT(*) as total
+            FROM contact_field_history
+            WHERE {self._CONTACT_HISTORY_WHERE_CLAUSE}
+        """
+        )
+        result = await self.conn.execute(query, {"contact_id": contact_id})
+        row = result.fetchone()
+        return row.total if row else 0
 
     async def get_entity_history(
         self, entity_type: str, entity_id: int

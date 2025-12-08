@@ -15,6 +15,7 @@ import {
   ContactFormData,
   ContactFilters,
   TagListResponse,
+  ContactHistoryListResponse,
 } from '@/types/contacts';
 import { JsonApiErrorResponse } from '@/types/api';
 import {
@@ -426,5 +427,58 @@ export function useUpdateContactField() {
       // Don't show toast here - let the component handle it
       console.error('Field update failed:', error);
     },
+  });
+}
+
+// Contact History API Functions
+export const historyKeys = {
+  all: ['contact-history'] as const,
+  list: (contactId: string, page?: number, limit?: number) =>
+    [...historyKeys.all, contactId, { page, limit }] as const,
+};
+
+export interface HistoryFilters {
+  page?: number;
+  limit?: number;
+}
+
+export async function fetchContactHistory(
+  contactId: string,
+  filters: HistoryFilters = {}
+): Promise<ContactHistoryListResponse> {
+  const params = new URLSearchParams();
+
+  if (filters.page) params.append('page', filters.page.toString());
+  if (filters.limit) params.append('limit', filters.limit.toString());
+
+  const url = `${API_ENDPOINTS.CONTACTS.BASE}/${contactId}/history?${params.toString()}`;
+
+  const response = await fetch(url, {
+    credentials: 'include',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+  });
+
+  if (!response.ok) {
+    const errorData: JsonApiErrorResponse = await response.json();
+    throw new Error(
+      errorData.errors?.[0]?.detail || ERROR_MESSAGES.FETCH_FAILED
+    );
+  }
+
+  return response.json();
+}
+
+export function useContactHistory(
+  contactId: string,
+  filters: HistoryFilters = {},
+  options: { enabled?: boolean } = {}
+) {
+  return useQuery({
+    queryKey: historyKeys.list(contactId, filters.page, filters.limit),
+    queryFn: () => fetchContactHistory(contactId, filters),
+    enabled: options.enabled !== false && !!contactId,
+    staleTime: 2 * 60 * 1000, // 2 minutes for history
   });
 }
