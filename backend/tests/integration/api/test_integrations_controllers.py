@@ -13,6 +13,8 @@ from dishka.integrations.fastapi import FastapiProvider, setup_dishka
 from fastapi.testclient import TestClient
 
 from app.infrastructure.auth.models import SessionUser
+from app.infrastructure.auth.oauth_service import OAuthService
+from app.infrastructure.config import Settings
 from app.infrastructure.di.contacts import ContactProvider
 from app.infrastructure.di.database import DatabaseProvider
 from app.infrastructure.di.infrastructure import InfrastructureProvider
@@ -43,6 +45,10 @@ class TestIntegrationsControllers:
             @provide(scope=Scope.REQUEST)
             def get_session_user(self) -> SessionUser:
                 return test_user  # type: ignore
+
+            @provide(scope=Scope.REQUEST)
+            def get_oauth_service(self, settings: Settings) -> OAuthService:
+                return OAuthService(settings)
 
         # Create app with test settings
         app = create_app(settings=test_settings)
