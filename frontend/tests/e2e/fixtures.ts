@@ -632,13 +632,51 @@ export const test = base.extend<TestFixtures, WorkerFixtures>({
   taggedContactsData: async ({ authenticatedPage, testCleanup }, use) => {
     const dataManager = new TestDataManager(authenticatedPage);
     const dataset = DataSetFactory.createTaggedData();
+
     console.log('🏷️ [Tagged Contacts] Creating tagged contacts dataset...');
+
+    // Create contacts with tags (tags will be auto-created)
     const createdContacts = await dataManager.createContacts(dataset.contacts);
-    testCleanup(async () => await dataManager.cleanup());
+
+    // Extract created tags from the contacts by fetching their real tag data
+    // This is needed because tests navigate to /contacts/tags/${tag.id} requiring real IDs
+    const createdTags: { id: string; name: string }[] = [];
+    for (const contact of createdContacts) {
+      if (contact.tags && contact.tags.length > 0) {
+        // Get the real tag data from the contact's tags endpoint
+        try {
+          const tagsResponse = await authenticatedPage.request.get(
+            `/api/contacts/${contact.id}/tags`
+          );
+
+          if (tagsResponse.ok()) {
+            const tagsData = await tagsResponse.json();
+            for (const tagResource of tagsData.data) {
+              const tagId = tagResource.id;
+              const tagName = tagResource.attributes.name;
+
+              if (!createdTags.some(tag => tag.id === tagId)) {
+                createdTags.push({ id: tagId, name: tagName });
+              }
+            }
+          }
+        } catch (error) {
+          console.warn(
+            `⚠️ [Tagged Contacts] Failed to get tags for contact ${contact.id}:`,
+            error
+          );
+        }
+      }
+    }
+
+    testCleanup(async () => {
+      await dataManager.cleanup();
+    });
+
     await use({
       page: authenticatedPage,
       contacts: createdContacts,
-      tags: convertDatasetTags(dataset.tags),
+      tags: createdTags,
     });
   },
 
