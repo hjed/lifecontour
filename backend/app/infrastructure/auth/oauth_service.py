@@ -714,10 +714,7 @@ class OAuthService:
             user_id: User ID to disconnect integration for
 
         Returns:
-            True if disconnected successfully, False if not connected
-
-        Raises:
-            ValueError: If user not connected to Google Contacts
+            False - feature not yet implemented
         """
         # TODO: Implement actual token storage and removal
         # For now, this is a placeholder that indicates the feature is not implemented
