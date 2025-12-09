@@ -729,14 +729,24 @@ async def authenticated_client(test_settings, test_user):
 
         @provide(scope=Scope.APP)
         def get_search_service(self) -> SearchService:
-            """Get search service (singleton for app lifetime)."""
+            """
+            Get search service (singleton for app lifetime).
+
+            Required for full app initialization even if not directly used in OAuth tests.
+            Some routes depend on SearchService being available in the DI container.
+            """
             return SearchService()
 
         @provide(scope=Scope.REQUEST)
         def get_outbox_event_publisher(
             self, connection: AsyncConnection
         ) -> OutboxEventPublisher:
-            """Get outbox event publisher for request scope."""
+            """
+            Get outbox event publisher for request scope.
+
+            Required for full app initialization even if not directly used in OAuth tests.
+            Some routes depend on OutboxEventPublisher being available in the DI container.
+            """
             return OutboxEventPublisher(connection)
 
     # Create app with test settings
