@@ -19,6 +19,7 @@ import {
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useAuth } from '@/lib/auth/AuthProvider';
+import { useGoogleContactsOAuthCallback } from '@/lib/api/integrations';
 
 // Component that uses useSearchParams - needs to be wrapped in Suspense
 function CallbackContent() {
@@ -27,6 +28,7 @@ function CallbackContent() {
   const { refreshSession } = useAuth();
   const [error, setError] = useState<string | null>(null);
   const processedRef = useRef(false);
+  const oauthCallback = useGoogleContactsOAuthCallback();
 
   useEffect(() => {
     const processCallback = async () => {
@@ -51,6 +53,22 @@ function CallbackContent() {
         // Validate required parameters
         if (!code || !state) {
           throw new Error('Missing required OAuth parameters');
+        }
+
+        // Check if this is an integration OAuth callback
+        // Integration OAuth callbacks will have a specific state format or session marker
+        const isIntegrationCallback = sessionStorage.getItem('oauth_integration') === 'true';
+
+        if (isIntegrationCallback) {
+          // Handle integration OAuth callback
+          await oauthCallback.mutateAsync({ code, state });
+
+          // Clean up session
+          sessionStorage.removeItem('oauth_integration');
+
+          // Redirect to integrations page
+          router.replace('/integrations');
+          return;
         }
 
         // Get provider from sessionStorage (stored during login)
@@ -98,7 +116,7 @@ function CallbackContent() {
     };
 
     processCallback();
-  }, [searchParams, router, refreshSession]);
+  }, [searchParams, router, refreshSession, oauthCallback]);
 
   // Show error state
   if (error) {
