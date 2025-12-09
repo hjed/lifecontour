@@ -257,13 +257,26 @@ async def google_contacts_oauth_authorize(
         # The state is embedded in the URL by the oauth_service
         parsed_url = urllib.parse.urlparse(authorization_url)
         query_params = urllib.parse.parse_qs(parsed_url.query)
-        state = query_params.get("state", [""])[0]
+        state_list = query_params.get("state")
+
+        if not state_list or not state_list[0]:
+            logger.error(
+                "OAuth authorization URL missing state parameter",
+                user_id=user.id,
+                authorization_url=authorization_url,
+            )
+            raise HTTPException(
+                status_code=500,
+                detail="OAuth authorization URL missing state parameter",
+            )
+
+        state = state_list[0]
 
         logger.info(
             "Google Contacts OAuth authorization initiated",
             user_id=user.id,
             redirect_url=request_data.redirect_url,
-            has_state=bool(state),
+            has_state=True,
         )
 
         return OAuthAuthorizeResponse(
