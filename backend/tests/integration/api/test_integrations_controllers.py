@@ -282,8 +282,8 @@ class TestIntegrationsControllers:
         with patch(
             "app.infrastructure.auth.oauth_service.OAuthService.get_google_contacts_authorization_url"
         ) as mock_auth_url:
-            # Mock successful authorization URL generation
-            mock_auth_url.return_value = "https://accounts.google.com/oauth/authorize?client_id=test&redirect_uri=test&scope=contacts"
+            # Mock successful authorization URL generation with state parameter
+            mock_auth_url.return_value = "https://accounts.google.com/oauth/authorize?client_id=test&redirect_uri=test&scope=contacts&state=test_state_123"
 
             # Make request
             response = client.post(
@@ -299,6 +299,7 @@ class TestIntegrationsControllers:
             assert data["authorization_url"].startswith(
                 "https://accounts.google.com/oauth/authorize"
             )
+            assert data["state"] == "test_state_123"
 
             # Verify service was called
             mock_auth_url.assert_called_once()
