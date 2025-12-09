@@ -18,6 +18,7 @@ type table (e.g., PLAN type if journal_plan_data row exists).
 """
 
 from collections.abc import Sequence
+from typing import Any
 
 import sqlalchemy as sa
 from alembic import op
@@ -52,7 +53,7 @@ BOOKING_REF_COMMENT = "Booking reference number"
 TRAVEL_ORDER_COMMENT = "Order within the travel plan for sorting"
 
 
-def create_journal_fk_column():
+def create_journal_fk_column() -> Any:
     """Create a standard journal_id foreign key column."""
     return sa.Column(
         "journal_id",
@@ -64,7 +65,7 @@ def create_journal_fk_column():
     )
 
 
-def create_timestamps():
+def create_timestamps() -> Any:
     """Create standard created_at and updated_at columns."""
     return [
         sa.Column(
@@ -82,7 +83,7 @@ def create_timestamps():
     ]
 
 
-def create_uuid_pk():
+def create_uuid_pk() -> Any:
     """Create a standard UUID primary key column."""
     return sa.Column(
         "id",
@@ -93,7 +94,7 @@ def create_uuid_pk():
     )
 
 
-def create_travel_fk_column():
+def create_travel_fk_column() -> Any:
     """Create a foreign key column to journal_travel_data."""
     return sa.Column(
         "journal_id",
@@ -104,7 +105,7 @@ def create_travel_fk_column():
     )
 
 
-def create_order_column():
+def create_order_column() -> Any:
     """Create a standard order column for travel components."""
     return sa.Column(
         "order",
@@ -114,7 +115,7 @@ def create_order_column():
     )
 
 
-def create_booking_ref_column():
+def create_booking_ref_column() -> Any:
     """Create a standard booking reference column."""
     return sa.Column(
         "booking_reference",
