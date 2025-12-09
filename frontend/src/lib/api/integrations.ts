@@ -353,14 +353,17 @@ export function useCancelSyncJob() {
 export function useGoogleContactsOAuthAuthorize() {
   return useMutation<OAuthAuthorizeResponse, Error, OAuthAuthorizeRequest>({
     mutationFn: async (request: OAuthAuthorizeRequest) => {
-      const response = await fetch('/api/integrations/google/contacts/oauth/authorize', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(request),
-        credentials: 'include',
-      });
+      const response = await fetch(
+        '/api/integrations/google/contacts/oauth/authorize',
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(request),
+          credentials: 'include',
+        }
+      );
 
       return handleApiResponse<OAuthAuthorizeResponse>(response);
     },
@@ -382,14 +385,17 @@ export function useGoogleContactsOAuthCallback() {
 
   return useMutation<OAuthCallbackResponse, Error, OAuthCallbackRequest>({
     mutationFn: async (request: OAuthCallbackRequest) => {
-      const response = await fetch('/api/integrations/google/contacts/oauth/callback', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(request),
-        credentials: 'include',
-      });
+      const response = await fetch(
+        '/api/integrations/google/contacts/oauth/callback',
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(request),
+          credentials: 'include',
+        }
+      );
 
       return handleApiResponse<OAuthCallbackResponse>(response);
     },
@@ -420,10 +426,13 @@ export function useGoogleContactsOAuthDisconnect() {
 
   return useMutation<OAuthDisconnectResponse, Error, void>({
     mutationFn: async () => {
-      const response = await fetch('/api/integrations/google/contacts/oauth/disconnect', {
-        method: 'DELETE',
-        credentials: 'include',
-      });
+      const response = await fetch(
+        '/api/integrations/google/contacts/oauth/disconnect',
+        {
+          method: 'DELETE',
+          credentials: 'include',
+        }
+      );
 
       return handleApiResponse<OAuthDisconnectResponse>(response);
     },

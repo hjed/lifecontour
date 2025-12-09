@@ -94,15 +94,11 @@ function IntegrationsPageContent() {
     error: syncError,
   } = useGoogleContactsSync();
 
-  const {
-    mutate: authorizeOAuth,
-    isPending: oauthLoading,
-  } = useGoogleContactsOAuthAuthorize();
+  const { mutate: authorizeOAuth, isPending: oauthLoading } =
+    useGoogleContactsOAuthAuthorize();
 
-  const {
-    mutate: disconnectOAuth,
-    isPending: disconnectLoading,
-  } = useGoogleContactsOAuthDisconnect();
+  const { mutate: disconnectOAuth, isPending: disconnectLoading } =
+    useGoogleContactsOAuthDisconnect();
 
   const status = statusData?.data?.attributes;
   const health = healthData?.data?.attributes;
