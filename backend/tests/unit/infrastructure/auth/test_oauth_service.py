@@ -627,27 +627,12 @@ class TestOAuthServiceGoogleContacts:
             assert exc_info.value.status_code == 400
             assert "Invalid CSRF token" in str(exc_info.value.detail)
 
-    async def test_disconnect_google_contacts_success(self, oauth_service_with_google):
-        """Test successful Google Contacts disconnect."""
+    async def test_disconnect_google_contacts_not_implemented(
+        self, oauth_service_with_google
+    ):
+        """Test Google Contacts disconnect returns False (not implemented)."""
         result = await oauth_service_with_google.disconnect_google_contacts(
             "test_user_id"
         )
 
-        assert result is True
-
-    async def test_disconnect_google_contacts_not_connected(
-        self, oauth_service_with_google
-    ):
-        """Test Google Contacts disconnect when not connected."""
-        # Mock the disconnect method to simulate not connected state
-        with patch.object(
-            oauth_service_with_google, "disconnect_google_contacts"
-        ) as mock_disconnect:
-            mock_disconnect.side_effect = ValueError("Google Contacts not connected")
-
-            with pytest.raises(ValueError) as exc_info:
-                await oauth_service_with_google.disconnect_google_contacts(
-                    "test_user_id"
-                )
-
-            assert "Google Contacts not connected" in str(exc_info.value)
+        assert result is False

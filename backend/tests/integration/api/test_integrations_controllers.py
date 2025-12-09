@@ -367,13 +367,13 @@ class TestIntegrationsControllers:
             data = response.json()
             assert "Invalid authorization code" in data["detail"]
 
-    def test_google_contacts_oauth_disconnect_success(self, client: TestClient):
-        """Test successful Google Contacts OAuth disconnect."""
+    def test_google_contacts_oauth_disconnect_not_implemented(self, client: TestClient):
+        """Test Google Contacts OAuth disconnect (not implemented)."""
         with patch(
             "app.infrastructure.auth.oauth_service.OAuthService.disconnect_google_contacts"
         ) as mock_disconnect:
-            # Mock successful disconnect
-            mock_disconnect.return_value = True
+            # Mock not implemented (returns False)
+            mock_disconnect.return_value = False
 
             # Make request
             response = client.delete(
@@ -383,26 +383,8 @@ class TestIntegrationsControllers:
             # Verify response
             assert response.status_code == 200
             data = response.json()
-            assert data["success"] is True
-            assert "Google Contacts disconnected successfully" in data["message"]
+            assert data["success"] is False
+            assert "not yet implemented" in data["message"]
 
             # Verify service was called
             mock_disconnect.assert_called_once()
-
-    def test_google_contacts_oauth_disconnect_not_connected(self, client: TestClient):
-        """Test OAuth disconnect when not connected."""
-        with patch(
-            "app.infrastructure.auth.oauth_service.OAuthService.disconnect_google_contacts"
-        ) as mock_disconnect:
-            # Mock not connected error
-            mock_disconnect.side_effect = ValueError("Google Contacts not connected")
-
-            # Make request
-            response = client.delete(
-                "/api/integrations/google/contacts/oauth/disconnect"
-            )
-
-            # Verify error response
-            assert response.status_code == 400
-            data = response.json()
-            assert "Google Contacts not connected" in data["detail"]

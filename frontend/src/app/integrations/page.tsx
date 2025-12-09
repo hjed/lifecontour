@@ -113,8 +113,7 @@ function IntegrationsPageContent() {
   };
 
   const handleConnectGoogle = () => {
-    // Mark this as an integration OAuth flow
-    sessionStorage.setItem('oauth_integration', 'true');
+    // OAuth flow type is now encoded in the state parameter by the backend
     authorizeOAuth({ redirect_url: '/integrations' });
   };
 
