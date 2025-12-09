@@ -96,9 +96,11 @@ test.describe('Integration Management - Authenticated User', () => {
       expect(authData).toHaveProperty('state');
       expect(authData.authorization_url).toContain('accounts.google.com');
     } else {
-      // If Google OAuth is not configured, expect appropriate error
+      // If Google OAuth is not configured, expect appropriate error (JSON API format)
       const errorData = await response.json();
-      expect(errorData.detail).toContain(
+      expect(errorData.errors).toBeDefined();
+      expect(errorData.errors.length).toBeGreaterThan(0);
+      expect(errorData.errors[0].detail).toContain(
         'Google OAuth provider not configured'
       );
     }
