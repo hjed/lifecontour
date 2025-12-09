@@ -148,7 +148,7 @@ module = "tests.integration.google_contacts.test_google_contacts_client"
 disable_error_code = ["misc"]
 
 [tool.pytest.ini_options]
-minversion = "6.2"
+minversion = "7.0"
 addopts = "-ra -q --strict-markers --strict-config"
 testpaths = ["tests"]
 python_files = ["test_*.py", "*_test.py"]
