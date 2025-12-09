@@ -10,9 +10,9 @@ from app.core.journal.models.exceptions import (
     JournalTagValidationError,
 )
 from app.core.journal.models.journal_tag import (
+    MAX_TAG_NAME_LENGTH,
     JournalTag,
     JournalTagAssignment,
-    MAX_TAG_NAME_LENGTH,
 )
 
 
