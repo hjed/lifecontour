@@ -49,8 +49,7 @@ class JournalTag:
 
         if len(self.name) > MAX_TAG_NAME_LENGTH:
             raise JournalTagValidationError(
-                "name",
-                f"Tag name cannot exceed {MAX_TAG_NAME_LENGTH} characters"
+                "name", f"Tag name cannot exceed {MAX_TAG_NAME_LENGTH} characters"
             )
 
     def _validate_color(self) -> None:
@@ -63,8 +62,7 @@ class JournalTag:
         # Check format: #RRGGBB
         if not self.color.startswith("#") or len(self.color) != MAX_TAG_COLOR_LENGTH:
             raise JournalTagValidationError(
-                "color",
-                "Tag color must be in hex format: #RRGGBB"
+                "color", "Tag color must be in hex format: #RRGGBB"
             )
 
         # Validate hex characters
@@ -72,8 +70,7 @@ class JournalTag:
             int(self.color[1:], 16)
         except ValueError as e:
             raise JournalTagValidationError(
-                "color",
-                "Tag color must contain valid hexadecimal characters"
+                "color", "Tag color must contain valid hexadecimal characters"
             ) from e
 
 
@@ -107,4 +104,3 @@ class JournalTagAssignment:
             raise JournalTagAssignmentValidationError(
                 "journal_id", "Journal ID must be a positive integer"
             )
-

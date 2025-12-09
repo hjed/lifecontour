@@ -121,4 +121,3 @@ class TestJournalContactRelationship:
 
         assert exc_info.value.field == "relationship_type"
         assert "ContactRelationshipType enum" in exc_info.value.message
-

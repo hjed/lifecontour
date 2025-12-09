@@ -214,4 +214,3 @@ class TestJournalTagAssignment:
             )
 
         assert exc_info.value.field == "journal_id"
-

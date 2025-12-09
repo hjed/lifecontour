@@ -76,6 +76,5 @@ class JournalContactRelationship:
         if not isinstance(self.relationship_type, ContactRelationshipType):
             raise JournalContactRelationshipValidationError(
                 "relationship_type",
-                f"Relationship type must be a ContactRelationshipType enum, got {type(self.relationship_type)}"
+                f"Relationship type must be a ContactRelationshipType enum, got {type(self.relationship_type)}",
             )
-
