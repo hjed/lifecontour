@@ -432,3 +432,35 @@ class ContactHistoryListResponse(BaseModel):
     )
     meta: Any = Field(default=None, description="Response metadata")
     links: Any = Field(default=None, description="Response links")
+
+
+# Contact Method Add/Delete Schemas
+class ContactMethodCreateData(BaseModel):
+    """Data for creating a new contact method."""
+
+    type: str = Field(default="contact_methods", description="Resource type")
+    attributes: ContactMethodAttributes = Field(
+        ..., description="Method attributes to create"
+    )
+
+
+class ContactMethodCreateRequest(BaseModel):
+    """Request model for creating a contact method."""
+
+    data: ContactMethodCreateData = Field(..., description="Method creation data")
+
+
+# Contact Address Add/Delete Schemas
+class ContactAddressCreateData(BaseModel):
+    """Data for creating a new contact address."""
+
+    type: str = Field(default="contact_addresses", description="Resource type")
+    attributes: ContactAddressAttributes = Field(
+        ..., description="Address attributes to create"
+    )
+
+
+class ContactAddressCreateRequest(BaseModel):
+    """Request model for creating a contact address."""
+
+    data: ContactAddressCreateData = Field(..., description="Address creation data")

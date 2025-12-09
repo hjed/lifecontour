@@ -21,17 +21,23 @@ from app.api.common.schemas import (
 from app.api.contacts.converters import (
     ContactConverter,
     ContactHistoryConverter,
+    ContactRelationshipConverter,
+    ContactRelationshipRequestConverter,
     ContactRequestConverter,
     TagConverter,
 )
 from app.api.contacts.schemas import (
     AddressFieldUpdateRequest,
+    ContactAddressCreateRequest,
+    ContactAddressResource,
     ContactCreateRequest,
     ContactFieldAttributes,
     ContactFieldResource,
     ContactFieldResponse,
     ContactHistoryListResponse,
     ContactListResponse,
+    ContactMethodCreateRequest,
+    ContactMethodResource,
     ContactResponse,
     ContactUpdateRequest,
     FieldUpdateRequest,
@@ -40,6 +46,7 @@ from app.api.contacts.schemas import (
     TagAssignmentRequest,
     TagListResponse,
 )
+from app.core.contacts.models.entities import ContactAddress, ContactMethod
 from app.core.contacts.models.exceptions import (
     ContactNotFoundError,
     ContactValidationError,
@@ -586,3 +593,127 @@ async def get_contact_history(
         meta=meta,
         links=links,
     )
+
+
+# Contact Methods Management Endpoints
+
+
+@router.post("/{contact_id}/methods", response_model=ContactResponse, status_code=status.HTTP_201_CREATED)
+@inject
+async def add_contact_method(
+    contact_id: int,
+    request: Request,
+    method_request: ContactMethodCreateRequest,
+    contact_service: FromDishka[ContactService],
+    connection: FromDishka[AsyncConnection],
+    user: FromDishka[SessionUser],  # Require authentication
+) -> ContactResponse:
+    """
+    Add a new contact method to an existing contact.
+
+    Creates a new contact method (email, phone, etc.) and returns the updated contact.
+    """
+    base_url = get_request_base_url(request)
+
+    try:
+        # Convert API request to domain entity
+        method_resource = ContactMethodResource(
+            id=None,  # Will be assigned by the database
+            attributes=method_request.data.attributes,
+        )
+        method = ContactRequestConverter.from_method_resource(method_resource, contact_id)
+
+        # Add the method using the service
+        await contact_service.add_contact_method(contact_id, method, connection)
+
+        # Get updated contact
+        updated_contact = await contact_service.get_contact_by_id(contact_id)
+        if not updated_contact:
+            raise ContactNotFoundError(contact_id)
+
+        contact_resource = ContactConverter.to_resource(updated_contact, base_url)
+        return ContactResponse(data=contact_resource)
+
+    except ContactValidationError as e:
+        if CONTACT_NOT_FOUND_ERROR in str(e):
+            raise ContactNotFoundError(contact_id) from e
+        raise
+
+
+@router.delete("/{contact_id}/methods/{method_id}", status_code=status.HTTP_204_NO_CONTENT)
+@inject
+async def delete_contact_method(
+    contact_id: int,
+    method_id: int,
+    contact_service: FromDishka[ContactService],
+    connection: FromDishka[AsyncConnection],
+    user: FromDishka[SessionUser],  # Require authentication
+) -> None:
+    """
+    Delete a contact method.
+
+    Removes the specified contact method from the contact.
+    """
+    await contact_service.delete_contact_method(contact_id, method_id, connection)
+
+
+# Contact Addresses Management Endpoints
+
+
+@router.post("/{contact_id}/addresses", response_model=ContactResponse, status_code=status.HTTP_201_CREATED)
+@inject
+async def add_contact_address(
+    contact_id: int,
+    request: Request,
+    address_request: ContactAddressCreateRequest,
+    contact_service: FromDishka[ContactService],
+    connection: FromDishka[AsyncConnection],
+    user: FromDishka[SessionUser],  # Require authentication
+) -> ContactResponse:
+    """
+    Add a new contact address to an existing contact.
+
+    Creates a new contact address and returns the updated contact.
+    """
+    base_url = get_request_base_url(request)
+
+    try:
+        # Convert API request to domain entity
+        address_resource = ContactAddressResource(
+            id=None,  # Will be assigned by the database
+            attributes=address_request.data.attributes,
+        )
+        address = ContactRequestConverter.from_address_resource(address_resource, contact_id)
+
+        # Add the address using the service
+        await contact_service.add_contact_address(contact_id, address, connection)
+
+        # Get updated contact
+        updated_contact = await contact_service.get_contact_by_id(contact_id)
+        if not updated_contact:
+            raise ContactNotFoundError(contact_id)
+
+        contact_resource = ContactConverter.to_resource(updated_contact, base_url)
+        return ContactResponse(data=contact_resource)
+
+    except ContactValidationError as e:
+        if CONTACT_NOT_FOUND_ERROR in str(e):
+            raise ContactNotFoundError(contact_id) from e
+        raise
+
+
+@router.delete("/{contact_id}/addresses/{address_id}", status_code=status.HTTP_204_NO_CONTENT)
+@inject
+async def delete_contact_address(
+    contact_id: int,
+    address_id: int,
+    contact_service: FromDishka[ContactService],
+    connection: FromDishka[AsyncConnection],
+    user: FromDishka[SessionUser],  # Require authentication
+) -> None:
+    """
+    Delete a contact address.
+
+    Removes the specified contact address from the contact.
+    """
+    await contact_service.delete_contact_address(contact_id, address_id, connection)

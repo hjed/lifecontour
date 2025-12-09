@@ -8,14 +8,16 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import {
+  ContactAddressAttributes,
+  ContactHistoryListResponse,
   ContactListResponse,
+  ContactMethodAttributes,
   ContactResponse,
   ContactCreateData,
   ContactUpdateData,
   ContactFormData,
   ContactFilters,
   TagListResponse,
-  ContactHistoryListResponse,
 } from '@/types/contacts';
 import { JsonApiErrorResponse } from '@/types/api';
 import {
@@ -480,5 +482,239 @@ export function useContactHistory(
     queryFn: () => fetchContactHistory(contactId, filters),
     enabled: options.enabled !== false && !!contactId,
     staleTime: 2 * 60 * 1000, // 2 minutes for history
+  });
+}
+
+// Contact Methods Management API Functions
+
+export async function updateContactMethodField(
+  contactId: string,
+  methodId: string,
+  fieldName: string,
+  value: string
+): Promise<void> {
+  const requestData = {
+    type: 'contact_method_fields',
+    attributes: { value },
+  };
+
+  const response = await fetch(
+    `${API_ENDPOINTS.CONTACTS.BASE}/${contactId}/methods/${methodId}/fields/${fieldName}`,
+    {
+      method: 'PATCH',
+      credentials: 'include',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ data: requestData }),
+    }
+  );
+
+  if (!response.ok) {
+    const errorData: JsonApiErrorResponse = await response.json();
+    throw new Error(
+      errorData.errors?.[0]?.detail || ERROR_MESSAGES.UPDATE_FAILED
+    );
+  }
+}
+
+export async function updateContactAddressField(
+  contactId: string,
+  addressId: string,
+  fieldName: string,
+  value: string
+): Promise<void> {
+  const requestData = {
+    type: 'contact_address_fields',
+    attributes: { value },
+  };
+
+  const response = await fetch(
+    `${API_ENDPOINTS.CONTACTS.BASE}/${contactId}/addresses/${addressId}/fields/${fieldName}`,
+    {
+      method: 'PATCH',
+      credentials: 'include',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ data: requestData }),
+    }
+  );
+
+  if (!response.ok) {
+    const errorData: JsonApiErrorResponse = await response.json();
+    throw new Error(
+      errorData.errors?.[0]?.detail || ERROR_MESSAGES.UPDATE_FAILED
+    );
+  }
+}
+
+async function addContactMethod(
+  contactId: string,
+  method: ContactMethodAttributes
+): Promise<ContactResponse> {
+  const requestData = {
+    type: 'contact_methods',
+    attributes: method,
+  };
+
+  const response = await fetch(`${API_ENDPOINTS.CONTACTS.BASE}/${contactId}/methods`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ data: requestData }),
+  });
+
+  if (!response.ok) {
+    const errorData: JsonApiErrorResponse = await response.json();
+    throw new Error(
+      errorData.errors?.[0]?.detail || ERROR_MESSAGES.CREATE_FAILED
+    );
+  }
+
+  return response.json();
+}
+
+async function deleteContactMethod(
+  contactId: string,
+  methodId: string
+): Promise<void> {
+  const response = await fetch(
+    `${API_ENDPOINTS.CONTACTS.BASE}/${contactId}/methods/${methodId}`,
+    {
+      method: 'DELETE',
+      credentials: 'include',
+    }
+  );
+
+  if (!response.ok) {
+    const errorData: JsonApiErrorResponse = await response.json();
+    throw new Error(
+      errorData.errors?.[0]?.detail || ERROR_MESSAGES.DELETE_FAILED
+    );
+  }
+}
+
+// Contact Addresses Management API Functions
+
+async function addContactAddress(
+  contactId: string,
+  address: ContactAddressAttributes
+): Promise<ContactResponse> {
+  const requestData = {
+    type: 'contact_addresses',
+    attributes: address,
+  };
+
+  const response = await fetch(`${API_ENDPOINTS.CONTACTS.BASE}/${contactId}/addresses`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ data: requestData }),
+  });
+
+  if (!response.ok) {
+    const errorData: JsonApiErrorResponse = await response.json();
+    throw new Error(
+      errorData.errors?.[0]?.detail || ERROR_MESSAGES.CREATE_FAILED
+    );
+  }
+
+  return response.json();
+}
+
+async function deleteContactAddress(
+  contactId: string,
+  addressId: string
+): Promise<void> {
+  const response = await fetch(
+    `${API_ENDPOINTS.CONTACTS.BASE}/${contactId}/addresses/${addressId}`,
+    {
+      method: 'DELETE',
+      credentials: 'include',
+    }
+  );
+
+  if (!response.ok) {
+    const errorData: JsonApiErrorResponse = await response.json();
+    throw new Error(
+      errorData.errors?.[0]?.detail || ERROR_MESSAGES.DELETE_FAILED
+    );
+  }
+}
+
+// React Query Hooks for Contact Methods
+
+export function useAddContactMethod() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({ contactId, method }: { contactId: string; method: ContactMethodAttributes }) =>
+      addContactMethod(contactId, method),
+    onSuccess: (_, { contactId }) => {
+      queryClient.invalidateQueries({ queryKey: contactKeys.detail(contactId) });
+      queryClient.invalidateQueries({ queryKey: contactKeys.lists() });
+      toast.success('Contact method added successfully');
+    },
+    onError: (error: Error) => {
+      toast.error(error.message);
+    },
+  });
+}
+
+export function useDeleteContactMethod() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({ contactId, methodId }: { contactId: string; methodId: string }) =>
+      deleteContactMethod(contactId, methodId),
+    onSuccess: (_, { contactId }) => {
+      queryClient.invalidateQueries({ queryKey: contactKeys.detail(contactId) });
+      queryClient.invalidateQueries({ queryKey: contactKeys.lists() });
+      toast.success('Contact method deleted successfully');
+    },
+    onError: (error: Error) => {
+      toast.error(error.message);
+    },
+  });
+}
+
+// React Query Hooks for Contact Addresses
+
+export function useAddContactAddress() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({ contactId, address }: { contactId: string; address: ContactAddressAttributes }) =>
+      addContactAddress(contactId, address),
+    onSuccess: (_, { contactId }) => {
+      queryClient.invalidateQueries({ queryKey: contactKeys.detail(contactId) });
+      queryClient.invalidateQueries({ queryKey: contactKeys.lists() });
+      toast.success('Contact address added successfully');
+    },
+    onError: (error: Error) => {
+      toast.error(error.message);
+    },
+  });
+}
+
+export function useDeleteContactAddress() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({ contactId, addressId }: { contactId: string; addressId: string }) =>
+      deleteContactAddress(contactId, addressId),
+    onSuccess: (_, { contactId }) => {
+      queryClient.invalidateQueries({ queryKey: contactKeys.detail(contactId) });
+      queryClient.invalidateQueries({ queryKey: contactKeys.lists() });
+      toast.success('Contact address deleted successfully');
+    },
+    onError: (error: Error) => {
+      toast.error(error.message);
+    },
   });
 }
