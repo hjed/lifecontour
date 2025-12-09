@@ -8,9 +8,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from uuid import UUID
 
-# Constants for tag validation
-MAX_TAG_NAME_LENGTH = 100
-MAX_TAG_COLOR_LENGTH = 7  # Hex color format: #RRGGBB
+from .constants import MAX_TAG_COLOR_LENGTH, MAX_TAG_NAME_LENGTH
 
 
 @dataclass
@@ -63,7 +61,7 @@ class JournalTag:
             raise JournalTagValidationError("color", "Tag color is required")
 
         # Check format: #RRGGBB
-        if not self.color.startswith("#") or len(self.color) != 7:
+        if not self.color.startswith("#") or len(self.color) != MAX_TAG_COLOR_LENGTH:
             raise JournalTagValidationError(
                 "color",
                 "Tag color must be in hex format: #RRGGBB"

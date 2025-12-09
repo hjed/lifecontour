@@ -7,22 +7,29 @@ class JournalError(Exception):
     pass
 
 
-class JournalValidationError(JournalError):
+class JournalFieldValidationError(JournalError):
+    """Base exception for field validation errors in journal domain.
+
+    This base class provides common implementation for all field validation errors.
+    Subclasses only need to provide a docstring describing the specific validation context.
+    """
+
+    def __init__(self, field: str, message: str):
+        self.field = field
+        self.message = message
+        super().__init__(f"{field}: {message}")
+
+
+class JournalValidationError(JournalFieldValidationError):
     """Exception raised when journal validation fails."""
 
-    def __init__(self, field: str, message: str):
-        self.field = field
-        self.message = message
-        super().__init__(f"{field}: {message}")
+    pass
 
 
-class CalendarValidationError(JournalError):
+class CalendarValidationError(JournalFieldValidationError):
     """Exception raised when calendar validation fails."""
 
-    def __init__(self, field: str, message: str):
-        self.field = field
-        self.message = message
-        super().__init__(f"{field}: {message}")
+    pass
 
 
 class CalendarNotFoundError(JournalError):
@@ -89,94 +96,22 @@ class JournalCycleError(JournalHierarchyError):
         )
 
 
-class PhotoAlbumDataValidationError(JournalError):
-    """Exception raised when photo album data (PHOTO_ALBUM type) validation fails."""
-
-    def __init__(self, field: str, message: str):
-        self.field = field
-        self.message = message
-        super().__init__(f"{field}: {message}")
-
-
-class PlanDataValidationError(JournalError):
-    """Exception raised when plan data (PLAN type) validation fails."""
-
-    def __init__(self, field: str, message: str):
-        self.field = field
-        self.message = message
-        super().__init__(f"{field}: {message}")
-
-
-class PlanDocumentValidationError(JournalError):
-    """Exception raised when plan document validation fails."""
-
-    def __init__(self, field: str, message: str):
-        self.field = field
-        self.message = message
-        super().__init__(f"{field}: {message}")
-
-
-class TravelDataValidationError(JournalError):
-    """Exception raised when travel data (TRAVEL type) validation fails."""
-
-    def __init__(self, field: str, message: str):
-        self.field = field
-        self.message = message
-        super().__init__(f"{field}: {message}")
-
-
-class TravelFlightValidationError(JournalError):
-    """Exception raised when travel flight validation fails."""
-
-    def __init__(self, field: str, message: str):
-        self.field = field
-        self.message = message
-        super().__init__(f"{field}: {message}")
-
-
-class TravelAccommodationValidationError(JournalError):
-    """Exception raised when travel accommodation validation fails."""
-
-    def __init__(self, field: str, message: str):
-        self.field = field
-        self.message = message
-        super().__init__(f"{field}: {message}")
-
-
-class TravelTransportationValidationError(JournalError):
-    """Exception raised when travel transportation validation fails."""
-
-    def __init__(self, field: str, message: str):
-        self.field = field
-        self.message = message
-        super().__init__(f"{field}: {message}")
-
-
-class JournalContactRelationshipValidationError(JournalError):
+class JournalContactRelationshipValidationError(JournalFieldValidationError):
     """Exception raised when journal contact relationship validation fails."""
 
-    def __init__(self, field: str, message: str):
-        self.field = field
-        self.message = message
-        super().__init__(f"{field}: {message}")
+    pass
 
 
-class JournalTagValidationError(JournalError):
+class JournalTagValidationError(JournalFieldValidationError):
     """Exception raised when journal tag validation fails."""
 
-    def __init__(self, field: str, message: str):
-        self.field = field
-        self.message = message
-        super().__init__(f"{field}: {message}")
+    pass
 
 
-class JournalTagAssignmentValidationError(JournalError):
+class JournalTagAssignmentValidationError(JournalFieldValidationError):
     """Exception raised when journal tag assignment validation fails."""
 
-    def __init__(self, field: str, message: str):
-        self.field = field
-        self.message = message
-        super().__init__(f"{field}: {message}")
+    pass
 
 
 class JournalTagNotFoundError(JournalError):
