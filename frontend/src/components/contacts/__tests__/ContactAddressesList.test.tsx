@@ -25,7 +25,7 @@ jest.mock('sonner', () => ({
 
 const mockAddresses: readonly ContactAddressResource[] = [
   {
-    id: 1,
+    id: '1',
     type: 'contact_addresses',
     attributes: {
       label: 'Home',
@@ -39,7 +39,7 @@ const mockAddresses: readonly ContactAddressResource[] = [
     },
   },
   {
-    id: 2,
+    id: '2',
     type: 'contact_addresses',
     attributes: {
       label: 'Work',
@@ -74,15 +74,17 @@ describe('ContactAddressesList', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
-    
+
     (contactsApi.useAddContactAddress as jest.Mock).mockReturnValue({
       mutateAsync: mockAddAddress,
+      isPending: false,
     });
-    
+
     (contactsApi.useDeleteContactAddress as jest.Mock).mockReturnValue({
       mutateAsync: mockDeleteAddress,
+      isPending: false,
     });
-    
+
     (contactsApi.updateContactAddressField as jest.Mock).mockImplementation(mockUpdateField);
   });
 
@@ -96,8 +98,8 @@ describe('ContactAddressesList', () => {
     );
 
     expect(screen.getByText('Addresses')).toBeInTheDocument();
-    expect(screen.getByDisplayValue('123 Main Street')).toBeInTheDocument();
-    expect(screen.getByDisplayValue('456 Business Ave')).toBeInTheDocument();
+    expect(screen.getByText(/123 Main Street/)).toBeInTheDocument();
+    expect(screen.getByText(/456 Business Ave/)).toBeInTheDocument();
   });
 
   it('renders empty state when no addresses', () => {
@@ -139,10 +141,6 @@ describe('ContactAddressesList', () => {
   });
 
   it('calls delete address when delete button clicked and confirmed', async () => {
-    // Mock window.confirm to return true
-    const originalConfirm = window.confirm;
-    window.confirm = jest.fn(() => true);
-
     render(
       <ContactAddressesList
         contactId="123"
@@ -151,8 +149,17 @@ describe('ContactAddressesList', () => {
       { wrapper: createWrapper() }
     );
 
+    // Click the delete button to open the dialog
     const deleteButton = screen.getAllByLabelText('Delete address')[0];
     fireEvent.click(deleteButton);
+
+    // Wait for the dialog to appear and click the confirm button
+    await waitFor(() => {
+      expect(screen.getByRole('dialog')).toBeInTheDocument();
+    });
+
+    const confirmButton = screen.getByRole('button', { name: 'Delete' });
+    fireEvent.click(confirmButton);
 
     await waitFor(() => {
       expect(mockDeleteAddress).toHaveBeenCalledWith({
@@ -160,16 +167,9 @@ describe('ContactAddressesList', () => {
         addressId: '1',
       });
     });
-
-    // Restore original confirm
-    window.confirm = originalConfirm;
   });
 
   it('does not delete when user cancels confirmation', async () => {
-    // Mock window.confirm to return false
-    const originalConfirm = window.confirm;
-    window.confirm = jest.fn(() => false);
-
     render(
       <ContactAddressesList
         contactId="123"
@@ -178,15 +178,21 @@ describe('ContactAddressesList', () => {
       { wrapper: createWrapper() }
     );
 
+    // Click the delete button to open the dialog
     const deleteButton = screen.getAllByLabelText('Delete address')[0];
     fireEvent.click(deleteButton);
+
+    // Wait for the dialog to appear and click the cancel button
+    await waitFor(() => {
+      expect(screen.getByRole('dialog')).toBeInTheDocument();
+    });
+
+    const cancelButton = screen.getByRole('button', { name: 'Cancel' });
+    fireEvent.click(cancelButton);
 
     await waitFor(() => {
       expect(mockDeleteAddress).not.toHaveBeenCalled();
     });
-
-    // Restore original confirm
-    window.confirm = originalConfirm;
   });
 
   it('disables buttons when disabled prop is true', () => {
@@ -217,7 +223,7 @@ describe('ContactAddressesList', () => {
       { wrapper: createWrapper() }
     );
 
-    expect(screen.getByDisplayValue('Home')).toBeInTheDocument();
-    expect(screen.getByDisplayValue('Work')).toBeInTheDocument();
+    expect(screen.getByText('Home')).toBeInTheDocument();
+    expect(screen.getByText('Work')).toBeInTheDocument();
   });
 });

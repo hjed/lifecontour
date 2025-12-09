@@ -14,6 +14,24 @@ import { useState } from 'react';
 import { Plus, Trash2, MapPin } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Checkbox } from '@/components/ui/checkbox';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { InlineEditAddressField } from './InlineEditAddressField';
 import { InlineEditField } from './InlineEditField';
 import {
@@ -23,7 +41,23 @@ import {
 } from '@/lib/api/contacts';
 import {
   ContactAddressResource,
+  ContactAddressAttributes,
 } from '@/types/contacts';
+import { AddressData } from './InlineEditAddressField';
+
+// Common country codes for the select dropdown
+const COMMON_COUNTRIES = [
+  { code: 'AU', name: 'Australia' },
+  { code: 'US', name: 'United States' },
+  { code: 'GB', name: 'United Kingdom' },
+  { code: 'CA', name: 'Canada' },
+  { code: 'NZ', name: 'New Zealand' },
+  { code: 'DE', name: 'Germany' },
+  { code: 'FR', name: 'France' },
+  { code: 'JP', name: 'Japan' },
+  { code: 'CN', name: 'China' },
+  { code: 'IN', name: 'India' },
+];
 
 export interface ContactAddressesListProps {
   /** Contact ID */
@@ -38,6 +72,18 @@ export interface ContactAddressesListProps {
   readonly 'data-testid'?: string;
 }
 
+// Initial state for new address form
+const initialAddressState: Omit<ContactAddressAttributes, 'is_primary'> & { is_primary: boolean } = {
+  street_line_1: '',
+  street_line_2: '',
+  locality: '',
+  region: '',
+  postal_code: '',
+  country_code: 'AU',
+  label: '',
+  is_primary: false,
+};
+
 /**
  * Contact addresses list component with inline editing and add/remove functionality.
  */
@@ -49,39 +95,63 @@ export function ContactAddressesList({
   'data-testid': testId,
 }: ContactAddressesListProps) {
   const [isAddingAddress, setIsAddingAddress] = useState(false);
+  const [newAddress, setNewAddress] = useState(initialAddressState);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [addressToDelete, setAddressToDelete] = useState<string | null>(null);
 
-  // TODO: Uncomment when add form is implemented
-  // const addAddressMutation = useAddContactAddress();
+  const addAddressMutation = useAddContactAddress();
   const deleteAddressMutation = useDeleteContactAddress();
 
-  // TODO: Implement handleAddAddress when add form is complete
-  // const handleAddAddress = async (addressData: ContactAddressAttributes) => {
-  //   try {
-  //     await addAddressMutation.mutateAsync({
-  //       contactId,
-  //       address: addressData,
-  //     });
-  //     setIsAddingAddress(false);
-  //   } catch (error) {
-  //     // Error handling is done by the mutation hook
-  //     console.error('Failed to add address:', error);
-  //   }
-  // };
+  const resetAddForm = () => {
+    setNewAddress(initialAddressState);
+    setIsAddingAddress(false);
+  };
 
-  const handleDeleteAddress = async (addressId: string) => {
-    // Use window.confirm for now - in production, this should be replaced with a proper modal
-    if (!window.confirm('Are you sure you want to delete this address?')) {
+  const handleAddAddress = async () => {
+    if (!newAddress.street_line_1.trim()) {
       return;
     }
 
     try {
+      await addAddressMutation.mutateAsync({
+        contactId,
+        address: {
+          street_line_1: newAddress.street_line_1.trim(),
+          street_line_2: newAddress.street_line_2?.trim() || undefined,
+          locality: newAddress.locality?.trim() || undefined,
+          region: newAddress.region?.trim() || undefined,
+          postal_code: newAddress.postal_code?.trim() || undefined,
+          country_code: newAddress.country_code,
+          label: newAddress.label?.trim() || undefined,
+          is_primary: newAddress.is_primary,
+        },
+      });
+      resetAddForm();
+    } catch (error) {
+      // Error handling is done by the mutation hook
+      console.error('Failed to add address:', error);
+    }
+  };
+
+  const handleDeleteClick = (addressId: string) => {
+    setAddressToDelete(addressId);
+    setDeleteDialogOpen(true);
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!addressToDelete) return;
+
+    try {
       await deleteAddressMutation.mutateAsync({
         contactId,
-        addressId,
+        addressId: addressToDelete,
       });
     } catch (error) {
       // Error handling is done by the mutation hook
       console.error('Failed to delete address:', error);
+    } finally {
+      setDeleteDialogOpen(false);
+      setAddressToDelete(null);
     }
   };
 
@@ -98,28 +168,24 @@ export function ContactAddressesList({
     }
   };
 
-  // TODO: Use formatAddressForDisplay when needed for address display
-  // const formatAddressForDisplay = (address: ContactAddressAttributes): string => {
-  //   const parts: string[] = [];
-  //
-  //   if (address.street_line_1) {
-  //     parts.push(address.street_line_1);
-  //   }
-  //   if (address.street_line_2) {
-  //     parts.push(address.street_line_2);
-  //   }
-  //
-  //   const locationParts: string[] = [];
-  //   if (address.locality) locationParts.push(address.locality);
-  //   if (address.region) locationParts.push(address.region);
-  //   if (address.postal_code) locationParts.push(address.postal_code);
-  //
-  //   if (locationParts.length > 0) {
-  //     parts.push(locationParts.join(', '));
-  //   }
-  //
-  //   return parts.join('\n');
-  // };
+  const handleAddressUpdate = async (
+    addressId: string,
+    addressData: AddressData
+  ) => {
+    // Update each field that has changed
+    const fieldUpdates = [
+      { field: 'street_line_1', value: addressData.street_line_1 || '' },
+      { field: 'street_line_2', value: addressData.street_line_2 || '' },
+      { field: 'locality', value: addressData.locality || '' },
+      { field: 'region', value: addressData.region || '' },
+      { field: 'postal_code', value: addressData.postal_code || '' },
+      { field: 'country_code', value: addressData.country_code || '' },
+    ];
+
+    for (const { field, value } of fieldUpdates) {
+      await handleFieldUpdate(addressId, field, value);
+    }
+  };
 
   return (
     <Card className={className} data-testid={testId}>
@@ -146,11 +212,7 @@ export function ContactAddressesList({
               <div className="flex-1 min-w-0">
                 <InlineEditAddressField
                   value={address.attributes}
-                  onSave={async (addressData) => {
-                    // For now, we'll update the full address through the main contact update
-                    // In a more sophisticated implementation, we could update individual fields
-                    console.log('Address update:', addressData);
-                  }}
+                  onSave={(addressData) => handleAddressUpdate(address.id?.toString() || '', addressData)}
                   placeholder="Add address"
                   disabled={disabled}
                   aria-label={`Address${address.attributes.label ? ` (${address.attributes.label})` : ''}`}
@@ -174,8 +236,8 @@ export function ContactAddressesList({
             <Button
               variant="ghost"
               size="sm"
-              onClick={() => handleDeleteAddress(address.id?.toString() || '')}
-              disabled={disabled}
+              onClick={() => handleDeleteClick(address.id?.toString() || '')}
+              disabled={disabled || deleteAddressMutation.isPending}
               aria-label="Delete address"
             >
               <Trash2 className="h-4 w-4 text-destructive" aria-hidden="true" />
@@ -190,32 +252,149 @@ export function ContactAddressesList({
         )}
 
         {isAddingAddress && (
-          <div className="p-3 rounded-md border border-dashed">
-            <div className="space-y-3">
-              <p className="text-sm font-medium">Add New Address</p>
-              <div className="flex items-center space-x-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setIsAddingAddress(false)}
-                >
-                  Cancel
-                </Button>
-                <Button
-                  size="sm"
-                  onClick={() => {
-                    // For now, just close the add form
-                    // In a full implementation, we'd show a form to collect the address data
-                    setIsAddingAddress(false);
-                  }}
-                >
-                  Add Address
-                </Button>
+          <div className="p-3 rounded-md border border-dashed space-y-4">
+            <p className="text-sm font-medium">Add New Address</p>
+
+            <div className="space-y-2">
+              <Label htmlFor="street-line-1">Street Address *</Label>
+              <Input
+                id="street-line-1"
+                value={newAddress.street_line_1}
+                onChange={(e) => setNewAddress({ ...newAddress, street_line_1: e.target.value })}
+                placeholder="123 Main Street"
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="street-line-2">Street Address Line 2</Label>
+              <Input
+                id="street-line-2"
+                value={newAddress.street_line_2 || ''}
+                onChange={(e) => setNewAddress({ ...newAddress, street_line_2: e.target.value })}
+                placeholder="Apt, Suite, Unit, etc."
+              />
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="locality">City</Label>
+                <Input
+                  id="locality"
+                  value={newAddress.locality || ''}
+                  onChange={(e) => setNewAddress({ ...newAddress, locality: e.target.value })}
+                  placeholder="Sydney"
+                />
               </div>
+              <div className="space-y-2">
+                <Label htmlFor="region">State/Region</Label>
+                <Input
+                  id="region"
+                  value={newAddress.region || ''}
+                  onChange={(e) => setNewAddress({ ...newAddress, region: e.target.value })}
+                  placeholder="NSW"
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="postal-code">Postal Code</Label>
+                <Input
+                  id="postal-code"
+                  value={newAddress.postal_code || ''}
+                  onChange={(e) => setNewAddress({ ...newAddress, postal_code: e.target.value })}
+                  placeholder="2000"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="country-code">Country</Label>
+                <Select
+                  value={newAddress.country_code}
+                  onValueChange={(value) => setNewAddress({ ...newAddress, country_code: value })}
+                >
+                  <SelectTrigger id="country-code">
+                    <SelectValue placeholder="Select country" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {COMMON_COUNTRIES.map((country) => (
+                      <SelectItem key={country.code} value={country.code}>
+                        {country.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="address-label">Label (optional)</Label>
+              <Input
+                id="address-label"
+                value={newAddress.label || ''}
+                onChange={(e) => setNewAddress({ ...newAddress, label: e.target.value })}
+                placeholder="e.g., Home, Work"
+              />
+            </div>
+
+            <div className="flex items-center space-x-2">
+              <Checkbox
+                id="address-primary"
+                checked={newAddress.is_primary}
+                onCheckedChange={(checked) => setNewAddress({ ...newAddress, is_primary: checked === true })}
+              />
+              <Label htmlFor="address-primary" className="text-sm font-normal">
+                Set as primary address
+              </Label>
+            </div>
+
+            <div className="flex items-center space-x-2 pt-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={resetAddForm}
+                disabled={addAddressMutation.isPending}
+              >
+                Cancel
+              </Button>
+              <Button
+                size="sm"
+                onClick={handleAddAddress}
+                disabled={!newAddress.street_line_1.trim() || addAddressMutation.isPending}
+              >
+                {addAddressMutation.isPending ? 'Adding...' : 'Add Address'}
+              </Button>
             </div>
           </div>
         )}
       </CardContent>
+
+      {/* Delete Confirmation Dialog */}
+      <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <DialogContent showCloseButton={false}>
+          <DialogHeader>
+            <DialogTitle>Delete Address</DialogTitle>
+            <DialogDescription>
+              Are you sure you want to delete this address? This action cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setDeleteDialogOpen(false)}
+              disabled={deleteAddressMutation.isPending}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={handleConfirmDelete}
+              disabled={deleteAddressMutation.isPending}
+            >
+              {deleteAddressMutation.isPending ? 'Deleting...' : 'Delete'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </Card>
   );
 }

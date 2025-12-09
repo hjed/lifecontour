@@ -14,6 +14,24 @@ import { useState } from 'react';
 import { Plus, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Checkbox } from '@/components/ui/checkbox';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { InlineEditEmailField } from './InlineEditEmailField';
 import { InlineEditPhoneField } from './InlineEditPhoneField';
 import { InlineEditField } from './InlineEditField';
@@ -54,39 +72,64 @@ export function ContactMethodsList({
   const [newMethodType, setNewMethodType] = useState<ContactMethodType>(
     ContactMethodType.EMAIL
   );
+  const [newMethodValue, setNewMethodValue] = useState('');
+  const [newMethodLabel, setNewMethodLabel] = useState('');
+  const [newMethodIsPrimary, setNewMethodIsPrimary] = useState(false);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [methodToDelete, setMethodToDelete] = useState<string | null>(null);
 
-  // TODO: Uncomment when add form is implemented
-  // const addMethodMutation = useAddContactMethod();
+  const addMethodMutation = useAddContactMethod();
   const deleteMethodMutation = useDeleteContactMethod();
 
-  // TODO: Implement handleAddMethod when add form is complete
-  // const handleAddMethod = async (methodData: ContactMethodAttributes) => {
-  //   try {
-  //     await addMethodMutation.mutateAsync({
-  //       contactId,
-  //       method: methodData,
-  //     });
-  //     setIsAddingMethod(false);
-  //   } catch (error) {
-  //     // Error handling is done by the mutation hook
-  //     console.error('Failed to add method:', error);
-  //   }
-  // };
+  const resetAddForm = () => {
+    setNewMethodType(ContactMethodType.EMAIL);
+    setNewMethodValue('');
+    setNewMethodLabel('');
+    setNewMethodIsPrimary(false);
+    setIsAddingMethod(false);
+  };
 
-  const handleDeleteMethod = async (methodId: string) => {
-    // Use window.confirm for now - in production, this should be replaced with a proper modal
-    if (!window.confirm('Are you sure you want to delete this contact method?')) {
+  const handleAddMethod = async () => {
+    if (!newMethodValue.trim()) {
       return;
     }
 
     try {
+      await addMethodMutation.mutateAsync({
+        contactId,
+        method: {
+          method_type: newMethodType,
+          value: newMethodValue.trim(),
+          label: newMethodLabel.trim() || undefined,
+          is_primary: newMethodIsPrimary,
+        },
+      });
+      resetAddForm();
+    } catch (error) {
+      // Error handling is done by the mutation hook
+      console.error('Failed to add method:', error);
+    }
+  };
+
+  const handleDeleteClick = (methodId: string) => {
+    setMethodToDelete(methodId);
+    setDeleteDialogOpen(true);
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!methodToDelete) return;
+
+    try {
       await deleteMethodMutation.mutateAsync({
         contactId,
-        methodId,
+        methodId: methodToDelete,
       });
     } catch (error) {
       // Error handling is done by the mutation hook
       console.error('Failed to delete method:', error);
+    } finally {
+      setDeleteDialogOpen(false);
+      setMethodToDelete(null);
     }
   };
 
@@ -172,8 +215,8 @@ export function ContactMethodsList({
             <Button
               variant="ghost"
               size="sm"
-              onClick={() => handleDeleteMethod(method.id?.toString() || '')}
-              disabled={disabled}
+              onClick={() => handleDeleteClick(method.id?.toString() || '')}
+              disabled={disabled || deleteMethodMutation.isPending}
               aria-label={`Delete ${method.attributes.method_type}`}
             >
               <Trash2 className="h-4 w-4 text-destructive" aria-hidden="true" />
@@ -188,50 +231,106 @@ export function ContactMethodsList({
         )}
 
         {isAddingMethod && (
-          <div className="p-3 rounded-md border border-dashed">
-            <div className="space-y-3">
-              <div className="flex items-center space-x-2">
-                <label htmlFor="method-type" className="text-sm font-medium">
-                  Type:
-                </label>
-                <select
-                  id="method-type"
-                  value={newMethodType}
-                  onChange={(e) => setNewMethodType(e.target.value as ContactMethodType)}
-                  className="px-2 py-1 border rounded text-sm"
-                >
-                  <option value={ContactMethodType.EMAIL}>Email</option>
-                  <option value={ContactMethodType.PHONE}>Phone</option>
-                  <option value={ContactMethodType.MOBILE}>Mobile</option>
-                </select>
-              </div>
-              <div className="flex items-center space-x-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => {
-                    // For now, just close the add form
-                    // In a full implementation, we'd show a form to collect the method data
-                    setIsAddingMethod(false);
-                  }}
-                >
-                  Cancel
-                </Button>
-                <Button
-                  size="sm"
-                  onClick={() => {
-                    // For now, just close the add form
-                    // In a full implementation, we'd collect the form data and call handleAddMethod
-                    setIsAddingMethod(false);
-                  }}
-                >
-                  Add Method
-                </Button>
-              </div>
+          <div className="p-3 rounded-md border border-dashed space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="method-type">Type</Label>
+              <Select
+                value={newMethodType}
+                onValueChange={(value) => setNewMethodType(value as ContactMethodType)}
+              >
+                <SelectTrigger id="method-type">
+                  <SelectValue placeholder="Select type" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={ContactMethodType.EMAIL}>Email</SelectItem>
+                  <SelectItem value={ContactMethodType.PHONE}>Phone</SelectItem>
+                  <SelectItem value={ContactMethodType.MOBILE}>Mobile</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="method-value">
+                {newMethodType === ContactMethodType.EMAIL ? 'Email Address' : 'Phone Number'} *
+              </Label>
+              <Input
+                id="method-value"
+                type={newMethodType === ContactMethodType.EMAIL ? 'email' : 'tel'}
+                value={newMethodValue}
+                onChange={(e) => setNewMethodValue(e.target.value)}
+                placeholder={newMethodType === ContactMethodType.EMAIL ? 'email@example.com' : '+1 234 567 8900'}
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="method-label">Label (optional)</Label>
+              <Input
+                id="method-label"
+                value={newMethodLabel}
+                onChange={(e) => setNewMethodLabel(e.target.value)}
+                placeholder="e.g., Work, Personal"
+              />
+            </div>
+
+            <div className="flex items-center space-x-2">
+              <Checkbox
+                id="method-primary"
+                checked={newMethodIsPrimary}
+                onCheckedChange={(checked) => setNewMethodIsPrimary(checked === true)}
+              />
+              <Label htmlFor="method-primary" className="text-sm font-normal">
+                Set as primary
+              </Label>
+            </div>
+
+            <div className="flex items-center space-x-2 pt-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={resetAddForm}
+                disabled={addMethodMutation.isPending}
+              >
+                Cancel
+              </Button>
+              <Button
+                size="sm"
+                onClick={handleAddMethod}
+                disabled={!newMethodValue.trim() || addMethodMutation.isPending}
+              >
+                {addMethodMutation.isPending ? 'Adding...' : 'Add Method'}
+              </Button>
             </div>
           </div>
         )}
       </CardContent>
+
+      {/* Delete Confirmation Dialog */}
+      <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <DialogContent showCloseButton={false}>
+          <DialogHeader>
+            <DialogTitle>Delete Contact Method</DialogTitle>
+            <DialogDescription>
+              Are you sure you want to delete this contact method? This action cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setDeleteDialogOpen(false)}
+              disabled={deleteMethodMutation.isPending}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={handleConfirmDelete}
+              disabled={deleteMethodMutation.isPending}
+            >
+              {deleteMethodMutation.isPending ? 'Deleting...' : 'Delete'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </Card>
   );
 }

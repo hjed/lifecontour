@@ -25,7 +25,7 @@ jest.mock('sonner', () => ({
 
 const mockMethods: readonly ContactMethodResource[] = [
   {
-    id: 1,
+    id: '1',
     type: 'contact_methods',
     attributes: {
       method_type: ContactMethodType.EMAIL,
@@ -35,7 +35,7 @@ const mockMethods: readonly ContactMethodResource[] = [
     },
   },
   {
-    id: 2,
+    id: '2',
     type: 'contact_methods',
     attributes: {
       method_type: ContactMethodType.PHONE,
@@ -67,15 +67,17 @@ describe('ContactMethodsList', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
-    
+
     (contactsApi.useAddContactMethod as jest.Mock).mockReturnValue({
       mutateAsync: mockAddMethod,
+      isPending: false,
     });
-    
+
     (contactsApi.useDeleteContactMethod as jest.Mock).mockReturnValue({
       mutateAsync: mockDeleteMethod,
+      isPending: false,
     });
-    
+
     (contactsApi.updateContactMethodField as jest.Mock).mockImplementation(mockUpdateField);
   });
 
@@ -89,8 +91,8 @@ describe('ContactMethodsList', () => {
     );
 
     expect(screen.getByText('Contact Methods')).toBeInTheDocument();
-    expect(screen.getByDisplayValue('john@example.com')).toBeInTheDocument();
-    expect(screen.getByDisplayValue('+61-2-1234-5678')).toBeInTheDocument();
+    expect(screen.getByText('john@example.com')).toBeInTheDocument();
+    expect(screen.getByText('+61 2 1234 5678')).toBeInTheDocument();
   });
 
   it('renders empty state when no methods', () => {
@@ -132,10 +134,6 @@ describe('ContactMethodsList', () => {
   });
 
   it('calls delete method when delete button clicked and confirmed', async () => {
-    // Mock window.confirm to return true
-    const originalConfirm = window.confirm;
-    window.confirm = jest.fn(() => true);
-
     render(
       <ContactMethodsList
         contactId="123"
@@ -144,8 +142,17 @@ describe('ContactMethodsList', () => {
       { wrapper: createWrapper() }
     );
 
+    // Click the delete button to open the dialog
     const deleteButton = screen.getByLabelText('Delete email');
     fireEvent.click(deleteButton);
+
+    // Wait for the dialog to appear and click the confirm button
+    await waitFor(() => {
+      expect(screen.getByRole('dialog')).toBeInTheDocument();
+    });
+
+    const confirmButton = screen.getByRole('button', { name: 'Delete' });
+    fireEvent.click(confirmButton);
 
     await waitFor(() => {
       expect(mockDeleteMethod).toHaveBeenCalledWith({
@@ -153,16 +160,9 @@ describe('ContactMethodsList', () => {
         methodId: '1',
       });
     });
-
-    // Restore original confirm
-    window.confirm = originalConfirm;
   });
 
   it('does not delete when user cancels confirmation', async () => {
-    // Mock window.confirm to return false
-    const originalConfirm = window.confirm;
-    window.confirm = jest.fn(() => false);
-
     render(
       <ContactMethodsList
         contactId="123"
@@ -171,15 +171,21 @@ describe('ContactMethodsList', () => {
       { wrapper: createWrapper() }
     );
 
+    // Click the delete button to open the dialog
     const deleteButton = screen.getByLabelText('Delete email');
     fireEvent.click(deleteButton);
+
+    // Wait for the dialog to appear and click the cancel button
+    await waitFor(() => {
+      expect(screen.getByRole('dialog')).toBeInTheDocument();
+    });
+
+    const cancelButton = screen.getByRole('button', { name: 'Cancel' });
+    fireEvent.click(cancelButton);
 
     await waitFor(() => {
       expect(mockDeleteMethod).not.toHaveBeenCalled();
     });
-
-    // Restore original confirm
-    window.confirm = originalConfirm;
   });
 
   it('disables buttons when disabled prop is true', () => {
