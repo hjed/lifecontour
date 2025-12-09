@@ -133,6 +133,32 @@ export interface IntegrationError {
 }
 
 // OAuth Types
+export interface OAuthAuthorizeRequest {
+  redirect_url?: string;
+}
+
+export interface OAuthAuthorizeResponse {
+  authorization_url: string;
+  state: string;
+}
+
+export interface OAuthCallbackRequest {
+  code: string;
+  state: string;
+}
+
+export interface OAuthCallbackResponse {
+  success: boolean;
+  message: string;
+  redirect_url: string;
+}
+
+export interface OAuthDisconnectResponse {
+  success: boolean;
+  message: string;
+}
+
+// Legacy OAuth types (for backward compatibility)
 export interface OAuthConnectionRequest {
   provider: 'google';
   scopes: string[];

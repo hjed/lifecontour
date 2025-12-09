@@ -11,13 +11,22 @@ from typing import Any
 
 import structlog
 from dishka.integrations.fastapi import FromDishka, inject
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
-from app.api.integrations.schemas import SyncJobRequest, SyncType
+from app.api.integrations.schemas import (
+    OAuthAuthorizeRequest,
+    OAuthAuthorizeResponse,
+    OAuthCallbackRequest,
+    OAuthCallbackResponse,
+    OAuthDisconnectResponse,
+    SyncJobRequest,
+    SyncType,
+)
 from app.core.integrations.health_service import IntegrationHealthService
 from app.core.integrations.task_queue_service import TaskQueueService
 from app.infrastructure.auth.models import SessionUser
+from app.infrastructure.auth.oauth_service import OAuthService
 
 router = APIRouter(prefix="/integrations", tags=["integrations"])
 logger = structlog.get_logger()
@@ -212,3 +221,189 @@ async def get_integrations_health(
                 "error": {"status": "unhealthy", "message": str(e)},
             },
         )
+
+
+# OAuth Integration Endpoints
+
+
+@router.post("/google/contacts/oauth/authorize", response_model=OAuthAuthorizeResponse)
+@inject
+async def google_contacts_oauth_authorize(
+    request_data: OAuthAuthorizeRequest,
+    request: Request,
+    user: FromDishka[SessionUser],
+    oauth_service: FromDishka[OAuthService],
+) -> OAuthAuthorizeResponse:
+    """
+    Initiate OAuth authorization flow for Google Contacts integration.
+
+    This endpoint generates an OAuth authorization URL that the frontend
+    can redirect to for connecting a Google account for contacts sync.
+    """
+    try:
+        # Store the redirect URL in session for after OAuth completion
+        request.session["integration_redirect_url"] = request_data.redirect_url
+
+        # Generate OAuth authorization URL for Google Contacts
+        # Use frontend callback URL for OAuth redirect
+        callback_url = f"{request.base_url}auth/callback"
+
+        authorization_url = await oauth_service.get_google_contacts_authorization_url(
+            request, str(callback_url)
+        )
+
+        # Extract state from the authorization URL
+        # The state is embedded in the URL by the oauth_service
+        import urllib.parse
+
+        parsed_url = urllib.parse.urlparse(authorization_url)
+        query_params = urllib.parse.parse_qs(parsed_url.query)
+        state = query_params.get("state", [""])[0]
+
+        logger.info(
+            "Google Contacts OAuth authorization initiated",
+            user_id=user.id,
+            redirect_url=request_data.redirect_url,
+            has_state=bool(state),
+        )
+
+        return OAuthAuthorizeResponse(
+            authorization_url=authorization_url,
+            state=state,
+        )
+
+    except HTTPException:
+        # Re-raise HTTP exceptions (like provider not configured)
+        raise
+    except Exception as e:
+        logger.error(
+            "Failed to initiate Google Contacts OAuth",
+            user_id=user.id,
+            error=str(e),
+            exc_info=True,
+        )
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to initiate OAuth authorization",
+        ) from e
+
+
+@router.post("/google/contacts/oauth/callback", response_model=OAuthCallbackResponse)
+@inject
+async def google_contacts_oauth_callback(
+    callback_data: OAuthCallbackRequest,
+    request: Request,
+    user: FromDishka[SessionUser],
+    oauth_service: FromDishka[OAuthService],
+) -> OAuthCallbackResponse:
+    """
+    Handle OAuth callback for Google Contacts integration.
+
+    This endpoint processes the OAuth callback and stores the tokens
+    for the authenticated user's Google Contacts integration.
+    """
+    try:
+        # Handle the OAuth callback and store tokens
+        # Use the frontend callback URL for OAuth redirect
+        callback_url = f"{request.base_url}auth/callback"
+
+        token_data = await oauth_service.handle_google_contacts_callback(
+            request, callback_data.code, callback_data.state, str(callback_url)
+        )
+
+        # Get redirect URL from session
+        redirect_url = request.session.pop("integration_redirect_url", "/integrations")
+
+        logger.info(
+            "Google Contacts OAuth callback successful",
+            user_id=user.id,
+            has_access_token=bool(token_data.get("access_token")),
+            has_refresh_token=bool(token_data.get("refresh_token")),
+        )
+
+        return OAuthCallbackResponse(
+            success=True,
+            message="Google Contacts connected successfully",
+            redirect_url=redirect_url,
+        )
+
+    except ValueError as e:
+        logger.error(
+            "Invalid OAuth callback data",
+            user_id=user.id,
+            error=str(e),
+            exc_info=True,
+        )
+        raise HTTPException(
+            status_code=400,
+            detail=str(e),
+        ) from e
+    except Exception as e:
+        logger.error(
+            "Failed to handle Google Contacts OAuth callback",
+            user_id=user.id,
+            error=str(e),
+            exc_info=True,
+        )
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to complete OAuth authorization",
+        ) from e
+
+
+@router.delete(
+    "/google/contacts/oauth/disconnect", response_model=OAuthDisconnectResponse
+)
+@inject
+async def google_contacts_oauth_disconnect(
+    user: FromDishka[SessionUser],
+    oauth_service: FromDishka[OAuthService],
+) -> OAuthDisconnectResponse:
+    """
+    Disconnect Google Contacts integration for the authenticated user.
+
+    This endpoint removes the stored OAuth tokens and disconnects
+    the Google Contacts integration.
+    """
+    try:
+        # Disconnect the Google Contacts integration
+        success = await oauth_service.disconnect_google_contacts(user.id)
+
+        if success:
+            logger.info(
+                "Google Contacts OAuth disconnected successfully",
+                user_id=user.id,
+            )
+            return OAuthDisconnectResponse(
+                success=True,
+                message="Google Contacts disconnected successfully",
+            )
+        else:
+            logger.warning(
+                "Google Contacts OAuth disconnect failed - not connected",
+                user_id=user.id,
+            )
+            raise ValueError("Google Contacts not connected")
+
+    except ValueError as e:
+        logger.error(
+            "Google Contacts disconnect validation error",
+            user_id=user.id,
+            error=str(e),
+            exc_info=True,
+        )
+        raise HTTPException(
+            status_code=400,
+            detail=str(e),
+        ) from e
+    except Exception as e:
+        logger.error(
+            "Failed to disconnect Google Contacts",
+            user_id=user.id,
+            error=str(e),
+            exc_info=True,
+        )
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to disconnect Google Contacts",
+        ) from e

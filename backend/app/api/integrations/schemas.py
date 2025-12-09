@@ -83,6 +83,43 @@ class HealthResponse(BaseModel):
     version: str = Field(default="1.0.0", description="API version")
 
 
+class OAuthAuthorizeRequest(BaseModel):
+    """Request model for OAuth authorization."""
+
+    redirect_url: str = Field(
+        default="/integrations", description="URL to redirect to after OAuth completion"
+    )
+
+
+class OAuthAuthorizeResponse(BaseModel):
+    """Response model for OAuth authorization."""
+
+    authorization_url: str = Field(description="OAuth authorization URL to redirect to")
+    state: str = Field(description="OAuth state parameter for security")
+
+
+class OAuthCallbackRequest(BaseModel):
+    """Request model for OAuth callback."""
+
+    code: str = Field(description="OAuth authorization code")
+    state: str = Field(description="OAuth state parameter")
+
+
+class OAuthCallbackResponse(BaseModel):
+    """Response model for OAuth callback."""
+
+    success: bool = Field(description="Whether OAuth was successful")
+    message: str = Field(description="Human-readable status message")
+    redirect_url: str = Field(description="URL to redirect to after completion")
+
+
+class OAuthDisconnectResponse(BaseModel):
+    """Response model for OAuth disconnect."""
+
+    success: bool = Field(description="Whether disconnect was successful")
+    message: str = Field(description="Human-readable status message")
+
+
 class ErrorResponse(BaseModel):
     """Response model for API errors."""
 
