@@ -32,7 +32,7 @@ export interface ContactMethodsListProps {
   /** Contact ID */
   readonly contactId: string;
   /** List of contact methods */
-  readonly methods: ContactMethodResource[];
+  readonly methods: readonly ContactMethodResource[];
   /** Whether the component is disabled */
   readonly disabled?: boolean;
   /** Additional CSS classes */
@@ -73,7 +73,9 @@ export function ContactMethodsList({
   };
 
   const handleDeleteMethod = async (methodId: string) => {
-    if (!confirm('Are you sure you want to delete this contact method?')) {
+    // Use window.confirm for now - in production, this should be replaced with a proper modal
+    // eslint-disable-next-line no-alert
+    if (!window.confirm('Are you sure you want to delete this contact method?')) {
       return;
     }
 
@@ -155,7 +157,7 @@ export function ContactMethodsList({
           disabled={disabled || isAddingMethod}
           aria-label="Add contact method"
         >
-          <Plus className="h-4 w-4" />
+          <Plus className="h-4 w-4" aria-hidden="true" />
         </Button>
       </CardHeader>
       <CardContent className="space-y-3">
@@ -174,7 +176,7 @@ export function ContactMethodsList({
               disabled={disabled}
               aria-label={`Delete ${method.attributes.method_type}`}
             >
-              <Trash2 className="h-4 w-4 text-destructive" />
+              <Trash2 className="h-4 w-4 text-destructive" aria-hidden="true" />
             </Button>
           </div>
         ))}

@@ -23,7 +23,7 @@ jest.mock('sonner', () => ({
   },
 }));
 
-const mockAddresses: ContactAddressResource[] = [
+const mockAddresses: readonly ContactAddressResource[] = [
   {
     id: 1,
     type: 'contact_addresses',
@@ -51,7 +51,7 @@ const mockAddresses: ContactAddressResource[] = [
       is_primary: false,
     },
   },
-];
+] as const;
 
 const createWrapper = () => {
   const queryClient = new QueryClient({

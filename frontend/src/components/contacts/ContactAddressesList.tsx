@@ -30,7 +30,7 @@ export interface ContactAddressesListProps {
   /** Contact ID */
   readonly contactId: string;
   /** List of contact addresses */
-  readonly addresses: ContactAddressResource[];
+  readonly addresses: readonly ContactAddressResource[];
   /** Whether the component is disabled */
   readonly disabled?: boolean;
   /** Additional CSS classes */
@@ -68,7 +68,9 @@ export function ContactAddressesList({
   };
 
   const handleDeleteAddress = async (addressId: string) => {
-    if (!confirm('Are you sure you want to delete this address?')) {
+    // Use window.confirm for now - in production, this should be replaced with a proper modal
+    // eslint-disable-next-line no-alert
+    if (!window.confirm('Are you sure you want to delete this address?')) {
       return;
     }
 
@@ -129,7 +131,7 @@ export function ContactAddressesList({
           disabled={disabled || isAddingAddress}
           aria-label="Add address"
         >
-          <Plus className="h-4 w-4" />
+          <Plus className="h-4 w-4" aria-hidden="true" />
         </Button>
       </CardHeader>
       <CardContent className="space-y-3">
@@ -175,7 +177,7 @@ export function ContactAddressesList({
               disabled={disabled}
               aria-label="Delete address"
             >
-              <Trash2 className="h-4 w-4 text-destructive" />
+              <Trash2 className="h-4 w-4 text-destructive" aria-hidden="true" />
             </Button>
           </div>
         ))}

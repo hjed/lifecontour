@@ -23,7 +23,7 @@ jest.mock('sonner', () => ({
   },
 }));
 
-const mockMethods: ContactMethodResource[] = [
+const mockMethods: readonly ContactMethodResource[] = [
   {
     id: 1,
     type: 'contact_methods',
@@ -44,7 +44,7 @@ const mockMethods: ContactMethodResource[] = [
       is_primary: false,
     },
   },
-];
+] as const;
 
 const createWrapper = () => {
   const queryClient = new QueryClient({
