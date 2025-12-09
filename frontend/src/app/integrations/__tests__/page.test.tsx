@@ -60,9 +60,15 @@ const mockUseGoogleContactsStatus = jest.mocked(useGoogleContactsStatus);
 const mockUseGoogleContactsSync = jest.mocked(useGoogleContactsSync);
 const mockUseIntegrationHealth = jest.mocked(useIntegrationHealth);
 const mockUseSyncHistory = jest.mocked(useSyncHistory);
-const mockUseGoogleContactsOAuthAuthorize = jest.mocked(useGoogleContactsOAuthAuthorize);
-const mockUseGoogleContactsOAuthCallback = jest.mocked(useGoogleContactsOAuthCallback);
-const mockUseGoogleContactsOAuthDisconnect = jest.mocked(useGoogleContactsOAuthDisconnect);
+const mockUseGoogleContactsOAuthAuthorize = jest.mocked(
+  useGoogleContactsOAuthAuthorize
+);
+const mockUseGoogleContactsOAuthCallback = jest.mocked(
+  useGoogleContactsOAuthCallback
+);
+const mockUseGoogleContactsOAuthDisconnect = jest.mocked(
+  useGoogleContactsOAuthDisconnect
+);
 
 function createWrapper() {
   const queryClient = new QueryClient({

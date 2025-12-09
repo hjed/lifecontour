@@ -777,10 +777,18 @@ async def authenticated_client(test_settings, test_user):
     from app.infrastructure.auth.models import SessionUser
     from app.infrastructure.auth.oauth_service import OAuthService
     from app.infrastructure.config import Settings
+    from app.infrastructure.outbox.publisher import OutboxEventPublisher
+    from app.infrastructure.search.service import SearchService
     from app.main import create_app
+    from sqlalchemy.ext.asyncio import AsyncConnection
 
     class TestAuthProvider(Provider):
         """Test provider for authenticated client."""
+
+        @provide(scope=Scope.APP)
+        def get_settings(self) -> Settings:
+            """Get test settings for app scope."""
+            return test_settings
 
         @provide(scope=Scope.REQUEST)
         def get_session_user(self) -> SessionUser:
@@ -792,6 +800,18 @@ async def authenticated_client(test_settings, test_user):
         def get_oauth_service(self, settings: Settings) -> OAuthService:
             """Get OAuth service instance for request scope."""
             return OAuthService(settings)
+
+        @provide(scope=Scope.APP)
+        def get_search_service(self) -> SearchService:
+            """Get search service (singleton for app lifetime)."""
+            return SearchService()
+
+        @provide(scope=Scope.REQUEST)
+        def get_outbox_event_publisher(
+            self, connection: AsyncConnection
+        ) -> OutboxEventPublisher:
+            """Get outbox event publisher for request scope."""
+            return OutboxEventPublisher(connection)
 
     # Create app with test settings
     app = create_app(settings=test_settings)
@@ -806,7 +826,6 @@ async def authenticated_client(test_settings, test_user):
 
     test_container = make_async_container(
         DatabaseProvider(test_settings),
-        InfrastructureProvider(),
         TestAuthProvider(),
         ContactProvider(),
         IntegrationProvider(),
