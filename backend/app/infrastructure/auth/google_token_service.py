@@ -18,11 +18,13 @@ logger = structlog.get_logger()
 
 class GoogleTokenNotFoundError(Exception):
     """Raised when Google OAuth tokens are not found for a user."""
+
     pass
 
 
 class TokenStorageError(Exception):
     """Raised when token storage operations fail."""
+
     pass
 
 
@@ -231,4 +233,5 @@ class GoogleTokenService:
             return False
 
         # Check if token is still valid
-        return datetime.now(UTC) < token_record.expires_at
+        expires_at: datetime = token_record.expires_at
+        return datetime.now(UTC) < expires_at
