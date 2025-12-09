@@ -699,6 +699,8 @@ async def authenticated_client(test_settings, test_user):
     from httpx import ASGITransport, AsyncClient
 
     from app.infrastructure.auth.models import SessionUser
+    from app.infrastructure.auth.oauth_service import OAuthService
+    from app.infrastructure.config import Settings
     from app.main import create_app
 
     class TestAuthProvider(Provider):
@@ -709,6 +711,11 @@ async def authenticated_client(test_settings, test_user):
             from typing import cast
 
             return cast(SessionUser, test_user)
+
+        @provide(scope=Scope.REQUEST)
+        def get_oauth_service(self, settings: Settings) -> OAuthService:
+            """Get OAuth service instance for request scope."""
+            return OAuthService(settings)
 
     # Create app with test settings
     app = create_app(settings=test_settings)

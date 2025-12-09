@@ -20,6 +20,9 @@ jest.mock('@/lib/api/integrations', () => ({
   useGoogleContactsSync: jest.fn(),
   useIntegrationHealth: jest.fn(),
   useSyncHistory: jest.fn(),
+  useGoogleContactsOAuthAuthorize: jest.fn(),
+  useGoogleContactsOAuthCallback: jest.fn(),
+  useGoogleContactsOAuthDisconnect: jest.fn(),
 }));
 
 // Mock toast
@@ -47,6 +50,9 @@ import {
   useGoogleContactsSync,
   useIntegrationHealth,
   useSyncHistory,
+  useGoogleContactsOAuthAuthorize,
+  useGoogleContactsOAuthCallback,
+  useGoogleContactsOAuthDisconnect,
 } from '@/lib/api/integrations';
 
 // Get typed mocked functions
@@ -54,6 +60,9 @@ const mockUseGoogleContactsStatus = jest.mocked(useGoogleContactsStatus);
 const mockUseGoogleContactsSync = jest.mocked(useGoogleContactsSync);
 const mockUseIntegrationHealth = jest.mocked(useIntegrationHealth);
 const mockUseSyncHistory = jest.mocked(useSyncHistory);
+const mockUseGoogleContactsOAuthAuthorize = jest.mocked(useGoogleContactsOAuthAuthorize);
+const mockUseGoogleContactsOAuthCallback = jest.mocked(useGoogleContactsOAuthCallback);
+const mockUseGoogleContactsOAuthDisconnect = jest.mocked(useGoogleContactsOAuthDisconnect);
 
 function createWrapper() {
   const queryClient = new QueryClient({
@@ -135,6 +144,25 @@ describe('IntegrationsPage', () => {
         meta: { total: 1, page: 1, pageSize: 10 },
       },
       isLoading: false,
+      error: null,
+    } as any);
+
+    // Default OAuth mock implementations
+    mockUseGoogleContactsOAuthAuthorize.mockReturnValue({
+      mutate: jest.fn(),
+      isPending: false,
+      error: null,
+    } as any);
+
+    mockUseGoogleContactsOAuthCallback.mockReturnValue({
+      mutateAsync: jest.fn(),
+      isPending: false,
+      error: null,
+    } as any);
+
+    mockUseGoogleContactsOAuthDisconnect.mockReturnValue({
+      mutate: jest.fn(),
+      isPending: false,
       error: null,
     } as any);
   });

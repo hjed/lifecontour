@@ -98,7 +98,9 @@ test.describe('Integration Management - Authenticated User', () => {
     } else {
       // If Google OAuth is not configured, expect appropriate error
       const errorData = await response.json();
-      expect(errorData.detail).toContain('Google OAuth provider not configured');
+      expect(errorData.detail).toContain(
+        'Google OAuth provider not configured'
+      );
     }
   });
 
@@ -127,11 +129,17 @@ test.describe('Integration Management - Authenticated User', () => {
     await authenticatedPage.goto('/integrations');
 
     // Wait for page to load
-    await authenticatedPage.waitForSelector('[data-testid="google-contacts-integration"]');
+    await authenticatedPage.waitForSelector(
+      '[data-testid="google-contacts-integration"]'
+    );
 
     // Check if connect or disconnect button is present
-    const connectButton = authenticatedPage.locator('[data-testid="connect-google"]');
-    const disconnectButton = authenticatedPage.locator('[data-testid="disconnect-google"]');
+    const connectButton = authenticatedPage.locator(
+      '[data-testid="connect-google"]'
+    );
+    const disconnectButton = authenticatedPage.locator(
+      '[data-testid="disconnect-google"]'
+    );
 
     // Either connect or disconnect button should be visible
     const connectVisible = await connectButton.isVisible();
@@ -141,7 +149,9 @@ test.describe('Integration Management - Authenticated User', () => {
 
     if (connectVisible) {
       // Test connect button functionality
-      expect(await connectButton.textContent()).toContain('Connect Google Account');
+      expect(await connectButton.textContent()).toContain(
+        'Connect Google Account'
+      );
 
       // Click should trigger OAuth flow (but we won't complete it in tests)
       // Just verify the button is clickable
