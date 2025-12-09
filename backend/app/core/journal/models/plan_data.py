@@ -14,6 +14,9 @@ from uuid import UUID
 from .constants import MAX_PLAN_DOCUMENT_TITLE_LENGTH, MAX_PLAN_DOCUMENT_URL_LENGTH
 from .exceptions import PlanDataValidationError, PlanDocumentValidationError
 
+# Validation message constants
+JOURNAL_ID_VALIDATION_MSG = "Journal ID must be a positive integer"
+
 
 @dataclass
 class PlanDocument:
@@ -51,7 +54,7 @@ class PlanDocument:
         """Validate journal_id is positive."""
         if self.journal_id <= 0:
             raise PlanDocumentValidationError(
-                "journal_id", "Journal ID must be a positive integer"
+                "journal_id", JOURNAL_ID_VALIDATION_MSG
             )
 
     def _validate_url(self) -> None:
@@ -107,5 +110,5 @@ class PlanData:
         """Validate journal_id is positive."""
         if self.journal_id <= 0:
             raise PlanDataValidationError(
-                "journal_id", "Journal ID must be a positive integer"
+                "journal_id", JOURNAL_ID_VALIDATION_MSG
             )

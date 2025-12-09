@@ -41,6 +41,16 @@ MAX_CONFIRMATION_NUMBER_LENGTH = 100
 MAX_ACCOMMODATION_NAME_LENGTH = 200
 MAX_TRANSPORTATION_TYPE_LENGTH = 50
 
+# Migration constants to reduce duplication
+JOURNALS_TABLE_FK = "journals.id"
+JOURNAL_FK_COMMENT = "FK to journals - PK ensures one-to-one relationship"
+TRAVEL_DATA_FK = "journal_travel_data.journal_id"
+TRAVEL_DATA_FK_COMMENT = "FK to journal_travel_data"
+UUID_DEFAULT = "gen_random_uuid()"
+NOW_DEFAULT = "now()"
+BOOKING_REF_COMMENT = "Booking reference number"
+TRAVEL_ORDER_COMMENT = "Order within the travel plan for sorting"
+
 
 def upgrade() -> None:
     """Create ITER4-003 journal types tables."""
@@ -51,10 +61,10 @@ def upgrade() -> None:
         sa.Column(
             "journal_id",
             sa.Integer(),
-            sa.ForeignKey("journals.id", ondelete="CASCADE"),
+            sa.ForeignKey(JOURNALS_TABLE_FK, ondelete="CASCADE"),
             nullable=False,
             primary_key=True,
-            comment="FK to journals - PK ensures one-to-one relationship",
+            comment=JOURNAL_FK_COMMENT,
         ),
         sa.Column(
             "immich_album_id",
@@ -65,13 +75,13 @@ def upgrade() -> None:
         sa.Column(
             "created_at",
             sa.TIMESTAMP(timezone=True),
-            server_default=sa.text("now()"),
+            server_default=sa.text(NOW_DEFAULT),
             nullable=False,
         ),
         sa.Column(
             "updated_at",
             sa.TIMESTAMP(timezone=True),
-            server_default=sa.text("now()"),
+            server_default=sa.text(NOW_DEFAULT),
             nullable=False,
         ),
         sa.PrimaryKeyConstraint("journal_id"),
@@ -83,21 +93,21 @@ def upgrade() -> None:
         sa.Column(
             "journal_id",
             sa.Integer(),
-            sa.ForeignKey("journals.id", ondelete="CASCADE"),
+            sa.ForeignKey(JOURNALS_TABLE_FK, ondelete="CASCADE"),
             nullable=False,
             primary_key=True,
-            comment="FK to journals - PK ensures one-to-one relationship",
+            comment=JOURNAL_FK_COMMENT,
         ),
         sa.Column(
             "created_at",
             sa.TIMESTAMP(timezone=True),
-            server_default=sa.text("now()"),
+            server_default=sa.text(NOW_DEFAULT),
             nullable=False,
         ),
         sa.Column(
             "updated_at",
             sa.TIMESTAMP(timezone=True),
-            server_default=sa.text("now()"),
+            server_default=sa.text(NOW_DEFAULT),
             nullable=False,
         ),
         sa.PrimaryKeyConstraint("journal_id"),
@@ -110,7 +120,7 @@ def upgrade() -> None:
             "id",
             sa.UUID(),
             nullable=False,
-            server_default=sa.text("gen_random_uuid()"),
+            server_default=sa.text(UUID_DEFAULT),
             primary_key=True,
         ),
         sa.Column(
@@ -147,7 +157,7 @@ def upgrade() -> None:
         sa.Column(
             "created_at",
             sa.TIMESTAMP(timezone=True),
-            server_default=sa.text("now()"),
+            server_default=sa.text(NOW_DEFAULT),
             nullable=False,
         ),
         sa.PrimaryKeyConstraint("id"),
@@ -166,21 +176,21 @@ def upgrade() -> None:
         sa.Column(
             "journal_id",
             sa.Integer(),
-            sa.ForeignKey("journals.id", ondelete="CASCADE"),
+            sa.ForeignKey(JOURNALS_TABLE_FK, ondelete="CASCADE"),
             nullable=False,
             primary_key=True,
-            comment="FK to journals - PK ensures one-to-one relationship",
+            comment=JOURNAL_FK_COMMENT,
         ),
         sa.Column(
             "created_at",
             sa.TIMESTAMP(timezone=True),
-            server_default=sa.text("now()"),
+            server_default=sa.text(NOW_DEFAULT),
             nullable=False,
         ),
         sa.Column(
             "updated_at",
             sa.TIMESTAMP(timezone=True),
-            server_default=sa.text("now()"),
+            server_default=sa.text(NOW_DEFAULT),
             nullable=False,
         ),
         sa.PrimaryKeyConstraint("journal_id"),
@@ -193,15 +203,15 @@ def upgrade() -> None:
             "id",
             sa.UUID(),
             nullable=False,
-            server_default=sa.text("gen_random_uuid()"),
+            server_default=sa.text(UUID_DEFAULT),
             primary_key=True,
         ),
         sa.Column(
             "journal_id",
             sa.Integer(),
-            sa.ForeignKey("journal_travel_data.journal_id", ondelete="CASCADE"),
+            sa.ForeignKey(TRAVEL_DATA_FK, ondelete="CASCADE"),
             nullable=False,
-            comment="FK to journal_travel_data",
+            comment=TRAVEL_DATA_FK_COMMENT,
         ),
         sa.Column(
             "flight_number",
@@ -243,7 +253,7 @@ def upgrade() -> None:
             "booking_reference",
             sa.VARCHAR(length=MAX_BOOKING_REFERENCE_LENGTH),
             nullable=True,
-            comment="Booking reference number",
+            comment=BOOKING_REF_COMMENT,
         ),
         sa.Column(
             "seat_number",
@@ -261,12 +271,12 @@ def upgrade() -> None:
             "order",
             sa.Integer(),
             nullable=False,
-            comment="Order within the travel plan for sorting",
+            comment=TRAVEL_ORDER_COMMENT,
         ),
         sa.Column(
             "created_at",
             sa.TIMESTAMP(timezone=True),
-            server_default=sa.text("now()"),
+            server_default=sa.text(NOW_DEFAULT),
             nullable=False,
         ),
         sa.PrimaryKeyConstraint("id"),
@@ -291,15 +301,15 @@ def upgrade() -> None:
             "id",
             sa.UUID(),
             nullable=False,
-            server_default=sa.text("gen_random_uuid()"),
+            server_default=sa.text(UUID_DEFAULT),
             primary_key=True,
         ),
         sa.Column(
             "journal_id",
             sa.Integer(),
-            sa.ForeignKey("journal_travel_data.journal_id", ondelete="CASCADE"),
+            sa.ForeignKey(TRAVEL_DATA_FK, ondelete="CASCADE"),
             nullable=False,
-            comment="FK to journal_travel_data",
+            comment=TRAVEL_DATA_FK_COMMENT,
         ),
         sa.Column(
             "name",
@@ -329,7 +339,7 @@ def upgrade() -> None:
             "booking_reference",
             sa.VARCHAR(length=MAX_BOOKING_REFERENCE_LENGTH),
             nullable=True,
-            comment="Booking reference number",
+            comment=BOOKING_REF_COMMENT,
         ),
         sa.Column(
             "confirmation_number",
@@ -341,12 +351,12 @@ def upgrade() -> None:
             "order",
             sa.Integer(),
             nullable=False,
-            comment="Order within the travel plan for sorting",
+            comment=TRAVEL_ORDER_COMMENT,
         ),
         sa.Column(
             "created_at",
             sa.TIMESTAMP(timezone=True),
-            server_default=sa.text("now()"),
+            server_default=sa.text(NOW_DEFAULT),
             nullable=False,
         ),
         sa.PrimaryKeyConstraint("id"),
@@ -371,15 +381,15 @@ def upgrade() -> None:
             "id",
             sa.UUID(),
             nullable=False,
-            server_default=sa.text("gen_random_uuid()"),
+            server_default=sa.text(UUID_DEFAULT),
             primary_key=True,
         ),
         sa.Column(
             "journal_id",
             sa.Integer(),
-            sa.ForeignKey("journal_travel_data.journal_id", ondelete="CASCADE"),
+            sa.ForeignKey(TRAVEL_DATA_FK, ondelete="CASCADE"),
             nullable=False,
-            comment="FK to journal_travel_data",
+            comment=TRAVEL_DATA_FK_COMMENT,
         ),
         sa.Column(
             "type",
@@ -397,18 +407,18 @@ def upgrade() -> None:
             "booking_reference",
             sa.VARCHAR(length=MAX_BOOKING_REFERENCE_LENGTH),
             nullable=True,
-            comment="Booking reference number",
+            comment=BOOKING_REF_COMMENT,
         ),
         sa.Column(
             "order",
             sa.Integer(),
             nullable=False,
-            comment="Order within the travel plan for sorting",
+            comment=TRAVEL_ORDER_COMMENT,
         ),
         sa.Column(
             "created_at",
             sa.TIMESTAMP(timezone=True),
-            server_default=sa.text("now()"),
+            server_default=sa.text(NOW_DEFAULT),
             nullable=False,
         ),
         sa.PrimaryKeyConstraint("id"),

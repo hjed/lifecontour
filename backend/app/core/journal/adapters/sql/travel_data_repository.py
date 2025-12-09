@@ -1,6 +1,6 @@
 """SQL implementation of TravelDataRepository."""
 
-from datetime import datetime
+from datetime import datetime, timezone
 from uuid import UUID
 
 from sqlalchemy import text
@@ -92,7 +92,7 @@ class SqlTravelDataRepository(TravelDataRepository):
         Raises:
             TravelDataValidationError: If database constraints are violated
         """
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
 
         # Check if record exists
         existing = await self.find_by_journal_id(travel_data.journal_id)
@@ -183,7 +183,7 @@ class SqlTravelDataRepository(TravelDataRepository):
         Raises:
             TravelFlightValidationError: If database constraints are violated
         """
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
 
         try:
             # Use UPSERT (INSERT ... ON CONFLICT) for PostgreSQL
@@ -275,7 +275,7 @@ class SqlTravelDataRepository(TravelDataRepository):
         Raises:
             TravelAccommodationValidationError: If database constraints are violated
         """
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
 
         try:
             # Use UPSERT (INSERT ... ON CONFLICT) for PostgreSQL
@@ -356,7 +356,7 @@ class SqlTravelDataRepository(TravelDataRepository):
         Raises:
             TravelTransportationValidationError: If database constraints are violated
         """
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
 
         try:
             # Use UPSERT (INSERT ... ON CONFLICT) for PostgreSQL

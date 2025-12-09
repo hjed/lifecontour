@@ -28,6 +28,9 @@ from .exceptions import (
     TravelTransportationValidationError,
 )
 
+# Validation message constants
+JOURNAL_ID_VALIDATION_MSG = "Journal ID must be a positive integer"
+
 
 @dataclass
 class TravelFlight:
@@ -79,7 +82,7 @@ class TravelFlight:
         """Validate journal_id is positive."""
         if self.journal_id <= 0:
             raise TravelFlightValidationError(
-                "journal_id", "Journal ID must be a positive integer"
+                "journal_id", JOURNAL_ID_VALIDATION_MSG
             )
 
     def _validate_flight_number(self) -> None:
@@ -199,7 +202,7 @@ class TravelAccommodation:
         """Validate journal_id is positive."""
         if self.journal_id <= 0:
             raise TravelAccommodationValidationError(
-                "journal_id", "Journal ID must be a positive integer"
+                "journal_id", JOURNAL_ID_VALIDATION_MSG
             )
 
     def _validate_name(self) -> None:
@@ -278,7 +281,7 @@ class TravelTransportation:
         """Validate journal_id is positive."""
         if self.journal_id <= 0:
             raise TravelTransportationValidationError(
-                "journal_id", "Journal ID must be a positive integer"
+                "journal_id", JOURNAL_ID_VALIDATION_MSG
             )
 
     def _validate_type(self) -> None:
@@ -344,5 +347,5 @@ class TravelData:
         """Validate journal_id is positive."""
         if self.journal_id <= 0:
             raise TravelDataValidationError(
-                "journal_id", "Journal ID must be a positive integer"
+                "journal_id", JOURNAL_ID_VALIDATION_MSG
             )

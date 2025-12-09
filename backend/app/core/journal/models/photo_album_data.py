@@ -13,6 +13,9 @@ from datetime import datetime
 from .constants import MAX_IMMICH_ALBUM_ID_LENGTH
 from .exceptions import PhotoAlbumDataValidationError
 
+# Validation message constants
+JOURNAL_ID_VALIDATION_MSG = "Journal ID must be a positive integer"
+
 
 @dataclass
 class PhotoAlbumData:
@@ -47,7 +50,7 @@ class PhotoAlbumData:
         """Validate journal_id is positive."""
         if self.journal_id <= 0:
             raise PhotoAlbumDataValidationError(
-                "journal_id", "Journal ID must be a positive integer"
+                "journal_id", JOURNAL_ID_VALIDATION_MSG
             )
 
     def _validate_immich_album_id(self) -> None:
