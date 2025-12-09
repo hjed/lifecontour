@@ -6,14 +6,14 @@ with mocked database connections.
 """
 
 from datetime import UTC, datetime, timedelta
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from cryptography.fernet import Fernet
 
 from app.infrastructure.auth.google_token_service import (
-    GoogleTokenService,
     GoogleTokenNotFoundError,
+    GoogleTokenService,
     TokenStorageError,
 )
 
@@ -32,7 +32,9 @@ class TestGoogleTokenService:
         return AsyncMock()
 
     @pytest.fixture
-    def service(self, mock_connection: AsyncMock, encryption_key: str) -> GoogleTokenService:
+    def service(
+        self, mock_connection: AsyncMock, encryption_key: str
+    ) -> GoogleTokenService:
         """Create GoogleTokenService instance with mocked dependencies."""
         return GoogleTokenService(mock_connection, encryption_key)
 
@@ -61,12 +63,12 @@ class TestGoogleTokenService:
         # Assert
         assert mock_connection.execute.call_count == 1
         call_args = mock_connection.execute.call_args
-        
+
         # Verify SQL contains UPSERT logic
         sql = str(call_args[0][0])
         assert "INSERT INTO user_google_auth" in sql
         assert "ON CONFLICT" in sql
-        
+
         # Verify parameters
         params = call_args[0][1]
         assert params["user_id"] == user_id
@@ -99,7 +101,7 @@ class TestGoogleTokenService:
         # Arrange
         user_id = "test_user_123"
         google_email = "test@gmail.com"
-        
+
         # Mock encrypted tokens (encrypt real tokens for test)
         access_token = "access_token_123"
         refresh_token = "refresh_token_456"
@@ -144,7 +146,7 @@ class TestGoogleTokenService:
         # Arrange
         user_id = "test_user_123"
         google_email = "test@gmail.com"
-        
+
         mock_result = MagicMock()
         mock_result.rowcount = 1
         mock_connection.execute.return_value = mock_result
