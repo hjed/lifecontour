@@ -712,7 +712,9 @@ async def authenticated_client(test_settings, test_user):
         @provide(scope=Scope.APP)
         def get_settings(self) -> Settings:
             """Get test settings for app scope."""
-            return test_settings
+            from typing import cast
+
+            return cast(Settings, test_settings)
 
         @provide(scope=Scope.REQUEST)
         def get_session_user(self) -> SessionUser:
