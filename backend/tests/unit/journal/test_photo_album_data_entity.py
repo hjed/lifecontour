@@ -81,4 +81,3 @@ class TestPhotoAlbumDataValidation:
             match=f"Immich album ID cannot exceed {MAX_IMMICH_ALBUM_ID_LENGTH}",
         ):
             PhotoAlbumData(journal_id=1, immich_album_id=long_id)
-

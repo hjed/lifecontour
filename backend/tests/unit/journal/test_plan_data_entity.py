@@ -171,4 +171,3 @@ class TestPlanDocumentValidation:
                 title=long_title,
                 order=0,
             )
-

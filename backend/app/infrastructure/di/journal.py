@@ -63,6 +63,8 @@ class JournalProvider(Provider):
         return SqlPlanDataRepository(connection)
 
     @provide(scope=Scope.REQUEST)
-    def travel_data_repository(self, connection: AsyncConnection) -> TravelDataRepository:
+    def travel_data_repository(
+        self, connection: AsyncConnection
+    ) -> TravelDataRepository:
         """Provide a TravelDataRepository instance."""
         return SqlTravelDataRepository(connection)

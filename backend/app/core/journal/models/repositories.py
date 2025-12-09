@@ -543,7 +543,9 @@ class TravelDataRepository(ABC):
         pass
 
     @abstractmethod
-    async def save_accommodation(self, accommodation: TravelAccommodation) -> TravelAccommodation:
+    async def save_accommodation(
+        self, accommodation: TravelAccommodation
+    ) -> TravelAccommodation:
         """
         Save a travel accommodation (insert or update).
 
@@ -566,7 +568,9 @@ class TravelDataRepository(ABC):
         pass
 
     @abstractmethod
-    async def save_transportation(self, transportation: TravelTransportation) -> TravelTransportation:
+    async def save_transportation(
+        self, transportation: TravelTransportation
+    ) -> TravelTransportation:
         """
         Save a travel transportation (insert or update).
 

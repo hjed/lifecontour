@@ -52,77 +52,107 @@ BOOKING_REF_COMMENT = "Booking reference number"
 TRAVEL_ORDER_COMMENT = "Order within the travel plan for sorting"
 
 
+def create_journal_fk_column():
+    """Create a standard journal_id foreign key column."""
+    return sa.Column(
+        "journal_id",
+        sa.Integer(),
+        sa.ForeignKey(JOURNALS_TABLE_FK, ondelete="CASCADE"),
+        nullable=False,
+        primary_key=True,
+        comment=JOURNAL_FK_COMMENT,
+    )
+
+
+def create_timestamps():
+    """Create standard created_at and updated_at columns."""
+    return [
+        sa.Column(
+            "created_at",
+            sa.TIMESTAMP(timezone=True),
+            server_default=sa.text(NOW_DEFAULT),
+            nullable=False,
+        ),
+        sa.Column(
+            "updated_at",
+            sa.TIMESTAMP(timezone=True),
+            server_default=sa.text(NOW_DEFAULT),
+            nullable=False,
+        ),
+    ]
+
+
+def create_uuid_pk():
+    """Create a standard UUID primary key column."""
+    return sa.Column(
+        "id",
+        sa.UUID(),
+        nullable=False,
+        server_default=sa.text(UUID_DEFAULT),
+        primary_key=True,
+    )
+
+
+def create_travel_fk_column():
+    """Create a foreign key column to journal_travel_data."""
+    return sa.Column(
+        "journal_id",
+        sa.Integer(),
+        sa.ForeignKey(TRAVEL_DATA_FK, ondelete="CASCADE"),
+        nullable=False,
+        comment=TRAVEL_DATA_FK_COMMENT,
+    )
+
+
+def create_order_column():
+    """Create a standard order column for travel components."""
+    return sa.Column(
+        "order",
+        sa.Integer(),
+        nullable=False,
+        comment=TRAVEL_ORDER_COMMENT,
+    )
+
+
+def create_booking_ref_column():
+    """Create a standard booking reference column."""
+    return sa.Column(
+        "booking_reference",
+        sa.VARCHAR(length=MAX_BOOKING_REFERENCE_LENGTH),
+        nullable=True,
+        comment=BOOKING_REF_COMMENT,
+    )
+
+
 def upgrade() -> None:
     """Create ITER4-003 journal types tables."""
 
     # Create journal_photo_album_data table (PHOTO_ALBUM type)
     op.create_table(
         "journal_photo_album_data",
-        sa.Column(
-            "journal_id",
-            sa.Integer(),
-            sa.ForeignKey(JOURNALS_TABLE_FK, ondelete="CASCADE"),
-            nullable=False,
-            primary_key=True,
-            comment=JOURNAL_FK_COMMENT,
-        ),
+        create_journal_fk_column(),
         sa.Column(
             "immich_album_id",
             sa.VARCHAR(length=MAX_IMMICH_ALBUM_ID_LENGTH),
             nullable=False,
             comment="Immich album identifier for photo integration",
         ),
-        sa.Column(
-            "created_at",
-            sa.TIMESTAMP(timezone=True),
-            server_default=sa.text(NOW_DEFAULT),
-            nullable=False,
-        ),
-        sa.Column(
-            "updated_at",
-            sa.TIMESTAMP(timezone=True),
-            server_default=sa.text(NOW_DEFAULT),
-            nullable=False,
-        ),
+        *create_timestamps(),
         sa.PrimaryKeyConstraint("journal_id"),
     )
 
     # Create journal_plan_data table (PLAN type)
     op.create_table(
         "journal_plan_data",
-        sa.Column(
-            "journal_id",
-            sa.Integer(),
-            sa.ForeignKey(JOURNALS_TABLE_FK, ondelete="CASCADE"),
-            nullable=False,
-            primary_key=True,
-            comment=JOURNAL_FK_COMMENT,
-        ),
-        sa.Column(
-            "created_at",
-            sa.TIMESTAMP(timezone=True),
-            server_default=sa.text(NOW_DEFAULT),
-            nullable=False,
-        ),
-        sa.Column(
-            "updated_at",
-            sa.TIMESTAMP(timezone=True),
-            server_default=sa.text(NOW_DEFAULT),
-            nullable=False,
-        ),
+        create_journal_fk_column(),
+        *create_timestamps(),
         sa.PrimaryKeyConstraint("journal_id"),
     )
 
     # Create journal_plan_documents table
     op.create_table(
         "journal_plan_documents",
-        sa.Column(
-            "id",
-            sa.UUID(),
-            nullable=False,
-            server_default=sa.text(UUID_DEFAULT),
-            primary_key=True,
-        ),
+        create_uuid_pk(),
         sa.Column(
             "journal_id",
             sa.Integer(),
@@ -173,46 +203,16 @@ def upgrade() -> None:
     # Create journal_travel_data table (TRAVEL type)
     op.create_table(
         "journal_travel_data",
-        sa.Column(
-            "journal_id",
-            sa.Integer(),
-            sa.ForeignKey(JOURNALS_TABLE_FK, ondelete="CASCADE"),
-            nullable=False,
-            primary_key=True,
-            comment=JOURNAL_FK_COMMENT,
-        ),
-        sa.Column(
-            "created_at",
-            sa.TIMESTAMP(timezone=True),
-            server_default=sa.text(NOW_DEFAULT),
-            nullable=False,
-        ),
-        sa.Column(
-            "updated_at",
-            sa.TIMESTAMP(timezone=True),
-            server_default=sa.text(NOW_DEFAULT),
-            nullable=False,
-        ),
+        create_journal_fk_column(),
+        *create_timestamps(),
         sa.PrimaryKeyConstraint("journal_id"),
     )
 
     # Create journal_travel_flights table
     op.create_table(
         "journal_travel_flights",
-        sa.Column(
-            "id",
-            sa.UUID(),
-            nullable=False,
-            server_default=sa.text(UUID_DEFAULT),
-            primary_key=True,
-        ),
-        sa.Column(
-            "journal_id",
-            sa.Integer(),
-            sa.ForeignKey(TRAVEL_DATA_FK, ondelete="CASCADE"),
-            nullable=False,
-            comment=TRAVEL_DATA_FK_COMMENT,
-        ),
+        create_uuid_pk(),
+        create_travel_fk_column(),
         sa.Column(
             "flight_number",
             sa.VARCHAR(length=MAX_FLIGHT_NUMBER_LENGTH),
@@ -249,12 +249,7 @@ def upgrade() -> None:
             nullable=False,
             comment="Arrival timestamp",
         ),
-        sa.Column(
-            "booking_reference",
-            sa.VARCHAR(length=MAX_BOOKING_REFERENCE_LENGTH),
-            nullable=True,
-            comment=BOOKING_REF_COMMENT,
-        ),
+        create_booking_ref_column(),
         sa.Column(
             "seat_number",
             sa.VARCHAR(length=MAX_SEAT_NUMBER_LENGTH),
@@ -267,12 +262,7 @@ def upgrade() -> None:
             nullable=True,
             comment="Confirmation number",
         ),
-        sa.Column(
-            "order",
-            sa.Integer(),
-            nullable=False,
-            comment=TRAVEL_ORDER_COMMENT,
-        ),
+        create_order_column(),
         sa.Column(
             "created_at",
             sa.TIMESTAMP(timezone=True),

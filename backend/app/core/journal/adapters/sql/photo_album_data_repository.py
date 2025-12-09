@@ -1,6 +1,6 @@
 """SQL implementation of PhotoAlbumDataRepository."""
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
@@ -72,7 +72,7 @@ class SqlPhotoAlbumDataRepository(PhotoAlbumDataRepository):
         Raises:
             PhotoAlbumDataValidationError: If database constraints are violated
         """
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
         # Check if record exists
         existing = await self.find_by_journal_id(photo_album_data.journal_id)
@@ -81,7 +81,7 @@ class SqlPhotoAlbumDataRepository(PhotoAlbumDataRepository):
             if existing is None:
                 # Insert new record
                 query = text("""
-                    INSERT INTO journal_photo_album_data 
+                    INSERT INTO journal_photo_album_data
                     (journal_id, immich_album_id, created_at, updated_at)
                     VALUES (:journal_id, :immich_album_id, :created_at, :updated_at)
                 """)

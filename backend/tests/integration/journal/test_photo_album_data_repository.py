@@ -7,7 +7,6 @@ from app.core.journal.adapters.sql.photo_album_data_repository import (
     SqlPhotoAlbumDataRepository,
 )
 from app.core.journal.models.photo_album_data import PhotoAlbumData
-from tests.integration.fixtures.database import DatabaseConfig
 
 
 @pytest.mark.integration
@@ -78,6 +77,8 @@ class TestSqlPhotoAlbumDataRepository:
         assert saved_updated.journal_id == sample_journal_id
         assert saved_updated.immich_album_id == "album-updated"
         assert saved_updated.created_at == saved_initial.created_at  # Should not change
+        assert saved_updated.updated_at is not None
+        assert saved_initial.updated_at is not None
         assert saved_updated.updated_at > saved_initial.updated_at  # Should be updated
 
         # Verify in database

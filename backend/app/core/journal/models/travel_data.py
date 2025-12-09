@@ -81,14 +81,14 @@ class TravelFlight:
     def _validate_journal_id(self) -> None:
         """Validate journal_id is positive."""
         if self.journal_id <= 0:
-            raise TravelFlightValidationError(
-                "journal_id", JOURNAL_ID_VALIDATION_MSG
-            )
+            raise TravelFlightValidationError("journal_id", JOURNAL_ID_VALIDATION_MSG)
 
     def _validate_flight_number(self) -> None:
         """Validate flight number is provided and within length limit."""
         if not self.flight_number or not self.flight_number.strip():
-            raise TravelFlightValidationError("flight_number", "Flight number is required")
+            raise TravelFlightValidationError(
+                "flight_number", "Flight number is required"
+            )
 
         if len(self.flight_number) > MAX_FLIGHT_NUMBER_LENGTH:
             raise TravelFlightValidationError(
@@ -208,7 +208,9 @@ class TravelAccommodation:
     def _validate_name(self) -> None:
         """Validate name is provided and within length limit."""
         if not self.name or not self.name.strip():
-            raise TravelAccommodationValidationError("name", "Accommodation name is required")
+            raise TravelAccommodationValidationError(
+                "name", "Accommodation name is required"
+            )
 
         if len(self.name) > MAX_ACCOMMODATION_NAME_LENGTH:
             raise TravelAccommodationValidationError(
@@ -287,7 +289,9 @@ class TravelTransportation:
     def _validate_type(self) -> None:
         """Validate type is provided and within length limit."""
         if not self.type or not self.type.strip():
-            raise TravelTransportationValidationError("type", "Transportation type is required")
+            raise TravelTransportationValidationError(
+                "type", "Transportation type is required"
+            )
 
         if len(self.type) > MAX_TRANSPORTATION_TYPE_LENGTH:
             raise TravelTransportationValidationError(
@@ -298,7 +302,9 @@ class TravelTransportation:
     def _validate_details(self) -> None:
         """Validate details are provided."""
         if not self.details or not self.details.strip():
-            raise TravelTransportationValidationError("details", "Transportation details are required")
+            raise TravelTransportationValidationError(
+                "details", "Transportation details are required"
+            )
 
     def _validate_optional_fields(self) -> None:
         """Validate optional fields are within length limits."""
@@ -346,6 +352,4 @@ class TravelData:
     def _validate_journal_id(self) -> None:
         """Validate journal_id is positive."""
         if self.journal_id <= 0:
-            raise TravelDataValidationError(
-                "journal_id", JOURNAL_ID_VALIDATION_MSG
-            )
+            raise TravelDataValidationError("journal_id", JOURNAL_ID_VALIDATION_MSG)

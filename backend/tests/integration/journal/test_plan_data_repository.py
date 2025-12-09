@@ -7,7 +7,6 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core.journal.adapters.sql.plan_data_repository import SqlPlanDataRepository
 from app.core.journal.models.plan_data import PlanData, PlanDocument
-from tests.integration.fixtures.database import DatabaseConfig
 
 
 @pytest.mark.integration
@@ -68,6 +67,8 @@ class TestSqlPlanDataRepository:
         # Verify updated data
         assert saved_updated.journal_id == sample_journal_id
         assert saved_updated.created_at == saved_initial.created_at  # Should not change
+        assert saved_updated.updated_at is not None
+        assert saved_initial.updated_at is not None
         assert saved_updated.updated_at > saved_initial.updated_at  # Should be updated
 
     async def test_delete_plan_data(
@@ -185,7 +186,7 @@ class TestSqlPlanDataRepository:
             title="Initial Title",
             order=0,
         )
-        saved_initial = await repo.save_document(initial_doc)
+        await repo.save_document(initial_doc)
 
         # Update document
         updated_doc = PlanDocument(

@@ -49,9 +49,7 @@ class PhotoAlbumData:
     def _validate_journal_id(self) -> None:
         """Validate journal_id is positive."""
         if self.journal_id <= 0:
-            raise PhotoAlbumDataValidationError(
-                "journal_id", JOURNAL_ID_VALIDATION_MSG
-            )
+            raise PhotoAlbumDataValidationError("journal_id", JOURNAL_ID_VALIDATION_MSG)
 
     def _validate_immich_album_id(self) -> None:
         """Validate immich_album_id is provided and within length limit."""
@@ -65,4 +63,3 @@ class PhotoAlbumData:
                 "immich_album_id",
                 f"Immich album ID cannot exceed {MAX_IMMICH_ALBUM_ID_LENGTH} characters",
             )
-

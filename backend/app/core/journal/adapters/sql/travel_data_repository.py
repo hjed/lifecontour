@@ -1,6 +1,6 @@
 """SQL implementation of TravelDataRepository."""
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from uuid import UUID
 
 from sqlalchemy import text
@@ -92,7 +92,7 @@ class SqlTravelDataRepository(TravelDataRepository):
         Raises:
             TravelDataValidationError: If database constraints are violated
         """
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
         # Check if record exists
         existing = await self.find_by_journal_id(travel_data.journal_id)
@@ -101,7 +101,7 @@ class SqlTravelDataRepository(TravelDataRepository):
             if existing is None:
                 # Insert new record
                 query = text("""
-                    INSERT INTO journal_travel_data 
+                    INSERT INTO journal_travel_data
                     (journal_id, created_at, updated_at)
                     VALUES (:journal_id, :created_at, :updated_at)
                 """)
@@ -183,7 +183,7 @@ class SqlTravelDataRepository(TravelDataRepository):
         Raises:
             TravelFlightValidationError: If database constraints are violated
         """
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
         try:
             # Use UPSERT (INSERT ... ON CONFLICT) for PostgreSQL
@@ -262,7 +262,9 @@ class SqlTravelDataRepository(TravelDataRepository):
 
         await self.connection.execute(query, {"flight_id": flight_id})
 
-    async def save_accommodation(self, accommodation: TravelAccommodation) -> TravelAccommodation:
+    async def save_accommodation(
+        self, accommodation: TravelAccommodation
+    ) -> TravelAccommodation:
         """
         Save a travel accommodation (insert or update).
 
@@ -275,7 +277,7 @@ class SqlTravelDataRepository(TravelDataRepository):
         Raises:
             TravelAccommodationValidationError: If database constraints are violated
         """
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
         try:
             # Use UPSERT (INSERT ... ON CONFLICT) for PostgreSQL
@@ -343,7 +345,9 @@ class SqlTravelDataRepository(TravelDataRepository):
 
         await self.connection.execute(query, {"accommodation_id": accommodation_id})
 
-    async def save_transportation(self, transportation: TravelTransportation) -> TravelTransportation:
+    async def save_transportation(
+        self, transportation: TravelTransportation
+    ) -> TravelTransportation:
         """
         Save a travel transportation (insert or update).
 
@@ -356,7 +360,7 @@ class SqlTravelDataRepository(TravelDataRepository):
         Raises:
             TravelTransportationValidationError: If database constraints are violated
         """
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
         try:
             # Use UPSERT (INSERT ... ON CONFLICT) for PostgreSQL

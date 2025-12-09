@@ -53,9 +53,7 @@ class PlanDocument:
     def _validate_journal_id(self) -> None:
         """Validate journal_id is positive."""
         if self.journal_id <= 0:
-            raise PlanDocumentValidationError(
-                "journal_id", JOURNAL_ID_VALIDATION_MSG
-            )
+            raise PlanDocumentValidationError("journal_id", JOURNAL_ID_VALIDATION_MSG)
 
     def _validate_url(self) -> None:
         """Validate URL is provided and within length limit."""
@@ -109,6 +107,4 @@ class PlanData:
     def _validate_journal_id(self) -> None:
         """Validate journal_id is positive."""
         if self.journal_id <= 0:
-            raise PlanDataValidationError(
-                "journal_id", JOURNAL_ID_VALIDATION_MSG
-            )
+            raise PlanDataValidationError("journal_id", JOURNAL_ID_VALIDATION_MSG)

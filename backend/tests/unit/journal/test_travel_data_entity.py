@@ -8,11 +8,8 @@ import pytest
 from app.core.journal.models.constants import (
     MAX_ACCOMMODATION_NAME_LENGTH,
     MAX_AIRLINE_LENGTH,
-    MAX_AIRPORT_CODE_LENGTH,
     MAX_BOOKING_REFERENCE_LENGTH,
-    MAX_CONFIRMATION_NUMBER_LENGTH,
     MAX_FLIGHT_NUMBER_LENGTH,
-    MAX_SEAT_NUMBER_LENGTH,
     MAX_TRANSPORTATION_TYPE_LENGTH,
 )
 from app.core.journal.models.exceptions import (

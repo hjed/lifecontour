@@ -1,6 +1,6 @@
 """SQL implementation of PlanDataRepository."""
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from uuid import UUID
 
 from sqlalchemy import text
@@ -81,7 +81,7 @@ class SqlPlanDataRepository(PlanDataRepository):
         Raises:
             PlanDataValidationError: If database constraints are violated
         """
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
         # Check if record exists
         existing = await self.find_by_journal_id(plan_data.journal_id)
@@ -90,7 +90,7 @@ class SqlPlanDataRepository(PlanDataRepository):
             if existing is None:
                 # Insert new record
                 query = text("""
-                    INSERT INTO journal_plan_data 
+                    INSERT INTO journal_plan_data
                     (journal_id, created_at, updated_at)
                     VALUES (:journal_id, :created_at, :updated_at)
                 """)
@@ -168,12 +168,12 @@ class SqlPlanDataRepository(PlanDataRepository):
         Raises:
             PlanDocumentValidationError: If database constraints are violated
         """
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
         try:
             # Use UPSERT (INSERT ... ON CONFLICT) for PostgreSQL
             query = text("""
-                INSERT INTO journal_plan_documents 
+                INSERT INTO journal_plan_documents
                 (id, journal_id, url, title, description, "order", created_at)
                 VALUES (:id, :journal_id, :url, :title, :description, :order, :created_at)
                 ON CONFLICT (id) DO UPDATE SET

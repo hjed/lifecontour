@@ -13,7 +13,6 @@ from app.core.journal.models.travel_data import (
     TravelFlight,
     TravelTransportation,
 )
-from tests.integration.fixtures.database import DatabaseConfig
 
 
 @pytest.mark.integration
@@ -179,7 +178,9 @@ class TestSqlTravelDataRepository:
         # Verify saved transportation
         assert saved_transportation.id == transportation.id
         assert saved_transportation.type == "car_rental"
-        assert saved_transportation.details == "Compact car from Hertz, pickup at airport"
+        assert (
+            saved_transportation.details == "Compact car from Hertz, pickup at airport"
+        )
         assert saved_transportation.booking_reference == "CAR123"
         assert saved_transportation.created_at is not None
 
@@ -272,6 +273,7 @@ class TestSqlTravelDataRepository:
 
         # Verify flight exists
         found_travel = await repo.find_by_journal_id(sample_journal_id)
+        assert found_travel is not None
         assert len(found_travel.flights) == 1
 
         # Delete flight
@@ -279,6 +281,7 @@ class TestSqlTravelDataRepository:
 
         # Verify flight is deleted
         found_after_delete = await repo.find_by_journal_id(sample_journal_id)
+        assert found_after_delete is not None
         assert len(found_after_delete.flights) == 0
 
     async def test_delete_accommodation(
@@ -303,6 +306,7 @@ class TestSqlTravelDataRepository:
 
         # Verify accommodation exists
         found_travel = await repo.find_by_journal_id(sample_journal_id)
+        assert found_travel is not None
         assert len(found_travel.accommodations) == 1
 
         # Delete accommodation
@@ -310,6 +314,7 @@ class TestSqlTravelDataRepository:
 
         # Verify accommodation is deleted
         found_after_delete = await repo.find_by_journal_id(sample_journal_id)
+        assert found_after_delete is not None
         assert len(found_after_delete.accommodations) == 0
 
     async def test_delete_transportation(
@@ -333,6 +338,7 @@ class TestSqlTravelDataRepository:
 
         # Verify transportation exists
         found_travel = await repo.find_by_journal_id(sample_journal_id)
+        assert found_travel is not None
         assert len(found_travel.transportation) == 1
 
         # Delete transportation
@@ -340,6 +346,7 @@ class TestSqlTravelDataRepository:
 
         # Verify transportation is deleted
         found_after_delete = await repo.find_by_journal_id(sample_journal_id)
+        assert found_after_delete is not None
         assert len(found_after_delete.transportation) == 0
 
     async def test_delete_travel_data_cascades_components(
@@ -386,6 +393,7 @@ class TestSqlTravelDataRepository:
 
         # Verify all components exist
         found_travel = await repo.find_by_journal_id(sample_journal_id)
+        assert found_travel is not None
         assert len(found_travel.flights) == 1
         assert len(found_travel.accommodations) == 1
         assert len(found_travel.transportation) == 1
