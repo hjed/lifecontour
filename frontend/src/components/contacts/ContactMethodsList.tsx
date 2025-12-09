@@ -23,7 +23,6 @@ import {
   updateContactMethodField,
 } from '@/lib/api/contacts';
 import {
-  ContactMethodAttributes,
   ContactMethodResource,
   ContactMethodType,
 } from '@/types/contacts';
@@ -56,7 +55,8 @@ export function ContactMethodsList({
     ContactMethodType.EMAIL
   );
 
-  const addMethodMutation = useAddContactMethod();
+  // TODO: Uncomment when add form is implemented
+  // const addMethodMutation = useAddContactMethod();
   const deleteMethodMutation = useDeleteContactMethod();
 
   // TODO: Implement handleAddMethod when add form is complete

@@ -22,7 +22,6 @@ import {
   updateContactAddressField,
 } from '@/lib/api/contacts';
 import {
-  ContactAddressAttributes,
   ContactAddressResource,
 } from '@/types/contacts';
 
@@ -51,7 +50,8 @@ export function ContactAddressesList({
 }: ContactAddressesListProps) {
   const [isAddingAddress, setIsAddingAddress] = useState(false);
 
-  const addAddressMutation = useAddContactAddress();
+  // TODO: Uncomment when add form is implemented
+  // const addAddressMutation = useAddContactAddress();
   const deleteAddressMutation = useDeleteContactAddress();
 
   // TODO: Implement handleAddAddress when add form is complete

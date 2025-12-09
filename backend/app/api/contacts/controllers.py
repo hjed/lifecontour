@@ -44,7 +44,6 @@ from app.api.contacts.schemas import (
     TagAssignmentRequest,
     TagListResponse,
 )
-
 from app.core.contacts.models.exceptions import (
     ContactNotFoundError,
     ContactValidationError,
