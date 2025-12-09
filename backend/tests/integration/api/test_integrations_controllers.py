@@ -321,10 +321,12 @@ class TestIntegrationsControllers:
                 json={"redirect_url": "/integrations"},
             )
 
-            # Verify error response
+            # Verify error response (JSON API format)
             assert response.status_code == 400
             data = response.json()
-            assert "Google OAuth provider not configured" in data["detail"]
+            assert "errors" in data
+            assert len(data["errors"]) > 0
+            assert "Google OAuth provider not configured" in data["errors"][0]["detail"]
 
     def test_google_contacts_oauth_callback_success(self, client: TestClient):
         """Test successful Google Contacts OAuth callback."""
@@ -368,10 +370,12 @@ class TestIntegrationsControllers:
                 json={"code": "invalid_code", "state": "test_state"},
             )
 
-            # Verify error response
+            # Verify error response (JSON API format)
             assert response.status_code == 400
             data = response.json()
-            assert "Invalid authorization code" in data["detail"]
+            assert "errors" in data
+            assert len(data["errors"]) > 0
+            assert "Invalid authorization code" in data["errors"][0]["detail"]
 
     def test_google_contacts_oauth_disconnect_not_implemented(self, client: TestClient):
         """Test Google Contacts OAuth disconnect (not implemented)."""
