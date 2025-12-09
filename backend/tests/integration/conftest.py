@@ -6,7 +6,7 @@ import subprocess
 import time
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, cast
 
 import pytest
 import pytest_asyncio
@@ -712,14 +712,10 @@ async def authenticated_client(test_settings, test_user):
         @provide(scope=Scope.APP)
         def get_settings(self) -> Settings:
             """Get test settings for app scope."""
-            from typing import cast
-
             return cast(Settings, test_settings)
 
         @provide(scope=Scope.REQUEST)
         def get_session_user(self) -> SessionUser:
-            from typing import cast
-
             return cast(SessionUser, test_user)
 
         @provide(scope=Scope.REQUEST)
