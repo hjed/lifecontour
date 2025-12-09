@@ -31,12 +31,15 @@ class OAuthService:
         self.oauth = OAuth()
         self._configure_providers()
 
-    def _encode_state(self, provider: str, redirect_uri: str, csrf_token: str) -> str:
-        """Encode OAuth state with provider info and CSRF token."""
+    def _encode_state(
+        self, provider: str, redirect_uri: str, csrf_token: str, flow_type: str = "auth"
+    ) -> str:
+        """Encode OAuth state with provider info, CSRF token, and flow type."""
         state_data = {
             "provider": provider,
             "redirect_uri": redirect_uri,
             "csrf_token": csrf_token,
+            "flow_type": flow_type,  # 'auth' for authentication, 'integration' for integration
         }
         # Base64 encode the JSON state data
         state_json = json.dumps(state_data)
@@ -588,9 +591,11 @@ class OAuthService:
 
         client = self.oauth._clients["google"]
 
-        # Generate CSRF token and encode state with provider info
+        # Generate CSRF token and encode state with provider info and integration flow type
         csrf_token = secrets.token_urlsafe(32)
-        encoded_state = self._encode_state("google", redirect_uri, csrf_token)
+        encoded_state = self._encode_state(
+            "google", redirect_uri, csrf_token, "integration"
+        )
 
         # Generate PKCE code verifier and store in session
         code_verifier = generate_token(48)
@@ -715,29 +720,18 @@ class OAuthService:
             ValueError: If user not connected to Google Contacts
         """
         # TODO: Implement actual token storage and removal
-        # For now, this is a placeholder that simulates the disconnect operation
+        # For now, this is a placeholder that indicates the feature is not implemented
         # In a real implementation, this would:
         # 1. Check if user has stored Google Contacts tokens
         # 2. Revoke the tokens with Google
         # 3. Remove tokens from storage
         # 4. Return success/failure status
 
-        logger.info(
-            "Google Contacts disconnect requested",
+        logger.warning(
+            "Google Contacts disconnect not implemented; returning False",
             user_id=user_id,
         )
 
-        # Simulate checking if user is connected
-        # In real implementation, check token storage
-        is_connected = True  # Placeholder - would check actual storage
-
-        if not is_connected:
-            raise ValueError("Google Contacts not connected")
-
-        # Simulate successful disconnect
-        logger.info(
-            "Google Contacts disconnected successfully",
-            user_id=user_id,
-        )
-
-        return True
+        # Return False to indicate the feature is not implemented
+        # This prevents false success responses when there's nothing to disconnect
+        return False

@@ -7,6 +7,7 @@ This module provides REST API endpoints for:
 - Sync job management and status tracking
 """
 
+import urllib.parse
 from typing import Any
 
 import structlog
@@ -254,8 +255,6 @@ async def google_contacts_oauth_authorize(
 
         # Extract state from the authorization URL
         # The state is embedded in the URL by the oauth_service
-        import urllib.parse
-
         parsed_url = urllib.parse.urlparse(authorization_url)
         query_params = urllib.parse.parse_qs(parsed_url.query)
         state = query_params.get("state", [""])[0]
@@ -380,10 +379,13 @@ async def google_contacts_oauth_disconnect(
             )
         else:
             logger.warning(
-                "Google Contacts OAuth disconnect failed - not connected",
+                "Google Contacts OAuth disconnect not implemented",
                 user_id=user.id,
             )
-            raise ValueError("Google Contacts not connected")
+            return OAuthDisconnectResponse(
+                success=False,
+                message="Google Contacts disconnect feature not yet implemented",
+            )
 
     except ValueError as e:
         logger.error(

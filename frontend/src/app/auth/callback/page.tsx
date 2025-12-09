@@ -55,16 +55,21 @@ function CallbackContent() {
           throw new Error('Missing required OAuth parameters');
         }
 
-        // Check if this is an integration OAuth callback
-        // Integration OAuth callbacks will have a specific state format or session marker
-        const isIntegrationCallback = sessionStorage.getItem('oauth_integration') === 'true';
+        // Check if this is an integration OAuth callback by decoding the state
+        // Integration OAuth callbacks will have flow_type: 'integration' in the state
+        let isIntegrationCallback = false;
+        try {
+          // Decode the state parameter to check flow type
+          const decodedState = JSON.parse(atob(state));
+          isIntegrationCallback = decodedState.flow_type === 'integration';
+        } catch {
+          // If state decoding fails, assume it's authentication OAuth
+          isIntegrationCallback = false;
+        }
 
         if (isIntegrationCallback) {
           // Handle integration OAuth callback
           await oauthCallback.mutateAsync({ code, state });
-
-          // Clean up session
-          sessionStorage.removeItem('oauth_integration');
 
           // Redirect to integrations page
           router.replace('/integrations');
