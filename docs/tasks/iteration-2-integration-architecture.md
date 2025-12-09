@@ -375,6 +375,12 @@ See [Integration Architecture - OAuth Authentication Flow](../architecture/integ
 - **Credential Storage:** Encrypted refresh_tokens in database with proper key management
 - **Error Handling:** Smart fallback from incremental to full sync on token expiration (HTTP 410)
 - **Observability:** Structured logging, metrics collection, and comprehensive health checks
+- **OAuth Placement:** OAuth endpoints MUST be in main API layer, never in workers (critical architectural boundary)
+
+> ⚠️ **For Future Integrations:** Before implementing any new integration, review:
+> - [Integration Architecture - New Integration Checklist](../architecture/integration-architecture.md#new-integration-checklist)
+> - [Integration Architecture - Common Mistakes to Avoid](../architecture/integration-architecture.md#common-mistakes-to-avoid)
+> - [Integration Architecture - OAuth Authentication Flow](../architecture/integration-architecture.md#5-oauth-authentication-flow)
 
 ## Current Status
 
