@@ -116,6 +116,20 @@ async function waitForOAuthLock(timeoutMs: number = 30000): Promise<boolean> {
 }
 
 /**
+ * Helper to convert dataset tags to the expected format for fixtures.
+ * Uses original dataset tags to avoid race conditions in tag extraction.
+ * This ensures deterministic tag counts regardless of API response timing.
+ */
+function convertDatasetTags(
+  tags: Array<{ name: string }>
+): Array<{ id: string; name: string }> {
+  return tags.map(tag => ({
+    id: `tag-${tag.name}`,
+    name: tag.name,
+  }));
+}
+
+/**
  * Complete OAuth flow once per worker and store authentication state
  * Uses the real Hydra OAuth provider for authentic E2E testing
  *
@@ -475,232 +489,97 @@ export const test = base.extend<TestFixtures, WorkerFixtures>({
     await use({ page: authenticatedPage, contacts, tags: tagNames });
   },
 
-  // Advanced data fixtures
+  // Advanced data fixtures - use convertDatasetTags helper to avoid duplication
   smallDataSet: async ({ authenticatedPage, testCleanup }, use) => {
     const dataManager = new TestDataManager(authenticatedPage);
     const dataset = DataSetFactory.createSmall();
-
     console.log('📊 [Small Dataset] Creating small test dataset...');
-
-    // Create contacts with tags (tags will be auto-created)
     const createdContacts = await dataManager.createContacts(dataset.contacts);
-
-    // Extract created tags from the contacts
-    const createdTags: { id: string; name: string }[] = [];
-    for (const contact of createdContacts) {
-      if (contact.tags) {
-        for (const tagName of contact.tags) {
-          if (!createdTags.find(tag => tag.name === tagName)) {
-            // We don't have the tag ID here, but we can use the tag name
-            // The actual tag IDs will be available when the contacts are fetched
-            createdTags.push({ id: `tag-${tagName}`, name: tagName });
-          }
-        }
-      }
-    }
-
-    testCleanup(async () => {
-      await dataManager.cleanup();
-    });
-
+    testCleanup(async () => await dataManager.cleanup());
     await use({
       page: authenticatedPage,
       contacts: createdContacts,
-      tags: createdTags,
+      tags: convertDatasetTags(dataset.tags),
     });
   },
 
   mediumDataSet: async ({ authenticatedPage, testCleanup }, use) => {
     const dataManager = new TestDataManager(authenticatedPage);
     const dataset = DataSetFactory.createMedium();
-
     console.log('📊 [Medium Dataset] Creating medium test dataset...');
-
-    // Create contacts with tags (tags will be auto-created)
     const createdContacts = await dataManager.createContacts(dataset.contacts);
-
-    // Extract created tags from the contacts
-    const createdTags: { id: string; name: string }[] = [];
-    for (const contact of createdContacts) {
-      if (contact.tags) {
-        for (const tagName of contact.tags) {
-          if (!createdTags.find(tag => tag.name === tagName)) {
-            createdTags.push({ id: `tag-${tagName}`, name: tagName });
-          }
-        }
-      }
-    }
-
-    testCleanup(async () => {
-      await dataManager.cleanup();
-    });
-
+    testCleanup(async () => await dataManager.cleanup());
     await use({
       page: authenticatedPage,
       contacts: createdContacts,
-      tags: createdTags,
+      tags: convertDatasetTags(dataset.tags),
     });
   },
 
   largeDataSet: async ({ authenticatedPage, testCleanup }, use) => {
     const dataManager = new TestDataManager(authenticatedPage);
     const dataset = DataSetFactory.createLarge();
-
     console.log('📊 [Large Dataset] Creating large test dataset...');
-
-    // Create contacts with tags (tags will be auto-created)
     const createdContacts = await dataManager.createContacts(dataset.contacts);
-
-    // Extract created tags from the contacts
-    const createdTags: { id: string; name: string }[] = [];
-    for (const contact of createdContacts) {
-      if (contact.tags) {
-        for (const tagName of contact.tags) {
-          if (!createdTags.find(tag => tag.name === tagName)) {
-            createdTags.push({ id: `tag-${tagName}`, name: tagName });
-          }
-        }
-      }
-    }
-
-    testCleanup(async () => {
-      await dataManager.cleanup();
-    });
-
+    testCleanup(async () => await dataManager.cleanup());
     await use({
       page: authenticatedPage,
       contacts: createdContacts,
-      tags: createdTags,
+      tags: convertDatasetTags(dataset.tags),
     });
   },
 
   searchTestData: async ({ authenticatedPage, testCleanup }, use) => {
     const dataManager = new TestDataManager(authenticatedPage);
     const dataset = DataSetFactory.createSearchTestData();
-
     console.log('🔍 [Search Dataset] Creating search test dataset...');
-
-    // Create contacts with tags (tags will be auto-created)
     const createdContacts = await dataManager.createContacts(dataset.contacts);
-
-    // Extract created tags from the contacts
-    const createdTags: { id: string; name: string }[] = [];
-    for (const contact of createdContacts) {
-      if (contact.tags) {
-        for (const tagName of contact.tags) {
-          if (!createdTags.find(tag => tag.name === tagName)) {
-            createdTags.push({ id: `tag-${tagName}`, name: tagName });
-          }
-        }
-      }
-    }
-
-    testCleanup(async () => {
-      await dataManager.cleanup();
-    });
-
+    testCleanup(async () => await dataManager.cleanup());
     await use({
       page: authenticatedPage,
       contacts: createdContacts,
-      tags: createdTags,
+      tags: convertDatasetTags(dataset.tags),
     });
   },
 
   favouritesTestData: async ({ authenticatedPage, testCleanup }, use) => {
     const dataManager = new TestDataManager(authenticatedPage);
     const dataset = DataSetFactory.createFavouritesTestData();
-
     console.log('⭐ [Favourites Dataset] Creating favourites test dataset...');
-
-    // Create contacts with tags (tags will be auto-created)
     const createdContacts = await dataManager.createContacts(dataset.contacts);
-
-    // Extract created tags from the contacts
-    const createdTags: { id: string; name: string }[] = [];
-    for (const contact of createdContacts) {
-      if (contact.tags) {
-        for (const tagName of contact.tags) {
-          if (!createdTags.find(tag => tag.name === tagName)) {
-            createdTags.push({ id: `tag-${tagName}`, name: tagName });
-          }
-        }
-      }
-    }
-
-    testCleanup(async () => {
-      await dataManager.cleanup();
-    });
-
+    testCleanup(async () => await dataManager.cleanup());
     await use({
       page: authenticatedPage,
       contacts: createdContacts,
-      tags: createdTags,
+      tags: convertDatasetTags(dataset.tags),
     });
   },
 
   taggedTestData: async ({ authenticatedPage, testCleanup }, use) => {
     const dataManager = new TestDataManager(authenticatedPage);
     const dataset = DataSetFactory.createTaggedData();
-
     console.log('🏷️ [Tagged Dataset] Creating tagged test dataset...');
-
-    // Create contacts with tags (tags will be auto-created)
     const createdContacts = await dataManager.createContacts(dataset.contacts);
-
-    // Extract created tags from the contacts
-    const createdTags: { id: string; name: string }[] = [];
-    for (const contact of createdContacts) {
-      if (contact.tags) {
-        for (const tagName of contact.tags) {
-          if (!createdTags.find(tag => tag.name === tagName)) {
-            createdTags.push({ id: `tag-${tagName}`, name: tagName });
-          }
-        }
-      }
-    }
-
-    testCleanup(async () => {
-      await dataManager.cleanup();
-    });
-
+    testCleanup(async () => await dataManager.cleanup());
     await use({
       page: authenticatedPage,
       contacts: createdContacts,
-      tags: createdTags,
+      tags: convertDatasetTags(dataset.tags),
     });
   },
 
   performanceTestData: async ({ authenticatedPage, testCleanup }, use) => {
     const dataManager = new TestDataManager(authenticatedPage);
     const dataset = DataSetFactory.createPerformanceTestData();
-
     console.log(
       '🚀 [Performance Dataset] Creating performance test dataset...'
     );
-
-    // Create contacts with tags (tags will be auto-created)
     const createdContacts = await dataManager.createContacts(dataset.contacts);
-
-    // Extract created tags from the contacts
-    const createdTags: { id: string; name: string }[] = [];
-    for (const contact of createdContacts) {
-      if (contact.tags) {
-        for (const tagName of contact.tags) {
-          if (!createdTags.find(tag => tag.name === tagName)) {
-            createdTags.push({ id: `tag-${tagName}`, name: tagName });
-          }
-        }
-      }
-    }
-
-    testCleanup(async () => {
-      await dataManager.cleanup();
-    });
-
+    testCleanup(async () => await dataManager.cleanup());
     await use({
       page: authenticatedPage,
       contacts: createdContacts,
-      tags: createdTags,
+      tags: convertDatasetTags(dataset.tags),
     });
   },
 
@@ -760,6 +639,7 @@ export const test = base.extend<TestFixtures, WorkerFixtures>({
     const createdContacts = await dataManager.createContacts(dataset.contacts);
 
     // Extract created tags from the contacts by fetching their real tag data
+    // This is needed because tests navigate to /contacts/tags/${tag.id} requiring real IDs
     const createdTags: { id: string; name: string }[] = [];
     for (const contact of createdContacts) {
       if (contact.tags && contact.tags.length > 0) {
@@ -775,7 +655,7 @@ export const test = base.extend<TestFixtures, WorkerFixtures>({
               const tagId = tagResource.id;
               const tagName = tagResource.attributes.name;
 
-              if (!createdTags.find(tag => tag.id === tagId)) {
+              if (!createdTags.some(tag => tag.id === tagId)) {
                 createdTags.push({ id: tagId, name: tagName });
               }
             }
