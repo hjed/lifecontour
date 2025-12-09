@@ -13,6 +13,7 @@ The integration architecture uses an **Isolated Worker Architecture** pattern th
 - **Domain Separation**: Integrations are cleanly separated from core business logic
 - **Operational Simplicity**: Minimal additional infrastructure (just Redis)
 - **AI-Friendly**: Each integration is self-contained and focused
+- **OAuth in Main API Only**: OAuth authorization flows MUST be implemented in the main API layer, never in workers (see [OAuth Authentication Flow](#5-oauth-authentication-flow) for details)
 
 ## Architecture Pattern
 
@@ -340,6 +341,95 @@ class WorkerSettings:
 5. Record sync metadata
 
 **Journal Integration Example**: Calendar events sync bi-directionally with journal EVENT type entries. See [Journal System Specification](../journal-system-specification.md) for sync behavior and attendee handling.
+
+## New Integration Checklist
+
+When adding a new external service integration, follow this checklist to ensure architectural compliance:
+
+### Pre-Implementation Review
+
+- [ ] **Identify sync pattern**: Which pattern applies? (Two-Way Sync, External References, One-Way Import, Bi-Directional)
+- [ ] **Review existing integrations**: Check `integration_workers/` and `app/core/integrations/` for reference implementations
+- [ ] **Read this document fully**: Ensure understanding of worker isolation, shared code strategy, and OAuth placement
+
+### OAuth Integration (if applicable)
+
+> ⚠️ **CRITICAL**: OAuth endpoints MUST be in the main API, NEVER in workers
+
+- [ ] **OAuth service in main API**: Place OAuth logic in `app/core/integrations/<service>_oauth/`
+- [ ] **API endpoints in main API**: Add OAuth endpoints to `app/api/integrations/`
+- [ ] **Token model in core_shared**: Add `User<Service>Auth` model to `core_shared/models/`
+- [ ] **Worker only reads tokens**: Worker code should only read encrypted tokens from database
+- [ ] **Token refresh in worker**: Token refresh (async, no user interaction) CAN be in worker
+
+### Worker Implementation
+
+- [ ] **Create worker package**: `integration_workers/<service>/`
+- [ ] **Isolated dependencies**: Separate `requirements.txt` with only needed packages
+- [ ] **Use core_shared**: Import shared models from `core_shared/`
+- [ ] **Idempotent tasks**: All tasks must be idempotent (safe to retry)
+- [ ] **Outbox pattern**: Use message-based architecture via outbox events
+- [ ] **Structured logging**: Use `structlog` with correlation IDs
+
+### Testing
+
+- [ ] **Unit tests**: Test business logic with mocked external APIs
+- [ ] **Integration tests**: Test database operations with real database
+- [ ] **Worker tests**: Test task idempotency and error handling
+
+### Documentation
+
+- [ ] **Update this document**: Add the new integration to the Integration Patterns section
+- [ ] **Create README**: Add `integration_workers/<service>/README.md`
+- [ ] **Update Docker Compose**: Add worker service to `docker-compose.yml`
+
+## Common Mistakes to Avoid
+
+This section documents anti-patterns and common mistakes to help future developers avoid issues.
+
+### ❌ OAuth Endpoints in Workers
+
+**Mistake**: Placing OAuth authorization URL generation and callback handling in worker code.
+
+**Why it's wrong**:
+1. Workers don't expose HTTP endpoints - they process background tasks
+2. OAuth is user-initiated and synchronous - requires browser redirect
+3. OAuth callbacks need to return HTML/redirect to the user's browser
+
+**Correct approach**: OAuth initiation and callbacks belong in `app/core/integrations/<service>_oauth/` or `app/api/integrations/`. Workers only consume stored tokens.
+
+### ❌ Direct Database Writes from Workers
+
+**Mistake**: Workers directly creating/updating domain entities in the database.
+
+**Why it's wrong**:
+1. Bypasses domain validation and business logic
+2. Creates tight coupling between workers and core domain
+3. Makes testing and debugging harder
+
+**Correct approach**: Workers should publish outbox events. The main application's outbox processor handles creating/updating entities through the proper domain services.
+
+### ❌ Sharing API/Worker Dependencies
+
+**Mistake**: Having workers import from `app/` packages directly.
+
+**Why it's wrong**:
+1. Breaks dependency isolation
+2. Workers may pull in unwanted dependencies (FastAPI, etc.)
+3. Makes it harder to deploy workers independently
+
+**Correct approach**: Use `core_shared/` for code that needs to be shared. Workers should only import from `core_shared/` and their own packages.
+
+### ❌ Non-Idempotent Tasks
+
+**Mistake**: Writing tasks that have side effects when retried.
+
+**Why it's wrong**:
+1. ARQ will retry failed tasks automatically
+2. Non-idempotent tasks can create duplicates or corrupt data
+3. Makes manual recovery from failures dangerous
+
+**Correct approach**: Use SyncMetadata with version hashes to track what's already processed. Check before processing, update atomically after.
 
 ## Deployment Architecture
 
