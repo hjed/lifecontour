@@ -54,22 +54,22 @@ export function ContactAddressesList({
   const addAddressMutation = useAddContactAddress();
   const deleteAddressMutation = useDeleteContactAddress();
 
-  const handleAddAddress = async (addressData: ContactAddressAttributes) => {
-    try {
-      await addAddressMutation.mutateAsync({
-        contactId,
-        address: addressData,
-      });
-      setIsAddingAddress(false);
-    } catch (error) {
-      // Error handling is done by the mutation hook
-      console.error('Failed to add address:', error);
-    }
-  };
+  // TODO: Implement handleAddAddress when add form is complete
+  // const handleAddAddress = async (addressData: ContactAddressAttributes) => {
+  //   try {
+  //     await addAddressMutation.mutateAsync({
+  //       contactId,
+  //       address: addressData,
+  //     });
+  //     setIsAddingAddress(false);
+  //   } catch (error) {
+  //     // Error handling is done by the mutation hook
+  //     console.error('Failed to add address:', error);
+  //   }
+  // };
 
   const handleDeleteAddress = async (addressId: string) => {
     // Use window.confirm for now - in production, this should be replaced with a proper modal
-    // eslint-disable-next-line no-alert
     if (!window.confirm('Are you sure you want to delete this address?')) {
       return;
     }
@@ -98,27 +98,28 @@ export function ContactAddressesList({
     }
   };
 
-  const formatAddressForDisplay = (address: ContactAddressAttributes): string => {
-    const parts: string[] = [];
-    
-    if (address.street_line_1) {
-      parts.push(address.street_line_1);
-    }
-    if (address.street_line_2) {
-      parts.push(address.street_line_2);
-    }
-    
-    const locationParts: string[] = [];
-    if (address.locality) locationParts.push(address.locality);
-    if (address.region) locationParts.push(address.region);
-    if (address.postal_code) locationParts.push(address.postal_code);
-    
-    if (locationParts.length > 0) {
-      parts.push(locationParts.join(', '));
-    }
-    
-    return parts.join('\n');
-  };
+  // TODO: Use formatAddressForDisplay when needed for address display
+  // const formatAddressForDisplay = (address: ContactAddressAttributes): string => {
+  //   const parts: string[] = [];
+  //
+  //   if (address.street_line_1) {
+  //     parts.push(address.street_line_1);
+  //   }
+  //   if (address.street_line_2) {
+  //     parts.push(address.street_line_2);
+  //   }
+  //
+  //   const locationParts: string[] = [];
+  //   if (address.locality) locationParts.push(address.locality);
+  //   if (address.region) locationParts.push(address.region);
+  //   if (address.postal_code) locationParts.push(address.postal_code);
+  //
+  //   if (locationParts.length > 0) {
+  //     parts.push(locationParts.join(', '));
+  //   }
+  //
+  //   return parts.join('\n');
+  // };
 
   return (
     <Card className={className} data-testid={testId}>

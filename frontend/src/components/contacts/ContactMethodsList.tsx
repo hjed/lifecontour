@@ -59,22 +59,22 @@ export function ContactMethodsList({
   const addMethodMutation = useAddContactMethod();
   const deleteMethodMutation = useDeleteContactMethod();
 
-  const handleAddMethod = async (methodData: ContactMethodAttributes) => {
-    try {
-      await addMethodMutation.mutateAsync({
-        contactId,
-        method: methodData,
-      });
-      setIsAddingMethod(false);
-    } catch (error) {
-      // Error handling is done by the mutation hook
-      console.error('Failed to add method:', error);
-    }
-  };
+  // TODO: Implement handleAddMethod when add form is complete
+  // const handleAddMethod = async (methodData: ContactMethodAttributes) => {
+  //   try {
+  //     await addMethodMutation.mutateAsync({
+  //       contactId,
+  //       method: methodData,
+  //     });
+  //     setIsAddingMethod(false);
+  //   } catch (error) {
+  //     // Error handling is done by the mutation hook
+  //     console.error('Failed to add method:', error);
+  //   }
+  // };
 
   const handleDeleteMethod = async (methodId: string) => {
     // Use window.confirm for now - in production, this should be replaced with a proper modal
-    // eslint-disable-next-line no-alert
     if (!window.confirm('Are you sure you want to delete this contact method?')) {
       return;
     }
@@ -105,7 +105,7 @@ export function ContactMethodsList({
 
   const renderMethodField = (method: ContactMethodResource) => {
     const methodId = method.id?.toString() || '';
-    const { method_type, value, label, is_primary } = method.attributes;
+    const { method_type, value, label } = method.attributes;
 
     if (method_type === ContactMethodType.EMAIL) {
       return (

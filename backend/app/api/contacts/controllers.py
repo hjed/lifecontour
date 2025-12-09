@@ -21,8 +21,6 @@ from app.api.common.schemas import (
 from app.api.contacts.converters import (
     ContactConverter,
     ContactHistoryConverter,
-    ContactRelationshipConverter,
-    ContactRelationshipRequestConverter,
     ContactRequestConverter,
     TagConverter,
 )
@@ -46,7 +44,7 @@ from app.api.contacts.schemas import (
     TagAssignmentRequest,
     TagListResponse,
 )
-from app.core.contacts.models.entities import ContactAddress, ContactMethod
+
 from app.core.contacts.models.exceptions import (
     ContactNotFoundError,
     ContactValidationError,

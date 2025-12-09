@@ -251,38 +251,39 @@ function ContactDetailPageContent() {
             addresses={contact.attributes.addresses || []}
           />
 
-                {/* Notes */}
-                {contact.attributes.notes &&
-                  contact.attributes.notes.length > 0 && (
-                    <div>
-                      <h3 className='mb-3 font-semibold'>Notes</h3>
-                      <div className='space-y-2'>
-                        {contact.attributes.notes.map(note => (
-                          <div
-                            key={
-                              note.id ||
-                              `${note.attributes.content.substring(0, 50)}-${note.attributes.created_at}`
-                            }
-                            className='text-sm'
-                          >
-                            <p>{note.attributes.content}</p>
-                            {note.attributes.created_at && (
-                              <p className='text-muted-foreground mt-1 text-xs'>
-                                {format(
-                                  new Date(note.attributes.created_at),
-                                  DATE_FORMATS.WITH_TIME,
-                                  { locale: enAU }
-                                )}
-                              </p>
+          {/* Notes */}
+          {contact.attributes.notes &&
+            contact.attributes.notes.length > 0 && (
+              <Card>
+                <CardHeader>
+                  <CardTitle className='text-xl'>Notes</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className='space-y-2'>
+                    {contact.attributes.notes.map(note => (
+                      <div
+                        key={
+                          note.id ||
+                          `${note.attributes.content.substring(0, 50)}-${note.attributes.created_at}`
+                        }
+                        className='text-sm'
+                      >
+                        <p>{note.attributes.content}</p>
+                        {note.attributes.created_at && (
+                          <p className='text-muted-foreground mt-1 text-xs'>
+                            {format(
+                              new Date(note.attributes.created_at),
+                              DATE_FORMATS.WITH_TIME,
+                              { locale: enAU }
                             )}
-                          </div>
-                        ))}
+                          </p>
+                        )}
                       </div>
-                    </div>
-                  )}
-              </div>
-            </CardContent>
-          </Card>
+                    ))}
+                  </div>
+                </CardContent>
+              </Card>
+            )}
         </div>
 
         {/* Sidebar - Mobile fallback for tags and metadata */}
