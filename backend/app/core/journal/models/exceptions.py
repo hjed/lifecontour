@@ -87,3 +87,112 @@ class JournalCycleError(JournalHierarchyError):
         super().__init__(
             f"Cannot set journal {journal_id} as child of {parent_id}: would create a cycle"
         )
+
+
+class PhotoAlbumDataValidationError(JournalError):
+    """Exception raised when photo album data (PHOTO_ALBUM type) validation fails."""
+
+    def __init__(self, field: str, message: str):
+        self.field = field
+        self.message = message
+        super().__init__(f"{field}: {message}")
+
+
+class PlanDataValidationError(JournalError):
+    """Exception raised when plan data (PLAN type) validation fails."""
+
+    def __init__(self, field: str, message: str):
+        self.field = field
+        self.message = message
+        super().__init__(f"{field}: {message}")
+
+
+class PlanDocumentValidationError(JournalError):
+    """Exception raised when plan document validation fails."""
+
+    def __init__(self, field: str, message: str):
+        self.field = field
+        self.message = message
+        super().__init__(f"{field}: {message}")
+
+
+class TravelDataValidationError(JournalError):
+    """Exception raised when travel data (TRAVEL type) validation fails."""
+
+    def __init__(self, field: str, message: str):
+        self.field = field
+        self.message = message
+        super().__init__(f"{field}: {message}")
+
+
+class TravelFlightValidationError(JournalError):
+    """Exception raised when travel flight validation fails."""
+
+    def __init__(self, field: str, message: str):
+        self.field = field
+        self.message = message
+        super().__init__(f"{field}: {message}")
+
+
+class TravelAccommodationValidationError(JournalError):
+    """Exception raised when travel accommodation validation fails."""
+
+    def __init__(self, field: str, message: str):
+        self.field = field
+        self.message = message
+        super().__init__(f"{field}: {message}")
+
+
+class TravelTransportationValidationError(JournalError):
+    """Exception raised when travel transportation validation fails."""
+
+    def __init__(self, field: str, message: str):
+        self.field = field
+        self.message = message
+        super().__init__(f"{field}: {message}")
+
+
+class JournalContactRelationshipValidationError(JournalError):
+    """Exception raised when journal contact relationship validation fails."""
+
+    def __init__(self, field: str, message: str):
+        self.field = field
+        self.message = message
+        super().__init__(f"{field}: {message}")
+
+
+class JournalTagValidationError(JournalError):
+    """Exception raised when journal tag validation fails."""
+
+    def __init__(self, field: str, message: str):
+        self.field = field
+        self.message = message
+        super().__init__(f"{field}: {message}")
+
+
+class JournalTagAssignmentValidationError(JournalError):
+    """Exception raised when journal tag assignment validation fails."""
+
+    def __init__(self, field: str, message: str):
+        self.field = field
+        self.message = message
+        super().__init__(f"{field}: {message}")
+
+
+class JournalTagNotFoundError(JournalError):
+    """Exception raised when a journal tag is not found."""
+
+    def __init__(self, tag_id: str):
+        self.tag_id = tag_id
+        super().__init__(f"Journal tag with ID {tag_id} not found")
+
+
+class JournalTagCycleError(JournalError):
+    """Exception raised when a cycle would be created in tag hierarchy."""
+
+    def __init__(self, tag_id: str, parent_id: str):
+        self.tag_id = tag_id
+        self.parent_id = parent_id
+        super().__init__(
+            f"Cannot set tag {tag_id} as child of {parent_id}: would create a cycle"
+        )
