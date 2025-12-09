@@ -773,14 +773,14 @@ async def authenticated_client(test_settings, test_user):
     from dishka import Provider, Scope, make_async_container, provide
     from dishka.integrations.fastapi import setup_dishka
     from httpx import ASGITransport, AsyncClient
+    from sqlalchemy.ext.asyncio import AsyncConnection
 
     from app.infrastructure.auth.models import SessionUser
     from app.infrastructure.auth.oauth_service import OAuthService
     from app.infrastructure.config import Settings
-    from app.infrastructure.outbox.publisher import OutboxEventPublisher
-    from app.infrastructure.search.service import SearchService
+    from app.infrastructure.events.outbox_event_publisher import OutboxEventPublisher
+    from app.infrastructure.search.search_service import SearchService
     from app.main import create_app
-    from sqlalchemy.ext.asyncio import AsyncConnection
 
     class TestAuthProvider(Provider):
         """Test provider for authenticated client."""
@@ -821,7 +821,6 @@ async def authenticated_client(test_settings, test_user):
 
     from app.infrastructure.di.contacts import ContactProvider
     from app.infrastructure.di.database import DatabaseProvider
-    from app.infrastructure.di.infrastructure import InfrastructureProvider
     from app.infrastructure.di.integrations import IntegrationProvider
 
     test_container = make_async_container(
