@@ -16,6 +16,9 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
 from app.api.integrations.schemas import (
+    GoogleContactsStatusAttributes,
+    GoogleContactsStatusData,
+    GoogleContactsStatusJsonApiResponse,
     OAuthAuthorizeRequest,
     OAuthAuthorizeResponse,
     OAuthCallbackRequest,
@@ -171,25 +174,63 @@ async def get_sync_job_status(
             ) from e
 
 
-@router.get("/google/contacts/status", response_model=IntegrationStatusResponse)
+@router.get(
+    "/google/contacts/status", response_model=GoogleContactsStatusJsonApiResponse
+)
 @inject
 async def get_google_contacts_status(
     user: FromDishka[SessionUser],
-) -> IntegrationStatusResponse:
+    oauth_service: FromDishka[OAuthService],
+) -> GoogleContactsStatusJsonApiResponse:
     """
     Get the current status of Google Contacts integration.
 
-    Returns information about the last sync, next scheduled sync,
-    and overall integration health.
+    Returns JSON API formatted response with connection status,
+    last sync time, and sync count.
     """
-    # TODO: Implement actual status checking
-    # For now, return a mock response
-    return IntegrationStatusResponse(
-        integration="google_contacts",
-        status="active",
-        last_sync="2024-01-01T12:00:00Z",
-        next_sync="2024-01-01T18:00:00Z",
-    )
+    try:
+        # Check if user has Google Contacts connected
+        is_connected = await oauth_service.is_google_contacts_connected(user.id)
+
+        # Build status based on connection state
+        status = "active" if is_connected else "disconnected"
+
+        # TODO: Get actual sync stats from database when implemented
+        # For now, return mock sync data if connected
+        last_sync = "2024-01-01T12:00:00Z" if is_connected else None
+        sync_count = 150 if is_connected else 0
+
+        return GoogleContactsStatusJsonApiResponse(
+            data=GoogleContactsStatusData(
+                id="google-contacts",
+                type="integration-status",
+                attributes=GoogleContactsStatusAttributes(
+                    connected=is_connected,
+                    last_sync=last_sync,
+                    sync_count=sync_count,
+                    status=status,
+                ),
+            )
+        )
+    except Exception as e:
+        logger.error(
+            "Failed to get Google Contacts status",
+            user_id=user.id,
+            error=str(e),
+            exc_info=True,
+        )
+        # Return disconnected status on error
+        return GoogleContactsStatusJsonApiResponse(
+            data=GoogleContactsStatusData(
+                id="google-contacts",
+                type="integration-status",
+                attributes=GoogleContactsStatusAttributes(
+                    connected=False,
+                    status="error",
+                    error_message=str(e),
+                ),
+            )
+        )
 
 
 @router.get("/health", response_model=HealthResponse)

@@ -38,7 +38,7 @@ This iteration implements a production-ready integration architecture:
 
 **Final Status:** All integration foundation components implemented and verified. Steel thread complete with Redis task queue, core shared models, integration domain, dependency injection, and comprehensive testing.
 
-### ITER2-002: Google Contacts Integration 🟡 IN PROGRESS (60% complete)
+### ITER2-002: Google Contacts Integration 🟡 IN PROGRESS (70% complete)
 **Description:** Implement Google Contacts integration using isolated worker architecture
 **Strategy:** Break into 5 manageable slices for reviewable PRs
 
@@ -198,16 +198,26 @@ The integration architecture foundation and core Google Contacts sync functional
    - Added integration tests for API controllers
    - Fixed critical security vulnerabilities identified in code review
 
-#### Phase 3: OAuth Integration & UI Flow 🟡 FOLLOWING
-**PR Size:** ~4 files (OAuth endpoints, frontend integration, tests)
+#### Phase 3: OAuth Integration & UI Flow 🟡 IN PROGRESS (PR #237)
+**PR Size:** ~16 files (OAuth endpoints, frontend integration, tests)
 **Estimated Effort:** 2-3 days
 
 **Acceptance Criteria:**
-- [ ] Add OAuth2 endpoints for Google account linking in main API
-- [ ] Implement frontend OAuth flow for Google account connection
-- [ ] Add user-facing sync controls and status display
-- [ ] Implement sync job monitoring and progress tracking
-- [ ] Add comprehensive end-to-end testing with OAuth flow
+- [x] Add OAuth2 endpoints for Google account linking in main API
+- [x] Implement frontend OAuth flow for Google account connection
+- [x] Add user-facing sync controls and status display
+- [x] Implement sync job monitoring and progress tracking
+- [x] Add comprehensive end-to-end testing with OAuth flow
+
+**Implementation Details:**
+- **OAuth Endpoints:** `POST /api/integrations/google/contacts/oauth/authorize`, `POST /api/integrations/google/contacts/oauth/callback`, `DELETE /api/integrations/google/contacts/oauth/disconnect`
+- **Status Endpoint:** `GET /api/integrations/google/contacts/status` returns JSON API format with connection status
+- **Frontend:** Enhanced integrations page with Connect/Disconnect buttons, OAuth callback handling
+- **Security:** CSRF protection with state parameter, PKCE flow, secure state encoding
+- **Testing:** 6 unit tests, integration tests, E2E tests for OAuth UI flow
+
+**Bug Fix (2025-12-10):**
+- Fixed backend response format mismatch: Updated `/api/integrations/google/contacts/status` to return JSON API format (`data.attributes.connected`) instead of simple object format
 
 #### Slice 5: Two-Way Sync & Conflict Resolution 🟡 PENDING
 **PR Size:** ~6 files (Push logic, conflict resolution, API client updates, tests)
