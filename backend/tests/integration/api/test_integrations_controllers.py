@@ -263,18 +263,26 @@ class TestIntegrationsControllers:
             assert "error" in data["services"]
             assert "Health service failed" in data["services"]["error"]["message"]
 
-    def test_get_google_contacts_status_mock(self, client: TestClient):
-        """Test Google Contacts status endpoint (still mock)."""
+    def test_get_google_contacts_status_disconnected(self, client: TestClient):
+        """Test Google Contacts status endpoint returns disconnected state."""
         # Make request
         response = client.get("/api/integrations/google/contacts/status")
 
-        # Verify response (this endpoint still returns mock data)
+        # Verify JSON API response format
         assert response.status_code == 200
         data = response.json()
-        assert data["integration"] == "google_contacts"
-        assert data["status"] == "active"
-        assert "last_sync" in data
-        assert "next_sync" in data
+
+        # Verify JSON API structure
+        assert "data" in data
+        assert data["data"]["id"] == "google-contacts"
+        assert data["data"]["type"] == "integration-status"
+
+        # Verify attributes (using camelCase as per JSON API)
+        attributes = data["data"]["attributes"]
+        assert attributes["connected"] is False
+        assert attributes["status"] == "disconnected"
+        assert attributes["syncCount"] == 0
+        assert attributes["lastSync"] is None
 
     # OAuth Integration Tests
     def test_google_contacts_oauth_authorize_success(self, client: TestClient):

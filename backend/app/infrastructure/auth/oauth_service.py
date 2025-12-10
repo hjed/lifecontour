@@ -732,3 +732,28 @@ class OAuthService:
         # Return False to indicate the feature is not implemented
         # This prevents false success responses when there's nothing to disconnect
         return False
+
+    async def is_google_contacts_connected(self, user_id: str) -> bool:
+        """
+        Check if Google Contacts integration is connected for a user.
+
+        Args:
+            user_id: User ID to check connection status for
+
+        Returns:
+            False - feature not yet implemented (no token storage)
+        """
+        # TODO: Implement actual token storage check
+        # For now, this is a placeholder that indicates no connection exists
+        # In a real implementation, this would:
+        # 1. Check if user has stored Google Contacts tokens
+        # 2. Optionally validate the tokens are not expired
+        # 3. Return True if valid tokens exist, False otherwise
+
+        logger.debug(
+            "Google Contacts connection check - not implemented; returning False",
+            user_id=user_id,
+        )
+
+        # Return False since token storage is not yet implemented
+        return False

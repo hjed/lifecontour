@@ -74,6 +74,51 @@ class IntegrationStatusResponse(BaseModel):
     )
 
 
+class GoogleContactsStatusAttributes(BaseModel):
+    """Attributes for Google Contacts integration status (JSON API format)."""
+
+    connected: bool = Field(description="Whether the integration is connected")
+    last_sync: str | None = Field(
+        default=None,
+        description="ISO timestamp of the last successful sync",
+        serialization_alias="lastSync",
+    )
+    sync_count: int = Field(
+        default=0,
+        description="Total number of contacts synced",
+        serialization_alias="syncCount",
+    )
+    status: str = Field(
+        default="disconnected",
+        description="Current integration status (active, inactive, error, disconnected)",
+    )
+    error_message: str | None = Field(
+        default=None,
+        description="Error message if status is error",
+        serialization_alias="errorMessage",
+    )
+
+    model_config = {"populate_by_name": True}
+
+
+class GoogleContactsStatusData(BaseModel):
+    """JSON API data wrapper for Google Contacts status."""
+
+    id: str = Field(default="google-contacts", description="Resource identifier")
+    type: str = Field(
+        default="integration-status", description="Resource type for JSON API"
+    )
+    attributes: GoogleContactsStatusAttributes = Field(
+        description="Integration status attributes"
+    )
+
+
+class GoogleContactsStatusJsonApiResponse(BaseModel):
+    """JSON API response for Google Contacts integration status."""
+
+    data: GoogleContactsStatusData = Field(description="JSON API data object")
+
+
 class HealthResponse(BaseModel):
     """Response model for integration health checks."""
 
