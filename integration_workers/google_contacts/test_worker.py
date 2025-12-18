@@ -13,6 +13,7 @@ from typing import Any
 
 # Add core_shared to path for imports
 import sys
+
 sys.path.insert(0, "/core_shared")
 
 from core_shared.database.engine import create_session_factory
@@ -49,10 +50,10 @@ class TestGoogleContactsWorker:
                     "etag": "etag123",
                     "names": [{"displayName": "John Doe"}],
                     "emailAddresses": [{"value": "john@example.com"}],
-                    "metadata": {"sources": [{"type": "CONTACT"}]}
+                    "metadata": {"sources": [{"type": "CONTACT"}]},
                 }
             ],
-            "nextSyncToken": "sync_token_123"
+            "nextSyncToken": "sync_token_123",
         }
         return mock_client
 
@@ -61,22 +62,26 @@ class TestGoogleContactsWorker:
         self,
         mock_session_factory,
         mock_google_auth_service,
-        mock_google_contacts_client
+        mock_google_contacts_client,
     ):
         """Test successful full sync of Google Contacts."""
         # Import the worker function
         from worker import sync_google_contacts
 
         # Mock the dependencies
-        with patch('worker.session_factory', mock_session_factory), \
-             patch('worker.GoogleAuthService', return_value=mock_google_auth_service), \
-             patch('worker.GoogleContactsAPIClient', return_value=mock_google_contacts_client):
-
+        with (
+            patch("worker.session_factory", mock_session_factory),
+            patch("worker.GoogleAuthService", return_value=mock_google_auth_service),
+            patch(
+                "worker.GoogleContactsAPIClient",
+                return_value=mock_google_contacts_client,
+            ),
+        ):
             # Execute the sync task
             result = await sync_google_contacts(
                 ctx={"logger": MagicMock()},
                 google_account_email="test@example.com",
-                sync_type="full"
+                sync_type="full",
             )
 
             # Verify the result
@@ -90,7 +95,7 @@ class TestGoogleContactsWorker:
         self,
         mock_session_factory,
         mock_google_auth_service,
-        mock_google_contacts_client
+        mock_google_contacts_client,
     ):
         """Test successful incremental sync of Google Contacts."""
         # Mock existing sync token
@@ -101,14 +106,18 @@ class TestGoogleContactsWorker:
 
         from worker import sync_google_contacts
 
-        with patch('worker.session_factory', mock_session_factory), \
-             patch('worker.GoogleAuthService', return_value=mock_google_auth_service), \
-             patch('worker.GoogleContactsAPIClient', return_value=mock_google_contacts_client):
-
+        with (
+            patch("worker.session_factory", mock_session_factory),
+            patch("worker.GoogleAuthService", return_value=mock_google_auth_service),
+            patch(
+                "worker.GoogleContactsAPIClient",
+                return_value=mock_google_contacts_client,
+            ),
+        ):
             result = await sync_google_contacts(
                 ctx={"logger": MagicMock()},
                 google_account_email="test@example.com",
-                sync_type="incremental"
+                sync_type="incremental",
             )
 
             assert result["status"] == "success"
@@ -119,7 +128,7 @@ class TestGoogleContactsWorker:
         self,
         mock_session_factory,
         mock_google_auth_service,
-        mock_google_contacts_client
+        mock_google_contacts_client,
     ):
         """Test smart sync chooses incremental when sync token exists."""
         # Mock existing sync token
@@ -130,14 +139,18 @@ class TestGoogleContactsWorker:
 
         from worker import sync_google_contacts
 
-        with patch('worker.session_factory', mock_session_factory), \
-             patch('worker.GoogleAuthService', return_value=mock_google_auth_service), \
-             patch('worker.GoogleContactsAPIClient', return_value=mock_google_contacts_client):
-
+        with (
+            patch("worker.session_factory", mock_session_factory),
+            patch("worker.GoogleAuthService", return_value=mock_google_auth_service),
+            patch(
+                "worker.GoogleContactsAPIClient",
+                return_value=mock_google_contacts_client,
+            ),
+        ):
             result = await sync_google_contacts(
                 ctx={"logger": MagicMock()},
                 google_account_email="test@example.com",
-                sync_type="smart"
+                sync_type="smart",
             )
 
             assert result["status"] == "success"
@@ -151,7 +164,7 @@ class TestGoogleContactsWorker:
         self,
         mock_session_factory,
         mock_google_auth_service,
-        mock_google_contacts_client
+        mock_google_contacts_client,
     ):
         """Test sync handles authentication errors gracefully."""
         # Mock auth service to raise error
@@ -159,14 +172,18 @@ class TestGoogleContactsWorker:
 
         from worker import sync_google_contacts
 
-        with patch('worker.session_factory', mock_session_factory), \
-             patch('worker.GoogleAuthService', return_value=mock_google_auth_service), \
-             patch('worker.GoogleContactsAPIClient', return_value=mock_google_contacts_client):
-
+        with (
+            patch("worker.session_factory", mock_session_factory),
+            patch("worker.GoogleAuthService", return_value=mock_google_auth_service),
+            patch(
+                "worker.GoogleContactsAPIClient",
+                return_value=mock_google_contacts_client,
+            ),
+        ):
             result = await sync_google_contacts(
                 ctx={"logger": MagicMock()},
                 google_account_email="test@example.com",
-                sync_type="full"
+                sync_type="full",
             )
 
             assert result["status"] == "error"
@@ -177,22 +194,28 @@ class TestGoogleContactsWorker:
         self,
         mock_session_factory,
         mock_google_auth_service,
-        mock_google_contacts_client
+        mock_google_contacts_client,
     ):
         """Test sync handles Google API errors gracefully."""
         # Mock API client to raise error
-        mock_google_contacts_client.list_connections.side_effect = Exception("API error")
+        mock_google_contacts_client.list_connections.side_effect = Exception(
+            "API error"
+        )
 
         from worker import sync_google_contacts
 
-        with patch('worker.session_factory', mock_session_factory), \
-             patch('worker.GoogleAuthService', return_value=mock_google_auth_service), \
-             patch('worker.GoogleContactsAPIClient', return_value=mock_google_contacts_client):
-
+        with (
+            patch("worker.session_factory", mock_session_factory),
+            patch("worker.GoogleAuthService", return_value=mock_google_auth_service),
+            patch(
+                "worker.GoogleContactsAPIClient",
+                return_value=mock_google_contacts_client,
+            ),
+        ):
             result = await sync_google_contacts(
                 ctx={"logger": MagicMock()},
                 google_account_email="test@example.com",
-                sync_type="full"
+                sync_type="full",
             )
 
             assert result["status"] == "error"

@@ -558,14 +558,17 @@ async function addContactMethod(
     attributes: method,
   };
 
-  const response = await fetch(`${API_ENDPOINTS.CONTACTS.BASE}/${contactId}/methods`, {
-    method: 'POST',
-    credentials: 'include',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({ data: requestData }),
-  });
+  const response = await fetch(
+    `${API_ENDPOINTS.CONTACTS.BASE}/${contactId}/methods`,
+    {
+      method: 'POST',
+      credentials: 'include',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ data: requestData }),
+    }
+  );
 
   if (!response.ok) {
     const errorData: JsonApiErrorResponse = await response.json();
@@ -608,14 +611,17 @@ async function addContactAddress(
     attributes: address,
   };
 
-  const response = await fetch(`${API_ENDPOINTS.CONTACTS.BASE}/${contactId}/addresses`, {
-    method: 'POST',
-    credentials: 'include',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({ data: requestData }),
-  });
+  const response = await fetch(
+    `${API_ENDPOINTS.CONTACTS.BASE}/${contactId}/addresses`,
+    {
+      method: 'POST',
+      credentials: 'include',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ data: requestData }),
+    }
+  );
 
   if (!response.ok) {
     const errorData: JsonApiErrorResponse = await response.json();
@@ -653,10 +659,17 @@ export function useAddContactMethod() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: ({ contactId, method }: { contactId: string; method: ContactMethodAttributes }) =>
-      addContactMethod(contactId, method),
+    mutationFn: ({
+      contactId,
+      method,
+    }: {
+      contactId: string;
+      method: ContactMethodAttributes;
+    }) => addContactMethod(contactId, method),
     onSuccess: (_, { contactId }) => {
-      queryClient.invalidateQueries({ queryKey: contactKeys.detail(contactId) });
+      queryClient.invalidateQueries({
+        queryKey: contactKeys.detail(contactId),
+      });
       queryClient.invalidateQueries({ queryKey: contactKeys.lists() });
       toast.success('Contact method added successfully');
     },
@@ -670,10 +683,17 @@ export function useDeleteContactMethod() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: ({ contactId, methodId }: { contactId: string; methodId: string }) =>
-      deleteContactMethod(contactId, methodId),
+    mutationFn: ({
+      contactId,
+      methodId,
+    }: {
+      contactId: string;
+      methodId: string;
+    }) => deleteContactMethod(contactId, methodId),
     onSuccess: (_, { contactId }) => {
-      queryClient.invalidateQueries({ queryKey: contactKeys.detail(contactId) });
+      queryClient.invalidateQueries({
+        queryKey: contactKeys.detail(contactId),
+      });
       queryClient.invalidateQueries({ queryKey: contactKeys.lists() });
       toast.success('Contact method deleted successfully');
     },
@@ -689,10 +709,17 @@ export function useAddContactAddress() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: ({ contactId, address }: { contactId: string; address: ContactAddressAttributes }) =>
-      addContactAddress(contactId, address),
+    mutationFn: ({
+      contactId,
+      address,
+    }: {
+      contactId: string;
+      address: ContactAddressAttributes;
+    }) => addContactAddress(contactId, address),
     onSuccess: (_, { contactId }) => {
-      queryClient.invalidateQueries({ queryKey: contactKeys.detail(contactId) });
+      queryClient.invalidateQueries({
+        queryKey: contactKeys.detail(contactId),
+      });
       queryClient.invalidateQueries({ queryKey: contactKeys.lists() });
       toast.success('Contact address added successfully');
     },
@@ -706,10 +733,17 @@ export function useDeleteContactAddress() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: ({ contactId, addressId }: { contactId: string; addressId: string }) =>
-      deleteContactAddress(contactId, addressId),
+    mutationFn: ({
+      contactId,
+      addressId,
+    }: {
+      contactId: string;
+      addressId: string;
+    }) => deleteContactAddress(contactId, addressId),
     onSuccess: (_, { contactId }) => {
-      queryClient.invalidateQueries({ queryKey: contactKeys.detail(contactId) });
+      queryClient.invalidateQueries({
+        queryKey: contactKeys.detail(contactId),
+      });
       queryClient.invalidateQueries({ queryKey: contactKeys.lists() });
       toast.success('Contact address deleted successfully');
     },

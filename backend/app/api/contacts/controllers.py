@@ -595,7 +595,11 @@ async def get_contact_history(
 # Contact Methods Management Endpoints
 
 
-@router.post("/{contact_id}/methods", response_model=ContactResponse, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/{contact_id}/methods",
+    response_model=ContactResponse,
+    status_code=status.HTTP_201_CREATED,
+)
 @inject
 async def add_contact_method(
     contact_id: int,
@@ -618,7 +622,9 @@ async def add_contact_method(
             id=None,  # Will be assigned by the database
             attributes=method_request.data.attributes,
         )
-        method = ContactRequestConverter.from_method_resource(method_resource, contact_id)
+        method = ContactRequestConverter.from_method_resource(
+            method_resource, contact_id
+        )
 
         # Add the method using the service
         await contact_service.add_contact_method(contact_id, method, connection)
@@ -637,7 +643,9 @@ async def add_contact_method(
         raise
 
 
-@router.delete("/{contact_id}/methods/{method_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete(
+    "/{contact_id}/methods/{method_id}", status_code=status.HTTP_204_NO_CONTENT
+)
 @inject
 async def delete_contact_method(
     contact_id: int,
@@ -657,7 +665,11 @@ async def delete_contact_method(
 # Contact Addresses Management Endpoints
 
 
-@router.post("/{contact_id}/addresses", response_model=ContactResponse, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/{contact_id}/addresses",
+    response_model=ContactResponse,
+    status_code=status.HTTP_201_CREATED,
+)
 @inject
 async def add_contact_address(
     contact_id: int,
@@ -680,7 +692,9 @@ async def add_contact_address(
             id=None,  # Will be assigned by the database
             attributes=address_request.data.attributes,
         )
-        address = ContactRequestConverter.from_address_resource(address_resource, contact_id)
+        address = ContactRequestConverter.from_address_resource(
+            address_resource, contact_id
+        )
 
         # Add the address using the service
         await contact_service.add_contact_address(contact_id, address, connection)
@@ -699,7 +713,9 @@ async def add_contact_address(
         raise
 
 
-@router.delete("/{contact_id}/addresses/{address_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete(
+    "/{contact_id}/addresses/{address_id}", status_code=status.HTTP_204_NO_CONTENT
+)
 @inject
 async def delete_contact_address(
     contact_id: int,

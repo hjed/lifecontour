@@ -27,9 +27,7 @@ import { ContactMethodsList } from '@/components/contacts/ContactMethodsList';
 import { ContactAddressesList } from '@/components/contacts/ContactAddressesList';
 import { RelationshipsList } from '@/components/contacts/RelationshipsList';
 import { ActivityFeed } from '@/components/contacts/ActivityFeed';
-import type {
-  TagResource,
-} from '@/types/contacts';
+import type { TagResource } from '@/types/contacts';
 import { AuthGuard } from '@/components/auth/AuthGuard';
 import { DATE_FORMATS } from '@/lib/constants';
 
@@ -74,8 +72,6 @@ const TagsCard = ({
       </CardContent>
     </Card>
   ) : null;
-
-
 
 export default function ContactDetailPage() {
   return (
@@ -237,7 +233,7 @@ function ContactDetailPageContent() {
 
       {/* Contact Details */}
       <div className='grid gap-6 lg:grid-cols-3'>
-        <div className='lg:col-span-2 space-y-6'>
+        <div className='space-y-6 lg:col-span-2'>
           {/* Contact Methods */}
           <ContactMethodsList
             contactId={contact.id}
@@ -251,38 +247,37 @@ function ContactDetailPageContent() {
           />
 
           {/* Notes */}
-          {contact.attributes.notes &&
-            contact.attributes.notes.length > 0 && (
-              <Card>
-                <CardHeader>
-                  <CardTitle className='text-xl'>Notes</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <div className='space-y-2'>
-                    {contact.attributes.notes.map(note => (
-                      <div
-                        key={
-                          note.id ||
-                          `${note.attributes.content.substring(0, 50)}-${note.attributes.created_at}`
-                        }
-                        className='text-sm'
-                      >
-                        <p>{note.attributes.content}</p>
-                        {note.attributes.created_at && (
-                          <p className='text-muted-foreground mt-1 text-xs'>
-                            {format(
-                              new Date(note.attributes.created_at),
-                              DATE_FORMATS.WITH_TIME,
-                              { locale: enAU }
-                            )}
-                          </p>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                </CardContent>
-              </Card>
-            )}
+          {contact.attributes.notes && contact.attributes.notes.length > 0 && (
+            <Card>
+              <CardHeader>
+                <CardTitle className='text-xl'>Notes</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className='space-y-2'>
+                  {contact.attributes.notes.map(note => (
+                    <div
+                      key={
+                        note.id ||
+                        `${note.attributes.content.substring(0, 50)}-${note.attributes.created_at}`
+                      }
+                      className='text-sm'
+                    >
+                      <p>{note.attributes.content}</p>
+                      {note.attributes.created_at && (
+                        <p className='text-muted-foreground mt-1 text-xs'>
+                          {format(
+                            new Date(note.attributes.created_at),
+                            DATE_FORMATS.WITH_TIME,
+                            { locale: enAU }
+                          )}
+                        </p>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+          )}
         </div>
 
         {/* Sidebar - Mobile fallback for tags and metadata */}

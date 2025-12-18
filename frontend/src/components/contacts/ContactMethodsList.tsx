@@ -40,10 +40,7 @@ import {
   useDeleteContactMethod,
   updateContactMethodField,
 } from '@/lib/api/contacts';
-import {
-  ContactMethodResource,
-  ContactMethodType,
-} from '@/types/contacts';
+import { ContactMethodResource, ContactMethodType } from '@/types/contacts';
 
 export interface ContactMethodsListProps {
   /** Contact ID */
@@ -154,8 +151,8 @@ export function ContactMethodsList({
       return (
         <InlineEditEmailField
           value={value}
-          onSave={(newValue) => handleFieldUpdate(methodId, 'value', newValue)}
-          placeholder="Enter email address"
+          onSave={newValue => handleFieldUpdate(methodId, 'value', newValue)}
+          placeholder='Enter email address'
           disabled={disabled}
           aria-label={`Email address${label ? ` (${label})` : ''}`}
         />
@@ -169,8 +166,8 @@ export function ContactMethodsList({
       return (
         <InlineEditPhoneField
           value={value}
-          onSave={(newValue) => handleFieldUpdate(methodId, 'value', newValue)}
-          placeholder="Enter phone number"
+          onSave={newValue => handleFieldUpdate(methodId, 'value', newValue)}
+          placeholder='Enter phone number'
           disabled={disabled}
           aria-label={`Phone number${label ? ` (${label})` : ''}`}
         />
@@ -181,7 +178,7 @@ export function ContactMethodsList({
     return (
       <InlineEditField
         value={value}
-        onSave={(newValue) => handleFieldUpdate(methodId, 'value', newValue)}
+        onSave={newValue => handleFieldUpdate(methodId, 'value', newValue)}
         placeholder={`Enter ${method_type}`}
         disabled={disabled}
         aria-label={`${method_type}${label ? ` (${label})` : ''}`}
@@ -191,109 +188,122 @@ export function ContactMethodsList({
 
   return (
     <Card className={className} data-testid={testId}>
-      <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-        <CardTitle className="text-base font-medium">Contact Methods</CardTitle>
+      <CardHeader className='flex flex-row items-center justify-between space-y-0 pb-2'>
+        <CardTitle className='text-base font-medium'>Contact Methods</CardTitle>
         <Button
-          variant="outline"
-          size="sm"
+          variant='outline'
+          size='sm'
           onClick={() => setIsAddingMethod(true)}
           disabled={disabled || isAddingMethod}
-          aria-label="Add contact method"
+          aria-label='Add contact method'
         >
-          <Plus className="h-4 w-4" aria-hidden="true" />
+          <Plus className='h-4 w-4' aria-hidden='true' />
         </Button>
       </CardHeader>
-      <CardContent className="space-y-3">
-        {methods.map((method) => (
+      <CardContent className='space-y-3'>
+        {methods.map(method => (
           <div
             key={method.id}
-            className="flex items-center justify-between space-x-3 p-2 rounded-md border"
+            className='flex items-center justify-between space-x-3 rounded-md border p-2'
           >
-            <div className="flex-1 min-w-0">
-              {renderMethodField(method)}
-            </div>
+            <div className='min-w-0 flex-1'>{renderMethodField(method)}</div>
             <Button
-              variant="ghost"
-              size="sm"
+              variant='ghost'
+              size='sm'
               onClick={() => handleDeleteClick(method.id?.toString() || '')}
               disabled={disabled || deleteMethodMutation.isPending}
               aria-label={`Delete ${method.attributes.method_type}`}
             >
-              <Trash2 className="h-4 w-4 text-destructive" aria-hidden="true" />
+              <Trash2 className='text-destructive h-4 w-4' aria-hidden='true' />
             </Button>
           </div>
         ))}
 
         {methods.length === 0 && !isAddingMethod && (
-          <p className="text-sm text-muted-foreground text-center py-4">
+          <p className='text-muted-foreground py-4 text-center text-sm'>
             No contact methods yet. Click the + button to add one.
           </p>
         )}
 
         {isAddingMethod && (
-          <div className="p-3 rounded-md border border-dashed space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="method-type">Type</Label>
+          <div className='space-y-4 rounded-md border border-dashed p-3'>
+            <div className='space-y-2'>
+              <Label htmlFor='method-type'>Type</Label>
               <Select
                 value={newMethodType}
-                onValueChange={(value) => setNewMethodType(value as ContactMethodType)}
+                onValueChange={value =>
+                  setNewMethodType(value as ContactMethodType)
+                }
               >
-                <SelectTrigger id="method-type">
-                  <SelectValue placeholder="Select type" />
+                <SelectTrigger id='method-type'>
+                  <SelectValue placeholder='Select type' />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value={ContactMethodType.EMAIL}>Email</SelectItem>
                   <SelectItem value={ContactMethodType.PHONE}>Phone</SelectItem>
-                  <SelectItem value={ContactMethodType.MOBILE}>Mobile</SelectItem>
+                  <SelectItem value={ContactMethodType.MOBILE}>
+                    Mobile
+                  </SelectItem>
                 </SelectContent>
               </Select>
             </div>
 
-            <div className="space-y-2">
-              <Label htmlFor="method-value">
-                {newMethodType === ContactMethodType.EMAIL ? 'Email Address' : 'Phone Number'} *
+            <div className='space-y-2'>
+              <Label htmlFor='method-value'>
+                {newMethodType === ContactMethodType.EMAIL
+                  ? 'Email Address'
+                  : 'Phone Number'}{' '}
+                *
               </Label>
               <Input
-                id="method-value"
-                type={newMethodType === ContactMethodType.EMAIL ? 'email' : 'tel'}
+                id='method-value'
+                type={
+                  newMethodType === ContactMethodType.EMAIL ? 'email' : 'tel'
+                }
                 value={newMethodValue}
-                onChange={(e) => setNewMethodValue(e.target.value)}
-                placeholder={newMethodType === ContactMethodType.EMAIL ? 'email@example.com' : '+1 234 567 8900'}
+                onChange={e => setNewMethodValue(e.target.value)}
+                placeholder={
+                  newMethodType === ContactMethodType.EMAIL
+                    ? 'email@example.com'
+                    : '+1 234 567 8900'
+                }
               />
             </div>
 
-            <div className="space-y-2">
-              <Label htmlFor="method-label">Label (optional)</Label>
+            <div className='space-y-2'>
+              <Label htmlFor='method-label'>Label (optional)</Label>
               <Input
-                id="method-label"
+                id='method-label'
                 value={newMethodLabel}
-                onChange={(e) => setNewMethodLabel(e.target.value)}
-                placeholder="e.g., Work, Personal"
+                onChange={e => setNewMethodLabel(e.target.value)}
+                placeholder='e.g., Work, Personal'
               />
             </div>
 
-            <div className="flex items-center space-x-2">
+            <div className='flex items-center space-x-2'>
               <Checkbox
-                id="method-primary"
+                id='method-primary'
                 checked={newMethodIsPrimary}
-                onCheckedChange={(checked) => setNewMethodIsPrimary(checked === true)}
+                onCheckedChange={checked =>
+                  setNewMethodIsPrimary(checked === true)
+                }
               />
-              <Label htmlFor="method-primary" className="text-sm font-normal">
+              <Label htmlFor='method-primary' className='text-sm font-normal'>
                 Set as primary
               </Label>
             </div>
 
-            <div className="flex items-center space-x-2 pt-2">
+            <div className='flex items-center space-x-2 pt-2'>
               <Button
-                variant="outline"
-                size="sm"
+                variant='outline'
+                size='sm'
                 onClick={resetAddForm}
                 disabled={addMethodMutation.isPending}
               >
                 Cancel
               </Button>
               <Button
-                size="sm"
+                size='sm'
                 onClick={handleAddMethod}
                 disabled={!newMethodValue.trim() || addMethodMutation.isPending}
               >
@@ -310,19 +320,20 @@ export function ContactMethodsList({
           <DialogHeader>
             <DialogTitle>Delete Contact Method</DialogTitle>
             <DialogDescription>
-              Are you sure you want to delete this contact method? This action cannot be undone.
+              Are you sure you want to delete this contact method? This action
+              cannot be undone.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
             <Button
-              variant="outline"
+              variant='outline'
               onClick={() => setDeleteDialogOpen(false)}
               disabled={deleteMethodMutation.isPending}
             >
               Cancel
             </Button>
             <Button
-              variant="destructive"
+              variant='destructive'
               onClick={handleConfirmDelete}
               disabled={deleteMethodMutation.isPending}
             >

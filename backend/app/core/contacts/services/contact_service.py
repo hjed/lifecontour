@@ -1436,7 +1436,11 @@ class ContactService:
 
             # Publish event
             event = ContactMethodDeleted(
-                contact_id, method_id, method.method_type.value, method.value, transaction=transaction
+                contact_id,
+                method_id,
+                method.method_type.value,
+                method.value,
+                transaction=transaction,
             )
             await self.event_publisher.publish(event)
 

@@ -85,17 +85,15 @@ describe('ContactAddressesList', () => {
       isPending: false,
     });
 
-    (contactsApi.updateContactAddressField as jest.Mock).mockImplementation(mockUpdateField);
+    (contactsApi.updateContactAddressField as jest.Mock).mockImplementation(
+      mockUpdateField
+    );
   });
 
   it('renders addresses list with addresses', () => {
-    render(
-      <ContactAddressesList
-        contactId="123"
-        addresses={mockAddresses}
-      />,
-      { wrapper: createWrapper() }
-    );
+    render(<ContactAddressesList contactId='123' addresses={mockAddresses} />, {
+      wrapper: createWrapper(),
+    });
 
     expect(screen.getByText('Addresses')).toBeInTheDocument();
     expect(screen.getByText(/123 Main Street/)).toBeInTheDocument();
@@ -103,51 +101,37 @@ describe('ContactAddressesList', () => {
   });
 
   it('renders empty state when no addresses', () => {
-    render(
-      <ContactAddressesList
-        contactId="123"
-        addresses={[]}
-      />,
-      { wrapper: createWrapper() }
-    );
+    render(<ContactAddressesList contactId='123' addresses={[]} />, {
+      wrapper: createWrapper(),
+    });
 
-    expect(screen.getByText('No addresses yet. Click the + button to add one.')).toBeInTheDocument();
+    expect(
+      screen.getByText('No addresses yet. Click the + button to add one.')
+    ).toBeInTheDocument();
   });
 
   it('shows add button', () => {
-    render(
-      <ContactAddressesList
-        contactId="123"
-        addresses={mockAddresses}
-      />,
-      { wrapper: createWrapper() }
-    );
+    render(<ContactAddressesList contactId='123' addresses={mockAddresses} />, {
+      wrapper: createWrapper(),
+    });
 
     const addButton = screen.getByLabelText('Add address');
     expect(addButton).toBeInTheDocument();
   });
 
   it('shows delete buttons for each address', () => {
-    render(
-      <ContactAddressesList
-        contactId="123"
-        addresses={mockAddresses}
-      />,
-      { wrapper: createWrapper() }
-    );
+    render(<ContactAddressesList contactId='123' addresses={mockAddresses} />, {
+      wrapper: createWrapper(),
+    });
 
     const deleteButtons = screen.getAllByLabelText('Delete address');
     expect(deleteButtons).toHaveLength(2);
   });
 
   it('calls delete address when delete button clicked and confirmed', async () => {
-    render(
-      <ContactAddressesList
-        contactId="123"
-        addresses={mockAddresses}
-      />,
-      { wrapper: createWrapper() }
-    );
+    render(<ContactAddressesList contactId='123' addresses={mockAddresses} />, {
+      wrapper: createWrapper(),
+    });
 
     // Click the delete button to open the dialog
     const deleteButton = screen.getAllByLabelText('Delete address')[0];
@@ -170,13 +154,9 @@ describe('ContactAddressesList', () => {
   });
 
   it('does not delete when user cancels confirmation', async () => {
-    render(
-      <ContactAddressesList
-        contactId="123"
-        addresses={mockAddresses}
-      />,
-      { wrapper: createWrapper() }
-    );
+    render(<ContactAddressesList contactId='123' addresses={mockAddresses} />, {
+      wrapper: createWrapper(),
+    });
 
     // Click the delete button to open the dialog
     const deleteButton = screen.getAllByLabelText('Delete address')[0];
@@ -198,7 +178,7 @@ describe('ContactAddressesList', () => {
   it('disables buttons when disabled prop is true', () => {
     render(
       <ContactAddressesList
-        contactId="123"
+        contactId='123'
         addresses={mockAddresses}
         disabled={true}
       />,
@@ -215,13 +195,9 @@ describe('ContactAddressesList', () => {
   });
 
   it('displays address labels when present', () => {
-    render(
-      <ContactAddressesList
-        contactId="123"
-        addresses={mockAddresses}
-      />,
-      { wrapper: createWrapper() }
-    );
+    render(<ContactAddressesList contactId='123' addresses={mockAddresses} />, {
+      wrapper: createWrapper(),
+    });
 
     expect(screen.getByText('Home')).toBeInTheDocument();
     expect(screen.getByText('Work')).toBeInTheDocument();

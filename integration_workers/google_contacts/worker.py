@@ -71,7 +71,7 @@ structlog.configure(
     processors=[
         structlog.processors.add_log_level,
         structlog.processors.TimeStamper(fmt="iso"),
-        structlog.processors.JSONRenderer()
+        structlog.processors.JSONRenderer(),
     ],
     wrapper_class=structlog.make_filtering_bound_logger(
         getattr(logging, settings.log_level.upper())
@@ -120,7 +120,10 @@ async def shutdown(ctx: dict[str, Any]) -> None:
 
 # Helper functions for sync logic
 
-async def _determine_smart_sync_type(session: AsyncSession, google_account_email: str) -> str:
+
+async def _determine_smart_sync_type(
+    session: AsyncSession, google_account_email: str
+) -> str:
     """
     Determine whether to use full or incremental sync based on existing sync metadata.
 
@@ -138,19 +141,21 @@ async def _determine_smart_sync_type(session: AsyncSession, google_account_email
         WHERE user_id = :user_id AND google_account_email = :email
         AND sync_token IS NOT NULL
     """)
-    result = await session.execute(stmt, {"user_id": SITE_USER_ID, "email": google_account_email})
+    result = await session.execute(
+        stmt, {"user_id": SITE_USER_ID, "email": google_account_email}
+    )
     sync_token = result.scalar()
 
     if sync_token:
         logger.info(
             "Found existing sync token, using incremental sync",
-            google_account_email=google_account_email
+            google_account_email=google_account_email,
         )
         return "incremental"
     else:
         logger.info(
             "No sync token found, using full sync",
-            google_account_email=google_account_email
+            google_account_email=google_account_email,
         )
         return "full"
 
@@ -159,7 +164,7 @@ async def _perform_full_sync(
     session: AsyncSession,
     client: GoogleContactsAPIClient,
     google_account_email: str,
-    metrics: dict[str, Any]
+    metrics: dict[str, Any],
 ) -> dict[str, Any]:
     """
     Perform a full sync of Google Contacts.
@@ -180,10 +185,7 @@ async def _perform_full_sync(
 
     while True:
         # Fetch contacts from Google
-        response = await client.list_connections(
-            page_size=100,
-            page_token=page_token
-        )
+        response = await client.list_connections(page_size=100, page_token=page_token)
 
         # Parse response
         contacts_response = ListConnectionsResponse(**response)
@@ -195,16 +197,19 @@ async def _perform_full_sync(
         try:
             # Pre-serialize all contacts in batch to avoid repeated model_dump() calls
             serialized_contacts = [
-                (person, person.model_dump()) for person in contacts_response.connections
+                (person, person.model_dump())
+                for person in contacts_response.connections
             ]
         except Exception as e:
             logger.error(
                 "Failed to serialize contacts batch",
                 google_account_email=google_account_email,
                 batch_size=len(contacts_response.connections),
-                error=str(e)
+                error=str(e),
             )
-            metrics["errors"] = metrics.get("errors", 0) + len(contacts_response.connections)
+            metrics["errors"] = metrics.get("errors", 0) + len(
+                contacts_response.connections
+            )
             continue
 
         # Process each contact using outbox pattern
@@ -215,7 +220,7 @@ async def _perform_full_sync(
                     contact_data=contact_data,
                     integration_source="google_contacts",
                     external_id=google_person.resource_name,
-                    sync_type="created"
+                    sync_type="created",
                 )
 
                 # Add to session (will be committed with transaction)
@@ -229,7 +234,7 @@ async def _perform_full_sync(
                     "Failed to create outbox event for contact",
                     google_account_email=google_account_email,
                     contact_resource_name=google_person.resource_name,
-                    error=str(e)
+                    error=str(e),
                 )
                 metrics["errors"] = metrics.get("errors", 0) + 1
 
@@ -240,12 +245,14 @@ async def _perform_full_sync(
 
     # Save sync token if available
     if contacts_response.next_sync_token:
-        await _save_sync_token(session, google_account_email, contacts_response.next_sync_token)
+        await _save_sync_token(
+            session, google_account_email, contacts_response.next_sync_token
+        )
 
     logger.info(
         "Full sync completed",
         google_account_email=google_account_email,
-        total_processed=total_processed
+        total_processed=total_processed,
     )
 
     return {"contacts_created": total_processed}
@@ -255,7 +262,7 @@ async def _perform_incremental_sync(
     session: AsyncSession,
     client: GoogleContactsAPIClient,
     google_account_email: str,
-    metrics: dict[str, Any]
+    metrics: dict[str, Any],
 ) -> dict[str, Any]:
     """
     Perform an incremental sync of Google Contacts using sync token.
@@ -277,13 +284,15 @@ async def _perform_incremental_sync(
         FROM user_google_auth
         WHERE user_id = :user_id AND google_account_email = :email
     """)
-    result = await session.execute(stmt, {"user_id": SITE_USER_ID, "email": google_account_email})
+    result = await session.execute(
+        stmt, {"user_id": SITE_USER_ID, "email": google_account_email}
+    )
     sync_token = result.scalar()
 
     if not sync_token:
         logger.warning(
             "No sync token found for incremental sync, falling back to full sync",
-            google_account_email=google_account_email
+            google_account_email=google_account_email,
         )
         return await _perform_full_sync(session, client, google_account_email, metrics)
 
@@ -304,7 +313,7 @@ async def _perform_incremental_sync(
             "Failed to serialize contacts batch",
             google_account_email=google_account_email,
             batch_size=len(contacts_response.connections),
-            error=str(e)
+            error=str(e),
         )
         return {"contacts_updated": 0, "errors": len(contacts_response.connections)}
 
@@ -316,7 +325,7 @@ async def _perform_incremental_sync(
                 contact_data=contact_data,
                 integration_source="google_contacts",
                 external_id=google_person.resource_name,
-                sync_type="updated"
+                sync_type="updated",
             )
 
             # Add to session (will be committed with transaction)
@@ -330,24 +339,28 @@ async def _perform_incremental_sync(
                 "Failed to create outbox event for contact",
                 google_account_email=google_account_email,
                 contact_resource_name=google_person.resource_name,
-                error=str(e)
+                error=str(e),
             )
             metrics["errors"] = metrics.get("errors", 0) + 1
 
     # Save new sync token
     if contacts_response.next_sync_token:
-        await _save_sync_token(session, google_account_email, contacts_response.next_sync_token)
+        await _save_sync_token(
+            session, google_account_email, contacts_response.next_sync_token
+        )
 
     logger.info(
         "Incremental sync completed",
         google_account_email=google_account_email,
-        total_processed=total_processed
+        total_processed=total_processed,
     )
 
     return {"contacts_updated": total_processed}
 
 
-async def _save_sync_token(session: AsyncSession, google_account_email: str, sync_token: str) -> None:
+async def _save_sync_token(
+    session: AsyncSession, google_account_email: str, sync_token: str
+) -> None:
     """
     Save sync token for future incremental syncs.
 
@@ -362,24 +375,27 @@ async def _save_sync_token(session: AsyncSession, google_account_email: str, syn
         WHERE user_id = :user_id AND google_account_email = :email
     """)
 
-    await session.execute(stmt, {
-        "sync_token": sync_token,
-        "updated_at": datetime.now(UTC),
-        "user_id": SITE_USER_ID,
-        "email": google_account_email
-    })
+    await session.execute(
+        stmt,
+        {
+            "sync_token": sync_token,
+            "updated_at": datetime.now(UTC),
+            "user_id": SITE_USER_ID,
+            "email": google_account_email,
+        },
+    )
 
     logger.info(
         "Saved sync token",
         google_account_email=google_account_email,
-        sync_token_prefix=sync_token[:20] + "..." if len(sync_token) > 20 else sync_token
+        sync_token_prefix=sync_token[:20] + "..."
+        if len(sync_token) > 20
+        else sync_token,
     )
 
 
 async def sync_google_contacts(
-    ctx: dict[str, Any],
-    google_account_email: str,
-    sync_type: str = "smart"
+    ctx: dict[str, Any], google_account_email: str, sync_type: str = "smart"
 ) -> dict[str, Any]:
     """
     Sync Google Contacts for a specific Google account.
@@ -399,7 +415,7 @@ async def sync_google_contacts(
         "Starting Google Contacts sync task",
         google_account_email=google_account_email,
         sync_type=sync_type,
-        worker_id=settings.worker_id
+        worker_id=settings.worker_id,
     )
 
     session_factory = ctx["session_factory"]
@@ -435,18 +451,24 @@ async def sync_google_contacts(
 
             # Determine sync strategy
             if sync_type == "smart":
-                sync_type = await _determine_smart_sync_type(session, google_account_email)
+                sync_type = await _determine_smart_sync_type(
+                    session, google_account_email
+                )
                 logger.info(
                     "Smart sync determined sync type",
                     google_account_email=google_account_email,
-                    determined_sync_type=sync_type
+                    determined_sync_type=sync_type,
                 )
 
             # Perform sync based on type
             if sync_type == "full":
-                result = await _perform_full_sync(session, client, google_account_email, metrics)
+                result = await _perform_full_sync(
+                    session, client, google_account_email, metrics
+                )
             elif sync_type == "incremental":
-                result = await _perform_incremental_sync(session, client, google_account_email, metrics)
+                result = await _perform_incremental_sync(
+                    session, client, google_account_email, metrics
+                )
             else:
                 raise ValueError(f"Unknown sync type: {sync_type}")
 
@@ -457,7 +479,7 @@ async def sync_google_contacts(
             completion_event = OutboxEvent.create_sync_completed_event(
                 integration_source="google_contacts",
                 google_account_email=google_account_email,
-                metrics=metrics
+                metrics=metrics,
             )
             session.add(completion_event)
 
@@ -467,13 +489,13 @@ async def sync_google_contacts(
             logger.info(
                 "Google Contacts sync task completed successfully",
                 google_account_email=google_account_email,
-                **metrics
+                **metrics,
             )
 
             return {
                 "status": "success",
                 "google_account_email": google_account_email,
-                **metrics
+                **metrics,
             }
 
     except Exception as e:

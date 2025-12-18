@@ -78,17 +78,15 @@ describe('ContactMethodsList', () => {
       isPending: false,
     });
 
-    (contactsApi.updateContactMethodField as jest.Mock).mockImplementation(mockUpdateField);
+    (contactsApi.updateContactMethodField as jest.Mock).mockImplementation(
+      mockUpdateField
+    );
   });
 
   it('renders contact methods list with methods', () => {
-    render(
-      <ContactMethodsList
-        contactId="123"
-        methods={mockMethods}
-      />,
-      { wrapper: createWrapper() }
-    );
+    render(<ContactMethodsList contactId='123' methods={mockMethods} />, {
+      wrapper: createWrapper(),
+    });
 
     expect(screen.getByText('Contact Methods')).toBeInTheDocument();
     expect(screen.getByText('john@example.com')).toBeInTheDocument();
@@ -96,51 +94,37 @@ describe('ContactMethodsList', () => {
   });
 
   it('renders empty state when no methods', () => {
-    render(
-      <ContactMethodsList
-        contactId="123"
-        methods={[]}
-      />,
-      { wrapper: createWrapper() }
-    );
+    render(<ContactMethodsList contactId='123' methods={[]} />, {
+      wrapper: createWrapper(),
+    });
 
-    expect(screen.getByText('No contact methods yet. Click the + button to add one.')).toBeInTheDocument();
+    expect(
+      screen.getByText('No contact methods yet. Click the + button to add one.')
+    ).toBeInTheDocument();
   });
 
   it('shows add button', () => {
-    render(
-      <ContactMethodsList
-        contactId="123"
-        methods={mockMethods}
-      />,
-      { wrapper: createWrapper() }
-    );
+    render(<ContactMethodsList contactId='123' methods={mockMethods} />, {
+      wrapper: createWrapper(),
+    });
 
     const addButton = screen.getByLabelText('Add contact method');
     expect(addButton).toBeInTheDocument();
   });
 
   it('shows delete buttons for each method', () => {
-    render(
-      <ContactMethodsList
-        contactId="123"
-        methods={mockMethods}
-      />,
-      { wrapper: createWrapper() }
-    );
+    render(<ContactMethodsList contactId='123' methods={mockMethods} />, {
+      wrapper: createWrapper(),
+    });
 
     const deleteButtons = screen.getAllByLabelText(/Delete/);
     expect(deleteButtons).toHaveLength(2);
   });
 
   it('calls delete method when delete button clicked and confirmed', async () => {
-    render(
-      <ContactMethodsList
-        contactId="123"
-        methods={mockMethods}
-      />,
-      { wrapper: createWrapper() }
-    );
+    render(<ContactMethodsList contactId='123' methods={mockMethods} />, {
+      wrapper: createWrapper(),
+    });
 
     // Click the delete button to open the dialog
     const deleteButton = screen.getByLabelText('Delete email');
@@ -163,13 +147,9 @@ describe('ContactMethodsList', () => {
   });
 
   it('does not delete when user cancels confirmation', async () => {
-    render(
-      <ContactMethodsList
-        contactId="123"
-        methods={mockMethods}
-      />,
-      { wrapper: createWrapper() }
-    );
+    render(<ContactMethodsList contactId='123' methods={mockMethods} />, {
+      wrapper: createWrapper(),
+    });
 
     // Click the delete button to open the dialog
     const deleteButton = screen.getByLabelText('Delete email');
@@ -191,7 +171,7 @@ describe('ContactMethodsList', () => {
   it('disables buttons when disabled prop is true', () => {
     render(
       <ContactMethodsList
-        contactId="123"
+        contactId='123'
         methods={mockMethods}
         disabled={true}
       />,

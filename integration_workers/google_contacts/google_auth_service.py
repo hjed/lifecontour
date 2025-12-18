@@ -21,11 +21,13 @@ SITE_USER_ID = 1
 
 class GoogleAuthTokensNotFoundError(Exception):
     """Raised when no Google OAuth tokens are found for the user."""
+
     pass
 
 
 class TokenRefreshFailedError(Exception):
     """Raised when Google token refresh fails permanently."""
+
     pass
 
 
@@ -100,7 +102,7 @@ class GoogleAuthService:
         if auth_record.expires_at and auth_record.expires_at <= datetime.now(UTC):
             logger.info(
                 "Access token expired, refreshing",
-                google_account_email=google_account_email
+                google_account_email=google_account_email,
             )
             return await self.refresh_access_token(google_account_email)
 
@@ -157,15 +159,16 @@ class GoogleAuthService:
         }
 
         logger.info(
-            "Refreshing Google access token",
-            google_account_email=google_account_email
+            "Refreshing Google access token", google_account_email=google_account_email
         )
 
         async with httpx.AsyncClient() as client:
             response = await client.post(token_url, data=data)
 
             if response.status_code != 200:
-                error_msg = f"Token refresh failed: {response.status_code} {response.text}"
+                error_msg = (
+                    f"Token refresh failed: {response.status_code} {response.text}"
+                )
                 logger.error(
                     "Failed to refresh Google access token",
                     google_account_email=google_account_email,

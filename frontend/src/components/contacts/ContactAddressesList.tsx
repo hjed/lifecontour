@@ -73,7 +73,9 @@ export interface ContactAddressesListProps {
 }
 
 // Initial state for new address form
-const initialAddressState: Omit<ContactAddressAttributes, 'is_primary'> & { is_primary: boolean } = {
+const initialAddressState: Omit<ContactAddressAttributes, 'is_primary'> & {
+  is_primary: boolean;
+} = {
   street_line_1: '',
   street_line_2: '',
   locality: '',
@@ -189,134 +191,167 @@ export function ContactAddressesList({
 
   return (
     <Card className={className} data-testid={testId}>
-      <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-        <CardTitle className="text-base font-medium">Addresses</CardTitle>
+      <CardHeader className='flex flex-row items-center justify-between space-y-0 pb-2'>
+        <CardTitle className='text-base font-medium'>Addresses</CardTitle>
         <Button
-          variant="outline"
-          size="sm"
+          variant='outline'
+          size='sm'
           onClick={() => setIsAddingAddress(true)}
           disabled={disabled || isAddingAddress}
-          aria-label="Add address"
+          aria-label='Add address'
         >
-          <Plus className="h-4 w-4" aria-hidden="true" />
+          <Plus className='h-4 w-4' aria-hidden='true' />
         </Button>
       </CardHeader>
-      <CardContent className="space-y-3">
-        {addresses.map((address) => (
+      <CardContent className='space-y-3'>
+        {addresses.map(address => (
           <div
             key={address.id}
-            className="flex items-start justify-between space-x-3 p-3 rounded-md border"
+            className='flex items-start justify-between space-x-3 rounded-md border p-3'
           >
-            <div className="flex items-start space-x-2 flex-1 min-w-0">
-              <MapPin className="h-4 w-4 text-muted-foreground mt-1 flex-shrink-0" aria-hidden="true" />
-              <div className="flex-1 min-w-0">
+            <div className='flex min-w-0 flex-1 items-start space-x-2'>
+              <MapPin
+                className='text-muted-foreground mt-1 h-4 w-4 flex-shrink-0'
+                aria-hidden='true'
+              />
+              <div className='min-w-0 flex-1'>
                 <InlineEditAddressField
                   value={address.attributes}
-                  onSave={(addressData) => handleAddressUpdate(address.id?.toString() || '', addressData)}
-                  placeholder="Add address"
+                  onSave={addressData =>
+                    handleAddressUpdate(
+                      address.id?.toString() || '',
+                      addressData
+                    )
+                  }
+                  placeholder='Add address'
                   disabled={disabled}
                   aria-label={`Address${address.attributes.label ? ` (${address.attributes.label})` : ''}`}
                 />
                 {address.attributes.label && (
-                  <div className="mt-1">
+                  <div className='mt-1'>
                     <InlineEditField
                       value={address.attributes.label}
-                      onSave={(newLabel) => 
-                        handleFieldUpdate(address.id?.toString() || '', 'label', newLabel)
+                      onSave={newLabel =>
+                        handleFieldUpdate(
+                          address.id?.toString() || '',
+                          'label',
+                          newLabel
+                        )
                       }
-                      placeholder="Address label"
+                      placeholder='Address label'
                       disabled={disabled}
-                      className="text-xs text-muted-foreground"
-                      aria-label="Address label"
+                      className='text-muted-foreground text-xs'
+                      aria-label='Address label'
                     />
                   </div>
                 )}
               </div>
             </div>
             <Button
-              variant="ghost"
-              size="sm"
+              variant='ghost'
+              size='sm'
               onClick={() => handleDeleteClick(address.id?.toString() || '')}
               disabled={disabled || deleteAddressMutation.isPending}
-              aria-label="Delete address"
+              aria-label='Delete address'
             >
-              <Trash2 className="h-4 w-4 text-destructive" aria-hidden="true" />
+              <Trash2 className='text-destructive h-4 w-4' aria-hidden='true' />
             </Button>
           </div>
         ))}
 
         {addresses.length === 0 && !isAddingAddress && (
-          <p className="text-sm text-muted-foreground text-center py-4">
+          <p className='text-muted-foreground py-4 text-center text-sm'>
             No addresses yet. Click the + button to add one.
           </p>
         )}
 
         {isAddingAddress && (
-          <div className="p-3 rounded-md border border-dashed space-y-4">
-            <p className="text-sm font-medium">Add New Address</p>
+          <div className='space-y-4 rounded-md border border-dashed p-3'>
+            <p className='text-sm font-medium'>Add New Address</p>
 
-            <div className="space-y-2">
-              <Label htmlFor="street-line-1">Street Address *</Label>
+            <div className='space-y-2'>
+              <Label htmlFor='street-line-1'>Street Address *</Label>
               <Input
-                id="street-line-1"
+                id='street-line-1'
                 value={newAddress.street_line_1}
-                onChange={(e) => setNewAddress({ ...newAddress, street_line_1: e.target.value })}
-                placeholder="123 Main Street"
+                onChange={e =>
+                  setNewAddress({
+                    ...newAddress,
+                    street_line_1: e.target.value,
+                  })
+                }
+                placeholder='123 Main Street'
               />
             </div>
 
-            <div className="space-y-2">
-              <Label htmlFor="street-line-2">Street Address Line 2</Label>
+            <div className='space-y-2'>
+              <Label htmlFor='street-line-2'>Street Address Line 2</Label>
               <Input
-                id="street-line-2"
+                id='street-line-2'
                 value={newAddress.street_line_2 || ''}
-                onChange={(e) => setNewAddress({ ...newAddress, street_line_2: e.target.value })}
-                placeholder="Apt, Suite, Unit, etc."
+                onChange={e =>
+                  setNewAddress({
+                    ...newAddress,
+                    street_line_2: e.target.value,
+                  })
+                }
+                placeholder='Apt, Suite, Unit, etc.'
               />
             </div>
 
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="locality">City</Label>
+            <div className='grid grid-cols-2 gap-4'>
+              <div className='space-y-2'>
+                <Label htmlFor='locality'>City</Label>
                 <Input
-                  id="locality"
+                  id='locality'
                   value={newAddress.locality || ''}
-                  onChange={(e) => setNewAddress({ ...newAddress, locality: e.target.value })}
-                  placeholder="Sydney"
+                  onChange={e =>
+                    setNewAddress({ ...newAddress, locality: e.target.value })
+                  }
+                  placeholder='Sydney'
                 />
               </div>
-              <div className="space-y-2">
-                <Label htmlFor="region">State/Region</Label>
+              <div className='space-y-2'>
+                <Label htmlFor='region'>State/Region</Label>
                 <Input
-                  id="region"
+                  id='region'
                   value={newAddress.region || ''}
-                  onChange={(e) => setNewAddress({ ...newAddress, region: e.target.value })}
-                  placeholder="NSW"
+                  onChange={e =>
+                    setNewAddress({ ...newAddress, region: e.target.value })
+                  }
+                  placeholder='NSW'
                 />
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="postal-code">Postal Code</Label>
+            <div className='grid grid-cols-2 gap-4'>
+              <div className='space-y-2'>
+                <Label htmlFor='postal-code'>Postal Code</Label>
                 <Input
-                  id="postal-code"
+                  id='postal-code'
                   value={newAddress.postal_code || ''}
-                  onChange={(e) => setNewAddress({ ...newAddress, postal_code: e.target.value })}
-                  placeholder="2000"
+                  onChange={e =>
+                    setNewAddress({
+                      ...newAddress,
+                      postal_code: e.target.value,
+                    })
+                  }
+                  placeholder='2000'
                 />
               </div>
-              <div className="space-y-2">
-                <Label htmlFor="country-code">Country</Label>
+              <div className='space-y-2'>
+                <Label htmlFor='country-code'>Country</Label>
                 <Select
                   value={newAddress.country_code}
-                  onValueChange={(value) => setNewAddress({ ...newAddress, country_code: value })}
+                  onValueChange={value =>
+                    setNewAddress({ ...newAddress, country_code: value })
+                  }
                 >
-                  <SelectTrigger id="country-code">
-                    <SelectValue placeholder="Select country" />
+                  <SelectTrigger id='country-code'>
+                    <SelectValue placeholder='Select country' />
                   </SelectTrigger>
                   <SelectContent>
-                    {COMMON_COUNTRIES.map((country) => (
+                    {COMMON_COUNTRIES.map(country => (
                       <SelectItem key={country.code} value={country.code}>
                         {country.name}
                       </SelectItem>
@@ -326,40 +361,47 @@ export function ContactAddressesList({
               </div>
             </div>
 
-            <div className="space-y-2">
-              <Label htmlFor="address-label">Label (optional)</Label>
+            <div className='space-y-2'>
+              <Label htmlFor='address-label'>Label (optional)</Label>
               <Input
-                id="address-label"
+                id='address-label'
                 value={newAddress.label || ''}
-                onChange={(e) => setNewAddress({ ...newAddress, label: e.target.value })}
-                placeholder="e.g., Home, Work"
+                onChange={e =>
+                  setNewAddress({ ...newAddress, label: e.target.value })
+                }
+                placeholder='e.g., Home, Work'
               />
             </div>
 
-            <div className="flex items-center space-x-2">
+            <div className='flex items-center space-x-2'>
               <Checkbox
-                id="address-primary"
+                id='address-primary'
                 checked={newAddress.is_primary}
-                onCheckedChange={(checked) => setNewAddress({ ...newAddress, is_primary: checked === true })}
+                onCheckedChange={checked =>
+                  setNewAddress({ ...newAddress, is_primary: checked === true })
+                }
               />
-              <Label htmlFor="address-primary" className="text-sm font-normal">
+              <Label htmlFor='address-primary' className='text-sm font-normal'>
                 Set as primary address
               </Label>
             </div>
 
-            <div className="flex items-center space-x-2 pt-2">
+            <div className='flex items-center space-x-2 pt-2'>
               <Button
-                variant="outline"
-                size="sm"
+                variant='outline'
+                size='sm'
                 onClick={resetAddForm}
                 disabled={addAddressMutation.isPending}
               >
                 Cancel
               </Button>
               <Button
-                size="sm"
+                size='sm'
                 onClick={handleAddAddress}
-                disabled={!newAddress.street_line_1.trim() || addAddressMutation.isPending}
+                disabled={
+                  !newAddress.street_line_1.trim() ||
+                  addAddressMutation.isPending
+                }
               >
                 {addAddressMutation.isPending ? 'Adding...' : 'Add Address'}
               </Button>
@@ -374,19 +416,20 @@ export function ContactAddressesList({
           <DialogHeader>
             <DialogTitle>Delete Address</DialogTitle>
             <DialogDescription>
-              Are you sure you want to delete this address? This action cannot be undone.
+              Are you sure you want to delete this address? This action cannot
+              be undone.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
             <Button
-              variant="outline"
+              variant='outline'
               onClick={() => setDeleteDialogOpen(false)}
               disabled={deleteAddressMutation.isPending}
             >
               Cancel
             </Button>
             <Button
-              variant="destructive"
+              variant='destructive'
               onClick={handleConfirmDelete}
               disabled={deleteAddressMutation.isPending}
             >
