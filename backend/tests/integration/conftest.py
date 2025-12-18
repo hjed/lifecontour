@@ -426,8 +426,10 @@ TEST_DATABASE_SCHEMA_STATEMENTS = [
     """CREATE TABLE journal_plan_documents (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
         journal_id INTEGER NOT NULL REFERENCES journal_plan_data(journal_id) ON DELETE CASCADE,
-        title VARCHAR(500) NOT NULL,
         url VARCHAR(2000) NOT NULL,
+        title VARCHAR(500) NOT NULL,
+        description TEXT,
+        "order" INTEGER NOT NULL,
         created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL
     )""",
     # Journal travel data table (TRAVEL type)
@@ -472,7 +474,7 @@ TEST_DATABASE_SCHEMA_STATEMENTS = [
         journal_id INTEGER NOT NULL REFERENCES journal_travel_data(journal_id) ON DELETE CASCADE,
         type VARCHAR(50) NOT NULL,
         details TEXT NOT NULL,
-        booking_reference VARCHAR(50),
+        booking_reference VARCHAR(100),
         "order" INTEGER NOT NULL,
         created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL
     )""",
