@@ -184,6 +184,58 @@ class ContactAddressAdded(DomainEvent):
 
 
 @dataclass(frozen=True)
+class ContactMethodDeleted(DomainEvent):
+    """Event raised when a contact method is deleted."""
+
+    def __init__(
+        self,
+        contact_id: int,
+        method_id: int,
+        method_type: str,
+        value: str,
+        transaction: AsyncConnection | None = None,
+    ):
+        super().__init__(
+            event_id=f"contact_method_deleted_{contact_id}_{method_id}_{datetime.now().isoformat()}",
+            occurred_at=datetime.now(),
+            aggregate_id=contact_id,
+            event_type="ContactMethodDeleted",
+            event_data={
+                "contact_id": contact_id,
+                "method_id": method_id,
+                "method_type": method_type,
+                "value": value,
+            },
+            transaction=transaction,
+        )
+
+
+@dataclass(frozen=True)
+class ContactAddressDeleted(DomainEvent):
+    """Event raised when a contact address is deleted."""
+
+    def __init__(
+        self,
+        contact_id: int,
+        address_id: int,
+        street_line_1: str,
+        transaction: AsyncConnection | None = None,
+    ):
+        super().__init__(
+            event_id=f"contact_address_deleted_{contact_id}_{address_id}_{datetime.now().isoformat()}",
+            occurred_at=datetime.now(),
+            aggregate_id=contact_id,
+            event_type="ContactAddressDeleted",
+            event_data={
+                "contact_id": contact_id,
+                "address_id": address_id,
+                "street_line_1": street_line_1,
+            },
+            transaction=transaction,
+        )
+
+
+@dataclass(frozen=True)
 class ContactNoteAdded(DomainEvent):
     """Event raised when a contact note is added."""
 

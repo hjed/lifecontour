@@ -30,7 +30,9 @@ class GoogleDate(BaseModel):
 class GoogleNickname(BaseModel):
     """Google People API nickname structure."""
 
-    metadata: "GoogleFieldMetadata" = Field(default_factory=lambda: GoogleFieldMetadata())
+    metadata: "GoogleFieldMetadata" = Field(
+        default_factory=lambda: GoogleFieldMetadata()
+    )
     value: str | None = None
     type: str | None = None
 
@@ -38,7 +40,9 @@ class GoogleNickname(BaseModel):
 class GoogleContactGroupMembership(BaseModel):
     """Google People API contact group membership structure."""
 
-    contact_group_resource_name: str | None = Field(default=None, alias="contactGroupResourceName")
+    contact_group_resource_name: str | None = Field(
+        default=None, alias="contactGroupResourceName"
+    )
     contact_group_id: str | None = Field(default=None, alias="contactGroupId")
 
 

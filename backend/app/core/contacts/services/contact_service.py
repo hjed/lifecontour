@@ -17,9 +17,11 @@ from app.core.contacts.models.entities import (
 )
 from app.core.contacts.models.events import (
     ContactAddressAdded,
+    ContactAddressDeleted,
     ContactCreated,
     ContactDeleted,
     ContactMethodAdded,
+    ContactMethodDeleted,
     ContactNoteAdded,
     ContactUpdated,
     TagAssigned,
@@ -1402,6 +1404,84 @@ class ContactService:
             return saved_note
 
         return cast(ContactNote, await self._execute_with_retry(_add_note_operation))
+
+    async def delete_contact_method(
+        self, contact_id: int, method_id: int, transaction: AsyncConnection
+    ) -> None:
+        """
+        Delete a contact method with transaction management.
+
+        Args:
+            contact_id: ID of the contact that owns the method
+            method_id: ID of the method to delete
+            transaction: Database transaction
+
+        Raises:
+            ContactValidationError: If contact or method doesn't exist
+        """
+
+        async def _delete_method_operation() -> None:
+            # Validate contact exists
+            await self.contact_validation.validate_contact_exists(
+                contact_id, transaction
+            )
+
+            # Get the method to validate it exists and belongs to the contact
+            method = await self.contact_repo.find_method_by_id(method_id)
+            if not method or method.contact_id != contact_id:
+                raise ContactValidationError("method_id", "Method not found")
+
+            # Delete method
+            await self.contact_repo.delete_method(method_id)
+
+            # Publish event
+            event = ContactMethodDeleted(
+                contact_id,
+                method_id,
+                method.method_type.value,
+                method.value,
+                transaction=transaction,
+            )
+            await self.event_publisher.publish(event)
+
+        return cast(None, await self._execute_with_retry(_delete_method_operation))
+
+    async def delete_contact_address(
+        self, contact_id: int, address_id: int, transaction: AsyncConnection
+    ) -> None:
+        """
+        Delete a contact address with transaction management.
+
+        Args:
+            contact_id: ID of the contact that owns the address
+            address_id: ID of the address to delete
+            transaction: Database transaction
+
+        Raises:
+            ContactValidationError: If contact or address doesn't exist
+        """
+
+        async def _delete_address_operation() -> None:
+            # Validate contact exists
+            await self.contact_validation.validate_contact_exists(
+                contact_id, transaction
+            )
+
+            # Get the address to validate it exists and belongs to the contact
+            address = await self.contact_repo.find_address_by_id(address_id)
+            if not address or address.contact_id != contact_id:
+                raise ContactValidationError("address_id", "Address not found")
+
+            # Delete address
+            await self.contact_repo.delete_address(address_id)
+
+            # Publish event
+            event = ContactAddressDeleted(
+                contact_id, address_id, address.street_line_1, transaction=transaction
+            )
+            await self.event_publisher.publish(event)
+
+        return cast(None, await self._execute_with_retry(_delete_address_operation))
 
     # Read operations (no transaction management needed)
     async def get_contact_by_id(self, contact_id: int) -> Contact | None:

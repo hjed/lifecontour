@@ -9,7 +9,7 @@
 
 import { useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { ArrowLeft, Trash2, Mail, Phone, MapPin, Calendar } from 'lucide-react';
+import { ArrowLeft, Trash2, Calendar } from 'lucide-react';
 
 import { format } from 'date-fns';
 import { enAU } from 'date-fns/locale';
@@ -23,22 +23,21 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 
 import { ContactAvatar } from '@/components/contacts/ContactAvatar';
 import { ContactIdentityInline } from '@/components/contacts/ContactIdentityInline';
+import { ContactMethodsList } from '@/components/contacts/ContactMethodsList';
+import { ContactAddressesList } from '@/components/contacts/ContactAddressesList';
 import { RelationshipsList } from '@/components/contacts/RelationshipsList';
 import { ActivityFeed } from '@/components/contacts/ActivityFeed';
-import type {
-  TagResource,
-  ContactMethodResource,
-  ContactAddressResource,
-} from '@/types/contacts';
+import type { TagResource } from '@/types/contacts';
 import { AuthGuard } from '@/components/auth/AuthGuard';
 import { DATE_FORMATS } from '@/lib/constants';
 
 // Helper components to reduce duplication
-const PrimaryBadge = () => (
-  <Badge variant='secondary' className='ml-2 text-xs'>
-    Primary
-  </Badge>
-);
+// TODO: Implement PrimaryBadge when needed for primary field indicators
+// const PrimaryBadge = () => (
+//   <Badge variant='secondary' className='ml-2 text-xs'>
+//     Primary
+//   </Badge>
+// );
 
 const MetadataItem = ({ label, value }: { label: string; value: string }) => (
   <div className='flex items-center gap-2 text-sm'>
@@ -73,57 +72,6 @@ const TagsCard = ({
       </CardContent>
     </Card>
   ) : null;
-
-const ContactMethodItem = ({ method }: { method: ContactMethodResource }) => (
-  <div className='flex items-center gap-3'>
-    {method.attributes.method_type === 'email' && (
-      <Mail className='text-muted-foreground h-4 w-4' />
-    )}
-    {method.attributes.method_type === 'phone' && (
-      <Phone className='text-muted-foreground h-4 w-4' />
-    )}
-    <div>
-      <p className='text-sm'>
-        {method.attributes.value}
-        {method.attributes.is_primary && <PrimaryBadge />}
-      </p>
-      {method.attributes.label && (
-        <p className='text-muted-foreground text-xs'>
-          {method.attributes.label}
-        </p>
-      )}
-    </div>
-  </div>
-);
-
-const AddressItem = ({ address }: { address: ContactAddressResource }) => (
-  <div className='flex items-start gap-3'>
-    <MapPin className='text-muted-foreground mt-0.5 h-4 w-4' />
-    <div>
-      <p className='text-sm'>
-        {address.attributes.street_line_1}
-        {address.attributes.is_primary && <PrimaryBadge />}
-      </p>
-      {address.attributes.street_line_2 && (
-        <p className='text-muted-foreground text-sm'>
-          {address.attributes.street_line_2}
-        </p>
-      )}
-      <p className='text-muted-foreground text-sm'>
-        {address.attributes.locality}, {address.attributes.region}{' '}
-        {address.attributes.postal_code}
-      </p>
-      <p className='text-muted-foreground text-sm'>
-        {address.attributes.country_code}
-      </p>
-      {address.attributes.label && (
-        <p className='text-muted-foreground text-xs'>
-          {address.attributes.label}
-        </p>
-      )}
-    </div>
-  </div>
-);
 
 export default function ContactDetailPage() {
   return (
@@ -285,83 +233,51 @@ function ContactDetailPageContent() {
 
       {/* Contact Details */}
       <div className='grid gap-6 lg:grid-cols-3'>
-        <div className='lg:col-span-2'>
-          <Card>
-            <CardHeader>
-              <CardTitle className='text-xl'>Contact Details</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className='space-y-6'>
-                {/* Contact Methods */}
-                {contact.attributes.contact_methods &&
-                  contact.attributes.contact_methods.length > 0 && (
-                    <div>
-                      <h3 className='mb-3 font-semibold'>Contact Methods</h3>
-                      <div className='space-y-2'>
-                        {contact.attributes.contact_methods.map(method => (
-                          <ContactMethodItem
-                            key={
-                              method.id ||
-                              `${method.attributes.method_type}-${method.attributes.value}`
-                            }
-                            method={method}
-                          />
-                        ))}
-                      </div>
-                    </div>
-                  )}
+        <div className='space-y-6 lg:col-span-2'>
+          {/* Contact Methods */}
+          <ContactMethodsList
+            contactId={contact.id}
+            methods={contact.attributes.contact_methods || []}
+          />
 
-                {/* Addresses */}
-                {contact.attributes.addresses &&
-                  contact.attributes.addresses.length > 0 && (
-                    <div>
-                      <h3 className='mb-3 font-semibold'>Addresses</h3>
-                      <div className='space-y-3'>
-                        {contact.attributes.addresses.map(address => (
-                          <AddressItem
-                            key={
-                              address.id ||
-                              `${address.attributes.street_line_1}-${address.attributes.postal_code || address.attributes.locality}`
-                            }
-                            address={address}
-                          />
-                        ))}
-                      </div>
-                    </div>
-                  )}
+          {/* Addresses */}
+          <ContactAddressesList
+            contactId={contact.id}
+            addresses={contact.attributes.addresses || []}
+          />
 
-                {/* Notes */}
-                {contact.attributes.notes &&
-                  contact.attributes.notes.length > 0 && (
-                    <div>
-                      <h3 className='mb-3 font-semibold'>Notes</h3>
-                      <div className='space-y-2'>
-                        {contact.attributes.notes.map(note => (
-                          <div
-                            key={
-                              note.id ||
-                              `${note.attributes.content.substring(0, 50)}-${note.attributes.created_at}`
-                            }
-                            className='text-sm'
-                          >
-                            <p>{note.attributes.content}</p>
-                            {note.attributes.created_at && (
-                              <p className='text-muted-foreground mt-1 text-xs'>
-                                {format(
-                                  new Date(note.attributes.created_at),
-                                  DATE_FORMATS.WITH_TIME,
-                                  { locale: enAU }
-                                )}
-                              </p>
-                            )}
-                          </div>
-                        ))}
-                      </div>
+          {/* Notes */}
+          {contact.attributes.notes && contact.attributes.notes.length > 0 && (
+            <Card>
+              <CardHeader>
+                <CardTitle className='text-xl'>Notes</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className='space-y-2'>
+                  {contact.attributes.notes.map(note => (
+                    <div
+                      key={
+                        note.id ||
+                        `${note.attributes.content.substring(0, 50)}-${note.attributes.created_at}`
+                      }
+                      className='text-sm'
+                    >
+                      <p>{note.attributes.content}</p>
+                      {note.attributes.created_at && (
+                        <p className='text-muted-foreground mt-1 text-xs'>
+                          {format(
+                            new Date(note.attributes.created_at),
+                            DATE_FORMATS.WITH_TIME,
+                            { locale: enAU }
+                          )}
+                        </p>
+                      )}
                     </div>
-                  )}
-              </div>
-            </CardContent>
-          </Card>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+          )}
         </div>
 
         {/* Sidebar - Mobile fallback for tags and metadata */}

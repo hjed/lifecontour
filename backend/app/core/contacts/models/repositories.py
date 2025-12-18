@@ -107,6 +107,11 @@ class ContactRepository(ABC):
         pass
 
     @abstractmethod
+    async def find_method_by_id(self, method_id: int) -> ContactMethod | None:
+        """Find a contact method by ID."""
+        pass
+
+    @abstractmethod
     async def delete_method(self, method_id: int) -> None:
         """Delete a contact method."""
         pass
@@ -126,6 +131,11 @@ class ContactRepository(ABC):
     @abstractmethod
     async def update_address(self, address: ContactAddress) -> ContactAddress:
         """Update a contact address."""
+        pass
+
+    @abstractmethod
+    async def find_address_by_id(self, address_id: int) -> ContactAddress | None:
+        """Find a contact address by ID."""
         pass
 
     @abstractmethod

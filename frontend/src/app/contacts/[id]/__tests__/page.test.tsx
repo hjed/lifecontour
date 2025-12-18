@@ -26,6 +26,24 @@ jest.mock('@/lib/api/contacts', () => ({
   useDeleteContact: jest.fn(),
   useToggleContactFavourite: jest.fn(),
   useUpdateContactField: jest.fn(),
+  useAddContactMethod: jest.fn(() => ({
+    mutateAsync: jest.fn(),
+    isPending: false,
+  })),
+  useDeleteContactMethod: jest.fn(() => ({
+    mutateAsync: jest.fn(),
+    isPending: false,
+  })),
+  useAddContactAddress: jest.fn(() => ({
+    mutateAsync: jest.fn(),
+    isPending: false,
+  })),
+  useDeleteContactAddress: jest.fn(() => ({
+    mutateAsync: jest.fn(),
+    isPending: false,
+  })),
+  updateContactMethodField: jest.fn(),
+  updateContactAddressField: jest.fn(),
   useContactHistory: jest.fn(() => ({
     data: { data: [], meta: { total_count: 0 } },
     isLoading: false,

@@ -476,6 +476,32 @@ class SqlContactRepository(ContactRepository):
                 ) from e
             raise
 
+    async def find_method_by_id(self, method_id: int) -> ContactMethod | None:
+        """Find a contact method by ID."""
+        query = text(
+            """
+            SELECT id, contact_id, method_type, value, label, is_primary, created_at, updated_at
+            FROM contact_methods
+            WHERE id = :method_id
+        """
+        )
+        result = await self.conn.execute(query, {"method_id": method_id})
+        row = result.fetchone()
+
+        if row is None:
+            return None
+
+        return ContactMethod(
+            id=row.id,
+            contact_id=row.contact_id,
+            method_type=MethodType(row.method_type),
+            value=row.value,
+            label=row.label,
+            is_primary=row.is_primary,
+            created_at=row.created_at,
+            updated_at=row.updated_at,
+        )
+
     async def delete_method(self, method_id: int) -> None:
         """Delete a contact method."""
         query = text("DELETE FROM contact_methods WHERE id = :method_id")
@@ -569,6 +595,37 @@ class SqlContactRepository(ContactRepository):
             if "unique" in str(e).lower() and "primary" in str(e).lower():
                 raise PrimaryAddressConflictError(address.contact_id) from e
             raise
+
+    async def find_address_by_id(self, address_id: int) -> ContactAddress | None:
+        """Find a contact address by ID."""
+        query = text(
+            """
+            SELECT id, contact_id, label, street_line_1, street_line_2, locality,
+                   region, postal_code, country_code, is_primary, created_at, updated_at
+            FROM contact_addresses
+            WHERE id = :address_id
+        """
+        )
+        result = await self.conn.execute(query, {"address_id": address_id})
+        row = result.fetchone()
+
+        if row is None:
+            return None
+
+        return ContactAddress(
+            id=row.id,
+            contact_id=row.contact_id,
+            label=row.label,
+            street_line_1=row.street_line_1,
+            street_line_2=row.street_line_2,
+            locality=row.locality,
+            region=row.region,
+            postal_code=row.postal_code,
+            country_code=row.country_code,
+            is_primary=row.is_primary,
+            created_at=row.created_at,
+            updated_at=row.updated_at,
+        )
 
     async def delete_address(self, address_id: int) -> None:
         """Delete a contact address."""
