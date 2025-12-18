@@ -201,6 +201,14 @@ CREATE TABLE journals (
 - **Validation:** Full entity validation with custom exceptions
 - **DI Integration:** All repositories configured in dependency injection
 
+**Bugfixes Applied (2025-12-17):**
+- Fixed test schema in `conftest.py` to match migration:
+  - Added `confirmation_number` column to `journal_travel_flights` table
+  - Changed `check_in`/`check_out` (TIMESTAMP) to `check_in_date`/`check_out_date` (DATE) in `journal_travel_accommodations`
+  - Made `address` column nullable in `journal_travel_accommodations` to match spec
+  - Added check constraint for valid dates
+- Fixed MyPy error in `sample_journal_id` fixture return type
+
 ### ITER4-004: Contact Relationships & Tags 🟡 PLANNED
 **Description:** Implement journal-contact relationships and hierarchical tag system
 **Strategy:** Single task for relationship and tag infrastructure

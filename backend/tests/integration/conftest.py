@@ -441,13 +441,14 @@ TEST_DATABASE_SCHEMA_STATEMENTS = [
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
         journal_id INTEGER NOT NULL REFERENCES journal_travel_data(journal_id) ON DELETE CASCADE,
         flight_number VARCHAR(20) NOT NULL,
-        airline VARCHAR(100) NOT NULL,
-        departure_airport VARCHAR(100) NOT NULL,
-        arrival_airport VARCHAR(100) NOT NULL,
+        airline VARCHAR(100),
+        departure_airport VARCHAR(10) NOT NULL,
+        arrival_airport VARCHAR(10) NOT NULL,
         departure_time TIMESTAMP WITH TIME ZONE NOT NULL,
         arrival_time TIMESTAMP WITH TIME ZONE NOT NULL,
-        booking_reference VARCHAR(50),
-        seat_number VARCHAR(10),
+        booking_reference VARCHAR(100),
+        seat_number VARCHAR(20),
+        confirmation_number VARCHAR(100),
         "order" INTEGER NOT NULL,
         created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL
     )""",
@@ -456,13 +457,14 @@ TEST_DATABASE_SCHEMA_STATEMENTS = [
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
         journal_id INTEGER NOT NULL REFERENCES journal_travel_data(journal_id) ON DELETE CASCADE,
         name VARCHAR(200) NOT NULL,
-        address VARCHAR(500) NOT NULL,
-        check_in TIMESTAMP WITH TIME ZONE NOT NULL,
-        check_out TIMESTAMP WITH TIME ZONE NOT NULL,
-        booking_reference VARCHAR(50),
-        confirmation_number VARCHAR(50),
+        address TEXT,
+        check_in_date DATE NOT NULL,
+        check_out_date DATE NOT NULL,
+        booking_reference VARCHAR(100),
+        confirmation_number VARCHAR(100),
         "order" INTEGER NOT NULL,
-        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL,
+        CHECK (check_in_date < check_out_date)
     )""",
     # Journal travel transportation table
     """CREATE TABLE journal_travel_transportation (
@@ -926,4 +928,4 @@ async def sample_journal_id(async_connection: AsyncConnection) -> int:
     )
     row = result.fetchone()
     assert row is not None
-    return row[0]  # type: ignore[return-value]
+    return int(row[0])
