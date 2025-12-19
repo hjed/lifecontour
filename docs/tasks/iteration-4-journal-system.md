@@ -209,40 +209,80 @@ CREATE TABLE journals (
   - Added check constraint for valid dates
 - Fixed MyPy error in `sample_journal_id` fixture return type
 
-### ITER4-004: Contact Relationships & Tags 🟡 PLANNED
+### ITER4-004: Contact Relationships & Tags 🟢 COMPLETED
 **Description:** Implement journal-contact relationships and hierarchical tag system
 **Strategy:** Single task for relationship and tag infrastructure
 **Specification Reference:** [Contact Relationships](../journal-system-specification.md#contact-relationships), [Tags](../journal-system-specification.md#tags)
+**PR:** [#256](https://github.com/hjed/personal-management-system/pull/256) - Ready for merge
 
-**PR Size:** ~6 files (2 main tables + assignments, migrations, tests)
+**PR Size:** 15 files (2 main tables + assignments, migrations, tests, DI setup)
 
 **Acceptance Criteria:**
-- [ ] Create `journal_contact_relationships` table:
+- [x] Create `journal_contact_relationships` table:
   - `journal_id` (FK to journals)
   - `contact_id` (FK to contacts)
   - `relationship_type` (enum: PARTICIPANT, INVITEE, MENTION, ABOUT)
   - `created_at`
   - Primary key: (journal_id, contact_id, relationship_type)
-- [ ] Create `journal_tags` table (hierarchical like contact tags):
+- [x] Create `journal_tags` table (hierarchical like contact tags):
   - `id` (UUID), `name`, `parent_id` (FK to journal_tags, nullable)
   - `color` (hex color), `created_at`, `updated_at`
-- [ ] Create `journal_tag_assignments` table:
+- [x] Create `journal_tag_assignments` table:
   - `journal_id` (FK to journals)
   - `tag_id` (FK to journal_tags)
   - `created_at`
   - Primary key: (journal_id, tag_id)
-- [ ] Implement relationship type validation (enum enforcement)
-- [ ] Implement tag hierarchy validation (prevent cycles)
-- [ ] Add database migrations with proper constraints
-- [ ] Write unit tests for relationship and tag validation
-- [ ] Write integration tests for relationship and tag persistence
-- [ ] Document relationship types and tag hierarchy in code comments
+- [x] Implement relationship type validation (enum enforcement)
+- [x] Implement tag hierarchy validation (prevent cycles)
+- [x] Add database migrations with proper constraints
+- [x] Write unit tests for relationship and tag validation
+- [x] Write integration tests for relationship and tag persistence
+- [x] Document relationship types and tag hierarchy in code comments
 
 **Relationship Types:**
 - **PARTICIPANT:** Contact attended/participated in the event
 - **INVITEE:** Contact was invited to the event
 - **MENTION:** Contact is mentioned in journal content (manually tagged)
 - **ABOUT:** Journal is specifically about this contact
+
+**Implementation Summary:**
+
+✅ **Database Schema**
+- Created `journal_tags` table with UUID primary key, hierarchical parent-child relationships, color support, and timestamps
+- Created `journal_tag_assignments` table for many-to-many relationship between journals and tags
+- Created `journal_contact_relationships` table with composite primary key (journal_id, contact_id, relationship_type)
+- Added proper foreign key constraints with CASCADE delete for data integrity
+- Created indexes on parent_id, tag_id, contact_id, and relationship_type for query performance
+
+✅ **Domain Models**
+- `JournalTag` entity with validation for name (1-100 chars) and hex color codes
+- `JournalContactRelationship` entity with composite key support and equality/hash methods
+- `JournalContactRelationshipType` enum with PARTICIPANT, INVITEE, MENTION, ABOUT values
+- Proper dataclass implementation with post-init validation
+
+✅ **Repository Layer**
+- `SqlJournalTagRepository` with CRUD operations, hierarchy queries, and cycle prevention
+- `SqlJournalContactRelationshipRepository` with filtering by journal, contact, and relationship type
+- Both repositories follow established SQLAlchemy Core patterns with explicit SQL queries
+
+✅ **Dependency Injection**
+- Added providers in `JournalProvider` for both repositories
+- Proper REQUEST scope for per-request instantiation
+- Integrated with existing Dishka container
+
+✅ **Testing**
+- 18 unit tests for JournalTag entity validation
+- 20 unit tests for JournalContactRelationship entity validation
+- 11 integration tests for JournalTagRepository (CRUD, hierarchy, cycles)
+- 11 integration tests for JournalContactRelationshipRepository (CRUD, filtering)
+- All 138 unit tests pass (including 38 new tests)
+
+✅ **Code Quality**
+- Ruff linting: All checks passed
+- Ruff formatting: All files formatted correctly
+- MyPy type checking: No type errors
+- Pre-commit hooks: All checks pass
+- Follows project architecture patterns and AI guidelines
 
 ### ITER4-005: Journal Repository & Service Layer 🟡 PLANNED
 **Description:** Implement repository and service layer with type dependency resolution
