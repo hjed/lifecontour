@@ -227,6 +227,9 @@ class DockerManager:
 # SQL DDL statements for test database schema (each statement executed separately)
 TEST_DATABASE_SCHEMA_STATEMENTS = [
     # Drop tables if they exist (in reverse dependency order)
+    "DROP TABLE IF EXISTS journal_contact_relationships CASCADE",
+    "DROP TABLE IF EXISTS journal_tag_assignments CASCADE",
+    "DROP TABLE IF EXISTS journal_tags CASCADE",
     "DROP TABLE IF EXISTS journal_travel_transportation CASCADE",
     "DROP TABLE IF EXISTS journal_travel_accommodations CASCADE",
     "DROP TABLE IF EXISTS journal_travel_flights CASCADE",
@@ -478,6 +481,34 @@ TEST_DATABASE_SCHEMA_STATEMENTS = [
         "order" INTEGER NOT NULL,
         created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL
     )""",
+    # Journal tags table (hierarchical)
+    """CREATE TABLE journal_tags (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        name VARCHAR(100) NOT NULL UNIQUE,
+        parent_id UUID REFERENCES journal_tags(id) ON DELETE SET NULL,
+        color VARCHAR(7),
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL,
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL
+    )""",
+    """CREATE INDEX idx_journal_tags_parent_id ON journal_tags (parent_id)""",
+    # Journal tag assignments table
+    """CREATE TABLE journal_tag_assignments (
+        journal_id INTEGER NOT NULL REFERENCES journals(id) ON DELETE CASCADE,
+        tag_id UUID NOT NULL REFERENCES journal_tags(id) ON DELETE CASCADE,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL,
+        PRIMARY KEY (journal_id, tag_id)
+    )""",
+    """CREATE INDEX idx_journal_tag_assignments_tag_id ON journal_tag_assignments (tag_id)""",
+    # Journal contact relationships table
+    """CREATE TABLE journal_contact_relationships (
+        journal_id INTEGER NOT NULL REFERENCES journals(id) ON DELETE CASCADE,
+        contact_id INTEGER NOT NULL REFERENCES contacts(id) ON DELETE CASCADE,
+        relationship_type VARCHAR(20) NOT NULL CHECK (relationship_type IN ('PARTICIPANT', 'INVITEE', 'MENTION', 'ABOUT')),
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL,
+        PRIMARY KEY (journal_id, contact_id, relationship_type)
+    )""",
+    """CREATE INDEX idx_journal_contact_relationships_contact_id ON journal_contact_relationships (contact_id)""",
+    """CREATE INDEX idx_journal_contact_relationships_type ON journal_contact_relationships (relationship_type)""",
 ]
 
 

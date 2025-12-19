@@ -37,6 +37,9 @@ from .exceptions import (
     TravelFlightValidationError,
     TravelTransportationValidationError,
 )
+from .journal_contact_relationship import JournalContactRelationship
+from .journal_relationship_types import JournalContactRelationshipType
+from .journal_tag import JournalTag
 from .journal_types import JournalType
 from .mood_data import MoodData
 from .photo_album_data import PhotoAlbumData
@@ -44,7 +47,9 @@ from .plan_data import PlanData, PlanDocument
 from .repositories import (
     CalendarInfoRepository,
     CalendarRepository,
+    JournalContactRelationshipRepository,
     JournalRepository,
+    JournalTagRepository,
     MoodDataRepository,
     PhotoAlbumDataRepository,
     PlanDataRepository,
@@ -85,8 +90,11 @@ __all__ = [
     "TravelFlight",
     "TravelAccommodation",
     "TravelTransportation",
+    "JournalTag",
+    "JournalContactRelationship",
     # Enums
     "JournalType",
+    "JournalContactRelationshipType",
     # Exceptions
     "JournalCycleError",
     "JournalError",
@@ -113,6 +121,8 @@ __all__ = [
     "PhotoAlbumDataRepository",
     "PlanDataRepository",
     "TravelDataRepository",
+    "JournalTagRepository",
+    "JournalContactRelationshipRepository",
     # Value Objects
     "EventDateRange",
 ]

@@ -6,6 +6,9 @@ from uuid import UUID
 from .calendar import Calendar
 from .calendar_info import CalendarInfo
 from .entities import Journal
+from .journal_contact_relationship import JournalContactRelationship
+from .journal_relationship_types import JournalContactRelationshipType
+from .journal_tag import JournalTag
 from .mood_data import MoodData
 from .photo_album_data import PhotoAlbumData
 from .plan_data import PlanData, PlanDocument
@@ -589,5 +592,177 @@ class TravelDataRepository(ABC):
 
         Args:
             transportation_id: The transportation UUID to delete
+        """
+        pass
+
+
+class JournalTagRepository(ABC):
+    """
+    Repository interface for journal tag operations.
+
+    Tags are hierarchical (parent-child relationships) and can be assigned to journals.
+    """
+
+    @abstractmethod
+    async def find_by_id(self, tag_id: UUID) -> JournalTag | None:
+        """
+        Find a tag by ID.
+
+        Args:
+            tag_id: The tag UUID to look up
+
+        Returns:
+            The JournalTag if found, None otherwise
+        """
+        pass
+
+    @abstractmethod
+    async def find_by_name(self, name: str) -> JournalTag | None:
+        """
+        Find a tag by name.
+
+        Args:
+            name: The tag name to look up
+
+        Returns:
+            The JournalTag if found, None otherwise
+        """
+        pass
+
+    @abstractmethod
+    async def save(self, tag: JournalTag) -> JournalTag:
+        """
+        Save a tag (insert or update).
+
+        Args:
+            tag: The tag to save
+
+        Returns:
+            The saved tag with updated fields (id, timestamps)
+        """
+        pass
+
+    @abstractmethod
+    async def delete(self, tag_id: UUID) -> None:
+        """
+        Delete a tag by ID.
+
+        Args:
+            tag_id: The tag UUID to delete
+        """
+        pass
+
+    @abstractmethod
+    async def get_all(self) -> list[JournalTag]:
+        """
+        Get all tags.
+
+        Returns:
+            List of all tags
+        """
+        pass
+
+    @abstractmethod
+    async def get_children(self, parent_id: UUID) -> list[JournalTag]:
+        """
+        Get child tags of a parent tag.
+
+        Args:
+            parent_id: The parent tag UUID
+
+        Returns:
+            List of child tags
+        """
+        pass
+
+    @abstractmethod
+    async def get_root_tags(self) -> list[JournalTag]:
+        """
+        Get all root tags (no parent).
+
+        Returns:
+            List of root tags
+        """
+        pass
+
+
+class JournalContactRelationshipRepository(ABC):
+    """
+    Repository interface for journal-contact relationship operations.
+
+    Manages relationships between journals and contacts with different relationship types.
+    """
+
+    @abstractmethod
+    async def create(
+        self, relationship: JournalContactRelationship
+    ) -> JournalContactRelationship:
+        """
+        Create a new journal-contact relationship.
+
+        Args:
+            relationship: The relationship to create
+
+        Returns:
+            The created relationship with created_at timestamp
+        """
+        pass
+
+    @abstractmethod
+    async def delete(
+        self,
+        journal_id: int,
+        contact_id: int,
+        relationship_type: JournalContactRelationshipType,
+    ) -> None:
+        """
+        Delete a specific journal-contact relationship.
+
+        Args:
+            journal_id: The journal ID
+            contact_id: The contact ID
+            relationship_type: The relationship type to delete
+        """
+        pass
+
+    @abstractmethod
+    async def get_by_journal(self, journal_id: int) -> list[JournalContactRelationship]:
+        """
+        Get all relationships for a journal.
+
+        Args:
+            journal_id: The journal ID to filter by
+
+        Returns:
+            List of relationships for the journal
+        """
+        pass
+
+    @abstractmethod
+    async def get_by_contact(self, contact_id: int) -> list[JournalContactRelationship]:
+        """
+        Get all relationships for a contact.
+
+        Args:
+            contact_id: The contact ID to filter by
+
+        Returns:
+            List of relationships for the contact
+        """
+        pass
+
+    @abstractmethod
+    async def get_by_journal_and_type(
+        self, journal_id: int, relationship_type: JournalContactRelationshipType
+    ) -> list[JournalContactRelationship]:
+        """
+        Get all relationships of a specific type for a journal.
+
+        Args:
+            journal_id: The journal ID to filter by
+            relationship_type: The relationship type to filter by
+
+        Returns:
+            List of relationships matching the criteria
         """
         pass
