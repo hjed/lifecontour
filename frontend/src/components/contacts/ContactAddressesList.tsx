@@ -208,6 +208,7 @@ export function ContactAddressesList({
           <div
             key={address.id}
             className='flex items-start justify-between space-x-3 rounded-md border p-3'
+            data-testid={`contact-address-${address.id}`}
           >
             <div className='flex min-w-0 flex-1 items-start space-x-2'>
               <MapPin
@@ -281,6 +282,7 @@ export function ContactAddressesList({
                   })
                 }
                 placeholder='123 Main Street'
+                data-testid='address-street-input'
               />
             </div>
 
@@ -309,6 +311,7 @@ export function ContactAddressesList({
                     setNewAddress({ ...newAddress, locality: e.target.value })
                   }
                   placeholder='Sydney'
+                  data-testid='address-suburb-input'
                 />
               </div>
               <div className='space-y-2'>
@@ -320,6 +323,7 @@ export function ContactAddressesList({
                     setNewAddress({ ...newAddress, region: e.target.value })
                   }
                   placeholder='NSW'
+                  data-testid='address-state-input'
                 />
               </div>
             </div>
@@ -337,6 +341,7 @@ export function ContactAddressesList({
                     })
                   }
                   placeholder='2000'
+                  data-testid='address-postcode-input'
                 />
               </div>
               <div className='space-y-2'>
