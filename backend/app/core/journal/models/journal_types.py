@@ -22,11 +22,11 @@ class JournalType(str, Enum):
     - NOTE: Simple text notes using only base journal fields
     - EVENT: Calendar events with time and location information
     - MOOD_RATING: Mood and energy level tracking
+    - PLAN: Event planning with document links
+    - TRAVEL: Travel itineraries with flights, accommodations, transportation
+    - PHOTO_ALBUM: Links to Immich photo albums
 
     Additional types will be added in future iterations:
-    - PLAN: Event planning with document links
-    - TRAVEL: Travel itineraries
-    - PHOTO_ALBUM: Links to Immich photo albums
     - FITNESS: Base type for fitness activities
     - OUTDOOR_ACTIVITY: Extends FITNESS
     - BUSHWALKING, CANYONING, etc.: Specialized activity types
@@ -37,10 +37,10 @@ class JournalType(str, Enum):
     EVENT = "event"
     MOOD_RATING = "mood_rating"
 
-    # Base types (Iteration 4 - Part 2) - placeholder for documentation
-    # PLAN = "plan"
-    # TRAVEL = "travel"
-    # PHOTO_ALBUM = "photo_album"
+    # Base types (Iteration 4 - Part 2)
+    PLAN = "plan"
+    TRAVEL = "travel"
+    PHOTO_ALBUM = "photo_album"
 
     # Activity types (Iteration 4.5) - placeholder for documentation
     # FITNESS = "fitness"

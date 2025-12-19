@@ -9,11 +9,19 @@ from app.core.journal.adapters.sql.calendar_info_repository import (
 from app.core.journal.adapters.sql.calendar_repository import SqlCalendarRepository
 from app.core.journal.adapters.sql.journal_repository import SqlJournalRepository
 from app.core.journal.adapters.sql.mood_data_repository import SqlMoodDataRepository
+from app.core.journal.adapters.sql.photo_album_data_repository import (
+    SqlPhotoAlbumDataRepository,
+)
+from app.core.journal.adapters.sql.plan_data_repository import SqlPlanDataRepository
+from app.core.journal.adapters.sql.travel_data_repository import SqlTravelDataRepository
 from app.core.journal.models.repositories import (
     CalendarInfoRepository,
     CalendarRepository,
     JournalRepository,
     MoodDataRepository,
+    PhotoAlbumDataRepository,
+    PlanDataRepository,
+    TravelDataRepository,
 )
 
 
@@ -41,3 +49,22 @@ class JournalProvider(Provider):
     def mood_data_repository(self, connection: AsyncConnection) -> MoodDataRepository:
         """Provide a MoodDataRepository instance."""
         return SqlMoodDataRepository(connection)
+
+    @provide(scope=Scope.REQUEST)
+    def photo_album_data_repository(
+        self, connection: AsyncConnection
+    ) -> PhotoAlbumDataRepository:
+        """Provide a PhotoAlbumDataRepository instance."""
+        return SqlPhotoAlbumDataRepository(connection)
+
+    @provide(scope=Scope.REQUEST)
+    def plan_data_repository(self, connection: AsyncConnection) -> PlanDataRepository:
+        """Provide a PlanDataRepository instance."""
+        return SqlPlanDataRepository(connection)
+
+    @provide(scope=Scope.REQUEST)
+    def travel_data_repository(
+        self, connection: AsyncConnection
+    ) -> TravelDataRepository:
+        """Provide a TravelDataRepository instance."""
+        return SqlTravelDataRepository(connection)

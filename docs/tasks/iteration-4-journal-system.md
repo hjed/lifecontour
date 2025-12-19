@@ -164,32 +164,50 @@ CREATE TABLE journals (
 - `backend/app/infrastructure/di/journal.py` - Add DI providers
 - `backend/tests/integration/conftest.py` - Add test schema for new tables
 
-### ITER4-003: Base Journal Types - Part 2 (PLAN, TRAVEL, PHOTO_ALBUM) 🟡 PLANNED
+### ITER4-003: Base Journal Types - Part 2 (PLAN, TRAVEL, PHOTO_ALBUM) ✅ COMPLETED
 **Description:** Implement remaining base journal types with Immich preparation
 **Strategy:** Single task for three complex types
 **Specification Reference:** [Plan Data](../journal-system-specification.md#plan-data-plan-type), [Travel Data](../journal-system-specification.md#travel-data-travel-type), [Photo Album Data](../journal-system-specification.md#photo-album-data-photo_album-type)
 
-**PR Size:** ~8 files (multiple tables for TRAVEL, migrations, tests)
+**PR Size:** ~15 files (domain models, repositories, migrations, tests)
+**Completed:** 2024-12-09
 
 **Acceptance Criteria:**
-- [ ] **PLAN type:** Create tables:
+- [x] **PLAN type:** Create tables:
   - `journal_plan_data` (journal_id PK, created_at, updated_at)
   - `journal_plan_documents` (id, journal_id FK, url, title, description, order, created_at)
-- [ ] **TRAVEL type:** Create tables:
+- [x] **TRAVEL type:** Create tables:
   - `journal_travel_data` (journal_id PK, created_at, updated_at)
   - `journal_travel_flights` (id, journal_id FK, flight_number, airline, airports, times, booking info, order, created_at)
   - `journal_travel_accommodations` (id, journal_id FK, name, address, check-in/out dates, booking info, order, created_at)
   - `journal_travel_transportation` (id, journal_id FK, type, details, booking_reference, order, created_at)
-- [ ] **PHOTO_ALBUM type:** Create `journal_photo_album_data` table:
+- [x] **PHOTO_ALBUM type:** Create `journal_photo_album_data` table:
   - `journal_id` (PK, FK to journals)
   - `immich_album_id` (string, Immich album identifier)
   - `created_at`, `updated_at`
   - **Note:** Prepares for Immich integration (Iteration 6)
-- [ ] Add database migrations with proper constraints and indexes
-- [ ] Implement order field handling for child items (flights, accommodations, etc.)
-- [ ] Write unit tests for type-specific validation
-- [ ] Write integration tests for complex type data persistence
-- [ ] Document Immich integration preparation in code comments
+- [x] Add database migrations with proper constraints and indexes
+- [x] Implement order field handling for child items (flights, accommodations, etc.)
+- [x] Write unit tests for type-specific validation
+- [x] Write integration tests for complex type data persistence
+- [x] Document Immich integration preparation in code comments
+
+**Implementation Details:**
+- **Domain Models:** 7 new entities (PlanData, PlanDocument, TravelData, TravelFlight, TravelAccommodation, TravelTransportation, PhotoAlbumData)
+- **Repository Interfaces:** 3 new interfaces with comprehensive CRUD operations
+- **SQL Implementations:** 3 repository implementations with optimized queries
+- **Database Migration:** Migration 0011 creates 7 tables with proper constraints
+- **Tests:** 32+ unit tests, comprehensive integration tests
+- **Validation:** Full entity validation with custom exceptions
+- **DI Integration:** All repositories configured in dependency injection
+
+**Bugfixes Applied (2025-12-17):**
+- Fixed test schema in `conftest.py` to match migration:
+  - Added `confirmation_number` column to `journal_travel_flights` table
+  - Changed `check_in`/`check_out` (TIMESTAMP) to `check_in_date`/`check_out_date` (DATE) in `journal_travel_accommodations`
+  - Made `address` column nullable in `journal_travel_accommodations` to match spec
+  - Added check constraint for valid dates
+- Fixed MyPy error in `sample_journal_id` fixture return type
 
 ### ITER4-004: Contact Relationships & Tags 🟡 PLANNED
 **Description:** Implement journal-contact relationships and hierarchical tag system

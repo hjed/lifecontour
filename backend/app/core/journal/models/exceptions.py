@@ -87,3 +87,66 @@ class JournalCycleError(JournalHierarchyError):
         super().__init__(
             f"Cannot set journal {journal_id} as child of {parent_id}: would create a cycle"
         )
+
+
+class PhotoAlbumDataValidationError(JournalError):
+    """Exception raised when photo album data (PHOTO_ALBUM type) validation fails."""
+
+    def __init__(self, field: str, message: str):
+        self.field = field
+        self.message = message
+        super().__init__(f"{field}: {message}")
+
+
+class PlanDataValidationError(JournalError):
+    """Exception raised when plan data (PLAN type) validation fails."""
+
+    def __init__(self, field: str, message: str):
+        self.field = field
+        self.message = message
+        super().__init__(f"{field}: {message}")
+
+
+class PlanDocumentValidationError(JournalError):
+    """Exception raised when plan document validation fails."""
+
+    def __init__(self, field: str, message: str):
+        self.field = field
+        self.message = message
+        super().__init__(f"{field}: {message}")
+
+
+class TravelDataValidationError(JournalError):
+    """Exception raised when travel data (TRAVEL type) validation fails."""
+
+    def __init__(self, field: str, message: str):
+        self.field = field
+        self.message = message
+        super().__init__(f"{field}: {message}")
+
+
+class TravelFlightValidationError(JournalError):
+    """Exception raised when travel flight validation fails."""
+
+    def __init__(self, field: str, message: str):
+        self.field = field
+        self.message = message
+        super().__init__(f"{field}: {message}")
+
+
+class TravelAccommodationValidationError(JournalError):
+    """Exception raised when travel accommodation validation fails."""
+
+    def __init__(self, field: str, message: str):
+        self.field = field
+        self.message = message
+        super().__init__(f"{field}: {message}")
+
+
+class TravelTransportationValidationError(JournalError):
+    """Exception raised when travel transportation validation fails."""
+
+    def __init__(self, field: str, message: str):
+        self.field = field
+        self.message = message
+        super().__init__(f"{field}: {message}")

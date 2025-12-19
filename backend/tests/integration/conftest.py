@@ -227,6 +227,13 @@ class DockerManager:
 # SQL DDL statements for test database schema (each statement executed separately)
 TEST_DATABASE_SCHEMA_STATEMENTS = [
     # Drop tables if they exist (in reverse dependency order)
+    "DROP TABLE IF EXISTS journal_travel_transportation CASCADE",
+    "DROP TABLE IF EXISTS journal_travel_accommodations CASCADE",
+    "DROP TABLE IF EXISTS journal_travel_flights CASCADE",
+    "DROP TABLE IF EXISTS journal_travel_data CASCADE",
+    "DROP TABLE IF EXISTS journal_plan_documents CASCADE",
+    "DROP TABLE IF EXISTS journal_plan_data CASCADE",
+    "DROP TABLE IF EXISTS journal_photo_album_data CASCADE",
     "DROP TABLE IF EXISTS journal_mood_data CASCADE",
     "DROP TABLE IF EXISTS journal_calendar_info CASCADE",
     "DROP TABLE IF EXISTS journals CASCADE",
@@ -401,6 +408,75 @@ TEST_DATABASE_SCHEMA_STATEMENTS = [
         energy_level INTEGER CHECK (energy_level IS NULL OR (energy_level >= 1 AND energy_level <= 10)),
         created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL,
         updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL
+    )""",
+    # Journal photo album data table (PHOTO_ALBUM type)
+    """CREATE TABLE journal_photo_album_data (
+        journal_id INTEGER PRIMARY KEY REFERENCES journals(id) ON DELETE CASCADE,
+        immich_album_id VARCHAR(255) NOT NULL,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL,
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL
+    )""",
+    # Journal plan data table (PLAN type)
+    """CREATE TABLE journal_plan_data (
+        journal_id INTEGER PRIMARY KEY REFERENCES journals(id) ON DELETE CASCADE,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL,
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL
+    )""",
+    # Journal plan documents table
+    """CREATE TABLE journal_plan_documents (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        journal_id INTEGER NOT NULL REFERENCES journal_plan_data(journal_id) ON DELETE CASCADE,
+        url VARCHAR(2000) NOT NULL,
+        title VARCHAR(500) NOT NULL,
+        description TEXT,
+        "order" INTEGER NOT NULL,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL
+    )""",
+    # Journal travel data table (TRAVEL type)
+    """CREATE TABLE journal_travel_data (
+        journal_id INTEGER PRIMARY KEY REFERENCES journals(id) ON DELETE CASCADE,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL,
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL
+    )""",
+    # Journal travel flights table
+    """CREATE TABLE journal_travel_flights (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        journal_id INTEGER NOT NULL REFERENCES journal_travel_data(journal_id) ON DELETE CASCADE,
+        flight_number VARCHAR(20) NOT NULL,
+        airline VARCHAR(100),
+        departure_airport VARCHAR(10) NOT NULL,
+        arrival_airport VARCHAR(10) NOT NULL,
+        departure_time TIMESTAMP WITH TIME ZONE NOT NULL,
+        arrival_time TIMESTAMP WITH TIME ZONE NOT NULL,
+        booking_reference VARCHAR(100),
+        seat_number VARCHAR(20),
+        confirmation_number VARCHAR(100),
+        "order" INTEGER NOT NULL,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL
+    )""",
+    # Journal travel accommodations table
+    """CREATE TABLE journal_travel_accommodations (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        journal_id INTEGER NOT NULL REFERENCES journal_travel_data(journal_id) ON DELETE CASCADE,
+        name VARCHAR(200) NOT NULL,
+        address TEXT,
+        check_in_date DATE NOT NULL,
+        check_out_date DATE NOT NULL,
+        booking_reference VARCHAR(100),
+        confirmation_number VARCHAR(100),
+        "order" INTEGER NOT NULL,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL,
+        CHECK (check_in_date < check_out_date)
+    )""",
+    # Journal travel transportation table
+    """CREATE TABLE journal_travel_transportation (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        journal_id INTEGER NOT NULL REFERENCES journal_travel_data(journal_id) ON DELETE CASCADE,
+        type VARCHAR(50) NOT NULL,
+        details TEXT NOT NULL,
+        booking_reference VARCHAR(100),
+        "order" INTEGER NOT NULL,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL
     )""",
 ]
 
@@ -819,3 +895,39 @@ class ContactFactory:
 async def contact_factory(authenticated_client):
     """Provide a ContactFactory for integration tests."""
     return ContactFactory(authenticated_client)
+
+
+# Journal integration test fixtures
+@pytest_asyncio.fixture
+async def db_connection(async_connection: AsyncConnection) -> AsyncConnection:
+    """Alias for async_connection for journal integration tests."""
+    return async_connection
+
+
+@pytest_asyncio.fixture
+async def sample_journal_id(async_connection: AsyncConnection) -> int:
+    """Create a sample journal for testing and return its ID."""
+    from datetime import UTC, datetime, timedelta
+
+    from sqlalchemy import text
+
+    now = datetime.now(UTC)
+    query = text("""
+        INSERT INTO journals (user_id, title, content, event_date_range_start, event_date_range_end)
+        VALUES (:user_id, :title, :content, :start, :end)
+        RETURNING id
+    """)
+
+    result = await async_connection.execute(
+        query,
+        {
+            "user_id": "test-user-123",
+            "title": "Test Journal",
+            "content": "Test content",
+            "start": now,
+            "end": now + timedelta(hours=1),
+        },
+    )
+    row = result.fetchone()
+    assert row is not None
+    return int(row[0])

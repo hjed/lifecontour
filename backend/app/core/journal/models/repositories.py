@@ -7,6 +7,14 @@ from .calendar import Calendar
 from .calendar_info import CalendarInfo
 from .entities import Journal
 from .mood_data import MoodData
+from .photo_album_data import PhotoAlbumData
+from .plan_data import PlanData, PlanDocument
+from .travel_data import (
+    TravelAccommodation,
+    TravelData,
+    TravelFlight,
+    TravelTransportation,
+)
 
 
 class JournalRepository(ABC):
@@ -321,5 +329,265 @@ class MoodDataRepository(ABC):
 
         Args:
             journal_id: The journal ID to delete mood data for
+        """
+        pass
+
+
+class PhotoAlbumDataRepository(ABC):
+    """
+    Repository interface for photo album data (PHOTO_ALBUM type) operations.
+
+    A journal has the PHOTO_ALBUM type if a PhotoAlbumData row exists for its journal_id.
+    """
+
+    @abstractmethod
+    async def find_by_journal_id(self, journal_id: int) -> PhotoAlbumData | None:
+        """
+        Find photo album data by journal ID.
+
+        Args:
+            journal_id: The journal ID to look up
+
+        Returns:
+            The PhotoAlbumData if found (journal has PHOTO_ALBUM type), None otherwise
+        """
+        pass
+
+    @abstractmethod
+    async def save(self, photo_album_data: PhotoAlbumData) -> PhotoAlbumData:
+        """
+        Save photo album data (insert or update).
+
+        This effectively adds or updates the PHOTO_ALBUM type for a journal.
+
+        Args:
+            photo_album_data: The photo album data to save
+
+        Returns:
+            The saved photo album data with updated timestamps
+        """
+        pass
+
+    @abstractmethod
+    async def delete(self, journal_id: int) -> None:
+        """
+        Delete photo album data by journal ID.
+
+        This effectively removes the PHOTO_ALBUM type from a journal.
+
+        Args:
+            journal_id: The journal ID to delete photo album data for
+        """
+        pass
+
+
+class PlanDataRepository(ABC):
+    """
+    Repository interface for plan data (PLAN type) operations.
+
+    A journal has the PLAN type if a PlanData row exists for its journal_id.
+    Plan documents are managed separately but loaded with plan data.
+    """
+
+    @abstractmethod
+    async def find_by_journal_id(self, journal_id: int) -> PlanData | None:
+        """
+        Find plan data by journal ID, including associated documents.
+
+        Args:
+            journal_id: The journal ID to look up
+
+        Returns:
+            The PlanData with documents if found (journal has PLAN type), None otherwise
+        """
+        pass
+
+    @abstractmethod
+    async def save(self, plan_data: PlanData) -> PlanData:
+        """
+        Save plan data (insert or update).
+
+        This effectively adds or updates the PLAN type for a journal.
+        Documents are saved separately.
+
+        Args:
+            plan_data: The plan data to save
+
+        Returns:
+            The saved plan data with updated timestamps
+        """
+        pass
+
+    @abstractmethod
+    async def delete(self, journal_id: int) -> None:
+        """
+        Delete plan data by journal ID.
+
+        This effectively removes the PLAN type from a journal.
+        Associated documents are cascade deleted.
+
+        Args:
+            journal_id: The journal ID to delete plan data for
+        """
+        pass
+
+    @abstractmethod
+    async def save_document(self, document: PlanDocument) -> PlanDocument:
+        """
+        Save a plan document (insert or update).
+
+        Args:
+            document: The plan document to save
+
+        Returns:
+            The saved plan document with updated timestamps
+        """
+        pass
+
+    @abstractmethod
+    async def delete_document(self, document_id: UUID) -> None:
+        """
+        Delete a plan document by ID.
+
+        Args:
+            document_id: The document UUID to delete
+        """
+        pass
+
+    @abstractmethod
+    async def get_documents(self, journal_id: int) -> list[PlanDocument]:
+        """
+        Get all documents for a plan, ordered by order field.
+
+        Args:
+            journal_id: The journal ID to get documents for
+
+        Returns:
+            List of plan documents in order
+        """
+        pass
+
+
+class TravelDataRepository(ABC):
+    """
+    Repository interface for travel data (TRAVEL type) operations.
+
+    A journal has the TRAVEL type if a TravelData row exists for its journal_id.
+    Travel components (flights, accommodations, transportation) are managed separately
+    but loaded with travel data.
+    """
+
+    @abstractmethod
+    async def find_by_journal_id(self, journal_id: int) -> TravelData | None:
+        """
+        Find travel data by journal ID, including all associated components.
+
+        Args:
+            journal_id: The journal ID to look up
+
+        Returns:
+            The TravelData with all components if found (journal has TRAVEL type), None otherwise
+        """
+        pass
+
+    @abstractmethod
+    async def save(self, travel_data: TravelData) -> TravelData:
+        """
+        Save travel data (insert or update).
+
+        This effectively adds or updates the TRAVEL type for a journal.
+        Components are saved separately.
+
+        Args:
+            travel_data: The travel data to save
+
+        Returns:
+            The saved travel data with updated timestamps
+        """
+        pass
+
+    @abstractmethod
+    async def delete(self, journal_id: int) -> None:
+        """
+        Delete travel data by journal ID.
+
+        This effectively removes the TRAVEL type from a journal.
+        Associated components are cascade deleted.
+
+        Args:
+            journal_id: The journal ID to delete travel data for
+        """
+        pass
+
+    @abstractmethod
+    async def save_flight(self, flight: TravelFlight) -> TravelFlight:
+        """
+        Save a travel flight (insert or update).
+
+        Args:
+            flight: The travel flight to save
+
+        Returns:
+            The saved travel flight with updated timestamps
+        """
+        pass
+
+    @abstractmethod
+    async def delete_flight(self, flight_id: UUID) -> None:
+        """
+        Delete a travel flight by ID.
+
+        Args:
+            flight_id: The flight UUID to delete
+        """
+        pass
+
+    @abstractmethod
+    async def save_accommodation(
+        self, accommodation: TravelAccommodation
+    ) -> TravelAccommodation:
+        """
+        Save a travel accommodation (insert or update).
+
+        Args:
+            accommodation: The travel accommodation to save
+
+        Returns:
+            The saved travel accommodation with updated timestamps
+        """
+        pass
+
+    @abstractmethod
+    async def delete_accommodation(self, accommodation_id: UUID) -> None:
+        """
+        Delete a travel accommodation by ID.
+
+        Args:
+            accommodation_id: The accommodation UUID to delete
+        """
+        pass
+
+    @abstractmethod
+    async def save_transportation(
+        self, transportation: TravelTransportation
+    ) -> TravelTransportation:
+        """
+        Save a travel transportation (insert or update).
+
+        Args:
+            transportation: The travel transportation to save
+
+        Returns:
+            The saved travel transportation with updated timestamps
+        """
+        pass
+
+    @abstractmethod
+    async def delete_transportation(self, transportation_id: UUID) -> None:
+        """
+        Delete a travel transportation by ID.
+
+        Args:
+            transportation_id: The transportation UUID to delete
         """
         pass
