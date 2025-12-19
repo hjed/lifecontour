@@ -7,7 +7,7 @@ including contact sync events and sync completion events.
 
 from datetime import UTC, datetime
 from typing import Any
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 from uuid import uuid4
 
 import pytest
@@ -168,8 +168,16 @@ class TestOutboxEventProcessor:
         )
         mock_contact_service.create_contact.return_value = expected_contact
 
-        # Process the event
-        result = await processor.process_event(contact_created_event)
+        # Mock external reference service to return None (no existing reference)
+        mock_external_ref_service = AsyncMock()
+        mock_external_ref_service.find_by_external_id.return_value = None
+        mock_external_ref_service.create_external_reference.return_value = AsyncMock()
+
+        with patch.object(
+            processor, "external_reference_service", mock_external_ref_service
+        ):
+            # Process the event
+            result = await processor.process_event(contact_created_event)
 
         # Verify contact service was called correctly
         mock_contact_service.create_contact.assert_called_once()
@@ -218,8 +226,15 @@ class TestOutboxEventProcessor:
         )
         mock_contact_service.update_contact.return_value = updated_contact
 
-        # Process the event
-        result = await processor.process_event(contact_updated_event)
+        # Mock external reference service
+        mock_external_ref_service = AsyncMock()
+        mock_external_ref_service.create_external_reference.return_value = AsyncMock()
+
+        with patch.object(
+            processor, "external_reference_service", mock_external_ref_service
+        ):
+            # Process the event
+            result = await processor.process_event(contact_updated_event)
 
         # Verify existing contact was looked up
         mock_contact_service.find_contact_by_external_reference.assert_called_once_with(
@@ -290,9 +305,16 @@ class TestOutboxEventProcessor:
         # Mock contact service to raise an error
         mock_contact_service.create_contact.side_effect = Exception("Database error")
 
-        # Should raise OutboxEventProcessingError
-        with pytest.raises(OutboxEventProcessingError) as exc_info:
-            await processor.process_event(contact_created_event)
+        # Mock external reference service
+        mock_external_ref_service = AsyncMock()
+        mock_external_ref_service.find_by_external_id.return_value = None
+
+        with patch.object(
+            processor, "external_reference_service", mock_external_ref_service
+        ):
+            # Should raise OutboxEventProcessingError
+            with pytest.raises(OutboxEventProcessingError) as exc_info:
+                await processor.process_event(contact_created_event)
 
         assert "Failed to process contact.created event" in str(exc_info.value)
         assert "Database error" in str(exc_info.value)
@@ -338,8 +360,15 @@ class TestOutboxEventProcessor:
             retry_count=0,
         )
 
-        # Should raise OutboxEventProcessingError due to transformation failure
-        with pytest.raises(OutboxEventProcessingError) as exc_info:
-            await processor.process_event(invalid_event)
+        # Mock external reference service
+        mock_external_ref_service = AsyncMock()
+        mock_external_ref_service.find_by_external_id.return_value = None
+
+        with patch.object(
+            processor, "external_reference_service", mock_external_ref_service
+        ):
+            # Should raise OutboxEventProcessingError due to transformation failure
+            with pytest.raises(OutboxEventProcessingError) as exc_info:
+                await processor.process_event(invalid_event)
 
         assert "Failed to transform Google contact data" in str(exc_info.value)
