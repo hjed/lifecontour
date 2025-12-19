@@ -284,6 +284,17 @@ CREATE TABLE journals (
 - Pre-commit hooks: All checks pass
 - Follows project architecture patterns and AI guidelines
 
+**CI Fixes Applied:**
+- Fixed contact history service test to expect correct parameter count (1, 50, 0)
+- Updated contact validation error test to expect status code 422 (Unprocessable Entity) instead of 400
+- Updated contact relationship validation tests to expect ContactValidationError instead of ValueError
+- Fixed health service tests by properly mocking aiohttp.ClientSession for external API checks
+- Updated health service tests to expect correct field names (queue_length instead of recent_jobs)
+- Fixed outbox event processor tests by mocking external_reference_service to avoid coroutine issues
+- Updated pre-commit config to use python3.11 for TOML checking (required for tomllib module)
+- All 622 unit tests now pass with no type errors or linting issues
+- All precommit hooks pass successfully
+
 ### ITER4-005: Journal Repository & Service Layer 🟡 PLANNED
 **Description:** Implement repository and service layer with type dependency resolution
 **Strategy:** Single task for data access and business logic
