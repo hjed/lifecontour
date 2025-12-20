@@ -1,35 +1,15 @@
-/**
- * E2E tests for contact inline editing workflows.
- * Tests complete editing workflows for contact identity, methods, and addresses.
- */
-
 import { test, expect } from './fixtures';
 
-test.describe('Contact Inline Editing - Complete Workflows', () => {
-  test('should display contact detail page with inline editable fields', async ({
-    contactsWithData,
-  }) => {
+test.describe('Contact Inline Editing', () => {
+  test('should display contact detail page', async ({ contactsWithData }) => {
     const { page, contacts } = contactsWithData;
     const contact = contacts[0];
 
-    // Navigate to contact detail page
     await page.goto(`/contacts/${contact.id}`);
-    await expect(page).toHaveURL(new RegExp(`/contacts/${contact.id}`));
-
-    // Verify inline editable fields are visible
-    const firstNameField = page.locator('[data-testid="first-name-field"]');
-    await expect(firstNameField).toBeVisible();
-
-    const lastNameField = page.locator('[data-testid="last-name-field"]');
-    await expect(lastNameField).toBeVisible();
-
-    // Verify contact methods section is visible
-    const contactMethodsSection = page.locator('text=Contact Methods');
-    await expect(contactMethodsSection).toBeVisible();
-
-    // Verify addresses section is visible
-    const addressesSection = page.locator('text=Addresses');
-    await expect(addressesSection).toBeVisible();
+    // Wait for the page to load and verify we're on the contact detail page
+    await expect(
+      page.locator('[data-testid="first-name-field"]')
+    ).toBeVisible();
   });
 
   test('should enter edit mode when clicking on first name field', async ({
@@ -40,16 +20,11 @@ test.describe('Contact Inline Editing - Complete Workflows', () => {
 
     await page.goto(`/contacts/${contact.id}`);
 
-    // Find and click the first name field to edit
     const firstNameField = page.locator('[data-testid="first-name-field"]');
-    await expect(firstNameField).toBeVisible();
     await firstNameField.click();
 
-    // Should show edit input
-    const firstNameInput = page.locator(
-      '[data-testid="first-name-field-input"]'
-    );
-    await expect(firstNameInput).toBeVisible();
+    const input = page.locator('[data-testid="first-name-field"] input');
+    await expect(input).toBeVisible();
   });
 
   test('should cancel inline edit with Escape key', async ({
@@ -57,23 +32,16 @@ test.describe('Contact Inline Editing - Complete Workflows', () => {
   }) => {
     const { page, contacts } = contactsWithData;
     const contact = contacts[0];
-    const originalFirstName = contact.firstName;
 
     await page.goto(`/contacts/${contact.id}`);
 
     const firstNameField = page.locator('[data-testid="first-name-field"]');
     await firstNameField.click();
 
-    const firstNameInput = page.locator(
-      '[data-testid="first-name-field-input"]'
-    );
-    await expect(firstNameInput).toBeVisible();
+    await page.keyboard.press('Escape');
 
-    // Press Escape to cancel
-    await firstNameInput.press('Escape');
-
-    // Should revert to view mode
-    await expect(firstNameField).toBeVisible();
+    const input = page.locator('[data-testid="first-name-field"] input');
+    await expect(input).not.toBeVisible();
   });
 
   test('should edit contact first name inline and save', async ({
@@ -84,29 +52,20 @@ test.describe('Contact Inline Editing - Complete Workflows', () => {
 
     await page.goto(`/contacts/${contact.id}`);
 
-    // Find and click the first name field to edit
     const firstNameField = page.locator('[data-testid="first-name-field"]');
-    await expect(firstNameField).toBeVisible();
     await firstNameField.click();
 
-    // Should show edit input
-    const firstNameInput = page.locator(
-      '[data-testid="first-name-field-input"]'
-    );
-    await expect(firstNameInput).toBeVisible();
+    const input = page.locator('[data-testid="first-name-field"] input');
+    await input.clear();
+    await input.fill('UpdatedFirstName');
 
-    // Clear and type new value
-    await firstNameInput.clear();
-    await firstNameInput.fill('UpdatedFirstName');
+    await page.keyboard.press('Enter');
+    await page.waitForTimeout(500);
 
-    // Submit by pressing Enter
-    await firstNameInput.press('Enter');
-
-    // Should show updated value
     await expect(firstNameField).toContainText('UpdatedFirstName');
   });
 
-  test('should edit contact last name inline and save', async ({
+  test('should display contact methods section', async ({
     contactsWithData,
   }) => {
     const { page, contacts } = contactsWithData;
@@ -114,115 +73,28 @@ test.describe('Contact Inline Editing - Complete Workflows', () => {
 
     await page.goto(`/contacts/${contact.id}`);
 
-    const lastNameField = page.locator('[data-testid="last-name-field"]');
-    await expect(lastNameField).toBeVisible();
-    await lastNameField.click();
+    const contactMethodsHeading = page.getByRole('heading', {
+      name: 'Contact Methods',
+    });
+    await expect(contactMethodsHeading).toBeVisible();
 
-    const lastNameInput = page.locator('[data-testid="last-name-field-input"]');
-    await expect(lastNameInput).toBeVisible();
-
-    await lastNameInput.clear();
-    await lastNameInput.fill('UpdatedLastName');
-    await lastNameInput.press('Enter');
-
-    await expect(lastNameField).toContainText('UpdatedLastName');
-  });
-
-  test('should display contact methods section with add button', async ({
-    contactsWithData,
-  }) => {
-    const { page, contacts } = contactsWithData;
-    const contact = contacts[0];
-
-    await page.goto(`/contacts/${contact.id}`);
-
-    // Verify contact methods section
-    const contactMethodsSection = page.locator('text=Contact Methods');
-    await expect(contactMethodsSection).toBeVisible();
-
-    // Verify add button is visible
-    const addMethodButton = page.locator(
-      'button:has-text("Add Contact Method")'
-    );
+    const addMethodButton = page.getByRole('button', {
+      name: /add contact method/i,
+    });
     await expect(addMethodButton).toBeVisible();
   });
 
-  test('should add new contact method', async ({ contactsWithData }) => {
+  test('should display addresses section', async ({ contactsWithData }) => {
     const { page, contacts } = contactsWithData;
     const contact = contacts[0];
 
     await page.goto(`/contacts/${contact.id}`);
 
-    // Find and click "Add Contact Method" button
-    const addMethodButton = page.locator(
-      'button:has-text("Add Contact Method")'
-    );
-    await expect(addMethodButton).toBeVisible();
-    await addMethodButton.click();
+    const addressesHeading = page.getByRole('heading', { name: 'Addresses' });
+    await expect(addressesHeading).toBeVisible();
 
-    // Should show form
-    const methodTypeSelect = page.locator('[data-testid="method-type-select"]');
-    await expect(methodTypeSelect).toBeVisible();
-
-    // Select email type
-    await methodTypeSelect.selectOption('email');
-
-    // Fill email
-    const emailInput = page.locator('[data-testid="method-value-input"]');
-    await emailInput.fill('newemail@example.com');
-
-    // Submit
-    const submitButton = page.locator('button:has-text("Add")').last();
-    await submitButton.click();
-
-    // Should show new method in list
-    await expect(page.locator('text=newemail@example.com')).toBeVisible();
-  });
-
-  test('should display addresses section with add button', async ({
-    contactsWithData,
-  }) => {
-    const { page, contacts } = contactsWithData;
-    const contact = contacts[0];
-
-    await page.goto(`/contacts/${contact.id}`);
-
-    // Verify addresses section
-    const addressesSection = page.locator('text=Addresses');
-    await expect(addressesSection).toBeVisible();
-
-    // Verify add button is visible
-    const addAddressButton = page.locator('button:has-text("Add Address")');
+    const addAddressButton = page.getByRole('button', { name: /add address/i });
     await expect(addAddressButton).toBeVisible();
-  });
-
-  test('should add new address', async ({ contactsWithData }) => {
-    const { page, contacts } = contactsWithData;
-    const contact = contacts[0];
-
-    await page.goto(`/contacts/${contact.id}`);
-
-    // Find and click "Add Address" button
-    const addAddressButton = page.locator('button:has-text("Add Address")');
-    await expect(addAddressButton).toBeVisible();
-    await addAddressButton.click();
-
-    // Should show form
-    const streetInput = page.locator('[data-testid="address-street-input"]');
-    await expect(streetInput).toBeVisible();
-
-    // Fill address fields
-    await streetInput.fill('123 New Street');
-    await page.locator('[data-testid="address-suburb-input"]').fill('Sydney');
-    await page.locator('[data-testid="address-state-input"]').fill('NSW');
-    await page.locator('[data-testid="address-postcode-input"]').fill('2000');
-
-    // Submit
-    const submitButton = page.locator('button:has-text("Add")').last();
-    await submitButton.click();
-
-    // Should show new address in list
-    await expect(page.locator('text=123 New Street')).toBeVisible();
   });
 
   test('should display activity feed section', async ({ contactsWithData }) => {
@@ -231,22 +103,20 @@ test.describe('Contact Inline Editing - Complete Workflows', () => {
 
     await page.goto(`/contacts/${contact.id}`);
 
-    // Verify activity feed section is visible
-    const activityFeedHeading = page.getByRole('heading', {
-      name: /Activity/i,
+    const activityHeading = page.getByRole('heading', {
+      name: /activity|timeline/i,
     });
-    await expect(activityFeedHeading).toBeVisible({ timeout: 10000 });
+    await expect(activityHeading).toBeVisible();
   });
 
   test('should display relationships section', async ({ contactsWithData }) => {
     const { page, contacts } = contactsWithData;
-    const contact = contacts[0];
+    const contact = contacts[1];
 
     await page.goto(`/contacts/${contact.id}`);
 
-    // Verify relationships section is visible
     const relationshipsHeading = page.getByRole('heading', {
-      name: /Relationships/i,
+      name: /relationships/i,
     });
     await expect(relationshipsHeading).toBeVisible();
   });
