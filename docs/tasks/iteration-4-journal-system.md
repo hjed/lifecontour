@@ -291,7 +291,7 @@ CREATE TABLE journals (
 - Fixed health service tests by properly mocking aiohttp.ClientSession for external API checks
 - Updated health service tests to expect correct field names (queue_length instead of recent_jobs)
 - Fixed outbox event processor tests by mocking external_reference_service to avoid coroutine issues
-- Updated pre-commit config to use python3.11 for TOML checking (required for tomllib module)
+- Updated system environment to use Python 3.11 as default (minimum supported version)
 - All 622 unit tests now pass with no type errors or linting issues
 - All precommit hooks pass successfully
 
