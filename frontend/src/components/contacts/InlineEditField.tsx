@@ -132,6 +132,7 @@ export function InlineEditField({
             aria-label={ariaLabel || 'Edit value'}
             aria-invalid={!!error}
             aria-describedby={error ? errorId : undefined}
+            data-testid={testId ? `${testId}-input` : undefined}
           />
 
           <Button

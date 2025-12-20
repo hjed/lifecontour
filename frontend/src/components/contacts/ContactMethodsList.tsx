@@ -205,6 +205,7 @@ export function ContactMethodsList({
           <div
             key={method.id}
             className='flex items-center justify-between space-x-3 rounded-md border p-2'
+            data-testid={`contact-method-${method.id}`}
           >
             <div className='min-w-0 flex-1'>{renderMethodField(method)}</div>
             <Button
@@ -235,7 +236,10 @@ export function ContactMethodsList({
                   setNewMethodType(value as ContactMethodType)
                 }
               >
-                <SelectTrigger id='method-type'>
+                <SelectTrigger
+                  id='method-type'
+                  data-testid='method-type-select'
+                >
                   <SelectValue placeholder='Select type' />
                 </SelectTrigger>
                 <SelectContent>
@@ -267,6 +271,7 @@ export function ContactMethodsList({
                     ? 'email@example.com'
                     : '+1 234 567 8900'
                 }
+                data-testid='method-value-input'
               />
             </div>
 
