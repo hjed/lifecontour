@@ -67,8 +67,10 @@ class TestContactRelationship:
 
     def test_self_relationship_validation(self):
         """Test that self-relationships are not allowed."""
+        from app.core.contacts.models.exceptions import ContactValidationError
+
         with pytest.raises(
-            ValueError, match="Contact cannot have a relationship with itself"
+            ContactValidationError, match="Contact cannot have a relationship with itself"
         ):
             ContactRelationship(
                 from_contact_id=1,
@@ -78,14 +80,16 @@ class TestContactRelationship:
 
     def test_negative_contact_id_validation(self):
         """Test that negative contact IDs are not allowed."""
-        with pytest.raises(ValueError, match="Contact IDs must be positive"):
+        from app.core.contacts.models.exceptions import ContactValidationError
+
+        with pytest.raises(ContactValidationError, match="Contact IDs must be positive"):
             ContactRelationship(
                 from_contact_id=-1,
                 to_contact_id=2,
                 relationship_type=RelationshipType.FRIEND,
             )
 
-        with pytest.raises(ValueError, match="Contact IDs must be positive"):
+        with pytest.raises(ContactValidationError, match="Contact IDs must be positive"):
             ContactRelationship(
                 from_contact_id=1,
                 to_contact_id=-2,
@@ -94,14 +98,16 @@ class TestContactRelationship:
 
     def test_zero_contact_id_validation(self):
         """Test that zero contact IDs are not allowed."""
-        with pytest.raises(ValueError, match="Contact IDs must be positive"):
+        from app.core.contacts.models.exceptions import ContactValidationError
+
+        with pytest.raises(ContactValidationError, match="Contact IDs must be positive"):
             ContactRelationship(
                 from_contact_id=0,
                 to_contact_id=2,
                 relationship_type=RelationshipType.FRIEND,
             )
 
-        with pytest.raises(ValueError, match="Contact IDs must be positive"):
+        with pytest.raises(ContactValidationError, match="Contact IDs must be positive"):
             ContactRelationship(
                 from_contact_id=1,
                 to_contact_id=0,

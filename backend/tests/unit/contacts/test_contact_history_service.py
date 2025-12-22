@@ -205,7 +205,7 @@ class TestContactHistoryService:
         )
 
         assert result == expected_entries
-        mock_history_repo.get_contact_history.assert_called_once_with(1, 50)
+        mock_history_repo.get_contact_history.assert_called_once_with(1, 50, 0)
 
     @pytest.mark.asyncio
     async def test_get_entity_history(

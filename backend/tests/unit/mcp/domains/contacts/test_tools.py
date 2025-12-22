@@ -97,6 +97,10 @@ class TestContactTools:
                 "list_contacts",
                 "toggle_contact_favourite",
                 "list_tags",
+                "update_contact_field",
+                "update_contact_method_field",
+                "update_contact_address_field",
+                "update_contact_note_field",
             ]
 
             for expected_tool in expected_tools:
@@ -173,6 +177,70 @@ class TestContactTools:
         # Use model_validate for proper type handling
         parsed_request = ContactUpdateRequest.model_validate(parsed_data)
         assert parsed_request.contact_id == 123
+
+    @pytest.mark.asyncio
+    async def test_update_contact_field_tool_registered(self, mcp_server):
+        """Test that update_contact_field tool is registered."""
+        async with Client(mcp_server) as client:
+            tools_response = await client.list_tools()
+
+            if hasattr(tools_response, "tools"):
+                tools = tools_response.tools
+            else:
+                tools = tools_response
+
+            tool_names = [tool.name for tool in tools]
+            assert "update_contact_field" in tool_names, (
+                "update_contact_field tool not found in registered tools"
+            )
+
+    @pytest.mark.asyncio
+    async def test_update_contact_method_field_tool_registered(self, mcp_server):
+        """Test that update_contact_method_field tool is registered."""
+        async with Client(mcp_server) as client:
+            tools_response = await client.list_tools()
+
+            if hasattr(tools_response, "tools"):
+                tools = tools_response.tools
+            else:
+                tools = tools_response
+
+            tool_names = [tool.name for tool in tools]
+            assert "update_contact_method_field" in tool_names, (
+                "update_contact_method_field tool not found in registered tools"
+            )
+
+    @pytest.mark.asyncio
+    async def test_update_contact_address_field_tool_registered(self, mcp_server):
+        """Test that update_contact_address_field tool is registered."""
+        async with Client(mcp_server) as client:
+            tools_response = await client.list_tools()
+
+            if hasattr(tools_response, "tools"):
+                tools = tools_response.tools
+            else:
+                tools = tools_response
+
+            tool_names = [tool.name for tool in tools]
+            assert "update_contact_address_field" in tool_names, (
+                "update_contact_address_field tool not found in registered tools"
+            )
+
+    @pytest.mark.asyncio
+    async def test_update_contact_note_field_tool_registered(self, mcp_server):
+        """Test that update_contact_note_field tool is registered."""
+        async with Client(mcp_server) as client:
+            tools_response = await client.list_tools()
+
+            if hasattr(tools_response, "tools"):
+                tools = tools_response.tools
+            else:
+                tools = tools_response
+
+            tool_names = [tool.name for tool in tools]
+            assert "update_contact_note_field" in tool_names, (
+                "update_contact_note_field tool not found in registered tools"
+            )
 
     # Note: The actual tool functionality is tested in integration tests
     # These unit tests focus on tool registration and basic structure

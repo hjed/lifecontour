@@ -620,6 +620,340 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
             ) from e
 
     @mcp.tool
+    @mcp_unified_error_handler("update_contact_field", "management")
+    @inject
+    async def update_contact_field(
+        contact_service: FromDishka[ContactService],
+        connection: FromDishka[AsyncConnection],
+        contact_id: Annotated[
+            int, Field(description="The unique identifier of the contact")
+        ],
+        field_name: Annotated[
+            str,
+            Field(
+                description="Name of the field to update (first_name, last_name, middle_name, nick_name, is_favourite)"
+            ),
+        ],
+        field_value: Annotated[str, Field(description="New value for the field")],
+    ) -> str:
+        """
+        Update a single contact field for AI-driven inline editing.
+
+        Updates only the specified field of a contact, optimized for AI-driven
+        inline editing workflows. Returns the old and new values for confirmation.
+
+        Args:
+            contact_id: The unique identifier of the contact
+            field_name: Name of the field to update
+            field_value: New value for the field
+
+        Returns:
+            JSON string containing the field update confirmation including:
+            - Field name and type
+            - Old and new values
+            - Update timestamp
+            - Contextual summary
+
+        Raises:
+            ContactNotFoundError: If the contact with the given ID does not exist
+            ContactValidationError: If the field name is invalid
+        """
+        logger.info(
+            "MCP: Updating contact field",
+            contact_id=contact_id,
+            field_name=field_name,
+            field_value=field_value,
+        )
+
+        try:
+            # Update the field
+            old_value, new_value = await contact_service.update_contact_field(
+                contact_id, field_name, field_value, connection
+            )
+
+            # Get updated contact for response
+            updated_contact = await contact_service.get_contact_by_id(contact_id)
+            if not updated_contact:
+                raise ContactNotFoundError(contact_id)
+
+            # Build response
+            response = ContactConverter.to_contact_response(
+                updated_contact,
+                additional_context=f"Field '{field_name}' updated successfully from '{old_value}' to '{new_value}'",
+            )
+
+            logger.info(
+                "MCP: Contact field updated successfully",
+                contact_id=contact_id,
+                field_name=field_name,
+                old_value=old_value,
+                new_value=new_value,
+            )
+
+            return MCPResponseBuilder.success_response(response)
+
+        except ContactNotFoundError as e:
+            logger.warning(
+                "MCP: Contact not found for field update",
+                contact_id=contact_id,
+                error=str(e),
+            )
+            raise ContactValidationError(
+                "contact_id", f"Contact with ID {contact_id} not found"
+            ) from e
+
+    @mcp.tool
+    @mcp_unified_error_handler("update_contact_method_field", "management")
+    @inject
+    async def update_contact_method_field(
+        contact_service: FromDishka[ContactService],
+        connection: FromDishka[AsyncConnection],
+        contact_id: Annotated[
+            int, Field(description="The unique identifier of the contact")
+        ],
+        method_id: Annotated[
+            int, Field(description="The unique identifier of the contact method")
+        ],
+        field_name: Annotated[
+            str,
+            Field(description="Name of the field to update (value, label, is_primary)"),
+        ],
+        field_value: Annotated[str, Field(description="New value for the field")],
+    ) -> str:
+        """
+        Update a single contact method field (email/phone).
+
+        Updates only the specified field of a contact method, optimized for
+        AI-driven inline editing of contact methods.
+
+        Args:
+            contact_id: The unique identifier of the contact
+            method_id: The unique identifier of the contact method
+            field_name: Name of the field to update
+            field_value: New value for the field
+
+        Returns:
+            JSON string containing the field update confirmation
+
+        Raises:
+            ContactNotFoundError: If the contact or method does not exist
+            ContactValidationError: If the field name is invalid
+        """
+        logger.info(
+            "MCP: Updating contact method field",
+            contact_id=contact_id,
+            method_id=method_id,
+            field_name=field_name,
+            field_value=field_value,
+        )
+
+        try:
+            # Update the method field
+            old_value, new_value = await contact_service.update_contact_method_field(
+                contact_id, method_id, field_name, field_value, connection
+            )
+
+            # Get updated contact for response
+            updated_contact = await contact_service.get_contact_by_id(contact_id)
+            if not updated_contact:
+                raise ContactNotFoundError(contact_id)
+
+            # Build response
+            response = ContactConverter.to_contact_response(
+                updated_contact,
+                additional_context=f"Method field '{field_name}' updated successfully",
+            )
+
+            logger.info(
+                "MCP: Contact method field updated successfully",
+                contact_id=contact_id,
+                method_id=method_id,
+                field_name=field_name,
+                old_value=old_value,
+                new_value=new_value,
+            )
+
+            return MCPResponseBuilder.success_response(response)
+
+        except ContactNotFoundError as e:
+            logger.warning(
+                "MCP: Contact not found for method field update",
+                contact_id=contact_id,
+                error=str(e),
+            )
+            raise ContactValidationError(
+                "contact_id", f"Contact with ID {contact_id} not found"
+            ) from e
+
+    @mcp.tool
+    @mcp_unified_error_handler("update_contact_address_field", "management")
+    @inject
+    async def update_contact_address_field(
+        contact_service: FromDishka[ContactService],
+        connection: FromDishka[AsyncConnection],
+        contact_id: Annotated[
+            int, Field(description="The unique identifier of the contact")
+        ],
+        address_id: Annotated[
+            int, Field(description="The unique identifier of the contact address")
+        ],
+        field_name: Annotated[
+            str,
+            Field(
+                description="Name of the field to update (label, street_line_1, street_line_2, locality, region, postal_code, country_code, is_primary)"
+            ),
+        ],
+        field_value: Annotated[str, Field(description="New value for the field")],
+    ) -> str:
+        """
+        Update a single contact address field.
+
+        Updates only the specified field of a contact address, optimized for
+        AI-driven inline editing of contact addresses.
+
+        Args:
+            contact_id: The unique identifier of the contact
+            address_id: The unique identifier of the contact address
+            field_name: Name of the field to update
+            field_value: New value for the field
+
+        Returns:
+            JSON string containing the field update confirmation
+
+        Raises:
+            ContactNotFoundError: If the contact or address does not exist
+            ContactValidationError: If the field name is invalid
+        """
+        logger.info(
+            "MCP: Updating contact address field",
+            contact_id=contact_id,
+            address_id=address_id,
+            field_name=field_name,
+            field_value=field_value,
+        )
+
+        try:
+            # Update the address field
+            old_value, new_value = await contact_service.update_contact_address_field(
+                contact_id, address_id, field_name, field_value, connection
+            )
+
+            # Get updated contact for response
+            updated_contact = await contact_service.get_contact_by_id(contact_id)
+            if not updated_contact:
+                raise ContactNotFoundError(contact_id)
+
+            # Build response
+            response = ContactConverter.to_contact_response(
+                updated_contact,
+                additional_context=f"Address field '{field_name}' updated successfully",
+            )
+
+            logger.info(
+                "MCP: Contact address field updated successfully",
+                contact_id=contact_id,
+                address_id=address_id,
+                field_name=field_name,
+                old_value=old_value,
+                new_value=new_value,
+            )
+
+            return MCPResponseBuilder.success_response(response)
+
+        except ContactNotFoundError as e:
+            logger.warning(
+                "MCP: Contact not found for address field update",
+                contact_id=contact_id,
+                error=str(e),
+            )
+            raise ContactValidationError(
+                "contact_id", f"Contact with ID {contact_id} not found"
+            ) from e
+
+    @mcp.tool
+    @mcp_unified_error_handler("update_contact_note_field", "management")
+    @inject
+    async def update_contact_note_field(
+        contact_service: FromDishka[ContactService],
+        connection: FromDishka[AsyncConnection],
+        contact_id: Annotated[
+            int, Field(description="The unique identifier of the contact")
+        ],
+        note_id: Annotated[
+            int, Field(description="The unique identifier of the contact note")
+        ],
+        field_name: Annotated[
+            str,
+            Field(description="Name of the field to update (content)"),
+        ],
+        field_value: Annotated[str, Field(description="New value for the field")],
+    ) -> str:
+        """
+        Update a single contact note field.
+
+        Updates only the specified field of a contact note, optimized for
+        AI-driven inline editing of contact notes.
+
+        Args:
+            contact_id: The unique identifier of the contact
+            note_id: The unique identifier of the contact note
+            field_name: Name of the field to update
+            field_value: New value for the field
+
+        Returns:
+            JSON string containing the field update confirmation
+
+        Raises:
+            ContactNotFoundError: If the contact or note does not exist
+            ContactValidationError: If the field name is invalid
+        """
+        logger.info(
+            "MCP: Updating contact note field",
+            contact_id=contact_id,
+            note_id=note_id,
+            field_name=field_name,
+            field_value=field_value,
+        )
+
+        try:
+            # Update the note field
+            old_value, new_value = await contact_service.update_contact_note_field(
+                contact_id, note_id, field_name, field_value, connection
+            )
+
+            # Get updated contact for response
+            updated_contact = await contact_service.get_contact_by_id(contact_id)
+            if not updated_contact:
+                raise ContactNotFoundError(contact_id)
+
+            # Build response
+            response = ContactConverter.to_contact_response(
+                updated_contact,
+                additional_context=f"Note field '{field_name}' updated successfully",
+            )
+
+            logger.info(
+                "MCP: Contact note field updated successfully",
+                contact_id=contact_id,
+                note_id=note_id,
+                field_name=field_name,
+                old_value=old_value,
+                new_value=new_value,
+            )
+
+            return MCPResponseBuilder.success_response(response)
+
+        except ContactNotFoundError as e:
+            logger.warning(
+                "MCP: Contact not found for note field update",
+                contact_id=contact_id,
+                error=str(e),
+            )
+            raise ContactValidationError(
+                "contact_id", f"Contact with ID {contact_id} not found"
+            ) from e
+
+    @mcp.tool
     @mcp_unified_error_handler("list_tags", "tag")
     @inject
     async def list_tags(
