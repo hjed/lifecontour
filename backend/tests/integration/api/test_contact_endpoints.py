@@ -19,6 +19,7 @@ async def integration_api_client(async_connection, clean_database, test_settings
 
     from app.infrastructure.auth.models import SessionUser
     from app.infrastructure.di.contacts import ContactProvider
+    from app.infrastructure.di.journal import JournalProvider
 
     # Create a test provider that uses our test connection
     class TestDatabaseProvider(Provider):
@@ -49,6 +50,7 @@ async def integration_api_client(async_connection, clean_database, test_settings
     test_container = make_async_container(
         TestDatabaseProvider(async_connection),
         ContactProvider(),
+        JournalProvider(),
     )
     app.state.dishka_container = test_container
     setup_dishka(test_container, app)

@@ -864,11 +864,13 @@ async def authenticated_client(test_settings, test_user):
     from app.infrastructure.di.contacts import ContactProvider
     from app.infrastructure.di.database import DatabaseProvider
     from app.infrastructure.di.integrations import IntegrationProvider
+    from app.infrastructure.di.journal import JournalProvider
 
     test_container = make_async_container(
         DatabaseProvider(test_settings),
         TestAuthProvider(),
         ContactProvider(),
+        JournalProvider(),
         IntegrationProvider(),
         FastapiProvider(),
     )
