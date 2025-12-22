@@ -782,11 +782,26 @@ def authenticated_search_client(test_settings, mock_search_service, test_user):
 
     # Create app with test settings
     from app.main import create_app
+    from dishka.integrations.fastapi import FastapiProvider
+
+    from app.infrastructure.di.contacts import ContactProvider
+    from app.infrastructure.di.database import DatabaseProvider
+    from app.infrastructure.di.infrastructure import InfrastructureProvider
+    from app.infrastructure.di.integrations import IntegrationProvider
+    from app.infrastructure.di.journal import JournalProvider
 
     app = create_app(settings=test_settings)
 
     # Replace container with test container
-    test_container = make_async_container(TestAuthSearchProvider())
+    test_container = make_async_container(
+        DatabaseProvider(test_settings),
+        InfrastructureProvider(),
+        TestAuthSearchProvider(),
+        ContactProvider(),
+        JournalProvider(),
+        IntegrationProvider(),
+        FastapiProvider(),
+    )
     try:
         app.state.dishka_container.close()
     except RuntimeError:
