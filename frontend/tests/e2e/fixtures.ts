@@ -205,12 +205,17 @@ async function completeWorkerOAuthFlow(browser: any): Promise<AuthState> {
         } catch (e) {
           // If redirect times out, we might still be on the callback page
           // This can happen if the callback page is still processing
-          console.log('🔐 [Worker Auth] Callback redirect timeout, checking if still on callback page');
+          console.log(
+            '🔐 [Worker Auth] Callback redirect timeout, checking if still on callback page'
+          );
           const stillOnCallback = page.url().includes('/auth/callback');
           if (stillOnCallback) {
             // Wait a bit longer for the callback to complete
             await page.waitForTimeout(2000);
-            console.log('🔐 [Worker Auth] After additional wait, URL is:', page.url());
+            console.log(
+              '🔐 [Worker Auth] After additional wait, URL is:',
+              page.url()
+            );
           }
         }
       }
@@ -239,7 +244,12 @@ async function completeWorkerOAuthFlow(browser: any): Promise<AuthState> {
     await playwrightExpect(async () => {
       // Log cookies before making the request
       const contextCookies = await page.context().cookies();
-      console.log('🔐 [Worker Auth] Cookies in context before status check:', contextCookies.map((c: any) => `${c.name}(domain=${c.domain},path=${c.path})`).join(', '));
+      console.log(
+        '🔐 [Worker Auth] Cookies in context before status check:',
+        contextCookies
+          .map((c: any) => `${c.name}(domain=${c.domain},path=${c.path})`)
+          .join(', ')
+      );
 
       const statusResponse = await page.request.get('/api/auth/status');
       playwrightExpect(statusResponse.ok()).toBe(true);
@@ -257,7 +267,16 @@ async function completeWorkerOAuthFlow(browser: any): Promise<AuthState> {
 
     // Step 5: Extract authentication cookies from browser context
     const cookies = await context.cookies();
-    console.log('🔐 [Worker Auth] All cookies from context:', cookies.map((c: any) => ({ name: c.name, domain: c.domain, path: c.path, httpOnly: c.httpOnly, secure: c.secure })));
+    console.log(
+      '🔐 [Worker Auth] All cookies from context:',
+      cookies.map((c: any) => ({
+        name: c.name,
+        domain: c.domain,
+        path: c.path,
+        httpOnly: c.httpOnly,
+        secure: c.secure,
+      }))
+    );
 
     const validCookies = cookies
       .filter((cookie: any) => cookie.name && cookie.value)
@@ -368,7 +387,10 @@ export const test = base.extend<TestFixtures, WorkerFixtures>({
         playwrightExpect(authStatus.authenticated).toBe(true);
       }).toPass({ timeout: 10000 });
     } catch (error) {
-      console.error('🔐 [Auth State] Authentication verification failed:', error);
+      console.error(
+        '🔐 [Auth State] Authentication verification failed:',
+        error
+      );
       throw error;
     }
 

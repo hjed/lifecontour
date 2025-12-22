@@ -88,7 +88,7 @@ def start_test_services() -> bool:
             "docker",
             "ps",
             "--filter",
-            "name=backend-postgres-test-1",
+            "name=pms-postgres",
             "--format",
             "{{.Names}}",
         ],
@@ -100,23 +100,28 @@ def start_test_services() -> bool:
             "docker",
             "ps",
             "--filter",
-            "name=backend-meilisearch-test-1",
+            "name=pms-meilisearch",
             "--format",
             "{{.Names}}",
         ],
         check=False,
     )
 
-    postgres_running = "postgres-test" in postgres_result.stdout
-    meilisearch_running = "meilisearch-test" in meilisearch_result.stdout
+    postgres_running = "pms-postgres" in postgres_result.stdout
+    meilisearch_running = "pms-meilisearch" in meilisearch_result.stdout
 
     if postgres_running and meilisearch_running:
         print("✓ Test services already running")
         return True
 
-    # Start the containers
+    # Start the containers (run from project root)
     docker_compose_cmd = get_docker_compose_cmd()
-    run_command(docker_compose_cmd + ["-f", "docker-compose.test.yml", "up", "-d"])
+    project_root = Path(__file__).parent.parent.parent
+    run_command(
+        docker_compose_cmd
+        + ["--profile", "test-backend", "--env-file", ".env.test", "up", "-d"],
+        cwd=project_root,
+    )
 
     # Wait for services to be ready
     print("Waiting for test services to be ready...")
@@ -131,7 +136,7 @@ def start_test_services() -> bool:
                 "docker",
                 "ps",
                 "--filter",
-                "name=postgres-test",
+                "name=pms-postgres",
                 "--format",
                 "{{.Names}}",
             ],
@@ -194,8 +199,10 @@ def stop_test_services() -> None:
     """Stop the test services containers."""
     print("Stopping test services...")
     docker_compose_cmd = get_docker_compose_cmd()
+    project_root = Path(__file__).parent.parent.parent
     run_command(
-        docker_compose_cmd + ["-f", "docker-compose.test.yml", "down", "-v"],
+        docker_compose_cmd + ["--profile", "test-backend", "down", "-v"],
+        cwd=project_root,
         check=False,
     )
     print("✓ Test services stopped")

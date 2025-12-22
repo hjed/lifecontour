@@ -5,11 +5,11 @@ This document describes how to run integration tests for the Personal Management
 ## Prerequisites
 
 - Docker and Docker Compose installed
-- Python 3.11+ with dependencies installed (`pip install -e .[dev]`)
+- Python 3.11+ with dependencies installed (`uv pip install -e .[dev]`)
 
 ## Running Integration Tests
 
-### Option 1: Using the Test Runner Script
+### Option 1: Using the Test Runner Script (Recommended)
 
 The easiest way to run integration tests is using the provided script:
 
@@ -19,22 +19,40 @@ python scripts/run_integration_tests.py
 
 This script will:
 1. Check that Docker is available
-2. Start a PostgreSQL test database container
+2. Start a PostgreSQL test database container using the unified docker-compose
 3. Run all integration tests
 4. Stop the test database container
 
-### Option 2: Manual Setup
+### Option 2: Using Unified Docker Compose (test-backend profile)
+
+Start the minimal test environment with the unified docker-compose:
+
+```bash
+# Start test services
+docker compose --profile test-backend --env-file .env.test up -d
+
+# Wait for database to be ready
+docker compose exec database pg_isready -U postgres
+
+# Run integration tests
+python -m pytest tests/integration/ -v
+
+# Stop and clean up
+docker compose --profile test-backend down -v
+```
+
+### Option 3: Manual Setup (Legacy)
 
 If you prefer to manage the database manually:
 
 1. **Start the test database:**
    ```bash
-   docker-compose -f docker-compose.test.yml up -d
+   docker compose --profile test-backend --env-file .env.test up -d
    ```
 
 2. **Wait for database to be ready:**
    ```bash
-   docker exec backend-postgres-test-1 pg_isready -U postgres
+   docker compose exec database pg_isready -U postgres
    ```
 
 3. **Run integration tests:**
@@ -44,7 +62,7 @@ If you prefer to manage the database manually:
 
 4. **Stop the test database:**
    ```bash
-   docker-compose -f docker-compose.test.yml down -v
+   docker compose --profile test-backend down -v
    ```
 
 ## Test Structure
@@ -62,13 +80,19 @@ If you prefer to manage the database manually:
 
 ## Database Setup
 
-The integration tests use a separate PostgreSQL database running in Docker:
+The integration tests use a separate PostgreSQL database running in Docker via the unified docker-compose setup:
 
+**Configuration (.env.test):**
 - **Host:** localhost
 - **Port:** 5433 (to avoid conflicts with local PostgreSQL)
 - **Database:** personal_management_test
 - **User:** postgres
 - **Password:** postgres
+
+**Connection string:**
+```
+postgresql://postgres:postgres@localhost:5433/personal_management_test
+```
 
 Each test runs in a transaction that is rolled back after the test completes, ensuring test isolation.
 

@@ -105,7 +105,7 @@ function areServicesRunning(): boolean {
   try {
     const dockerComposeCmd = getDockerComposeCommand();
     const result = execSync(
-      `${dockerComposeCmd} -f docker-compose.test.yml ps --services --filter "status=running"`,
+      `${dockerComposeCmd} --profile test ps --services --filter "status=running"`,
       {
         encoding: 'utf8',
         stdio: 'pipe',
@@ -115,11 +115,11 @@ function areServicesRunning(): boolean {
 
     const runningServices = result.trim().split('\n').filter(Boolean);
     const expectedServices = [
-      'database-test',
-      'oauth-provider-test',
-      'backend-test',
-      'meilisearch-test',
-      'redis-test',
+      'database',
+      'oauth-provider',
+      'backend',
+      'meilisearch',
+      'redis',
     ];
 
     return expectedServices.every(service => runningServices.includes(service));
@@ -161,13 +161,13 @@ async function globalSetup(_config: FullConfig) {
       } else {
         // Stop any existing containers to ensure clean state
         execCommand(
-          `${dockerComposeCmd} -f docker-compose.test.yml down --remove-orphans`,
+          `${dockerComposeCmd} --profile test --env-file .env.test down --remove-orphans`,
           'Cleaning up existing containers'
         );
 
         // Start Docker services (docker-compose v1 doesn't support --wait)
         execCommand(
-          `${dockerComposeCmd} -f docker-compose.test.yml up -d --build`,
+          `${dockerComposeCmd} --profile test --env-file .env.test up -d --build`,
           'Starting Docker services'
         );
       }
@@ -204,13 +204,10 @@ async function globalSetup(_config: FullConfig) {
     try {
       console.log('📋 Docker service logs:');
       const dockerComposeCmd = getDockerComposeCommand();
-      execSync(
-        `${dockerComposeCmd} -f docker-compose.test.yml logs --tail=50`,
-        {
-          stdio: 'inherit',
-          cwd: projectRoot,
-        }
-      );
+      execSync(`${dockerComposeCmd} --profile test logs --tail=50`, {
+        stdio: 'inherit',
+        cwd: projectRoot,
+      });
     } catch (logError) {
       console.error('Failed to retrieve logs:', logError);
     }
