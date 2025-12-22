@@ -327,7 +327,9 @@ async def get_auth_status(
     logger.info(
         "Auth status check",
         user_authenticated=user is not None,
-        session_keys=list(request.session.keys()) if hasattr(request, "session") else [],
+        session_keys=list(request.session.keys())
+        if hasattr(request, "session")
+        else [],
     )
 
     if user:

@@ -48,36 +48,39 @@ A personal relationship management and journaling system with AI integration thr
 For a complete development environment with all services:
 
 ```bash
-# Start complete Docker development environment
-./scripts/dev.sh docker-start
+# Start complete Docker development environment (default dev profile)
+docker compose up
 
 # Stop Docker development environment
-./scripts/dev.sh docker-stop
+docker compose down
 
 # Rebuild Docker images (useful when dependencies change)
-./scripts/dev.sh docker-rebuild
+docker compose build --no-cache
 
 # Rebuild specific service only
-./scripts/dev.sh docker-rebuild-service backend-dev
+docker compose build --no-cache backend
 ```
 
-**Windows users** can use:
-```cmd
-# PowerShell
-.\scripts\dev.ps1 docker-rebuild
+For detailed Docker Compose setup and profiles, see [Docker Compose Unified Setup](docs/DOCKER_COMPOSE_UNIFIED.md).
 
-# Batch file (simpler)
-scripts\rebuild-docker.bat dev
+### Testing with Docker
+
+```bash
+# Run tests with test profile
+docker compose --profile test --env-file .env.test up
+
+# Run backend integration tests only
+docker compose --profile test-backend up
+
+# Clean up test environment
+docker compose --profile test down -v
 ```
 
 ### Production Deployment
 
 ```bash
 # Start all services with nginx proxy
-docker-compose up -d
-
-# Rebuild production images
-./scripts/dev.sh docker-rebuild-prod
+docker compose --profile prod --env-file .env.prod up -d
 
 # Access via nginx proxy
 # Frontend: http://localhost

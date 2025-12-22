@@ -490,9 +490,12 @@ test.describe('Login Page - Authenticated Users', () => {
 
     // Wait for the redirect to complete (should redirect away from /auth/login)
     // The redirect happens in the login page's useEffect when isAuthenticated is true
-    await authenticatedPage.waitForURL(url => !url.pathname.includes('/auth/login'), {
-      timeout: 5000,
-    });
+    await authenticatedPage.waitForURL(
+      url => !url.pathname.includes('/auth/login'),
+      {
+        timeout: 5000,
+      }
+    );
 
     // Verify we're no longer on the login page
     await expect(authenticatedPage).not.toHaveURL(/\/auth\/login/);
@@ -515,9 +518,12 @@ test.describe('Login Page - Authenticated Users', () => {
     await authenticatedPage.goto('/auth/login');
 
     // Wait for the redirect to complete (should redirect away from /auth/login)
-    await authenticatedPage.waitForURL(url => !url.pathname.includes('/auth/login'), {
-      timeout: 5000,
-    });
+    await authenticatedPage.waitForURL(
+      url => !url.pathname.includes('/auth/login'),
+      {
+        timeout: 5000,
+      }
+    );
 
     // Should be redirected to an authenticated page, not login
     await expect(authenticatedPage).not.toHaveURL(/\/auth\/login/);

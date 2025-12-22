@@ -135,9 +135,9 @@ docker_start() {
         exit 1
     fi
 
-    # Start all services
-    log_info "Starting all services with Docker Compose..."
-    docker compose -f docker-compose.dev.yml up -d
+    # Start all services with dev profile (default)
+    log_info "Starting all services with Docker Compose (dev profile)..."
+    docker compose --profile dev --env-file .env.dev up -d
 
     log_success "Docker development environment started!"
     log_info ""
@@ -161,7 +161,7 @@ docker_start() {
 # Stop Docker development environment
 docker_stop() {
     log_info "Stopping Docker development environment..."
-    docker compose -f docker-compose.dev.yml down
+    docker compose --profile dev down
     log_success "Docker development environment stopped!"
 }
 
@@ -170,11 +170,11 @@ docker_logs() {
     if [ -n "$2" ]; then
         # Show logs for specific service
         log_info "Showing logs for service: $2"
-        docker compose -f docker-compose.dev.yml logs -f "$2"
+        docker compose --profile dev logs -f "$2"
     else
         # Show logs for all services
         log_info "Showing logs for all services (use Ctrl+C to exit)..."
-        docker compose -f docker-compose.dev.yml logs -f
+        docker compose --profile dev logs -f
     fi
 }
 
@@ -182,19 +182,19 @@ docker_logs() {
 docker_restart() {
     if [ -z "$2" ]; then
         log_error "Please specify a service name to restart"
-        log_info "Available services: postgres-dev, meilisearch-dev, jaeger, oauth-provider, oauth-ui, backend-dev, frontend-dev"
+        log_info "Available services: database, redis, meilisearch, jaeger, oauth-provider, oauth-login-consent, backend, frontend, google-contacts-worker"
         exit 1
     fi
 
     log_info "Restarting Docker service: $2"
-    docker compose -f docker-compose.dev.yml restart "$2"
+    docker compose --profile dev restart "$2"
     log_success "Service $2 restarted!"
 }
 
 # Show Docker status
 docker_status() {
     log_info "Docker development environment status:"
-    docker compose -f docker-compose.dev.yml ps
+    docker compose --profile dev ps
 }
 
 # Test Docker environment
@@ -220,11 +220,11 @@ docker_rebuild() {
 
     # Stop services first to avoid conflicts
     log_info "Stopping existing services..."
-    docker compose -f docker-compose.dev.yml down
+    docker compose --profile dev down
 
     # Rebuild images with no cache
     log_info "Rebuilding backend and frontend images (no cache)..."
-    docker compose -f docker-compose.dev.yml build --no-cache backend-dev frontend-dev
+    docker compose --profile dev build --no-cache backend frontend
 
     log_success "Docker images rebuilt successfully!"
     log_info "Use './scripts/dev.sh docker-start' to start the services with new images"
@@ -242,35 +242,28 @@ docker_rebuild_prod() {
 
     # Stop services first to avoid conflicts
     log_info "Stopping existing services..."
-    docker compose down
+    docker compose --profile prod down
 
     # Rebuild images with no cache
     log_info "Rebuilding backend, frontend, nginx, and google-contacts-worker images (no cache)..."
-    docker compose build --no-cache backend frontend nginx google-contacts-worker
+    docker compose --profile prod build --no-cache backend frontend nginx google-contacts-worker
 
     log_success "Production Docker images rebuilt successfully!"
-    log_info "Use 'docker compose up -d' to start the services with new images"
+    log_info "Use 'docker compose --profile prod up -d' to start the services with new images"
 }
 
 # Rebuild specific Docker service
 docker_rebuild_service() {
     if [ -z "$2" ]; then
         log_error "Please specify a service name to rebuild"
-        log_info "Development services: backend-dev, frontend-dev"
-        log_info "Production services: backend, frontend, nginx"
+        log_info "Services: backend, frontend, nginx, google-contacts-worker"
         exit 1
     fi
 
     local service="$2"
-    local compose_file="docker-compose.dev.yml"
+    local profile="${3:-dev}"  # Default to dev profile
 
-    # Determine if this is a production service
-    if [[ "$service" == "backend" || "$service" == "frontend" || "$service" == "nginx" ]]; then
-        compose_file="docker-compose.yml"
-        log_info "Rebuilding production service: $service"
-    else
-        log_info "Rebuilding development service: $service"
-    fi
+    log_info "Rebuilding service: $service (profile: $profile)"
 
     # Check if Docker is available
     if ! command_exists "docker"; then
@@ -280,15 +273,15 @@ docker_rebuild_service() {
 
     # Stop the specific service
     log_info "Stopping service: $service"
-    docker compose -f "$compose_file" stop "$service"
+    docker compose --profile "$profile" stop "$service"
 
     # Rebuild the service with no cache
     log_info "Rebuilding service: $service (no cache)..."
-    docker compose -f "$compose_file" build --no-cache "$service"
+    docker compose --profile "$profile" build --no-cache "$service"
 
     # Restart the service
     log_info "Starting service: $service"
-    docker compose -f "$compose_file" up -d "$service"
+    docker compose --profile "$profile" up -d "$service"
 
     log_success "Service $service rebuilt and restarted successfully!"
 }

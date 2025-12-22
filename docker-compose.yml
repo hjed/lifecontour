@@ -1,90 +1,214 @@
+version: '3.8'
+
+# Unified Docker Compose for Personal Management System
+# Supports multiple profiles: dev (default), test, test-backend, prod
+# Usage:
+#   docker compose up                          # dev profile (default)
+#   docker compose --profile test up           # test profile
+#   docker compose --profile test-backend up   # backend tests only
+#   docker compose --profile prod up           # production
+#
+# Environment files:
+#   .env.dev   - Development configuration (default)
+#   .env.test  - Testing configuration
+#   .env.prod  - Production configuration
+
 services:
-  # PostgreSQL Database
+  # ============================================================================
+  # CORE SERVICES (all profiles)
+  # ============================================================================
+
   database:
     image: postgres:15-alpine
-    container_name: personal-management-db
+    container_name: pms-postgres
+    profiles: [dev, test, test-backend, prod]
     environment:
-      POSTGRES_DB: personal_management
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: ${DB_NAME:-personal_management}
+      POSTGRES_USER: ${DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-postgres}
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./docker/database/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
     ports:
-      - "5432:5432"
+      - "${DB_PORT:-5432}:5432"
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d personal_management"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 40s
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-postgres} -d ${DB_NAME:-personal_management}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
     networks:
       - personal-management
 
-  # MeiliSearch Search Engine
-  meilisearch:
-    image: getmeili/meilisearch:v1.2
-    container_name: personal-management-search
-    environment:
-      - MEILI_MASTER_KEY=personal_management_search_key
-      - MEILI_ENV=development
-      - MEILI_LOG_LEVEL=INFO
-    volumes:
-      - meilisearch_data:/meili_data
-    ports:
-      - "7700:7700"
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:7700/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 40s
-    networks:
-      - personal-management
-
-  # Redis for ARQ Task Queue
   redis:
     image: redis:7-alpine
-    container_name: personal-management-redis
+    container_name: pms-redis
+    profiles: [dev, test, test-backend, prod]
     command: redis-server --appendonly yes
     volumes:
       - redis_data:/data
     ports:
-      - "6380:6379"
+      - "${REDIS_PORT:-6379}:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 40s
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
     networks:
       - personal-management
 
-  # Python FastAPI Backend
+  meilisearch:
+    image: getmeili/meilisearch:v1.2
+    container_name: pms-meilisearch
+    profiles: [dev, test, test-backend, prod]
+    environment:
+      - MEILI_MASTER_KEY=${MEILI_MASTER_KEY:-dev_master_key_change_in_production}
+      - MEILI_ENV=${MEILI_ENV:-development}
+      - MEILI_LOG_LEVEL=${MEILI_LOG_LEVEL:-INFO}
+      - MEILI_NO_ANALYTICS=true
+    volumes:
+      - meilisearch_data:/meili_data
+    ports:
+      - "${MEILI_PORT:-7700}:7700"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:7700/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - personal-management
+
+  # ============================================================================
+  # DEVELOPMENT SERVICES (dev profile)
+  # ============================================================================
+
+  jaeger:
+    image: jaegertracing/all-in-one:1.52
+    container_name: pms-jaeger
+    profiles: [dev]
+    environment:
+      - COLLECTOR_OTLP_ENABLED=true
+      - COLLECTOR_ZIPKIN_HOST_PORT=:9411
+    ports:
+      - "16686:16686"  # Jaeger UI
+      - "14268:14268"  # Jaeger collector HTTP
+      - "14250:14250"  # Jaeger collector gRPC
+      - "4317:4317"    # OTLP gRPC receiver
+      - "4318:4318"    # OTLP HTTP receiver
+      - "9411:9411"    # Zipkin compatible endpoint
+    networks:
+      - personal-management
+
+  oauth-provider:
+    image: oryd/hydra:v2.2.0
+    container_name: pms-oauth
+    profiles: [dev, test, prod]
+    environment:
+      - DSN=${OAUTH_DSN:-sqlite://file::memory:?cache=shared}
+      - URLS_SELF_ISSUER=${OAUTH_ISSUER:-http://localhost:4444}
+      - URLS_CONSENT=${OAUTH_CONSENT_URL:-http://localhost:3001/consent}
+      - URLS_LOGIN=${OAUTH_LOGIN_URL:-http://localhost:3001/login}
+      - SECRETS_SYSTEM=${OAUTH_SYSTEM_SECRET:-this-is-a-dev-secret-change-in-production}
+      - OIDC_SUBJECT_IDENTIFIERS_SUPPORTED_TYPES=public,pairwise
+      - OIDC_SUBJECT_IDENTIFIERS_PAIRWISE_SALT=${OAUTH_PAIRWISE_SALT:-some-random-salt}
+      - LOG_LEVEL=${OAUTH_LOG_LEVEL:-debug}
+      - SERVE_COOKIES_SAME_SITE_MODE=Lax
+      - SERVE_COOKIES_SAME_SITE_LEGACY_WORKAROUND=true
+    volumes:
+      - ./docker/oauth-provider/hydra.yml:/etc/config/hydra/hydra.yml:ro
+    ports:
+      - "${OAUTH_PUBLIC_PORT:-4444}:4444"
+      - "${OAUTH_ADMIN_PORT:-4445}:4445"
+    networks:
+      - personal-management
+    command: ["serve", "-c", "/etc/config/hydra/hydra.yml", "all", "--dev"]
+
+  oauth-login-consent:
+    image: node:18-alpine
+    container_name: pms-oauth-login-consent
+    profiles: [dev, test]
+    working_dir: /app
+    volumes:
+      - ./docker/oauth-login-consent:/app
+    ports:
+      - "${OAUTH_UI_PORT:-3001}:3001"
+    environment:
+      - HYDRA_ADMIN_URL=http://oauth-provider:4445
+      - PORT=3001
+      - NODE_ENV=${NODE_ENV:-development}
+    depends_on:
+      - oauth-provider
+    networks:
+      - personal-management
+    command: sh -c "npm install && npm start"
+
+  oauth-init:
+    image: curlimages/curl:latest
+    container_name: pms-oauth-init
+    profiles: [dev, test]
+    networks:
+      - personal-management
+    depends_on:
+      oauth-provider:
+        condition: service_started
+    volumes:
+      - ./docker/oauth-provider/init-oauth.sh:/init-oauth.sh:ro
+    environment:
+      - OAUTH_PROVIDER_HOST=oauth-provider
+      - OAUTH_ADMIN_PORT=4445
+      - CLIENT_ID=${OAUTH_CLIENT_ID:-dev-client-id}
+      - CLIENT_SECRET=${OAUTH_CLIENT_SECRET:-dev-client-secret}
+      - ENVIRONMENT=${ENVIRONMENT:-development}
+      - FRONTEND_URL=${FRONTEND_URL:-http://localhost:3000}
+      - PUBLIC_PORT=${OAUTH_PUBLIC_PORT:-4444}
+      - ADMIN_PORT_EXTERNAL=${OAUTH_ADMIN_PORT:-4445}
+    entrypoint: ["/bin/sh"]
+    command: ["/init-oauth.sh"]
+    restart: "no"
+
+  # ============================================================================
+  # BACKEND SERVICES
+  # ============================================================================
+
   backend:
     build:
       context: .
       dockerfile: docker/backend/Dockerfile
       args:
-        BUILD_ENV: production
-        INSTALL_DEV_DEPS: "false"
-    container_name: personal-management-backend
+        BUILD_ENV: ${BUILD_ENV:-development}
+        INSTALL_DEV_DEPS: ${INSTALL_DEV_DEPS:-true}
+    container_name: pms-backend
+    profiles: [dev, test, prod]
     environment:
-      DATABASE_URL: postgresql://postgres:postgres@database:5432/personal_management
-      DEBUG: "false"
-      LOG_LEVEL: INFO
-      CORS_ORIGINS: "http://localhost:3000,http://127.0.0.1:3000,http://frontend:3000"
-      ALLOWED_HOSTS: "localhost,127.0.0.1,backend"
+      DATABASE_URL: postgresql://${DB_USER:-postgres}:${DB_PASSWORD:-postgres}@database:5432/${DB_NAME:-personal_management}
+      DEBUG: ${DEBUG:-true}
+      LOG_LEVEL: ${LOG_LEVEL:-DEBUG}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000,http://frontend:3000}
+      ALLOWED_HOSTS: ${ALLOWED_HOSTS:-localhost,127.0.0.1,backend,*}
       MEILISEARCH_URL: http://meilisearch:7700
-      MEILISEARCH_API_KEY: personal_management_search_key
-      SESSION_SECRET_KEY: personal_management_session_secret_key_change_in_production
-      SEARCH_INDEX_PREFIX: pms_
+      MEILISEARCH_API_KEY: ${MEILI_MASTER_KEY:-dev_master_key_change_in_production}
+      SESSION_SECRET_KEY: ${SESSION_SECRET_KEY:-dev_session_secret_change_in_production}
+      SEARCH_INDEX_PREFIX: ${SEARCH_INDEX_PREFIX:-pms_}
       REDIS_URL: redis://redis:6379
+      ENABLE_TELEMETRY: ${ENABLE_TELEMETRY:-true}
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-http://jaeger:4318}
+      OTEL_SERVICE_NAME: ${OTEL_SERVICE_NAME:-personal-management-backend}
+      OTEL_RESOURCE_ATTRIBUTES: ${OTEL_RESOURCE_ATTRIBUTES:-service.name=personal-management-backend,service.version=0.1.0}
+      OAUTH_PROVIDER_NAME: ${OAUTH_PROVIDER_NAME:-generic}
+      OAUTH_CLIENT_ID: ${OAUTH_CLIENT_ID:-dev-client-id}
+      OAUTH_CLIENT_SECRET: ${OAUTH_CLIENT_SECRET:-dev-client-secret}
+      OAUTH_AUTHORIZATION_URL: ${OAUTH_AUTHORIZATION_URL:-http://localhost:4444/oauth2/auth}
+      OAUTH_TOKEN_URL: ${OAUTH_TOKEN_URL:-http://oauth-provider:4444/oauth2/token}
+      OAUTH_USERINFO_URL: ${OAUTH_USERINFO_URL:-http://oauth-provider:4444/userinfo}
+      DISABLE_AUTH: ${DISABLE_AUTH:-false}
     volumes:
       - ./backend:/app
       - ./core_shared:/core_shared
+      - backend_cache:/app/.cache
     ports:
-      - "8000:8000"
+      - "${BACKEND_PORT:-8000}:8000"
     depends_on:
       database:
         condition: service_healthy
@@ -101,52 +225,33 @@ services:
     networks:
       - personal-management
     restart: unless-stopped
+    command: ${BACKEND_COMMAND:-/start-dev.sh}
 
-  # Google Contacts Integration Worker
-  google-contacts-worker:
-    build:
-      context: .
-      dockerfile: integration_workers/google_contacts/Dockerfile
-    container_name: personal-management-google-worker
-    environment:
-      DATABASE_URL: postgresql://postgres:postgres@database:5432/personal_management
-      REDIS_URL: redis://redis:6379
-      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-your-google-client-id}
-      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-your-google-client-secret}
-      ENCRYPTION_KEY: ${ENCRYPTION_KEY:-your-encryption-key-here}
-      LOG_LEVEL: INFO
-      WORKER_ID: google-contacts-worker
-      MAX_CONCURRENT_JOBS: 5
-    volumes:
-      - ./core_shared:/core_shared:ro
-      - ./integration_workers/google_contacts:/app
-    depends_on:
-      database:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    networks:
-      - personal-management
-    restart: unless-stopped
+  # ============================================================================
+  # FRONTEND SERVICES
+  # ============================================================================
 
-  # Next.js Frontend
   frontend:
     build:
       context: .
       dockerfile: docker/frontend/Dockerfile
       args:
-        BUILD_ENV: production
-        NODE_ENV: production
-    container_name: personal-management-frontend
+        BUILD_ENV: ${BUILD_ENV:-development}
+        NODE_ENV: ${NODE_ENV:-development}
+    container_name: pms-frontend
+    profiles: [dev, test, prod]
     environment:
-      - BACKEND_URL=http://backend:8000
-      - NODE_ENV=production
+      - NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL:-http://localhost:8000}
+      - NEXT_PUBLIC_OAUTH_PROVIDER_URL=${NEXT_PUBLIC_OAUTH_PROVIDER_URL:-http://localhost:4444}
+      - BACKEND_URL=${BACKEND_URL:-http://backend:8000}
+      - NODE_ENV=${NODE_ENV:-development}
+      - WATCHPACK_POLLING=${WATCHPACK_POLLING:-true}
     volumes:
       - ./frontend:/app
-      - /app/node_modules
-      - /app/.next
+      - frontend_modules:/app/node_modules
+      - frontend_next:/app/.next
     ports:
-      - "3000:3000"
+      - "${FRONTEND_PORT:-3000}:3000"
     depends_on:
       backend:
         condition: service_healthy
@@ -160,12 +265,47 @@ services:
       - personal-management
     restart: unless-stopped
 
-  # Nginx Reverse Proxy
+  # ============================================================================
+  # INTEGRATION SERVICES
+  # ============================================================================
+
+  google-contacts-worker:
+    build:
+      context: .
+      dockerfile: integration_workers/google_contacts/Dockerfile
+    container_name: pms-google-worker
+    profiles: [dev, prod]
+    environment:
+      DATABASE_URL: postgresql://${DB_USER:-postgres}:${DB_PASSWORD:-postgres}@database:5432/${DB_NAME:-personal_management}
+      REDIS_URL: redis://redis:6379
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-dev-google-client-id}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-dev-google-client-secret}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:-dev-encryption-key-change-in-production}
+      LOG_LEVEL: ${WORKER_LOG_LEVEL:-DEBUG}
+      WORKER_ID: google-contacts-worker
+      MAX_CONCURRENT_JOBS: ${MAX_CONCURRENT_JOBS:-3}
+    volumes:
+      - ./core_shared:/core_shared:ro
+      - ./integration_workers/google_contacts:/app
+    depends_on:
+      database:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - personal-management
+    restart: unless-stopped
+
+  # ============================================================================
+  # PRODUCTION SERVICES
+  # ============================================================================
+
   nginx:
     build:
       context: ./docker/nginx
       dockerfile: Dockerfile
-    container_name: personal-management-nginx
+    container_name: pms-nginx
+    profiles: [prod]
     ports:
       - "80:80"
       - "443:443"
@@ -185,16 +325,31 @@ services:
       - personal-management
     restart: unless-stopped
 
+# ============================================================================
+# VOLUMES
+# ============================================================================
+
 volumes:
   postgres_data:
     driver: local
+  redis_data:
+    driver: local
   meilisearch_data:
     driver: local
-  redis_data:
+  backend_cache:
+    driver: local
+  frontend_modules:
+    driver: local
+  frontend_next:
     driver: local
   nginx_logs:
     driver: local
 
+# ============================================================================
+# NETWORKS
+# ============================================================================
+
 networks:
   personal-management:
     driver: bridge
+    name: personal-management
