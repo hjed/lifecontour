@@ -205,6 +205,15 @@ async def auth_callback_json(
         # Store user in session (serialize datetime to ISO string)
         request.session["user"] = session_user.model_dump(mode="json")
 
+        # Mark session as modified to ensure cookie is set
+        request.session.setdefault("_modified", True)
+
+        logger.info(
+            "Session user set",
+            user_id=session_user.id,
+            session_keys=list(request.session.keys()),
+        )
+
         # Get redirect URL from session or use default
         redirect_url = request.session.pop("post_auth_redirect", "/")
 
@@ -307,12 +316,20 @@ async def get_current_user_info(user: FromDishka[SessionUser]) -> UserResponse:
 
 @router.get("/status", response_model=AuthStatusResponse)
 @inject
-async def get_auth_status(user: FromDishka[SessionUser | None]) -> AuthStatusResponse:
+async def get_auth_status(
+    request: Request, user: FromDishka[SessionUser | None]
+) -> AuthStatusResponse:
     """
     Get authentication status.
 
     Returns whether the user is authenticated and their information if available.
     """
+    logger.info(
+        "Auth status check",
+        user_authenticated=user is not None,
+        session_keys=list(request.session.keys()) if hasattr(request, "session") else [],
+    )
+
     if user:
         user_response = UserResponse(
             id=user.id,

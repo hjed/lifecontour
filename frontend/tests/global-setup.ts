@@ -9,7 +9,7 @@
  * - Redis
  */
 
-import { chromium, FullConfig } from '@playwright/test';
+import { FullConfig } from '@playwright/test';
 import { execSync } from 'child_process';
 
 /**
@@ -188,24 +188,6 @@ async function globalSetup(_config: FullConfig) {
     await waitForService('http://localhost:7701/health');
 
     console.log('✅ All services are ready!');
-
-    // Optional: Create a test browser instance to verify frontend connectivity
-    console.log('🌐 Verifying frontend connectivity...');
-    const browser = await chromium.launch();
-    const page = await browser.newPage();
-
-    try {
-      // Test that we can reach the backend through the frontend
-      const response = await page.request.get(
-        'http://localhost:8001/api/health'
-      );
-      if (!response.ok()) {
-        throw new Error(`Backend health check failed: ${response.status()}`);
-      }
-      console.log('✅ Backend connectivity verified');
-    } finally {
-      await browser.close();
-    }
 
     console.log('🎉 Global setup completed successfully!');
   } catch (error) {

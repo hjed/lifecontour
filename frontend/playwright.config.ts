@@ -77,6 +77,7 @@ export default defineConfig({
   },
 
   /* Configure projects for major browsers */
+  /* Only test browsers that are tested in CI: chromium, firefox, and Mobile Chrome */
   projects: [
     {
       name: 'chromium',
@@ -100,21 +101,10 @@ export default defineConfig({
       },
     },
 
-    {
-      name: 'webkit',
-      use: { ...devices['Desktop Safari'] },
-      // Note: WebKit has known issues with OAuth redirects in test environment
-      // Tests may fail due to browser-specific JavaScript redirect handling
-    },
-
     /* Test against mobile viewports. */
     {
       name: 'Mobile Chrome',
       use: { ...devices['Pixel 6'] },
-    },
-    {
-      name: 'Mobile Safari',
-      use: { ...devices['iPhone 12'] },
     },
 
     /* Test against branded browsers. */

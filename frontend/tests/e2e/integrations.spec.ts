@@ -65,8 +65,15 @@ test.describe('Integration Management - Authenticated User', () => {
     expect(response.ok()).toBeTruthy();
 
     const statusData = await response.json();
-    expect(statusData).toHaveProperty('integration');
-    expect(statusData).toHaveProperty('status');
+    // Check JSON API format
+    expect(statusData).toHaveProperty('data');
+    expect(statusData.data).toHaveProperty('attributes');
+    expect(statusData.data.attributes).toHaveProperty('status');
+    expect(statusData.data.attributes).toHaveProperty('connected');
+    // Verify status is one of the expected values
+    expect(['connected', 'disconnected', 'error', 'inactive']).toContain(
+      statusData.data.attributes.status
+    );
   });
 
   test('should handle OAuth authorization flow for Google Contacts', async ({

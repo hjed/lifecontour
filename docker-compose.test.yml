@@ -143,6 +143,8 @@ services:
         INSTALL_DEV_DEPS: "true"
     container_name: pms-backend-test
     environment:
+      # Enable debug mode for testing (allows HTTP cookies without secure flag)
+      DEBUG: "true"
       DATABASE_URL: postgresql://postgres:postgres@database-test:5432/personal_management_test
       # OAuth Configuration for testing
       OAUTH_PROVIDER_NAME: generic
