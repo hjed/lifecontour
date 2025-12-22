@@ -781,7 +781,6 @@ def authenticated_search_client(test_settings, mock_search_service, test_user):
         return mock_search_service_instance
 
     # Create app with test settings
-    from app.main import create_app
     from dishka.integrations.fastapi import FastapiProvider
 
     from app.infrastructure.di.contacts import ContactProvider
@@ -789,6 +788,7 @@ def authenticated_search_client(test_settings, mock_search_service, test_user):
     from app.infrastructure.di.infrastructure import InfrastructureProvider
     from app.infrastructure.di.integrations import IntegrationProvider
     from app.infrastructure.di.journal import JournalProvider
+    from app.main import create_app
 
     app = create_app(settings=test_settings)
 
