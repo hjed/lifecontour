@@ -25,6 +25,8 @@ class TestJournalContactRelationshipRepositoryIntegration:
     @pytest.fixture
     async def sample_journal_and_contact(self, async_connection):
         """Create sample journal and contact for testing."""
+        from datetime import UTC, datetime, timedelta
+
         from sqlalchemy import text
 
         # Create a journal
@@ -35,14 +37,15 @@ class TestJournalContactRelationshipRepositoryIntegration:
             RETURNING id
         """
         )
+        now = datetime.now(UTC)
         journal_result = await async_connection.execute(
             journal_query,
             {
                 "user_id": "test_user",
                 "title": "Test Journal",
                 "content": "Test content",
-                "start": "2025-01-01T00:00:00Z",
-                "end": "2025-01-01T23:59:59Z",
+                "start": now,
+                "end": now + timedelta(hours=1),
             },
         )
         journal_id = journal_result.scalar()

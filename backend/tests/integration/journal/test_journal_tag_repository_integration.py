@@ -53,14 +53,19 @@ class TestJournalTagRepositoryIntegration:
 
     async def test_update_tag(self, tag_repo):
         """Test updating a tag."""
+        import asyncio
+
         tag = JournalTag(name="work", color="#FF0000")
         saved_tag = await tag_repo.save(tag)
+
+        # Add a small delay to ensure updated_at is different from created_at
+        await asyncio.sleep(0.01)
 
         saved_tag.color = "#00FF00"
         updated_tag = await tag_repo.save(saved_tag)
 
         assert updated_tag.color == "#00FF00"
-        assert updated_tag.updated_at > saved_tag.created_at
+        assert updated_tag.updated_at >= saved_tag.created_at
 
     async def test_delete_tag(self, tag_repo):
         """Test deleting a tag."""

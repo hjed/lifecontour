@@ -726,12 +726,12 @@ def authenticated_app(test_settings):
 def mock_search_service():
     """Create a mock search service for testing."""
     from typing import Any
-    from unittest.mock import MagicMock
+    from unittest.mock import AsyncMock
 
     def _create_mock_service(search_results: dict[str, Any]):
-        mock_service = MagicMock()
-        mock_service.search_contacts.return_value = search_results
-        mock_service.global_search.return_value = search_results
+        mock_service = AsyncMock()
+        mock_service.search_contacts = AsyncMock(return_value=search_results)
+        mock_service.global_search = AsyncMock(return_value=search_results)
         return mock_service
 
     return _create_mock_service
