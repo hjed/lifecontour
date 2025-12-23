@@ -255,6 +255,10 @@ async function completeWorkerOAuthFlow(browser: any): Promise<AuthState> {
     await page.waitForTimeout(500);
 
     let authUser: string | undefined;
+    // NOTE: This uses a 10s timeout because the real OAuth flow involves an external
+    // IdP + backend round-trip that can be slow and variable under CI/network load.
+    // `toPass` will poll with web-first retries and typically resolve much faster,
+    // but we allow up to 10s to avoid flaky failures when the provider is slow.
     await playwrightExpect(async () => {
       // Log cookies before making the request
       const contextCookies = await page.context().cookies();

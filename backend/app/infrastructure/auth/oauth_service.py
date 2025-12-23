@@ -41,7 +41,9 @@ class OAuthService:
             provider: OAuth provider name (e.g., 'google', 'github')
             redirect_uri: Redirect URI for OAuth callback
             csrf_token: CSRF token for state validation
-            flow_type: Type of OAuth flow ('auth' for authentication, 'integration' for integration)
+            flow_type: Type of OAuth flow. Valid values are:
+                - 'auth': for authentication flows (default)
+                - 'integration': for integration flows (e.g., Google Contacts sync)
 
         Returns:
             Base64-encoded JSON state parameter

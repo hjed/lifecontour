@@ -806,6 +806,9 @@ async def authenticated_client(test_settings, test_user):
 
             Required for full app initialization even if not directly used in OAuth tests.
             Some routes depend on SearchService being available in the DI container.
+
+            Note: This is a mock/stub instance created without dependencies or configuration,
+            and is intended for testing purposes only.
             """
             return SearchService()
 
