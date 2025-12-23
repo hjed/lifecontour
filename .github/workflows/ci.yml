@@ -527,7 +527,7 @@ jobs:
           # Wait for OAuth provider to be ready
           echo "Waiting for OAuth provider..."
           for i in {1..60}; do
-            if curl -f -s http://localhost:4447/health/ready > /dev/null 2>&1; then
+            if curl -f -s http://localhost:4446/health/ready > /dev/null 2>&1; then
               echo "✅ OAuth provider is ready!"
               break
             fi
@@ -571,7 +571,7 @@ jobs:
           echo "✅ Backend health check passed"
 
           echo "Testing OAuth provider health..."
-          curl -f -s http://localhost:4447/health/ready || (echo "❌ OAuth provider health check failed" && exit 1)
+          curl -f -s http://localhost:4446/health/ready || (echo "❌ OAuth provider health check failed" && exit 1)
           echo "✅ OAuth provider health check passed"
 
           echo "Testing MeiliSearch health..."
