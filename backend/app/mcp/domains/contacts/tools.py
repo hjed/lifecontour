@@ -80,6 +80,13 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
         contact_id: Annotated[
             int, Field(description="The unique identifier of the contact")
         ],
+        include_history: Annotated[
+            bool,
+            Field(
+                default=False,
+                description="Optional: Include field change history for the contact",
+            ),
+        ] = False,
     ) -> str:
         """
         Get contact details by ID for AI analysis.
@@ -88,14 +95,19 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
         tags, and a contextual summary. The response is formatted for AI consumption
         to help with relationship management and decision making.
 
+        Optionally includes field change history to help AI understand how the contact
+        information has evolved over time.
+
         Args:
             contact_id: The unique identifier of the contact
+            include_history: Optional flag to include field change history
 
         Returns:
             JSON string containing AI-friendly contact information including:
             - Basic contact details (name, email, phone)
             - Associated tags for categorization
             - Contextual summary for AI understanding
+            - Optional field change history if requested
 
         Raises:
             ContactNotFoundError: If the contact with the given ID does not exist
@@ -108,6 +120,16 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
 
         # Convert to AI-friendly response using converter
         response = ContactConverter.to_contact_response(contact)
+
+        # Add history context if requested
+        if include_history:
+            history = await contact_service.get_contact_history(contact_id, limit=10)
+            history_summary = (
+                f"Recent changes: {len(history)} field updates recorded"
+                if history
+                else "No recent changes"
+            )
+            response.summary = f"{response.summary}\n\n{history_summary}"
 
         return MCPResponseBuilder.success_response(response)
 
@@ -311,9 +333,27 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
         contact_data: Annotated[
             str, Field(description="JSON string with contact update data")
         ],
+        field_name: Annotated[
+            str | None,
+            Field(
+                default=None,
+                description="Optional: For field-level updates, specify the field name (first_name, last_name, middle_name, nick_name, is_favourite, or method/address/note field paths)",
+            ),
+        ] = None,
+        field_value: Annotated[
+            str | None,
+            Field(
+                default=None,
+                description="Optional: For field-level updates, specify the new field value",
+            ),
+        ] = None,
     ) -> str:
         """
         Update an existing contact for AI-managed relationship maintenance.
+
+        Supports two update modes:
+        1. Full contact update: Provide contact_data JSON with multiple fields
+        2. Field-level update: Provide field_name and field_value for single field updates
 
         Updates an existing contact with validation and returns AI-friendly confirmation.
         Supports updating contact methods, tags, and adding notes. Uses replacement
@@ -331,6 +371,8 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
                 - phone (optional): Updated primary phone number
                 - tags (optional): Updated tags (replaces existing tags)
                 - notes (optional): Additional notes to add
+            field_name: Optional field name for field-level updates
+            field_value: Optional field value for field-level updates
 
         Returns:
             JSON string containing AI-friendly contact update confirmation including:
@@ -349,61 +391,77 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
         if not existing_contact:
             raise ContactNotFoundError(request.contact_id)
 
-        # Create updated contact entity with only changed fields
-        updated_contact = Contact(
-            id=request.contact_id,
-            first_name=request.first_name or existing_contact.first_name,
-            last_name=request.last_name or existing_contact.last_name,
-            middle_name=request.middle_name or existing_contact.middle_name,
-            nick_name=request.nick_name or existing_contact.nick_name,
-        )
-
-        # Add contact methods if provided (replacement strategy)
-        if request.email:
-            email_method = ContactMethod(
-                method_type=MethodType.EMAIL,
-                value=request.email,
+        # Handle field-level update if field_name and field_value are provided
+        if field_name is not None and field_value is not None:
+            logger.info(
+                "MCP: Performing field-level update",
                 contact_id=request.contact_id,
-                is_primary=True,
+                field_name=field_name,
             )
-            updated_contact.methods.append(email_method)
-
-        if request.phone:
-            phone_method = ContactMethod(
-                method_type=MethodType.PHONE,
-                value=request.phone,
-                contact_id=request.contact_id,
-                is_primary=True,
+            await contact_service.update_contact_field(
+                request.contact_id, field_name, field_value, connection
             )
-            updated_contact.methods.append(phone_method)
-
-        # Add additional note if provided
-        if request.notes:
-            note = ContactNote(
-                content=request.notes,
-                contact_id=request.contact_id,
+            # Fetch updated contact for response
+            final_contact = await contact_service.get_contact_by_id(request.contact_id)
+            if not final_contact:
+                raise ContactNotFoundError(request.contact_id)
+        else:
+            # Handle full contact update
+            # Create updated contact entity with only changed fields
+            updated_contact = Contact(
+                id=request.contact_id,
+                first_name=request.first_name or existing_contact.first_name,
+                last_name=request.last_name or existing_contact.last_name,
+                middle_name=request.middle_name or existing_contact.middle_name,
+                nick_name=request.nick_name or existing_contact.nick_name,
             )
-            updated_contact.notes.append(note)
 
-        # Handle tags if provided - find or create tags by name (replacement strategy)
-        if request.tags is not None:
-            for tag_name in request.tags:
-                # Try to find existing tag by name
-                existing_tag = await tag_repo.find_by_name(tag_name)
+            # Add contact methods if provided (replacement strategy)
+            if request.email:
+                email_method = ContactMethod(
+                    method_type=MethodType.EMAIL,
+                    value=request.email,
+                    contact_id=request.contact_id,
+                    is_primary=True,
+                )
+                updated_contact.methods.append(email_method)
 
-                if existing_tag:
-                    # Use existing tag
-                    updated_contact.tags.append(existing_tag)
-                else:
-                    # Create new tag
-                    new_tag = Tag(name=TagName(tag_name))
-                    saved_tag = await tag_repo.save(new_tag)
-                    updated_contact.tags.append(saved_tag)
+            if request.phone:
+                phone_method = ContactMethod(
+                    method_type=MethodType.PHONE,
+                    value=request.phone,
+                    contact_id=request.contact_id,
+                    is_primary=True,
+                )
+                updated_contact.methods.append(phone_method)
 
-        # Update the contact with all methods, notes, and tags in a single transaction
-        final_contact = await contact_service.update_contact(
-            updated_contact, connection
-        )
+            # Add additional note if provided
+            if request.notes:
+                note = ContactNote(
+                    content=request.notes,
+                    contact_id=request.contact_id,
+                )
+                updated_contact.notes.append(note)
+
+            # Handle tags if provided - find or create tags by name (replacement strategy)
+            if request.tags is not None:
+                for tag_name in request.tags:
+                    # Try to find existing tag by name
+                    existing_tag = await tag_repo.find_by_name(tag_name)
+
+                    if existing_tag:
+                        # Use existing tag
+                        updated_contact.tags.append(existing_tag)
+                    else:
+                        # Create new tag
+                        new_tag = Tag(name=TagName(tag_name))
+                        saved_tag = await tag_repo.save(new_tag)
+                        updated_contact.tags.append(saved_tag)
+
+            # Update the contact with all methods, notes, and tags in a single transaction
+            final_contact = await contact_service.update_contact(
+                updated_contact, connection
+            )
 
         # Create AI-friendly response using shared converter
         response = ContactConverter.to_contact_response(
