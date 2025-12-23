@@ -497,7 +497,6 @@ jobs:
 
       - name: Setup Docker environment for e2e tests
         run: |
-          docker buildx bake --file docker-compose.yml --file docker/gha-compose-testing-cache.json
           echo "🐳 Starting Docker services for e2e tests..."
           docker compose --profile test --env-file .env.test up -d
 

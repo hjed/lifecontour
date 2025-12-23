@@ -55,16 +55,18 @@ function CallbackContent() {
           throw new Error('Missing required OAuth parameters');
         }
 
-        // Check if this is an integration OAuth callback by decoding the state
-        // Integration OAuth callbacks will have flow_type: 'integration' in the state
+        // Decode state parameter to extract flow type and provider
         let isIntegrationCallback = false;
+        let provider = 'generic';
         try {
-          // Decode the state parameter to check flow type
+          // Decode the state parameter to check flow type and provider
           const decodedState = JSON.parse(atob(state));
           isIntegrationCallback = decodedState.flow_type === 'integration';
+          provider = decodedState.provider || 'generic';
         } catch {
-          // If state decoding fails, assume it's authentication OAuth
+          // If state decoding fails, assume it's authentication OAuth with generic provider
           isIntegrationCallback = false;
+          provider = 'generic';
         }
 
         if (isIntegrationCallback) {
@@ -75,9 +77,6 @@ function CallbackContent() {
           router.replace('/integrations');
           return;
         }
-
-        // Get provider from sessionStorage (stored during login)
-        const provider = sessionStorage.getItem('oauth_provider') || 'generic';
 
         // Send callback data to backend
         const response = await fetch('/api/auth/callback', {
@@ -107,9 +106,6 @@ function CallbackContent() {
 
         // Refresh session to get user data
         await refreshSession();
-
-        // Clean up stored provider
-        sessionStorage.removeItem('oauth_provider');
 
         // Redirect to intended destination or dashboard
         const redirectTo = data.redirect_url ?? '/';

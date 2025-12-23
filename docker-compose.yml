@@ -3,10 +3,10 @@ version: '3.8'
 # Unified Docker Compose for Personal Management System
 # Supports multiple profiles: dev (default), test, test-backend, prod
 # Usage:
-#   docker compose up                          # dev profile (default)
-#   docker compose --profile test up           # test profile
-#   docker compose --profile test-backend up   # backend tests only
-#   docker compose --profile prod up           # production
+#   docker compose --env-file .env.dev up                          # dev profile (default)
+#   docker compose --profile test --env-file .env.test up          # test profile
+#   docker compose --profile test-backend --env-file .env.test up  # backend tests only
+#   docker compose --profile prod --env-file .env.prod up          # production
 #
 # Environment files:
 #   .env.dev   - Development configuration (default)

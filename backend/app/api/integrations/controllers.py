@@ -288,7 +288,8 @@ async def google_contacts_oauth_authorize(
 
         # Generate OAuth authorization URL for Google Contacts
         # Use frontend callback URL for OAuth redirect
-        callback_url = urllib.parse.urljoin(str(request.base_url), "auth/callback")
+        base_url = str(request.base_url).rstrip("/")
+        callback_url = f"{base_url}/auth/callback"
 
         authorization_url = await oauth_service.get_google_contacts_authorization_url(
             request, callback_url
@@ -358,7 +359,8 @@ async def google_contacts_oauth_callback(
     try:
         # Handle the OAuth callback and store tokens
         # Use the frontend callback URL for OAuth redirect
-        callback_url = urllib.parse.urljoin(str(request.base_url), "auth/callback")
+        base_url = str(request.base_url).rstrip("/")
+        callback_url = f"{base_url}/auth/callback"
 
         token_data = await oauth_service.handle_google_contacts_callback(
             request, callback_data.code, callback_data.state, callback_url

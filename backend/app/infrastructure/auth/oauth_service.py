@@ -34,7 +34,18 @@ class OAuthService:
     def _encode_state(
         self, provider: str, redirect_uri: str, csrf_token: str, flow_type: str = "auth"
     ) -> str:
-        """Encode OAuth state with provider info, CSRF token, and flow type."""
+        """
+        Encode OAuth state with provider info, CSRF token, and flow type.
+
+        Args:
+            provider: OAuth provider name (e.g., 'google', 'github')
+            redirect_uri: Redirect URI for OAuth callback
+            csrf_token: CSRF token for state validation
+            flow_type: Type of OAuth flow ('auth' for authentication, 'integration' for integration)
+
+        Returns:
+            Base64-encoded JSON state parameter
+        """
         state_data = {
             "provider": provider,
             "redirect_uri": redirect_uri,
