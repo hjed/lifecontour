@@ -45,6 +45,9 @@ from app.mcp.shared.response_builders import MCPResponseBuilder
 
 logger = structlog.get_logger()
 
+# Configuration constants
+DEFAULT_HISTORY_LIMIT = 10
+
 
 class TagInfo(BaseModel):
     """Information about a tag."""
@@ -62,6 +65,37 @@ class TagListResponse(BaseModel):
     total_count: int
     summary: str
     suggestions: list[str]
+
+
+def _convert_field_value(field_name: str, field_value: str) -> str | bool:
+    """
+    Convert field value to appropriate type based on field name.
+
+    Args:
+        field_name: Name of the field being updated
+        field_value: String value to convert
+
+    Returns:
+        Converted value with appropriate type
+
+    Raises:
+        ContactValidationError: If the value cannot be converted to the expected type
+    """
+    # Boolean fields
+    boolean_fields = {"is_favourite", "is_primary"}
+    if field_name in boolean_fields:
+        if field_value.lower() in ("true", "1", "yes"):
+            return True
+        elif field_value.lower() in ("false", "0", "no"):
+            return False
+        else:
+            raise ContactValidationError(
+                field_name,
+                f"Field '{field_name}' expects a boolean value (true/false), got '{field_value}'",
+            )
+
+    # String fields - return as-is
+    return field_value
 
 
 def register_contact_tools(mcp: FastMCP[None]) -> None:
@@ -123,7 +157,9 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
 
         # Add history context if requested
         if include_history:
-            history = await contact_service.get_contact_history(contact_id, limit=10)
+            history = await contact_service.get_contact_history(
+                contact_id, limit=DEFAULT_HISTORY_LIMIT
+            )
             history_summary = (
                 f"Recent changes: {len(history)} field updates recorded"
                 if history
@@ -391,6 +427,14 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
         if not existing_contact:
             raise ContactNotFoundError(request.contact_id)
 
+        # Validate field-level update parameters
+        if (field_name is None) != (field_value is None):
+            # One is provided but not the other - this is an error
+            raise ContactValidationError(
+                "field_update",
+                "Both field_name and field_value must be provided together for field-level updates",
+            )
+
         # Handle field-level update if field_name and field_value are provided
         if field_name is not None and field_value is not None:
             logger.info(
@@ -398,8 +442,10 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
                 contact_id=request.contact_id,
                 field_name=field_name,
             )
+            # Convert field_value to appropriate type based on field_name
+            converted_value = _convert_field_value(field_name, field_value)
             await contact_service.update_contact_field(
-                request.contact_id, field_name, field_value, connection
+                request.contact_id, field_name, converted_value, connection
             )
             # Fetch updated contact for response
             final_contact = await contact_service.get_contact_by_id(request.contact_id)
