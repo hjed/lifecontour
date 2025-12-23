@@ -60,7 +60,7 @@ test.describe('Contact Inline Editing', () => {
     await input.fill('UpdatedFirstName');
 
     await page.keyboard.press('Enter');
-    await page.waitForTimeout(500);
+    await page.waitForLoadState('networkidle');
 
     await expect(firstNameField).toContainText('UpdatedFirstName');
   });
