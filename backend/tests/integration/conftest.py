@@ -726,12 +726,12 @@ def authenticated_app(test_settings):
 def mock_search_service():
     """Create a mock search service for testing."""
     from typing import Any
-    from unittest.mock import AsyncMock
+    from unittest.mock import MagicMock
 
     def _create_mock_service(search_results: dict[str, Any]):
-        mock_service = AsyncMock()
-        mock_service.search_contacts = AsyncMock(return_value=search_results)
-        mock_service.global_search = AsyncMock(return_value=search_results)
+        mock_service = MagicMock()
+        mock_service.search_contacts.return_value = search_results
+        mock_service.global_search.return_value = search_results
         return mock_service
 
     return _create_mock_service
@@ -742,8 +742,8 @@ def authenticated_search_client(test_settings, mock_search_service, test_user):
     """
     Create a test client with authentication and search service mocking.
 
-    Returns a tuple of (test_client, mock_service_factory).
-    The mock_service_factory can be called with search results to set up the mock.
+    Returns a tuple of (test_client, setup_search_mock).
+    The setup_search_mock can be called with search results to set up the mock.
     """
     from typing import Any
 
@@ -754,8 +754,8 @@ def authenticated_search_client(test_settings, mock_search_service, test_user):
     from app.infrastructure.auth.models import SessionUser
     from app.infrastructure.search.search_service import SearchService
 
-    # Store the mock service so it can be updated
-    mock_search_service_instance = None
+    # Use a mutable container to store the mock service so it can be updated
+    mock_service_container = {"instance": None}
 
     class TestAuthSearchProvider(Provider):
         """Test provider for authenticated search client."""
@@ -769,16 +769,15 @@ def authenticated_search_client(test_settings, mock_search_service, test_user):
         @provide(scope=Scope.REQUEST)
         def get_search_service(self) -> SearchService:
             # Return the mock service if it's been set up
-            if mock_search_service_instance is not None:
-                return mock_search_service_instance
+            if mock_service_container["instance"] is not None:
+                return mock_service_container["instance"]
             # Otherwise return a real service (which will fail if MeiliSearch is not available)
             return SearchService()
 
     def setup_search_mock(search_results: dict[str, Any]):
         """Setup search mock for testing."""
-        nonlocal mock_search_service_instance
-        mock_search_service_instance = mock_search_service(search_results)
-        return mock_search_service_instance
+        mock_service_container["instance"] = mock_search_service(search_results)
+        return mock_service_container["instance"]
 
     # Create app with test settings
     from dishka.integrations.fastapi import FastapiProvider
