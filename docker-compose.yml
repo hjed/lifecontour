@@ -216,6 +216,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      oauth-init:
+        condition: service_completed_successfully
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
       interval: 30s
