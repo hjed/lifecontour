@@ -123,7 +123,9 @@ export default defineConfig({
   webServer: {
     command: 'pnpm dev',
     url: 'http://localhost:3000',
-    reuseExistingServer: !process.env.CI,
+    // In CI, Docker compose starts the frontend, so reuse it
+    // Locally, start the dev server if not already running
+    reuseExistingServer: true,
     timeout: 120 * 1000, // 2 minutes for dev server to start
     env: {
       BACKEND_URL: 'http://localhost:8001', // Use test backend port
