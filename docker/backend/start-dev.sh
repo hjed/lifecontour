@@ -7,17 +7,30 @@ set -e
 
 echo "🚀 Starting Personal Management System Backend (Development Mode)"
 
+# Extract database connection info from DATABASE_URL
+# Format: postgresql://user:password@host:port/database
+DB_HOST=$(echo "$DATABASE_URL" | sed -E 's/.*@([^:]+):.*/\1/')
+DB_PORT=$(echo "$DATABASE_URL" | sed -E 's/.*:([0-9]+)\/.*/\1/')
+DB_USER=$(echo "$DATABASE_URL" | sed -E 's/postgresql:\/\/([^:]+):.*/\1/')
+DB_NAME=$(echo "$DATABASE_URL" | sed -E 's/.*\/([^?]+).*/\1/')
+
+echo "📋 Database connection: host=$DB_HOST port=$DB_PORT user=$DB_USER db=$DB_NAME"
+
 # Wait for database to be ready
 echo "⏳ Waiting for database to be ready..."
-while ! pg_isready -h postgres-dev -p 5432 -U dev_user -d personal_management_dev; do
+while ! pg_isready -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME"; do
     echo "Database not ready, waiting..."
     sleep 2
 done
 echo "✅ Database is ready!"
 
+# Extract meilisearch host from MEILISEARCH_URL
+# Format: http://hostname:port
+MEILI_HOST=$(echo "$MEILISEARCH_URL" | sed -E 's/https?:\/\///')
+
 # Wait for MeiliSearch to be ready
 echo "⏳ Waiting for MeiliSearch to be ready..."
-while ! curl -f http://meilisearch-dev:7700/health > /dev/null 2>&1; do
+while ! curl -f "http://$MEILI_HOST/health" > /dev/null 2>&1; do
     echo "MeiliSearch not ready, waiting..."
     sleep 2
 done
