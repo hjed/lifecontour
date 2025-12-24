@@ -1,6 +1,11 @@
 """Integration tests for JournalContactRelationshipRepository."""
 
+from datetime import UTC, datetime, timedelta
+
 import pytest
+import pytest_asyncio
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core.journal.adapters.sql.journal_contact_relationship_repository import (
     SqlJournalContactRelationshipRepository,
@@ -13,57 +18,61 @@ from app.core.journal.models.journal_relationship_types import (
 )
 
 
+@pytest_asyncio.fixture
+async def rel_repo(
+    async_connection: AsyncConnection,
+) -> SqlJournalContactRelationshipRepository:
+    """Create a relationship repository instance."""
+    return SqlJournalContactRelationshipRepository(async_connection)
+
+
+@pytest_asyncio.fixture
+async def sample_journal_and_contact(
+    async_connection: AsyncConnection,
+) -> tuple[int, int]:
+    """Create sample journal and contact for testing."""
+    # Create a journal
+    journal_query = text(
+        """
+        INSERT INTO journals (user_id, title, content, event_date_range_start, event_date_range_end)
+        VALUES (:user_id, :title, :content, :start, :end)
+        RETURNING id
+    """
+    )
+    now = datetime.now(UTC)
+    journal_result = await async_connection.execute(
+        journal_query,
+        {
+            "user_id": "test_user",
+            "title": "Test Journal",
+            "content": "Test content",
+            "start": now,
+            "end": now + timedelta(hours=1),
+        },
+    )
+    journal_id = journal_result.scalar()
+    assert journal_id is not None
+
+    # Create a contact
+    contact_query = text(
+        """
+        INSERT INTO contacts (first_name)
+        VALUES (:first_name)
+        RETURNING id
+    """
+    )
+    contact_result = await async_connection.execute(
+        contact_query, {"first_name": "Test Contact"}
+    )
+    contact_id = contact_result.scalar()
+    assert contact_id is not None
+
+    return journal_id, contact_id
+
+
 @pytest.mark.integration
 class TestJournalContactRelationshipRepositoryIntegration:
     """Integration tests for journal-contact relationship repository."""
-
-    @pytest.fixture
-    async def rel_repo(self, async_connection):
-        """Create a relationship repository instance."""
-        return SqlJournalContactRelationshipRepository(async_connection)
-
-    @pytest.fixture
-    async def sample_journal_and_contact(self, async_connection):
-        """Create sample journal and contact for testing."""
-        from datetime import UTC, datetime, timedelta
-
-        from sqlalchemy import text
-
-        # Create a journal
-        journal_query = text(
-            """
-            INSERT INTO journals (user_id, title, content, event_date_range_start, event_date_range_end)
-            VALUES (:user_id, :title, :content, :start, :end)
-            RETURNING id
-        """
-        )
-        now = datetime.now(UTC)
-        journal_result = await async_connection.execute(
-            journal_query,
-            {
-                "user_id": "test_user",
-                "title": "Test Journal",
-                "content": "Test content",
-                "start": now,
-                "end": now + timedelta(hours=1),
-            },
-        )
-        journal_id = journal_result.scalar()
-
-        # Create a contact
-        contact_query = text(
-            """
-            INSERT INTO contacts (first_name)
-            VALUES (:first_name)
-            RETURNING id
-        """
-        )
-        contact_result = await async_connection.execute(
-            contact_query, {"first_name": "Test Contact"}
-        )
-        contact_id = contact_result.scalar()
-
-        return journal_id, contact_id
 
     async def test_create_relationship(self, rel_repo, sample_journal_and_contact):
         """Test creating a relationship."""

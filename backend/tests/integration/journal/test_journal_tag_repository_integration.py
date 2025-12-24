@@ -3,19 +3,22 @@
 from uuid import uuid4
 
 import pytest
+import pytest_asyncio
+from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core.journal.adapters.sql.journal_tag_repository import SqlJournalTagRepository
 from app.core.journal.models.journal_tag import JournalTag
 
 
+@pytest_asyncio.fixture
+async def tag_repo(async_connection: AsyncConnection) -> SqlJournalTagRepository:
+    """Create a tag repository instance."""
+    return SqlJournalTagRepository(async_connection)
+
+
 @pytest.mark.integration
 class TestJournalTagRepositoryIntegration:
     """Integration tests for journal tag repository."""
-
-    @pytest.fixture
-    async def tag_repo(self, async_connection):
-        """Create a tag repository instance."""
-        return SqlJournalTagRepository(async_connection)
 
     async def test_save_new_tag(self, tag_repo):
         """Test saving a new tag."""
