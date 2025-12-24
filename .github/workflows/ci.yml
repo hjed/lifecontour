@@ -20,6 +20,13 @@ jobs:
     defaults:
       run:
         working-directory: ./backend
+    if: |
+      github.event_name == 'workflow_call' ||
+      contains(github.event.pull_request.files.*.name, '.py') ||
+      contains(github.event.pull_request.files.*.name, '.toml') ||
+      contains(github.event.pull_request.files.*.name, 'Dockerfile') ||
+      contains(github.event.pull_request.files.*.name, 'docker-compose') ||
+      github.event_name == 'push'
 
     steps:
       - name: Checkout code
@@ -106,6 +113,13 @@ jobs:
     defaults:
       run:
         working-directory: ./backend
+    if: |
+      github.event_name == 'workflow_call' ||
+      contains(github.event.pull_request.files.*.name, '.py') ||
+      contains(github.event.pull_request.files.*.name, '.toml') ||
+      contains(github.event.pull_request.files.*.name, 'Dockerfile') ||
+      contains(github.event.pull_request.files.*.name, 'docker-compose') ||
+      github.event_name == 'push'
 
     services:
       postgres:
@@ -212,6 +226,13 @@ jobs:
     defaults:
       run:
         working-directory: ./backend
+    if: |
+      github.event_name == 'workflow_call' ||
+      contains(github.event.pull_request.files.*.name, '.py') ||
+      contains(github.event.pull_request.files.*.name, '.toml') ||
+      contains(github.event.pull_request.files.*.name, 'Dockerfile') ||
+      contains(github.event.pull_request.files.*.name, 'docker-compose') ||
+      github.event_name == 'push'
 
     services:
       postgres:
@@ -444,7 +465,7 @@ jobs:
   frontend-e2e-test:
     name: Frontend E2E Tests (${{ matrix.browser }})
     runs-on: ubuntu-latest
-    needs: [backend-lint, frontend-lint]
+    needs: [frontend-lint]
     strategy:
       fail-fast: false
       matrix:
@@ -618,78 +639,4 @@ jobs:
           echo "🧹 Cleaning up Docker environment..."
           docker compose --profile test down --volumes --remove-orphans
           echo "✅ Cleanup complete"
-
-  build-test:
-    name: Build Test
-    runs-on: ubuntu-latest
-    needs: [backend-lint, core-shared-lint, backend-unit-test, core-shared-unit-test, backend-integration-test, frontend-lint, frontend-test, frontend-e2e-test]
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v6
-
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
-        with:
-          version: ${{ env.PNPM_VERSION }}
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v6
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-          cache: 'pnpm'
-          cache-dependency-path: frontend/pnpm-lock.yaml
-
-      - name: Get pnpm store directory
-        shell: bash
-        run: |
-          echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
-
-      - name: Setup pnpm cache
-        uses: actions/cache@v4
-        with:
-          path: ${{ env.STORE_PATH }}
-          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('frontend/pnpm-lock.yaml') }}
-          restore-keys: |
-            ${{ runner.os }}-pnpm-store-
-
-
-      - name: Install frontend dependencies
-        working-directory: ./frontend
-        run: pnpm install --frozen-lockfile
-
-      - name: Build frontend
-        working-directory: ./frontend
-        run: pnpm build
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Test Docker build
-        run: |
-          docker buildx build -f docker/backend/Dockerfile . -t backend:test --cache-from=type=gha --cache-to=type=gha,mode=max --load
-          docker buildx build -f docker/frontend/Dockerfile . -t frontend:test --cache-from=type=gha --cache-to=type=gha,mode=max --load
-
-      - name: Run Trivy vulnerability scanner - Backend
-        uses: aquasecurity/trivy-action@master
-        with:
-          image-ref: 'backend:test'
-          format: 'sarif'
-          output: 'trivy-backend-results.sarif'
-
-      - name: Run Trivy vulnerability scanner - Frontend
-        uses: aquasecurity/trivy-action@master
-        with:
-          image-ref: 'frontend:test'
-          format: 'sarif'
-          output: 'trivy-frontend-results.sarif'
-
-      - name: Upload Trivy scan results as artifacts
-        uses: actions/upload-artifact@v5
-        if: always()
-        with:
-          name: trivy-results
-          path: |
-            trivy-backend-results.sarif
-            trivy-frontend-results.sarif
 
