@@ -766,7 +766,7 @@ def authenticated_search_client(test_settings, mock_search_service, test_user):
 
             return cast(SessionUser, test_user)
 
-        @provide(scope=Scope.REQUEST)
+        @provide(scope=Scope.APP)
         def get_search_service(self) -> SearchService:
             # Return the mock service if it's been set up
             if mock_service_container["instance"] is not None:
@@ -784,7 +784,6 @@ def authenticated_search_client(test_settings, mock_search_service, test_user):
 
     from app.infrastructure.di.contacts import ContactProvider
     from app.infrastructure.di.database import DatabaseProvider
-    from app.infrastructure.di.infrastructure import InfrastructureProvider
     from app.infrastructure.di.integrations import IntegrationProvider
     from app.infrastructure.di.journal import JournalProvider
     from app.main import create_app
@@ -792,19 +791,17 @@ def authenticated_search_client(test_settings, mock_search_service, test_user):
     app = create_app(settings=test_settings)
 
     # Replace container with test container
+    # Note: We don't include InfrastructureProvider because TestAuthSearchProvider
+    # provides SearchService, and we want to use the mock instead of the real service
     test_container = make_async_container(
         DatabaseProvider(test_settings),
-        InfrastructureProvider(),
         TestAuthSearchProvider(),
         ContactProvider(),
         JournalProvider(),
         IntegrationProvider(),
         FastapiProvider(),
     )
-    try:
-        app.state.dishka_container.close()
-    except RuntimeError:
-        pass
+    # Don't try to close the old container - just replace it
     app.state.dishka_container = test_container
     setup_dishka(test_container, app)
 
