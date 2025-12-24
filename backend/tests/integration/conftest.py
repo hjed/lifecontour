@@ -809,13 +809,15 @@ def authenticated_search_client(test_settings, mock_search_service, test_user):
 
     # Replace container with test container
     # TestAuthSearchProvider provides Settings, SessionUser, and SearchService
-    # This replaces InfrastructureProvider so we can use our mock SearchService
+    # IMPORTANT: TestAuthSearchProvider must come AFTER ContactProvider because
+    # ContactProvider also provides SearchService (duplicate in production code).
+    # Later providers override earlier ones in Dishka.
     test_container = make_async_container(
         DatabaseProvider(test_settings),
-        TestAuthSearchProvider(),
         ContactProvider(),
         JournalProvider(),
         IntegrationProvider(),
+        TestAuthSearchProvider(),  # Must be after ContactProvider to override SearchService
         FastapiProvider(),
     )
     # Don't try to close the old container - just replace it
