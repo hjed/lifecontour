@@ -745,13 +745,14 @@ def authenticated_search_client(test_settings, mock_search_service, test_user):
     Returns a tuple of (test_client, setup_search_mock).
     The setup_search_mock can be called with search results to set up the mock.
     """
-    from typing import Any
+    from typing import Any, cast
 
     from dishka import Provider, Scope, make_async_container, provide
     from dishka.integrations.fastapi import setup_dishka
     from fastapi.testclient import TestClient
 
     from app.infrastructure.auth.models import SessionUser
+    from app.infrastructure.config import Settings
     from app.infrastructure.search.search_service import SearchService
 
     # Use a mutable container to store the mock service so it can be updated
@@ -776,10 +777,13 @@ def authenticated_search_client(test_settings, mock_search_service, test_user):
     class TestAuthSearchProvider(Provider):
         """Test provider for authenticated search client."""
 
+        @provide(scope=Scope.APP)
+        def get_settings(self) -> Settings:
+            """Get test settings for app scope."""
+            return cast(Settings, test_settings)
+
         @provide(scope=Scope.REQUEST)
         def get_session_user(self) -> SessionUser:
-            from typing import cast
-
             return cast(SessionUser, test_user)
 
         @provide(scope=Scope.APP)
@@ -804,8 +808,8 @@ def authenticated_search_client(test_settings, mock_search_service, test_user):
     app = create_app(settings=test_settings)
 
     # Replace container with test container
-    # Note: We don't include InfrastructureProvider because TestAuthSearchProvider
-    # provides SearchService, and we want to use the mock instead of the real service
+    # TestAuthSearchProvider provides Settings, SessionUser, and SearchService
+    # This replaces InfrastructureProvider so we can use our mock SearchService
     test_container = make_async_container(
         DatabaseProvider(test_settings),
         TestAuthSearchProvider(),
