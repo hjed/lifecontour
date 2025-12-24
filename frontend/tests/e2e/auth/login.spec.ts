@@ -485,9 +485,19 @@ test.describe('Login Page - Authenticated Users', () => {
     authenticatedPage,
   }) => {
     // Try to navigate to login page when already authenticated
+    // The AuthProvider will check the session and redirect away from login
     await authenticatedPage.goto('/auth/login');
 
-    // Should be redirected away from login page (likely to dashboard or contacts)
+    // Wait for the redirect to complete (should redirect away from /auth/login)
+    // The redirect happens in the login page's useEffect when isAuthenticated is true
+    await authenticatedPage.waitForURL(
+      url => !url.pathname.includes('/auth/login'),
+      {
+        timeout: 5000,
+      }
+    );
+
+    // Verify we're no longer on the login page
     await expect(authenticatedPage).not.toHaveURL(/\/auth\/login/);
 
     // Should not see login form
@@ -506,6 +516,14 @@ test.describe('Login Page - Authenticated Users', () => {
 
     // Try to access login page
     await authenticatedPage.goto('/auth/login');
+
+    // Wait for the redirect to complete (should redirect away from /auth/login)
+    await authenticatedPage.waitForURL(
+      url => !url.pathname.includes('/auth/login'),
+      {
+        timeout: 5000,
+      }
+    );
 
     // Should be redirected to an authenticated page, not login
     await expect(authenticatedPage).not.toHaveURL(/\/auth\/login/);

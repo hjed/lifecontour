@@ -204,11 +204,10 @@ test.describe('OAuth Docker Integration', () => {
   }) => {
     console.log('1. Testing OAuth callback handling with Docker setup...');
 
-    // Set up session storage as if we initiated OAuth
-    await page.goto('/auth/login');
-    await page.evaluate(() => {
-      sessionStorage.setItem('oauth_provider', 'generic');
-    });
+    // Encode state parameter with flow_type and provider
+    const state = btoa(
+      JSON.stringify({ flow_type: 'auth', provider: 'generic' })
+    );
 
     // Track callback requests
     const callbackRequests: { method: string; url: string; status?: number }[] =
@@ -230,7 +229,7 @@ test.describe('OAuth Docker Integration', () => {
 
     // Test callback with mock parameters
     console.log('3. Testing callback with mock OAuth parameters...');
-    await page.goto('/auth/callback?code=test-code&state=test-state');
+    await page.goto(`/auth/callback?code=test-code&state=${state}`);
     await page.waitForTimeout(3000);
 
     // Verify callback request was made

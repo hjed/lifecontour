@@ -54,7 +54,29 @@ The development environment includes these services:
 
 ## 🛠️ Development Commands
 
-### Service Management
+### Service Management (Unified Docker Compose)
+
+```bash
+# Start all services (dev profile - default)
+docker compose up
+
+# Stop all services
+docker compose down
+
+# Restart specific service
+docker compose restart frontend
+
+# View service status
+docker compose ps
+
+# View logs for all services
+docker compose logs -f
+
+# View logs for specific service
+docker compose logs -f backend
+```
+
+### Legacy Commands (Still Supported)
 
 ```bash
 # Start all services
@@ -64,88 +86,130 @@ The development environment includes these services:
 ./scripts/dev.sh docker-stop
 
 # Restart specific service
-./scripts/dev.sh docker-restart frontend-dev
+./scripts/dev.sh docker-restart backend-dev
 
 # View service status
 ./scripts/dev.sh docker-status
 ```
 
-### Logs and Debugging
+### Logs and Debugging (Unified Docker Compose)
 
 ```bash
 # View logs for all services
-./scripts/dev.sh docker-logs
+docker compose logs
 
 # View logs for specific service
-./scripts/dev.sh docker-logs backend-dev
+docker compose logs backend
 
 # Follow logs in real-time
-./scripts/dev.sh docker-logs backend-dev -f
+docker compose logs -f backend
 
 # View last 50 lines
-./scripts/dev.sh docker-logs frontend-dev --tail 50
+docker compose logs --tail 50 frontend
+
+# View logs with timestamps
+docker compose logs --timestamps backend
 ```
 
-### Database Operations
+### Database Operations (Unified Docker Compose)
 
 ```bash
 # Run database migrations
-./scripts/dev.sh docker-exec backend-dev alembic upgrade head
+docker compose exec backend alembic upgrade head
 
 # Create new migration
-./scripts/dev.sh docker-exec backend-dev alembic revision --autogenerate -m "Description"
+docker compose exec backend alembic revision --autogenerate -m "Description"
 
 # Access database shell
-./scripts/dev.sh docker-exec database psql -U dev_user -d personal_management_dev
+docker compose exec database psql -U postgres -d personal_management
 
 # Reset database (WARNING: destroys all data)
-./scripts/dev.sh docker-stop
-docker volume rm personal-management-system_postgres_data
-./scripts/dev.sh docker-start
+docker compose down -v
+docker compose up database
 ```
 
-### Code Quality and Testing
+### Legacy Database Commands
+
+```bash
+# Run database migrations (old)
+./scripts/dev.sh docker-exec backend-dev alembic upgrade head
+
+# Create new migration (old)
+./scripts/dev.sh docker-exec backend-dev alembic revision --autogenerate -m "Description"
+
+# Access database shell (old)
+./scripts/dev.sh docker-exec database psql -U dev_user -d personal_management_dev
+```
+
+### Code Quality and Testing (Unified Docker Compose)
 
 ```bash
 # Run linting and type checking
-./scripts/dev.sh docker-exec backend-dev uv run ruff check .
-./scripts/dev.sh docker-exec backend-dev uv run mypy .
-./scripts/dev.sh docker-exec frontend-dev pnpm lint
+docker compose exec backend uv run ruff check .
+docker compose exec backend uv run mypy .
+docker compose exec frontend pnpm lint
 
 # Run tests
-./scripts/dev.sh docker-exec backend-dev uv run pytest
-./scripts/dev.sh docker-exec frontend-dev pnpm test
+docker compose exec backend uv run pytest
+docker compose exec frontend pnpm test
 
 # Run tests with coverage
-./scripts/dev.sh docker-exec backend-dev uv run pytest --cov=app
-./scripts/dev.sh docker-exec frontend-dev pnpm test:coverage
+docker compose exec backend uv run pytest --cov=app
+docker compose exec frontend pnpm test:coverage
+
+# Run e2e tests
+docker compose --profile test --env-file .env.test up
+cd frontend && pnpm test:e2e
+docker compose --profile test down -v
 ```
 
 ## 🔧 Configuration
 
-### Environment Variables
+### Environment Variables (Unified Docker Compose)
 
-The Docker environment uses these configuration files:
+The unified Docker Compose setup uses these configuration files:
 
-- **`docker-compose.dev.yml`**: Main development configuration
-- **`docker/.env.dev`**: Development environment variables
-- **`backend/.env.dev`**: Backend-specific development settings
-- **`frontend/.env.local`**: Frontend environment variables
+- **`docker-compose.yml`**: Unified configuration with profiles
+- **`.env.dev`**: Development environment variables (default)
+- **`.env.test`**: Testing environment variables
+- **`.env.prod`**: Production environment variables
 
 ### Key Environment Variables
 
+**Development (.env.dev):**
 ```bash
+# Database
+DB_NAME=personal_management_dev
+DB_USER=dev_user
+DB_PASSWORD=dev_password
+DB_PORT=5432
+
 # Backend
-DATABASE_URL=postgresql://dev_user:dev_password@database:5432/personal_management_dev
-MEILISEARCH_URL=http://search:7700
-OAUTH_PROVIDER_URL=http://oauth-provider:4444
 DEBUG=true
+LOG_LEVEL=DEBUG
+OAUTH_CLIENT_ID=dev-client-id
+OAUTH_CLIENT_SECRET=dev-client-secret
 
 # Frontend
-NEXT_PUBLIC_API_URL=http://localhost:8000
-NEXT_PUBLIC_OAUTH_URL=http://localhost:4444
 NODE_ENV=development
+NEXT_PUBLIC_API_URL=http://localhost:8000
 ```
+
+**Testing (.env.test):**
+```bash
+# Database
+DB_NAME=personal_management_test
+DB_USER=postgres
+DB_PASSWORD=postgres
+DB_PORT=5433
+
+# Backend
+DEBUG=true
+OAUTH_CLIENT_ID=test-client-id
+OAUTH_CLIENT_SECRET=test-client-secret
+```
+
+For complete configuration details, see [Docker Compose Unified Setup](../DOCKER_COMPOSE_UNIFIED.md).
 
 ## 🚀 Development Features
 

@@ -497,15 +497,14 @@ jobs:
 
       - name: Setup Docker environment for e2e tests
         run: |
-          docker buildx bake --file docker-compose.test.yml --file docker/gha-compose-testing-cache.json
           echo "🐳 Starting Docker services for e2e tests..."
-          docker compose -f docker-compose.test.yml up -d
+          docker compose --profile test --env-file .env.test up -d
 
           echo "📋 Checking Docker services status..."
-          docker compose -f docker-compose.test.yml ps
+          docker compose --profile test ps
 
           echo "📋 Checking Docker service logs for any immediate errors..."
-          docker compose -f docker-compose.test.yml logs --tail=20
+          docker compose --profile test logs --tail=20
 
           echo "⏳ Waiting for services to be ready..."
 
@@ -519,7 +518,7 @@ jobs:
             echo "Backend not ready yet... ($i/60)"
             if [ $i -eq 60 ]; then
               echo "❌ Backend failed to start. Checking logs..."
-              docker compose -f docker-compose.test.yml logs backend-test
+              docker compose --profile test logs backend
               exit 1
             fi
             sleep 5
@@ -528,14 +527,14 @@ jobs:
           # Wait for OAuth provider to be ready
           echo "Waiting for OAuth provider..."
           for i in {1..60}; do
-            if curl -f -s http://localhost:4447/health/ready > /dev/null 2>&1; then
+            if curl -f -s http://localhost:4446/health/ready > /dev/null 2>&1; then
               echo "✅ OAuth provider is ready!"
               break
             fi
             echo "OAuth provider not ready yet... ($i/60)"
             if [ $i -eq 60 ]; then
               echo "❌ OAuth provider failed to start. Checking logs..."
-              docker compose -f docker-compose.test.yml logs oauth-provider-test
+              docker compose --profile test logs oauth-provider
               exit 1
             fi
             sleep 5
@@ -551,15 +550,15 @@ jobs:
             echo "MeiliSearch not ready yet... ($i/60)"
             if [ $i -eq 60 ]; then
               echo "❌ MeiliSearch failed to start. Checking logs..."
-              docker compose -f docker-compose.test.yml logs meilisearch-test
+              docker compose --profile test logs meilisearch
               exit 1
             fi
             sleep 5
           done
 
           # OAuth initialization is handled automatically by Docker Compose dependencies
-          # The backend service depends on oauth-init-test with condition: service_completed_successfully
-          # So if the backend is healthy, oauth-init-test must have completed successfully
+          # The backend service depends on oauth-init with condition: service_completed_successfully
+          # So if the backend is healthy, oauth-init must have completed successfully
           echo "✅ OAuth initialization is handled by Docker Compose dependencies"
 
           echo "🎉 All services are ready for e2e tests!"
@@ -572,7 +571,7 @@ jobs:
           echo "✅ Backend health check passed"
 
           echo "Testing OAuth provider health..."
-          curl -f -s http://localhost:4447/health/ready || (echo "❌ OAuth provider health check failed" && exit 1)
+          curl -f -s http://localhost:4446/health/ready || (echo "❌ OAuth provider health check failed" && exit 1)
           echo "✅ OAuth provider health check passed"
 
           echo "Testing MeiliSearch health..."
@@ -617,7 +616,7 @@ jobs:
         if: always()
         run: |
           echo "🧹 Cleaning up Docker environment..."
-          docker compose -f docker-compose.test.yml down --volumes --remove-orphans
+          docker compose --profile test down --volumes --remove-orphans
           echo "✅ Cleanup complete"
 
   build-test:

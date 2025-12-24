@@ -115,14 +115,22 @@ Add status badges to your README.md (see `.github/README-badges.md`)
 
 ## Local Development Integration
 
-The CI/CD setup integrates with local development scripts:
+The CI/CD setup integrates with local development and Docker Compose:
 
 ```bash
 # Run the same checks locally
 ./scripts/dev.sh lint      # Same as CI linting
 ./scripts/dev.sh test      # Same as CI testing
 ./scripts/dev.sh lint-fix  # Fix linting issues
+
+# Run tests with Docker Compose
+docker compose --profile test --env-file .env.test up
+cd frontend && pnpm test:e2e
+cd backend && pytest tests/integration/
+docker compose --profile test down -v
 ```
+
+For detailed Docker Compose setup, see [Docker Compose Unified Setup](./DOCKER_COMPOSE_UNIFIED.md).
 
 ## Coverage Requirements
 

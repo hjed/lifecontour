@@ -13,6 +13,8 @@ from dishka.integrations.fastapi import FastapiProvider, setup_dishka
 from fastapi.testclient import TestClient
 
 from app.infrastructure.auth.models import SessionUser
+from app.infrastructure.auth.oauth_service import OAuthService
+from app.infrastructure.config import Settings
 from app.infrastructure.di.contacts import ContactProvider
 from app.infrastructure.di.database import DatabaseProvider
 from app.infrastructure.di.infrastructure import InfrastructureProvider
@@ -43,6 +45,10 @@ class TestIntegrationsControllers:
             @provide(scope=Scope.REQUEST)
             def get_session_user(self) -> SessionUser:
                 return test_user  # type: ignore
+
+            @provide(scope=Scope.REQUEST)
+            def get_oauth_service(self, settings: Settings) -> OAuthService:
+                return OAuthService(settings)
 
         # Create app with test settings
         app = create_app(settings=test_settings)
@@ -257,15 +263,147 @@ class TestIntegrationsControllers:
             assert "error" in data["services"]
             assert "Health service failed" in data["services"]["error"]["message"]
 
-    def test_get_google_contacts_status_mock(self, client: TestClient):
-        """Test Google Contacts status endpoint (still mock)."""
+    def test_get_google_contacts_status_disconnected(self, client: TestClient):
+        """Test Google Contacts status endpoint returns disconnected state."""
         # Make request
         response = client.get("/api/integrations/google/contacts/status")
 
-        # Verify response (this endpoint still returns mock data)
+        # Verify JSON API response format
         assert response.status_code == 200
         data = response.json()
-        assert data["integration"] == "google_contacts"
-        assert data["status"] == "active"
-        assert "last_sync" in data
-        assert "next_sync" in data
+
+        # Verify JSON API structure
+        assert "data" in data
+        assert data["data"]["id"] == "google-contacts"
+        assert data["data"]["type"] == "integration-status"
+
+        # Verify attributes (using camelCase as per JSON API)
+        attributes = data["data"]["attributes"]
+        assert attributes["connected"] is False
+        assert attributes["status"] == "disconnected"
+        assert attributes["syncCount"] == 0
+        assert attributes["lastSync"] is None
+
+    # OAuth Integration Tests
+    def test_google_contacts_oauth_authorize_success(self, client: TestClient):
+        """Test successful Google Contacts OAuth authorization initiation."""
+        with patch(
+            "app.infrastructure.auth.oauth_service.OAuthService.get_google_contacts_authorization_url"
+        ) as mock_auth_url:
+            # Mock successful authorization URL generation with state parameter
+            mock_auth_url.return_value = "https://accounts.google.com/oauth/authorize?client_id=test&redirect_uri=test&scope=contacts&state=test_state_123"
+
+            # Make request
+            response = client.post(
+                "/api/integrations/google/contacts/oauth/authorize",
+                json={"redirect_url": "/integrations"},
+            )
+
+            # Verify response
+            assert response.status_code == 200
+            data = response.json()
+            assert "authorization_url" in data
+            assert "state" in data
+            assert data["authorization_url"].startswith(
+                "https://accounts.google.com/oauth/authorize"
+            )
+            assert data["state"] == "test_state_123"
+
+            # Verify service was called
+            mock_auth_url.assert_called_once()
+
+    def test_google_contacts_oauth_authorize_missing_provider(self, client: TestClient):
+        """Test OAuth authorization when Google provider is not configured."""
+        with patch(
+            "app.infrastructure.auth.oauth_service.OAuthService.get_google_contacts_authorization_url"
+        ) as mock_auth_url:
+            # Mock provider not configured error
+            from fastapi import HTTPException
+
+            mock_auth_url.side_effect = HTTPException(
+                status_code=400, detail="Google OAuth provider not configured"
+            )
+
+            # Make request
+            response = client.post(
+                "/api/integrations/google/contacts/oauth/authorize",
+                json={"redirect_url": "/integrations"},
+            )
+
+            # Verify error response (JSON API format)
+            assert response.status_code == 400
+            data = response.json()
+            assert "errors" in data
+            assert len(data["errors"]) > 0
+            assert "Google OAuth provider not configured" in data["errors"][0]["detail"]
+
+    def test_google_contacts_oauth_callback_success(self, client: TestClient):
+        """Test successful Google Contacts OAuth callback."""
+        with patch(
+            "app.infrastructure.auth.oauth_service.OAuthService.handle_google_contacts_callback"
+        ) as mock_callback:
+            # Mock successful callback handling
+            mock_callback.return_value = {
+                "access_token": "test_access_token",
+                "refresh_token": "test_refresh_token",
+                "expires_at": "2024-12-31T23:59:59Z",
+            }
+
+            # Make request
+            response = client.post(
+                "/api/integrations/google/contacts/oauth/callback",
+                json={"code": "test_auth_code", "state": "test_state"},
+            )
+
+            # Verify response
+            assert response.status_code == 200
+            data = response.json()
+            assert data["success"] is True
+            assert "Google Contacts connected successfully" in data["message"]
+            assert data["redirect_url"] == "/integrations"
+
+            # Verify service was called
+            mock_callback.assert_called_once()
+
+    def test_google_contacts_oauth_callback_invalid_code(self, client: TestClient):
+        """Test OAuth callback with invalid authorization code."""
+        with patch(
+            "app.infrastructure.auth.oauth_service.OAuthService.handle_google_contacts_callback"
+        ) as mock_callback:
+            # Mock invalid code error
+            mock_callback.side_effect = ValueError("Invalid authorization code")
+
+            # Make request
+            response = client.post(
+                "/api/integrations/google/contacts/oauth/callback",
+                json={"code": "invalid_code", "state": "test_state"},
+            )
+
+            # Verify error response (JSON API format)
+            assert response.status_code == 400
+            data = response.json()
+            assert "errors" in data
+            assert len(data["errors"]) > 0
+            assert "Invalid authorization code" in data["errors"][0]["detail"]
+
+    def test_google_contacts_oauth_disconnect_not_implemented(self, client: TestClient):
+        """Test Google Contacts OAuth disconnect (not implemented)."""
+        with patch(
+            "app.infrastructure.auth.oauth_service.OAuthService.disconnect_google_contacts"
+        ) as mock_disconnect:
+            # Mock not implemented (returns False)
+            mock_disconnect.return_value = False
+
+            # Make request
+            response = client.delete(
+                "/api/integrations/google/contacts/oauth/disconnect"
+            )
+
+            # Verify response
+            assert response.status_code == 200
+            data = response.json()
+            assert data["success"] is False
+            assert "not yet implemented" in data["message"]
+
+            # Verify service was called
+            mock_disconnect.assert_called_once()

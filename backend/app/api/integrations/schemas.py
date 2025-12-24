@@ -74,6 +74,51 @@ class IntegrationStatusResponse(BaseModel):
     )
 
 
+class GoogleContactsStatusAttributes(BaseModel):
+    """Attributes for Google Contacts integration status (JSON API format)."""
+
+    connected: bool = Field(description="Whether the integration is connected")
+    last_sync: str | None = Field(
+        default=None,
+        description="ISO timestamp of the last successful sync",
+        serialization_alias="lastSync",
+    )
+    sync_count: int = Field(
+        default=0,
+        description="Total number of contacts synced",
+        serialization_alias="syncCount",
+    )
+    status: str = Field(
+        default="disconnected",
+        description="Current integration status (active, inactive, error, disconnected)",
+    )
+    error_message: str | None = Field(
+        default=None,
+        description="Error message if status is error",
+        serialization_alias="errorMessage",
+    )
+
+    model_config = {"populate_by_name": True}
+
+
+class GoogleContactsStatusData(BaseModel):
+    """JSON API data wrapper for Google Contacts status."""
+
+    id: str = Field(default="google-contacts", description="Resource identifier")
+    type: str = Field(
+        default="integration-status", description="Resource type for JSON API"
+    )
+    attributes: GoogleContactsStatusAttributes = Field(
+        description="Integration status attributes"
+    )
+
+
+class GoogleContactsStatusJsonApiResponse(BaseModel):
+    """JSON API response for Google Contacts integration status."""
+
+    data: GoogleContactsStatusData = Field(description="JSON API data object")
+
+
 class HealthResponse(BaseModel):
     """Response model for integration health checks."""
 
@@ -81,6 +126,43 @@ class HealthResponse(BaseModel):
     timestamp: str = Field(description="ISO timestamp of the health check")
     services: dict[str, Any] = Field(description="Health status of individual services")
     version: str = Field(default="1.0.0", description="API version")
+
+
+class OAuthAuthorizeRequest(BaseModel):
+    """Request model for OAuth authorization."""
+
+    redirect_url: str = Field(
+        default="/integrations", description="URL to redirect to after OAuth completion"
+    )
+
+
+class OAuthAuthorizeResponse(BaseModel):
+    """Response model for OAuth authorization."""
+
+    authorization_url: str = Field(description="OAuth authorization URL to redirect to")
+    state: str = Field(description="OAuth state parameter for security")
+
+
+class OAuthCallbackRequest(BaseModel):
+    """Request model for OAuth callback."""
+
+    code: str = Field(description="OAuth authorization code")
+    state: str = Field(description="OAuth state parameter")
+
+
+class OAuthCallbackResponse(BaseModel):
+    """Response model for OAuth callback."""
+
+    success: bool = Field(description="Whether OAuth was successful")
+    message: str = Field(description="Human-readable status message")
+    redirect_url: str = Field(description="URL to redirect to after completion")
+
+
+class OAuthDisconnectResponse(BaseModel):
+    """Response model for OAuth disconnect."""
+
+    success: bool = Field(description="Whether disconnect was successful")
+    message: str = Field(description="Human-readable status message")
 
 
 class ErrorResponse(BaseModel):

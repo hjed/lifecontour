@@ -179,15 +179,21 @@ test.describe('Example: Fixture-Based Testing', () => {
       // Navigate to contacts page
       await page.goto('/contacts');
 
+      // Wait for contacts to load
+      await page.waitForLoadState('networkidle');
+
       // Use search functionality
       const searchInput = page.locator('[data-testid="search-input"]');
       await searchInput.fill(contacts[0].firstName);
+
+      // Wait for search results to update
+      await page.waitForLoadState('networkidle');
 
       // Should filter to show only matching contacts
       const contactCard = page.locator(
         `[data-testid="contact-${contacts[0].id}"]`
       );
-      await expect(contactCard).toBeVisible();
+      await expect(contactCard).toBeVisible({ timeout: 10000 });
 
       // Other contacts should not be visible
       for (let i = 1; i < contacts.length; i++) {
@@ -200,12 +206,15 @@ test.describe('Example: Fixture-Based Testing', () => {
       // Clear search
       await searchInput.clear();
 
+      // Wait for search results to update
+      await page.waitForLoadState('networkidle');
+
       // All contacts should be visible again
       for (const contact of contacts) {
         const contactCard = page.locator(
           `[data-testid="contact-${contact.id}"]`
         );
-        await expect(contactCard).toBeVisible();
+        await expect(contactCard).toBeVisible({ timeout: 10000 });
       }
     });
 

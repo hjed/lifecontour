@@ -65,7 +65,112 @@ test.describe('Integration Management - Authenticated User', () => {
     expect(response.ok()).toBeTruthy();
 
     const statusData = await response.json();
-    expect(statusData).toHaveProperty('integration');
-    expect(statusData).toHaveProperty('status');
+    // Check JSON API format
+    expect(statusData).toHaveProperty('data');
+    expect(statusData.data).toHaveProperty('attributes');
+    expect(statusData.data.attributes).toHaveProperty('status');
+    expect(statusData.data.attributes).toHaveProperty('connected');
+    // Verify status is one of the expected values
+    expect(['connected', 'disconnected', 'error', 'inactive']).toContain(
+      statusData.data.attributes.status
+    );
+  });
+
+  test('should handle OAuth authorization flow for Google Contacts', async ({
+    authenticatedPage,
+  }) => {
+    // Test OAuth authorization endpoint
+    const response = await authenticatedPage.request.post(
+      '/api/integrations/google/contacts/oauth/authorize',
+      {
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        data: {
+          redirect_url: '/integrations',
+        },
+      }
+    );
+
+    // Accept various response codes:
+    // 200 = success (Google OAuth configured)
+    // 400 = bad request (Google OAuth not configured)
+    expect([200, 400]).toContain(response.status());
+
+    if (response.ok()) {
+      const authData = await response.json();
+      expect(authData).toHaveProperty('authorization_url');
+      expect(authData).toHaveProperty('state');
+      expect(authData.authorization_url).toContain('accounts.google.com');
+    } else {
+      // If Google OAuth is not configured, expect appropriate error (JSON API format)
+      const errorData = await response.json();
+      expect(errorData.errors).toBeDefined();
+      expect(errorData.errors.length).toBeGreaterThan(0);
+      expect(errorData.errors[0].detail).toContain(
+        'Google OAuth provider not configured'
+      );
+    }
+  });
+
+  test('should handle OAuth disconnect for Google Contacts', async ({
+    authenticatedPage,
+  }) => {
+    // Test OAuth disconnect endpoint
+    const response = await authenticatedPage.request.delete(
+      '/api/integrations/google/contacts/oauth/disconnect'
+    );
+
+    // Accept various response codes:
+    // 200 = success (disconnected)
+    // 400 = bad request (not connected)
+    expect([200, 400]).toContain(response.status());
+
+    const responseData = await response.json();
+    expect(responseData).toHaveProperty('success');
+    expect(responseData).toHaveProperty('message');
+  });
+
+  test('should display OAuth connection controls in UI', async ({
+    authenticatedPage,
+  }) => {
+    // Navigate to integrations page
+    await authenticatedPage.goto('/integrations');
+
+    // Wait for page to load
+    await authenticatedPage.waitForSelector(
+      '[data-testid="google-contacts-integration"]'
+    );
+
+    // Check if connect or disconnect button is present
+    const connectButton = authenticatedPage.locator(
+      '[data-testid="connect-google"]'
+    );
+    const disconnectButton = authenticatedPage.locator(
+      '[data-testid="disconnect-google"]'
+    );
+
+    // Either connect or disconnect button should be visible
+    const connectVisible = await connectButton.isVisible();
+    const disconnectVisible = await disconnectButton.isVisible();
+
+    expect(connectVisible || disconnectVisible).toBeTruthy();
+
+    if (connectVisible) {
+      // Test connect button functionality
+      expect(await connectButton.textContent()).toContain(
+        'Connect Google Account'
+      );
+
+      // Click should trigger OAuth flow (but we won't complete it in tests)
+      // Just verify the button is clickable
+      expect(await connectButton.isEnabled()).toBeTruthy();
+    }
+
+    if (disconnectVisible) {
+      // Test disconnect button functionality
+      expect(await disconnectButton.textContent()).toContain('Disconnect');
+      expect(await disconnectButton.isEnabled()).toBeTruthy();
+    }
   });
 });

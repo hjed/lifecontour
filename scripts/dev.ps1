@@ -57,11 +57,11 @@ function Invoke-DockerRebuild {
 
     # Stop services first to avoid conflicts
     Write-Info "Stopping existing services..."
-    docker compose -f docker-compose.dev.yml down
+    docker compose --profile dev down
 
     # Rebuild images with no cache
     Write-Info "Rebuilding backend and frontend images (no cache)..."
-    docker compose -f docker-compose.dev.yml build --no-cache backend-dev frontend-dev
+    docker compose --profile dev build --no-cache backend frontend
 
     Write-Success "Docker images rebuilt successfully!"
     Write-Info "Use '.\scripts\dev.ps1 docker-start' to start the services with new images"
@@ -79,36 +79,27 @@ function Invoke-DockerRebuildProd {
 
     # Stop services first to avoid conflicts
     Write-Info "Stopping existing services..."
-    docker compose down
+    docker compose --profile prod down
 
     # Rebuild images with no cache
     Write-Info "Rebuilding backend, frontend, nginx, and google-contacts-worker images (no cache)..."
-    docker compose build --no-cache backend frontend nginx google-contacts-worker
+    docker compose --profile prod build --no-cache backend frontend nginx google-contacts-worker
 
     Write-Success "Production Docker images rebuilt successfully!"
-    Write-Info "Use 'docker compose up -d' to start the services with new images"
+    Write-Info "Use 'docker compose --profile prod up -d' to start the services with new images"
 }
 
 # Rebuild specific Docker service
 function Invoke-DockerRebuildService {
-    param([string]$Service)
+    param([string]$Service, [string]$Profile = "dev")
 
     if ([string]::IsNullOrEmpty($Service)) {
         Write-Error "Please specify a service name to rebuild"
-        Write-Info "Development services: backend-dev, frontend-dev"
-        Write-Info "Production services: backend, frontend, nginx"
+        Write-Info "Services: backend, frontend, nginx, google-contacts-worker"
         exit 1
     }
 
-    $ComposeFile = "docker-compose.dev.yml"
-
-    # Determine if this is a production service
-    if ($Service -in @("backend", "frontend", "nginx")) {
-        $ComposeFile = "docker-compose.yml"
-        Write-Info "Rebuilding production service: $Service"
-    } else {
-        Write-Info "Rebuilding development service: $Service"
-    }
+    Write-Info "Rebuilding service: $Service (profile: $Profile)"
 
     # Check if Docker is available
     if (-not (Test-Command "docker")) {
@@ -118,22 +109,22 @@ function Invoke-DockerRebuildService {
 
     # Stop the specific service
     Write-Info "Stopping service: $Service"
-    docker compose -f $ComposeFile stop $Service
+    docker compose --profile $Profile stop $Service
 
     # Rebuild the service with no cache
     Write-Info "Rebuilding service: $Service (no cache)..."
-    docker compose -f $ComposeFile build --no-cache $Service
+    docker compose --profile $Profile build --no-cache $Service
 
     # Restart the service
     Write-Info "Starting service: $Service"
-    docker compose -f $ComposeFile up -d $Service
+    docker compose --profile $Profile up -d $Service
 
     Write-Success "Service $Service rebuilt and restarted successfully!"
 }
 
 # Start complete Docker development environment
 function Invoke-DockerStart {
-    Write-Info "Starting complete Docker development environment..."
+    Write-Info "Starting Docker development environment..."
 
     # Check if Docker is available
     if (-not (Test-Command "docker")) {
@@ -141,9 +132,9 @@ function Invoke-DockerStart {
         exit 1
     }
 
-    # Start all services
-    Write-Info "Starting all services with Docker Compose..."
-    docker compose -f docker-compose.dev.yml up -d
+    # Start all services with dev profile (default)
+    Write-Info "Starting all services with Docker Compose (dev profile)..."
+    docker compose --profile dev --env-file .env.dev up -d
 
     Write-Success "Docker development environment started!"
     Write-Info ""
@@ -162,7 +153,7 @@ function Invoke-DockerStart {
 # Stop Docker development environment
 function Invoke-DockerStop {
     Write-Info "Stopping Docker development environment..."
-    docker compose -f docker-compose.dev.yml down
+    docker compose --profile dev down
     Write-Success "Docker development environment stopped!"
 }
 

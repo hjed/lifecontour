@@ -47,16 +47,14 @@ test.describe('OAuth Error Handling', () => {
   test('should handle expired OAuth authorization codes', async ({
     unauthenticatedPage: page,
   }) => {
-    // Set up session storage
-    await page.goto('/auth/login');
-    await expect(page.getByRole('heading', { name: /welcome/i })).toBeVisible();
-    await page.evaluate(() => {
-      sessionStorage.setItem('oauth_provider', 'generic');
-    });
+    // Encode state parameter with flow_type and provider
+    const state = btoa(
+      JSON.stringify({ flow_type: 'auth', provider: 'generic' })
+    );
 
     // Navigate to callback with expired code
     await page.goto(
-      '/auth/callback?code=expired-or-invalid-code&state=test-state'
+      `/auth/callback?code=expired-or-invalid-code&state=${state}`
     );
 
     // Wait for page to settle and verify error handling
@@ -74,13 +72,6 @@ test.describe('OAuth Error Handling', () => {
   test('should handle OAuth provider errors', async ({
     unauthenticatedPage: page,
   }) => {
-    // Set up session storage
-    await page.goto('/auth/login');
-    await expect(page.getByRole('heading', { name: /welcome/i })).toBeVisible();
-    await page.evaluate(() => {
-      sessionStorage.setItem('oauth_provider', 'generic');
-    });
-
     // Test OAuth error scenarios
     const errorScenarios = [
       {
@@ -184,18 +175,13 @@ test.describe('OAuth Session and State Management Errors', () => {
   test('should handle session timeout during OAuth flow', async ({
     unauthenticatedPage: page,
   }) => {
-    // Start OAuth flow
-    await page.goto('/auth/login');
-    await expect(page.getByRole('heading', { name: /welcome/i })).toBeVisible();
+    // Encode state parameter with flow_type and provider
+    const state = btoa(
+      JSON.stringify({ flow_type: 'auth', provider: 'generic' })
+    );
 
-    // Set up and then clear session storage to simulate timeout
-    await page.evaluate(() => {
-      sessionStorage.setItem('oauth_provider', 'generic');
-      sessionStorage.clear();
-    });
-
-    // Try to complete OAuth callback
-    await page.goto('/auth/callback?code=test-code&state=test-state');
+    // Try to complete OAuth callback with valid state
+    await page.goto(`/auth/callback?code=test-code&state=${state}`);
 
     // Verify graceful handling
     await expect(async () => {

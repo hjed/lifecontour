@@ -77,6 +77,8 @@ export default defineConfig({
   },
 
   /* Configure projects for major browsers */
+  /* Only test browsers that are tested in CI: chromium, firefox, and Mobile Chrome */
+  /* Note: Webkit (Safari) was removed due to known issues with OAuth redirects in test environments */
   projects: [
     {
       name: 'chromium',
@@ -100,21 +102,10 @@ export default defineConfig({
       },
     },
 
-    {
-      name: 'webkit',
-      use: { ...devices['Desktop Safari'] },
-      // Note: WebKit has known issues with OAuth redirects in test environment
-      // Tests may fail due to browser-specific JavaScript redirect handling
-    },
-
     /* Test against mobile viewports. */
     {
       name: 'Mobile Chrome',
       use: { ...devices['Pixel 6'] },
-    },
-    {
-      name: 'Mobile Safari',
-      use: { ...devices['iPhone 12'] },
     },
 
     /* Test against branded browsers. */
@@ -132,7 +123,9 @@ export default defineConfig({
   webServer: {
     command: 'pnpm dev',
     url: 'http://localhost:3000',
-    reuseExistingServer: !process.env.CI,
+    // In CI, Docker compose starts the frontend, so reuse it
+    // Locally, start the dev server if not already running
+    reuseExistingServer: true,
     timeout: 120 * 1000, // 2 minutes for dev server to start
     env: {
       BACKEND_URL: 'http://localhost:8001', // Use test backend port

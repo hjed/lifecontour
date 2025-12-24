@@ -19,6 +19,7 @@ import {
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useAuth } from '@/lib/auth/AuthProvider';
+import { useGoogleContactsOAuthCallback } from '@/lib/api/integrations';
 
 // Component that uses useSearchParams - needs to be wrapped in Suspense
 function CallbackContent() {
@@ -27,6 +28,7 @@ function CallbackContent() {
   const { refreshSession } = useAuth();
   const [error, setError] = useState<string | null>(null);
   const processedRef = useRef(false);
+  const oauthCallback = useGoogleContactsOAuthCallback();
 
   useEffect(() => {
     const processCallback = async () => {
@@ -53,8 +55,28 @@ function CallbackContent() {
           throw new Error('Missing required OAuth parameters');
         }
 
-        // Get provider from sessionStorage (stored during login)
-        const provider = sessionStorage.getItem('oauth_provider') || 'generic';
+        // Decode state parameter to extract flow type and provider
+        let isIntegrationCallback = false;
+        let provider = 'generic';
+        try {
+          // Decode the state parameter to check flow type and provider
+          const decodedState = JSON.parse(atob(state));
+          isIntegrationCallback = decodedState.flow_type === 'integration';
+          provider = decodedState.provider || 'generic';
+        } catch {
+          // If state decoding fails, assume it's authentication OAuth with generic provider
+          isIntegrationCallback = false;
+          provider = 'generic';
+        }
+
+        if (isIntegrationCallback) {
+          // Handle integration OAuth callback
+          await oauthCallback.mutateAsync({ code, state });
+
+          // Redirect to integrations page
+          router.replace('/integrations');
+          return;
+        }
 
         // Send callback data to backend
         const response = await fetch('/api/auth/callback', {
@@ -85,9 +107,6 @@ function CallbackContent() {
         // Refresh session to get user data
         await refreshSession();
 
-        // Clean up stored provider
-        sessionStorage.removeItem('oauth_provider');
-
         // Redirect to intended destination or dashboard
         const redirectTo = data.redirect_url ?? '/';
         router.replace(redirectTo);
@@ -98,7 +117,7 @@ function CallbackContent() {
     };
 
     processCallback();
-  }, [searchParams, router, refreshSession]);
+  }, [searchParams, router, refreshSession, oauthCallback]);
 
   // Show error state
   if (error) {

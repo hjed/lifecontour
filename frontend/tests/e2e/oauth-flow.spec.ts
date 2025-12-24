@@ -60,15 +60,13 @@ test.describe('OAuth Authentication Flow - Real Provider Tests', () => {
   test('should handle OAuth callback with proper session state', async ({
     unauthenticatedPage: page,
   }) => {
-    // Set up session storage for OAuth callback
-    await page.goto('/auth/login');
-    await expect(page.getByRole('heading', { name: /welcome/i })).toBeVisible();
-    await page.evaluate(() => {
-      sessionStorage.setItem('oauth_provider', 'generic');
-    });
+    // Encode state parameter with flow_type and provider
+    const state = btoa(
+      JSON.stringify({ flow_type: 'auth', provider: 'generic' })
+    );
 
     // Navigate to callback with test parameters
-    await page.goto('/auth/callback?code=test-code&state=test-state');
+    await page.goto(`/auth/callback?code=test-code&state=${state}`);
 
     // Wait for page to process the callback - either shows content or redirects
     await expect(async () => {
@@ -90,13 +88,6 @@ test.describe('OAuth Authentication Flow - Real Provider Tests', () => {
   test('should validate OAuth state parameter correctly', async ({
     unauthenticatedPage: page,
   }) => {
-    // Set up session storage
-    await page.goto('/auth/login');
-    await expect(page.getByRole('heading', { name: /welcome/i })).toBeVisible();
-    await page.evaluate(() => {
-      sessionStorage.setItem('oauth_provider', 'generic');
-    });
-
     // Track callback responses
     let responseReceived = false;
     page.on('response', response => {
@@ -105,7 +96,7 @@ test.describe('OAuth Authentication Flow - Real Provider Tests', () => {
       }
     });
 
-    // Test with invalid state
+    // Test with invalid state (not properly encoded)
     await page.goto('/auth/callback?code=test-code&state=invalid-state');
 
     // Wait for response and verify error handling
@@ -140,13 +131,6 @@ test.describe('OAuth Authentication Flow - Real Provider Tests', () => {
   test('should handle OAuth callback errors gracefully', async ({
     unauthenticatedPage: page,
   }) => {
-    // Set up session storage
-    await page.goto('/auth/login');
-    await expect(page.getByRole('heading', { name: /welcome/i })).toBeVisible();
-    await page.evaluate(() => {
-      sessionStorage.setItem('oauth_provider', 'generic');
-    });
-
     // Navigate to callback with error parameters
     await page.goto(
       '/auth/callback?error=access_denied&error_description=User%20denied%20access'
@@ -203,14 +187,19 @@ test.describe('OAuth Authentication Flow - Real Provider Tests', () => {
       .locator('button:has-text("Continue with")')
       .first();
     if (await oauthButton.isVisible()) {
+      // Track OAuth login requests to verify provider is being used
+      let oauthLoginCalled = false;
+      page.on('request', request => {
+        if (request.url().includes('/api/auth/login')) {
+          oauthLoginCalled = true;
+        }
+      });
+
       await oauthButton.click();
 
-      // Wait for provider to be stored
+      // Wait for OAuth login to be called
       await expect(async () => {
-        const storedProvider = await page.evaluate(() =>
-          sessionStorage.getItem('oauth_provider')
-        );
-        expect(storedProvider).toBeTruthy();
+        expect(oauthLoginCalled).toBe(true);
       }).toPass({ timeout: 5000 });
     }
   });

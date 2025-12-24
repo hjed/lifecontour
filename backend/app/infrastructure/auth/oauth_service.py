@@ -31,12 +31,28 @@ class OAuthService:
         self.oauth = OAuth()
         self._configure_providers()
 
-    def _encode_state(self, provider: str, redirect_uri: str, csrf_token: str) -> str:
-        """Encode OAuth state with provider info and CSRF token."""
+    def _encode_state(
+        self, provider: str, redirect_uri: str, csrf_token: str, flow_type: str = "auth"
+    ) -> str:
+        """
+        Encode OAuth state with provider info, CSRF token, and flow type.
+
+        Args:
+            provider: OAuth provider name (e.g., 'google', 'github')
+            redirect_uri: Redirect URI for OAuth callback
+            csrf_token: CSRF token for state validation
+            flow_type: Type of OAuth flow. Valid values are:
+                - 'auth': for authentication flows (default)
+                - 'integration': for integration flows (e.g., Google Contacts sync)
+
+        Returns:
+            Base64-encoded JSON state parameter
+        """
         state_data = {
             "provider": provider,
             "redirect_uri": redirect_uri,
             "csrf_token": csrf_token,
+            "flow_type": flow_type,  # 'auth' for authentication, 'integration' for integration
         }
         # Base64 encode the JSON state data
         state_json = json.dumps(state_data)
@@ -121,6 +137,24 @@ class OAuthService:
             except Exception as e:
                 logger.warning(
                     "Failed to configure Discord OAuth provider", error=str(e)
+                )
+
+        # Google provider for integrations
+        if self.settings.google_client_id and self.settings.google_client_secret:
+            try:
+                self.oauth.register(
+                    name="google",
+                    client_id=self.settings.google_client_id,
+                    client_secret=self.settings.google_client_secret,
+                    authorize_url="https://accounts.google.com/o/oauth2/v2/auth",
+                    access_token_url="https://oauth2.googleapis.com/token",
+                    client_kwargs={"scope": "openid email profile"},
+                    code_challenge_method="S256",
+                )
+                logger.info("Configured Google OAuth provider with PKCE")
+            except Exception as e:
+                logger.warning(
+                    "Failed to configure Google OAuth provider", error=str(e)
                 )
 
         # Generic OAuth2 provider
@@ -545,3 +579,194 @@ class OAuthService:
             provider=provider,
             provider_data=user_data,
         )
+
+    async def get_google_contacts_authorization_url(
+        self, request: Request, redirect_uri: str
+    ) -> str:
+        """
+        Get Google OAuth authorization URL with contacts scope for integration.
+
+        Args:
+            request: FastAPI request object
+            redirect_uri: OAuth callback URI
+
+        Returns:
+            Authorization URL for Google Contacts integration
+
+        Raises:
+            HTTPException: If Google provider not configured
+        """
+        if "google" not in self.oauth._clients:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Google OAuth provider not configured",
+            )
+
+        client = self.oauth._clients["google"]
+
+        # Generate CSRF token and encode state with provider info and integration flow type
+        csrf_token = secrets.token_urlsafe(32)
+        encoded_state = self._encode_state(
+            "google", redirect_uri, csrf_token, "integration"
+        )
+
+        # Generate PKCE code verifier and store in session
+        code_verifier = generate_token(48)
+        request.session["oauth_code_verifier"] = code_verifier
+
+        # Store CSRF token in session for validation
+        request.session["oauth_csrf_token"] = csrf_token
+
+        # Get authorization URL with contacts scope
+        authorization_url = await client.create_authorization_url(
+            redirect_uri,
+            state=encoded_state,
+            code_verifier=code_verifier,
+            scope="openid email profile https://www.googleapis.com/auth/contacts.readonly",
+            access_type="offline",  # Request refresh token
+            prompt="consent",  # Force consent to get refresh token
+        )
+
+        logger.info(
+            "Generated Google Contacts OAuth authorization URL",
+            redirect_uri=redirect_uri,
+            has_state=bool(encoded_state),
+            has_csrf_token=bool(csrf_token),
+        )
+
+        return str(authorization_url["url"])
+
+    async def handle_google_contacts_callback(
+        self, request: Request, code: str, state: str, redirect_uri: str
+    ) -> dict[str, Any]:
+        """
+        Handle Google OAuth callback for contacts integration.
+
+        Args:
+            request: FastAPI request object
+            code: Authorization code from Google
+            state: State parameter for CSRF protection
+            redirect_uri: OAuth callback URI
+
+        Returns:
+            Token data including access_token, refresh_token, expires_in
+
+        Raises:
+            HTTPException: If callback validation fails
+        """
+        # Decode and validate state
+        try:
+            decoded_state = self._decode_state(state)
+            provider = decoded_state["provider"]
+            csrf_token = decoded_state["csrf_token"]
+        except Exception as e:
+            logger.warning("Failed to decode OAuth state", error=str(e))
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid state parameter",
+            ) from e
+
+        # Validate CSRF token
+        session_csrf_token = request.session.get("oauth_csrf_token")
+        if not session_csrf_token or session_csrf_token != csrf_token:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid CSRF token",
+            )
+
+        # Validate provider
+        if provider != "google":
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid provider in state",
+            )
+
+        # Get code verifier from session
+        code_verifier = request.session.get("oauth_code_verifier")
+        if not code_verifier:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Missing code verifier",
+            )
+
+        try:
+            # Exchange authorization code for tokens
+            client = self.oauth._clients["google"]
+            token = await client.authorize_access_token(
+                request,
+                redirect_uri=redirect_uri,
+                code_verifier=code_verifier,
+            )
+
+            # Clean up session
+            request.session.pop("oauth_csrf_token", None)
+            request.session.pop("oauth_code_verifier", None)
+
+            logger.info(
+                "Successfully exchanged Google authorization code for tokens",
+                has_access_token=bool(token.get("access_token")),
+                has_refresh_token=bool(token.get("refresh_token")),
+                expires_in=token.get("expires_in"),
+            )
+
+            # Return token data as dict
+            return dict(token)
+
+        except Exception as e:
+            logger.error("Failed to exchange Google authorization code", error=str(e))
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Failed to exchange authorization code: {str(e)}",
+            ) from e
+
+    async def disconnect_google_contacts(self, user_id: str) -> bool:
+        """
+        Disconnect Google Contacts integration for a user.
+
+        Args:
+            user_id: User ID to disconnect integration for
+
+        Returns:
+            False - feature not yet implemented
+        """
+        # TODO: Implement actual token storage and removal
+        # For now, this is a placeholder that indicates the feature is not implemented
+        # In a real implementation, this would:
+        # 1. Check if user has stored Google Contacts tokens
+        # 2. Revoke the tokens with Google
+        # 3. Remove tokens from storage
+        # 4. Return success/failure status
+
+        logger.warning(
+            "Google Contacts disconnect not implemented; returning False",
+            user_id=user_id,
+        )
+
+        # Return False to indicate the feature is not implemented
+        # This prevents false success responses when there's nothing to disconnect
+        return False
+
+    async def is_google_contacts_connected(self, user_id: str) -> bool:
+        """
+        Check if Google Contacts integration is connected for a user.
+
+        Args:
+            user_id: User ID to check connection status for
+
+        Returns:
+            False - feature not yet implemented (no token storage)
+        """
+        # TODO: Implement actual token storage check
+        # For now, this is a placeholder that indicates no connection exists
+        # In a real implementation, this would:
+        # 1. Check if user has stored Google Contacts tokens
+        # 2. Optionally validate the tokens are not expired
+        # 3. Return True if valid tokens exist, False otherwise
+
+        logger.debug(
+            "Google Contacts connection check - not implemented; returning False",
+            user_id=user_id,
+        )
+
+        # Return False since token storage is not yet implemented
+        return False

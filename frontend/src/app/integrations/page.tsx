@@ -22,6 +22,8 @@ import {
   useGoogleContactsSync,
   useIntegrationHealth,
   useSyncHistory,
+  useGoogleContactsOAuthAuthorize,
+  useGoogleContactsOAuthDisconnect,
 } from '@/lib/api/integrations';
 import { SyncType } from '@/types/integrations';
 import { Button } from '@/components/ui/button';
@@ -92,12 +94,27 @@ function IntegrationsPageContent() {
     error: syncError,
   } = useGoogleContactsSync();
 
+  const { mutate: authorizeOAuth, isPending: oauthLoading } =
+    useGoogleContactsOAuthAuthorize();
+
+  const { mutate: disconnectOAuth, isPending: disconnectLoading } =
+    useGoogleContactsOAuthDisconnect();
+
   const status = statusData?.data?.attributes;
   const health = healthData?.data?.attributes;
   const recentJobs = historyData?.data || [];
 
   const handleSync = (syncType: SyncType) => {
     triggerSync(syncType);
+  };
+
+  const handleConnectGoogle = () => {
+    // OAuth flow type is now encoded in the state parameter by the backend
+    authorizeOAuth({ redirect_url: '/integrations' });
+  };
+
+  const handleDisconnectGoogle = () => {
+    disconnectOAuth();
   };
 
   if (statusLoading || healthLoading || historyLoading) {
@@ -192,9 +209,33 @@ function IntegrationsPageContent() {
                         >
                           Full Sync
                         </Button>
+                        <Button
+                          variant='outline'
+                          onClick={handleDisconnectGoogle}
+                          disabled={disconnectLoading}
+                          data-testid='disconnect-google'
+                        >
+                          {disconnectLoading ? (
+                            <RefreshCw className='mr-2 h-4 w-4 animate-spin' />
+                          ) : (
+                            <Settings className='mr-2 h-4 w-4' />
+                          )}
+                          Disconnect
+                        </Button>
                       </>
                     ) : (
-                      <Button>Connect Google Account</Button>
+                      <Button
+                        onClick={handleConnectGoogle}
+                        disabled={oauthLoading}
+                        data-testid='connect-google'
+                      >
+                        {oauthLoading ? (
+                          <RefreshCw className='mr-2 h-4 w-4 animate-spin' />
+                        ) : (
+                          <Users className='mr-2 h-4 w-4' />
+                        )}
+                        Connect Google Account
+                      </Button>
                     )}
                   </div>
 

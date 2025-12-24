@@ -444,3 +444,195 @@ class TestOAuthService:
 
             # Verify result
             assert result == mock_user_info
+
+
+class TestOAuthServiceGoogleContacts:
+    """Test OAuth service Google Contacts integration functionality."""
+
+    @pytest.fixture
+    def oauth_service_with_google(self):
+        """Create OAuth service with Google provider configured."""
+        settings = Settings(
+            google_client_id="test_google_client_id",
+            google_client_secret="test_google_client_secret",
+        )
+        return OAuthService(settings)
+
+    @pytest.fixture
+    def mock_request(self):
+        """Create mock request with session."""
+        request = Mock()
+        request.session = {}
+        request.base_url = "https://example.com/"
+        return request
+
+    async def test_get_google_contacts_authorization_url_success(
+        self, oauth_service_with_google, mock_request
+    ):
+        """Test successful Google Contacts authorization URL generation."""
+        redirect_uri = "https://example.com/auth/callback"
+
+        with patch.object(
+            oauth_service_with_google.oauth._clients["google"],
+            "create_authorization_url",
+            new_callable=AsyncMock,
+        ) as mock_create_url:
+            mock_create_url.return_value = {
+                "url": "https://accounts.google.com/oauth/authorize?client_id=test&state=encoded_state"
+            }
+
+            result = (
+                await oauth_service_with_google.get_google_contacts_authorization_url(
+                    mock_request, redirect_uri
+                )
+            )
+
+            # Verify authorization URL was created with correct parameters
+            mock_create_url.assert_called_once()
+            call_args = mock_create_url.call_args
+            assert call_args[0][0] == redirect_uri  # redirect_uri
+            assert "state" in call_args[1]
+            assert "code_verifier" in call_args[1]
+            assert (
+                call_args[1]["scope"]
+                == "openid email profile https://www.googleapis.com/auth/contacts.readonly"
+            )
+            assert call_args[1]["access_type"] == "offline"
+            assert call_args[1]["prompt"] == "consent"
+
+            # Verify session data was stored
+            assert "oauth_code_verifier" in mock_request.session
+            assert "oauth_csrf_token" in mock_request.session
+
+            # Verify result
+            assert (
+                result
+                == "https://accounts.google.com/oauth/authorize?client_id=test&state=encoded_state"
+            )
+
+    async def test_get_google_contacts_authorization_url_no_provider(self):
+        """Test Google Contacts authorization URL when Google provider not configured."""
+        settings = Settings()  # No Google provider
+        oauth_service = OAuthService(settings)
+        mock_request = Mock()
+        mock_request.session = {}
+
+        with pytest.raises(HTTPException) as exc_info:
+            await oauth_service.get_google_contacts_authorization_url(
+                mock_request, "https://example.com/callback"
+            )
+
+        assert exc_info.value.status_code == 400
+        assert "Google OAuth provider not configured" in str(exc_info.value.detail)
+
+    async def test_handle_google_contacts_callback_success(
+        self, oauth_service_with_google, mock_request
+    ):
+        """Test successful Google Contacts OAuth callback handling."""
+        # Setup session data
+        mock_request.session = {
+            "oauth_csrf_token": "test_csrf_token",
+            "oauth_code_verifier": "test_code_verifier",
+        }
+
+        # Mock state encoding/decoding
+        with patch.object(
+            oauth_service_with_google, "_decode_state"
+        ) as mock_decode_state:
+            mock_decode_state.return_value = {
+                "provider": "google",
+                "redirect_uri": "https://example.com/callback",
+                "csrf_token": "test_csrf_token",
+            }
+
+            # Mock token exchange
+            with patch.object(
+                oauth_service_with_google.oauth._clients["google"],
+                "authorize_access_token",
+                new_callable=AsyncMock,
+            ) as mock_authorize:
+                mock_token_data = {
+                    "access_token": "test_access_token",
+                    "refresh_token": "test_refresh_token",
+                    "expires_in": 3600,
+                }
+                mock_authorize.return_value = mock_token_data
+
+                result = (
+                    await oauth_service_with_google.handle_google_contacts_callback(
+                        mock_request,
+                        "test_code",
+                        "encoded_state",
+                        "https://example.com/callback",
+                    )
+                )
+
+                # Verify token exchange was called correctly
+                mock_authorize.assert_called_once_with(
+                    mock_request,
+                    redirect_uri="https://example.com/callback",
+                    code_verifier="test_code_verifier",
+                )
+
+                # Verify session cleanup
+                assert "oauth_csrf_token" not in mock_request.session
+                assert "oauth_code_verifier" not in mock_request.session
+
+                # Verify result
+                assert result == mock_token_data
+
+    async def test_handle_google_contacts_callback_invalid_state(
+        self, oauth_service_with_google, mock_request
+    ):
+        """Test Google Contacts callback with invalid state."""
+        with patch.object(
+            oauth_service_with_google, "_decode_state"
+        ) as mock_decode_state:
+            mock_decode_state.side_effect = Exception("Invalid state")
+
+            with pytest.raises(HTTPException) as exc_info:
+                await oauth_service_with_google.handle_google_contacts_callback(
+                    mock_request,
+                    "test_code",
+                    "invalid_state",
+                    "https://example.com/callback",
+                )
+
+            assert exc_info.value.status_code == 400
+            assert "Invalid state parameter" in str(exc_info.value.detail)
+
+    async def test_handle_google_contacts_callback_csrf_mismatch(
+        self, oauth_service_with_google, mock_request
+    ):
+        """Test Google Contacts callback with CSRF token mismatch."""
+        mock_request.session = {"oauth_csrf_token": "different_token"}
+
+        with patch.object(
+            oauth_service_with_google, "_decode_state"
+        ) as mock_decode_state:
+            mock_decode_state.return_value = {
+                "provider": "google",
+                "redirect_uri": "https://example.com/callback",
+                "csrf_token": "test_csrf_token",
+            }
+
+            with pytest.raises(HTTPException) as exc_info:
+                await oauth_service_with_google.handle_google_contacts_callback(
+                    mock_request,
+                    "test_code",
+                    "encoded_state",
+                    "https://example.com/callback",
+                )
+
+            assert exc_info.value.status_code == 400
+            assert "Invalid CSRF token" in str(exc_info.value.detail)
+
+    async def test_disconnect_google_contacts_not_implemented(
+        self, oauth_service_with_google
+    ):
+        """Test Google Contacts disconnect returns False (not implemented)."""
+        result = await oauth_service_with_google.disconnect_google_contacts(
+            "test_user_id"
+        )
+
+        assert result is False

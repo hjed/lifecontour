@@ -17,6 +17,11 @@ import {
   SyncHistoryFilters,
   OAuthConnectionRequest,
   OAuthConnectionResponse,
+  OAuthAuthorizeRequest,
+  OAuthAuthorizeResponse,
+  OAuthCallbackRequest,
+  OAuthCallbackResponse,
+  OAuthDisconnectResponse,
   IntegrationStatsResponse,
 } from '@/types/integrations';
 import { JsonApiErrorResponse } from '@/types/api';
@@ -336,6 +341,111 @@ export function useCancelSyncJob() {
     },
     onError: (error: Error) => {
       toast.error(`Failed to cancel sync: ${error.message}`);
+    },
+  });
+}
+
+// OAuth Integration Functions
+
+/**
+ * Initiate Google Contacts OAuth authorization flow.
+ */
+export function useGoogleContactsOAuthAuthorize() {
+  return useMutation<OAuthAuthorizeResponse, Error, OAuthAuthorizeRequest>({
+    mutationFn: async (request: OAuthAuthorizeRequest) => {
+      const response = await fetch(
+        '/api/integrations/google/contacts/oauth/authorize',
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(request),
+          credentials: 'include',
+        }
+      );
+
+      return handleApiResponse<OAuthAuthorizeResponse>(response);
+    },
+    onSuccess: (data: OAuthAuthorizeResponse) => {
+      // Redirect to Google OAuth authorization URL
+      window.location.href = data.authorization_url;
+    },
+    onError: (error: Error) => {
+      toast.error(`Failed to initiate OAuth: ${error.message}`);
+    },
+  });
+}
+
+/**
+ * Handle Google Contacts OAuth callback.
+ */
+export function useGoogleContactsOAuthCallback() {
+  const queryClient = useQueryClient();
+
+  return useMutation<OAuthCallbackResponse, Error, OAuthCallbackRequest>({
+    mutationFn: async (request: OAuthCallbackRequest) => {
+      const response = await fetch(
+        '/api/integrations/google/contacts/oauth/callback',
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(request),
+          credentials: 'include',
+        }
+      );
+
+      return handleApiResponse<OAuthCallbackResponse>(response);
+    },
+    onSuccess: (data: OAuthCallbackResponse) => {
+      // Invalidate integration status to refresh connection state
+      queryClient.invalidateQueries({
+        queryKey: integrationKeys.googleContactsStatus(),
+      });
+
+      toast.success(data.message);
+
+      // Redirect to the specified URL
+      if (data.redirect_url) {
+        window.location.href = data.redirect_url;
+      }
+    },
+    onError: (error: Error) => {
+      toast.error(`OAuth failed: ${error.message}`);
+    },
+  });
+}
+
+/**
+ * Disconnect Google Contacts OAuth integration.
+ */
+export function useGoogleContactsOAuthDisconnect() {
+  const queryClient = useQueryClient();
+
+  return useMutation<OAuthDisconnectResponse, Error, void>({
+    mutationFn: async () => {
+      const response = await fetch(
+        '/api/integrations/google/contacts/oauth/disconnect',
+        {
+          method: 'DELETE',
+          credentials: 'include',
+        }
+      );
+
+      return handleApiResponse<OAuthDisconnectResponse>(response);
+    },
+    onSuccess: (data: OAuthDisconnectResponse) => {
+      // Invalidate integration status to refresh connection state
+      queryClient.invalidateQueries({
+        queryKey: integrationKeys.googleContactsStatus(),
+      });
+
+      toast.success(data.message);
+    },
+    onError: (error: Error) => {
+      toast.error(`Failed to disconnect: ${error.message}`);
     },
   });
 }

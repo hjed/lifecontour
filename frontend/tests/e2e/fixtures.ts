@@ -30,20 +30,24 @@ import {
 
 // Types for our fixtures
 export interface AuthState {
-  cookies: Array<{
-    name: string;
-    value: string;
-    domain: string;
-    path: string;
-    expires?: number;
-    httpOnly?: boolean;
-    secure?: boolean;
-    sameSite?: 'Strict' | 'Lax' | 'None';
-  }>;
-  sessionData: {
-    oauth_provider?: string;
-    oauth_tokens?: any;
-    user_session?: any;
+  storageState: {
+    cookies: Array<{
+      name: string;
+      value: string;
+      domain: string;
+      path: string;
+      expires?: number;
+      httpOnly?: boolean;
+      secure?: boolean;
+      sameSite?: 'Strict' | 'Lax' | 'None';
+    }>;
+    origins?: Array<{
+      origin: string;
+      localStorage?: Array<{
+        name: string;
+        value: string;
+      }>;
+    }>;
   };
   isAuthenticated: boolean;
 }
@@ -206,12 +210,28 @@ async function completeWorkerOAuthFlow(browser: any): Promise<AuthState> {
 
         // Wait for callback to complete by watching for the final redirect
         // The callback page should redirect to /contacts or another authenticated route
-        await page.waitForURL(
-          (url: URL) => !url.toString().includes('/auth/callback'),
-          { timeout: 15000 }
-        );
-
-        console.log('🔐 [Worker Auth] Final URL after callback:', page.url());
+        try {
+          await page.waitForURL(
+            (url: URL) => !url.toString().includes('/auth/callback'),
+            { timeout: 15000 }
+          );
+          console.log('🔐 [Worker Auth] Final URL after callback:', page.url());
+        } catch (e) {
+          // If redirect times out, we might still be on the callback page
+          // This can happen if the callback page is still processing
+          console.log(
+            '🔐 [Worker Auth] Callback redirect timeout, checking if still on callback page'
+          );
+          const stillOnCallback = page.url().includes('/auth/callback');
+          if (stillOnCallback) {
+            // Wait a bit longer for the callback to complete
+            await page.waitForTimeout(2000);
+            console.log(
+              '🔐 [Worker Auth] After additional wait, URL is:',
+              page.url()
+            );
+          }
+        }
       }
     } else if (currentUrl.includes('/auth/login')) {
       console.warn(
@@ -231,15 +251,32 @@ async function completeWorkerOAuthFlow(browser: any): Promise<AuthState> {
     // Uses toPass for automatic retry instead of manual loops
     console.log('🔐 [Worker Auth] Verifying authentication...');
 
+    // Wait a moment for session to be persisted
+    await page.waitForTimeout(500);
+
     let authUser: string | undefined;
+    // NOTE: This uses a 10s timeout because the real OAuth flow involves an external
+    // IdP + backend round-trip that can be slow and variable under CI/network load.
+    // `toPass` will poll with web-first retries and typically resolve much faster,
+    // but we allow up to 10s to avoid flaky failures when the provider is slow.
     await playwrightExpect(async () => {
+      // Log cookies before making the request
+      const contextCookies = await page.context().cookies();
+      console.log(
+        '🔐 [Worker Auth] Cookies in context before status check:',
+        contextCookies
+          .map((c: any) => `${c.name}(domain=${c.domain},path=${c.path})`)
+          .join(', ')
+      );
+
       const statusResponse = await page.request.get('/api/auth/status');
       playwrightExpect(statusResponse.ok()).toBe(true);
 
       const authStatus = await statusResponse.json();
+      console.log('🔐 [Worker Auth] Auth status response:', authStatus);
       playwrightExpect(authStatus.authenticated).toBe(true);
       authUser = authStatus.user?.email;
-    }).toPass({ timeout: 5000 });
+    }).toPass({ timeout: 10000 });
 
     console.log(
       '🔐 [Worker Auth] Real OAuth authentication successful!',
@@ -248,6 +285,17 @@ async function completeWorkerOAuthFlow(browser: any): Promise<AuthState> {
 
     // Step 5: Extract authentication cookies from browser context
     const cookies = await context.cookies();
+    console.log(
+      '🔐 [Worker Auth] All cookies from context:',
+      cookies.map((c: any) => ({
+        name: c.name,
+        domain: c.domain,
+        path: c.path,
+        httpOnly: c.httpOnly,
+        secure: c.secure,
+      }))
+    );
+
     const validCookies = cookies
       .filter((cookie: any) => cookie.name && cookie.value)
       .map((cookie: any) => ({
@@ -263,18 +311,9 @@ async function completeWorkerOAuthFlow(browser: any): Promise<AuthState> {
     );
 
     return {
-      cookies: validCookies,
-      sessionData: {
-        oauth_provider: 'generic',
-        oauth_tokens: JSON.stringify({
-          access_token: 'real-oauth-token',
-          token_type: 'Bearer',
-        }),
-        user_session: JSON.stringify({
-          id: 'real-user-id',
-          email: 'test@example.com',
-          name: 'Test User',
-        }),
+      storageState: {
+        cookies: validCookies,
+        origins: [],
       },
       isAuthenticated: true,
     };
@@ -288,26 +327,33 @@ async function completeWorkerOAuthFlow(browser: any): Promise<AuthState> {
 }
 
 /**
- * Apply authentication state to a page context
+ * Apply authentication state to a page context using Playwright's storageState
  */
 async function applyAuthState(page: Page, authState: AuthState): Promise<void> {
-  // Filter and validate cookies before adding them
-  const validCookies = authState.cookies.filter(cookie => {
-    // Ensure required fields are present
-    if (!cookie.name || !cookie.value || !cookie.domain || !cookie.path) {
-      return false;
-    }
+  // Add cookies from the stored state
+  const validCookies = authState.storageState.cookies
+    .filter((cookie: any) => {
+      // Ensure required fields are present
+      if (!cookie.name || !cookie.value) {
+        return false;
+      }
 
-    // Validate expires field
-    if (
-      cookie.expires !== undefined &&
-      (cookie.expires < -1 || !Number.isInteger(cookie.expires))
-    ) {
-      return false;
-    }
+      // Validate expires field
+      if (
+        cookie.expires !== undefined &&
+        (cookie.expires < -1 || !Number.isInteger(cookie.expires))
+      ) {
+        return false;
+      }
 
-    return true;
-  });
+      return true;
+    })
+    .map((cookie: any) => ({
+      ...cookie,
+      // Set default domain and path if not present
+      domain: cookie.domain || 'localhost',
+      path: cookie.path || '/',
+    }));
 
   // Add real authentication cookies to the page context
   if (validCookies.length > 0) {
@@ -315,7 +361,7 @@ async function applyAuthState(page: Page, authState: AuthState): Promise<void> {
     console.log(
       `🔐 [Auth State] Applied ${validCookies.length} authentication cookies to page context:`,
       validCookies
-        .map(c => `${c.name}=${c.value.substring(0, 20)}...`)
+        .map((c: any) => `${c.name}=${c.value.substring(0, 20)}...`)
         .join(', ')
     );
 
@@ -323,7 +369,7 @@ async function applyAuthState(page: Page, authState: AuthState): Promise<void> {
     const appliedCookies = await page.context().cookies();
     console.log(
       `🔐 [Auth State] Verified ${appliedCookies.length} cookies in context:`,
-      appliedCookies.map(c => c.name).join(', ')
+      appliedCookies.map((c: any) => c.name).join(', ')
     );
   } else {
     console.warn(
@@ -335,6 +381,7 @@ async function applyAuthState(page: Page, authState: AuthState): Promise<void> {
 // Extend Playwright's base test with our fixtures
 export const test = base.extend<TestFixtures, WorkerFixtures>({
   // Worker-scoped fixture: Complete OAuth flow once per worker
+  // This ensures all tests in a worker share the same authenticated session
   workerAuth: [
     async ({ browser }, use) => {
       const authState = await completeWorkerOAuthFlow(browser);
@@ -344,8 +391,27 @@ export const test = base.extend<TestFixtures, WorkerFixtures>({
   ],
 
   // Test-scoped fixture: Authenticated page
+  // Uses the worker-scoped auth state to authenticate each test
   authenticatedPage: async ({ page, workerAuth }, use) => {
+    // Apply the authenticated state to the test page
     await applyAuthState(page, workerAuth);
+
+    // Verify authentication is working before proceeding with test
+    try {
+      await playwrightExpect(async () => {
+        const statusResponse = await page.request.get('/api/auth/status');
+        playwrightExpect(statusResponse.ok()).toBe(true);
+        const authStatus = await statusResponse.json();
+        playwrightExpect(authStatus.authenticated).toBe(true);
+      }).toPass({ timeout: 10000 });
+    } catch (error) {
+      console.error(
+        '🔐 [Auth State] Authentication verification failed:',
+        error
+      );
+      throw error;
+    }
+
     await use(page);
   },
 
