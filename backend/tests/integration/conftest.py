@@ -757,6 +757,22 @@ def authenticated_search_client(test_settings, mock_search_service, test_user):
     # Use a mutable container to store the mock service so it can be updated
     mock_service_container = {"instance": None}
 
+    class SearchServiceWrapper:
+        """Wrapper that defers to mock or real service at runtime."""
+
+        def __init__(self, mock_container: dict[str, Any]):
+            self.mock_container = mock_container
+
+        def _get_service(self):
+            """Get the appropriate service (mock or real)."""
+            if self.mock_container["instance"] is not None:
+                return self.mock_container["instance"]
+            return SearchService()
+
+        def __getattr__(self, name):
+            """Delegate all method calls to the appropriate service."""
+            return getattr(self._get_service(), name)
+
     class TestAuthSearchProvider(Provider):
         """Test provider for authenticated search client."""
 
@@ -768,11 +784,8 @@ def authenticated_search_client(test_settings, mock_search_service, test_user):
 
         @provide(scope=Scope.APP)
         def get_search_service(self) -> SearchService:
-            # Return the mock service if it's been set up
-            if mock_service_container["instance"] is not None:
-                return mock_service_container["instance"]
-            # Otherwise return a real service (which will fail if MeiliSearch is not available)
-            return SearchService()
+            # Return a wrapper that defers to mock or real service at runtime
+            return SearchServiceWrapper(mock_service_container)  # type: ignore
 
     def setup_search_mock(search_results: dict[str, Any]):
         """Setup search mock for testing."""
