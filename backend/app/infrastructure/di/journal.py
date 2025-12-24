@@ -7,7 +7,11 @@ from app.core.journal.adapters.sql.calendar_info_repository import (
     SqlCalendarInfoRepository,
 )
 from app.core.journal.adapters.sql.calendar_repository import SqlCalendarRepository
+from app.core.journal.adapters.sql.journal_contact_relationship_repository import (
+    SqlJournalContactRelationshipRepository,
+)
 from app.core.journal.adapters.sql.journal_repository import SqlJournalRepository
+from app.core.journal.adapters.sql.journal_tag_repository import SqlJournalTagRepository
 from app.core.journal.adapters.sql.mood_data_repository import SqlMoodDataRepository
 from app.core.journal.adapters.sql.photo_album_data_repository import (
     SqlPhotoAlbumDataRepository,
@@ -17,7 +21,9 @@ from app.core.journal.adapters.sql.travel_data_repository import SqlTravelDataRe
 from app.core.journal.models.repositories import (
     CalendarInfoRepository,
     CalendarRepository,
+    JournalContactRelationshipRepository,
     JournalRepository,
+    JournalTagRepository,
     MoodDataRepository,
     PhotoAlbumDataRepository,
     PlanDataRepository,
@@ -68,3 +74,17 @@ class JournalProvider(Provider):
     ) -> TravelDataRepository:
         """Provide a TravelDataRepository instance."""
         return SqlTravelDataRepository(connection)
+
+    @provide(scope=Scope.REQUEST)
+    def journal_tag_repository(
+        self, connection: AsyncConnection
+    ) -> JournalTagRepository:
+        """Provide a JournalTagRepository instance."""
+        return SqlJournalTagRepository(connection)
+
+    @provide(scope=Scope.REQUEST)
+    def journal_contact_relationship_repository(
+        self, connection: AsyncConnection
+    ) -> JournalContactRelationshipRepository:
+        """Provide a JournalContactRelationshipRepository instance."""
+        return SqlJournalContactRelationshipRepository(connection)

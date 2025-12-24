@@ -5,7 +5,7 @@ Tests the health monitoring functionality for integration services
 including Redis, workers, and external APIs.
 """
 
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from redis.asyncio import Redis
@@ -41,8 +41,20 @@ class TestIntegrationHealthService:
         )
         mock_redis_pool.llen = AsyncMock(return_value=2)
 
-        # Get overall health
-        health = await service.get_overall_health()
+        # Mock aiohttp.ClientSession for external API check
+        mock_response = AsyncMock()
+        mock_response.status = 200
+        mock_response.__aenter__ = AsyncMock(return_value=mock_response)
+        mock_response.__aexit__ = AsyncMock(return_value=None)
+
+        mock_session = AsyncMock()
+        mock_session.get = MagicMock(return_value=mock_response)
+        mock_session.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_session.__aexit__ = AsyncMock(return_value=None)
+
+        with patch("aiohttp.ClientSession", return_value=mock_session):
+            # Get overall health
+            health = await service.get_overall_health()
 
         # Verify overall status
         assert health["status"] == "healthy"
@@ -135,8 +147,7 @@ class TestIntegrationHealthService:
 
         # Verify health response
         assert health["status"] == "healthy"
-        assert health["recent_jobs"] == 1
-        assert "last_seen" in health
+        assert health["queue_length"] == 1
         assert health["worker_version"] == "1.0.0"
         assert "last_checked" in health
 
@@ -163,14 +174,26 @@ class TestIntegrationHealthService:
         self, service: IntegrationHealthService
     ):
         """Test external API health check when healthy."""
-        # Check external API health (currently returns mock data)
-        health = await service._check_external_api_health()
+        # Mock aiohttp.ClientSession for external API check
+        mock_response = AsyncMock()
+        mock_response.status = 200
+        mock_response.__aenter__ = AsyncMock(return_value=mock_response)
+        mock_response.__aexit__ = AsyncMock(return_value=None)
+
+        mock_session = AsyncMock()
+        mock_session.get = MagicMock(return_value=mock_response)
+        mock_session.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_session.__aexit__ = AsyncMock(return_value=None)
+
+        with patch("aiohttp.ClientSession", return_value=mock_session):
+            # Check external API health
+            health = await service._check_external_api_health()
 
         # Verify health response
         assert health["status"] == "healthy"
-        assert health["rate_limit_remaining"] == "90%"
+        assert "response_time_ms" in health
         assert "last_successful_call" in health
-        assert health["average_response_time_ms"] == 150
+        assert health["endpoint_tested"] == "Google OAuth2 discovery"
         assert "last_checked" in health
 
     @pytest.mark.asyncio
@@ -203,19 +226,31 @@ class TestIntegrationHealthService:
 
         # Verify it returns worker health
         assert health["status"] == "healthy"
-        assert health["recent_jobs"] == 0
+        assert health["queue_length"] == 0
 
     @pytest.mark.asyncio
     async def test_check_service_connectivity_google_api(
         self, service: IntegrationHealthService
     ):
         """Test service connectivity check for Google API."""
-        # Check Google API connectivity
-        health = await service.check_service_connectivity("google_api")
+        # Mock aiohttp.ClientSession for external API check
+        mock_response = AsyncMock()
+        mock_response.status = 200
+        mock_response.__aenter__ = AsyncMock(return_value=mock_response)
+        mock_response.__aexit__ = AsyncMock(return_value=None)
+
+        mock_session = AsyncMock()
+        mock_session.get = MagicMock(return_value=mock_response)
+        mock_session.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_session.__aexit__ = AsyncMock(return_value=None)
+
+        with patch("aiohttp.ClientSession", return_value=mock_session):
+            # Check Google API connectivity
+            health = await service.check_service_connectivity("google_api")
 
         # Verify it returns Google API health
         assert health["status"] == "healthy"
-        assert health["rate_limit_remaining"] == "90%"
+        assert "response_time_ms" in health
 
     @pytest.mark.asyncio
     async def test_check_service_connectivity_unknown(

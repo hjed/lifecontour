@@ -227,6 +227,9 @@ class DockerManager:
 # SQL DDL statements for test database schema (each statement executed separately)
 TEST_DATABASE_SCHEMA_STATEMENTS = [
     # Drop tables if they exist (in reverse dependency order)
+    "DROP TABLE IF EXISTS journal_contact_relationships CASCADE",
+    "DROP TABLE IF EXISTS journal_tag_assignments CASCADE",
+    "DROP TABLE IF EXISTS journal_tags CASCADE",
     "DROP TABLE IF EXISTS journal_travel_transportation CASCADE",
     "DROP TABLE IF EXISTS journal_travel_accommodations CASCADE",
     "DROP TABLE IF EXISTS journal_travel_flights CASCADE",
@@ -478,6 +481,34 @@ TEST_DATABASE_SCHEMA_STATEMENTS = [
         "order" INTEGER NOT NULL,
         created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL
     )""",
+    # Journal tags table (hierarchical)
+    """CREATE TABLE journal_tags (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        name VARCHAR(100) NOT NULL UNIQUE,
+        parent_id UUID REFERENCES journal_tags(id) ON DELETE SET NULL,
+        color VARCHAR(7),
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL,
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL
+    )""",
+    """CREATE INDEX idx_journal_tags_parent_id ON journal_tags (parent_id)""",
+    # Journal tag assignments table
+    """CREATE TABLE journal_tag_assignments (
+        journal_id INTEGER NOT NULL REFERENCES journals(id) ON DELETE CASCADE,
+        tag_id UUID NOT NULL REFERENCES journal_tags(id) ON DELETE CASCADE,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL,
+        PRIMARY KEY (journal_id, tag_id)
+    )""",
+    """CREATE INDEX idx_journal_tag_assignments_tag_id ON journal_tag_assignments (tag_id)""",
+    # Journal contact relationships table
+    """CREATE TABLE journal_contact_relationships (
+        journal_id INTEGER NOT NULL REFERENCES journals(id) ON DELETE CASCADE,
+        contact_id INTEGER NOT NULL REFERENCES contacts(id) ON DELETE CASCADE,
+        relationship_type VARCHAR(20) NOT NULL CHECK (relationship_type IN ('PARTICIPANT', 'INVITEE', 'MENTION', 'ABOUT')),
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL,
+        PRIMARY KEY (journal_id, contact_id, relationship_type)
+    )""",
+    """CREATE INDEX idx_journal_contact_relationships_contact_id ON journal_contact_relationships (contact_id)""",
+    """CREATE INDEX idx_journal_contact_relationships_type ON journal_contact_relationships (relationship_type)""",
 ]
 
 
@@ -711,55 +742,85 @@ def authenticated_search_client(test_settings, mock_search_service, test_user):
     """
     Create a test client with authentication and search service mocking.
 
-    Returns a tuple of (test_client, mock_service_factory).
-    The mock_service_factory can be called with search results to set up the mock.
+    Returns a tuple of (test_client, setup_search_mock).
+    The setup_search_mock can be called with search results to set up the mock.
     """
-    from typing import Any
+    from typing import Any, cast
 
     from dishka import Provider, Scope, make_async_container, provide
     from dishka.integrations.fastapi import setup_dishka
     from fastapi.testclient import TestClient
 
     from app.infrastructure.auth.models import SessionUser
+    from app.infrastructure.config import Settings
     from app.infrastructure.search.search_service import SearchService
 
-    # Store the mock service so it can be updated
-    mock_search_service_instance = None
+    # Use a mutable container to store the mock service so it can be updated
+    mock_service_container = {"instance": None}
+
+    class SearchServiceWrapper:
+        """Wrapper that defers to mock or real service at runtime."""
+
+        def __init__(self, mock_container: dict[str, Any]):
+            self.mock_container = mock_container
+
+        def _get_service(self):
+            """Get the appropriate service (mock or real)."""
+            if self.mock_container["instance"] is not None:
+                return self.mock_container["instance"]
+            return SearchService()
+
+        def __getattr__(self, name):
+            """Delegate all method calls to the appropriate service."""
+            return getattr(self._get_service(), name)
 
     class TestAuthSearchProvider(Provider):
         """Test provider for authenticated search client."""
 
+        @provide(scope=Scope.APP)
+        def get_settings(self) -> Settings:
+            """Get test settings for app scope."""
+            return cast(Settings, test_settings)
+
         @provide(scope=Scope.REQUEST)
         def get_session_user(self) -> SessionUser:
-            from typing import cast
-
             return cast(SessionUser, test_user)
 
-        @provide(scope=Scope.REQUEST)
+        @provide(scope=Scope.APP)
         def get_search_service(self) -> SearchService:
-            # Return the mock service if it's been set up
-            if mock_search_service_instance is not None:
-                return mock_search_service_instance
-            # Otherwise return a real service (which will fail if MeiliSearch is not available)
-            return SearchService()
+            # Return a wrapper that defers to mock or real service at runtime
+            return SearchServiceWrapper(mock_service_container)  # type: ignore
 
     def setup_search_mock(search_results: dict[str, Any]):
         """Setup search mock for testing."""
-        nonlocal mock_search_service_instance
-        mock_search_service_instance = mock_search_service(search_results)
-        return mock_search_service_instance
+        mock_service_container["instance"] = mock_search_service(search_results)
+        return mock_service_container["instance"]
 
     # Create app with test settings
+    from dishka.integrations.fastapi import FastapiProvider
+
+    from app.infrastructure.di.contacts import ContactProvider
+    from app.infrastructure.di.database import DatabaseProvider
+    from app.infrastructure.di.integrations import IntegrationProvider
+    from app.infrastructure.di.journal import JournalProvider
     from app.main import create_app
 
     app = create_app(settings=test_settings)
 
     # Replace container with test container
-    test_container = make_async_container(TestAuthSearchProvider())
-    try:
-        app.state.dishka_container.close()
-    except RuntimeError:
-        pass
+    # TestAuthSearchProvider provides Settings, SessionUser, and SearchService
+    # IMPORTANT: TestAuthSearchProvider must come AFTER ContactProvider because
+    # ContactProvider also provides SearchService (duplicate in production code).
+    # Later providers override earlier ones in Dishka.
+    test_container = make_async_container(
+        DatabaseProvider(test_settings),
+        ContactProvider(),
+        JournalProvider(),
+        IntegrationProvider(),
+        TestAuthSearchProvider(),  # Must be after ContactProvider to override SearchService
+        FastapiProvider(),
+    )
+    # Don't try to close the old container - just replace it
     app.state.dishka_container = test_container
     setup_dishka(test_container, app)
 
@@ -833,11 +894,13 @@ async def authenticated_client(test_settings, test_user):
     from app.infrastructure.di.contacts import ContactProvider
     from app.infrastructure.di.database import DatabaseProvider
     from app.infrastructure.di.integrations import IntegrationProvider
+    from app.infrastructure.di.journal import JournalProvider
 
     test_container = make_async_container(
         DatabaseProvider(test_settings),
         TestAuthProvider(),
         ContactProvider(),
+        JournalProvider(),
         IntegrationProvider(),
         FastapiProvider(),
     )

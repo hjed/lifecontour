@@ -125,7 +125,7 @@ class TestContactValidationError:
         expected_message = "Validation error for first_name: First name is required"
         assert str(error) == expected_message
         assert error.message == expected_message
-        assert error.status_code == 400
+        assert error.status_code == 422
         assert error.field == "first_name"
 
 

@@ -14,11 +14,14 @@ async def integration_api_client(async_connection, clean_database, test_settings
     # This ensures we use the same database configuration as other integration tests
 
     from dishka import Provider, Scope, make_async_container, provide
-    from dishka.integrations.fastapi import setup_dishka
+    from dishka.integrations.fastapi import FastapiProvider, setup_dishka
     from sqlalchemy.ext.asyncio import AsyncConnection
 
     from app.infrastructure.auth.models import SessionUser
     from app.infrastructure.di.contacts import ContactProvider
+    from app.infrastructure.di.infrastructure import InfrastructureProvider
+    from app.infrastructure.di.integrations import IntegrationProvider
+    from app.infrastructure.di.journal import JournalProvider
 
     # Create a test provider that uses our test connection
     class TestDatabaseProvider(Provider):
@@ -48,7 +51,11 @@ async def integration_api_client(async_connection, clean_database, test_settings
 
     test_container = make_async_container(
         TestDatabaseProvider(async_connection),
+        InfrastructureProvider(),
         ContactProvider(),
+        JournalProvider(),
+        IntegrationProvider(),
+        FastapiProvider(),
     )
     app.state.dishka_container = test_container
     setup_dishka(test_container, app)
