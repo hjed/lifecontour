@@ -13,7 +13,6 @@ import { Save } from 'lucide-react';
 import { ContactFormData } from '@/types/contacts';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import {
   Form,
   FormControl,
@@ -80,12 +79,10 @@ export function ContactForm({
   return (
     <Form {...form}>
       <form onSubmit={form.handleSubmit(handleSubmit)} className='space-y-6'>
-        {/* Basic Information */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Basic Information</CardTitle>
-          </CardHeader>
-          <CardContent className='space-y-4'>
+        {/* Name Fields - Styled to match detail view */}
+        <div className='space-y-4'>
+          <div>
+            <h3 className='mb-3 text-lg font-medium'>Contact Name</h3>
             <div className='grid gap-4 md:grid-cols-2'>
               <FormField
                 control={form.control}
@@ -94,7 +91,11 @@ export function ContactForm({
                   <FormItem>
                     <FormLabel>First Name *</FormLabel>
                     <FormControl>
-                      <Input {...field} data-testid='first-name-input' />
+                      <Input
+                        {...field}
+                        data-testid='first-name-input'
+                        className='text-base'
+                      />
                     </FormControl>
                     <FormMessage />
                   </FormItem>
@@ -107,43 +108,57 @@ export function ContactForm({
                   <FormItem>
                     <FormLabel>Last Name</FormLabel>
                     <FormControl>
-                      <Input {...field} data-testid='last-name-input' />
+                      <Input
+                        {...field}
+                        data-testid='last-name-input'
+                        className='text-base'
+                      />
                     </FormControl>
                     <FormMessage />
                   </FormItem>
                 )}
               />
             </div>
-            <div className='grid gap-4 md:grid-cols-2'>
-              <FormField
-                control={form.control}
-                name='middle_name'
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Middle Name</FormLabel>
-                    <FormControl>
-                      <Input {...field} data-testid='middle-name-input' />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-              <FormField
-                control={form.control}
-                name='nick_name'
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Nickname</FormLabel>
-                    <FormControl>
-                      <Input {...field} data-testid='nickname-input' />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-            </div>
-          </CardContent>
-        </Card>
+          </div>
+
+          <div className='grid gap-4 md:grid-cols-2'>
+            <FormField
+              control={form.control}
+              name='middle_name'
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Middle Name</FormLabel>
+                  <FormControl>
+                    <Input
+                      {...field}
+                      data-testid='middle-name-input'
+                      className='text-base'
+                    />
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+            <FormField
+              control={form.control}
+              name='nick_name'
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Nickname</FormLabel>
+                  <FormControl>
+                    <Input
+                      {...field}
+                      data-testid='nickname-input'
+                      className='text-base'
+                      placeholder='Optional nickname'
+                    />
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+          </div>
+        </div>
 
         {/* Form Actions */}
         <div className='flex justify-end gap-2 border-t pt-4'>

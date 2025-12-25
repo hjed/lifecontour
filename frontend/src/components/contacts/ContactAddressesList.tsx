@@ -200,7 +200,8 @@ export function ContactAddressesList({
           disabled={disabled || isAddingAddress}
           aria-label='Add address'
         >
-          <Plus className='h-4 w-4' aria-hidden='true' />
+          <Plus className='mr-1 h-4 w-4' aria-hidden='true' />
+          Add
         </Button>
       </CardHeader>
       <CardContent className='space-y-3'>

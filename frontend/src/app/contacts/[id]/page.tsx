@@ -161,7 +161,7 @@ function ContactDetailPageContent() {
       </div>
 
       {/* Contact Header - Three Column Grid Layout */}
-      <header className='mb-8 grid grid-cols-1 items-start gap-x-8 gap-y-4 md:grid-cols-[128px,1fr] lg:grid-cols-[128px,1fr,280px]'>
+      <header className='mb-6 grid grid-cols-1 items-start gap-x-6 gap-y-4 md:grid-cols-[128px,1fr] lg:grid-cols-[128px,1fr,280px]'>
         {/* Column 1: Avatar */}
         <div className='col-start-1'>
           <ContactAvatar
@@ -173,7 +173,7 @@ function ContactDetailPageContent() {
         </div>
 
         {/* Column 2: Identity and Actions */}
-        <div className='col-start-1 space-y-4 md:col-start-2'>
+        <div className='col-start-1 space-y-3 md:col-start-2'>
           <ContactIdentityInline contact={contact} />
 
           {/* Action Buttons */}

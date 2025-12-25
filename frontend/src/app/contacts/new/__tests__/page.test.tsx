@@ -166,9 +166,7 @@ describe('NewContactPage', () => {
     // Wait for authentication to complete and page to load
     expect(await screen.findByText('Add New Contact')).toBeInTheDocument();
     expect(
-      screen.getByText(
-        'Create a new contact with their information and details'
-      )
+      screen.getByText('Fill in the contact details below')
     ).toBeInTheDocument();
     expect(
       screen.getByRole('button', { name: /back to contacts/i })
@@ -367,25 +365,25 @@ describe('NewContactPage', () => {
   });
 
   it('validates required fields', async () => {
-    const user = userEvent.setup();
+    const mockCreateMutation = jest.fn();
 
     mockUseCreateContact.mockReturnValue({
-      mutateAsync: jest.fn(),
+      mutateAsync: mockCreateMutation,
       isPending: false,
     } as any);
 
     renderNewContactPage();
 
     // Wait for authentication to complete and page to load
-    // Try to submit without filling required fields
+    // Save button should be disabled when first name is empty
     const saveButton = await screen.findByRole('button', {
       name: /save contact/i,
     });
-    await user.click(saveButton);
 
-    // Should show validation error
-    await waitFor(() => {
-      expect(screen.getByText(/this field is required/i)).toBeInTheDocument();
-    });
+    // Button should be disabled initially (no first name)
+    expect(saveButton).toBeDisabled();
+
+    // Mutation should not be called
+    expect(mockCreateMutation).not.toHaveBeenCalled();
   });
 });

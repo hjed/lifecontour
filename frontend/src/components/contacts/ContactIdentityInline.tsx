@@ -67,9 +67,9 @@ export function ContactIdentityInline({
 
   return (
     <div className={className}>
-      <div className='mb-2 flex flex-col gap-2'>
-        {/* Name Fields */}
-        <div className='flex flex-wrap items-center gap-2'>
+      <div className='mb-2 flex flex-col gap-3'>
+        {/* Name Fields - Use grid to prevent overflow */}
+        <div className='grid grid-cols-1 gap-2 md:grid-cols-[auto,auto,auto] md:items-center'>
           <div className='flex items-center gap-1'>
             <InlineEditField
               value={contact.attributes.first_name}
@@ -89,7 +89,9 @@ export function ContactIdentityInline({
               data-testid='last-name-field'
             />
           </div>
-          <FavouriteToggle {...favouriteProps} />
+          <div className='md:ml-2'>
+            <FavouriteToggle {...favouriteProps} />
+          </div>
         </div>
 
         {/* Nickname Field */}
