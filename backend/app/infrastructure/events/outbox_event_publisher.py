@@ -6,13 +6,16 @@ within the same transaction as business data changes, ensuring reliable event de
 """
 
 import json
+from collections.abc import Sequence
 
 import structlog
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
-from app.core.contacts.models.events import DomainEvent
-from app.core.contacts.models.repositories import ContactEventPublisher
+from app.core.contacts.models.repositories import (
+    ContactEventPublisher,
+    DomainEventProtocol,
+)
 
 logger = structlog.get_logger()
 
@@ -34,7 +37,7 @@ class OutboxEventPublisher(ContactEventPublisher):
         """
         self.conn = connection
 
-    async def publish(self, event: DomainEvent) -> None:
+    async def publish(self, event: DomainEventProtocol) -> None:
         """
         Publish a domain event by storing it in the outbox_events table.
 
@@ -79,12 +82,12 @@ class OutboxEventPublisher(ContactEventPublisher):
             )
             raise
 
-    async def publish_batch(self, events: list[DomainEvent]) -> None:
+    async def publish_batch(self, events: Sequence[DomainEventProtocol]) -> None:
         """
         Publish multiple domain events in a batch.
 
         Args:
-            events: List of domain events to publish
+            events: Sequence of domain events to publish
         """
         if not events:
             return

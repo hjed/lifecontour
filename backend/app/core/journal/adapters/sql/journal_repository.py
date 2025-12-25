@@ -130,7 +130,9 @@ class SqlJournalRepository(JournalRepository):
         row = result.fetchone()
 
         if not row:
-            raise JournalNotFoundError(journal.id)  # type: ignore[arg-type]
+            # Journal ID must be set for update operations
+            assert journal.id is not None, "Journal ID must be set for update"
+            raise JournalNotFoundError(journal.id)
 
         return self._row_to_journal(row)
 
