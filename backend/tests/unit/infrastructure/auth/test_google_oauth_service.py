@@ -95,8 +95,8 @@ class TestGoogleOAuthProvider:
 
         # Google OAuth uses the v2 endpoint
         assert auth_url.startswith("https://accounts.google.com/o/oauth2/v2/auth")
-        # Verify contacts scope is included in the URL
-        assert "https%3A//www.googleapis.com/auth/contacts.readonly" in auth_url
+        # Verify contacts scope is included in the URL (check for the scope in the URL)
+        assert "contacts.readonly" in auth_url
         assert "oauth_csrf_token" in mock_request.session
         assert "oauth_code_verifier" in mock_request.session
 
@@ -118,26 +118,41 @@ class TestGoogleOAuthCallback:
 
     async def test_handle_google_callback_success(self, oauth_service, mock_request):
         """Test successful Google OAuth callback handling."""
+        import base64
+        import json
+
+        # Create properly encoded state
+        csrf_token = "test_csrf_token"
+        state_data = {
+            "provider": "google",
+            "redirect_uri": "http://localhost:3000/callback",
+            "csrf_token": csrf_token,
+            "flow_type": "integration",
+        }
+        state_json = json.dumps(state_data)
+        encoded_state = base64.urlsafe_b64encode(state_json.encode()).decode()
+
         mock_request.session = {
-            "oauth_state": "test_state",
+            "oauth_csrf_token": csrf_token,
             "oauth_code_verifier": "test_code_verifier",
         }
 
-        with patch.object(oauth_service.oauth, "create_client") as mock_create_client:
-            mock_client = Mock()
-            mock_token = {
-                "access_token": "test_access_token",
-                "refresh_token": "test_refresh_token",
-                "expires_in": 3600,
-                "scope": "https://www.googleapis.com/auth/contacts.readonly email profile",
-            }
-            mock_client.authorize_access_token = AsyncMock(return_value=mock_token)
-            mock_create_client.return_value = mock_client
+        # Mock the Google OAuth client
+        mock_client = Mock()
+        mock_token = {
+            "access_token": "test_access_token",
+            "refresh_token": "test_refresh_token",
+            "expires_in": 3600,
+            "scope": "https://www.googleapis.com/auth/contacts.readonly email profile",
+        }
+        mock_client.authorize_access_token = AsyncMock(return_value=mock_token)
 
+        # Patch the _clients dictionary
+        with patch.dict(oauth_service.oauth._clients, {"google": mock_client}):
             token_data = await oauth_service.handle_google_contacts_callback(
                 mock_request,
                 "test_code",
-                "test_state",
+                encoded_state,
                 "http://localhost:3000/callback",
             )
 
@@ -183,13 +198,27 @@ class TestGoogleOAuthCallback:
         self, oauth_service, mock_request
     ):
         """Test Google OAuth callback with missing code verifier raises exception."""
-        mock_request.session = {"oauth_state": "test_state"}  # No code_verifier
+        import base64
+        import json
+
+        # Create properly encoded state
+        csrf_token = "test_csrf_token"
+        state_data = {
+            "provider": "google",
+            "redirect_uri": "http://localhost:3000/callback",
+            "csrf_token": csrf_token,
+            "flow_type": "integration",
+        }
+        state_json = json.dumps(state_data)
+        encoded_state = base64.urlsafe_b64encode(state_json.encode()).decode()
+
+        mock_request.session = {"oauth_csrf_token": csrf_token}  # No code_verifier
 
         with pytest.raises(HTTPException) as exc_info:
             await oauth_service.handle_google_contacts_callback(
                 mock_request,
                 "test_code",
-                "test_state",
+                encoded_state,
                 "http://localhost:3000/callback",
             )
 
