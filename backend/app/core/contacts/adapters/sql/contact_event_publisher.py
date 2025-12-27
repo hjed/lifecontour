@@ -1,13 +1,14 @@
 """SQL implementation of ContactEventPublisher that stores events in contact_edit_event table."""
 
 import json
+from collections.abc import Sequence
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
-from app.core.contacts.models.events import DomainEvent
 from app.core.contacts.models.repositories import (
     ContactEventPublisher,
+    DomainEventProtocol,
 )
 
 
@@ -17,7 +18,7 @@ class SqlContactEventPublisher(ContactEventPublisher):
     def __init__(self, connection: AsyncConnection):
         self.conn = connection
 
-    async def publish(self, event: DomainEvent) -> None:
+    async def publish(self, event: DomainEventProtocol) -> None:
         """Publish a domain event by storing it in the contact_edit_event table."""
         # Store event in dedicated events table
         query = text(
@@ -40,7 +41,7 @@ class SqlContactEventPublisher(ContactEventPublisher):
             },
         )
 
-    async def publish_batch(self, events: list[DomainEvent]) -> None:
+    async def publish_batch(self, events: Sequence[DomainEventProtocol]) -> None:
         """Publish multiple domain events."""
         for event in events:
             await self.publish(event)

@@ -1,7 +1,10 @@
 """Repository interfaces for the contacts domain."""
 
 from abc import ABC, abstractmethod
-from typing import Any, Union
+from collections.abc import Sequence
+from typing import Any, Protocol, Union
+
+from sqlalchemy.ext.asyncio import AsyncConnection
 
 from .entities import (
     Contact,
@@ -11,7 +14,28 @@ from .entities import (
     ContactRelationship,
     Tag,
 )
-from .events import DomainEvent
+
+
+class DomainEventProtocol(Protocol):
+    """Protocol for domain events to support structural typing across domains."""
+
+    @property
+    def event_id(self) -> str: ...
+
+    @property
+    def occurred_at(self) -> Any: ...  # datetime
+
+    @property
+    def aggregate_id(self) -> int: ...
+
+    @property
+    def event_type(self) -> str: ...
+
+    @property
+    def event_data(self) -> dict[str, Any]: ...
+
+    @property
+    def transaction(self) -> AsyncConnection | None: ...
 
 
 class ContactRepository(ABC):
@@ -321,12 +345,12 @@ class ContactEventPublisher(ABC):
     """Interface for publishing contact domain events."""
 
     @abstractmethod
-    async def publish(self, event: DomainEvent) -> None:
+    async def publish(self, event: DomainEventProtocol) -> None:
         """Publish a domain event."""
         pass
 
     @abstractmethod
-    async def publish_batch(self, events: list[DomainEvent]) -> None:
+    async def publish_batch(self, events: Sequence[DomainEventProtocol]) -> None:
         """Publish multiple domain events."""
         pass
 

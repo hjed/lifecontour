@@ -18,6 +18,14 @@ from .constants import (
     MIN_MOOD_VALUE,
 )
 from .entities import Journal
+from .events import (
+    DomainEvent,
+    JournalCreated,
+    JournalDeleted,
+    JournalTypeAdded,
+    JournalTypeRemoved,
+    JournalUpdated,
+)
 from .exceptions import (
     CalendarInfoValidationError,
     CalendarNotFoundError,
@@ -95,6 +103,13 @@ __all__ = [
     # Enums
     "JournalType",
     "JournalContactRelationshipType",
+    # Events
+    "DomainEvent",
+    "JournalCreated",
+    "JournalUpdated",
+    "JournalDeleted",
+    "JournalTypeAdded",
+    "JournalTypeRemoved",
     # Exceptions
     "JournalCycleError",
     "JournalError",

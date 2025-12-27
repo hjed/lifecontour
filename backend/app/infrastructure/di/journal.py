@@ -29,6 +29,8 @@ from app.core.journal.models.repositories import (
     PlanDataRepository,
     TravelDataRepository,
 )
+from app.core.journal.services.journal_service import JournalService
+from app.infrastructure.events.outbox_event_publisher import OutboxEventPublisher
 
 
 class JournalProvider(Provider):
@@ -88,3 +90,15 @@ class JournalProvider(Provider):
     ) -> JournalContactRelationshipRepository:
         """Provide a JournalContactRelationshipRepository instance."""
         return SqlJournalContactRelationshipRepository(connection)
+
+    @provide(scope=Scope.REQUEST)
+    def journal_service(
+        self,
+        journal_repo: JournalRepository,
+        event_publisher: OutboxEventPublisher,
+    ) -> JournalService:
+        """Provide a JournalService instance."""
+        return JournalService(
+            journal_repo=journal_repo,
+            event_publisher=event_publisher,
+        )

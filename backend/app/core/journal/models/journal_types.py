@@ -72,3 +72,55 @@ class JournalType(str, Enum):
             True if the type requires a data table, False otherwise
         """
         return journal_type != cls.NOTE
+
+    @classmethod
+    def get_dependencies(cls, journal_type: "JournalType") -> list["JournalType"]:
+        """
+        Get the list of types that must be added when this type is added.
+
+        Type dependencies are transitive and automatically added by the service layer.
+        For example, adding CANYONING automatically adds BUSHWALKING, ABSEILING_TRIP,
+        OUTDOOR_ACTIVITY, and FITNESS.
+
+        Current implementation (Iteration 4):
+        - Base types (NOTE, EVENT, MOOD_RATING, PLAN, TRAVEL, PHOTO_ALBUM) have no dependencies
+
+        Future implementation (Iteration 4.5):
+        - FITNESS: No dependencies (base fitness type)
+        - OUTDOOR_ACTIVITY: Requires FITNESS
+        - BUSHWALKING: Requires OUTDOOR_ACTIVITY, FITNESS
+        - ABSEILING_TRIP: Requires OUTDOOR_ACTIVITY, FITNESS
+        - CANYONING: Requires BUSHWALKING, ABSEILING_TRIP, OUTDOOR_ACTIVITY, FITNESS
+        - CLIMBING: Requires OUTDOOR_ACTIVITY, FITNESS
+        - KAYAKING: Requires OUTDOOR_ACTIVITY, FITNESS
+        - CROSS_COUNTRY_SKIING: Requires BUSHWALKING, OUTDOOR_ACTIVITY, FITNESS
+        - JOGGING: Requires FITNESS
+
+        Args:
+            journal_type: The journal type to get dependencies for
+
+        Returns:
+            List of journal types that must be added (empty for base types)
+        """
+        # Type dependency mapping (will be expanded in Iteration 4.5)
+        dependencies: dict[JournalType, list[JournalType]] = {
+            # Base types have no dependencies
+            cls.NOTE: [],
+            cls.EVENT: [],
+            cls.MOOD_RATING: [],
+            cls.PLAN: [],
+            cls.TRAVEL: [],
+            cls.PHOTO_ALBUM: [],
+            # Future fitness types will be added here in Iteration 4.5
+            # cls.FITNESS: [],
+            # cls.OUTDOOR_ACTIVITY: [cls.FITNESS],
+            # cls.BUSHWALKING: [cls.OUTDOOR_ACTIVITY, cls.FITNESS],
+            # cls.ABSEILING_TRIP: [cls.OUTDOOR_ACTIVITY, cls.FITNESS],
+            # cls.CANYONING: [cls.BUSHWALKING, cls.ABSEILING_TRIP, cls.OUTDOOR_ACTIVITY, cls.FITNESS],
+            # cls.CLIMBING: [cls.OUTDOOR_ACTIVITY, cls.FITNESS],
+            # cls.KAYAKING: [cls.OUTDOOR_ACTIVITY, cls.FITNESS],
+            # cls.CROSS_COUNTRY_SKIING: [cls.BUSHWALKING, cls.OUTDOOR_ACTIVITY, cls.FITNESS],
+            # cls.JOGGING: [cls.FITNESS],
+        }
+
+        return dependencies.get(journal_type, [])

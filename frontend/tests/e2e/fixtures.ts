@@ -304,6 +304,9 @@ async function completeWorkerOAuthFlow(browser: any): Promise<AuthState> {
           cookie.expires && cookie.expires > 0
             ? Math.floor(cookie.expires)
             : Math.floor((Date.now() + 3600000) / 1000), // Default to 1 hour from now
+        // Firefox is stricter about secure flag on non-HTTPS connections
+        // For localhost testing, we need to set secure: false to allow cookies
+        secure: false,
       }));
 
     console.log(
@@ -353,6 +356,9 @@ async function applyAuthState(page: Page, authState: AuthState): Promise<void> {
       // Set default domain and path if not present
       domain: cookie.domain || 'localhost',
       path: cookie.path || '/',
+      // Firefox is stricter about secure flag on non-HTTPS connections
+      // For localhost testing, we need to set secure: false to allow cookies
+      secure: false,
     }));
 
   // Add real authentication cookies to the page context
