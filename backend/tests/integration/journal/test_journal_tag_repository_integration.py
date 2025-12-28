@@ -1,5 +1,6 @@
 """Integration tests for JournalTagRepository."""
 
+from datetime import UTC
 from uuid import uuid4
 
 import pytest
@@ -148,3 +149,60 @@ class TestJournalTagRepositoryIntegration:
 
         found_tag = await tag_repo.find_by_id(saved_tag.id)
         assert found_tag.color == "#FF0000"
+
+    async def test_get_tags_for_journal(self, tag_repo, async_connection):
+        """Test getting tags assigned to a journal."""
+        from datetime import datetime
+
+        from sqlalchemy import text
+
+        from app.core.journal.adapters.sql.journal_repository import (
+            SqlJournalRepository,
+        )
+        from app.core.journal.models.entities import Journal
+        from app.core.journal.models.value_objects import EventDateRange
+
+        # Create a journal
+        journal_repo = SqlJournalRepository(async_connection)
+        journal = Journal(
+            user_id="test-user",
+            title="Test Journal",
+            content="Test content",
+            event_date_range=EventDateRange(
+                start=datetime.now(UTC), end=datetime.now(UTC)
+            ),
+        )
+        saved_journal = await journal_repo.save(journal)
+
+        # Create tags
+        tag1 = JournalTag(name="work")
+        tag2 = JournalTag(name="personal")
+        saved_tag1 = await tag_repo.save(tag1)
+        saved_tag2 = await tag_repo.save(tag2)
+
+        # Assign tags to journal
+        await async_connection.execute(
+            text(
+                """
+                INSERT INTO journal_tag_assignments (journal_id, tag_id)
+                VALUES (:journal_id, :tag_id)
+            """
+            ),
+            {"journal_id": saved_journal.id, "tag_id": saved_tag1.id},
+        )
+        await async_connection.execute(
+            text(
+                """
+                INSERT INTO journal_tag_assignments (journal_id, tag_id)
+                VALUES (:journal_id, :tag_id)
+            """
+            ),
+            {"journal_id": saved_journal.id, "tag_id": saved_tag2.id},
+        )
+
+        # Get tags for journal
+        tags = await tag_repo.get_tags_for_journal(saved_journal.id)
+        assert len(tags) == 2
+        tag_names = [tag.name for tag in tags]
+        assert "work" in tag_names
+        assert "personal" in tag_names

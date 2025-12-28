@@ -14,9 +14,8 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine, create_async_engine
 
 # Constants
-CONTAINER_NAME_FILTER = "name=postgres-test"
-BACKEND_POSTGRES_CONTAINER = "backend-postgres-test-1"
-DOCKER_COMPOSE_TEST_FILE = "docker-compose.test.yml"
+CONTAINER_NAME_FILTER = "name=pms-postgres"
+BACKEND_POSTGRES_CONTAINER = "pms-postgres"
 MAX_DB_STARTUP_RETRIES = 30
 
 
@@ -55,11 +54,16 @@ class DockerManager:
 
     def __init__(self):
         self.backend_dir = self._get_backend_directory()
+        self.project_root = self._get_project_root()
         self.docker_compose_cmd = self._get_docker_compose_cmd()
 
     def _get_backend_directory(self) -> str:
         """Get the backend directory path."""
         return os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+
+    def _get_project_root(self) -> str:
+        """Get the project root directory path."""
+        return os.path.dirname(self.backend_dir)
 
     def _get_docker_compose_cmd(self) -> list[str]:
         """Get the appropriate docker compose command."""
@@ -133,10 +137,11 @@ class DockerManager:
                 print("Test database container already running")
                 return
 
-            # Start the container
+            # Start the container using unified docker-compose with test-backend profile
             subprocess.run(
-                self.docker_compose_cmd + ["-f", DOCKER_COMPOSE_TEST_FILE, "up", "-d"],
-                cwd=self.backend_dir,
+                self.docker_compose_cmd
+                + ["--profile", "test-backend", "--env-file", ".env.test", "up", "-d"],
+                cwd=self.project_root,
                 check=True,
             )
 
@@ -154,9 +159,8 @@ class DockerManager:
         """Stop Docker PostgreSQL container."""
         try:
             subprocess.run(
-                self.docker_compose_cmd
-                + ["-f", DOCKER_COMPOSE_TEST_FILE, "down", "-v"],
-                cwd=self.backend_dir,
+                self.docker_compose_cmd + ["--profile", "test-backend", "down", "-v"],
+                cwd=self.project_root,
                 check=True,
             )
             print("Test database stopped")

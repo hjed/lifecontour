@@ -685,6 +685,19 @@ class JournalTagRepository(ABC):
         """
         pass
 
+    @abstractmethod
+    async def get_tags_for_journal(self, journal_id: int) -> list[JournalTag]:
+        """
+        Get all tags assigned to a journal.
+
+        Args:
+            journal_id: The journal ID to get tags for
+
+        Returns:
+            List of tags assigned to the journal
+        """
+        pass
+
 
 class JournalContactRelationshipRepository(ABC):
     """

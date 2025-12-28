@@ -213,6 +213,34 @@ class JournalService:
         """
         return await self.journal_repo.find_by_id(journal_id)
 
+    async def get_journals_paginated(
+        self, user_id: str, offset: int = 0, limit: int = 20
+    ) -> list[Journal]:
+        """
+        Get journals for a user with pagination.
+
+        Args:
+            user_id: The user ID to filter by
+            offset: Number of journals to skip
+            limit: Maximum number of journals to return
+
+        Returns:
+            List of journals
+        """
+        return await self.journal_repo.get_all(user_id, limit, offset)
+
+    async def get_journals_count(self, user_id: str) -> int:
+        """
+        Get total count of journals for a user.
+
+        Args:
+            user_id: The user ID to count journals for
+
+        Returns:
+            Total count of journals
+        """
+        return await self.journal_repo.count_by_user(user_id)
+
     async def _validate_hierarchy(
         self,
         parent_id: int,

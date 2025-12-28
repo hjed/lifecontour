@@ -36,6 +36,14 @@ from app.core.contacts.models.exceptions import (
     TooManyTagsError,
 )
 from app.core.exceptions import DomainError
+from app.core.journal.models.exceptions import (
+    JournalCycleError,
+    JournalDomainError,
+    JournalMaxDepthExceededError,
+    JournalNotFoundError,
+    JournalTypeDependencyError,
+    JournalValidationError,
+)
 from app.core.search.exceptions import SearchDomainError
 from app.infrastructure.auth.exceptions import (
     AuthenticationError,
@@ -86,6 +94,7 @@ def create_validation_error_response(
 def create_domain_error_response(domain_error: DomainError) -> JsonApiErrorResponse:
     """Create JSON API error response from domain error."""
     error_code_map = {
+        # Contact errors
         ContactNotFoundError: "CONTACT_NOT_FOUND",
         TagNotFoundError: "TAG_NOT_FOUND",
         DuplicateEmailError: "DUPLICATE_EMAIL",
@@ -99,6 +108,12 @@ def create_domain_error_response(domain_error: DomainError) -> JsonApiErrorRespo
         TooManyTagsError: "TOO_MANY_TAGS",
         PrimaryMethodConflictError: "PRIMARY_METHOD_CONFLICT",
         PrimaryAddressConflictError: "PRIMARY_ADDRESS_CONFLICT",
+        # Journal errors
+        JournalNotFoundError: "JOURNAL_NOT_FOUND",
+        JournalValidationError: "JOURNAL_VALIDATION_ERROR",
+        JournalCycleError: "JOURNAL_CYCLE_ERROR",
+        JournalMaxDepthExceededError: "JOURNAL_MAX_DEPTH_EXCEEDED",
+        JournalTypeDependencyError: "JOURNAL_TYPE_DEPENDENCY_ERROR",
     }
 
     error_code = error_code_map.get(type(domain_error), "DOMAIN_ERROR")
@@ -144,6 +159,13 @@ async def search_domain_error_handler(
     request: Request, exc: SearchDomainError
 ) -> JSONResponse:
     """Handle search domain errors specifically."""
+    return await domain_error_handler(request, exc)
+
+
+async def journal_domain_error_handler(
+    request: Request, exc: JournalDomainError
+) -> JSONResponse:
+    """Handle journal domain errors specifically."""
     return await domain_error_handler(request, exc)
 
 
@@ -275,6 +297,7 @@ def register_error_handlers(app: "FastAPI") -> None:
     # Cast handlers to the expected type
     contact_handler: ExceptionHandler = contact_domain_error_handler  # type: ignore[assignment]
     search_handler: ExceptionHandler = search_domain_error_handler  # type: ignore[assignment]
+    journal_handler: ExceptionHandler = journal_domain_error_handler  # type: ignore[assignment]
     domain_handler: ExceptionHandler = domain_error_handler  # type: ignore[assignment]
     validation_handler: ExceptionHandler = validation_error_handler  # type: ignore[assignment]
     http_handler: ExceptionHandler = http_exception_handler  # type: ignore[assignment]
@@ -291,6 +314,7 @@ def register_error_handlers(app: "FastAPI") -> None:
     # Domain error handlers (most specific first)
     app.add_exception_handler(ContactDomainError, contact_handler)
     app.add_exception_handler(SearchDomainError, search_handler)
+    app.add_exception_handler(JournalDomainError, journal_handler)
     app.add_exception_handler(DomainError, domain_handler)
 
     # Validation error handlers

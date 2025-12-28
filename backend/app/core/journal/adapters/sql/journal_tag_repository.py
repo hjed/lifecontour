@@ -191,3 +191,29 @@ class SqlJournalTagRepository(JournalTagRepository):
             )
             for row in rows
         ]
+
+    async def get_tags_for_journal(self, journal_id: int) -> list[JournalTag]:
+        """Get all tags assigned to a journal."""
+        query = text(
+            """
+            SELECT t.id, t.name, t.parent_id, t.color, t.created_at, t.updated_at
+            FROM journal_tags t
+            JOIN journal_tag_assignments jta ON t.id = jta.tag_id
+            WHERE jta.journal_id = :journal_id
+            ORDER BY t.name
+        """
+        )
+        result = await self.conn.execute(query, {"journal_id": journal_id})
+        rows = result.fetchall()
+
+        return [
+            JournalTag(
+                id=row.id,
+                name=row.name,
+                parent_id=row.parent_id,
+                color=row.color,
+                created_at=row.created_at,
+                updated_at=row.updated_at,
+            )
+            for row in rows
+        ]
