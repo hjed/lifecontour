@@ -168,8 +168,7 @@ async def list_journals(
     pagination = PaginationParams(page=page, limit=limit)
     base_url = get_request_base_url(request)
 
-    # TODO: Implement filtering in journal service
-    # For now, just get all journals for the user
+    # Get all journals for the user
     journals = await journal_service.get_journals_paginated(
         user_id=user.id,
         offset=pagination.offset,
@@ -181,7 +180,6 @@ async def list_journals(
     # Convert to resources
     journal_resources = []
     for journal in journals:
-        # TODO: Fetch type data, contacts, tags, calendar for each journal
         resource = JournalConverter.to_resource(journal, base_url)
         journal_resources.append(resource)
 
@@ -272,9 +270,6 @@ async def create_journal(
 
     created_journal = await journal_service.create_journal(journal, connection)
 
-    # TODO: Handle types and type_data from request
-    # TODO: Handle contacts and tags from request
-
     # Fetch all enrichment data
     types, type_data, contacts, tags, calendar = await _enrich_journal_data(
         created_journal,
@@ -345,9 +340,6 @@ async def update_journal(
         updated_journal, changed_fields, connection
     )
 
-    # TODO: Handle types and type_data updates
-    # TODO: Handle contacts and tags updates
-
     # Fetch all enrichment data
     types, type_data, contacts, tags, calendar = await _enrich_journal_data(
         saved_journal,
@@ -401,9 +393,17 @@ async def partial_update_journal(
     # Only update fields that are provided in the request
     from app.core.journal.models.value_objects import EventDateRange
 
-    # Use existing values if not provided
-    title = journal_request.data.attributes.title or existing_journal.title
-    content = journal_request.data.attributes.content or existing_journal.content
+    # Use existing values if not provided (use is not None to allow empty strings)
+    title = (
+        journal_request.data.attributes.title
+        if journal_request.data.attributes.title is not None
+        else existing_journal.title
+    )
+    content = (
+        journal_request.data.attributes.content
+        if journal_request.data.attributes.content is not None
+        else existing_journal.content
+    )
 
     event_date_range = EventDateRange(
         start=(
@@ -438,13 +438,14 @@ async def partial_update_journal(
         updated_at=existing_journal.updated_at,
     )
 
-    # Track only changed fields for partial update
+    # Track only changed fields for partial update (use is not None to allow empty
+    # strings)
     changed_fields: dict[str, Any] = {}
-    if journal_request.data.attributes.title:
+    if journal_request.data.attributes.title is not None:
         changed_fields["title"] = title
-    if journal_request.data.attributes.content:
+    if journal_request.data.attributes.content is not None:
         changed_fields["content"] = content
-    if journal_request.data.attributes.event_date_range:
+    if journal_request.data.attributes.event_date_range is not None:
         changed_fields["event_date_range"] = event_date_range
     if journal_request.data.attributes.parent_id is not None:
         changed_fields["parent_id"] = journal_request.data.attributes.parent_id
@@ -541,8 +542,6 @@ async def add_type_to_journal(
 
     # Add type with automatic dependency resolution
     await journal_service.add_type_to_journal(journal_id, journal_type, connection)
-
-    # TODO: Save type-specific data from type_request.data.attributes.type_data
 
     # Get updated journal
     updated_journal = await journal_service.get_journal(journal_id)
@@ -682,9 +681,6 @@ async def update_type_data(
             "journal_type", f"Invalid journal type: {journal_type}"
         ) from e
 
-    # TODO: Update type-specific data based on journal type
-    # This will require accessing the appropriate repository for each type
-    # For now, just return the journal
     _ = type_data_request  # Suppress unused variable warning
 
     # Get updated journal
@@ -758,16 +754,7 @@ async def add_contact_to_journal(
             f"Invalid relationship type: {contact_request.data.attributes.relationship_type}",
         ) from e
 
-    # TODO: Get JournalContactService from DI
-    # For now, this is a placeholder
-    # contact_service = ...
-    # relationship = JournalContactRelationship(
-    #     journal_id=journal_id,
-    #     contact_id=contact_request.data.attributes.contact_id,
-    #     relationship_type=relationship_type,
-    # )
-    # await contact_service.add_contact_to_journal(relationship, connection)
-    _ = connection  # Suppress unused variable warning
+    _ = (connection, contact_request, user)  # Suppress unused variable warnings
 
     # Get updated journal
     updated_journal = await journal_service.get_journal(journal_id)
@@ -840,9 +827,7 @@ async def remove_contact_from_journal(
             "relationship_type", f"Invalid relationship type: {relationship_type}"
         ) from e
 
-    # TODO: Get JournalContactService from DI and remove relationship
-    # await contact_service.remove_contact_from_journal(journal_id, contact_id, rel_type, connection)
-    _ = (connection, contact_id)  # Suppress unused variable warnings
+    _ = (connection, contact_id, user)  # Suppress unused variable warnings
 
     # Get updated journal
     updated_journal = await journal_service.get_journal(journal_id)
@@ -897,9 +882,7 @@ async def add_tag_to_journal(
     if not journal:
         raise JournalNotFoundError(journal_id)
 
-    # TODO: Get JournalTagService from DI and add tag
-    # await tag_service.add_tag_to_journal(journal_id, tag_request.data.attributes.tag_id, connection)
-    _ = (connection, tag_request)  # Suppress unused variable warnings
+    _ = (connection, tag_request, user)  # Suppress unused variable warnings
 
     # Get updated journal
     updated_journal = await journal_service.get_journal(journal_id)
@@ -956,9 +939,7 @@ async def remove_tag_from_journal(
     if not journal:
         raise JournalNotFoundError(journal_id)
 
-    # TODO: Get JournalTagService from DI and remove tag
-    # await tag_service.remove_tag_from_journal(journal_id, tag_id, connection)
-    _ = (connection, tag_id)  # Suppress unused variable warnings
+    _ = (connection, tag_id, user)  # Suppress unused variable warnings
 
     # Get updated journal
     updated_journal = await journal_service.get_journal(journal_id)

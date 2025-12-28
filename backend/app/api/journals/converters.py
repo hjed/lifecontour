@@ -69,6 +69,95 @@ class JournalConverter:
         )
 
     @staticmethod
+    def _convert_contacts(
+        contacts: list[JournalContactRelationship] | None,
+    ) -> list[JournalContactRelationshipSchema]:
+        """Convert contact relationships to schemas."""
+        if not contacts:
+            return []
+
+        return [
+            JournalContactRelationshipSchema(
+                id=str(contact_rel.contact_id),
+                name=None,  # Will be populated by controller
+                relationship_type=contact_rel.relationship_type.value,
+            )
+            for contact_rel in contacts
+        ]
+
+    @staticmethod
+    def _convert_tags(tags: list[JournalTag] | None) -> list[JournalTagSchema]:
+        """Convert tags to schemas."""
+        if not tags:
+            return []
+
+        return [
+            JournalTagSchema(
+                id=str(tag.id) if tag.id else "",
+                name=tag.name,
+                color=tag.color,
+            )
+            for tag in tags
+        ]
+
+    @staticmethod
+    def _convert_calendar(calendar: Calendar | None) -> CalendarSchema | None:
+        """Convert calendar to schema."""
+        if not calendar:
+            return None
+
+        return CalendarSchema(
+            id=str(calendar.id) if calendar.id else "",
+            name=calendar.name,
+            color=calendar.color,
+        )
+
+    @staticmethod
+    def _convert_parent(parent: Journal | None) -> dict[str, str] | None:
+        """Convert parent journal to summary."""
+        if not parent:
+            return None
+
+        return {
+            "id": str(parent.id),
+            "title": parent.title,
+        }
+
+    @staticmethod
+    def _create_relationships(
+        tags: list[JournalTag] | None,
+        contacts: list[JournalContactRelationship] | None,
+        calendar: Calendar | None,
+    ) -> JournalRelationships | None:
+        """Create relationships object."""
+        if not (tags or contacts or calendar):
+            return None
+
+        tags_data = None
+        if tags:
+            tags_data = {
+                "data": [{"type": "tags", "id": str(tag.id)} for tag in tags if tag.id]
+            }
+
+        contacts_data = None
+        if contacts:
+            contacts_data = {
+                "data": [
+                    {"type": "contacts", "id": str(c.contact_id)} for c in contacts
+                ]
+            }
+
+        calendar_data = None
+        if calendar and calendar.id:
+            calendar_data = {"data": {"type": "calendars", "id": str(calendar.id)}}
+
+        return JournalRelationships(
+            tags=tags_data,
+            contacts=contacts_data,
+            calendar=calendar_data,
+        )
+
+    @staticmethod
     def to_resource(
         journal: Journal,
         base_url: str = "",
@@ -100,44 +189,10 @@ class JournalConverter:
         _validate_entity_id(journal.id, "journal")
 
         # Convert embedded data
-        contact_schemas = []
-        if contacts:
-            for contact_rel in contacts:
-                # We'll need to fetch contact name from contact service
-                # For now, just include the ID and relationship type
-                contact_schemas.append(
-                    JournalContactRelationshipSchema(
-                        id=str(contact_rel.contact_id),
-                        name=None,  # Will be populated by controller
-                        relationship_type=contact_rel.relationship_type.value,
-                    )
-                )
-
-        tag_schemas = []
-        if tags:
-            for tag in tags:
-                tag_schemas.append(
-                    JournalTagSchema(
-                        id=str(tag.id) if tag.id else "",
-                        name=tag.name,
-                        color=tag.color,
-                    )
-                )
-
-        calendar_schema = None
-        if calendar:
-            calendar_schema = CalendarSchema(
-                id=str(calendar.id) if calendar.id else "",
-                name=calendar.name,
-                color=calendar.color,
-            )
-
-        parent_summary = None
-        if parent:
-            parent_summary = {
-                "id": str(parent.id),
-                "title": parent.title,
-            }
+        contact_schemas = JournalConverter._convert_contacts(contacts)
+        tag_schemas = JournalConverter._convert_tags(tags)
+        calendar_schema = JournalConverter._convert_calendar(calendar)
+        parent_summary = JournalConverter._convert_parent(parent)
 
         # Create attributes
         attributes = JournalAttributes(
@@ -158,36 +213,7 @@ class JournalConverter:
         )
 
         # Create relationships
-        relationships = None
-        if tags or contacts or calendar:
-            relationships = JournalRelationships(
-                tags=(
-                    {
-                        "data": [
-                            {"type": "tags", "id": str(tag.id)}
-                            for tag in tags
-                            if tag.id
-                        ]
-                    }
-                    if tags
-                    else None
-                ),
-                contacts=(
-                    {
-                        "data": [
-                            {"type": "contacts", "id": str(c.contact_id)}
-                            for c in contacts
-                        ]
-                    }
-                    if contacts
-                    else None
-                ),
-                calendar=(
-                    {"data": {"type": "calendars", "id": str(calendar.id)}}
-                    if calendar and calendar.id
-                    else None
-                ),
-            )
+        relationships = JournalConverter._create_relationships(tags, contacts, calendar)
 
         # Create links
         links = None

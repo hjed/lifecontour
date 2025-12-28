@@ -20,6 +20,7 @@ class JournalValidationError(JournalDomainError):
 
     def __init__(self, field: str, message: str):
         super().__init__(f"{field}: {message}", 400)
+        # Store field separately for programmatic access (e.g. in error handlers)
         self.field = field
 
 

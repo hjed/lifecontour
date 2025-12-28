@@ -18,6 +18,11 @@ from app.api.common.schemas import (
     JsonApiUpdateRequest,
 )
 
+# Constants for field descriptions
+DISPLAY_ORDER_DESC = "Display order"
+BOOKING_REFERENCE_DESC = "Booking reference"
+RESOURCE_TYPE_DESC = "Resource type"
+
 
 # Event Date Range Schema
 class EventDateRangeSchema(BaseModel):
@@ -64,7 +69,7 @@ class PlanDocumentSchema(BaseModel):
     url: str = Field(..., description="Document URL")
     title: str | None = Field(default=None, description="Document title")
     description: str | None = Field(default=None, description="Document description")
-    order: int | None = Field(default=None, description="Display order")
+    order: int | None = Field(default=None, description=DISPLAY_ORDER_DESC)
 
 
 class PlanDataSchema(BaseModel):
@@ -85,11 +90,13 @@ class TravelFlightSchema(BaseModel):
     arrival_airport: str | None = Field(default=None, description="Arrival airport")
     departure_time: datetime | None = Field(default=None, description="Departure time")
     arrival_time: datetime | None = Field(default=None, description="Arrival time")
-    booking_reference: str | None = Field(default=None, description="Booking reference")
+    booking_reference: str | None = Field(
+        default=None, description=BOOKING_REFERENCE_DESC
+    )
     confirmation_number: str | None = Field(
         default=None, description="Confirmation number"
     )
-    order: int | None = Field(default=None, description="Display order")
+    order: int | None = Field(default=None, description=DISPLAY_ORDER_DESC)
 
 
 class TravelAccommodationSchema(BaseModel):
@@ -100,11 +107,13 @@ class TravelAccommodationSchema(BaseModel):
     address: str | None = Field(default=None, description="Accommodation address")
     check_in_date: date | None = Field(default=None, description="Check-in date")
     check_out_date: date | None = Field(default=None, description="Check-out date")
-    booking_reference: str | None = Field(default=None, description="Booking reference")
+    booking_reference: str | None = Field(
+        default=None, description=BOOKING_REFERENCE_DESC
+    )
     confirmation_number: str | None = Field(
         default=None, description="Confirmation number"
     )
-    order: int | None = Field(default=None, description="Display order")
+    order: int | None = Field(default=None, description=DISPLAY_ORDER_DESC)
 
 
 class TravelTransportationSchema(BaseModel):
@@ -113,8 +122,10 @@ class TravelTransportationSchema(BaseModel):
     id: str | None = Field(default=None, description="Transportation ID (UUID)")
     type: str = Field(..., description="Transportation type (car, train, bus, etc.)")
     details: str | None = Field(default=None, description="Transportation details")
-    booking_reference: str | None = Field(default=None, description="Booking reference")
-    order: int | None = Field(default=None, description="Display order")
+    booking_reference: str | None = Field(
+        default=None, description=BOOKING_REFERENCE_DESC
+    )
+    order: int | None = Field(default=None, description=DISPLAY_ORDER_DESC)
 
 
 class TravelDataSchema(BaseModel):
@@ -224,7 +235,7 @@ class JournalRelationships(BaseModel):
 class JournalResource(BaseModel):
     """Journal resource following JSON API specification."""
 
-    type: str = Field(default="journals", description="Resource type")
+    type: str = Field(default="journals", description=RESOURCE_TYPE_DESC)
     id: str = Field(..., description="Resource identifier")
     attributes: JournalAttributes = Field(..., description="Journal attributes")
     relationships: JournalRelationships | None = Field(
@@ -238,7 +249,7 @@ class JournalResource(BaseModel):
 class JournalCreateData(BaseModel):
     """Data for creating a new journal."""
 
-    type: str = Field(default="journals", description="Resource type")
+    type: str = Field(default="journals", description=RESOURCE_TYPE_DESC)
     attributes: JournalAttributes = Field(
         ..., description="Journal attributes to create"
     )
@@ -274,7 +285,7 @@ class JournalUpdateAttributes(BaseModel):
 class JournalUpdateData(BaseModel):
     """Data for updating an existing journal."""
 
-    type: str = Field(default="journals", description="Resource type")
+    type: str = Field(default="journals", description=RESOURCE_TYPE_DESC)
     id: str = Field(..., description="Journal ID to update")
     attributes: JournalUpdateAttributes = Field(
         ..., description="Journal attributes to update"
@@ -320,7 +331,7 @@ class JournalTypeAddAttributes(BaseModel):
 class JournalTypeAddData(BaseModel):
     """Data for adding a type to a journal."""
 
-    type: str = Field(default="journal-types", description="Resource type")
+    type: str = Field(default="journal-types", description=RESOURCE_TYPE_DESC)
     attributes: JournalTypeAddAttributes = Field(
         ..., description="Type addition attributes"
     )
@@ -343,7 +354,7 @@ class JournalTypeDataUpdateAttributes(BaseModel):
 class JournalTypeDataUpdateData(BaseModel):
     """Data for updating type-specific data."""
 
-    type: str = Field(default="journal-type-data", description="Resource type")
+    type: str = Field(default="journal-type-data", description=RESOURCE_TYPE_DESC)
     attributes: dict[str, Any] = Field(..., description="Type-specific data to update")
 
 
@@ -367,7 +378,7 @@ class JournalContactRelationshipAddData(BaseModel):
     """Data for adding a contact relationship to a journal."""
 
     type: str = Field(
-        default="journal-contact-relationships", description="Resource type"
+        default="journal-contact-relationships", description=RESOURCE_TYPE_DESC
     )
     attributes: JournalContactRelationshipAddAttributes = Field(
         ..., description="Relationship attributes"
@@ -396,7 +407,7 @@ class JournalTagAddAttributes(BaseModel):
 class JournalTagAddData(BaseModel):
     """Data model for adding a tag to a journal."""
 
-    type: str = Field(default="journal-tag", description="Resource type")
+    type: str = Field(default="journal-tag", description=RESOURCE_TYPE_DESC)
     attributes: JournalTagAddAttributes = Field(
         ..., description="Tag addition attributes"
     )
@@ -426,7 +437,7 @@ class CalendarAttributes(BaseModel):
 class CalendarResource(BaseModel):
     """Calendar resource following JSON API specification."""
 
-    type: str = Field(default="calendars", description="Resource type")
+    type: str = Field(default="calendars", description=RESOURCE_TYPE_DESC)
     id: str = Field(..., description="Resource identifier")
     attributes: CalendarAttributes = Field(..., description="Calendar attributes")
     links: JsonApiLinks | None = Field(default=None, description="Resource links")
@@ -436,7 +447,7 @@ class CalendarResource(BaseModel):
 class CalendarCreateData(BaseModel):
     """Data for creating a new calendar."""
 
-    type: str = Field(default="calendars", description="Resource type")
+    type: str = Field(default="calendars", description=RESOURCE_TYPE_DESC)
     attributes: CalendarAttributes = Field(
         ..., description="Calendar attributes to create"
     )
