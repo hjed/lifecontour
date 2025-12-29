@@ -374,6 +374,18 @@ CREATE TABLE journals (
 - ✅ Added integration test for `get_tags_for_journal` method
 - ✅ All endpoints now properly inject required repositories and use the enrichment helper
 
+**Recent Progress (2024-12-28):**
+- ✅ Implemented `assign_tag` and `remove_tag` repository methods in `JournalTagRepository`
+- ✅ Fully implemented `PUT /api/journals/{id}/types/{type}/data` endpoint for updating type-specific data
+  - Supports EVENT type (calendar info: calendar_id, start_time, end_time, is_all_day, location, sync_invitees)
+  - Supports MOOD_RATING type (mood data: mood_value, mood_label, energy_level)
+  - Supports PHOTO_ALBUM type (photo album data: immich_album_id)
+  - Returns appropriate errors for PLAN/TRAVEL types (complex nested structures not yet supported)
+  - Returns appropriate error for NOTE type (no type-specific data)
+- ✅ Added integration tests for `assign_tag` and `remove_tag` methods
+- ✅ All tests passing (157 unit tests, 2 new integration tests)
+- ✅ Code passes linting, formatting, and type checking
+
 **Acceptance Criteria:**
 
 - [x] Create `JournalController` in `backend/app/api/journals/` with JSON API compliance
@@ -412,10 +424,17 @@ CREATE TABLE journals (
 **Implementation Details:**
 
 - **Helper Function:** `_enrich_journal_data()` fetches all enrichment data in parallel
-- **Repository Method:** `get_tags_for_journal(journal_id)` joins journal_tags with journal_tag_assignments
+- **Repository Methods:**
+  - `get_tags_for_journal(journal_id)` - Joins journal_tags with journal_tag_assignments to fetch tags
+  - `assign_tag(journal_id, tag_id)` - Assigns a tag to a journal
+  - `remove_tag(journal_id, tag_id)` - Removes a tag from a journal
 - **Converter:** `TypeDataConverter` methods convert domain entities to API schemas
+- **Type Data Update:** `update_type_data` endpoint supports EVENT, MOOD_RATING, and PHOTO_ALBUM types
 - **All Endpoints Updated:** 11 endpoints now inject all required repositories and return complete data
-- **Test Coverage:** Added integration test for tag fetching functionality
+- **Test Coverage:**
+  - Integration tests for tag fetching, assignment, and removal
+  - All unit tests passing (157 tests)
+  - Code passes linting, formatting, and type checking
 
 ### ITER4-007: MeiliSearch Integration 🟡 PLANNED
 **Description:** Implement event-driven journal indexing and search

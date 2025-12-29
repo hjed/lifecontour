@@ -217,3 +217,29 @@ class SqlJournalTagRepository(JournalTagRepository):
             )
             for row in rows
         ]
+
+    async def assign_tag(self, journal_id: int, tag_id: UUID) -> None:
+        """Assign a tag to a journal."""
+        from sqlalchemy.exc import IntegrityError
+
+        try:
+            query = text(
+                """
+                INSERT INTO journal_tag_assignments (journal_id, tag_id)
+                VALUES (:journal_id, :tag_id)
+            """
+            )
+            await self.conn.execute(query, {"journal_id": journal_id, "tag_id": tag_id})
+        except IntegrityError:
+            # Tag already assigned - ignore
+            pass
+
+    async def remove_tag(self, journal_id: int, tag_id: UUID) -> None:
+        """Remove a tag from a journal."""
+        query = text(
+            """
+            DELETE FROM journal_tag_assignments
+            WHERE journal_id = :journal_id AND tag_id = :tag_id
+        """
+        )
+        await self.conn.execute(query, {"journal_id": journal_id, "tag_id": tag_id})

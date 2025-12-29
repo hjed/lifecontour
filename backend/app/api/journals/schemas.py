@@ -38,10 +38,12 @@ class CalendarInfoDataSchema(BaseModel):
 
     calendar_id: str = Field(..., description="Calendar ID")
     start_time: time | None = Field(
-        default=None, description="Event start time (null for all-day events)"
+        default=None,
+        description="Event start time (time-of-day, null for all-day events)",
     )
     end_time: time | None = Field(
-        default=None, description="Event end time (null for all-day events)"
+        default=None,
+        description="Event end time (time-of-day, null for all-day events)",
     )
     is_all_day: bool = Field(default=False, description="Whether event is all-day")
     location: str | None = Field(default=None, description="Event location")
@@ -401,7 +403,7 @@ JournalContactAddRequest = JournalContactRelationshipAddRequest
 class JournalTagAddAttributes(BaseModel):
     """Attributes for adding a tag to a journal."""
 
-    tag_id: str = Field(..., description="UUID of the tag to add")
+    tag_id: str = Field(..., description="ID of the tag to add")
 
 
 class JournalTagAddData(BaseModel):

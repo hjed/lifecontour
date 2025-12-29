@@ -662,6 +662,9 @@ async def update_type_data(
 
     The journal must already have the specified type.
     """
+    from uuid import UUID
+
+    from app.core.journal.models.exceptions import JournalValidationError
     from app.core.journal.models.journal_types import JournalType
 
     base_url = get_request_base_url(request)
@@ -673,15 +676,86 @@ async def update_type_data(
 
     # Parse journal type
     try:
-        _ = JournalType[journal_type]
+        jtype = JournalType[journal_type]
     except KeyError as e:
-        from app.core.journal.models.exceptions import JournalValidationError
-
         raise JournalValidationError(
             "journal_type", f"Invalid journal type: {journal_type}"
         ) from e
 
-    _ = type_data_request  # Suppress unused variable warning
+    # Get the attributes from the request
+    attrs = type_data_request.data.attributes
+
+    # Update type-specific data based on the type
+    if jtype == JournalType.EVENT:
+        # Update calendar info
+        calendar_info = await calendar_info_repo.find_by_journal_id(journal_id)
+        if not calendar_info:
+            raise JournalValidationError(
+                "journal_type", f"Journal does not have type {journal_type}"
+            )
+
+        # Update fields from request
+        if "calendar_id" in attrs:
+            calendar_info.calendar_id = UUID(attrs["calendar_id"])
+        if "start_time" in attrs:
+            calendar_info.start_time = attrs["start_time"]
+        if "end_time" in attrs:
+            calendar_info.end_time = attrs["end_time"]
+        if "is_all_day" in attrs:
+            calendar_info.is_all_day = attrs["is_all_day"]
+        if "location" in attrs:
+            calendar_info.location = attrs["location"]
+        if "sync_invitees" in attrs:
+            calendar_info.sync_invitees = attrs["sync_invitees"]
+
+        await calendar_info_repo.save(calendar_info)
+
+    elif jtype == JournalType.MOOD_RATING:
+        # Update mood data
+        mood_data = await mood_data_repo.find_by_journal_id(journal_id)
+        if not mood_data:
+            raise JournalValidationError(
+                "journal_type", f"Journal does not have type {journal_type}"
+            )
+
+        # Update fields from request
+        if "mood_value" in attrs:
+            mood_data.mood_value = attrs["mood_value"]
+        if "mood_label" in attrs:
+            mood_data.mood_label = attrs["mood_label"]
+        if "energy_level" in attrs:
+            mood_data.energy_level = attrs["energy_level"]
+
+        await mood_data_repo.save(mood_data)
+
+    elif jtype == JournalType.PHOTO_ALBUM:
+        # Update photo album data
+        photo_album_data = await photo_album_data_repo.find_by_journal_id(journal_id)
+        if not photo_album_data:
+            raise JournalValidationError(
+                "journal_type", f"Journal does not have type {journal_type}"
+            )
+
+        # Update fields from request
+        if "immich_album_id" in attrs:
+            photo_album_data.immich_album_id = attrs["immich_album_id"]
+
+        await photo_album_data_repo.save(photo_album_data)
+
+    elif jtype in (JournalType.PLAN, JournalType.TRAVEL):
+        # PLAN and TRAVEL types have complex nested data structures
+        # For now, return an error indicating this is not yet supported
+        raise JournalValidationError(
+            "journal_type",
+            f"Updating {journal_type} type data is not yet supported. "
+            "Please use the full journal update endpoint instead.",
+        )
+
+    else:
+        # NOTE type has no type-specific data
+        raise JournalValidationError(
+            "journal_type", f"Type {journal_type} has no type-specific data to update"
+        )
 
     # Get updated journal
     updated_journal = await journal_service.get_journal(journal_id)
@@ -730,6 +804,9 @@ async def add_contact_to_journal(
     """
     Add a contact relationship to a journal.
     """
+    from app.core.journal.models.journal_contact_relationship import (
+        JournalContactRelationship,
+    )
     from app.core.journal.models.journal_relationship_types import (
         JournalContactRelationshipType,
     )
@@ -741,9 +818,16 @@ async def add_contact_to_journal(
     if not journal:
         raise JournalNotFoundError(journal_id)
 
-    # Parse relationship type
+    # Parse contact_id and relationship type
     try:
-        _ = JournalContactRelationshipType[
+        contact_id = int(contact_request.data.attributes.contact_id)
+    except ValueError as e:
+        from app.core.journal.models.exceptions import JournalValidationError
+
+        raise JournalValidationError("contact_id", "Invalid contact ID format") from e
+
+    try:
+        relationship_type = JournalContactRelationshipType[
             contact_request.data.attributes.relationship_type
         ]
     except KeyError as e:
@@ -754,7 +838,13 @@ async def add_contact_to_journal(
             f"Invalid relationship type: {contact_request.data.attributes.relationship_type}",
         ) from e
 
-    _ = (connection, contact_request, user)  # Suppress unused variable warnings
+    # Create the relationship
+    relationship = JournalContactRelationship(
+        journal_id=journal_id,
+        contact_id=contact_id,
+        relationship_type=relationship_type,
+    )
+    await contact_relationship_repo.create(relationship)
 
     # Get updated journal
     updated_journal = await journal_service.get_journal(journal_id)
@@ -817,9 +907,16 @@ async def remove_contact_from_journal(
     if not journal:
         raise JournalNotFoundError(journal_id)
 
-    # Parse relationship type
+    # Parse contact_id and relationship type
     try:
-        _ = JournalContactRelationshipType[relationship_type]
+        contact_id_int = int(contact_id)
+    except ValueError as e:
+        from app.core.journal.models.exceptions import JournalValidationError
+
+        raise JournalValidationError("contact_id", "Invalid contact ID format") from e
+
+    try:
+        relationship_type_enum = JournalContactRelationshipType[relationship_type]
     except KeyError as e:
         from app.core.journal.models.exceptions import JournalValidationError
 
@@ -827,7 +924,10 @@ async def remove_contact_from_journal(
             "relationship_type", f"Invalid relationship type: {relationship_type}"
         ) from e
 
-    _ = (connection, contact_id, user)  # Suppress unused variable warnings
+    # Delete the relationship
+    await contact_relationship_repo.delete(
+        journal_id, contact_id_int, relationship_type_enum
+    )
 
     # Get updated journal
     updated_journal = await journal_service.get_journal(journal_id)
@@ -875,6 +975,10 @@ async def add_tag_to_journal(
     """
     Add a tag to a journal.
     """
+    from uuid import UUID
+
+    from app.core.journal.models.exceptions import JournalValidationError
+
     base_url = get_request_base_url(request)
 
     # Verify journal exists
@@ -882,7 +986,19 @@ async def add_tag_to_journal(
     if not journal:
         raise JournalNotFoundError(journal_id)
 
-    _ = (connection, tag_request, user)  # Suppress unused variable warnings
+    # Parse tag_id
+    try:
+        tag_uuid = UUID(tag_request.data.attributes.tag_id)
+    except ValueError as e:
+        raise JournalValidationError("tag_id", "Invalid UUID format") from e
+
+    # Verify tag exists
+    tag = await tag_repo.find_by_id(tag_uuid)
+    if not tag:
+        raise JournalValidationError("tag_id", f"Tag not found: {tag_uuid}")
+
+    # Assign tag to journal
+    await tag_repo.assign_tag(journal_id, tag_uuid)
 
     # Get updated journal
     updated_journal = await journal_service.get_journal(journal_id)
@@ -932,6 +1048,10 @@ async def remove_tag_from_journal(
     """
     Remove a tag from a journal.
     """
+    from uuid import UUID
+
+    from app.core.journal.models.exceptions import JournalValidationError
+
     base_url = get_request_base_url(request)
 
     # Verify journal exists
@@ -939,7 +1059,14 @@ async def remove_tag_from_journal(
     if not journal:
         raise JournalNotFoundError(journal_id)
 
-    _ = (connection, tag_id, user)  # Suppress unused variable warnings
+    # Parse tag_id
+    try:
+        tag_uuid = UUID(tag_id)
+    except ValueError as e:
+        raise JournalValidationError("tag_id", "Invalid UUID format") from e
+
+    # Remove tag from journal
+    await tag_repo.remove_tag(journal_id, tag_uuid)
 
     # Get updated journal
     updated_journal = await journal_service.get_journal(journal_id)

@@ -698,6 +698,28 @@ class JournalTagRepository(ABC):
         """
         pass
 
+    @abstractmethod
+    async def assign_tag(self, journal_id: int, tag_id: UUID) -> None:
+        """
+        Assign a tag to a journal.
+
+        Args:
+            journal_id: The journal ID
+            tag_id: The tag UUID to assign
+        """
+        pass
+
+    @abstractmethod
+    async def remove_tag(self, journal_id: int, tag_id: UUID) -> None:
+        """
+        Remove a tag from a journal.
+
+        Args:
+            journal_id: The journal ID
+            tag_id: The tag UUID to remove
+        """
+        pass
+
 
 class JournalContactRelationshipRepository(ABC):
     """
