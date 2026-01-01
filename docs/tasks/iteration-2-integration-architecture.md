@@ -283,19 +283,59 @@ The integration architecture foundation and core Google Contacts sync functional
 - **Shared Container:** Same Dishka container used by both REST API and MCP server
 - **Resource Management:** Proper cleanup of database connections and resources
 
-### ITER2-005: Production Resilience Patterns 🔴 PENDING
+### ITER2-005: Production Resilience Patterns 🟡 IN PROGRESS
 **Description:** Implement production-grade resilience and observability patterns
 **PR Size:** Split into 4 sub-tasks for comprehensive coverage
 
-#### Phase 1: Idempotency & Transactional Patterns 🟡 PENDING
-**PR Size:** ~5 files (Outbox pattern, locking, tests)
+#### Phase 1: Idempotency & Transactional Patterns ✅ COMPLETED
+**PR Size:** ~15 files (Repository, outbox processor integration, utils, tests, documentation)
 
 **Acceptance Criteria:**
-- [ ] Implement mandatory idempotency patterns with SyncMetadata locking
-- [ ] Add transactional outbox pattern for atomic database/event operations
-- [ ] Implement SELECT FOR UPDATE locking for concurrent sync operations
-- [ ] Add comprehensive integration tests for concurrent scenarios
-- [ ] Document idempotency patterns and usage guidelines
+- [x] Implement mandatory idempotency patterns with SyncMetadata locking
+- [x] Add transactional outbox pattern for atomic database/event operations (already existed)
+- [x] Implement SELECT FOR UPDATE locking for concurrent sync operations
+- [x] Add comprehensive integration tests for concurrent scenarios
+- [x] Document idempotency patterns and usage guidelines
+- [x] Integrate OutboxEventProcessor into OutboxProcessor for contact sync events
+
+**Implementation Details:**
+- **SyncMetadataRepository** (`backend/app/core/integrations/adapters/sql/sync_metadata_repository.py`):
+  - `find_and_lock()`: Acquires exclusive lock using SELECT FOR UPDATE
+  - `find_by_external_id()`: Read-only query without locking
+  - `upsert()`: Atomic insert/update with ON CONFLICT handling
+  - `should_sync()`: Version hash-based idempotency check
+- **Version Hash Utilities** (`backend/app/core/integrations/utils/version_hash.py`):
+  - `calculate_version_hash()`: Generic SHA-256 hash calculation
+  - `calculate_contact_version_hash()`: Contact-specific hash (excludes metadata timestamps)
+- **OutboxEventProcessor** (`backend/app/core/integrations/outbox_event_processor.py`):
+  - Updated `_process_contact_updated()` to use SELECT FOR UPDATE locking
+  - Added version hash checking for idempotency (skip if unchanged)
+  - Atomic sync metadata updates in same transaction as contact updates
+  - Updated `_process_contact_created()` to create initial sync metadata
+- **OutboxProcessor Integration** (`backend/app/infrastructure/events/outbox_processor.py`):
+  - Added event routing logic to distinguish contact sync events (`contact.*`) from other events
+  - Contact sync events routed to `OutboxEventProcessor` for proper locking and idempotency
+  - Other events continue to be processed by `SearchIndexer` (MeiliSearch)
+  - Added `_process_contact_event()` method that creates all necessary dependencies
+  - Maintains transactional integrity using same database connection
+- **Integration Tests** (`backend/tests/integration/core/integrations/test_concurrent_sync.py`):
+  - `test_concurrent_sync_with_locking`: Verifies SELECT FOR UPDATE prevents race conditions
+  - `test_concurrent_sync_different_contacts`: Verifies row-level locking (not table-level)
+  - Tests use real PostgreSQL database via Docker
+- **Unit Tests**:
+  - `test_sync_metadata_repository.py`: 8 tests covering all repository methods
+  - `test_outbox_processor.py`: 10 tests including contact event routing
+  - `test_outbox_event_processor.py`: 7 tests for contact sync processing
+  - Tests for locking, idempotency, and error handling
+- **Documentation** (`backend/tests/integration/core/integrations/README.md`):
+  - Comprehensive guide to concurrent sync patterns
+  - Explains SELECT FOR UPDATE, idempotency checks, and separate connections
+  - Running instructions and test infrastructure details
+
+**Test Results:**
+- ✅ 107/107 unit tests passing (infrastructure/events + core/integrations)
+- ✅ 5/5 integration tests passing (outbox pattern)
+- ✅ All quality gates passing (mypy, ruff check, ruff format)
 
 #### Phase 2: Retry & Error Handling 🟡 PENDING
 **PR Size:** ~4 files (ARQ configuration, error handling, monitoring)

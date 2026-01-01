@@ -374,3 +374,165 @@ class TestOutboxProcessor:
         # Assert
         # Should have called process_events at least once
         assert mock_processor.process_events.call_count >= 1
+
+    @pytest.mark.asyncio
+    async def test_process_contact_sync_event(self, processor, mock_search_indexer):
+        """Test that contact.* events are routed to OutboxEventProcessor."""
+        # Arrange
+        contact_event = OutboxEvent(
+            id=1,
+            event_id="contact-event-1",
+            event_type="contact.created",
+            aggregate_id=42,
+            event_data={
+                "integration_source": "google_contacts",
+                "external_id": "people/c123",
+                "contact_data": {
+                    "resourceName": "people/c123",
+                    "names": [{"givenName": "Test", "familyName": "User"}],
+                },
+                "sync_timestamp": "2024-01-01T10:00:00Z",
+                "sync_type": "created",
+            },
+            occurred_at=datetime(2024, 1, 1, 10, 0, 0),
+            processed_at=None,
+            retry_count=0,
+            created_at=datetime(2024, 1, 1, 10, 0, 0),
+        )
+
+        mock_conn = AsyncMock()
+
+        @asynccontextmanager
+        async def mock_begin():
+            yield mock_conn
+
+        mock_engine = AsyncMock()
+        mock_engine.begin = mock_begin
+
+        mock_repository = MagicMock()
+        mock_repository.get_unprocessed_events = AsyncMock(return_value=[contact_event])
+        mock_repository.mark_as_processed = AsyncMock()
+
+        # Mock the OutboxEventProcessor
+        mock_event_processor = AsyncMock()
+        mock_event_processor.process_event = AsyncMock(
+            return_value={"status": "success", "contact_id": 123}
+        )
+
+        with (
+            patch(
+                "app.infrastructure.events.outbox_processor.get_async_database_engine",
+                return_value=mock_engine,
+            ),
+            patch(
+                "app.infrastructure.events.outbox_processor.OutboxRepository",
+                return_value=mock_repository,
+            ),
+            patch(
+                "app.infrastructure.events.outbox_processor.SearchIndexer",
+                return_value=mock_search_indexer,
+            ),
+            patch(
+                "app.core.integrations.outbox_event_processor.OutboxEventProcessor",
+                return_value=mock_event_processor,
+            ),
+        ):
+            # Act
+            await processor.process_events()
+
+        # Assert
+        # Contact event should NOT be sent to search indexer
+        mock_search_indexer.process_event.assert_not_called()
+
+        # Contact event SHOULD be sent to OutboxEventProcessor
+        mock_event_processor.process_event.assert_called_once_with(contact_event)
+
+        # Event should be marked as processed
+        mock_repository.mark_as_processed.assert_called_once_with("contact-event-1")
+
+    @pytest.mark.asyncio
+    async def test_process_mixed_events(self, processor, mock_search_indexer):
+        """Test processing a mix of contact and non-contact events."""
+        # Arrange
+        events = [
+            OutboxEvent(
+                id=1,
+                event_id="contact-event",
+                event_type="contact.created",
+                aggregate_id=42,
+                event_data={
+                    "integration_source": "google_contacts",
+                    "external_id": "people/c123",
+                    "contact_data": {},
+                    "sync_timestamp": "2024-01-01T10:00:00Z",
+                    "sync_type": "created",
+                },
+                occurred_at=datetime(2024, 1, 1, 10, 0, 0),
+                processed_at=None,
+                retry_count=0,
+                created_at=datetime(2024, 1, 1, 10, 0, 0),
+            ),
+            OutboxEvent(
+                id=2,
+                event_id="search-event",
+                event_type="ContactCreated",
+                aggregate_id=43,
+                event_data={"contact_id": 43, "name": "Jane"},
+                occurred_at=datetime(2024, 1, 1, 12, 5, 0),
+                processed_at=None,
+                retry_count=0,
+                created_at=datetime(2024, 1, 1, 12, 5, 0),
+            ),
+        ]
+
+        mock_conn = AsyncMock()
+
+        @asynccontextmanager
+        async def mock_begin():
+            yield mock_conn
+
+        mock_engine = AsyncMock()
+        mock_engine.begin = mock_begin
+
+        mock_repository = MagicMock()
+        mock_repository.get_unprocessed_events = AsyncMock(return_value=events)
+        mock_repository.mark_as_processed = AsyncMock()
+
+        # Mock the OutboxEventProcessor
+        mock_event_processor = AsyncMock()
+        mock_event_processor.process_event = AsyncMock(
+            return_value={"status": "success", "contact_id": 123}
+        )
+
+        with (
+            patch(
+                "app.infrastructure.events.outbox_processor.get_async_database_engine",
+                return_value=mock_engine,
+            ),
+            patch(
+                "app.infrastructure.events.outbox_processor.OutboxRepository",
+                return_value=mock_repository,
+            ),
+            patch(
+                "app.infrastructure.events.outbox_processor.SearchIndexer",
+                return_value=mock_search_indexer,
+            ),
+            patch(
+                "app.core.integrations.outbox_event_processor.OutboxEventProcessor",
+                return_value=mock_event_processor,
+            ),
+        ):
+            # Act
+            await processor.process_events()
+
+        # Assert
+        # Contact event should go to OutboxEventProcessor
+        mock_event_processor.process_event.assert_called_once_with(events[0])
+
+        # Non-contact event should go to SearchIndexer
+        mock_search_indexer.process_event.assert_called_once_with(events[1])
+
+        # Both events should be marked as processed
+        assert mock_repository.mark_as_processed.call_count == 2
+        mock_repository.mark_as_processed.assert_any_call("contact-event")
+        mock_repository.mark_as_processed.assert_any_call("search-event")

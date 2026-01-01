@@ -3,20 +3,35 @@ Outbox Event Processor for handling integration sync events.
 
 Processes outbox events created by integration workers to create/update
 contacts in the core system using the message-based architecture pattern.
+
+This processor implements production-grade resilience patterns:
+1. SELECT FOR UPDATE locking for concurrent sync operations
+2. Version hash-based idempotency checks
+3. Atomic operations with proper transaction handling
 """
 
 from typing import Any
 
 import structlog
 from core_shared.models.outbox import OutboxEvent
+from core_shared.models.sync_metadata import SyncStatus
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core.contacts.services.contact_service import ContactService
+from app.core.integrations.adapters.sql.sync_metadata_repository import (
+    SyncMetadataRepository,
+)
 from app.core.integrations.external_reference_service import ExternalReferenceService
 from app.core.integrations.google_contacts.api_models import GooglePerson
 from app.core.integrations.google_contacts.transformer import GoogleContactTransformer
+from app.core.integrations.utils.version_hash import calculate_contact_version_hash
 
 logger = structlog.get_logger()
+
+# Event type constants
+EVENT_TYPE_CONTACT_CREATED = "contact.created"
+EVENT_TYPE_CONTACT_UPDATED = "contact.updated"
+EVENT_TYPE_SYNC_COMPLETED = "sync.completed"
 
 
 class OutboxEventProcessingError(Exception):
@@ -49,6 +64,7 @@ class OutboxEventProcessor:
         self.connection = connection
         self.google_transformer = GoogleContactTransformer()
         self.external_reference_service = ExternalReferenceService(connection)
+        self.sync_metadata_repo = SyncMetadataRepository(connection)
 
     async def process_event(self, event: OutboxEvent) -> dict[str, Any]:
         """
@@ -184,11 +200,36 @@ class OutboxEventProcessor:
             )
             # Don't fail the entire operation if external reference creation fails
 
+        # Create initial sync metadata
+        # Calculate version hash for the contact data
+        version_hash = calculate_contact_version_hash(contact_data)
+
+        try:
+            await self.sync_metadata_repo.upsert(
+                internal_id=created_contact.id,
+                integration_source=integration_source,
+                external_id=external_id,
+                version_hash=version_hash,
+                sync_status=SyncStatus.SUCCESS,
+            )
+        except Exception as e:
+            logger.warning(
+                "Failed to create sync metadata - will be created on first update",
+                contact_id=created_contact.id,
+                integration_source=integration_source,
+                external_id=external_id,
+                error=str(e),
+            )
+            # Don't fail the entire operation if sync metadata creation fails
+            # The sync_metadata will be created automatically on the first contact.updated event
+            # This provides better resilience - contact creation succeeds even if sync_metadata fails
+
         logger.info(
             "Successfully created contact from outbox event",
             contact_id=created_contact.id,
             integration_source=integration_source,
             external_id=external_id,
+            version_hash=version_hash,
         )
 
         return {
@@ -200,17 +241,60 @@ class OutboxEventProcessor:
         }
 
     async def _process_contact_updated(self, event: OutboxEvent) -> dict[str, Any]:
-        """Process a contact.updated event."""
+        """
+        Process a contact update event with SELECT FOR UPDATE locking and idempotency.
+
+        This method implements production-grade resilience patterns:
+        1. Acquires exclusive lock on sync metadata using SELECT FOR UPDATE
+        2. Checks version hash for idempotency (skip if unchanged)
+        3. Updates contact and sync metadata atomically
+        """
         event_data: dict[str, Any] = event.event_data  # type: ignore
         integration_source: str = event_data["integration_source"]
         external_id: str = event_data["external_id"]
         contact_data: dict[str, Any] = event_data["contact_data"]
 
         logger.info(
-            "Processing contact update",
+            "Processing contact update with locking",
             integration_source=integration_source,
             external_id=external_id,
         )
+
+        # Calculate version hash for idempotency check
+        new_version_hash = calculate_contact_version_hash(contact_data)
+
+        # Acquire lock on sync metadata (SELECT FOR UPDATE)
+        # This prevents concurrent updates to the same contact
+        # Note: sync_metadata may be None if this is the first sync or if
+        # sync_metadata creation failed during contact.created
+        sync_metadata = await self.sync_metadata_repo.find_and_lock(
+            integration_source=integration_source,
+            external_id=external_id,
+        )
+
+        if sync_metadata is None:
+            logger.info(
+                "No existing sync metadata found - will create on first update",
+                integration_source=integration_source,
+                external_id=external_id,
+            )
+
+        # Idempotency check: Skip if version hash matches
+        # should_sync() handles None gracefully (returns True to proceed with sync)
+        if not self.sync_metadata_repo.should_sync(sync_metadata, new_version_hash):
+            logger.info(
+                "Contact update skipped - version hash unchanged (idempotent)",
+                integration_source=integration_source,
+                external_id=external_id,
+                version_hash=new_version_hash,
+            )
+            return {
+                "status": "skipped",
+                "reason": "version_hash_unchanged",
+                "event_type": "contact.updated",
+                "integration_source": integration_source,
+                "external_id": external_id,
+            }
 
         # Find existing contact by external reference
         try:
@@ -256,11 +340,36 @@ class OutboxEventProcessor:
                 f"Failed to update contact: {str(e)}"
             ) from e
 
+        # Update sync metadata with new version hash
+        # This is done atomically in the same transaction as the contact update
+        if updated_contact.id is None:
+            raise OutboxEventProcessingError("Updated contact has no ID")
+
+        try:
+            await self.sync_metadata_repo.upsert(
+                internal_id=updated_contact.id,
+                integration_source=integration_source,
+                external_id=external_id,
+                version_hash=new_version_hash,
+                sync_status=SyncStatus.SUCCESS,
+            )
+        except Exception as e:
+            logger.warning(
+                "Failed to update sync metadata",
+                contact_id=updated_contact.id,
+                integration_source=integration_source,
+                external_id=external_id,
+                error=str(e),
+            )
+            # Don't fail the entire operation if sync metadata update fails
+            # The contact was updated successfully
+
         logger.info(
             "Successfully updated contact from outbox event",
             contact_id=updated_contact.id,
             integration_source=integration_source,
             external_id=external_id,
+            version_hash=new_version_hash,
         )
 
         return {

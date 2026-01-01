@@ -2,7 +2,7 @@
 Background processor for outbox events.
 
 Processes events from the outbox table and sends them to external systems
-like MeiliSearch for search indexing.
+like MeiliSearch for search indexing and contact sync event processing.
 """
 
 import asyncio
@@ -91,14 +91,30 @@ class OutboxProcessor:
         """
         Process a single outbox event.
 
+        Routes events to appropriate processors:
+        - contact.* events -> OutboxEventProcessor (contact sync)
+        - Other events -> SearchIndexer (MeiliSearch indexing)
+
+        Note on transaction scope:
+        This method runs within a batch-level transaction. For contact sync events,
+        SELECT FOR UPDATE locks are held until the batch commits. This is intentional:
+        - Ensures atomicity between event processing and marking as processed
+        - Row-level locks allow concurrent processing of different contacts
+        - Lock duration is proportional to batch size (typically small)
+        - Prevents race conditions when the same contact is synced concurrently
+
         Args:
             event: Outbox event to process
             repository: Repository for updating event status
             search_indexer: Search indexer with database connection
         """
         try:
-            # Process the event with the search indexer
-            await search_indexer.process_event(event)
+            # Route contact sync events to OutboxEventProcessor
+            if event.event_type.startswith("contact."):
+                await self._process_contact_event(event, search_indexer.db_connection)
+            else:
+                # Process other events with the search indexer
+                await search_indexer.process_event(event)
 
             # Mark as processed
             await repository.mark_as_processed(event.event_id)
@@ -117,6 +133,77 @@ class OutboxProcessor:
                 error=str(e),
             )
             raise
+
+    async def _process_contact_event(self, event: Any, connection: Any) -> None:
+        """
+        Process contact sync events using OutboxEventProcessor.
+
+        Args:
+            event: Contact sync event (contact.created, contact.updated, etc.)
+            connection: Database connection for transaction
+        """
+        # Import here to avoid circular dependencies
+        from app.core.contacts.adapters.sql.contact_field_history_repository import (
+            SqlContactFieldHistoryRepository,
+        )
+        from app.core.contacts.adapters.sql.contact_repository import (
+            SqlContactRepository,
+        )
+        from app.core.contacts.adapters.sql.tag_repository import SqlTagRepository
+        from app.core.contacts.services.address_validation_service import (
+            AddressValidationService,
+        )
+        from app.core.contacts.services.contact_history_service import (
+            ContactHistoryService,
+        )
+        from app.core.contacts.services.contact_service import ContactService
+        from app.core.contacts.services.contact_validation_service import (
+            ContactValidationService,
+        )
+        from app.core.contacts.services.tag_hierarchy_service import (
+            TagHierarchyService,
+        )
+        from app.core.integrations.outbox_event_processor import OutboxEventProcessor
+        from app.infrastructure.events.outbox_event_publisher import (
+            OutboxEventPublisher,
+        )
+
+        # Create repositories
+        contact_repository = SqlContactRepository(connection)
+        tag_repository = SqlTagRepository(connection)
+        history_repository = SqlContactFieldHistoryRepository(connection)
+        event_publisher = OutboxEventPublisher(connection)
+
+        # Create services
+        address_validation_service = AddressValidationService()
+        contact_validation_service = ContactValidationService(contact_repository)
+        history_service = ContactHistoryService(history_repository)
+        tag_hierarchy_service = TagHierarchyService(tag_repository)
+
+        # Create contact service
+        contact_service = ContactService(
+            contact_repo=contact_repository,
+            tag_repo=tag_repository,
+            history_repo=history_repository,
+            event_publisher=event_publisher,
+            address_validation_service=address_validation_service,
+            contact_validation_service=contact_validation_service,
+            history_service=history_service,
+            tag_hierarchy_service=tag_hierarchy_service,
+        )
+
+        # Create outbox event processor
+        event_processor = OutboxEventProcessor(contact_service, connection)
+
+        # Process the event
+        result = await event_processor.process_event(event)
+
+        logger.info(
+            "Processed contact sync event",
+            event_id=event.event_id,
+            event_type=event.event_type,
+            result=result,
+        )
 
     async def get_failed_events_summary(self) -> dict[str, Any]:
         """
