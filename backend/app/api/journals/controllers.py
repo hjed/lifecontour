@@ -330,7 +330,11 @@ async def update_journal(
     if journal_request.data.attributes.content is not None:
         changed_fields["content"] = updated_journal.content
     if journal_request.data.attributes.event_date_range is not None:
-        changed_fields["event_date_range"] = updated_journal.event_date_range
+        # Convert EventDateRange to JSON-serializable dict
+        changed_fields["event_date_range"] = {
+            "start": updated_journal.event_date_range.start.isoformat(),
+            "end": updated_journal.event_date_range.end.isoformat(),
+        }
     if journal_request.data.attributes.parent_id is not None:
         changed_fields["parent_id"] = updated_journal.parent_id
     if journal_request.data.attributes.order is not None:
@@ -446,7 +450,11 @@ async def partial_update_journal(
     if journal_request.data.attributes.content is not None:
         changed_fields["content"] = content
     if journal_request.data.attributes.event_date_range is not None:
-        changed_fields["event_date_range"] = event_date_range
+        # Convert EventDateRange to JSON-serializable dict
+        changed_fields["event_date_range"] = {
+            "start": event_date_range.start.isoformat(),
+            "end": event_date_range.end.isoformat(),
+        }
     if journal_request.data.attributes.parent_id is not None:
         changed_fields["parent_id"] = journal_request.data.attributes.parent_id
     if journal_request.data.attributes.order is not None:
@@ -839,12 +847,22 @@ async def add_contact_to_journal(
         ) from e
 
     # Create the relationship
+    from sqlalchemy.exc import IntegrityError
+
+    from app.core.journal.models.exceptions import JournalValidationError
+
     relationship = JournalContactRelationship(
         journal_id=journal_id,
         contact_id=contact_id,
         relationship_type=relationship_type,
     )
-    await contact_relationship_repo.create(relationship)
+    try:
+        await contact_relationship_repo.create(relationship)
+    except IntegrityError as e:
+        raise JournalValidationError(
+            "contact_id",
+            f"Contact not found or relationship already exists: {contact_id}",
+        ) from e
 
     # Get updated journal
     updated_journal = await journal_service.get_journal(journal_id)
