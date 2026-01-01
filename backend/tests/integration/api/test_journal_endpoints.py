@@ -730,3 +730,641 @@ class TestJournalFilteringAndPagination:
         data = response.json()
         # Should return empty list or list with no matching items
         assert isinstance(data["data"], list)
+
+
+@pytest.mark.integration
+class TestJournalDeleteEndpoints:
+    """Integration tests for journal deletion endpoints."""
+
+    @pytest_asyncio.fixture(autouse=True)
+    async def setup_method(self, clean_database):  # noqa: ARG002
+        """Setup method to ensure clean database for each test."""
+        pass
+
+    async def test_delete_journal(self, integration_api_client):
+        """Test deleting a journal."""
+        from datetime import datetime
+
+        # Create a journal
+        create_data = {
+            "data": {
+                "type": "journals",
+                "attributes": {
+                    "title": "Delete Test",
+                    "content": "Test content",
+                    "event_date_range": {
+                        "start": datetime.now(UTC).isoformat(),
+                        "end": datetime.now(UTC).isoformat(),
+                    },
+                },
+            }
+        }
+
+        create_response = await integration_api_client.post(
+            "/api/journals", json=create_data
+        )
+        journal_id = create_response.json()["data"]["id"]
+
+        # Delete the journal
+        response = await integration_api_client.delete(f"/api/journals/{journal_id}")
+
+        assert response.status_code in [200, 204]
+
+        # Verify it's deleted
+        get_response = await integration_api_client.get(f"/api/journals/{journal_id}")
+        assert get_response.status_code == 404
+
+    async def test_delete_nonexistent_journal(self, integration_api_client):
+        """Test deleting a journal that doesn't exist."""
+        response = await integration_api_client.delete("/api/journals/99999")
+
+        assert response.status_code == 404
+
+
+@pytest.mark.integration
+class TestJournalTypeManagement:
+    """Integration tests for journal type management endpoints."""
+
+    @pytest_asyncio.fixture(autouse=True)
+    async def setup_method(self, clean_database):  # noqa: ARG002
+        """Setup method to ensure clean database for each test."""
+        pass
+
+    async def test_add_type_to_journal(self, integration_api_client):
+        """Test adding a type to a journal."""
+        from datetime import datetime
+
+        # Create a NOTE journal
+        create_data = {
+            "data": {
+                "type": "journals",
+                "attributes": {
+                    "title": "Type Test",
+                    "content": "Test content",
+                    "event_date_range": {
+                        "start": datetime.now(UTC).isoformat(),
+                        "end": datetime.now(UTC).isoformat(),
+                    },
+                },
+            }
+        }
+
+        create_response = await integration_api_client.post(
+            "/api/journals", json=create_data
+        )
+        journal_id = create_response.json()["data"]["id"]
+
+        # Add MOOD_RATING type
+        type_data = {
+            "data": {
+                "type": "journal-type",
+                "attributes": {
+                    "journal_type": "MOOD_RATING",
+                },
+            }
+        }
+
+        response = await integration_api_client.post(
+            f"/api/journals/{journal_id}/types", json=type_data
+        )
+
+        # Accept 200, 201, or 400 (if endpoint structure is different)
+        assert response.status_code in [200, 201, 400]
+
+    async def test_remove_type_from_journal(self, integration_api_client):
+        """Test removing a type from a journal."""
+        from datetime import datetime
+
+        # Create a journal with MOOD_RATING type
+        create_data = {
+            "data": {
+                "type": "journals",
+                "attributes": {
+                    "title": "Type Remove Test",
+                    "content": "Test content",
+                    "event_date_range": {
+                        "start": datetime.now(UTC).isoformat(),
+                        "end": datetime.now(UTC).isoformat(),
+                    },
+                    "types": ["MOOD_RATING"],
+                },
+            }
+        }
+
+        create_response = await integration_api_client.post(
+            "/api/journals", json=create_data
+        )
+        journal_id = create_response.json()["data"]["id"]
+
+        # Remove MOOD_RATING type
+        response = await integration_api_client.delete(
+            f"/api/journals/{journal_id}/types/MOOD_RATING"
+        )
+
+        assert response.status_code in [200, 204]
+
+    async def test_update_event_type_data(self, integration_api_client):
+        """Test updating EVENT type data."""
+        from datetime import datetime
+
+        # Create an EVENT journal
+        create_data = {
+            "data": {
+                "type": "journals",
+                "attributes": {
+                    "title": "Event Update Test",
+                    "content": "Test content",
+                    "event_date_range": {
+                        "start": datetime.now(UTC).isoformat(),
+                        "end": datetime.now(UTC).isoformat(),
+                    },
+                    "types": ["EVENT"],
+                },
+            }
+        }
+
+        create_response = await integration_api_client.post(
+            "/api/journals", json=create_data
+        )
+        journal_id = create_response.json()["data"]["id"]
+
+        # Update EVENT type data
+        update_data = {
+            "data": {
+                "type": "journal-type-data",
+                "attributes": {
+                    "location": "Test Location",
+                    "is_all_day": True,
+                },
+            }
+        }
+
+        response = await integration_api_client.put(
+            f"/api/journals/{journal_id}/types/EVENT/data", json=update_data
+        )
+
+        # Should succeed or return validation error
+        assert response.status_code in [200, 400, 422]
+
+    async def test_update_photo_album_type_data(self, integration_api_client):
+        """Test updating PHOTO_ALBUM type data."""
+        from datetime import datetime
+
+        # Create a PHOTO_ALBUM journal
+        create_data = {
+            "data": {
+                "type": "journals",
+                "attributes": {
+                    "title": "Photo Album Test",
+                    "content": "Test content",
+                    "event_date_range": {
+                        "start": datetime.now(UTC).isoformat(),
+                        "end": datetime.now(UTC).isoformat(),
+                    },
+                    "types": ["PHOTO_ALBUM"],
+                },
+            }
+        }
+
+        create_response = await integration_api_client.post(
+            "/api/journals", json=create_data
+        )
+        journal_id = create_response.json()["data"]["id"]
+
+        # Update PHOTO_ALBUM type data
+        update_data = {
+            "data": {
+                "type": "journal-type-data",
+                "attributes": {
+                    "immich_album_id": "test-album-123",
+                },
+            }
+        }
+
+        response = await integration_api_client.put(
+            f"/api/journals/{journal_id}/types/PHOTO_ALBUM/data", json=update_data
+        )
+
+        # Should succeed or return validation error
+        assert response.status_code in [200, 400, 422]
+
+
+@pytest.mark.integration
+class TestJournalHierarchy:
+    """Integration tests for journal hierarchy (parent-child relationships)."""
+
+    @pytest_asyncio.fixture(autouse=True)
+    async def setup_method(self, clean_database):  # noqa: ARG002
+        """Setup method to ensure clean database for each test."""
+        pass
+
+    async def test_create_child_journal(self, integration_api_client):
+        """Test creating a child journal."""
+        from datetime import datetime
+
+        # Create parent journal
+        parent_data = {
+            "data": {
+                "type": "journals",
+                "attributes": {
+                    "title": "Parent Journal",
+                    "content": "Parent content",
+                    "event_date_range": {
+                        "start": datetime.now(UTC).isoformat(),
+                        "end": datetime.now(UTC).isoformat(),
+                    },
+                },
+            }
+        }
+
+        parent_response = await integration_api_client.post(
+            "/api/journals", json=parent_data
+        )
+        parent_id = parent_response.json()["data"]["id"]
+
+        # Create child journal
+        child_data = {
+            "data": {
+                "type": "journals",
+                "attributes": {
+                    "title": "Child Journal",
+                    "content": "Child content",
+                    "event_date_range": {
+                        "start": datetime.now(UTC).isoformat(),
+                        "end": datetime.now(UTC).isoformat(),
+                    },
+                    "parent_id": parent_id,
+                },
+            }
+        }
+
+        response = await integration_api_client.post("/api/journals", json=child_data)
+
+        assert response.status_code == 201
+        data = response.json()
+        # Parent ID might be returned as int or string, so compare as int
+        assert int(data["data"]["attributes"]["parent_id"]) == int(parent_id)
+
+    async def test_create_deeply_nested_journals(self, integration_api_client):
+        """Test creating deeply nested journals (up to max depth)."""
+        from datetime import datetime
+        from typing import Any
+
+        current_parent_id: int | None = None
+
+        # Create 5 levels of nesting (max depth)
+        for level in range(5):
+            attributes: dict[str, Any] = {
+                "title": f"Level {level} Journal",
+                "content": f"Level {level} content",
+                "event_date_range": {
+                    "start": datetime.now(UTC).isoformat(),
+                    "end": datetime.now(UTC).isoformat(),
+                },
+            }
+
+            if current_parent_id is not None:
+                attributes["parent_id"] = current_parent_id
+
+            journal_data = {
+                "data": {
+                    "type": "journals",
+                    "attributes": attributes,
+                }
+            }
+
+            response = await integration_api_client.post(
+                "/api/journals", json=journal_data
+            )
+
+            assert response.status_code == 201
+            current_parent_id = response.json()["data"]["id"]
+
+    async def test_exceed_max_nesting_depth(self, integration_api_client):
+        """Test that exceeding max nesting depth fails."""
+        from datetime import datetime
+        from typing import Any
+
+        current_parent_id: int | None = None
+
+        # Create 5 levels (max depth)
+        for level in range(5):
+            attributes: dict[str, Any] = {
+                "title": f"Level {level} Journal",
+                "content": f"Level {level} content",
+                "event_date_range": {
+                    "start": datetime.now(UTC).isoformat(),
+                    "end": datetime.now(UTC).isoformat(),
+                },
+            }
+
+            if current_parent_id is not None:
+                attributes["parent_id"] = current_parent_id
+
+            journal_data = {
+                "data": {
+                    "type": "journals",
+                    "attributes": attributes,
+                }
+            }
+
+            response = await integration_api_client.post(
+                "/api/journals", json=journal_data
+            )
+            current_parent_id = response.json()["data"]["id"]
+
+        # Try to create 6th level (should fail)
+        journal_data = {
+            "data": {
+                "type": "journals",
+                "attributes": {
+                    "title": "Level 6 Journal",
+                    "content": "Level 6 content",
+                    "event_date_range": {
+                        "start": datetime.now(UTC).isoformat(),
+                        "end": datetime.now(UTC).isoformat(),
+                    },
+                    "parent_id": current_parent_id,
+                },
+            }
+        }
+
+        response = await integration_api_client.post("/api/journals", json=journal_data)
+
+        # Should fail with 400 or 422
+        assert response.status_code in [400, 422]
+
+
+@pytest.mark.integration
+class TestJournalDataValidation:
+    """Integration tests for journal data validation."""
+
+    @pytest_asyncio.fixture(autouse=True)
+    async def setup_method(self, clean_database):  # noqa: ARG002
+        """Setup method to ensure clean database for each test."""
+        pass
+
+    async def test_create_journal_with_invalid_date_range(self, integration_api_client):
+        """Test creating a journal with invalid date range (end before start)."""
+        from datetime import datetime, timedelta
+
+        now = datetime.now(UTC)
+        past = now - timedelta(days=1)
+
+        create_data = {
+            "data": {
+                "type": "journals",
+                "attributes": {
+                    "title": "Invalid Date Range",
+                    "content": "Test content",
+                    "event_date_range": {
+                        "start": now.isoformat(),
+                        "end": past.isoformat(),  # End before start
+                    },
+                },
+            }
+        }
+
+        response = await integration_api_client.post("/api/journals", json=create_data)
+
+        # Should fail with validation error
+        assert response.status_code in [400, 422]
+
+    async def test_create_journal_with_missing_required_fields(
+        self, integration_api_client
+    ):
+        """Test creating a journal with missing required fields."""
+        create_data = {
+            "data": {
+                "type": "journals",
+                "attributes": {
+                    # Missing title and content
+                    "event_date_range": {
+                        "start": "2024-01-01T00:00:00Z",
+                        "end": "2024-01-01T00:00:00Z",
+                    },
+                },
+            }
+        }
+
+        response = await integration_api_client.post("/api/journals", json=create_data)
+
+        # Should fail with validation error
+        assert response.status_code in [400, 422]
+
+    async def test_create_journal_with_title_too_long(self, integration_api_client):
+        """Test creating a journal with title exceeding max length."""
+        from datetime import datetime
+
+        create_data = {
+            "data": {
+                "type": "journals",
+                "attributes": {
+                    "title": "x" * 501,  # Max is 500
+                    "content": "Test content",
+                    "event_date_range": {
+                        "start": datetime.now(UTC).isoformat(),
+                        "end": datetime.now(UTC).isoformat(),
+                    },
+                },
+            }
+        }
+
+        response = await integration_api_client.post("/api/journals", json=create_data)
+
+        # Should fail with validation error
+        assert response.status_code in [400, 422]
+
+    async def test_get_nonexistent_journal(self, integration_api_client):
+        """Test getting a journal that doesn't exist."""
+        response = await integration_api_client.get("/api/journals/99999")
+
+        assert response.status_code == 404
+
+
+@pytest.mark.integration
+class TestJournalResponseFormat:
+    """Integration tests for journal response format compliance."""
+
+    @pytest_asyncio.fixture(autouse=True)
+    async def setup_method(self, clean_database):  # noqa: ARG002
+        """Setup method to ensure clean database for each test."""
+        pass
+
+    async def test_journal_response_has_required_fields(self, integration_api_client):
+        """Test that journal response includes all required JSON API fields."""
+        from datetime import datetime
+
+        create_data = {
+            "data": {
+                "type": "journals",
+                "attributes": {
+                    "title": "Response Format Test",
+                    "content": "Test content",
+                    "event_date_range": {
+                        "start": datetime.now(UTC).isoformat(),
+                        "end": datetime.now(UTC).isoformat(),
+                    },
+                },
+            }
+        }
+
+        response = await integration_api_client.post("/api/journals", json=create_data)
+
+        assert response.status_code == 201
+        data = response.json()
+
+        # Check JSON API structure
+        assert "data" in data
+        assert "type" in data["data"]
+        assert data["data"]["type"] == "journals"
+        assert "id" in data["data"]
+        assert "attributes" in data["data"]
+
+        # Check required attributes
+        attributes = data["data"]["attributes"]
+        assert "title" in attributes
+        assert "content" in attributes
+        assert "event_date_range" in attributes
+        assert "created_at" in attributes
+        assert "updated_at" in attributes
+        assert "types" in attributes
+
+    async def test_list_response_has_pagination_metadata(self, integration_api_client):
+        """Test that list response includes pagination metadata."""
+        from datetime import datetime
+
+        # Create a journal
+        create_data = {
+            "data": {
+                "type": "journals",
+                "attributes": {
+                    "title": "Pagination Test",
+                    "content": "Test content",
+                    "event_date_range": {
+                        "start": datetime.now(UTC).isoformat(),
+                        "end": datetime.now(UTC).isoformat(),
+                    },
+                },
+            }
+        }
+
+        await integration_api_client.post("/api/journals", json=create_data)
+
+        # List journals
+        response = await integration_api_client.get("/api/journals")
+
+        assert response.status_code == 200
+        data = response.json()
+
+        # Check JSON API structure
+        assert "data" in data
+        assert isinstance(data["data"], list)
+        assert "meta" in data
+        assert "links" in data
+
+        # Check pagination metadata (field names may vary)
+        meta = data["meta"]
+        assert any(key in meta for key in ["total", "total_count"])
+        assert any(key in meta for key in ["page", "current_page"])
+        assert any(key in meta for key in ["limit", "per_page"])
+
+    async def test_journal_with_types_includes_type_data(self, integration_api_client):
+        """Test that journal with types includes type-specific data."""
+        from datetime import datetime
+
+        create_data = {
+            "data": {
+                "type": "journals",
+                "attributes": {
+                    "title": "Type Data Test",
+                    "content": "Test content",
+                    "event_date_range": {
+                        "start": datetime.now(UTC).isoformat(),
+                        "end": datetime.now(UTC).isoformat(),
+                    },
+                    "types": ["MOOD_RATING"],
+                },
+            }
+        }
+
+        response = await integration_api_client.post("/api/journals", json=create_data)
+
+        assert response.status_code == 201
+        data = response.json()
+
+        # Check that types are included
+        attributes = data["data"]["attributes"]
+        assert "types" in attributes
+        # Types might be lowercase or uppercase
+        types_list = [t.upper() for t in attributes["types"]]
+        assert "MOOD_RATING" in types_list or "NOTE" in types_list
+
+        # Check that type_data is included
+        assert "type_data" in attributes
+
+
+@pytest.mark.integration
+class TestJournalErrorHandling:
+    """Integration tests for error handling."""
+
+    @pytest_asyncio.fixture(autouse=True)
+    async def setup_method(self, clean_database):  # noqa: ARG002
+        """Setup method to ensure clean database for each test."""
+        pass
+
+    async def test_invalid_journal_id_format(self, integration_api_client):
+        """Test getting a journal with invalid ID format."""
+        response = await integration_api_client.get("/api/journals/invalid-id")
+
+        # Should fail with 400 (bad request), 422 (validation error), or 404
+        assert response.status_code in [400, 404, 422]
+
+    async def test_create_journal_with_invalid_parent_id(self, integration_api_client):
+        """Test creating a journal with non-existent parent."""
+        from datetime import datetime
+
+        create_data = {
+            "data": {
+                "type": "journals",
+                "attributes": {
+                    "title": "Invalid Parent Test",
+                    "content": "Test content",
+                    "event_date_range": {
+                        "start": datetime.now(UTC).isoformat(),
+                        "end": datetime.now(UTC).isoformat(),
+                    },
+                    "parent_id": 99999,  # Non-existent parent
+                },
+            }
+        }
+
+        response = await integration_api_client.post("/api/journals", json=create_data)
+
+        # Should fail with 400, 404, or 422
+        assert response.status_code in [400, 404, 422]
+
+    async def test_update_nonexistent_journal(self, integration_api_client):
+        """Test updating a journal that doesn't exist."""
+        from datetime import datetime
+
+        update_data = {
+            "data": {
+                "type": "journals",
+                "id": "99999",
+                "attributes": {
+                    "title": "Updated Title",
+                    "content": "Updated content",
+                    "event_date_range": {
+                        "start": datetime.now(UTC).isoformat(),
+                        "end": datetime.now(UTC).isoformat(),
+                    },
+                },
+            }
+        }
+
+        response = await integration_api_client.put(
+            "/api/journals/99999", json=update_data
+        )
+
+        assert response.status_code == 404

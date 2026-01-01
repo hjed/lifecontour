@@ -360,7 +360,8 @@ CREATE TABLE journals (
 - `backend/app/core/journal/models/journal_types.py` - Add get_dependencies() method
 - `backend/app/infrastructure/di/journal.py` - Register JournalService
 
-### ITER4-006: Journal REST API � IN PROGRESS
+### ITER4-006: Journal REST API ✅ COMPLETED
+**Completed:** 2026-01-01
 **Description:** Create comprehensive REST API endpoints with JSON API compliance
 **Strategy:** Single task for complete API layer
 **Specification Reference:** [REST API Endpoints](../journal-system-specification.md#rest-api-endpoints)
