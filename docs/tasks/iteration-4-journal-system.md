@@ -360,41 +360,81 @@ CREATE TABLE journals (
 - `backend/app/core/journal/models/journal_types.py` - Add get_dependencies() method
 - `backend/app/infrastructure/di/journal.py` - Register JournalService
 
-### ITER4-006: Journal REST API 🟡 PLANNED
+### ITER4-006: Journal REST API � IN PROGRESS
 **Description:** Create comprehensive REST API endpoints with JSON API compliance
 **Strategy:** Single task for complete API layer
 **Specification Reference:** [REST API Endpoints](../journal-system-specification.md#rest-api-endpoints)
 
 **PR Size:** ~9 files (controller, schemas, tests)
 
+**Recent Progress (2024-12-27):**
+- ✅ Implemented `get_tags_for_journal` repository method to fetch tags assigned to journals
+- ✅ Created `_enrich_journal_data` helper function to fetch all enrichment data (types, type_data, contacts, tags, calendar)
+- ✅ Updated all journal endpoints to return complete data with types, type_data, contacts, tags, and calendar
+- ✅ Added integration test for `get_tags_for_journal` method
+- ✅ All endpoints now properly inject required repositories and use the enrichment helper
+
+**Recent Progress (2024-12-28):**
+- ✅ Implemented `assign_tag` and `remove_tag` repository methods in `JournalTagRepository`
+- ✅ Fully implemented `PUT /api/journals/{id}/types/{type}/data` endpoint for updating type-specific data
+  - Supports EVENT type (calendar info: calendar_id, start_time, end_time, is_all_day, location, sync_invitees)
+  - Supports MOOD_RATING type (mood data: mood_value, mood_label, energy_level)
+  - Supports PHOTO_ALBUM type (photo album data: immich_album_id)
+  - Returns appropriate errors for PLAN/TRAVEL types (complex nested structures not yet supported)
+  - Returns appropriate error for NOTE type (no type-specific data)
+- ✅ Added integration tests for `assign_tag` and `remove_tag` methods
+- ✅ All tests passing (157 unit tests, 2 new integration tests)
+- ✅ Code passes linting, formatting, and type checking
+
 **Acceptance Criteria:**
-- [ ] Create `JournalController` in `backend/app/api/journals/` with JSON API compliance
-- [ ] Implement core CRUD endpoints:
-  - `GET /api/journals` - List with filtering (type, date_range, contact_id, tag_id, calendar_id, parent_id, search)
-  - `POST /api/journals` - Create with type data and relationships
-  - `GET /api/journals/{id}` - Get single journal with all data
-  - `PUT /api/journals/{id}` - Full replacement update
-  - `PATCH /api/journals/{id}` - Partial update
-  - `DELETE /api/journals/{id}` - Delete with cascade/orphan options
-- [ ] Implement type management endpoints:
-  - `POST /api/journals/{id}/types` - Add type(s) with automatic dependencies
-  - `DELETE /api/journals/{id}/types/{type}` - Remove type with validation
-  - `PUT /api/journals/{id}/types/{type}/data` - Update type-specific data
-- [ ] Implement relationship management endpoints:
-  - `POST /api/journals/{id}/contacts` - Add contact relationship
-  - `DELETE /api/journals/{id}/contacts/{contact_id}` - Remove relationship(s)
-  - `GET /api/contacts/{id}/journals` - Get journals for contact
-- [ ] Create Pydantic schemas for request/response validation
-- [ ] Implement proper error handling with FastAPI exception handlers
-- [ ] Generate OpenAPI documentation
+
+- [x] Create `JournalController` in `backend/app/api/journals/` with JSON API compliance
+- [x] Implement core CRUD endpoints:
+  - [x] `GET /api/journals` - List with filtering (type, date_range, contact_id, tag_id, calendar_id, parent_id, search)
+  - [x] `POST /api/journals` - Create with type data and relationships
+  - [x] `GET /api/journals/{id}` - Get single journal with all data ✅ **Now returns complete data**
+  - [x] `PUT /api/journals/{id}` - Full replacement update ✅ **Now returns complete data**
+  - [x] `PATCH /api/journals/{id}` - Partial update ✅ **Now returns complete data**
+  - [x] `DELETE /api/journals/{id}` - Delete with cascade/orphan options
+- [x] Implement type management endpoints:
+  - [x] `POST /api/journals/{id}/types` - Add type(s) with automatic dependencies ✅ **Now returns complete data**
+  - [x] `DELETE /api/journals/{id}/types/{type}` - Remove type with validation ✅ **Now returns complete data**
+  - [x] `PUT /api/journals/{id}/types/{type}/data` - Update type-specific data ✅ **Now returns complete data**
+- [x] Implement relationship management endpoints:
+  - [x] `POST /api/journals/{id}/relationships/contacts` - Add contact relationship ✅ **Now returns complete data**
+  - [x] `DELETE /api/journals/{id}/relationships/contacts/{contact_id}/{relationship_type}` - Remove relationship ✅ **Now returns complete data**
+  - [x] `POST /api/journals/{id}/relationships/tags` - Add tag to journal ✅ **Now returns complete data**
+  - [x] `DELETE /api/journals/{id}/relationships/tags/{tag_id}` - Remove tag from journal ✅ **Now returns complete data**
+  - [ ] `GET /api/contacts/{id}/journals` - Get journals for contact
+- [x] Create Pydantic schemas for request/response validation
+- [x] Implement proper error handling with FastAPI exception handlers
+- [x] Generate OpenAPI documentation
 - [ ] Write integration tests for all endpoints
-- [ ] Document API patterns in code comments
+- [x] Document API patterns in code comments
 
 **Response Format:**
-- Embedded type data organized by type
-- Embedded relationships (contacts, tags, calendar)
-- Child count for parent journals
-- Pagination metadata
+
+- ✅ Embedded type data organized by type
+- ✅ Embedded relationships (contacts, tags, calendar)
+- ✅ Child count for parent journals
+- ✅ Pagination metadata
+- ✅ Strictly follow json api spec
+- ✅ Reuse existing JSON API schemas and existing api types where possible
+
+**Implementation Details:**
+
+- **Helper Function:** `_enrich_journal_data()` fetches all enrichment data in parallel
+- **Repository Methods:**
+  - `get_tags_for_journal(journal_id)` - Joins journal_tags with journal_tag_assignments to fetch tags
+  - `assign_tag(journal_id, tag_id)` - Assigns a tag to a journal
+  - `remove_tag(journal_id, tag_id)` - Removes a tag from a journal
+- **Converter:** `TypeDataConverter` methods convert domain entities to API schemas
+- **Type Data Update:** `update_type_data` endpoint supports EVENT, MOOD_RATING, and PHOTO_ALBUM types
+- **All Endpoints Updated:** 11 endpoints now inject all required repositories and return complete data
+- **Test Coverage:**
+  - Integration tests for tag fetching, assignment, and removal
+  - All unit tests passing (157 tests)
+  - Code passes linting, formatting, and type checking
 
 ### ITER4-007: MeiliSearch Integration 🟡 PLANNED
 **Description:** Implement event-driven journal indexing and search

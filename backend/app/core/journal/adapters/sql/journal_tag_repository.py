@@ -191,3 +191,55 @@ class SqlJournalTagRepository(JournalTagRepository):
             )
             for row in rows
         ]
+
+    async def get_tags_for_journal(self, journal_id: int) -> list[JournalTag]:
+        """Get all tags assigned to a journal."""
+        query = text(
+            """
+            SELECT t.id, t.name, t.parent_id, t.color, t.created_at, t.updated_at
+            FROM journal_tags t
+            JOIN journal_tag_assignments jta ON t.id = jta.tag_id
+            WHERE jta.journal_id = :journal_id
+            ORDER BY t.name
+        """
+        )
+        result = await self.conn.execute(query, {"journal_id": journal_id})
+        rows = result.fetchall()
+
+        return [
+            JournalTag(
+                id=row.id,
+                name=row.name,
+                parent_id=row.parent_id,
+                color=row.color,
+                created_at=row.created_at,
+                updated_at=row.updated_at,
+            )
+            for row in rows
+        ]
+
+    async def assign_tag(self, journal_id: int, tag_id: UUID) -> None:
+        """Assign a tag to a journal."""
+        from sqlalchemy.exc import IntegrityError
+
+        try:
+            query = text(
+                """
+                INSERT INTO journal_tag_assignments (journal_id, tag_id)
+                VALUES (:journal_id, :tag_id)
+            """
+            )
+            await self.conn.execute(query, {"journal_id": journal_id, "tag_id": tag_id})
+        except IntegrityError:
+            # Tag already assigned - ignore
+            pass
+
+    async def remove_tag(self, journal_id: int, tag_id: UUID) -> None:
+        """Remove a tag from a journal."""
+        query = text(
+            """
+            DELETE FROM journal_tag_assignments
+            WHERE journal_id = :journal_id AND tag_id = :tag_id
+        """
+        )
+        await self.conn.execute(query, {"journal_id": journal_id, "tag_id": tag_id})

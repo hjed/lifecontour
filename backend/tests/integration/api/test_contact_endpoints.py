@@ -533,3 +533,182 @@ class TestContactEndpoints:
         ]
         assert len(regular_contacts) == 1
         assert regular_contacts[0]["attributes"]["is_favourite"] is False
+
+    async def test_get_contact_journals(self, integration_api_client):
+        """Test getting journals associated with a contact."""
+        from datetime import UTC, datetime, timedelta
+
+        # Create a contact
+        contact_data = {
+            "data": {
+                "type": "contacts",
+                "attributes": {
+                    "first_name": "John",
+                    "last_name": "Doe",
+                    "contact_methods": [],
+                    "addresses": [],
+                    "notes": [],
+                },
+            }
+        }
+        contact_response = await integration_api_client.post(
+            "/api/contacts", json=contact_data
+        )
+        assert contact_response.status_code == 201
+        contact_id = int(contact_response.json()["data"]["id"])
+
+        # Create journals directly in the database
+        # We need to get the connection from the test setup
+        # For now, we'll create journals via the API if available, or skip this test
+        # Let's create journals using raw SQL through the test connection
+
+        # Get the async_connection from the fixture
+        # Since we can't easily access it here, let's create journals via API
+        now = datetime.now(UTC)
+        journal1_data = {
+            "data": {
+                "type": "journals",
+                "attributes": {
+                    "title": "Meeting with John",
+                    "content": "Discussed project plans",
+                    "event_date_range": {
+                        "start": now.isoformat(),
+                        "end": (now + timedelta(hours=1)).isoformat(),
+                    },
+                },
+            }
+        }
+        journal1_response = await integration_api_client.post(
+            "/api/journals", json=journal1_data
+        )
+        assert journal1_response.status_code == 201
+        journal1_id = int(journal1_response.json()["data"]["id"])
+
+        journal2_data = {
+            "data": {
+                "type": "journals",
+                "attributes": {
+                    "title": "Lunch with John",
+                    "content": "Had a great conversation",
+                    "event_date_range": {
+                        "start": (now + timedelta(days=1)).isoformat(),
+                        "end": (now + timedelta(days=1, hours=1)).isoformat(),
+                    },
+                },
+            }
+        }
+        journal2_response = await integration_api_client.post(
+            "/api/journals", json=journal2_data
+        )
+        assert journal2_response.status_code == 201
+        journal2_id = int(journal2_response.json()["data"]["id"])
+
+        # Add contact to journals
+        # Add as PARTICIPANT to journal1
+        add_contact1_data = {
+            "data": {
+                "type": "journal-contact-relationships",
+                "attributes": {
+                    "contact_id": str(contact_id),
+                    "relationship_type": "PARTICIPANT",
+                },
+            }
+        }
+        response1 = await integration_api_client.post(
+            f"/api/journals/{journal1_id}/relationships/contacts",
+            json=add_contact1_data,
+        )
+        assert response1.status_code == 200
+
+        # Add as MENTION to journal2
+        add_contact2_data = {
+            "data": {
+                "type": "journal-contact-relationships",
+                "attributes": {
+                    "contact_id": str(contact_id),
+                    "relationship_type": "MENTION",
+                },
+            }
+        }
+        response2 = await integration_api_client.post(
+            f"/api/journals/{journal2_id}/relationships/contacts",
+            json=add_contact2_data,
+        )
+        assert response2.status_code == 200
+
+        # Test getting all journals for the contact
+        response = await integration_api_client.get(
+            f"/api/contacts/{contact_id}/journals"
+        )
+        assert response.status_code == 200
+
+        data = response.json()
+        assert "data" in data
+        assert "meta" in data
+        assert "links" in data
+
+        # Should have 2 journals
+        assert len(data["data"]) == 2
+        assert data["meta"]["total_count"] == 2
+
+        # Verify journal structure
+        for journal in data["data"]:
+            assert journal["type"] == "journals"
+            assert "id" in journal
+            assert "attributes" in journal
+            assert "title" in journal["attributes"]
+            assert "content" in journal["attributes"]
+
+        # Test filtering by relationship type
+        response = await integration_api_client.get(
+            f"/api/contacts/{contact_id}/journals?relationship_type=PARTICIPANT"
+        )
+        assert response.status_code == 200
+
+        data = response.json()
+        assert len(data["data"]) == 1
+        assert data["meta"]["total_count"] == 1
+
+        # Test pagination
+        response = await integration_api_client.get(
+            f"/api/contacts/{contact_id}/journals?page=1&limit=1"
+        )
+        assert response.status_code == 200
+
+        data = response.json()
+        assert len(data["data"]) == 1
+        assert data["meta"]["total_count"] == 2
+        assert data["meta"]["page_count"] == 2
+
+    async def test_get_contact_journals_not_found(self, integration_api_client):
+        """Test getting journals for a non-existent contact."""
+        response = await integration_api_client.get("/api/contacts/99999/journals")
+        assert response.status_code == 404
+
+    async def test_get_contact_journals_invalid_relationship_type(
+        self, integration_api_client
+    ):
+        """Test getting journals with an invalid relationship type."""
+        # Create a contact
+        contact_data = {
+            "data": {
+                "type": "contacts",
+                "attributes": {
+                    "first_name": "John",
+                    "contact_methods": [],
+                    "addresses": [],
+                    "notes": [],
+                },
+            }
+        }
+        contact_response = await integration_api_client.post(
+            "/api/contacts", json=contact_data
+        )
+        assert contact_response.status_code == 201
+        contact_id = int(contact_response.json()["data"]["id"])
+
+        # Try to get journals with invalid relationship type
+        response = await integration_api_client.get(
+            f"/api/contacts/{contact_id}/journals?relationship_type=INVALID"
+        )
+        assert response.status_code == 422  # Validation error

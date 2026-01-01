@@ -44,12 +44,26 @@ from app.api.contacts.schemas import (
     TagAssignmentRequest,
     TagListResponse,
 )
+from app.api.journals.controllers import _enrich_journal_data
+from app.api.journals.converters import JournalConverter
+from app.api.journals.schemas import JournalListResponse
 from app.core.contacts.models.exceptions import (
     ContactNotFoundError,
     ContactValidationError,
 )
 from app.core.contacts.services import ContactService
 from app.core.contacts.services.contact_history_service import ContactHistoryService
+from app.core.journal.models.repositories import (
+    CalendarInfoRepository,
+    CalendarRepository,
+    JournalContactRelationshipRepository,
+    JournalTagRepository,
+    MoodDataRepository,
+    PhotoAlbumDataRepository,
+    PlanDataRepository,
+    TravelDataRepository,
+)
+from app.core.journal.services.journal_service import JournalService
 from app.infrastructure.auth.models import SessionUser
 
 logger = structlog.get_logger()
@@ -730,3 +744,108 @@ async def delete_contact_address(
     Removes the specified contact address from the contact.
     """
     await contact_service.delete_contact_address(contact_id, address_id, connection)
+
+
+@router.get("/{contact_id}/journals")
+@inject
+async def get_contact_journals(
+    contact_id: int,
+    request: Request,
+    contact_service: FromDishka[ContactService],
+    journal_service: FromDishka[JournalService],
+    contact_relationship_repo: FromDishka[JournalContactRelationshipRepository],
+    calendar_info_repo: FromDishka[CalendarInfoRepository],
+    calendar_repo: FromDishka[CalendarRepository],
+    mood_data_repo: FromDishka[MoodDataRepository],
+    plan_data_repo: FromDishka[PlanDataRepository],
+    travel_data_repo: FromDishka[TravelDataRepository],
+    photo_album_data_repo: FromDishka[PhotoAlbumDataRepository],
+    tag_repo: FromDishka[JournalTagRepository],
+    user: FromDishka[SessionUser],  # Require authentication
+    page: int = Query(default=1, description="Page number", ge=1),
+    limit: int = Query(default=20, description="Items per page", ge=1, le=100),
+    relationship_type: str | None = Query(
+        default=None, description="Filter by relationship type"
+    ),
+) -> JournalListResponse:
+    """
+    Get all journals associated with a contact.
+
+    Returns a paginated list of journals that have a relationship with the specified contact.
+    Optionally filter by relationship type (PARTICIPANT, INVITEE, MENTION, ABOUT).
+    """
+    from app.core.journal.models.journal_contact_relationship import (
+        JournalContactRelationshipType,
+    )
+
+    base_url = get_request_base_url(request)
+
+    # Verify contact exists
+    contact = await contact_service.get_contact_by_id(contact_id)
+    if not contact:
+        raise ContactNotFoundError(contact_id)
+
+    # Get relationships for this contact
+    relationships = await contact_relationship_repo.get_by_contact(contact_id)
+
+    # Filter by relationship type if specified
+    if relationship_type:
+        try:
+            rel_type = JournalContactRelationshipType[relationship_type.upper()]
+            relationships = [
+                r for r in relationships if r.relationship_type == rel_type
+            ]
+        except KeyError as e:
+            raise ContactValidationError(
+                "relationship_type",
+                f"Invalid relationship type: {relationship_type}. "
+                "Valid types: PARTICIPANT, INVITEE, MENTION, ABOUT",
+            ) from e
+
+    # Get unique journal IDs
+    journal_ids = list({r.journal_id for r in relationships})
+
+    # Apply pagination to journal IDs
+    pagination = PaginationParams(page=page, limit=limit)
+    total_count = len(journal_ids)
+    paginated_journal_ids = journal_ids[
+        pagination.offset : pagination.offset + pagination.limit
+    ]
+
+    # Fetch journals
+    journals = []
+    for journal_id in paginated_journal_ids:
+        journal = await journal_service.get_journal(journal_id)
+        if journal:
+            journals.append(journal)
+
+    # Enrich journals with type data, contacts, tags, etc.
+    journal_resources = []
+    for journal in journals:
+        types, type_data, contacts, tags, calendar = await _enrich_journal_data(
+            journal,
+            calendar_info_repo,
+            calendar_repo,
+            mood_data_repo,
+            plan_data_repo,
+            travel_data_repo,
+            photo_album_data_repo,
+            contact_relationship_repo,
+            tag_repo,
+        )
+        journal_resource = JournalConverter.to_resource(
+            journal, base_url, types, type_data, contacts, tags, calendar
+        )
+        journal_resources.append(journal_resource)
+
+    # Create pagination metadata
+    meta = create_pagination_meta(total_count, page, limit)
+    links = create_pagination_links(
+        f"{base_url}/api/contacts/{contact_id}/journals", page, limit, total_count
+    )
+
+    return JournalListResponse(
+        data=journal_resources,
+        meta=meta,
+        links=links,
+    )
