@@ -106,6 +106,51 @@ CONTACTS_INDEX_SETTINGS = {
     ],
 }
 
+# Index configuration for journals
+JOURNAL_INDEX_SETTINGS = {
+    "searchableAttributes": [
+        "title",
+        "content",
+        "location",
+    ],
+    "filterableAttributes": [
+        "event_date_range_start",
+        "event_date_range_end",
+        "types",
+        "contact_ids",
+        "tag_ids",
+        "calendar_id",
+        "parent_id",
+        "entity_type",
+        "created_at",
+        "updated_at",
+    ],
+    "sortableAttributes": [
+        "event_date_range_start",
+        "event_date_range_end",
+        "created_at",
+        "updated_at",
+        "title",
+    ],
+    "displayedAttributes": [
+        "id",
+        "user_id",
+        "title",
+        "content",
+        "event_date_range_start",
+        "event_date_range_end",
+        "types",
+        "contact_ids",
+        "tag_ids",
+        "calendar_id",
+        "parent_id",
+        "location",
+        "entity_type",
+        "created_at",
+        "updated_at",
+    ],
+}
+
 # Global search index settings (for cross-entity search)
 GLOBAL_INDEX_SETTINGS = {
     "searchableAttributes": ["title", "content", "name", "description"],

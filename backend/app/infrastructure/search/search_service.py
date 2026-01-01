@@ -130,6 +130,112 @@ class SearchService:
             )
             raise
 
+    def search_journals(
+        self,
+        query: str,
+        filters: dict[str, Any] | None = None,
+        limit: int = 20,
+        offset: int = 0,
+        sort: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """
+        Search journals using MeiliSearch.
+
+        Args:
+            query: Search query string
+            filters: Optional filters to apply
+            limit: Maximum number of results
+            offset: Offset for pagination
+            sort: Optional sort criteria
+
+        Returns:
+            Search results with metadata
+        """
+        try:
+            index_name = get_index_name("journals")
+            index = self.client.index(index_name)
+
+            # Build search parameters
+            search_params = {
+                "limit": limit,
+                "offset": offset,
+                "attributesToHighlight": [
+                    "title",
+                    "content",
+                    "location",
+                ],
+                "highlightPreTag": "<mark>",
+                "highlightPostTag": "</mark>",
+                "attributesToRetrieve": [
+                    "id",
+                    "user_id",
+                    "title",
+                    "content",
+                    "event_date_range_start",
+                    "event_date_range_end",
+                    "types",
+                    "contact_ids",
+                    "tag_ids",
+                    "calendar_id",
+                    "parent_id",
+                    "location",
+                    "created_at",
+                    "updated_at",
+                ],
+            }
+
+            # Add filters if provided
+            if filters:
+                filter_expressions = []
+                for key, value in filters.items():
+                    if isinstance(value, list):
+                        # Handle array filters (e.g., types, contact_ids)
+                        filter_expressions.append(f"{key} IN {value}")
+                    else:
+                        filter_expressions.append(f"{key} = '{value}'")
+
+                if filter_expressions:
+                    search_params["filter"] = " AND ".join(filter_expressions)
+
+            # Add sort if provided
+            if sort:
+                search_params["sort"] = sort
+
+            # Perform the search
+            results = index.search(query, search_params)
+
+            # Format the response
+            response = {
+                "hits": results["hits"],
+                "query": query,
+                "processing_time_ms": results["processingTimeMs"],
+                "limit": limit,
+                "offset": offset,
+                "estimated_total_hits": results.get("estimatedTotalHits", 0),
+                "facet_distribution": results.get("facetDistribution", {}),
+                "facet_stats": results.get("facetStats", {}),
+            }
+
+            logger.debug(
+                "Journal search completed",
+                query=query,
+                hits_count=len(results["hits"]),
+                processing_time_ms=results["processingTimeMs"],
+            )
+
+            return response
+
+        except MeilisearchError as e:
+            logger.error(
+                "MeiliSearch error during journal search", query=query, error=str(e)
+            )
+            raise
+        except Exception as e:
+            logger.error(
+                "Unexpected error during journal search", query=query, error=str(e)
+            )
+            raise
+
     def global_search(
         self,
         query: str,
@@ -150,27 +256,71 @@ class SearchService:
             Global search results with metadata
         """
         try:
-            # For now, only search contacts since that's what we have
-            # In future iterations, this will search across multiple indices
+            # Determine which entity types to search
+            available_types = ["contact", "journal"]
+            search_types = entity_types if entity_types else available_types
 
-            filters = {}
-            if entity_types:
-                filters["entity_type"] = entity_types
+            # Collect results from all entity types
+            all_hits = []
+            total_processing_time = 0
 
-            # Use contact search for now
-            results = self.search_contacts(
-                query=query, filters=filters, limit=limit, offset=offset
-            )
+            # Search contacts if requested
+            if "contact" in search_types:
+                try:
+                    contact_results = self.search_contacts(
+                        query=query, limit=limit, offset=offset
+                    )
+                    all_hits.extend(contact_results["hits"])
+                    total_processing_time += contact_results.get(
+                        "processing_time_ms", 0
+                    )
+                except Exception as e:
+                    logger.warning(
+                        "Error searching contacts in global search",
+                        query=query,
+                        error=str(e),
+                    )
 
-            # Add entity type information to the response
-            results["searched_entity_types"] = entity_types or ["contact"]
-            results["available_entity_types"] = ["contact"]  # Will expand in future
+            # Search journals if requested
+            if "journal" in search_types:
+                try:
+                    journal_results = self.search_journals(
+                        query=query, limit=limit, offset=offset
+                    )
+                    all_hits.extend(journal_results["hits"])
+                    total_processing_time += journal_results.get(
+                        "processing_time_ms", 0
+                    )
+                except Exception as e:
+                    logger.warning(
+                        "Error searching journals in global search",
+                        query=query,
+                        error=str(e),
+                    )
+
+            # Sort by relevance (MeiliSearch score) if available
+            all_hits.sort(key=lambda x: x.get("_rankingScore", 0), reverse=True)
+
+            # Apply limit to combined results
+            all_hits = all_hits[:limit]
+
+            # Build response
+            results = {
+                "hits": all_hits,
+                "query": query,
+                "processing_time_ms": total_processing_time,
+                "limit": limit,
+                "offset": offset,
+                "estimated_total_hits": len(all_hits),
+                "searched_entity_types": search_types,
+                "available_entity_types": available_types,
+            }
 
             logger.debug(
                 "Global search completed",
                 query=query,
-                entity_types=entity_types,
-                hits_count=len(results["hits"]),
+                entity_types=search_types,
+                hits_count=len(all_hits),
             )
 
             return results

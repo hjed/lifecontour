@@ -726,7 +726,7 @@ def test_settings():
         debug=True,
         database_url=get_test_database_url(),  # Use the same database URL as other integration tests
         meilisearch_url="http://localhost:7701",  # Use test MeiliSearch port
-        meilisearch_api_key="test_master_key",  # Use test API key
+        meilisearch_api_key="test_search_key",  # Use test API key from .env.test
         allowed_hosts=["*"],  # Allow all hosts for testing
         cors_origins=["*"],
     )

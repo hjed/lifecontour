@@ -272,7 +272,7 @@ class TestSearchService:
         # Assert
         assert results["hits"] == mock_search_results["hits"]
         assert results["searched_entity_types"] == ["contact"]
-        assert results["available_entity_types"] == ["contact"]
+        assert results["available_entity_types"] == ["contact", "journal"]
 
     def test_global_search_no_entity_types(
         self, search_service, mock_meilisearch_client, mock_search_results
@@ -291,7 +291,8 @@ class TestSearchService:
             results = search_service.global_search("John")
 
         # Assert
-        assert results["searched_entity_types"] == ["contact"]
+        # When no entity types specified, should search all available types
+        assert results["searched_entity_types"] == ["contact", "journal"]
 
     def test_get_search_suggestions(self, search_service):
         """Test search suggestions functionality."""
