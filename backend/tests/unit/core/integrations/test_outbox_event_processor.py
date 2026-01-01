@@ -7,7 +7,7 @@ including contact sync events and sync completion events.
 
 from datetime import UTC, datetime
 from typing import Any
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
 import pytest
@@ -230,8 +230,21 @@ class TestOutboxEventProcessor:
         mock_external_ref_service = AsyncMock()
         mock_external_ref_service.create_external_reference.return_value = AsyncMock()
 
-        with patch.object(
-            processor, "external_reference_service", mock_external_ref_service
+        # Mock sync metadata repository
+        mock_sync_metadata_repo = AsyncMock()
+        mock_sync_metadata_repo.find_and_lock.return_value = (
+            None  # No existing sync metadata
+        )
+        mock_sync_metadata_repo.should_sync = MagicMock(
+            return_value=True
+        )  # Synchronous method
+        mock_sync_metadata_repo.upsert.return_value = AsyncMock()
+
+        with (
+            patch.object(
+                processor, "external_reference_service", mock_external_ref_service
+            ),
+            patch.object(processor, "sync_metadata_repo", mock_sync_metadata_repo),
         ):
             # Process the event
             result = await processor.process_event(contact_updated_event)
@@ -331,9 +344,17 @@ class TestOutboxEventProcessor:
         # Mock contact service to return None (contact not found)
         mock_contact_service.find_contact_by_external_reference.return_value = None
 
-        # Should raise OutboxEventProcessingError
-        with pytest.raises(OutboxEventProcessingError) as exc_info:
-            await processor.process_event(contact_updated_event)
+        # Mock sync metadata repository
+        mock_sync_metadata_repo = AsyncMock()
+        mock_sync_metadata_repo.find_and_lock.return_value = None
+        mock_sync_metadata_repo.should_sync = MagicMock(
+            return_value=True
+        )  # Synchronous method
+
+        with patch.object(processor, "sync_metadata_repo", mock_sync_metadata_repo):
+            # Should raise OutboxEventProcessingError
+            with pytest.raises(OutboxEventProcessingError) as exc_info:
+                await processor.process_event(contact_updated_event)
 
         assert "Contact not found for update" in str(exc_info.value)
         assert "people/c123456789" in str(exc_info.value)

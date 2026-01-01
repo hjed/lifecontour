@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine, create_async_en
 # Constants
 CONTAINER_NAME_FILTER = "name=pms-postgres"
 BACKEND_POSTGRES_CONTAINER = "pms-postgres"
+DOCKER_COMPOSE_FILE = "docker-compose.yml"
 MAX_DB_STARTUP_RETRIES = 30
 
 
@@ -140,7 +141,16 @@ class DockerManager:
             # Start the container using unified docker-compose with test-backend profile
             subprocess.run(
                 self.docker_compose_cmd
-                + ["--profile", "test-backend", "--env-file", ".env.test", "up", "-d"],
+                + [
+                    "-f",
+                    DOCKER_COMPOSE_FILE,
+                    "--profile",
+                    "test-backend",
+                    "--env-file",
+                    ".env.test",
+                    "up",
+                    "-d",
+                ],
                 cwd=self.project_root,
                 check=True,
             )
@@ -159,7 +169,15 @@ class DockerManager:
         """Stop Docker PostgreSQL container."""
         try:
             subprocess.run(
-                self.docker_compose_cmd + ["--profile", "test-backend", "down", "-v"],
+                self.docker_compose_cmd
+                + [
+                    "-f",
+                    DOCKER_COMPOSE_FILE,
+                    "--profile",
+                    "test-backend",
+                    "down",
+                    "-v",
+                ],
                 cwd=self.project_root,
                 check=True,
             )

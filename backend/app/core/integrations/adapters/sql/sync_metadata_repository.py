@@ -1,0 +1,238 @@
+"""
+SQL repository for SyncMetadata with SELECT FOR UPDATE locking support.
+
+This repository implements production-grade resilience patterns:
+1. SELECT FOR UPDATE locking for concurrent sync operations
+2. Version hash-based idempotency checks
+3. Atomic upsert operations
+"""
+
+from datetime import UTC, datetime
+
+from core_shared.models.sync_metadata import SyncMetadata, SyncStatus
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncConnection
+
+
+class SyncMetadataRepository:
+    """Repository for managing sync metadata with concurrency control."""
+
+    def __init__(self, conn: AsyncConnection):
+        """
+        Initialize the repository.
+
+        Args:
+            conn: Database connection (must be within a transaction for locking)
+        """
+        self.conn = conn
+
+    async def find_and_lock(
+        self, integration_source: str, external_id: str
+    ) -> SyncMetadata | None:
+        """
+        Find sync metadata and acquire an exclusive lock using SELECT FOR UPDATE.
+
+        This prevents concurrent sync operations on the same entity.
+        The lock is held until the transaction commits or rolls back.
+
+        Args:
+            integration_source: Integration source (e.g., 'google_contacts')
+            external_id: External entity ID
+
+        Returns:
+            SyncMetadata if found, None otherwise
+        """
+        query = text("""
+            SELECT id, internal_id, integration_source, external_id,
+                   last_synced_at, version_hash, sync_status,
+                   error_message, retry_count, created_at, updated_at
+            FROM sync_metadata
+            WHERE integration_source = :integration_source
+              AND external_id = :external_id
+            FOR UPDATE
+        """)
+
+        result = await self.conn.execute(
+            query,
+            {
+                "integration_source": integration_source,
+                "external_id": external_id,
+            },
+        )
+        row = result.fetchone()
+
+        if not row:
+            return None
+
+        return SyncMetadata(
+            id=row.id,
+            internal_id=row.internal_id,
+            integration_source=row.integration_source,
+            external_id=row.external_id,
+            last_synced_at=row.last_synced_at,
+            version_hash=row.version_hash,
+            sync_status=row.sync_status,
+            error_message=row.error_message,
+            retry_count=row.retry_count,
+            created_at=row.created_at,
+            updated_at=row.updated_at,
+        )
+
+    async def find_by_external_id(
+        self, integration_source: str, external_id: str
+    ) -> SyncMetadata | None:
+        """
+        Find sync metadata without locking (for read-only operations).
+
+        Args:
+            integration_source: Integration source (e.g., 'google_contacts')
+            external_id: External entity ID
+
+        Returns:
+            SyncMetadata if found, None otherwise
+        """
+        query = text("""
+            SELECT id, internal_id, integration_source, external_id,
+                   last_synced_at, version_hash, sync_status,
+                   error_message, retry_count, created_at, updated_at
+            FROM sync_metadata
+            WHERE integration_source = :integration_source
+              AND external_id = :external_id
+        """)
+
+        result = await self.conn.execute(
+            query,
+            {
+                "integration_source": integration_source,
+                "external_id": external_id,
+            },
+        )
+        row = result.fetchone()
+
+        if not row:
+            return None
+
+        return SyncMetadata(
+            id=row.id,
+            internal_id=row.internal_id,
+            integration_source=row.integration_source,
+            external_id=row.external_id,
+            last_synced_at=row.last_synced_at,
+            version_hash=row.version_hash,
+            sync_status=row.sync_status,
+            error_message=row.error_message,
+            retry_count=row.retry_count,
+            created_at=row.created_at,
+            updated_at=row.updated_at,
+        )
+
+    async def upsert(
+        self,
+        internal_id: int,
+        integration_source: str,
+        external_id: str,
+        version_hash: str,
+        sync_status: SyncStatus = SyncStatus.SUCCESS,
+        error_message: str | None = None,
+    ) -> SyncMetadata:
+        """
+        Insert or update sync metadata atomically.
+
+        Args:
+            internal_id: Internal entity ID
+            integration_source: Integration source
+            external_id: External entity ID
+            version_hash: Version hash for change detection
+            sync_status: Sync status
+            error_message: Error message if failed
+
+        Returns:
+            Created or updated SyncMetadata
+        """
+        now = datetime.now(UTC)
+
+        query = text("""
+            INSERT INTO sync_metadata
+                (internal_id, integration_source, external_id, last_synced_at,
+                 version_hash, sync_status, error_message, retry_count,
+                 created_at, updated_at)
+            VALUES
+                (:internal_id, :integration_source, :external_id, :last_synced_at,
+                 :version_hash, :sync_status, :error_message, 0,
+                 :created_at, :updated_at)
+            ON CONFLICT (integration_source, external_id)
+            DO UPDATE SET
+                internal_id = EXCLUDED.internal_id,
+                last_synced_at = EXCLUDED.last_synced_at,
+                version_hash = EXCLUDED.version_hash,
+                sync_status = EXCLUDED.sync_status,
+                error_message = EXCLUDED.error_message,
+                retry_count = CASE
+                    WHEN EXCLUDED.sync_status = 'success' THEN 0
+                    ELSE sync_metadata.retry_count + 1
+                END,
+                updated_at = EXCLUDED.updated_at
+            RETURNING id, internal_id, integration_source, external_id,
+                      last_synced_at, version_hash, sync_status,
+                      error_message, retry_count, created_at, updated_at
+        """)
+
+        result = await self.conn.execute(
+            query,
+            {
+                "internal_id": internal_id,
+                "integration_source": integration_source,
+                "external_id": external_id,
+                "last_synced_at": now,
+                "version_hash": version_hash,
+                "sync_status": sync_status.value,
+                "error_message": error_message,
+                "created_at": now,
+                "updated_at": now,
+            },
+        )
+        row = result.fetchone()
+
+        if not row:
+            raise RuntimeError("Failed to upsert sync metadata")
+
+        return SyncMetadata(
+            id=row.id,
+            internal_id=row.internal_id,
+            integration_source=row.integration_source,
+            external_id=row.external_id,
+            last_synced_at=row.last_synced_at,
+            version_hash=row.version_hash,
+            sync_status=row.sync_status,
+            error_message=row.error_message,
+            retry_count=row.retry_count,
+            created_at=row.created_at,
+            updated_at=row.updated_at,
+        )
+
+    def should_sync(
+        self, existing_metadata: SyncMetadata | None, new_version_hash: str
+    ) -> bool:
+        """
+        Determine if sync should proceed based on version hash comparison.
+
+        This implements idempotency - if the version hash matches,
+        the data hasn't changed and we can skip the sync.
+
+        Args:
+            existing_metadata: Existing sync metadata (if any)
+            new_version_hash: New version hash from external system
+
+        Returns:
+            True if sync should proceed, False if it can be skipped
+        """
+        if existing_metadata is None:
+            # No existing metadata - this is a new entity, sync it
+            return True
+
+        if existing_metadata.version_hash == new_version_hash:
+            # Version hash matches - data hasn't changed, skip sync
+            return False
+
+        # Version hash differs - data has changed, sync it
+        return True
