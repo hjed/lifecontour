@@ -25,6 +25,123 @@ class SearchService:
         """Initialize the search service."""
         self.client = get_meilisearch_client()
 
+    def _build_search_params(
+        self,
+        limit: int,
+        offset: int,
+        attributes_to_highlight: list[str],
+        attributes_to_retrieve: list[str],
+        filters: dict[str, Any] | None = None,
+        sort: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """
+        Build search parameters for MeiliSearch.
+
+        Args:
+            limit: Maximum number of results
+            offset: Offset for pagination
+            attributes_to_highlight: Fields to highlight in results
+            attributes_to_retrieve: Fields to include in results
+            filters: Optional filters to apply
+            sort: Optional sort criteria
+
+        Returns:
+            Dictionary of search parameters
+        """
+        search_params: dict[str, Any] = {
+            "limit": limit,
+            "offset": offset,
+            "attributesToHighlight": attributes_to_highlight,
+            "highlightPreTag": "<mark>",
+            "highlightPostTag": "</mark>",
+            "attributesToRetrieve": attributes_to_retrieve,
+        }
+
+        # Add filters if provided
+        if filters:
+            filter_expressions = []
+            for key, value in filters.items():
+                if isinstance(value, list):
+                    # Handle array filters (e.g., tags, types)
+                    filter_expressions.append(f"{key} IN {value}")
+                elif isinstance(value, bool):
+                    # Handle boolean filters (e.g., is_favourite)
+                    filter_expressions.append(f"{key} = {str(value).lower()}")
+                else:
+                    filter_expressions.append(f"{key} = '{value}'")
+
+            if filter_expressions:
+                search_params["filter"] = " AND ".join(filter_expressions)
+
+        # Add sort if provided
+        if sort:
+            search_params["sort"] = sort
+
+        return search_params
+
+    def _perform_search(
+        self,
+        index_name: str,
+        query: str,
+        search_params: dict[str, Any],
+        entity_type: str,
+    ) -> dict[str, Any]:
+        """
+        Perform a search on a specific index.
+
+        Args:
+            index_name: Name of the index to search
+            query: Search query string
+            search_params: Search parameters
+            entity_type: Type of entity being searched (for logging)
+
+        Returns:
+            Formatted search results
+
+        Raises:
+            MeilisearchError: If MeiliSearch operation fails
+            Exception: For unexpected errors
+        """
+        try:
+            index = self.client.index(index_name)
+            results = index.search(query, search_params)
+
+            # Format the response
+            response = {
+                "hits": results["hits"],
+                "query": query,
+                "processing_time_ms": results["processingTimeMs"],
+                "limit": search_params["limit"],
+                "offset": search_params["offset"],
+                "estimated_total_hits": results.get("estimatedTotalHits", 0),
+                "facet_distribution": results.get("facetDistribution", {}),
+                "facet_stats": results.get("facetStats", {}),
+            }
+
+            logger.debug(
+                f"{entity_type} search completed",
+                query=query,
+                hits_count=len(results["hits"]),
+                processing_time_ms=results["processingTimeMs"],
+            )
+
+            return response
+
+        except MeilisearchError as e:
+            logger.error(
+                f"MeiliSearch error during {entity_type.lower()} search",
+                query=query,
+                error=str(e),
+            )
+            raise
+        except Exception as e:
+            logger.error(
+                f"Unexpected error during {entity_type.lower()} search",
+                query=query,
+                error=str(e),
+            )
+            raise
+
     def search_contacts(
         self,
         query: str,
@@ -46,89 +163,38 @@ class SearchService:
         Returns:
             Search results with metadata
         """
-        try:
-            index_name = get_index_name("contacts")
-            index = self.client.index(index_name)
+        index_name = get_index_name("contacts")
 
-            # Build search parameters
-            search_params = {
-                "limit": limit,
-                "offset": offset,
-                "attributesToHighlight": [
-                    "first_name",
-                    "last_name",
-                    "email",
-                    "notes_content",
-                ],
-                "highlightPreTag": "<mark>",
-                "highlightPostTag": "</mark>",
-                "attributesToRetrieve": [
-                    "id",
-                    "first_name",
-                    "last_name",
-                    "full_name",
-                    "email",
-                    "phone",
-                    "tags",
-                    "created_at",
-                    "updated_at",
-                ],
-            }
+        search_params = self._build_search_params(
+            limit=limit,
+            offset=offset,
+            attributes_to_highlight=[
+                "first_name",
+                "last_name",
+                "email",
+                "notes_content",
+            ],
+            attributes_to_retrieve=[
+                "id",
+                "first_name",
+                "last_name",
+                "full_name",
+                "email",
+                "phone",
+                "tags",
+                "created_at",
+                "updated_at",
+            ],
+            filters=filters,
+            sort=sort,
+        )
 
-            # Add filters if provided
-            if filters:
-                filter_expressions = []
-                for key, value in filters.items():
-                    if isinstance(value, list):
-                        # Handle array filters (e.g., tags)
-                        filter_expressions.append(f"{key} IN {value}")
-                    elif isinstance(value, bool):
-                        # Handle boolean filters (e.g., is_favourite)
-                        filter_expressions.append(f"{key} = {str(value).lower()}")
-                    else:
-                        filter_expressions.append(f"{key} = '{value}'")
-
-                if filter_expressions:
-                    search_params["filter"] = " AND ".join(filter_expressions)
-
-            # Add sort if provided
-            if sort:
-                search_params["sort"] = sort
-
-            # Perform the search
-            results = index.search(query, search_params)
-
-            # Format the response
-            response = {
-                "hits": results["hits"],
-                "query": query,
-                "processing_time_ms": results["processingTimeMs"],
-                "limit": limit,
-                "offset": offset,
-                "estimated_total_hits": results.get("estimatedTotalHits", 0),
-                "facet_distribution": results.get("facetDistribution", {}),
-                "facet_stats": results.get("facetStats", {}),
-            }
-
-            logger.debug(
-                "Contact search completed",
-                query=query,
-                hits_count=len(results["hits"]),
-                processing_time_ms=results["processingTimeMs"],
-            )
-
-            return response
-
-        except MeilisearchError as e:
-            logger.error(
-                "MeiliSearch error during contact search", query=query, error=str(e)
-            )
-            raise
-        except Exception as e:
-            logger.error(
-                "Unexpected error during contact search", query=query, error=str(e)
-            )
-            raise
+        return self._perform_search(
+            index_name=index_name,
+            query=query,
+            search_params=search_params,
+            entity_type="Contact",
+        )
 
     def search_journals(
         self,
@@ -151,90 +217,42 @@ class SearchService:
         Returns:
             Search results with metadata
         """
-        try:
-            index_name = get_index_name("journals")
-            index = self.client.index(index_name)
+        index_name = get_index_name("journals")
 
-            # Build search parameters
-            search_params = {
-                "limit": limit,
-                "offset": offset,
-                "attributesToHighlight": [
-                    "title",
-                    "content",
-                    "location",
-                ],
-                "highlightPreTag": "<mark>",
-                "highlightPostTag": "</mark>",
-                "attributesToRetrieve": [
-                    "id",
-                    "user_id",
-                    "title",
-                    "content",
-                    "event_date_range_start",
-                    "event_date_range_end",
-                    "types",
-                    "contact_ids",
-                    "tag_ids",
-                    "calendar_id",
-                    "parent_id",
-                    "location",
-                    "created_at",
-                    "updated_at",
-                ],
-            }
+        search_params = self._build_search_params(
+            limit=limit,
+            offset=offset,
+            attributes_to_highlight=[
+                "title",
+                "content",
+                "location",
+            ],
+            attributes_to_retrieve=[
+                "id",
+                "user_id",
+                "title",
+                "content",
+                "event_date_range_start",
+                "event_date_range_end",
+                "types",
+                "contact_ids",
+                "tag_ids",
+                "calendar_id",
+                "parent_id",
+                "location",
+                "created_at",
+                "updated_at",
+            ],
+            filters=filters,
+            sort=sort,
+        )
 
-            # Add filters if provided
-            if filters:
-                filter_expressions = []
-                for key, value in filters.items():
-                    if isinstance(value, list):
-                        # Handle array filters (e.g., types, contact_ids)
-                        filter_expressions.append(f"{key} IN {value}")
-                    else:
-                        filter_expressions.append(f"{key} = '{value}'")
-
-                if filter_expressions:
-                    search_params["filter"] = " AND ".join(filter_expressions)
-
-            # Add sort if provided
-            if sort:
-                search_params["sort"] = sort
-
-            # Perform the search
-            results = index.search(query, search_params)
-
-            # Format the response
-            response = {
-                "hits": results["hits"],
-                "query": query,
-                "processing_time_ms": results["processingTimeMs"],
-                "limit": limit,
-                "offset": offset,
-                "estimated_total_hits": results.get("estimatedTotalHits", 0),
-                "facet_distribution": results.get("facetDistribution", {}),
-                "facet_stats": results.get("facetStats", {}),
-            }
-
-            logger.debug(
-                "Journal search completed",
-                query=query,
-                hits_count=len(results["hits"]),
-                processing_time_ms=results["processingTimeMs"],
-            )
-
-            return response
-
-        except MeilisearchError as e:
-            logger.error(
-                "MeiliSearch error during journal search", query=query, error=str(e)
-            )
-            raise
-        except Exception as e:
-            logger.error(
-                "Unexpected error during journal search", query=query, error=str(e)
-            )
-            raise
+        return self._perform_search(
+            index_name=index_name,
+            query=query,
+            search_params=search_params,
+            entity_type="Journal",
+        )
 
     def global_search(
         self,
