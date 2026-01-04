@@ -184,7 +184,10 @@ class JournalIndexingService:
             )
             types_row = types_result.fetchone()
 
-            # All journals are at least NOTE type
+            # NOTE: By business design, every existing journal is always treated as having
+            # a default type of 'NOTE', even if there is no separate NOTE-specific data row.
+            # This allows all journals to function as basic notes while optionally having
+            # additional type-specific data (EVENT, MOOD_RATING, PLAN, TRAVEL, PHOTO_ALBUM).
             types = ["NOTE"]
             if types_row:
                 # Add non-null type values

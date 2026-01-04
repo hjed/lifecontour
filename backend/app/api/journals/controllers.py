@@ -166,7 +166,7 @@ async def list_journals(
     page: int = Query(default=1, description="Page number", ge=1),
     limit: int = Query(default=20, description="Items per page", ge=1, le=100),
     journal_type: str | None = Query(
-        default=None, description="Filter by journal type"
+        default=None, description="Filter by journal type", alias="type"
     ),
     start_date: datetime | None = Query(
         default=None, description="Filter by start date (inclusive)"
@@ -1196,8 +1196,13 @@ async def search_journals(
         start_date = hit.get("event_date_range_start")
         end_date = hit.get("event_date_range_end")
 
-        # Use current time as fallback if dates are missing
+        # Use current time as fallback if dates are missing (should not happen in normal operation)
+        # This is a defensive measure for data integrity issues
         if not start_date or not end_date:
+            logger.warning(
+                "Missing event_date_range in search results, using fallback",
+                journal_id=hit.get("id"),
+            )
             start_date = datetime.now(UTC)
             end_date = datetime.now(UTC)
 
@@ -1215,13 +1220,20 @@ async def search_journals(
             updated_at=hit.get("updated_at"),
         )
 
+        # Only include relevant search metadata fields to avoid exposing internal details
+        search_metadata = {
+            key: hit[key]
+            for key in ("_rankingScore", "_rankingScoreDetails")
+            if key in hit
+        }
+
         resource = JournalResource(
             id=str(hit["id"]),
             attributes=attributes,
             links=JsonApiLinks(self=f"{base_url}/api/journals/{hit['id']}"),
             meta={
                 "highlighted": hit.get("_formatted", {}),
-                "search_metadata": hit,
+                "search_metadata": search_metadata,
             },
         )
         journal_resources.append(resource)

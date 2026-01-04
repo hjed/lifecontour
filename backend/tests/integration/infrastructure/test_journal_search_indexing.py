@@ -4,7 +4,7 @@ Integration tests for journal search indexing.
 Tests the JournalIndexingService with real MeiliSearch and PostgreSQL.
 """
 
-from datetime import datetime
+from datetime import UTC, datetime
 
 import pytest
 from meilisearch import Client as MeiliSearchClient
@@ -36,7 +36,7 @@ class TestJournalSearchIndexing:
     ):
         """Test indexing a newly created journal."""
         # Create a journal created event
-        now = datetime.now()
+        now = datetime.now(UTC)
         event = OutboxEvent(
             id=1,
             event_id="test-event-1",
