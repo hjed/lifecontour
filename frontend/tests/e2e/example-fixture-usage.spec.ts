@@ -260,8 +260,7 @@ test.describe('Example: Fixture-Based Testing', () => {
       // Navigate to contacts page (this should trigger the API call)
       await authenticatedPage.goto('/contacts');
 
-      // Wait for the page to load and process the error with reliable waiting
-      new ReliableWaiter(authenticatedPage);
+      // Wait for the page to load and process the error
       await authenticatedPage.waitForLoadState('networkidle');
 
       // Should show error state (React Query retries will complete automatically)

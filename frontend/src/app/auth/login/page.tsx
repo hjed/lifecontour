@@ -113,8 +113,12 @@ function LoginContent() {
             ) : providersData?.providers?.length ? (
               providersData.providers.map(provider => {
                 const Icon = getProviderIcon(provider.name);
-                const isLoading = loadingProvider === provider.name;
-                const isAnyLoading = loadingProvider !== null;
+                // Show loading if this provider was clicked and auth is still loading
+                const isLoading =
+                  loadingProvider === provider.name && state.isLoading;
+                // Disable all buttons if any provider is loading
+                const isAnyLoading =
+                  loadingProvider !== null && state.isLoading;
 
                 return (
                   <Button

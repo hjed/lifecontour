@@ -71,7 +71,7 @@ function activitiesReducer(
         activities: action.activities,
         processedDataKey: action.dataKey,
       };
-    case 'APPEND_ACTIVITIES':
+    case 'APPEND_ACTIVITIES': {
       if (state.processedDataKey === action.dataKey) return state;
       const existingIds = new Set(state.activities.map(a => a.id));
       const newActivities = action.activities.filter(
@@ -84,6 +84,7 @@ function activitiesReducer(
         activities: [...state.activities, ...newActivities],
         processedDataKey: action.dataKey,
       };
+    }
     default:
       return state;
   }

@@ -753,7 +753,7 @@ export const test = base.extend<TestFixtures, WorkerFixtures>({
   },
 
   // Utility fixtures
-  dataFactory: async ({}, use) => {
+  dataFactory: async (_fixtures, use) => {
     await use({
       contacts: ContactFactory,
       tags: TagFactory,
@@ -762,7 +762,7 @@ export const test = base.extend<TestFixtures, WorkerFixtures>({
   },
 
   // Test-scoped fixture: Cleanup tracking
-  testCleanup: async ({}, use) => {
+  testCleanup: async (_fixtures, use) => {
     const cleanupTasks: (() => Promise<void>)[] = [];
 
     const addCleanupTask = (task: () => Promise<void>) => {
