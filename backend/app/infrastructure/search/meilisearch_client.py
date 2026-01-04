@@ -114,6 +114,7 @@ JOURNAL_INDEX_SETTINGS = {
         "location",
     ],
     "filterableAttributes": [
+        "user_id",
         "event_date_range_start",
         "event_date_range_end",
         "types",

@@ -162,32 +162,41 @@ class JournalIndexingService:
             if not journal_row:
                 return None
 
-            # Fetch journal types
+            # Fetch journal types using a single query with LEFT JOINs
+            # This is more efficient than UNION ALL as it scans each table only once
             types_query = text("""
-                SELECT DISTINCT 'NOTE' as type WHERE EXISTS (
-                    SELECT 1 FROM journals WHERE id = :journal_id
-                )
-                UNION ALL
-                SELECT 'EVENT' FROM journal_calendar_info
-                WHERE journal_id = :journal_id
-                UNION ALL
-                SELECT 'MOOD_RATING' FROM journal_mood_data
-                WHERE journal_id = :journal_id
-                UNION ALL
-                SELECT 'PLAN' FROM journal_plan_data
-                WHERE journal_id = :journal_id
-                UNION ALL
-                SELECT 'TRAVEL' FROM journal_travel_data
-                WHERE journal_id = :journal_id
-                UNION ALL
-                SELECT 'PHOTO_ALBUM' FROM journal_photo_album_data
-                WHERE journal_id = :journal_id
+                SELECT
+                    CASE WHEN jci.journal_id IS NOT NULL THEN 'EVENT' END as event_type,
+                    CASE WHEN jmd.journal_id IS NOT NULL THEN 'MOOD_RATING' END as mood_type,
+                    CASE WHEN jpd.journal_id IS NOT NULL THEN 'PLAN' END as plan_type,
+                    CASE WHEN jtd.journal_id IS NOT NULL THEN 'TRAVEL' END as travel_type,
+                    CASE WHEN jpad.journal_id IS NOT NULL THEN 'PHOTO_ALBUM' END as photo_type
+                FROM journals j
+                LEFT JOIN journal_calendar_info jci ON j.id = jci.journal_id
+                LEFT JOIN journal_mood_data jmd ON j.id = jmd.journal_id
+                LEFT JOIN journal_plan_data jpd ON j.id = jpd.journal_id
+                LEFT JOIN journal_travel_data jtd ON j.id = jtd.journal_id
+                LEFT JOIN journal_photo_album_data jpad ON j.id = jpad.journal_id
+                WHERE j.id = :journal_id
             """)
             types_result = await self.db_connection.execute(
                 types_query, {"journal_id": journal_id}
             )
-            types_rows = types_result.fetchall()
-            types = [row.type for row in types_rows if row.type]
+            types_row = types_result.fetchone()
+
+            # All journals are at least NOTE type
+            types = ["NOTE"]
+            if types_row:
+                # Add non-null type values
+                for type_value in [
+                    types_row.event_type,
+                    types_row.mood_type,
+                    types_row.plan_type,
+                    types_row.travel_type,
+                    types_row.photo_type,
+                ]:
+                    if type_value:
+                        types.append(type_value)
 
             # Fetch contact IDs
             contacts_query = text("""

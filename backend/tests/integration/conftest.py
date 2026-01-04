@@ -811,7 +811,7 @@ def authenticated_search_client(test_settings, mock_search_service, test_user):
         @provide(scope=Scope.APP)
         def get_search_service(self) -> SearchService:
             # Return a wrapper that defers to mock or real service at runtime
-            return SearchServiceWrapper(mock_service_container)  # type: ignore
+            return cast(SearchService, SearchServiceWrapper(mock_service_container))
 
     def setup_search_mock(search_results: dict[str, Any]):
         """Setup search mock for testing."""

@@ -1,6 +1,7 @@
 """Integration tests for journal API endpoints."""
 
 from datetime import UTC
+from typing import Any
 
 import pytest
 import pytest_asyncio
@@ -68,6 +69,42 @@ async def integration_api_client(async_connection, clean_database, test_settings
     await test_container.close()
 
 
+def create_journal_request_data(
+    title: str = "Test Journal",
+    content: str = "Test content",
+    **kwargs: Any,
+) -> dict[str, Any]:
+    """
+    Create a journal request data structure.
+
+    Args:
+        title: Journal title
+        content: Journal content
+        **kwargs: Additional attributes to include
+
+    Returns:
+        JSON API formatted request data
+    """
+    from datetime import datetime
+
+    attributes = {
+        "title": title,
+        "content": content,
+        "event_date_range": {
+            "start": datetime.now(UTC).isoformat(),
+            "end": datetime.now(UTC).isoformat(),
+        },
+    }
+    attributes.update(kwargs)
+
+    return {
+        "data": {
+            "type": "journals",
+            "attributes": attributes,
+        }
+    }
+
+
 @pytest.mark.integration
 class TestJournalCRUDEndpoints:
     """Integration tests for journal CRUD endpoints."""
@@ -79,21 +116,7 @@ class TestJournalCRUDEndpoints:
 
     async def test_create_journal_minimal(self, integration_api_client):
         """Test creating a journal with minimal data."""
-        from datetime import datetime
-
-        request_data = {
-            "data": {
-                "type": "journals",
-                "attributes": {
-                    "title": "Test Journal",
-                    "content": "Test content",
-                    "event_date_range": {
-                        "start": datetime.now(UTC).isoformat(),
-                        "end": datetime.now(UTC).isoformat(),
-                    },
-                },
-            }
-        }
+        request_data = create_journal_request_data()
 
         response = await integration_api_client.post("/api/journals", json=request_data)
 
@@ -106,22 +129,11 @@ class TestJournalCRUDEndpoints:
 
     async def test_get_journal(self, integration_api_client):
         """Test retrieving a journal by ID."""
-        from datetime import datetime
-
         # Create a journal first
-        create_data = {
-            "data": {
-                "type": "journals",
-                "attributes": {
-                    "title": "Get Test Journal",
-                    "content": "Get test content",
-                    "event_date_range": {
-                        "start": datetime.now(UTC).isoformat(),
-                        "end": datetime.now(UTC).isoformat(),
-                    },
-                },
-            }
-        }
+        create_data = create_journal_request_data(
+            title="Get Test Journal",
+            content="Get test content",
+        )
 
         create_response = await integration_api_client.post(
             "/api/journals", json=create_data
@@ -138,23 +150,12 @@ class TestJournalCRUDEndpoints:
 
     async def test_list_journals(self, integration_api_client):
         """Test listing journals with pagination."""
-        from datetime import datetime
-
         # Create multiple journals
         for i in range(3):
-            create_data = {
-                "data": {
-                    "type": "journals",
-                    "attributes": {
-                        "title": f"Journal {i}",
-                        "content": f"Content {i}",
-                        "event_date_range": {
-                            "start": datetime.now(UTC).isoformat(),
-                            "end": datetime.now(UTC).isoformat(),
-                        },
-                    },
-                }
-            }
+            create_data = create_journal_request_data(
+                title=f"Journal {i}",
+                content=f"Content {i}",
+            )
             await integration_api_client.post("/api/journals", json=create_data)
 
         # List journals
@@ -178,22 +179,11 @@ class TestJournalUpdateEndpoints:
 
     async def test_update_journal_full(self, integration_api_client):
         """Test full update of a journal."""
-        from datetime import datetime
-
         # Create a journal
-        create_data = {
-            "data": {
-                "type": "journals",
-                "attributes": {
-                    "title": "Original Title",
-                    "content": "Original content",
-                    "event_date_range": {
-                        "start": datetime.now(UTC).isoformat(),
-                        "end": datetime.now(UTC).isoformat(),
-                    },
-                },
-            }
-        }
+        create_data = create_journal_request_data(
+            title="Original Title",
+            content="Original content",
+        )
 
         create_response = await integration_api_client.post(
             "/api/journals", json=create_data
@@ -201,20 +191,11 @@ class TestJournalUpdateEndpoints:
         journal_id = create_response.json()["data"]["id"]
 
         # Update the journal
-        update_data = {
-            "data": {
-                "type": "journals",
-                "id": str(journal_id),
-                "attributes": {
-                    "title": "Updated Title",
-                    "content": "Updated content",
-                    "event_date_range": {
-                        "start": datetime.now(UTC).isoformat(),
-                        "end": datetime.now(UTC).isoformat(),
-                    },
-                },
-            }
-        }
+        update_data = create_journal_request_data(
+            title="Updated Title",
+            content="Updated content",
+        )
+        update_data["data"]["id"] = str(journal_id)
 
         response = await integration_api_client.put(
             f"/api/journals/{journal_id}", json=update_data
@@ -227,22 +208,11 @@ class TestJournalUpdateEndpoints:
 
     async def test_patch_journal_partial(self, integration_api_client):
         """Test partial update of a journal."""
-        from datetime import datetime
-
         # Create a journal
-        create_data = {
-            "data": {
-                "type": "journals",
-                "attributes": {
-                    "title": "Original Title",
-                    "content": "Original content",
-                    "event_date_range": {
-                        "start": datetime.now(UTC).isoformat(),
-                        "end": datetime.now(UTC).isoformat(),
-                    },
-                },
-            }
-        }
+        create_data = create_journal_request_data(
+            title="Original Title",
+            content="Original content",
+        )
 
         create_response = await integration_api_client.post(
             "/api/journals", json=create_data
@@ -272,22 +242,11 @@ class TestJournalUpdateEndpoints:
 
     async def test_delete_journal(self, integration_api_client):
         """Test deleting a journal."""
-        from datetime import datetime
-
         # Create a journal
-        create_data = {
-            "data": {
-                "type": "journals",
-                "attributes": {
-                    "title": "Delete Test",
-                    "content": "To be deleted",
-                    "event_date_range": {
-                        "start": datetime.now(UTC).isoformat(),
-                        "end": datetime.now(UTC).isoformat(),
-                    },
-                },
-            }
-        }
+        create_data = create_journal_request_data(
+            title="Delete Test",
+            content="To be deleted",
+        )
 
         create_response = await integration_api_client.post(
             "/api/journals", json=create_data

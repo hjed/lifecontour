@@ -5,13 +5,14 @@ Handles journal-related HTTP endpoints following JSON API specification.
 Controllers act as adapters between HTTP and domain services.
 """
 
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
 import structlog
 from dishka.integrations.fastapi import FromDishka, inject
 from fastapi import APIRouter, Query, Request, status
 from meilisearch.errors import MeilisearchError
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.api.common.schemas import (
@@ -39,7 +40,16 @@ from app.api.journals.schemas import (
     JournalUpdateRequest,
 )
 from app.core.journal.models.entities import Journal
-from app.core.journal.models.exceptions import JournalNotFoundError
+from app.core.journal.models.exceptions import (
+    JournalNotFoundError,
+    JournalValidationError,
+)
+from app.core.journal.models.journal_contact_relationship import (
+    JournalContactRelationship,
+)
+from app.core.journal.models.journal_relationship_types import (
+    JournalContactRelationshipType,
+)
 from app.core.journal.models.journal_types import JournalType
 from app.core.journal.models.repositories import (
     CalendarInfoRepository,
@@ -822,13 +832,6 @@ async def add_contact_to_journal(
     """
     Add a contact relationship to a journal.
     """
-    from app.core.journal.models.journal_contact_relationship import (
-        JournalContactRelationship,
-    )
-    from app.core.journal.models.journal_relationship_types import (
-        JournalContactRelationshipType,
-    )
-
     base_url = get_request_base_url(request)
 
     # Verify journal exists
@@ -840,8 +843,6 @@ async def add_contact_to_journal(
     try:
         contact_id = int(contact_request.data.attributes.contact_id)
     except ValueError as e:
-        from app.core.journal.models.exceptions import JournalValidationError
-
         raise JournalValidationError("contact_id", "Invalid contact ID format") from e
 
     try:
@@ -849,8 +850,6 @@ async def add_contact_to_journal(
             contact_request.data.attributes.relationship_type
         ]
     except KeyError as e:
-        from app.core.journal.models.exceptions import JournalValidationError
-
         rel_type = contact_request.data.attributes.relationship_type
         raise JournalValidationError(
             "relationship_type",
@@ -858,10 +857,6 @@ async def add_contact_to_journal(
         ) from e
 
     # Create the relationship
-    from sqlalchemy.exc import IntegrityError
-
-    from app.core.journal.models.exceptions import JournalValidationError
-
     relationship = JournalContactRelationship(
         journal_id=journal_id,
         contact_id=contact_id,
@@ -1144,15 +1139,15 @@ async def search_journals(
     # Calculate offset from page
     offset = (page - 1) * limit
 
-    # Build filters
-    filters: dict[str, Any] = {}
+    # Build filters - always filter by user_id for security
+    filters: dict[str, Any] = {"user_id": user.id}
     if types:
         filters["types"] = types
 
     try:
         results = search_service.search_journals(
             query=q,
-            filters=filters if filters else None,
+            filters=filters,
             limit=limit,
             offset=offset,
             sort=sort,
@@ -1179,8 +1174,8 @@ async def search_journals(
 
         # Use current time as fallback if dates are missing
         if not start_date or not end_date:
-            start_date = datetime.now()
-            end_date = datetime.now()
+            start_date = datetime.now(UTC)
+            end_date = datetime.now(UTC)
 
         event_date_range = EventDateRangeSchema(
             start=start_date,
