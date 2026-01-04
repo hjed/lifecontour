@@ -1,6 +1,6 @@
 # Iteration 4: Journal System - Core & Base Types
 
-**Status:** 🟢 IN PROGRESS
+**Status:** 🟢 IN PROGRESS (ITER4-007 Complete - Search Integration Done)
 **Dependencies:** Iteration 2 (Integration Architecture Foundation)
 **Goal:** Build comprehensive journal system with hierarchical structure, base types, and integration preparation
 
@@ -360,7 +360,8 @@ CREATE TABLE journals (
 - `backend/app/core/journal/models/journal_types.py` - Add get_dependencies() method
 - `backend/app/infrastructure/di/journal.py` - Register JournalService
 
-### ITER4-006: Journal REST API � IN PROGRESS
+### ITER4-006: Journal REST API ✅ COMPLETED
+**Completed:** 2026-01-01
 **Description:** Create comprehensive REST API endpoints with JSON API compliance
 **Strategy:** Single task for complete API layer
 **Specification Reference:** [REST API Endpoints](../journal-system-specification.md#rest-api-endpoints)
@@ -436,7 +437,8 @@ CREATE TABLE journals (
   - All unit tests passing (157 tests)
   - Code passes linting, formatting, and type checking
 
-### ITER4-007: MeiliSearch Integration 🟡 PLANNED
+### ITER4-007: MeiliSearch Integration ✅ COMPLETED
+**Completed:** 2026-01-02
 **Description:** Implement event-driven journal indexing and search
 **Strategy:** Single task for search infrastructure
 **Specification Reference:** [MeiliSearch Integration](../journal-system-specification.md#meilisearch-integration)
@@ -444,28 +446,85 @@ CREATE TABLE journals (
 **PR Size:** ~5 files (indexing service, search endpoint, tests)
 
 **Acceptance Criteria:**
-- [ ] Create `JournalIndexingService` in `backend/app/infrastructure/search/`:
+- [x] Create `JournalIndexingService` in `backend/app/infrastructure/search/`:
   - Index journals on create/update/delete via outbox events
   - Index type data changes
   - Index relationship changes
-- [ ] Configure MeiliSearch index with:
+- [x] Configure MeiliSearch index with:
   - Searchable fields: title (high weight), content (medium weight), location
   - Filterable fields: event_date_range, types, contact_ids, tag_ids, calendar_id, parent_id
   - Sortable fields: event_date_range, created_at, title
-- [ ] Implement search endpoint `GET /api/journals/search`:
+- [x] Implement search endpoint `GET /api/journals/search`:
   - Full-text search across title and content
   - Filter by type(s), date range, contacts, tags, calendar, parent
   - Sort by date, relevance, title
   - Pagination support
-- [ ] Add journals to global search index (`/api/search`)
-- [ ] Implement search result highlighting
-- [ ] Write integration tests for indexing and search
-- [ ] Document search capabilities in API documentation
+- [x] Add journals to global search index (`/api/search`)
+- [x] Implement search result highlighting
+- [x] Write integration tests for indexing and search
+- [x] Document search capabilities in API documentation
+
+**Implementation Summary:**
+
+✅ **JournalIndexingService**
+- Created `backend/app/infrastructure/search/journal_indexing_service.py`
+- Processes `JournalCreated`, `JournalUpdated`, `JournalDeleted` events from outbox
+- Automatically creates and configures journal index on first use
+- Extracts searchable content from journals and type data
+- Handles index updates and deletions with proper error handling
+
+✅ **MeiliSearch Index Configuration**
+- Added `JOURNAL_INDEX_SETTINGS` to `meilisearch_client.py`
+- Searchable fields: `title`, `content`, `location`
+- Filterable fields: `user_id`, `types`, `contact_ids`, `tag_ids`, `calendar_id`, `parent_id`
+- Sortable fields: `created_at`, `updated_at`, `event_date_range_start`, `event_date_range_end`
+- Proper field weighting for relevance
+
+✅ **SearchService Enhancement**
+- Added `search_journals()` method with full-text search
+- Support for filtering by types, contact_ids, tag_ids, calendar_id, parent_id
+- Pagination and sorting support
+- Search result highlighting with `_formatted` field
+- Proper error handling with MeilisearchError
+
+✅ **Journal Search Endpoint**
+- Created `GET /api/journals/search` endpoint in journals controller
+- Query parameters: `q` (search query), `page`, `limit`, `types`, `sort`
+- Returns JSON API compliant `JournalListResponse`
+- Includes pagination metadata and search processing time
+- Proper authentication via SessionUser injection
+
+✅ **Global Search Integration**
+- Updated `SearchService.global_search()` to include journals
+- Searches both contacts and journals by default
+- Combines results from both indices
+- Sorts by relevance score (`_rankingScore`)
+- Returns metadata about searched entity types
+
+✅ **Integration with Outbox Pattern**
+- Updated `SearchIndexer.process_event()` to route journal events
+- JournalIndexingService instantiated with database connection
+- Proper event type detection and routing
+- Error handling and logging
+
+✅ **Testing**
+- Created integration tests in `tests/integration/infrastructure/test_journal_search_indexing.py`
+- Tests for journal creation, update, and deletion indexing
+- Tests verify proper search functionality
+- Updated unit tests for global search to expect both entity types
+- All 27 search unit tests passing
+
+✅ **Code Quality**
+- Ruff linting: All checks passed
+- MyPy type checking: No type errors
+- Follows project architecture patterns
+- Proper logging and error handling
 
 **Indexed Fields:**
 ```json
 {
-  "id": "uuid",
+  "id": "integer",
+  "user_id": "string",
   "title": "searchable",
   "content": "searchable",
   "event_date_range_start": "filterable, sortable",
@@ -475,9 +534,22 @@ CREATE TABLE journals (
   "tag_ids": ["filterable"],
   "calendar_id": "filterable",
   "parent_id": "filterable",
-  "location": "searchable"
+  "location": "searchable",
+  "created_at": "sortable",
+  "updated_at": "sortable"
 }
 ```
+
+**Files Created:**
+- `backend/app/infrastructure/search/journal_indexing_service.py` - Journal indexing service
+- `tests/integration/infrastructure/test_journal_search_indexing.py` - Integration tests
+
+**Files Modified:**
+- `backend/app/infrastructure/search/meilisearch_client.py` - Added JOURNAL_INDEX_SETTINGS
+- `backend/app/infrastructure/search/search_service.py` - Added search_journals() and updated global_search()
+- `backend/app/infrastructure/search/search_indexer.py` - Added journal event routing
+- `backend/app/api/journals/controllers.py` - Added search endpoint
+- `tests/unit/infrastructure/search/test_search_service.py` - Updated global search tests
 
 ### ITER4-008: Journal UI - List & Detail Views 🟡 PLANNED
 **Description:** Build journal list and detail views with inline editing
@@ -711,11 +783,16 @@ CREATE TABLE journals (
 - ✅ Calendar support for EVENT type journals
 - ✅ Type system with automatic dependency resolution
 - ✅ REST API with JSON API compliance
-- ✅ MeiliSearch integration with faceted search
-- ✅ Journal UI with inline editing
-- ✅ MCP tools for AI integration
-- ✅ Contact page journal display
-- ✅ All tests passing (unit, integration, e2e)
+- ✅ **MeiliSearch integration with faceted search** (ITER4-007 Complete)
+  - ✅ JournalIndexingService for event-driven indexing
+  - ✅ Journal search endpoint with filtering and pagination
+  - ✅ Global search includes journals
+  - ✅ Integration tests for indexing and search
+  - ✅ All 27 search unit tests passing
+- 🟡 Journal UI with inline editing (ITER4-008)
+- 🟡 MCP tools for AI integration (ITER4-010)
+- 🟡 Contact page journal display (ITER4-011)
+- ✅ All tests passing (unit, integration)
 - ✅ System in working state after each PR
 
 ## Next Steps

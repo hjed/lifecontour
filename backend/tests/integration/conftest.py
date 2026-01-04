@@ -725,8 +725,8 @@ def test_settings():
     return Settings(
         debug=True,
         database_url=get_test_database_url(),  # Use the same database URL as other integration tests
-        meilisearch_url="http://localhost:7701",  # Use test MeiliSearch port
-        meilisearch_api_key="test_master_key",  # Use test API key
+        meilisearch_url=os.getenv("MEILISEARCH_URL", "http://localhost:7701"),
+        meilisearch_api_key=os.getenv("MEILISEARCH_API_KEY", "test_master_key"),
         allowed_hosts=["*"],  # Allow all hosts for testing
         cors_origins=["*"],
     )
@@ -811,7 +811,7 @@ def authenticated_search_client(test_settings, mock_search_service, test_user):
         @provide(scope=Scope.APP)
         def get_search_service(self) -> SearchService:
             # Return a wrapper that defers to mock or real service at runtime
-            return SearchServiceWrapper(mock_service_container)  # type: ignore
+            return cast(SearchService, SearchServiceWrapper(mock_service_container))
 
     def setup_search_mock(search_results: dict[str, Any]):
         """Setup search mock for testing."""

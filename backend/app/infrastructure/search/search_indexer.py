@@ -13,6 +13,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.infrastructure.events.outbox_repository import OutboxEvent
+from app.infrastructure.search.journal_indexing_service import JournalIndexingService
 from app.infrastructure.search.meilisearch_client import (
     CONTACTS_INDEX_SETTINGS,
     get_index_name,
@@ -43,6 +44,11 @@ class SearchIndexer:
                 "TagRemoved",
             ]:
                 await self._process_contact_event(event)
+            elif event.event_type.startswith("Journal"):
+                journal_indexer = JournalIndexingService(
+                    db_connection=self.db_connection
+                )
+                await journal_indexer.process_event(event)
             else:
                 logger.debug(
                     "Skipping unsupported event type",
@@ -272,11 +278,15 @@ class SearchIndexer:
             )
             occurred_at_str = event.occurred_at.isoformat()
 
+            first_name = contact_data.get("first_name", "")
+            last_name = contact_data.get("last_name", "")
+            full_name = f"{first_name} {last_name}".strip()
+
             complete_data = {
                 "id": contact_id,
-                "first_name": contact_data.get("first_name", ""),
-                "last_name": contact_data.get("last_name", ""),
-                "full_name": f"{contact_data.get('first_name', '')} {contact_data.get('last_name', '')}".strip(),
+                "first_name": first_name,
+                "last_name": last_name,
+                "full_name": full_name,
                 "email": contact_data.get("email"),
                 "phone": contact_data.get("phone"),
                 "entity_type": "contact",

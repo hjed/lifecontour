@@ -5,15 +5,18 @@ Handles journal-related HTTP endpoints following JSON API specification.
 Controllers act as adapters between HTTP and domain services.
 """
 
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
 import structlog
 from dishka.integrations.fastapi import FromDishka, inject
 from fastapi import APIRouter, Query, Request, status
+from meilisearch.errors import MeilisearchError
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.api.common.schemas import (
+    JsonApiLinks,
     PaginationParams,
     create_pagination_links,
     create_pagination_meta,
@@ -25,9 +28,11 @@ from app.api.journals.converters import (
     TypeDataConverter,
 )
 from app.api.journals.schemas import (
+    JournalAttributes,
     JournalContactAddRequest,
     JournalCreateRequest,
     JournalListResponse,
+    JournalResource,
     JournalResponse,
     JournalTagAddRequest,
     JournalTypeAddRequest,
@@ -35,7 +40,16 @@ from app.api.journals.schemas import (
     JournalUpdateRequest,
 )
 from app.core.journal.models.entities import Journal
-from app.core.journal.models.exceptions import JournalNotFoundError
+from app.core.journal.models.exceptions import (
+    JournalNotFoundError,
+    JournalValidationError,
+)
+from app.core.journal.models.journal_contact_relationship import (
+    JournalContactRelationship,
+)
+from app.core.journal.models.journal_relationship_types import (
+    JournalContactRelationshipType,
+)
 from app.core.journal.models.journal_types import JournalType
 from app.core.journal.models.repositories import (
     CalendarInfoRepository,
@@ -48,7 +62,9 @@ from app.core.journal.models.repositories import (
     TravelDataRepository,
 )
 from app.core.journal.services.journal_service import JournalService
+from app.core.search.exceptions import SearchServiceUnavailableError
 from app.infrastructure.auth.models import SessionUser
+from app.infrastructure.search.search_service import SearchService
 
 logger = structlog.get_logger()
 
@@ -79,7 +95,9 @@ async def _enrich_journal_data(
     Any,
 ]:
     """
-    Fetch all enrichment data for a journal (types, type_data, contacts, tags, calendar).
+    Fetch all enrichment data for a journal.
+
+    Retrieves types, type_data, contacts, tags, and calendar information.
 
     Returns:
         Tuple of (types, type_data, contacts, tags, calendar)
@@ -147,7 +165,9 @@ async def list_journals(
     user: FromDishka[SessionUser],  # Require authentication
     page: int = Query(default=1, description="Page number", ge=1),
     limit: int = Query(default=20, description="Items per page", ge=1, le=100),
-    type: str | None = Query(default=None, description="Filter by journal type"),
+    journal_type: str | None = Query(
+        default=None, description="Filter by journal type", alias="type"
+    ),
     start_date: datetime | None = Query(
         default=None, description="Filter by start date (inclusive)"
     ),
@@ -330,7 +350,11 @@ async def update_journal(
     if journal_request.data.attributes.content is not None:
         changed_fields["content"] = updated_journal.content
     if journal_request.data.attributes.event_date_range is not None:
-        changed_fields["event_date_range"] = updated_journal.event_date_range
+        # Convert EventDateRange to JSON-serializable dict
+        changed_fields["event_date_range"] = {
+            "start": updated_journal.event_date_range.start.isoformat(),
+            "end": updated_journal.event_date_range.end.isoformat(),
+        }
     if journal_request.data.attributes.parent_id is not None:
         changed_fields["parent_id"] = updated_journal.parent_id
     if journal_request.data.attributes.order is not None:
@@ -446,7 +470,11 @@ async def partial_update_journal(
     if journal_request.data.attributes.content is not None:
         changed_fields["content"] = content
     if journal_request.data.attributes.event_date_range is not None:
-        changed_fields["event_date_range"] = event_date_range
+        # Convert EventDateRange to JSON-serializable dict
+        changed_fields["event_date_range"] = {
+            "start": event_date_range.start.isoformat(),
+            "end": event_date_range.end.isoformat(),
+        }
     if journal_request.data.attributes.parent_id is not None:
         changed_fields["parent_id"] = journal_request.data.attributes.parent_id
     if journal_request.data.attributes.order is not None:
@@ -638,6 +666,82 @@ async def remove_type_from_journal(
     return JournalResponse(data=journal_resource)
 
 
+async def _update_event_type_data(
+    journal_id: int,
+    journal_type: str,
+    attrs: dict[str, Any],
+    calendar_info_repo: CalendarInfoRepository,
+) -> None:
+    """Update EVENT type-specific data."""
+    from uuid import UUID
+
+    calendar_info = await calendar_info_repo.find_by_journal_id(journal_id)
+    if not calendar_info:
+        raise JournalValidationError(
+            "journal_type", f"Journal does not have type {journal_type}"
+        )
+
+    # Update fields from request
+    if "calendar_id" in attrs:
+        calendar_info.calendar_id = UUID(attrs["calendar_id"])
+    if "start_time" in attrs:
+        calendar_info.start_time = attrs["start_time"]
+    if "end_time" in attrs:
+        calendar_info.end_time = attrs["end_time"]
+    if "is_all_day" in attrs:
+        calendar_info.is_all_day = attrs["is_all_day"]
+    if "location" in attrs:
+        calendar_info.location = attrs["location"]
+    if "sync_invitees" in attrs:
+        calendar_info.sync_invitees = attrs["sync_invitees"]
+
+    await calendar_info_repo.save(calendar_info)
+
+
+async def _update_mood_type_data(
+    journal_id: int,
+    journal_type: str,
+    attrs: dict[str, Any],
+    mood_data_repo: MoodDataRepository,
+) -> None:
+    """Update MOOD_RATING type-specific data."""
+    mood_data = await mood_data_repo.find_by_journal_id(journal_id)
+    if not mood_data:
+        raise JournalValidationError(
+            "journal_type", f"Journal does not have type {journal_type}"
+        )
+
+    # Update fields from request
+    if "mood_value" in attrs:
+        mood_data.mood_value = attrs["mood_value"]
+    if "mood_label" in attrs:
+        mood_data.mood_label = attrs["mood_label"]
+    if "energy_level" in attrs:
+        mood_data.energy_level = attrs["energy_level"]
+
+    await mood_data_repo.save(mood_data)
+
+
+async def _update_photo_album_type_data(
+    journal_id: int,
+    journal_type: str,
+    attrs: dict[str, Any],
+    photo_album_data_repo: PhotoAlbumDataRepository,
+) -> None:
+    """Update PHOTO_ALBUM type-specific data."""
+    photo_album_data = await photo_album_data_repo.find_by_journal_id(journal_id)
+    if not photo_album_data:
+        raise JournalValidationError(
+            "journal_type", f"Journal does not have type {journal_type}"
+        )
+
+    # Update fields from request
+    if "immich_album_id" in attrs:
+        photo_album_data.immich_album_id = attrs["immich_album_id"]
+
+    await photo_album_data_repo.save(photo_album_data)
+
+
 @router.put("/{journal_id}/types/{journal_type}/data", response_model=JournalResponse)
 @inject
 async def update_type_data(
@@ -662,11 +766,6 @@ async def update_type_data(
 
     The journal must already have the specified type.
     """
-    from uuid import UUID
-
-    from app.core.journal.models.exceptions import JournalValidationError
-    from app.core.journal.models.journal_types import JournalType
-
     base_url = get_request_base_url(request)
 
     # Verify journal exists
@@ -687,61 +786,15 @@ async def update_type_data(
 
     # Update type-specific data based on the type
     if jtype == JournalType.EVENT:
-        # Update calendar info
-        calendar_info = await calendar_info_repo.find_by_journal_id(journal_id)
-        if not calendar_info:
-            raise JournalValidationError(
-                "journal_type", f"Journal does not have type {journal_type}"
-            )
-
-        # Update fields from request
-        if "calendar_id" in attrs:
-            calendar_info.calendar_id = UUID(attrs["calendar_id"])
-        if "start_time" in attrs:
-            calendar_info.start_time = attrs["start_time"]
-        if "end_time" in attrs:
-            calendar_info.end_time = attrs["end_time"]
-        if "is_all_day" in attrs:
-            calendar_info.is_all_day = attrs["is_all_day"]
-        if "location" in attrs:
-            calendar_info.location = attrs["location"]
-        if "sync_invitees" in attrs:
-            calendar_info.sync_invitees = attrs["sync_invitees"]
-
-        await calendar_info_repo.save(calendar_info)
-
+        await _update_event_type_data(
+            journal_id, journal_type, attrs, calendar_info_repo
+        )
     elif jtype == JournalType.MOOD_RATING:
-        # Update mood data
-        mood_data = await mood_data_repo.find_by_journal_id(journal_id)
-        if not mood_data:
-            raise JournalValidationError(
-                "journal_type", f"Journal does not have type {journal_type}"
-            )
-
-        # Update fields from request
-        if "mood_value" in attrs:
-            mood_data.mood_value = attrs["mood_value"]
-        if "mood_label" in attrs:
-            mood_data.mood_label = attrs["mood_label"]
-        if "energy_level" in attrs:
-            mood_data.energy_level = attrs["energy_level"]
-
-        await mood_data_repo.save(mood_data)
-
+        await _update_mood_type_data(journal_id, journal_type, attrs, mood_data_repo)
     elif jtype == JournalType.PHOTO_ALBUM:
-        # Update photo album data
-        photo_album_data = await photo_album_data_repo.find_by_journal_id(journal_id)
-        if not photo_album_data:
-            raise JournalValidationError(
-                "journal_type", f"Journal does not have type {journal_type}"
-            )
-
-        # Update fields from request
-        if "immich_album_id" in attrs:
-            photo_album_data.immich_album_id = attrs["immich_album_id"]
-
-        await photo_album_data_repo.save(photo_album_data)
-
+        await _update_photo_album_type_data(
+            journal_id, journal_type, attrs, photo_album_data_repo
+        )
     elif jtype in (JournalType.PLAN, JournalType.TRAVEL):
         # PLAN and TRAVEL types have complex nested data structures
         # For now, return an error indicating this is not yet supported
@@ -750,7 +803,6 @@ async def update_type_data(
             f"Updating {journal_type} type data is not yet supported. "
             "Please use the full journal update endpoint instead.",
         )
-
     else:
         # NOTE type has no type-specific data
         raise JournalValidationError(
@@ -804,13 +856,6 @@ async def add_contact_to_journal(
     """
     Add a contact relationship to a journal.
     """
-    from app.core.journal.models.journal_contact_relationship import (
-        JournalContactRelationship,
-    )
-    from app.core.journal.models.journal_relationship_types import (
-        JournalContactRelationshipType,
-    )
-
     base_url = get_request_base_url(request)
 
     # Verify journal exists
@@ -822,8 +867,6 @@ async def add_contact_to_journal(
     try:
         contact_id = int(contact_request.data.attributes.contact_id)
     except ValueError as e:
-        from app.core.journal.models.exceptions import JournalValidationError
-
         raise JournalValidationError("contact_id", "Invalid contact ID format") from e
 
     try:
@@ -831,11 +874,10 @@ async def add_contact_to_journal(
             contact_request.data.attributes.relationship_type
         ]
     except KeyError as e:
-        from app.core.journal.models.exceptions import JournalValidationError
-
+        rel_type = contact_request.data.attributes.relationship_type
         raise JournalValidationError(
             "relationship_type",
-            f"Invalid relationship type: {contact_request.data.attributes.relationship_type}",
+            f"Invalid relationship type: {rel_type}",
         ) from e
 
     # Create the relationship
@@ -844,7 +886,13 @@ async def add_contact_to_journal(
         contact_id=contact_id,
         relationship_type=relationship_type,
     )
-    await contact_relationship_repo.create(relationship)
+    try:
+        await contact_relationship_repo.create(relationship)
+    except IntegrityError as e:
+        raise JournalValidationError(
+            "contact_id",
+            f"Contact not found or relationship already exists: {contact_id}",
+        ) from e
 
     # Get updated journal
     updated_journal = await journal_service.get_journal(journal_id)
@@ -1091,3 +1139,123 @@ async def remove_tag_from_journal(
     )
 
     return JournalResponse(data=journal_resource)
+
+
+@router.get("/search", response_model=JournalListResponse)
+@inject
+async def search_journals(
+    request: Request,
+    search_service: FromDishka[SearchService],
+    user: FromDishka[SessionUser],  # Require authentication
+    q: str = Query(..., description="Search query", min_length=1, max_length=500),
+    page: int = Query(default=1, description="Page number", ge=1),
+    limit: int = Query(default=20, description="Results per page", ge=1, le=100),
+    types: list[str] | None = Query(
+        default=None, description="Filter by journal types"
+    ),
+    sort: list[str] | None = Query(default=None, description="Sort criteria"),
+) -> JournalListResponse:
+    """
+    Search journals using MeiliSearch.
+
+    Supports full-text search across title and content with filtering and pagination.
+    """
+    # Calculate offset from page
+    offset = (page - 1) * limit
+
+    # Build filters - always filter by user_id for security
+    filters: dict[str, Any] = {"user_id": user.id}
+    if types:
+        filters["types"] = types
+
+    try:
+        results = search_service.search_journals(
+            query=q,
+            filters=filters,
+            limit=limit,
+            offset=offset,
+            sort=sort,
+        )
+    except MeilisearchError as e:
+        logger.error("MeiliSearch error during journal search", error=str(e), query=q)
+        raise SearchServiceUnavailableError("MeiliSearch", str(e)) from e
+
+    # Convert search results to journal resources
+    from app.api.journals.schemas import EventDateRangeSchema
+
+    base_url = get_request_base_url(request)
+    journal_resources: list[JournalResource] = []
+
+    for hit in results["hits"]:
+        # Create a minimal journal resource from search hit
+        # Note: This is a simplified resource from search results
+        # For full details, clients should fetch the complete journal via
+        # GET /journals/{id}
+
+        # Parse event date range from search results
+        start_date = hit.get("event_date_range_start")
+        end_date = hit.get("event_date_range_end")
+
+        # Use current time as fallback if dates are missing (should not happen in normal operation)
+        # This is a defensive measure for data integrity issues
+        if not start_date or not end_date:
+            logger.warning(
+                "Missing event_date_range in search results, using fallback",
+                journal_id=hit.get("id"),
+            )
+            start_date = datetime.now(UTC)
+            end_date = datetime.now(UTC)
+
+        event_date_range = EventDateRangeSchema(
+            start=start_date,
+            end=end_date,
+        )
+
+        attributes = JournalAttributes(
+            title=hit.get("title", ""),
+            content=hit.get("content", ""),
+            event_date_range=event_date_range,
+            types=hit.get("types", []),
+            created_at=hit.get("created_at"),
+            updated_at=hit.get("updated_at"),
+        )
+
+        # Only include relevant search metadata fields to avoid exposing internal details
+        search_metadata = {
+            key: hit[key]
+            for key in ("_rankingScore", "_rankingScoreDetails")
+            if key in hit
+        }
+
+        resource = JournalResource(
+            id=str(hit["id"]),
+            attributes=attributes,
+            links=JsonApiLinks(self=f"{base_url}/api/journals/{hit['id']}"),
+            meta={
+                "highlighted": hit.get("_formatted", {}),
+                "search_metadata": search_metadata,
+            },
+        )
+        journal_resources.append(resource)
+
+    # Build pagination metadata
+    total_count = results.get("estimated_total_hits", 0)
+    pagination_meta = create_pagination_meta(total_count, page, limit)
+
+    # Build pagination links with query parameters
+    base_url_without_query = str(request.url).split("?")[0]
+    additional_params: dict[str, str | list[str]] = {"q": q}
+    if types:
+        additional_params["types"] = types
+    if sort:
+        additional_params["sort"] = sort
+
+    links = create_pagination_links(
+        base_url_without_query, page, limit, total_count, additional_params
+    )
+
+    return JournalListResponse(
+        data=journal_resources,
+        meta=pagination_meta,
+        links=links,
+    )
