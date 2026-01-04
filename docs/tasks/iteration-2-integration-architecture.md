@@ -219,16 +219,25 @@ The integration architecture foundation and core Google Contacts sync functional
 **Bug Fix (2025-12-10):**
 - Fixed backend response format mismatch: Updated `/api/integrations/google/contacts/status` to return JSON API format (`data.attributes.connected`) instead of simple object format
 
-#### Slice 5: Two-Way Sync & Conflict Resolution 🟡 PENDING
+#### Slice 5: Two-Way Sync & Conflict Resolution ✅ COMPLETED
 **PR Size:** ~6 files (Push logic, conflict resolution, API client updates, tests)
 
 **Acceptance Criteria:**
-- [ ] Add logic to detect locally created/updated contacts since last sync
-- [ ] Add `create_contact` and `update_contact` methods to GoogleContactsAPIClient
-- [ ] Implement push logic using ETag from SyncMetadata in If-Match header for updates
-- [ ] Handle `412 Precondition Failed` errors by logging conflicts and skipping updates
-- [ ] Update SyncMetadata with new ETag from Google API response after successful push
-- [ ] Create comprehensive integration tests mocking API for two-way sync, conflicts, token expiration
+- [x] Add logic to detect locally created/updated contacts since last sync
+- [x] Add `create_contact` and `update_contact` methods to GoogleContactsAPIClient
+- [x] Implement push logic using ETag from SyncMetadata in If-Match header for updates
+- [x] Handle `412 Precondition Failed` errors by logging conflicts and skipping updates
+- [x] Update SyncMetadata with new ETag from Google API response after successful push
+- [x] Create comprehensive integration tests mocking API for two-way sync, conflicts, token expiration
+
+**Implementation Details (2026-01-04):**
+- Added `create_contact()` and `update_contact()` methods to GoogleContactsAPIClient with ETag support
+- Implemented `find_contacts_to_push()` to detect locally created/updated contacts
+- Added `push_contacts_to_google()` with conflict resolution handling 412/400 errors
+- Created `push_local_contacts_to_google()` ARQ task for bidirectional sync
+- Added comprehensive test suite: 17 tests covering sync, API client, local changes detection, and push logic
+- All tests passing with proper mocking and error handling
+- Code quality: All linting issues resolved, Pydantic v2 migration complete
 
 ### ITER2-003: Dishka Migration & Architecture Modernization ✅ COMPLETED
 **Description:** Migrate entire application to use Dishka dependency injection framework

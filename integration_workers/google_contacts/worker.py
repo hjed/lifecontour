@@ -6,19 +6,16 @@ This worker processes Google Contacts synchronization tasks using ARQ.
 It runs as a separate process from the main FastAPI application.
 """
 
-import asyncio
-import hashlib
 import logging
-import os
 import sys
-from datetime import datetime, UTC
+from datetime import UTC, datetime
 from typing import Any
 
 import structlog
 from arq import run_worker
 from arq.connections import RedisSettings
 from pydantic import SecretStr
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -26,20 +23,26 @@ from sqlalchemy.ext.asyncio import AsyncSession
 sys.path.insert(0, "/core_shared")
 
 # Import from the installed core_shared package
+from api_models import ListConnectionsResponse
 from core_shared.database.engine import create_session_factory
-from core_shared.models.sync_metadata import SyncMetadata, SyncStatus
+
+# Import outbox models from core_shared
+from core_shared.models.outbox import OutboxEvent
+from core_shared.models.sync_metadata import SyncStatus
 
 # Import worker-specific services
 from google_auth_service import GoogleAuthService
 from google_contacts_client import GoogleContactsAPIClient
-from api_models import GooglePerson, ListConnectionsResponse
-
-# Import outbox models from core_shared
-from core_shared.models.outbox import OutboxEvent
 
 
 class WorkerSettings(BaseSettings):
     """Configuration for Google Contacts worker."""
+
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        case_sensitive=False,
+    )
 
     # Database connection
     database_url: SecretStr
@@ -58,9 +61,6 @@ class WorkerSettings(BaseSettings):
     worker_id: str = "google-contacts-worker"
     log_level: str = "INFO"
     max_concurrent_jobs: int = 5
-
-    class Config:
-        env_file = ".env"
 
 
 # Global settings instance
@@ -119,6 +119,579 @@ async def shutdown(ctx: dict[str, Any]) -> None:
 
 
 # Helper functions for sync logic
+
+
+async def find_contacts_to_push(
+    session: AsyncSession, integration_source: str = "google_contacts"
+) -> list[dict[str, Any]]:
+    """
+    Find contacts that need to be pushed to Google.
+
+    Identifies two types of contacts:
+    1. Newly created contacts (no sync metadata entry)
+    2. Updated contacts (updated_at > last_synced_at)
+
+    Args:
+        session: Database session
+        integration_source: Integration source name (default: "google_contacts")
+
+    Returns:
+        List of contact dictionaries with sync action ("create" or "update")
+    """
+    # Query to find contacts that need to be pushed
+    # This uses a LEFT JOIN to find both:
+    # - Contacts without sync metadata (newly created locally)
+    # - Contacts updated after last sync
+    stmt = text("""
+        SELECT
+            c.id,
+            c.first_name,
+            c.last_name,
+            c.middle_name,
+            c.nick_name,
+            c.is_favourite,
+            c.created_at,
+            c.updated_at,
+            sm.external_id,
+            sm.last_synced_at,
+            sm.version_hash,
+            CASE
+                WHEN sm.id IS NULL THEN 'create'
+                WHEN c.updated_at > sm.last_synced_at THEN 'update'
+                ELSE NULL
+            END as sync_action
+        FROM contacts c
+        LEFT JOIN sync_metadata sm ON
+            c.id = sm.internal_id AND
+            sm.integration_source = :integration_source
+        WHERE
+            -- Either no sync metadata (new contact)
+            sm.id IS NULL
+            -- Or contact updated after last sync
+            OR c.updated_at > sm.last_synced_at
+        ORDER BY c.updated_at ASC
+    """)
+
+    result = await session.execute(stmt, {"integration_source": integration_source})
+    rows = result.fetchall()
+
+    contacts = []
+    for row in rows:
+        contact_dict = {
+            "id": row.id,
+            "first_name": row.first_name,
+            "last_name": row.last_name,
+            "middle_name": row.middle_name,
+            "nick_name": row.nick_name,
+            "is_favourite": row.is_favourite,
+            "created_at": row.created_at,
+            "updated_at": row.updated_at,
+            "external_id": row.external_id,
+            "last_synced_at": row.last_synced_at,
+            "version_hash": row.version_hash,
+            "sync_action": row.sync_action,
+        }
+        contacts.append(contact_dict)
+
+    logger.info(
+        "Found contacts to push",
+        integration_source=integration_source,
+        total_contacts=len(contacts),
+        new_contacts=sum(1 for c in contacts if c["sync_action"] == "create"),
+        updated_contacts=sum(1 for c in contacts if c["sync_action"] == "update"),
+    )
+
+    return contacts
+
+
+async def _load_full_contact(session: AsyncSession, contact_id: int) -> dict[str, Any]:
+    """
+    Load full contact data including methods, addresses, and notes.
+
+    Args:
+        session: Database session
+        contact_id: Contact ID
+
+    Returns:
+        Dictionary with full contact data
+    """
+    # Load contact methods
+    methods_stmt = text("""
+        SELECT id, method_type, value, label, is_primary
+        FROM contact_methods
+        WHERE contact_id = :contact_id
+        ORDER BY is_primary DESC, id ASC
+    """)
+    methods_result = await session.execute(methods_stmt, {"contact_id": contact_id})
+    methods_rows = methods_result.fetchall()
+    methods = [
+        {
+            "id": row.id,
+            "method_type": row.method_type,
+            "value": row.value,
+            "label": row.label,
+            "is_primary": row.is_primary,
+        }
+        for row in methods_rows
+    ]
+
+    # Load contact addresses
+    addresses_stmt = text("""
+        SELECT id, label, street_line_1, street_line_2, locality,
+               region, postal_code, country_code, is_primary
+        FROM contact_addresses
+        WHERE contact_id = :contact_id
+        ORDER BY is_primary DESC, id ASC
+    """)
+    addresses_result = await session.execute(addresses_stmt, {"contact_id": contact_id})
+    addresses_rows = addresses_result.fetchall()
+    addresses = [
+        {
+            "id": row.id,
+            "label": row.label,
+            "street_line_1": row.street_line_1,
+            "street_line_2": row.street_line_2,
+            "locality": row.locality,
+            "region": row.region,
+            "postal_code": row.postal_code,
+            "country_code": row.country_code,
+            "is_primary": row.is_primary,
+        }
+        for row in addresses_rows
+    ]
+
+    # Load contact notes
+    notes_stmt = text("""
+        SELECT id, content
+        FROM contact_notes
+        WHERE contact_id = :contact_id
+        ORDER BY created_at DESC
+    """)
+    notes_result = await session.execute(notes_stmt, {"contact_id": contact_id})
+    notes_rows = notes_result.fetchall()
+    notes = [{"id": row.id, "content": row.content} for row in notes_rows]
+
+    return {"methods": methods, "addresses": addresses, "notes": notes}
+
+
+def _transform_names(contact: dict[str, Any]) -> list[dict[str, Any]]:
+    """Transform contact names to Google Person format."""
+    name_data: dict[str, Any] = {}
+    if contact.get("first_name"):
+        name_data["givenName"] = contact["first_name"]
+    if contact.get("last_name"):
+        name_data["familyName"] = contact["last_name"]
+    if contact.get("middle_name"):
+        name_data["middleName"] = contact["middle_name"]
+
+    return [name_data] if name_data else []
+
+
+def _transform_nicknames(contact: dict[str, Any]) -> list[dict[str, str]] | None:
+    """Transform contact nickname to Google Person format."""
+    if contact.get("nick_name"):
+        return [{"value": contact["nick_name"]}]
+    return None
+
+
+def _normalize_contact_type(label: str) -> str:
+    """
+    Normalize contact method labels to Google's standard types.
+
+    Google accepts custom types, but using standard types improves compatibility.
+    Standard types: home, work, other, mobile, main
+
+    Args:
+        label: The label from our system
+
+    Returns:
+        Normalized type string (defaults to original label if no mapping exists)
+    """
+    if not label:
+        return "other"
+
+    normalized = label.strip().lower()
+    label_mapping = {
+        "work": "work",
+        "office": "work",
+        "business": "work",
+        "home": "home",
+        "personal": "home",
+        "other": "other",
+        "mobile": "mobile",
+        "main": "main",
+    }
+    return label_mapping.get(normalized, label)  # Return original if no mapping
+
+
+def _transform_email(method: dict[str, Any]) -> dict[str, Any]:
+    """Transform a single email method to Google Person format."""
+    email_data: dict[str, Any] = {"value": method["value"]}
+    if method.get("label"):
+        email_data["type"] = _normalize_contact_type(method["label"])
+    if method.get("is_primary"):
+        email_data["metadata"] = {"primary": True}
+    return email_data
+
+
+def _transform_phone(method: dict[str, Any]) -> dict[str, Any]:
+    """Transform a single phone method to Google Person format."""
+    phone_data: dict[str, Any] = {"value": method["value"]}
+    if method.get("label"):
+        phone_data["type"] = _normalize_contact_type(method["label"])
+    if method.get("is_primary"):
+        phone_data["metadata"] = {"primary": True}
+    return phone_data
+
+
+def _transform_contact_methods(methods: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Transform contact methods (emails and phones) to Google Person format."""
+    email_addresses = []
+    phone_numbers = []
+
+    for method in methods:
+        if method["method_type"] == "email":
+            email_addresses.append(_transform_email(method))
+        elif method["method_type"] == "phone":
+            phone_numbers.append(_transform_phone(method))
+
+    return email_addresses, phone_numbers
+
+
+def _transform_address(addr: dict[str, Any]) -> dict[str, Any]:
+    """Transform a single address to Google Person format."""
+    addr_data: dict[str, Any] = {}
+
+    # Build street address
+    if addr.get("street_line_1"):
+        addr_data["streetAddress"] = addr["street_line_1"]
+    if addr.get("street_line_2"):
+        if "streetAddress" in addr_data:
+            addr_data["streetAddress"] += f"\n{addr['street_line_2']}"
+        else:
+            addr_data["streetAddress"] = addr["street_line_2"]
+
+    # Add other address fields
+    if addr.get("locality"):
+        addr_data["city"] = addr["locality"]
+    if addr.get("region"):
+        addr_data["region"] = addr["region"]
+    if addr.get("postal_code"):
+        addr_data["postalCode"] = addr["postal_code"]
+    if addr.get("country_code"):
+        addr_data["countryCode"] = addr["country_code"]
+    if addr.get("label"):
+        addr_data["type"] = addr["label"]
+    if addr.get("is_primary"):
+        addr_data["metadata"] = {"primary": True}
+
+    return addr_data
+
+
+def _transform_addresses(addresses: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Transform addresses to Google Person format."""
+    google_addresses = []
+    for addr in addresses:
+        addr_data = _transform_address(addr)
+        if addr_data:
+            google_addresses.append(addr_data)
+    return google_addresses
+
+
+def _transform_notes(notes: list[dict[str, Any]]) -> list[dict[str, str]] | None:
+    """Transform notes to Google Person biographies format."""
+    if notes:
+        combined_notes = "\n\n".join(note["content"] for note in notes)
+        return [{"value": combined_notes, "contentType": "TEXT_PLAIN"}]
+    return None
+
+
+def _transform_contact_to_google_person(contact: dict[str, Any]) -> dict[str, Any]:
+    """
+    Transform internal contact format to Google People API Person format.
+
+    Args:
+        contact: Contact dictionary with full data (including methods, addresses, notes)
+
+    Returns:
+        Dictionary in Google People API Person format
+    """
+    person_data: dict[str, Any] = {}
+
+    # Transform names
+    names = _transform_names(contact)
+    if names:
+        person_data["names"] = names
+
+    # Transform nicknames
+    nicknames = _transform_nicknames(contact)
+    if nicknames:
+        person_data["nicknames"] = nicknames
+
+    # Transform contact methods (emails and phones)
+    methods = contact.get("methods", [])
+    email_addresses, phone_numbers = _transform_contact_methods(methods)
+    if email_addresses:
+        person_data["emailAddresses"] = email_addresses
+    if phone_numbers:
+        person_data["phoneNumbers"] = phone_numbers
+
+    # Transform addresses
+    addresses = contact.get("addresses", [])
+    if addresses:
+        google_addresses = _transform_addresses(addresses)
+        if google_addresses:
+            person_data["addresses"] = google_addresses
+
+    # Transform notes to biographies
+    notes = contact.get("notes", [])
+    biographies = _transform_notes(notes)
+    if biographies:
+        person_data["biographies"] = biographies
+
+    return person_data
+
+
+async def _create_contact_in_google(
+    session: AsyncSession,
+    client: GoogleContactsAPIClient,
+    contact: dict[str, Any],
+    person_data: dict[str, Any],
+    google_account_email: str,
+) -> dict[str, Any]:
+    """Create a new contact in Google and update sync metadata."""
+    logger.info(
+        "Creating contact in Google",
+        contact_id=contact["id"],
+        google_account_email=google_account_email,
+    )
+
+    result = await client.create_contact(person_data)
+
+    # Update sync metadata
+    await _upsert_sync_metadata(
+        session=session,
+        internal_id=contact["id"],
+        external_id=result["resourceName"],
+        etag=result.get("etag"),
+        integration_source="google_contacts",
+    )
+
+    logger.info(
+        "Successfully created contact in Google",
+        contact_id=contact["id"],
+        resource_name=result["resourceName"],
+    )
+
+    return result
+
+
+async def _update_contact_in_google(
+    session: AsyncSession,
+    client: GoogleContactsAPIClient,
+    contact: dict[str, Any],
+    person_data: dict[str, Any],
+    google_account_email: str,
+) -> dict[str, Any]:
+    """Update an existing contact in Google and update sync metadata."""
+    logger.info(
+        "Updating contact in Google",
+        contact_id=contact["id"],
+        external_id=contact["external_id"],
+        google_account_email=google_account_email,
+    )
+
+    # Get current ETag from sync metadata
+    etag = contact.get("version_hash")
+
+    result = await client.update_contact(
+        resource_name=contact["external_id"],
+        contact_data=person_data,
+        etag=etag,
+    )
+
+    # Update sync metadata with new ETag
+    await _upsert_sync_metadata(
+        session=session,
+        internal_id=contact["id"],
+        external_id=result["resourceName"],
+        etag=result.get("etag"),
+        integration_source="google_contacts",
+    )
+
+    logger.info(
+        "Successfully updated contact in Google",
+        contact_id=contact["id"],
+        resource_name=result["resourceName"],
+    )
+
+    return result
+
+
+def _handle_http_error(e: Exception, contact: dict[str, Any], metrics: dict[str, int]) -> None:
+    """Handle HTTP errors from Google API."""
+    from googleapiclient.errors import HttpError
+
+    if not isinstance(e, HttpError):
+        raise e
+
+    # Handle ETag conflicts (400 with failedPrecondition or 412 Precondition Failed)
+    error_content = e.content.decode() if isinstance(e.content, bytes) else str(e.content)
+    is_conflict = (
+        e.resp.status == 412  # Standard HTTP precondition failed
+        or (e.resp.status == 400 and "failed_precondition" in error_content.lower())  # Google API specific
+    )
+
+    if is_conflict:
+        logger.warning(
+            "ETag conflict detected, skipping contact",
+            contact_id=contact["id"],
+            external_id=contact.get("external_id"),
+            error=str(e),
+            status_code=e.resp.status,
+        )
+        metrics["conflict_count"] += 1
+        metrics["error_count"] += 1
+    else:
+        logger.error(
+            "Failed to push contact to Google",
+            contact_id=contact["id"],
+            sync_action=contact["sync_action"],
+            error=str(e),
+            status_code=e.resp.status,
+        )
+        metrics["error_count"] += 1
+
+
+async def _push_single_contact(
+    session: AsyncSession,
+    client: GoogleContactsAPIClient,
+    contact: dict[str, Any],
+    google_account_email: str,
+    metrics: dict[str, int],
+) -> None:
+    """Push a single contact to Google."""
+    from googleapiclient.errors import HttpError
+
+    try:
+        # Load full contact data (methods, addresses, notes)
+        full_contact_data = await _load_full_contact(session, contact["id"])
+        contact.update(full_contact_data)
+
+        # Transform to Google Person format
+        person_data = _transform_contact_to_google_person(contact)
+
+        if contact["sync_action"] == "create":
+            await _create_contact_in_google(session, client, contact, person_data, google_account_email)
+            metrics["created_count"] += 1
+            metrics["pushed_count"] += 1
+        elif contact["sync_action"] == "update":
+            await _update_contact_in_google(session, client, contact, person_data, google_account_email)
+            metrics["updated_count"] += 1
+            metrics["pushed_count"] += 1
+
+    except HttpError as e:
+        _handle_http_error(e, contact, metrics)
+    except Exception as e:
+        logger.error(
+            "Unexpected error pushing contact to Google",
+            contact_id=contact["id"],
+            sync_action=contact["sync_action"],
+            error=str(e),
+        )
+        metrics["error_count"] += 1
+
+
+async def push_contacts_to_google(
+    session: AsyncSession,
+    client: GoogleContactsAPIClient,
+    contacts: list[dict[str, Any]],
+    google_account_email: str,
+) -> dict[str, Any]:
+    """
+    Push local contacts to Google.
+
+    Args:
+        session: Database session
+        client: Google Contacts API client
+        contacts: List of contacts to push (from find_contacts_to_push)
+        google_account_email: Google account email
+
+    Returns:
+        Dictionary with push metrics
+    """
+    metrics = {
+        "pushed_count": 0,
+        "created_count": 0,
+        "updated_count": 0,
+        "error_count": 0,
+        "conflict_count": 0,
+    }
+
+    for contact in contacts:
+        await _push_single_contact(session, client, contact, google_account_email, metrics)
+
+    logger.info(
+        "Completed pushing contacts to Google",
+        google_account_email=google_account_email,
+        **metrics,
+    )
+
+    return metrics
+
+
+async def _upsert_sync_metadata(
+    session: AsyncSession,
+    internal_id: int,
+    external_id: str,
+    etag: str | None,
+    integration_source: str,
+) -> None:
+    """
+    Upsert sync metadata after successful push.
+
+    Args:
+        session: Database session
+        internal_id: Internal contact ID
+        external_id: Google resource name
+        etag: Google ETag
+        integration_source: Integration source name
+    """
+    # Calculate version hash from ETag
+    # Use empty string when no ETag is provided (version_hash column is NOT NULL)
+    version_hash = etag or ""
+
+    now = datetime.now(UTC)
+
+    stmt = text("""
+        INSERT INTO sync_metadata
+            (internal_id, integration_source, external_id, last_synced_at,
+             version_hash, sync_status, created_at, updated_at)
+        VALUES
+            (:internal_id, :integration_source, :external_id, :last_synced_at,
+             :version_hash, :sync_status, :created_at, :updated_at)
+        ON CONFLICT (integration_source, external_id)
+        DO UPDATE SET
+            internal_id = EXCLUDED.internal_id,
+            last_synced_at = EXCLUDED.last_synced_at,
+            version_hash = EXCLUDED.version_hash,
+            sync_status = EXCLUDED.sync_status,
+            updated_at = EXCLUDED.updated_at
+    """)
+
+    await session.execute(
+        stmt,
+        {
+            "internal_id": internal_id,
+            "integration_source": integration_source,
+            "external_id": external_id,
+            "last_synced_at": now,
+            "version_hash": version_hash,
+            "sync_status": SyncStatus.SUCCESS.value,
+            "created_at": now,
+            "updated_at": now,
+        },
+    )
 
 
 async def _determine_smart_sync_type(
@@ -517,12 +1090,127 @@ async def sync_google_contacts(
         }
 
 
+async def push_local_contacts_to_google(
+    ctx: dict[str, Any], google_account_email: str
+) -> dict[str, Any]:
+    """
+    Push locally created/updated contacts to Google (two-way sync).
+
+    This ARQ task finds contacts that were created or modified locally
+    and pushes them to Google Contacts.
+
+    Args:
+        ctx: ARQ context dictionary
+        google_account_email: Google account email to sync
+
+    Returns:
+        Task result dictionary with push status and metrics
+    """
+    logger.info(
+        "Starting push local contacts to Google task",
+        google_account_email=google_account_email,
+        worker_id=settings.worker_id,
+    )
+
+    session_factory = ctx["session_factory"]
+
+    # Initialize metrics
+    metrics = {
+        "pushed_count": 0,
+        "created_count": 0,
+        "updated_count": 0,
+        "error_count": 0,
+        "conflict_count": 0,
+        "worker_id": settings.worker_id,
+        "started_at": datetime.now(UTC).isoformat(),
+    }
+
+    try:
+        # Use session-per-task pattern
+        async with session_factory() as session:
+            # Create services
+            auth_service = GoogleAuthService(
+                session=session,
+                encryption_key=settings.encryption_key.get_secret_value(),
+                google_client_id=settings.google_client_id,
+                google_client_secret=settings.google_client_secret.get_secret_value(),
+            )
+
+            client = GoogleContactsAPIClient(
+                auth_service=auth_service,
+                google_account_email=google_account_email,
+                google_client_id=settings.google_client_id,
+                google_client_secret=settings.google_client_secret.get_secret_value(),
+            )
+
+            # Find contacts that need to be pushed
+            contacts_to_push = await find_contacts_to_push(
+                session=session, integration_source="google_contacts"
+            )
+
+            if not contacts_to_push:
+                logger.info(
+                    "No local changes to push",
+                    google_account_email=google_account_email,
+                )
+                metrics["completed_at"] = datetime.now(UTC).isoformat()
+                return {
+                    "status": "success",
+                    "google_account_email": google_account_email,
+                    **metrics,
+                }
+
+            # Push contacts to Google
+            push_result = await push_contacts_to_google(
+                session=session,
+                client=client,
+                contacts=contacts_to_push,
+                google_account_email=google_account_email,
+            )
+
+            metrics.update(push_result)
+            metrics["completed_at"] = datetime.now(UTC).isoformat()
+
+            # Commit all sync metadata updates
+            await session.commit()
+
+            logger.info(
+                "Push local contacts to Google task completed successfully",
+                google_account_email=google_account_email,
+                **metrics,
+            )
+
+            return {
+                "status": "success",
+                "google_account_email": google_account_email,
+                **metrics,
+            }
+
+    except Exception as e:
+        logger.error(
+            "Push local contacts to Google task failed",
+            google_account_email=google_account_email,
+            error=str(e),
+            error_type=type(e).__name__,
+        )
+
+        # Return error result
+        return {
+            "status": "error",
+            "google_account_email": google_account_email,
+            "error": str(e),
+            "error_type": type(e).__name__,
+            "worker_id": settings.worker_id,
+            "failed_at": datetime.now(UTC).isoformat(),
+        }
+
+
 # ARQ Worker Settings
 class GoogleContactsWorkerSettings:
     """ARQ worker configuration."""
 
     # Task functions
-    functions = [sync_google_contacts]
+    functions = [sync_google_contacts, push_local_contacts_to_google]
 
     # Worker lifecycle
     on_startup = startup
