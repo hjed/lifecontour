@@ -78,7 +78,7 @@ export function GlobalSearch({
   const [selectedIndex, setSelectedIndex] = useState(-1);
   // Load recent searches from localStorage using lazy initialization
   const [recentSearches, setRecentSearches] = useState<string[]>(() => {
-    if (typeof globalThis.window === 'undefined') return [];
+    if (globalThis.window === undefined) return [];
     const saved = localStorage.getItem('recent-searches');
     if (saved) {
       try {
