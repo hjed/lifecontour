@@ -293,10 +293,16 @@ class GoogleContactsAPIClient:
                 contact_data["metadata"]["sources"][0]["etag"] = etag
 
             # Build request parameters
-            # Extract field names from contact_data (excluding metadata)
-            update_fields = [
-                key for key in contact_data.keys() if key != "metadata" and key != "resourceName" and key != "etag"
-            ]
+            # Extract field names from contact_data (excluding metadata, resourceName, and etag)
+            excluded_fields = {"metadata", "resourceName", "etag"}
+            update_fields = [key for key in contact_data.keys() if key not in excluded_fields]
+
+            # Validate that we have fields to update
+            if not update_fields:
+                raise ValueError(
+                    "No fields to update in contact_data. "
+                    "contact_data must contain at least one field besides metadata, resourceName, or etag."
+                )
 
             request_params = {
                 "resourceName": resource_name,

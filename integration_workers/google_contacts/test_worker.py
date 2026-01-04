@@ -151,8 +151,8 @@ class TestGoogleContactsWorker:
             # Note: The actual call might have page_size and page_token as well
             calls = mock_google_contacts_client.list_connections.call_args_list
             assert len(calls) > 0
-            # Check that at least one call had sync_token
-            assert any("sync_token" in str(call) for call in calls)
+            # Check that at least one call had sync_token as a keyword argument
+            assert any("sync_token" in call.kwargs for call in calls)
 
     @pytest.mark.asyncio
     async def test_sync_google_contacts_handles_auth_error(
@@ -371,6 +371,39 @@ class TestGoogleContactsAPIClient:
             # Verify it's a 400 error with failedPrecondition
             assert exc_info.value.resp.status == 400
             assert b"FAILED_PRECONDITION" in exc_info.value.content
+
+    @pytest.mark.asyncio
+    async def test_update_contact_empty_fields_raises_error(
+        self, mock_auth_service, mock_google_service
+    ):
+        """Test that updating with empty contact_data raises ValueError."""
+        from google_contacts_client import GoogleContactsAPIClient
+
+        # Create client
+        client = GoogleContactsAPIClient(
+            auth_service=mock_auth_service,
+            google_account_email="test@example.com",
+            google_client_id="client_id",
+            google_client_secret="client_secret",
+        )
+
+        # Mock the service
+        with patch.object(client, "_get_service", return_value=mock_google_service):
+            # Empty contact data (only metadata/resourceName/etag)
+            contact_data = {
+                "metadata": {"sources": [{"etag": "some_etag"}]},
+            }
+
+            # Execute update - should raise ValueError
+            with pytest.raises(ValueError) as exc_info:
+                await client.update_contact(
+                    resource_name="people/c123456789",
+                    contact_data=contact_data,
+                    etag="some_etag",
+                )
+
+            # Verify error message
+            assert "No fields to update" in str(exc_info.value)
 
 
 class TestDetectLocalChanges:
@@ -723,6 +756,56 @@ class TestPushSyncLogic:
             assert result["conflict_count"] == 1
 
     @pytest.mark.asyncio
+    async def test_push_handles_412_conflict(
+        self, mock_session, mock_google_client
+    ):
+        """Test push sync handles 412 Precondition Failed (standard HTTP conflict)."""
+        from googleapiclient.errors import HttpError
+        from worker import push_contacts_to_google
+
+        # Mock local contact to push
+        local_contacts = [
+            {
+                "id": 4,
+                "first_name": "Dave",
+                "last_name": "Conflict412",
+                "sync_action": "update",
+                "external_id": "people/c888999000",
+                "version_hash": "stale_hash_412",
+            }
+        ]
+
+        # Mock 412 error (standard HTTP precondition failed)
+        mock_response = MagicMock()
+        mock_response.status = 412
+        mock_error = HttpError(
+            resp=mock_response,
+            content=b'{"error": {"message": "Precondition Failed"}}',
+        )
+        mock_google_client.update_contact.side_effect = mock_error
+
+        # Mock _load_full_contact to return empty data
+        with patch("worker._load_full_contact", new_callable=AsyncMock) as mock_load:
+            mock_load.return_value = {
+                "methods": [],
+                "addresses": [],
+                "notes": [],
+            }
+
+            # Execute
+            result = await push_contacts_to_google(
+                session=mock_session,
+                client=mock_google_client,
+                contacts=local_contacts,
+                google_account_email="test@example.com",
+            )
+
+            # Verify - should log conflict but not fail entire sync
+            assert result["pushed_count"] == 0
+            assert result["error_count"] == 1
+            assert result["conflict_count"] == 1
+
+    @pytest.mark.asyncio
     async def test_push_mixed_contacts(self, mock_session, mock_google_client):
         """Test pushing a mix of new and updated contacts."""
         from worker import push_contacts_to_google
@@ -836,6 +919,70 @@ class TestPushSyncLogic:
                     etag="etag_metadata",
                     integration_source="google_contacts",
                 )
+
+
+class TestContactTypeNormalization:
+    """Test cases for contact type normalization."""
+
+    def test_normalize_work_labels(self):
+        """Test normalization of work-related labels."""
+        from worker import _normalize_contact_type
+
+        assert _normalize_contact_type("work") == "work"
+        assert _normalize_contact_type("Work") == "work"
+        assert _normalize_contact_type("WORK") == "work"
+        assert _normalize_contact_type("office") == "work"
+        assert _normalize_contact_type("Office") == "work"
+        assert _normalize_contact_type("business") == "work"
+        assert _normalize_contact_type("Business") == "work"
+
+    def test_normalize_home_labels(self):
+        """Test normalization of home-related labels."""
+        from worker import _normalize_contact_type
+
+        assert _normalize_contact_type("home") == "home"
+        assert _normalize_contact_type("Home") == "home"
+        assert _normalize_contact_type("HOME") == "home"
+        assert _normalize_contact_type("personal") == "home"
+        assert _normalize_contact_type("Personal") == "home"
+
+    def test_normalize_mobile_and_main(self):
+        """Test normalization of mobile and main labels."""
+        from worker import _normalize_contact_type
+
+        assert _normalize_contact_type("mobile") == "mobile"
+        assert _normalize_contact_type("Mobile") == "mobile"
+        assert _normalize_contact_type("main") == "main"
+        assert _normalize_contact_type("Main") == "main"
+
+    def test_normalize_other_label(self):
+        """Test normalization of 'other' label."""
+        from worker import _normalize_contact_type
+
+        assert _normalize_contact_type("other") == "other"
+        assert _normalize_contact_type("Other") == "other"
+
+    def test_normalize_empty_label(self):
+        """Test normalization of empty/None label."""
+        from worker import _normalize_contact_type
+
+        assert _normalize_contact_type("") == "other"
+        assert _normalize_contact_type(None) == "other"
+
+    def test_normalize_unknown_label_passthrough(self):
+        """Test that unknown labels are passed through unchanged."""
+        from worker import _normalize_contact_type
+
+        assert _normalize_contact_type("custom_label") == "custom_label"
+        assert _normalize_contact_type("Fax") == "Fax"
+        assert _normalize_contact_type("Assistant") == "Assistant"
+
+    def test_normalize_whitespace_handling(self):
+        """Test that whitespace is handled correctly."""
+        from worker import _normalize_contact_type
+
+        assert _normalize_contact_type("  work  ") == "work"
+        assert _normalize_contact_type("  Home  ") == "home"
 
 
 if __name__ == "__main__":
