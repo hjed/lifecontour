@@ -555,30 +555,61 @@ CREATE TABLE journals (
 **Description:** Build journal list and detail views with inline editing
 **Strategy:** Single task for core UI components
 **Specification Reference:** [Display Requirements](../journal-system-specification.md#display-requirements), [Frontend Components](../journal-system-specification.md#frontend-components)
+**Design Document:** [ITER4-008 Design](../design/iter4-008-journal-ui-design.md)
 
-**PR Size:** ~8 files (list component, detail component, sub-components, tests)
+**PR Size:** ~18 files (list component, detail component, sub-components, API layer, types, tests)
 
 **Acceptance Criteria:**
+- [ ] Create TypeScript types in `frontend/src/types/journals.ts`:
+  - JournalType enum, JournalContactRelationshipType enum
+  - JournalResource, JournalAttributes, type-specific data types
+  - JournalFilters for list filtering
+- [ ] Create API layer in `frontend/src/lib/api/journals.ts`:
+  - TanStack Query hooks for all journal operations
+  - Mutation hooks for inline editing
+  - Query key structure for cache management
 - [ ] Create `JournalList` component in `frontend/src/components/journals/`:
   - Filterable list with sidebar filters (date range, types, contacts, tags, calendar)
   - Date grouping (day/week/month)
   - Type icons for visual identification
-  - Color-coding by calendar (primary) or tag (secondary)
+  - Colour-coding by calendar (primary) or tag (secondary)
   - Contact chips display
   - Expandable content preview (first 200 chars)
   - Infinite scroll pagination
   - Quick actions (edit, delete, duplicate)
+- [ ] Create `JournalListFilters` component:
+  - Date range picker with Calendar component
+  - Type multi-select with checkboxes
+  - Contact autocomplete (reuse ContactSearchCombobox)
+  - Tag multi-select
+  - Calendar single-select
+- [ ] Create `JournalListItem` component:
+  - Calendar colour bar on left edge
+  - Type icons, title, date display
+  - Tag badges, contact chips
+  - Content excerpt with expand
 - [ ] Create `JournalDetail` component:
   - Inline editing (similar to contact detail page)
-  - Markdown content rendering with live preview
+  - Markdown content rendering
   - Type-specific data sections (collapsible, inline editable)
   - Contact relationship display (grouped by type, inline editable)
   - Tag chips (clickable to filter, inline editable)
-  - Calendar badge (color-coded, inline editable)
+  - Calendar badge (colour-coded, inline editable)
   - Type icons for visual identification
   - Parent breadcrumb navigation
   - Child journal cards (expandable)
   - Delete confirmation dialog
+- [ ] Create inline edit components:
+  - `InlineEditDateRange` - Date range picker
+  - `InlineEditMarkdown` - Markdown content editor
+  - `JournalIdentityInline` - Title/date inline editing
+  - `JournalContentInline` - Content inline editing
+- [ ] Create relationship components:
+  - `JournalContactsList` - Contact management
+  - `JournalTagsList` - Tag management
+  - `JournalCalendarBadge` - Calendar display/editing
+  - `JournalBreadcrumb` - Parent navigation
+  - `JournalChildrenList` - Child journals display
 - [ ] Implement responsive design for mobile and desktop
 - [ ] Add accessibility features (ARIA attributes, keyboard navigation)
 - [ ] Write Jest unit tests for components
@@ -586,11 +617,16 @@ CREATE TABLE journals (
 - [ ] Document component patterns in code comments
 
 **UI Patterns:**
-- Calendar color bar on left edge of journal cards
+- Calendar colour bar on left edge of journal cards
 - Type icons next to title
-- Tag badges with tag colors
+- Tag badges with tag colours
 - Inline editing for all fields (click to edit)
 - Optimistic UI updates
+
+**Out of Scope (Deferred):**
+- Drag-and-drop child reordering
+- Advanced markdown editor with toolbar
+- E2E Playwright tests (separate task)
 
 ### ITER4-009: Journal UI - Forms & Editing 🟡 PLANNED
 **Description:** Build journal creation and editing forms with type management
@@ -817,3 +853,23 @@ CREATE TABLE journals (
 - Calendar sync with EVENT journals
 - Bidirectional synchronization
 - Advanced calendar features
+
+## Future Tasks (Out of Scope for Iteration 4)
+
+The following features have been identified during design but are deferred to future iterations:
+
+### Priority 2 - Journal UI Enhancements
+- **Calendar View** - Display journals on a calendar interface (month/week/day views)
+- **Drag-and-drop child reordering** - Reorder child journals via drag-and-drop
+- **Advanced markdown editor** - Rich text toolbar, image upload, syntax highlighting
+- **PDF Export** - Export journals to PDF format
+
+### Priority 2 - Integration Enhancements
+- **Immich album picker** - Visual album selector for PHOTO_ALBUM journals
+- **GPX track display** - Map visualisation for TRAVEL journals with GPX data
+
+### Priority 3 - Testing
+- **E2E Playwright tests** - Full end-to-end tests for journal workflows
+
+### Priority 3 - Performance
+- **List virtualisation** - Virtual scrolling for large journal lists
