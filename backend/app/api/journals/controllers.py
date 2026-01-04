@@ -666,6 +666,82 @@ async def remove_type_from_journal(
     return JournalResponse(data=journal_resource)
 
 
+async def _update_event_type_data(
+    journal_id: int,
+    journal_type: str,
+    attrs: dict[str, Any],
+    calendar_info_repo: CalendarInfoRepository,
+) -> None:
+    """Update EVENT type-specific data."""
+    from uuid import UUID
+
+    calendar_info = await calendar_info_repo.find_by_journal_id(journal_id)
+    if not calendar_info:
+        raise JournalValidationError(
+            "journal_type", f"Journal does not have type {journal_type}"
+        )
+
+    # Update fields from request
+    if "calendar_id" in attrs:
+        calendar_info.calendar_id = UUID(attrs["calendar_id"])
+    if "start_time" in attrs:
+        calendar_info.start_time = attrs["start_time"]
+    if "end_time" in attrs:
+        calendar_info.end_time = attrs["end_time"]
+    if "is_all_day" in attrs:
+        calendar_info.is_all_day = attrs["is_all_day"]
+    if "location" in attrs:
+        calendar_info.location = attrs["location"]
+    if "sync_invitees" in attrs:
+        calendar_info.sync_invitees = attrs["sync_invitees"]
+
+    await calendar_info_repo.save(calendar_info)
+
+
+async def _update_mood_type_data(
+    journal_id: int,
+    journal_type: str,
+    attrs: dict[str, Any],
+    mood_data_repo: MoodDataRepository,
+) -> None:
+    """Update MOOD_RATING type-specific data."""
+    mood_data = await mood_data_repo.find_by_journal_id(journal_id)
+    if not mood_data:
+        raise JournalValidationError(
+            "journal_type", f"Journal does not have type {journal_type}"
+        )
+
+    # Update fields from request
+    if "mood_value" in attrs:
+        mood_data.mood_value = attrs["mood_value"]
+    if "mood_label" in attrs:
+        mood_data.mood_label = attrs["mood_label"]
+    if "energy_level" in attrs:
+        mood_data.energy_level = attrs["energy_level"]
+
+    await mood_data_repo.save(mood_data)
+
+
+async def _update_photo_album_type_data(
+    journal_id: int,
+    journal_type: str,
+    attrs: dict[str, Any],
+    photo_album_data_repo: PhotoAlbumDataRepository,
+) -> None:
+    """Update PHOTO_ALBUM type-specific data."""
+    photo_album_data = await photo_album_data_repo.find_by_journal_id(journal_id)
+    if not photo_album_data:
+        raise JournalValidationError(
+            "journal_type", f"Journal does not have type {journal_type}"
+        )
+
+    # Update fields from request
+    if "immich_album_id" in attrs:
+        photo_album_data.immich_album_id = attrs["immich_album_id"]
+
+    await photo_album_data_repo.save(photo_album_data)
+
+
 @router.put("/{journal_id}/types/{journal_type}/data", response_model=JournalResponse)
 @inject
 async def update_type_data(
@@ -690,11 +766,6 @@ async def update_type_data(
 
     The journal must already have the specified type.
     """
-    from uuid import UUID
-
-    from app.core.journal.models.exceptions import JournalValidationError
-    from app.core.journal.models.journal_types import JournalType
-
     base_url = get_request_base_url(request)
 
     # Verify journal exists
@@ -715,61 +786,15 @@ async def update_type_data(
 
     # Update type-specific data based on the type
     if jtype == JournalType.EVENT:
-        # Update calendar info
-        calendar_info = await calendar_info_repo.find_by_journal_id(journal_id)
-        if not calendar_info:
-            raise JournalValidationError(
-                "journal_type", f"Journal does not have type {journal_type}"
-            )
-
-        # Update fields from request
-        if "calendar_id" in attrs:
-            calendar_info.calendar_id = UUID(attrs["calendar_id"])
-        if "start_time" in attrs:
-            calendar_info.start_time = attrs["start_time"]
-        if "end_time" in attrs:
-            calendar_info.end_time = attrs["end_time"]
-        if "is_all_day" in attrs:
-            calendar_info.is_all_day = attrs["is_all_day"]
-        if "location" in attrs:
-            calendar_info.location = attrs["location"]
-        if "sync_invitees" in attrs:
-            calendar_info.sync_invitees = attrs["sync_invitees"]
-
-        await calendar_info_repo.save(calendar_info)
-
+        await _update_event_type_data(
+            journal_id, journal_type, attrs, calendar_info_repo
+        )
     elif jtype == JournalType.MOOD_RATING:
-        # Update mood data
-        mood_data = await mood_data_repo.find_by_journal_id(journal_id)
-        if not mood_data:
-            raise JournalValidationError(
-                "journal_type", f"Journal does not have type {journal_type}"
-            )
-
-        # Update fields from request
-        if "mood_value" in attrs:
-            mood_data.mood_value = attrs["mood_value"]
-        if "mood_label" in attrs:
-            mood_data.mood_label = attrs["mood_label"]
-        if "energy_level" in attrs:
-            mood_data.energy_level = attrs["energy_level"]
-
-        await mood_data_repo.save(mood_data)
-
+        await _update_mood_type_data(journal_id, journal_type, attrs, mood_data_repo)
     elif jtype == JournalType.PHOTO_ALBUM:
-        # Update photo album data
-        photo_album_data = await photo_album_data_repo.find_by_journal_id(journal_id)
-        if not photo_album_data:
-            raise JournalValidationError(
-                "journal_type", f"Journal does not have type {journal_type}"
-            )
-
-        # Update fields from request
-        if "immich_album_id" in attrs:
-            photo_album_data.immich_album_id = attrs["immich_album_id"]
-
-        await photo_album_data_repo.save(photo_album_data)
-
+        await _update_photo_album_type_data(
+            journal_id, journal_type, attrs, photo_album_data_repo
+        )
     elif jtype in (JournalType.PLAN, JournalType.TRAVEL):
         # PLAN and TRAVEL types have complex nested data structures
         # For now, return an error indicating this is not yet supported
@@ -778,7 +803,6 @@ async def update_type_data(
             f"Updating {journal_type} type data is not yet supported. "
             "Please use the full journal update endpoint instead.",
         )
-
     else:
         # NOTE type has no type-specific data
         raise JournalValidationError(
