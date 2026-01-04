@@ -47,12 +47,6 @@ const nextConfig = {
     domains: ['localhost'],
     formats: ['image/webp', 'image/avif'],
   },
-
-  // Internationalization for Australian English
-  i18n: {
-    locales: ['en-AU'],
-    defaultLocale: 'en-AU',
-  },
 };
 
 export default nextConfig;

@@ -125,8 +125,7 @@ test.describe('OAuth Error Handling', () => {
       expect(clickableCount).toBeGreaterThan(0);
     }).toPass({ timeout: 5000 });
 
-    // Clean up
-    await page.unroute('**/api/auth/login');
+    // Note: No cleanup needed - Playwright automatically cleans up routes when the page/context is closed
   });
 
   test('should handle malformed OAuth callback URLs', async ({
@@ -231,8 +230,6 @@ test.describe('OAuth Session and State Management Errors', () => {
       expect(bodyText).toBeTruthy();
     }).toPass({ timeout: 5000 });
 
-    // Clean up
-    await page.unroute('**/oauth/**');
-    await page.unroute('**localhost:4446/**');
+    // Note: No cleanup needed - Playwright automatically cleans up routes when the page/context is closed
   });
 });

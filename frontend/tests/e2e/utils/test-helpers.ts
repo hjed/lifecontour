@@ -1401,7 +1401,7 @@ export class ReliableWaiter {
     // Wait for either successful authentication (contacts page) or login page
     try {
       await this.page.waitForURL(/\/(contacts|auth\/login)/, { timeout });
-    } catch (_error) {
+    } catch {
       // If URL doesn't match, check if we're on a valid authenticated page
       const currentUrl = this.page.url();
       if (

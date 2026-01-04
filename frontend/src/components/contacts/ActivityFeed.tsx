@@ -10,7 +10,7 @@
 
 'use client';
 
-import { useState, useCallback, useEffect, useRef } from 'react';
+import { useCallback, useReducer, useEffect } from 'react';
 import { Clock, Loader2 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -27,57 +27,111 @@ interface ActivityFeedProps {
 
 const DEFAULT_PAGE_SIZE = 10;
 
+// Reducer for managing activities state
+type ActivitiesState = {
+  activities: ContactHistoryResource[];
+  contactId: string;
+  page: number;
+  processedDataKey: string | null;
+};
+
+type ActivitiesAction =
+  | { type: 'RESET'; contactId: string }
+  | { type: 'SET_PAGE'; page: number }
+  | {
+      type: 'SET_ACTIVITIES';
+      activities: ContactHistoryResource[];
+      dataKey: string;
+    }
+  | {
+      type: 'APPEND_ACTIVITIES';
+      activities: ContactHistoryResource[];
+      dataKey: string;
+    };
+
+function activitiesReducer(
+  state: ActivitiesState,
+  action: ActivitiesAction
+): ActivitiesState {
+  switch (action.type) {
+    case 'RESET':
+      if (state.contactId === action.contactId) return state;
+      return {
+        activities: [],
+        contactId: action.contactId,
+        page: 1,
+        processedDataKey: null,
+      };
+    case 'SET_PAGE':
+      return { ...state, page: action.page };
+    case 'SET_ACTIVITIES':
+      if (state.processedDataKey === action.dataKey) return state;
+      return {
+        ...state,
+        activities: action.activities,
+        processedDataKey: action.dataKey,
+      };
+    case 'APPEND_ACTIVITIES': {
+      if (state.processedDataKey === action.dataKey) return state;
+      const existingIds = new Set(state.activities.map(a => a.id));
+      const newActivities = action.activities.filter(
+        a => !existingIds.has(a.id)
+      );
+      if (newActivities.length === 0)
+        return { ...state, processedDataKey: action.dataKey };
+      return {
+        ...state,
+        activities: [...state.activities, ...newActivities],
+        processedDataKey: action.dataKey,
+      };
+    }
+    default:
+      return state;
+  }
+}
+
 export function ActivityFeed({
   contactId,
   className,
   pageSize = DEFAULT_PAGE_SIZE,
 }: ActivityFeedProps) {
-  const [page, setPage] = useState(1);
-  const [allActivities, setAllActivities] = useState<ContactHistoryResource[]>(
-    []
-  );
+  const [state, dispatch] = useReducer(activitiesReducer, {
+    activities: [],
+    contactId,
+    page: 1,
+    processedDataKey: null,
+  });
 
   const { data, isLoading, error, isFetching } = useContactHistory(contactId, {
-    page,
+    page: state.page,
     limit: pageSize,
   });
 
-  // Track the previous contactId to reset state on change
-  const prevContactIdRef = useRef(contactId);
-
-  // Reset when contactId changes
+  // Reset state when contactId changes
   useEffect(() => {
-    if (contactId !== prevContactIdRef.current) {
-      prevContactIdRef.current = contactId;
-      setPage(1);
-      setAllActivities([]);
-    }
+    dispatch({ type: 'RESET', contactId });
   }, [contactId]);
 
-  // Track what data we've already processed to avoid duplicates
-  const processedDataRef = useRef<string | null>(null);
-
-  // Accumulate activities as pages are loaded
+  // Update activities when data changes
   useEffect(() => {
     if (!data) return;
 
-    const currentDataKey = `${page}-${data.data.map(a => a.id).join(',')}`;
+    const currentDataKey = `${state.page}-${data.data.map(a => a.id).join(',')}`;
 
-    if (processedDataRef.current !== currentDataKey) {
-      processedDataRef.current = currentDataKey;
-      if (page === 1) {
-        // Reset on first page
-        setAllActivities(data.data);
-      } else {
-        // Append new activities, avoiding duplicates
-        setAllActivities(prev => {
-          const existingIds = new Set(prev.map(a => a.id));
-          const newActivities = data.data.filter(a => !existingIds.has(a.id));
-          return newActivities.length > 0 ? [...prev, ...newActivities] : prev;
-        });
-      }
+    if (state.page === 1) {
+      dispatch({
+        type: 'SET_ACTIVITIES',
+        activities: data.data,
+        dataKey: currentDataKey,
+      });
+    } else {
+      dispatch({
+        type: 'APPEND_ACTIVITIES',
+        activities: data.data,
+        dataKey: currentDataKey,
+      });
     }
-  }, [data, page]);
+  }, [data, state.page]);
 
   const hasMore =
     data?.meta?.current_page !== undefined &&
@@ -85,8 +139,8 @@ export function ActivityFeed({
     data.meta.current_page < data.meta.page_count;
 
   const handleLoadMore = useCallback(() => {
-    setPage(prev => prev + 1);
-  }, []);
+    dispatch({ type: 'SET_PAGE', page: state.page + 1 });
+  }, [state.page]);
 
   return (
     <Card className={className} data-testid='activity-feed'>
@@ -114,7 +168,7 @@ export function ActivityFeed({
         )}
 
         {/* Empty state */}
-        {!isLoading && !error && allActivities.length === 0 && (
+        {!isLoading && !error && state.activities.length === 0 && (
           <div className='text-muted-foreground py-8 text-center'>
             <Clock className='mx-auto mb-4 h-12 w-12 opacity-50' />
             <p className='text-lg font-medium'>No activity yet</p>
@@ -123,9 +177,9 @@ export function ActivityFeed({
         )}
 
         {/* Activity list */}
-        {!isLoading && !error && allActivities.length > 0 && (
+        {!isLoading && !error && state.activities.length > 0 && (
           <div className='space-y-1'>
-            {allActivities.map(activity => (
+            {state.activities.map(activity => (
               <ActivityItem key={activity.id} activity={activity} />
             ))}
 
