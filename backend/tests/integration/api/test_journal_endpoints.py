@@ -487,23 +487,11 @@ class TestJournalFilteringAndPagination:
 
     async def test_list_journals_with_pagination(self, integration_api_client):
         """Test listing journals with pagination parameters."""
-        from datetime import datetime
-
         # Create 5 journals
         for i in range(5):
-            create_data = {
-                "data": {
-                    "type": "journals",
-                    "attributes": {
-                        "title": f"Pagination Test {i}",
-                        "content": f"Content {i}",
-                        "event_date_range": {
-                            "start": datetime.now(UTC).isoformat(),
-                            "end": datetime.now(UTC).isoformat(),
-                        },
-                    },
-                }
-            }
+            create_data = create_journal_request_data(
+                title=f"Pagination Test {i}", content=f"Content {i}"
+            )
             await integration_api_client.post("/api/journals", json=create_data)
 
         # Test page 1 with limit 2
@@ -519,37 +507,14 @@ class TestJournalFilteringAndPagination:
 
     async def test_list_journals_with_type_filter(self, integration_api_client):
         """Test listing journals filtered by type."""
-        from datetime import datetime
-
         # Create journals with different types
-        note_data = {
-            "data": {
-                "type": "journals",
-                "attributes": {
-                    "title": "Note Journal",
-                    "content": "Note content",
-                    "event_date_range": {
-                        "start": datetime.now(UTC).isoformat(),
-                        "end": datetime.now(UTC).isoformat(),
-                    },
-                },
-            }
-        }
+        note_data = create_journal_request_data(
+            title="Note Journal", content="Note content"
+        )
 
-        mood_data = {
-            "data": {
-                "type": "journals",
-                "attributes": {
-                    "title": "Mood Journal",
-                    "content": "Mood content",
-                    "event_date_range": {
-                        "start": datetime.now(UTC).isoformat(),
-                        "end": datetime.now(UTC).isoformat(),
-                    },
-                    "types": ["MOOD_RATING"],
-                },
-            }
-        }
+        mood_data = create_journal_request_data(
+            title="Mood Journal", content="Mood content", types=["MOOD_RATING"]
+        )
 
         await integration_api_client.post("/api/journals", json=note_data)
         await integration_api_client.post("/api/journals", json=mood_data)
@@ -618,22 +583,10 @@ class TestJournalDeleteEndpoints:
 
     async def test_delete_journal(self, integration_api_client):
         """Test deleting a journal."""
-        from datetime import datetime
-
         # Create a journal
-        create_data = {
-            "data": {
-                "type": "journals",
-                "attributes": {
-                    "title": "Delete Test",
-                    "content": "Test content",
-                    "event_date_range": {
-                        "start": datetime.now(UTC).isoformat(),
-                        "end": datetime.now(UTC).isoformat(),
-                    },
-                },
-            }
-        }
+        create_data = create_journal_request_data(
+            title="Delete Test", content="Test content"
+        )
 
         create_response = await integration_api_client.post(
             "/api/journals", json=create_data
@@ -667,22 +620,10 @@ class TestJournalTypeManagement:
 
     async def test_add_type_to_journal(self, integration_api_client):
         """Test adding a type to a journal."""
-        from datetime import datetime
-
         # Create a NOTE journal
-        create_data = {
-            "data": {
-                "type": "journals",
-                "attributes": {
-                    "title": "Type Test",
-                    "content": "Test content",
-                    "event_date_range": {
-                        "start": datetime.now(UTC).isoformat(),
-                        "end": datetime.now(UTC).isoformat(),
-                    },
-                },
-            }
-        }
+        create_data = create_journal_request_data(
+            title="Type Test", content="Test content"
+        )
 
         create_response = await integration_api_client.post(
             "/api/journals", json=create_data
@@ -708,23 +649,10 @@ class TestJournalTypeManagement:
 
     async def test_remove_type_from_journal(self, integration_api_client):
         """Test removing a type from a journal."""
-        from datetime import datetime
-
         # Create a journal with MOOD_RATING type
-        create_data = {
-            "data": {
-                "type": "journals",
-                "attributes": {
-                    "title": "Type Remove Test",
-                    "content": "Test content",
-                    "event_date_range": {
-                        "start": datetime.now(UTC).isoformat(),
-                        "end": datetime.now(UTC).isoformat(),
-                    },
-                    "types": ["MOOD_RATING"],
-                },
-            }
-        }
+        create_data = create_journal_request_data(
+            title="Type Remove Test", content="Test content", types=["MOOD_RATING"]
+        )
 
         create_response = await integration_api_client.post(
             "/api/journals", json=create_data
@@ -740,23 +668,10 @@ class TestJournalTypeManagement:
 
     async def test_update_event_type_data(self, integration_api_client):
         """Test updating EVENT type data."""
-        from datetime import datetime
-
         # Create an EVENT journal
-        create_data = {
-            "data": {
-                "type": "journals",
-                "attributes": {
-                    "title": "Event Update Test",
-                    "content": "Test content",
-                    "event_date_range": {
-                        "start": datetime.now(UTC).isoformat(),
-                        "end": datetime.now(UTC).isoformat(),
-                    },
-                    "types": ["EVENT"],
-                },
-            }
-        }
+        create_data = create_journal_request_data(
+            title="Event Update Test", content="Test content", types=["EVENT"]
+        )
 
         create_response = await integration_api_client.post(
             "/api/journals", json=create_data
@@ -783,23 +698,10 @@ class TestJournalTypeManagement:
 
     async def test_update_photo_album_type_data(self, integration_api_client):
         """Test updating PHOTO_ALBUM type data."""
-        from datetime import datetime
-
         # Create a PHOTO_ALBUM journal
-        create_data = {
-            "data": {
-                "type": "journals",
-                "attributes": {
-                    "title": "Photo Album Test",
-                    "content": "Test content",
-                    "event_date_range": {
-                        "start": datetime.now(UTC).isoformat(),
-                        "end": datetime.now(UTC).isoformat(),
-                    },
-                    "types": ["PHOTO_ALBUM"],
-                },
-            }
-        }
+        create_data = create_journal_request_data(
+            title="Photo Album Test", content="Test content", types=["PHOTO_ALBUM"]
+        )
 
         create_response = await integration_api_client.post(
             "/api/journals", json=create_data
@@ -835,22 +737,10 @@ class TestJournalHierarchy:
 
     async def test_create_child_journal(self, integration_api_client):
         """Test creating a child journal."""
-        from datetime import datetime
-
         # Create parent journal
-        parent_data = {
-            "data": {
-                "type": "journals",
-                "attributes": {
-                    "title": "Parent Journal",
-                    "content": "Parent content",
-                    "event_date_range": {
-                        "start": datetime.now(UTC).isoformat(),
-                        "end": datetime.now(UTC).isoformat(),
-                    },
-                },
-            }
-        }
+        parent_data = create_journal_request_data(
+            title="Parent Journal", content="Parent content"
+        )
 
         parent_response = await integration_api_client.post(
             "/api/journals", json=parent_data
@@ -858,20 +748,9 @@ class TestJournalHierarchy:
         parent_id = parent_response.json()["data"]["id"]
 
         # Create child journal
-        child_data = {
-            "data": {
-                "type": "journals",
-                "attributes": {
-                    "title": "Child Journal",
-                    "content": "Child content",
-                    "event_date_range": {
-                        "start": datetime.now(UTC).isoformat(),
-                        "end": datetime.now(UTC).isoformat(),
-                    },
-                    "parent_id": parent_id,
-                },
-            }
-        }
+        child_data = create_journal_request_data(
+            title="Child Journal", content="Child content", parent_id=parent_id
+        )
 
         response = await integration_api_client.post("/api/journals", json=child_data)
 
@@ -882,31 +761,15 @@ class TestJournalHierarchy:
 
     async def test_create_deeply_nested_journals(self, integration_api_client):
         """Test creating deeply nested journals (up to max depth)."""
-        from datetime import datetime
-        from typing import Any
-
         current_parent_id: int | None = None
 
         # Create 5 levels of nesting (max depth)
         for level in range(5):
-            attributes: dict[str, Any] = {
-                "title": f"Level {level} Journal",
-                "content": f"Level {level} content",
-                "event_date_range": {
-                    "start": datetime.now(UTC).isoformat(),
-                    "end": datetime.now(UTC).isoformat(),
-                },
-            }
-
-            if current_parent_id is not None:
-                attributes["parent_id"] = current_parent_id
-
-            journal_data = {
-                "data": {
-                    "type": "journals",
-                    "attributes": attributes,
-                }
-            }
+            journal_data = create_journal_request_data(
+                title=f"Level {level} Journal",
+                content=f"Level {level} content",
+                parent_id=current_parent_id,
+            )
 
             response = await integration_api_client.post(
                 "/api/journals", json=journal_data
@@ -917,31 +780,15 @@ class TestJournalHierarchy:
 
     async def test_exceed_max_nesting_depth(self, integration_api_client):
         """Test that exceeding max nesting depth fails."""
-        from datetime import datetime
-        from typing import Any
-
         current_parent_id: int | None = None
 
         # Create 5 levels (max depth)
         for level in range(5):
-            attributes: dict[str, Any] = {
-                "title": f"Level {level} Journal",
-                "content": f"Level {level} content",
-                "event_date_range": {
-                    "start": datetime.now(UTC).isoformat(),
-                    "end": datetime.now(UTC).isoformat(),
-                },
-            }
-
-            if current_parent_id is not None:
-                attributes["parent_id"] = current_parent_id
-
-            journal_data = {
-                "data": {
-                    "type": "journals",
-                    "attributes": attributes,
-                }
-            }
+            journal_data = create_journal_request_data(
+                title=f"Level {level} Journal",
+                content=f"Level {level} content",
+                parent_id=current_parent_id,
+            )
 
             response = await integration_api_client.post(
                 "/api/journals", json=journal_data
@@ -949,20 +796,11 @@ class TestJournalHierarchy:
             current_parent_id = response.json()["data"]["id"]
 
         # Try to create 6th level (should fail)
-        journal_data = {
-            "data": {
-                "type": "journals",
-                "attributes": {
-                    "title": "Level 6 Journal",
-                    "content": "Level 6 content",
-                    "event_date_range": {
-                        "start": datetime.now(UTC).isoformat(),
-                        "end": datetime.now(UTC).isoformat(),
-                    },
-                    "parent_id": current_parent_id,
-                },
-            }
-        }
+        journal_data = create_journal_request_data(
+            title="Level 6 Journal",
+            content="Level 6 content",
+            parent_id=current_parent_id,
+        )
 
         response = await integration_api_client.post("/api/journals", json=journal_data)
 
@@ -1029,21 +867,10 @@ class TestJournalDataValidation:
 
     async def test_create_journal_with_title_too_long(self, integration_api_client):
         """Test creating a journal with title exceeding max length."""
-        from datetime import datetime
-
-        create_data = {
-            "data": {
-                "type": "journals",
-                "attributes": {
-                    "title": "x" * 501,  # Max is 500
-                    "content": "Test content",
-                    "event_date_range": {
-                        "start": datetime.now(UTC).isoformat(),
-                        "end": datetime.now(UTC).isoformat(),
-                    },
-                },
-            }
-        }
+        create_data = create_journal_request_data(
+            title="x" * 501,
+            content="Test content",  # Max is 500
+        )
 
         response = await integration_api_client.post("/api/journals", json=create_data)
 
@@ -1068,21 +895,9 @@ class TestJournalResponseFormat:
 
     async def test_journal_response_has_required_fields(self, integration_api_client):
         """Test that journal response includes all required JSON API fields."""
-        from datetime import datetime
-
-        create_data = {
-            "data": {
-                "type": "journals",
-                "attributes": {
-                    "title": "Response Format Test",
-                    "content": "Test content",
-                    "event_date_range": {
-                        "start": datetime.now(UTC).isoformat(),
-                        "end": datetime.now(UTC).isoformat(),
-                    },
-                },
-            }
-        }
+        create_data = create_journal_request_data(
+            title="Response Format Test", content="Test content"
+        )
 
         response = await integration_api_client.post("/api/journals", json=create_data)
 
@@ -1107,22 +922,10 @@ class TestJournalResponseFormat:
 
     async def test_list_response_has_pagination_metadata(self, integration_api_client):
         """Test that list response includes pagination metadata."""
-        from datetime import datetime
-
         # Create a journal
-        create_data = {
-            "data": {
-                "type": "journals",
-                "attributes": {
-                    "title": "Pagination Test",
-                    "content": "Test content",
-                    "event_date_range": {
-                        "start": datetime.now(UTC).isoformat(),
-                        "end": datetime.now(UTC).isoformat(),
-                    },
-                },
-            }
-        }
+        create_data = create_journal_request_data(
+            title="Pagination Test", content="Test content"
+        )
 
         await integration_api_client.post("/api/journals", json=create_data)
 
@@ -1146,22 +949,9 @@ class TestJournalResponseFormat:
 
     async def test_journal_with_types_includes_type_data(self, integration_api_client):
         """Test that journal with types includes type-specific data."""
-        from datetime import datetime
-
-        create_data = {
-            "data": {
-                "type": "journals",
-                "attributes": {
-                    "title": "Type Data Test",
-                    "content": "Test content",
-                    "event_date_range": {
-                        "start": datetime.now(UTC).isoformat(),
-                        "end": datetime.now(UTC).isoformat(),
-                    },
-                    "types": ["MOOD_RATING"],
-                },
-            }
-        }
+        create_data = create_journal_request_data(
+            title="Type Data Test", content="Test content", types=["MOOD_RATING"]
+        )
 
         response = await integration_api_client.post("/api/journals", json=create_data)
 
@@ -1197,22 +987,11 @@ class TestJournalErrorHandling:
 
     async def test_create_journal_with_invalid_parent_id(self, integration_api_client):
         """Test creating a journal with non-existent parent."""
-        from datetime import datetime
-
-        create_data = {
-            "data": {
-                "type": "journals",
-                "attributes": {
-                    "title": "Invalid Parent Test",
-                    "content": "Test content",
-                    "event_date_range": {
-                        "start": datetime.now(UTC).isoformat(),
-                        "end": datetime.now(UTC).isoformat(),
-                    },
-                    "parent_id": 99999,  # Non-existent parent
-                },
-            }
-        }
+        create_data = create_journal_request_data(
+            title="Invalid Parent Test",
+            content="Test content",
+            parent_id=99999,  # Non-existent parent
+        )
 
         response = await integration_api_client.post("/api/journals", json=create_data)
 
