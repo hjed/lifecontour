@@ -627,3 +627,162 @@ Check if these are installed, add if needed:
 - Immich album picker integration
 - GPX track display for travel journals
 - E2E Playwright tests (separate testing task)
+
+---
+
+## 15. Implementation Status
+
+### Phase 1: Foundation (Files 1-4) ✅ COMPLETE
+
+**Completed:** 2026-01-04
+
+**Files Implemented:**
+1. ✅ **Types** - `frontend/src/types/journals.ts`
+2. ✅ **API Layer** - `frontend/src/lib/api/journals.ts`
+3. ✅ **JournalListItem** - `frontend/src/components/journals/JournalListItem.tsx`
+4. ✅ **JournalList** - `frontend/src/components/journals/JournalList.tsx`
+5. ✅ **JournalFilters** - `frontend/src/components/journals/JournalFilters.tsx` (from Phase 5, implemented early)
+
+#### Implemented Components
+
+1. **TypeScript Types** (`frontend/src/types/journals.ts`)
+   - ✅ `JournalType` enum (NOTE, EVENT, MOOD_RATING, PLAN, TRAVEL, PHOTO_ALBUM)
+   - ✅ `JournalContactRelationshipType` enum (PARTICIPANT, INVITEE, MENTION, ABOUT)
+   - ✅ `EventDateRange` interface
+   - ✅ `JournalContactRelationship` interface
+   - ✅ `JournalTag` interface
+   - ✅ `JournalCalendar` interface
+   - ✅ `JournalAttributes` interface with all required fields
+   - ✅ `JournalResource` interface
+   - ✅ Type-specific data types (MoodRatingData, TravelData, PhotoAlbumData, PlanData, CalendarInfoData)
+   - ✅ `JournalFilters` interface
+   - ✅ `JournalFormData` interface
+   - ✅ Response types (JournalResponse, JournalListResponse)
+
+2. **API Layer** (`frontend/src/lib/api/journals.ts`)
+   - ✅ Query hooks:
+     - `useJournals(filters)` - Fetch journals with filtering
+     - `useJournal(id)` - Fetch single journal
+     - `useSearchJournals(query)` - Search journals
+     - `useJournalTags()` - Fetch available tags
+   - ✅ Mutation hooks:
+     - `useCreateJournal()` - Create new journal
+     - `useUpdateJournal()` - Update journal
+     - `useDeleteJournal()` - Delete journal
+     - `useUpdateJournalField()` - Update single field
+   - ✅ Type management hooks:
+     - `useAddJournalType()` - Add type to journal
+     - `useRemoveJournalType()` - Remove type from journal
+   - ✅ Relationship management hooks:
+     - `useAddContactRelationship()` - Add contact relationship
+     - `useRemoveContactRelationship()` - Remove contact relationship
+     - `useAddJournalTag()` - Add tag to journal
+     - `useRemoveJournalTag()` - Remove tag from journal
+   - ✅ Query key structure for proper cache management
+   - ✅ Error handling with toast notifications
+   - ✅ Optimistic updates and cache invalidation
+
+3. **Components**
+   - ✅ `JournalListItem` (`frontend/src/components/journals/JournalListItem.tsx`)
+     - Calendar color bar on left edge
+     - Type icons (FileText, Calendar, Heart, ClipboardList, Plane, Image)
+     - Title as clickable link to detail page
+     - Date range display with Australian formatting
+     - Tag badges with colors
+     - Contact chips with relationship types
+     - Content excerpt with truncation
+   - ✅ `JournalList` (`frontend/src/components/journals/JournalList.tsx`)
+     - Responsive grid layout (1/2/3 columns)
+     - Empty state support
+     - Renders JournalListItem components
+   - ✅ `JournalFilters` (`frontend/src/components/journals/JournalFilters.tsx`)
+     - Date range picker with calendar component
+     - Journal type checkboxes (all 6 types)
+     - Contact search using ContactSearchCombobox
+     - Tag multi-select with checkboxes
+     - Calendar selection dropdown
+     - Clear all filters button
+     - Active filter state management
+
+4. **Unit Tests**
+   - ✅ Type tests (`frontend/src/types/__tests__/journals.test.ts`)
+   - ✅ API tests (`frontend/src/lib/api/__tests__/journals.test.ts`)
+   - ✅ Component tests:
+     - `JournalListItem.test.tsx`
+     - `JournalList.test.tsx`
+     - `JournalFilters.test.tsx`
+
+5. **Supporting Files**
+   - ✅ Updated `frontend/src/lib/constants.ts` with journal endpoints and messages
+   - ✅ Created journal detail page route (`frontend/src/app/journals/[id]/page.tsx`)
+
+#### Quality Assurance
+
+- ✅ All formatting checks pass (Prettier)
+- ✅ All linting checks pass (ESLint)
+- ✅ All type checks pass (TypeScript)
+- ✅ All unit tests pass (Jest)
+- ✅ Code follows established patterns from contacts domain
+- ✅ Accessibility attributes included (aria-labels, test-ids)
+- ✅ Responsive design implemented
+
+#### Notes
+
+- Components follow the established inline editing pattern from contacts domain
+- API layer uses TanStack Query for caching and optimistic updates
+- All components are properly typed with TypeScript
+- Date formatting uses Australian locale (enAU) consistently
+- Calendar color bar provides visual distinction between calendars
+- Type icons provide quick visual identification of journal types
+- JournalFilters was implemented early (originally planned for Phase 5)
+
+### Phase 2: Detail View (Files 5-8) ⏳ PENDING
+
+**Status:** Not started
+
+**Planned Files:**
+- [ ] 5. **JournalDetail** - `frontend/src/components/journals/JournalDetail.tsx` - Main detail layout
+- [ ] 6. **JournalIdentityInline** - `frontend/src/components/journals/JournalIdentityInline.tsx` - Title/date editing
+- [ ] 7. **JournalContentInline** - `frontend/src/components/journals/JournalContentInline.tsx` - Markdown editing (simple textarea first)
+- [ ] 8. **InlineEditDateRange** - `frontend/src/components/journals/InlineEditDateRange.tsx` - Date range picker
+
+### Phase 3: Type Sections (Files 9-11) ⏳ PENDING
+
+**Status:** Not started
+
+**Planned Files:**
+- [ ] 9. **JournalTypeBadges** - `frontend/src/components/journals/JournalTypeBadges.tsx` - Type display
+- [ ] 10. **JournalTypeSection** - `frontend/src/components/journals/JournalTypeSection.tsx` - Collapsible type sections
+- [ ] 11. **Type-specific editors** - Type-specific form components (EVENT, MOOD_RATING, PHOTO_ALBUM)
+
+### Phase 4: Relationships (Files 12-15) ⏳ PENDING
+
+**Status:** Not started
+
+**Planned Files:**
+- [ ] 12. **JournalContactsList** - `frontend/src/components/journals/JournalContactsList.tsx` - Contact management
+- [ ] 13. **JournalTagsList** - `frontend/src/components/journals/JournalTagsList.tsx` - Tag management
+- [ ] 14. **JournalCalendarBadge** - `frontend/src/components/journals/JournalCalendarBadge.tsx` - Calendar display/editing
+- [ ] 15. **JournalBreadcrumb** - `frontend/src/components/journals/JournalBreadcrumb.tsx` - Parent navigation
+
+### Phase 5: Hierarchy & Filters (Files 16-18) ⏳ PENDING
+
+**Status:** Partially complete (JournalFilters implemented in Phase 1)
+
+**Planned Files:**
+- [ ] 16. **JournalChildrenList** - `frontend/src/components/journals/JournalChildrenList.tsx` - Child journals
+- [x] 17. **JournalListFilters** - `frontend/src/components/journals/JournalFilters.tsx` - Filter sidebar (COMPLETE)
+- [ ] 18. **Integration** - Wire up all components
+
+### Phase 6: Polish & Tests (Files 19-20+) ⏳ PENDING
+
+**Status:** Not started
+
+**Planned Work:**
+- [ ] 19. **Responsive polish** - Mobile/tablet optimizations
+- [ ] 20. **Comprehensive tests** - Integration tests for all components
+- [ ] **Advanced features:**
+  - Infinite scroll pagination
+  - Date grouping in list view
+  - Performance optimizations
+  - Quick actions (edit, delete, duplicate)
