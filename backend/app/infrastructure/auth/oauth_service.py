@@ -690,13 +690,48 @@ class OAuthService:
             )
 
         try:
-            # Exchange authorization code for tokens
+            # Exchange authorization code for tokens using direct HTTP request
+            # This avoids the state validation issues with Authlib's authorize_access_token
             client = self.oauth._clients["google"]
-            token = await client.authorize_access_token(
-                request,
+            token_endpoint = "https://oauth2.googleapis.com/token"
+
+            logger.info(
+                "Exchanging Google authorization code for tokens",
+                token_endpoint=token_endpoint,
+                code_length=len(code),
                 redirect_uri=redirect_uri,
-                code_verifier=code_verifier,
             )
+
+            # Prepare token request data
+            token_data = {
+                "grant_type": "authorization_code",
+                "code": code,
+                "redirect_uri": redirect_uri,
+                "client_id": client.client_id,
+                "client_secret": client.client_secret,
+                "code_verifier": code_verifier,
+            }
+
+            # Exchange code for tokens
+            async with httpx.AsyncClient() as http_client:
+                token_response = await http_client.post(
+                    token_endpoint,
+                    data=token_data,
+                    headers={"Content-Type": "application/x-www-form-urlencoded"},
+                )
+
+                if token_response.status_code != 200:
+                    logger.error(
+                        "Google token exchange failed",
+                        status_code=token_response.status_code,
+                        response_text=token_response.text[:200],
+                    )
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="Failed to exchange authorization code for token",
+                    )
+
+                token = token_response.json()
 
             # Clean up session
             request.session.pop("oauth_csrf_token", None)
@@ -712,6 +747,9 @@ class OAuthService:
             # Return token data as dict
             return dict(token)
 
+        except HTTPException:
+            # Re-raise HTTP exceptions as-is
+            raise
         except Exception as e:
             logger.error("Failed to exchange Google authorization code", error=str(e))
             raise HTTPException(

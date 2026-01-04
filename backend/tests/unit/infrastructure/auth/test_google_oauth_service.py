@@ -137,18 +137,26 @@ class TestGoogleOAuthCallback:
             "oauth_code_verifier": "test_code_verifier",
         }
 
-        # Mock the Google OAuth client
-        mock_client = Mock()
+        # Mock token response
         mock_token = {
             "access_token": "test_access_token",
             "refresh_token": "test_refresh_token",
             "expires_in": 3600,
             "scope": "https://www.googleapis.com/auth/contacts.readonly email profile",
         }
-        mock_client.authorize_access_token = AsyncMock(return_value=mock_token)
 
-        # Patch the _clients dictionary
-        with patch.dict(oauth_service.oauth._clients, {"google": mock_client}):
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = mock_token
+
+        # Mock HTTP client for token exchange
+        with patch("httpx.AsyncClient") as mock_client_class:
+            mock_client = AsyncMock()
+            mock_client.__aenter__.return_value = mock_client
+            mock_client.__aexit__.return_value = None
+            mock_client.post = AsyncMock(return_value=mock_response)
+            mock_client_class.return_value = mock_client
+
             token_data = await oauth_service.handle_google_contacts_callback(
                 mock_request,
                 "test_code",
