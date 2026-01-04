@@ -216,7 +216,7 @@ async function completeWorkerOAuthFlow(browser: any): Promise<AuthState> {
             { timeout: 15000 }
           );
           console.log('🔐 [Worker Auth] Final URL after callback:', page.url());
-        } catch (e) {
+        } catch {
           // If redirect times out, we might still be on the callback page
           // This can happen if the callback page is still processing
           console.log(
@@ -753,7 +753,6 @@ export const test = base.extend<TestFixtures, WorkerFixtures>({
   },
 
   // Utility fixtures
-  // eslint-disable-next-line no-empty-pattern
   dataFactory: async ({}, use) => {
     await use({
       contacts: ContactFactory,
@@ -763,7 +762,6 @@ export const test = base.extend<TestFixtures, WorkerFixtures>({
   },
 
   // Test-scoped fixture: Cleanup tracking
-  // eslint-disable-next-line no-empty-pattern
   testCleanup: async ({}, use) => {
     const cleanupTasks: (() => Promise<void>)[] = [];
 

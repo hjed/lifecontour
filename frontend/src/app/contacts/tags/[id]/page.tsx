@@ -50,10 +50,11 @@ function ContactGroupPageContent() {
   });
 
   // Find the current tag
+  const tagsDataArray = tagsData?.data;
   const currentTag = useMemo(() => {
-    if (!tagsData?.data) return null;
-    return tagsData.data.find(tag => tag.id === tagId);
-  }, [tagsData?.data, tagId]);
+    if (!tagsDataArray) return null;
+    return tagsDataArray.find(tag => tag.id === tagId);
+  }, [tagsDataArray, tagId]);
 
   // Transform contacts for display
   const displayContacts = useDisplayContacts(contactsData?.data);

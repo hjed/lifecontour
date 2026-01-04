@@ -65,13 +65,6 @@ function LoginContent() {
     staleTime: 5 * 60 * 1000, // 5 minutes
   });
 
-  // Clear loading state when auth state changes
-  useEffect(() => {
-    if (!state.isLoading) {
-      setLoadingProvider(null);
-    }
-  }, [state.isLoading]);
-
   // Redirect authenticated users away from login page
   useEffect(() => {
     if (state.isAuthenticated && !state.isLoading) {

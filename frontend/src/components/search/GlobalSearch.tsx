@@ -18,6 +18,7 @@ import React, {
   useEffect,
   useCallback,
   useMemo,
+  useId,
 } from 'react';
 import { Search, X, Clock, Filter } from 'lucide-react';
 import { Input } from '@/components/ui/input';
@@ -75,32 +76,30 @@ export function GlobalSearch({
   const [query, setQuery] = useState('');
   const [isOpen, setIsOpen] = useState(false);
   const [selectedIndex, setSelectedIndex] = useState(-1);
-  const [recentSearches, setRecentSearches] = useState<string[]>([]);
+  // Load recent searches from localStorage using lazy initialization
+  const [recentSearches, setRecentSearches] = useState<string[]>(() => {
+    if (typeof window === 'undefined') return [];
+    const saved = localStorage.getItem('recent-searches');
+    if (saved) {
+      try {
+        return JSON.parse(saved);
+      } catch {
+        return [];
+      }
+    }
+    return [];
+  });
 
   const inputRef = useRef<HTMLInputElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
   // Generate unique IDs for accessibility
-  const listboxId = useRef(
-    `search-listbox-${Math.random().toString(36).substring(2, 11)}`
-  );
-  const getOptionId = (index: number) =>
-    `search-option-${listboxId.current}-${index}`;
+  const uniqueId = useId();
+  const listboxId = `search-listbox-${uniqueId}`;
+  const getOptionId = (index: number) => `search-option-${listboxId}-${index}`;
 
   // Debounce search query for API calls
   const debouncedQuery = useDebounce(query, 300);
-
-  // Load recent searches from localStorage on mount
-  useEffect(() => {
-    const saved = localStorage.getItem('recent-searches');
-    if (saved) {
-      try {
-        setRecentSearches(JSON.parse(saved));
-      } catch {
-        // Ignore invalid JSON
-      }
-    }
-  }, []);
 
   // Save recent searches to localStorage
   const saveRecentSearch = useCallback(
@@ -254,7 +253,7 @@ export function GlobalSearch({
           aria-expanded={isOpen}
           aria-haspopup='listbox'
           aria-autocomplete='list'
-          aria-controls={isOpen ? listboxId.current : undefined}
+          aria-controls={isOpen ? listboxId : undefined}
           aria-activedescendant={
             isOpen && selectedIndex >= 0
               ? getOptionId(selectedIndex)
@@ -286,11 +285,7 @@ export function GlobalSearch({
           className='absolute top-full right-0 left-0 z-50 mt-1 max-h-80 overflow-auto'
         >
           <CardContent className='p-0'>
-            <div
-              role='listbox'
-              aria-label='Search suggestions'
-              id={listboxId.current}
-            >
+            <div role='listbox' aria-label='Search suggestions' id={listboxId}>
               {!debouncedQuery.trim() && recentSearches.length > 0 && (
                 <>
                   <div className='text-muted-foreground px-3 py-2 text-xs font-medium'>
