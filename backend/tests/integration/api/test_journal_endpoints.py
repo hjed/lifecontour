@@ -274,22 +274,10 @@ class TestJournalTypeManagementEndpoints:
 
     async def test_add_type_to_journal(self, integration_api_client):
         """Test adding a type to a journal."""
-        from datetime import datetime
-
         # Create a journal (NOTE type by default)
-        create_data = {
-            "data": {
-                "type": "journals",
-                "attributes": {
-                    "title": "Type Test",
-                    "content": "Test content",
-                    "event_date_range": {
-                        "start": datetime.now(UTC).isoformat(),
-                        "end": datetime.now(UTC).isoformat(),
-                    },
-                },
-            }
-        }
+        create_data = create_journal_request_data(
+            title="Type Test", content="Test content"
+        )
 
         create_response = await integration_api_client.post(
             "/api/journals", json=create_data
@@ -316,23 +304,10 @@ class TestJournalTypeManagementEndpoints:
 
     async def test_remove_type_from_journal(self, integration_api_client):
         """Test removing a type from a journal."""
-        from datetime import datetime
-
         # Create a journal with MOOD_RATING type
-        create_data = {
-            "data": {
-                "type": "journals",
-                "attributes": {
-                    "title": "Type Remove Test",
-                    "content": "Test content",
-                    "event_date_range": {
-                        "start": datetime.now(UTC).isoformat(),
-                        "end": datetime.now(UTC).isoformat(),
-                    },
-                    "types": ["MOOD_RATING"],
-                },
-            }
-        }
+        create_data = create_journal_request_data(
+            title="Type Remove Test", content="Test content", types=["MOOD_RATING"]
+        )
 
         create_response = await integration_api_client.post(
             "/api/journals", json=create_data
@@ -350,23 +325,10 @@ class TestJournalTypeManagementEndpoints:
 
     async def test_update_type_data_mood_rating(self, integration_api_client):
         """Test updating type-specific data for MOOD_RATING."""
-        from datetime import datetime
-
         # Create a journal with MOOD_RATING type
-        create_data = {
-            "data": {
-                "type": "journals",
-                "attributes": {
-                    "title": "Mood Test",
-                    "content": "Test content",
-                    "event_date_range": {
-                        "start": datetime.now(UTC).isoformat(),
-                        "end": datetime.now(UTC).isoformat(),
-                    },
-                    "types": ["MOOD_RATING"],
-                },
-            }
-        }
+        create_data = create_journal_request_data(
+            title="Mood Test", content="Test content", types=["MOOD_RATING"]
+        )
 
         create_response = await integration_api_client.post(
             "/api/journals", json=create_data
@@ -406,22 +368,11 @@ class TestJournalRelationshipEndpoints:
     async def test_add_tag_to_journal(self, integration_api_client):
         """Test adding a tag to a journal."""
         import uuid
-        from datetime import datetime
 
         # Create a journal
-        create_data = {
-            "data": {
-                "type": "journals",
-                "attributes": {
-                    "title": "Tag Test",
-                    "content": "Test content",
-                    "event_date_range": {
-                        "start": datetime.now(UTC).isoformat(),
-                        "end": datetime.now(UTC).isoformat(),
-                    },
-                },
-            }
-        }
+        create_data = create_journal_request_data(
+            title="Tag Test", content="Test content"
+        )
 
         create_response = await integration_api_client.post(
             "/api/journals", json=create_data
@@ -453,22 +404,11 @@ class TestJournalRelationshipEndpoints:
     async def test_remove_tag_from_journal(self, integration_api_client):
         """Test removing a tag from a journal."""
         import uuid
-        from datetime import datetime
 
         # Create a journal
-        create_data = {
-            "data": {
-                "type": "journals",
-                "attributes": {
-                    "title": "Tag Remove Test",
-                    "content": "Test content",
-                    "event_date_range": {
-                        "start": datetime.now(UTC).isoformat(),
-                        "end": datetime.now(UTC).isoformat(),
-                    },
-                },
-            }
-        }
+        create_data = create_journal_request_data(
+            title="Tag Remove Test", content="Test content"
+        )
 
         create_response = await integration_api_client.post(
             "/api/journals", json=create_data
@@ -486,22 +426,10 @@ class TestJournalRelationshipEndpoints:
 
     async def test_add_contact_relationship(self, integration_api_client):
         """Test adding a contact relationship to a journal."""
-        from datetime import datetime
-
         # Create a journal
-        create_data = {
-            "data": {
-                "type": "journals",
-                "attributes": {
-                    "title": "Contact Test",
-                    "content": "Test content",
-                    "event_date_range": {
-                        "start": datetime.now(UTC).isoformat(),
-                        "end": datetime.now(UTC).isoformat(),
-                    },
-                },
-            }
-        }
+        create_data = create_journal_request_data(
+            title="Contact Test", content="Test content"
+        )
 
         create_response = await integration_api_client.post(
             "/api/journals", json=create_data
@@ -529,22 +457,10 @@ class TestJournalRelationshipEndpoints:
 
     async def test_remove_contact_relationship(self, integration_api_client):
         """Test removing a contact relationship from a journal."""
-        from datetime import datetime
-
         # Create a journal
-        create_data = {
-            "data": {
-                "type": "journals",
-                "attributes": {
-                    "title": "Contact Remove Test",
-                    "content": "Test content",
-                    "event_date_range": {
-                        "start": datetime.now(UTC).isoformat(),
-                        "end": datetime.now(UTC).isoformat(),
-                    },
-                },
-            }
-        }
+        create_data = create_journal_request_data(
+            title="Contact Remove Test", content="Test content"
+        )
 
         create_response = await integration_api_client.post(
             "/api/journals", json=create_data
