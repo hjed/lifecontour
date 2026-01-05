@@ -659,6 +659,7 @@ class OAuthService:
             decoded_state = self._decode_state(state)
             provider = decoded_state["provider"]
             csrf_token = decoded_state["csrf_token"]
+            state_redirect_uri = decoded_state["redirect_uri"]
         except Exception as e:
             logger.warning("Failed to decode OAuth state", error=str(e))
             raise HTTPException(
@@ -679,6 +680,19 @@ class OAuthService:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Invalid provider in state",
+            )
+
+        # Validate redirect URI matches the one encoded in state
+        if redirect_uri != state_redirect_uri:
+            logger.warning(
+                "OAuth redirect URI mismatch",
+                requested_redirect_uri=redirect_uri,
+                state_redirect_uri=state_redirect_uri,
+                provider=provider,
+            )
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="OAuth redirect URI mismatch",
             )
 
         # Get code verifier from session
