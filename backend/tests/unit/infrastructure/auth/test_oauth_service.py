@@ -545,18 +545,23 @@ class TestOAuthServiceGoogleContacts:
                 "csrf_token": "test_csrf_token",
             }
 
-            # Mock token exchange
-            with patch.object(
-                oauth_service_with_google.oauth._clients["google"],
-                "authorize_access_token",
-                new_callable=AsyncMock,
-            ) as mock_authorize:
-                mock_token_data = {
-                    "access_token": "test_access_token",
-                    "refresh_token": "test_refresh_token",
-                    "expires_in": 3600,
-                }
-                mock_authorize.return_value = mock_token_data
+            # Mock HTTP client for token exchange
+            mock_token_data = {
+                "access_token": "test_access_token",
+                "refresh_token": "test_refresh_token",
+                "expires_in": 3600,
+            }
+
+            mock_response = Mock()
+            mock_response.status_code = 200
+            mock_response.json.return_value = mock_token_data
+
+            with patch("httpx.AsyncClient") as mock_client_class:
+                mock_client = AsyncMock()
+                mock_client.__aenter__.return_value = mock_client
+                mock_client.__aexit__.return_value = None
+                mock_client.post = AsyncMock(return_value=mock_response)
+                mock_client_class.return_value = mock_client
 
                 result = (
                     await oauth_service_with_google.handle_google_contacts_callback(
@@ -567,12 +572,17 @@ class TestOAuthServiceGoogleContacts:
                     )
                 )
 
-                # Verify token exchange was called correctly
-                mock_authorize.assert_called_once_with(
-                    mock_request,
-                    redirect_uri="https://example.com/callback",
-                    code_verifier="test_code_verifier",
+                # Verify HTTP request was made correctly
+                mock_client.post.assert_called_once()
+                call_args = mock_client.post.call_args
+                assert call_args[0][0] == "https://oauth2.googleapis.com/token"
+                assert call_args[1]["data"]["grant_type"] == "authorization_code"
+                assert call_args[1]["data"]["code"] == "test_code"
+                assert (
+                    call_args[1]["data"]["redirect_uri"]
+                    == "https://example.com/callback"
                 )
+                assert call_args[1]["data"]["code_verifier"] == "test_code_verifier"
 
                 # Verify session cleanup
                 assert "oauth_csrf_token" not in mock_request.session
