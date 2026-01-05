@@ -553,9 +553,9 @@ CREATE TABLE journals (
 - `backend/app/api/journals/controllers.py` - Added search endpoint
 - `tests/unit/infrastructure/search/test_search_service.py` - Updated global search tests
 
-### ITER4-008: Journal UI - List & Detail Views 🔵 IN PROGRESS (Phase 1 Complete)
+### ITER4-008: Journal UI - List & Detail Views 🔵 IN PROGRESS (Phases 1-2 Complete)
 **Description:** Build journal list and detail views with inline editing
-**Strategy:** Phased implementation - Phase 1 (Foundation) complete, Phase 2 (Detail View) pending
+**Strategy:** Phased implementation - Phase 1 (Foundation) and Phase 2 (Detail View) complete
 **Specification Reference:** [Display Requirements](../journal-system-specification.md#display-requirements), [Frontend Components](../journal-system-specification.md#frontend-components)
 **Design Document:** [ITER4-008 Design](../design/iter4-008-journal-ui-design.md)
 
@@ -580,6 +580,26 @@ CREATE TABLE journals (
 - [x] JournalFilters with date range, type checkboxes, contact search, tag selection
 - [x] Accessibility features (ARIA attributes, test-ids)
 - [x] Jest unit tests for types, API layer, and components
+- [x] All quality checks passing (formatting, linting, type checking)
+
+**Phase 2: Detail View (Files 5-8) ✅ COMPLETE (2026-01-05)**
+
+**Files Implemented:**
+- [x] 5. **JournalDetail** - `frontend/src/components/journals/JournalDetail.tsx`
+- [x] 6. **JournalIdentityInline** - `frontend/src/components/journals/JournalIdentityInline.tsx`
+- [x] 7. **JournalContentInline** - `frontend/src/components/journals/JournalContentInline.tsx`
+- [x] 8. **InlineEditDateRange** - `frontend/src/components/journals/InlineEditDateRange.tsx`
+- [x] **Detail Page** - `frontend/src/app/journals/[id]/page.tsx`
+
+**Acceptance Criteria:**
+- [x] JournalDetail with responsive Card-based layout
+- [x] Inline editing for title using InlineEditField
+- [x] Inline editing for dates using InlineEditDateRange with Calendar popover
+- [x] Inline editing for content using simple textarea
+- [x] Sections for types, relationships, and hierarchy (placeholders for future phases)
+- [x] Loading and error states
+- [x] Accessibility features (ARIA attributes, test-ids)
+- [x] Jest unit tests for all components (26 tests total)
 - [x] All quality checks passing (formatting, linting, type checking)
 
 **API Integration Notes:**
@@ -894,9 +914,9 @@ CREATE TABLE journals (
   - ✅ Global search includes journals
   - ✅ Integration tests for indexing and search
   - ✅ All 27 search unit tests passing
-- � Journal UI with inline editing (ITER4-008) - Phase 1 of 6 Complete
+- � Journal UI with inline editing (ITER4-008) - Phases 1-2 of 6 Complete
   - ✅ Phase 1: Foundation (Files 1-4) - Types, API, JournalListItem, JournalList, JournalFilters
-  - ⏳ Phase 2: Detail View (Files 5-8) - JournalDetail, inline editing components
+  - ✅ Phase 2: Detail View (Files 5-8) - JournalDetail, JournalIdentityInline, JournalContentInline, InlineEditDateRange
   - ⏳ Phase 3: Type Sections (Files 9-11) - Type badges, type-specific editors
   - ⏳ Phase 4: Relationships (Files 12-15) - Contacts, tags, calendar, breadcrumb
   - ⏳ Phase 5: Hierarchy & Filters (Files 16-18) - Children list, integration (filters done)
