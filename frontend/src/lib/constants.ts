@@ -19,6 +19,11 @@ export const API_ENDPOINTS = {
     BASE: '/api/contacts',
     BY_ID: (id: string) => `/api/contacts/${id}`,
   },
+  JOURNALS: {
+    BASE: '/api/journals',
+    BY_ID: (id: string) => `/api/journals/${id}`,
+    SEARCH: '/api/journals/search',
+  },
   SEARCH: {
     CONTACTS: '/api/search/contacts',
     GLOBAL: '/api/search/global',
@@ -152,6 +157,9 @@ export const SUCCESS_MESSAGES = {
   CONTACT_CREATED: 'Contact created successfully',
   CONTACT_UPDATED: 'Contact updated successfully',
   CONTACT_DELETED: 'Contact deleted successfully',
+  JOURNAL_CREATED: 'Journal created successfully',
+  JOURNAL_UPDATED: 'Journal updated successfully',
+  JOURNAL_DELETED: 'Journal deleted successfully',
   CREATE_SUCCESS: 'Created successfully',
   UPDATE_SUCCESS: 'Updated successfully',
   DELETE_SUCCESS: 'Deleted successfully',

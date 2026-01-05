@@ -391,7 +391,9 @@ CREATE TABLE journals (
 
 - [x] Create `JournalController` in `backend/app/api/journals/` with JSON API compliance
 - [x] Implement core CRUD endpoints:
-  - [x] `GET /api/journals` - List with filtering (type, date_range, contact_id, tag_id, calendar_id, parent_id, search)
+  - [x] `GET /api/journals` - List with filtering (type, start_date, end_date, contact_id, tag_id, calendar_id, parent_id, search)
+    - ⚠️ **Note:** Endpoint accepts filter parameters but filtering logic not yet implemented in repository
+    - 📋 **TODO:** Implement filtering in `JournalRepository.list()` method
   - [x] `POST /api/journals` - Create with type data and relationships
   - [x] `GET /api/journals/{id}` - Get single journal with all data ✅ **Now returns complete data**
   - [x] `PUT /api/journals/{id}` - Full replacement update ✅ **Now returns complete data**
@@ -551,46 +553,149 @@ CREATE TABLE journals (
 - `backend/app/api/journals/controllers.py` - Added search endpoint
 - `tests/unit/infrastructure/search/test_search_service.py` - Updated global search tests
 
-### ITER4-008: Journal UI - List & Detail Views 🟡 PLANNED
+### ITER4-008: Journal UI - List & Detail Views 🔵 IN PROGRESS (Phase 1 Complete)
 **Description:** Build journal list and detail views with inline editing
-**Strategy:** Single task for core UI components
+**Strategy:** Phased implementation - Phase 1 (Foundation) complete, Phase 2 (Detail View) pending
 **Specification Reference:** [Display Requirements](../journal-system-specification.md#display-requirements), [Frontend Components](../journal-system-specification.md#frontend-components)
+**Design Document:** [ITER4-008 Design](../design/iter4-008-journal-ui-design.md)
 
-**PR Size:** ~8 files (list component, detail component, sub-components, tests)
+**PR Size:** ~18 files (list component, detail component, sub-components, API layer, types, tests)
+
+**Phase 1: Foundation (Files 1-4) ✅ COMPLETE (2026-01-04)**
+
+**Files Implemented:**
+- [x] 1. **Types** - `frontend/src/types/journals.ts`
+- [x] 2. **API Layer** - `frontend/src/lib/api/journals.ts`
+- [x] 3. **JournalListItem** - `frontend/src/components/journals/JournalListItem.tsx`
+- [x] 4. **JournalList** - `frontend/src/components/journals/JournalList.tsx`
+- [x] 5. **JournalFilters** - `frontend/src/components/journals/JournalFilters.tsx` (from Phase 5, implemented early)
 
 **Acceptance Criteria:**
-- [ ] Create `JournalList` component in `frontend/src/components/journals/`:
-  - Filterable list with sidebar filters (date range, types, contacts, tags, calendar)
-  - Date grouping (day/week/month)
-  - Type icons for visual identification
-  - Color-coding by calendar (primary) or tag (secondary)
-  - Contact chips display
-  - Expandable content preview (first 200 chars)
+- [x] TypeScript types with all enums and interfaces
+- [x] TanStack Query hooks for all journal operations
+- [x] Mutation hooks for inline editing
+- [x] Query key structure for cache management
+- [x] JournalList with responsive grid layout (1/2/3 columns)
+- [x] JournalListItem with calendar colour bar, type icons, tags, contacts
+- [x] JournalFilters with date range, type checkboxes, contact search, tag selection
+- [x] Accessibility features (ARIA attributes, test-ids)
+- [x] Jest unit tests for types, API layer, and components
+- [x] All quality checks passing (formatting, linting, type checking)
+
+**API Integration Notes:**
+- ✅ Frontend filter parameters aligned with backend expectations:
+  - `type` (singular) - only first selected type sent
+  - `tag_id` (singular) - only first selected tag sent
+  - `start_date` / `end_date` - date range parameters
+  - Tags endpoint: `/api/tags` (not `/api/journal-tags`)
+  - Tag relationship type: `journal-tag` (singular, not `journal-tags`)
+- ⚠️ **Backend filtering not yet implemented** - Backend accepts filter parameters but returns all journals
+- 📋 **TODO for later phase:** Implement actual filtering logic in `JournalRepository.list()` to filter by:
+  - `type` - filter by journal type
+  - `tag_id` - filter by assigned tag
+  - `start_date` / `end_date` - filter by event date range
+  - `contact_id` - filter by related contact
+  - `calendar_id` - filter by calendar
+  - `parent_id` - filter by parent journal
+
+**Phase 2: Detail View (Files 5-8) ⏳ PENDING**
+
+**Status:** Not started
+
+**Planned Files:**
+- [ ] 5. **JournalDetail** - `frontend/src/components/journals/JournalDetail.tsx` - Main detail layout
+- [ ] 6. **JournalIdentityInline** - `frontend/src/components/journals/JournalIdentityInline.tsx` - Title/date editing
+- [ ] 7. **JournalContentInline** - `frontend/src/components/journals/JournalContentInline.tsx` - Markdown editing (simple textarea first)
+- [ ] 8. **InlineEditDateRange** - `frontend/src/components/journals/InlineEditDateRange.tsx` - Date range picker
+
+**Acceptance Criteria:**
+- [ ] JournalDetail component with inline editing layout
+- [ ] Title and date inline editing
+- [ ] Markdown content editing (simple textarea)
+- [ ] Date range picker component
+- [ ] Responsive design for mobile and desktop
+- [ ] Unit tests for all components
+
+**Phase 3: Type Sections (Files 9-11) ⏳ PENDING**
+
+**Status:** Not started
+
+**Planned Files:**
+- [ ] 9. **JournalTypeBadges** - `frontend/src/components/journals/JournalTypeBadges.tsx` - Type display
+- [ ] 10. **JournalTypeSection** - `frontend/src/components/journals/JournalTypeSection.tsx` - Collapsible type sections
+- [ ] 11. **Type-specific editors** - Type-specific form components (EVENT, MOOD_RATING, PHOTO_ALBUM)
+
+**Acceptance Criteria:**
+- [ ] Type badges display with icons
+- [ ] Collapsible type-specific sections
+- [ ] Type-specific data editors (EVENT, MOOD_RATING, PHOTO_ALBUM)
+- [ ] Unit tests for type components
+
+**Phase 4: Relationships (Files 12-15) ⏳ PENDING**
+
+**Status:** Not started
+
+**Planned Files:**
+- [ ] 12. **JournalContactsList** - `frontend/src/components/journals/JournalContactsList.tsx` - Contact management
+- [ ] 13. **JournalTagsList** - `frontend/src/components/journals/JournalTagsList.tsx` - Tag management
+- [ ] 14. **JournalCalendarBadge** - `frontend/src/components/journals/JournalCalendarBadge.tsx` - Calendar display/editing
+- [ ] 15. **JournalBreadcrumb** - `frontend/src/components/journals/JournalBreadcrumb.tsx` - Parent navigation
+
+**Acceptance Criteria:**
+- [ ] Contact relationships display (grouped by type, inline editable)
+- [ ] Tag management (inline editable)
+- [ ] Calendar badge (colour-coded, inline editable)
+- [ ] Parent breadcrumb navigation
+- [ ] Unit tests for relationship components
+
+**Phase 5: Hierarchy & Filters (Files 16-18) ⏳ PENDING**
+
+**Status:** Partially complete (JournalFilters implemented in Phase 1)
+
+**Planned Files:**
+- [ ] 16. **JournalChildrenList** - `frontend/src/components/journals/JournalChildrenList.tsx` - Child journals
+- [x] 17. **JournalListFilters** - `frontend/src/components/journals/JournalFilters.tsx` - Filter sidebar (COMPLETE)
+- [ ] 18. **Integration** - Wire up all components
+
+**Acceptance Criteria:**
+- [ ] Child journal cards (expandable)
+- [x] Filter sidebar with all filter controls (COMPLETE)
+- [ ] Integration of all components
+- [ ] Delete confirmation dialog
+- [ ] Unit tests for hierarchy components
+
+**Phase 6: Polish & Tests (Files 19-20+) ⏳ PENDING**
+
+**Status:** Not started
+
+**Planned Work:**
+- [ ] 19. **Responsive polish** - Mobile/tablet optimizations
+- [ ] 20. **Comprehensive tests** - Integration tests for all components
+- [ ] **Advanced features:**
   - Infinite scroll pagination
+  - Date grouping in list view
+  - Performance optimizations
   - Quick actions (edit, delete, duplicate)
-- [ ] Create `JournalDetail` component:
-  - Inline editing (similar to contact detail page)
-  - Markdown content rendering with live preview
-  - Type-specific data sections (collapsible, inline editable)
-  - Contact relationship display (grouped by type, inline editable)
-  - Tag chips (clickable to filter, inline editable)
-  - Calendar badge (color-coded, inline editable)
-  - Type icons for visual identification
-  - Parent breadcrumb navigation
-  - Child journal cards (expandable)
-  - Delete confirmation dialog
-- [ ] Implement responsive design for mobile and desktop
-- [ ] Add accessibility features (ARIA attributes, keyboard navigation)
-- [ ] Write Jest unit tests for components
-- [ ] Write React Testing Library tests for user interactions
-- [ ] Document component patterns in code comments
+
+**Acceptance Criteria:**
+- [ ] Responsive polish for all screen sizes
+- [ ] Comprehensive integration tests
+- [ ] Infinite scroll pagination
+- [ ] Date grouping in list view
+- [ ] Performance optimizations
+- [ ] Quick actions (edit, delete, duplicate)
 
 **UI Patterns:**
-- Calendar color bar on left edge of journal cards
+- Calendar colour bar on left edge of journal cards
 - Type icons next to title
-- Tag badges with tag colors
+- Tag badges with tag colours
 - Inline editing for all fields (click to edit)
 - Optimistic UI updates
+
+**Out of Scope (Deferred):**
+- Drag-and-drop child reordering
+- Advanced markdown editor with toolbar
+- E2E Playwright tests (separate task)
 
 ### ITER4-009: Journal UI - Forms & Editing 🟡 PLANNED
 **Description:** Build journal creation and editing forms with type management
@@ -789,7 +894,13 @@ CREATE TABLE journals (
   - ✅ Global search includes journals
   - ✅ Integration tests for indexing and search
   - ✅ All 27 search unit tests passing
-- 🟡 Journal UI with inline editing (ITER4-008)
+- � Journal UI with inline editing (ITER4-008) - Phase 1 of 6 Complete
+  - ✅ Phase 1: Foundation (Files 1-4) - Types, API, JournalListItem, JournalList, JournalFilters
+  - ⏳ Phase 2: Detail View (Files 5-8) - JournalDetail, inline editing components
+  - ⏳ Phase 3: Type Sections (Files 9-11) - Type badges, type-specific editors
+  - ⏳ Phase 4: Relationships (Files 12-15) - Contacts, tags, calendar, breadcrumb
+  - ⏳ Phase 5: Hierarchy & Filters (Files 16-18) - Children list, integration (filters done)
+  - ⏳ Phase 6: Polish & Tests (Files 19-20+) - Responsive polish, advanced features
 - 🟡 MCP tools for AI integration (ITER4-010)
 - 🟡 Contact page journal display (ITER4-011)
 - ✅ All tests passing (unit, integration)
@@ -817,3 +928,23 @@ CREATE TABLE journals (
 - Calendar sync with EVENT journals
 - Bidirectional synchronization
 - Advanced calendar features
+
+## Future Tasks (Out of Scope for Iteration 4)
+
+The following features have been identified during design but are deferred to future iterations:
+
+### Priority 2 - Journal UI Enhancements
+- **Calendar View** - Display journals on a calendar interface (month/week/day views)
+- **Drag-and-drop child reordering** - Reorder child journals via drag-and-drop
+- **Advanced markdown editor** - Rich text toolbar, image upload, syntax highlighting
+- **PDF Export** - Export journals to PDF format
+
+### Priority 2 - Integration Enhancements
+- **Immich album picker** - Visual album selector for PHOTO_ALBUM journals
+- **GPX track display** - Map visualisation for TRAVEL journals with GPX data
+
+### Priority 3 - Testing
+- **E2E Playwright tests** - Full end-to-end tests for journal workflows
+
+### Priority 3 - Performance
+- **List virtualisation** - Virtual scrolling for large journal lists
