@@ -736,15 +736,29 @@ Check if these are installed, add if needed:
 - Type icons provide quick visual identification of journal types
 - JournalFilters was implemented early (originally planned for Phase 5)
 
-### Phase 2: Detail View (Files 5-8) ⏳ PENDING
+### Phase 2: Detail View (Files 5-8) ✅ COMPLETE
 
-**Status:** Not started
+**Status:** Complete
 
-**Planned Files:**
-- [ ] 5. **JournalDetail** - `frontend/src/components/journals/JournalDetail.tsx` - Main detail layout
-- [ ] 6. **JournalIdentityInline** - `frontend/src/components/journals/JournalIdentityInline.tsx` - Title/date editing
-- [ ] 7. **JournalContentInline** - `frontend/src/components/journals/JournalContentInline.tsx` - Markdown editing (simple textarea first)
-- [ ] 8. **InlineEditDateRange** - `frontend/src/components/journals/InlineEditDateRange.tsx` - Date range picker
+**Implemented Files:**
+- [x] 5. **JournalDetail** - `frontend/src/components/journals/JournalDetail.tsx` - Main detail layout with responsive design, sections for identity, content, types, relationships, hierarchy
+- [x] 6. **JournalIdentityInline** - `frontend/src/components/journals/JournalIdentityInline.tsx` - Inline editing for title and date fields using InlineEditField and InlineEditDateRange
+- [x] 7. **JournalContentInline** - `frontend/src/components/journals/JournalContentInline.tsx` - Markdown content editing with simple textarea (start simple, enhance later)
+- [x] 8. **InlineEditDateRange** - `frontend/src/components/journals/InlineEditDateRange.tsx` - Date range picker component for inline editing with Calendar popover
+
+**Tests:**
+- [x] `frontend/src/components/journals/__tests__/JournalDetail.test.tsx` - 13 tests covering rendering, loading states, error states, and all sections
+- [x] `frontend/src/components/journals/__tests__/JournalIdentityInline.test.tsx` - 7 tests covering title and date editing
+- [x] `frontend/src/components/journals/__tests__/JournalContentInline.test.tsx` - 2 tests covering content editing
+- [x] `frontend/src/components/journals/__tests__/InlineEditDateRange.test.tsx` - 4 tests covering date range picker functionality
+
+**Key Features:**
+- Responsive detail view with Card-based layout
+- Inline editing for title, dates, and content using shared InlineEdit components
+- Date range picker with Calendar popover for event dates
+- Sections for types, relationships, and hierarchy (placeholders for future phases)
+- Loading and error states
+- Comprehensive test coverage (26 tests total for Phase 2 components)
 
 ### Phase 3: Type Sections (Files 9-11) ⏳ PENDING
 
