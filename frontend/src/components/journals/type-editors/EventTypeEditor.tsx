@@ -7,14 +7,15 @@
 
 'use client';
 
-import { useCallback, useState } from 'react';
+import { useMemo } from 'react';
 import { Calendar as CalendarIcon, MapPin, Clock } from 'lucide-react';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import { Checkbox } from '@/components/ui/checkbox';
-import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import type { CalendarInfoData } from '@/types/journals';
+import { useTypeEditorState } from './useTypeEditorState';
+import { TypeEditorActions } from './TypeEditorActions';
 
 interface EventTypeEditorProps {
   readonly journalId: string;
@@ -23,6 +24,12 @@ interface EventTypeEditorProps {
   readonly className?: string;
   readonly 'data-testid'?: string;
 }
+
+const DEFAULT_DATA: CalendarInfoData = {
+  calendar_id: '',
+  is_all_day: false,
+  sync_invitees: false,
+};
 
 /**
  * EventTypeEditor component for editing event-specific data.
@@ -43,32 +50,19 @@ export function EventTypeEditor({
   className,
   'data-testid': testId,
 }: EventTypeEditorProps) {
-  const [isEditing, setIsEditing] = useState(false);
-  const [editData, setEditData] = useState<CalendarInfoData>(
-    data || {
-      calendar_id: '',
-      is_all_day: false,
-      sync_invitees: false,
-    }
-  );
+  const initialData = useMemo(() => data ?? DEFAULT_DATA, [data]);
 
-  const handleSave = useCallback(async () => {
-    if (onSave) {
-      await onSave(editData);
-      setIsEditing(false);
-    }
-  }, [editData, onSave]);
-
-  const handleCancel = useCallback(() => {
-    setEditData(
-      data || {
-        calendar_id: '',
-        is_all_day: false,
-        sync_invitees: false,
-      }
-    );
-    setIsEditing(false);
-  }, [data]);
+  const {
+    isEditing,
+    editData,
+    setEditData,
+    handleEdit,
+    handleSave,
+    handleCancel,
+  } = useTypeEditorState({
+    initialData,
+    onSave,
+  });
 
   return (
     <div
@@ -98,9 +92,16 @@ export function EventTypeEditor({
         <Checkbox
           id='is-all-day'
           checked={editData.is_all_day}
-          onCheckedChange={checked =>
-            setEditData({ ...editData, is_all_day: checked as boolean })
-          }
+          onCheckedChange={checked => {
+            const isAllDay = checked as boolean;
+            setEditData({
+              ...editData,
+              is_all_day: isAllDay,
+              // Clear time fields when switching to all-day
+              start_time: isAllDay ? null : editData.start_time,
+              end_time: isAllDay ? null : editData.end_time,
+            });
+          }}
           disabled={!isEditing}
           data-testid='is-all-day-checkbox'
         />
@@ -183,37 +184,12 @@ export function EventTypeEditor({
       </div>
 
       {/* Edit/Save/Cancel buttons */}
-      <div className='flex gap-2'>
-        {!isEditing ? (
-          <Button
-            variant='outline'
-            size='sm'
-            onClick={() => setIsEditing(true)}
-            data-testid='edit-button'
-          >
-            Edit
-          </Button>
-        ) : (
-          <>
-            <Button
-              variant='default'
-              size='sm'
-              onClick={handleSave}
-              data-testid='save-button'
-            >
-              Save
-            </Button>
-            <Button
-              variant='outline'
-              size='sm'
-              onClick={handleCancel}
-              data-testid='cancel-button'
-            >
-              Cancel
-            </Button>
-          </>
-        )}
-      </div>
+      <TypeEditorActions
+        isEditing={isEditing}
+        onEdit={handleEdit}
+        onSave={handleSave}
+        onCancel={handleCancel}
+      />
     </div>
   );
 }

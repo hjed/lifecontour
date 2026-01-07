@@ -6,13 +6,14 @@
 
 'use client';
 
-import { useCallback, useState } from 'react';
+import { useMemo } from 'react';
 import { Heart, Zap } from 'lucide-react';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
-import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import type { MoodData } from '@/types/journals';
+import { useTypeEditorState } from './useTypeEditorState';
+import { TypeEditorActions } from './TypeEditorActions';
 
 interface MoodRatingTypeEditorProps {
   readonly journalId: string;
@@ -21,6 +22,12 @@ interface MoodRatingTypeEditorProps {
   readonly className?: string;
   readonly 'data-testid'?: string;
 }
+
+const DEFAULT_DATA: MoodData = {
+  mood_value: null,
+  mood_label: null,
+  energy_level: null,
+};
 
 /**
  * MoodRatingTypeEditor component for editing mood and energy data.
@@ -41,32 +48,25 @@ export function MoodRatingTypeEditor({
   className,
   'data-testid': testId,
 }: MoodRatingTypeEditorProps) {
-  const [isEditing, setIsEditing] = useState(false);
-  const [editData, setEditData] = useState<MoodData>(
-    data || {
-      mood_value: null,
-      mood_label: null,
-      energy_level: null,
-    }
-  );
+  const initialData = useMemo(() => data ?? DEFAULT_DATA, [data]);
 
-  const handleSave = useCallback(async () => {
-    if (onSave) {
-      await onSave(editData);
-      setIsEditing(false);
-    }
-  }, [editData, onSave]);
-
-  const handleCancel = useCallback(() => {
-    setEditData(
-      data || {
-        mood_value: null,
-        mood_label: null,
-        energy_level: null,
-      }
-    );
-    setIsEditing(false);
-  }, [data]);
+  const {
+    isEditing,
+    editData,
+    setEditData,
+    handleEdit,
+    handleSave,
+    handleCancel,
+  } = useTypeEditorState({
+    initialData,
+    onSave,
+    // Initialize sliders to middle value (5) if they're null when entering edit mode
+    onEdit: currentData => ({
+      ...currentData,
+      mood_value: currentData.mood_value ?? 5,
+      energy_level: currentData.energy_level ?? 5,
+    }),
+  });
 
   return (
     <div
@@ -89,7 +89,7 @@ export function MoodRatingTypeEditor({
             onChange={e =>
               setEditData({
                 ...editData,
-                mood_value: parseInt(e.target.value, 10),
+                mood_value: Number.parseInt(e.target.value, 10),
               })
             }
             disabled={!isEditing}
@@ -136,7 +136,7 @@ export function MoodRatingTypeEditor({
             onChange={e =>
               setEditData({
                 ...editData,
-                energy_level: parseInt(e.target.value, 10),
+                energy_level: Number.parseInt(e.target.value, 10),
               })
             }
             disabled={!isEditing}
@@ -153,37 +153,12 @@ export function MoodRatingTypeEditor({
       </div>
 
       {/* Edit/Save/Cancel buttons */}
-      <div className='flex gap-2'>
-        {!isEditing ? (
-          <Button
-            variant='outline'
-            size='sm'
-            onClick={() => setIsEditing(true)}
-            data-testid='edit-button'
-          >
-            Edit
-          </Button>
-        ) : (
-          <>
-            <Button
-              variant='default'
-              size='sm'
-              onClick={handleSave}
-              data-testid='save-button'
-            >
-              Save
-            </Button>
-            <Button
-              variant='outline'
-              size='sm'
-              onClick={handleCancel}
-              data-testid='cancel-button'
-            >
-              Cancel
-            </Button>
-          </>
-        )}
-      </div>
+      <TypeEditorActions
+        isEditing={isEditing}
+        onEdit={handleEdit}
+        onSave={handleSave}
+        onCancel={handleCancel}
+      />
     </div>
   );
 }

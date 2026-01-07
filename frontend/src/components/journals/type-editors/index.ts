@@ -9,3 +9,5 @@ export { MoodRatingTypeEditor } from './MoodRatingTypeEditor';
 export { PhotoAlbumTypeEditor } from './PhotoAlbumTypeEditor';
 export { PlanTypeEditor } from './PlanTypeEditor';
 export { TravelTypeEditor } from './TravelTypeEditor';
+export { TypeEditorActions } from './TypeEditorActions';
+export { useTypeEditorState } from './useTypeEditorState';

@@ -42,6 +42,10 @@ interface JournalTypeSectionProps {
     | PhotoAlbumData
     | PlanData
     | TravelData;
+  readonly onSave?: (
+    type: JournalType,
+    data: CalendarInfoData | MoodData | PhotoAlbumData | PlanData | TravelData
+  ) => Promise<void>;
   readonly defaultOpen?: boolean;
   readonly className?: string;
   readonly 'data-testid'?: string;
@@ -73,6 +77,7 @@ export function JournalTypeSection({
   journalId,
   type,
   typeData,
+  onSave,
   defaultOpen = false,
   className,
   'data-testid': testId,
@@ -114,6 +119,7 @@ export function JournalTypeSection({
               journalId={journalId}
               type={type}
               typeData={typeData}
+              onSave={onSave}
             />
           </CardContent>
         </CollapsibleContent>
@@ -129,15 +135,20 @@ function TypeSpecificContent({
   journalId,
   type,
   typeData,
+  onSave,
 }: {
-  journalId: string;
-  type: JournalType;
-  typeData?:
+  readonly journalId: string;
+  readonly type: JournalType;
+  readonly typeData?:
     | CalendarInfoData
     | MoodData
     | PhotoAlbumData
     | PlanData
     | TravelData;
+  readonly onSave?: (
+    type: JournalType,
+    data: CalendarInfoData | MoodData | PhotoAlbumData | PlanData | TravelData
+  ) => Promise<void>;
 }) {
   // Render type-specific editor based on journal type
   switch (type) {
@@ -146,6 +157,7 @@ function TypeSpecificContent({
         <EventTypeEditor
           journalId={journalId}
           data={typeData as CalendarInfoData | undefined}
+          onSave={onSave ? async data => onSave(type, data) : undefined}
         />
       );
     case JournalType.MOOD_RATING:
@@ -153,6 +165,7 @@ function TypeSpecificContent({
         <MoodRatingTypeEditor
           journalId={journalId}
           data={typeData as MoodData | undefined}
+          onSave={onSave ? async data => onSave(type, data) : undefined}
         />
       );
     case JournalType.PHOTO_ALBUM:
@@ -160,6 +173,7 @@ function TypeSpecificContent({
         <PhotoAlbumTypeEditor
           journalId={journalId}
           data={typeData as PhotoAlbumData | undefined}
+          onSave={onSave ? async data => onSave(type, data) : undefined}
         />
       );
     case JournalType.PLAN:
@@ -167,6 +181,7 @@ function TypeSpecificContent({
         <PlanTypeEditor
           journalId={journalId}
           data={typeData as PlanData | undefined}
+          onSave={onSave ? async data => onSave(type, data) : undefined}
         />
       );
     case JournalType.TRAVEL:
@@ -174,6 +189,7 @@ function TypeSpecificContent({
         <TravelTypeEditor
           journalId={journalId}
           data={typeData as TravelData | undefined}
+          onSave={onSave ? async data => onSave(type, data) : undefined}
         />
       );
     case JournalType.NOTE:

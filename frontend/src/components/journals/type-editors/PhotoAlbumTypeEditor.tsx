@@ -7,13 +7,14 @@
 
 'use client';
 
-import { useCallback, useState } from 'react';
-import { Image } from 'lucide-react';
+import { useMemo } from 'react';
+import { Image as ImageIcon } from 'lucide-react';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
-import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import type { PhotoAlbumData } from '@/types/journals';
+import { useTypeEditorState } from './useTypeEditorState';
+import { TypeEditorActions } from './TypeEditorActions';
 
 interface PhotoAlbumTypeEditorProps {
   readonly journalId: string;
@@ -22,6 +23,10 @@ interface PhotoAlbumTypeEditorProps {
   readonly className?: string;
   readonly 'data-testid'?: string;
 }
+
+const DEFAULT_DATA: PhotoAlbumData = {
+  immich_album_id: null,
+};
 
 /**
  * PhotoAlbumTypeEditor component for editing photo album data.
@@ -42,28 +47,19 @@ export function PhotoAlbumTypeEditor({
   className,
   'data-testid': testId,
 }: PhotoAlbumTypeEditorProps) {
-  const [isEditing, setIsEditing] = useState(false);
-  const [editData, setEditData] = useState<PhotoAlbumData>(
-    data || {
-      immich_album_id: null,
-    }
-  );
+  const initialData = useMemo(() => data ?? DEFAULT_DATA, [data]);
 
-  const handleSave = useCallback(async () => {
-    if (onSave) {
-      await onSave(editData);
-      setIsEditing(false);
-    }
-  }, [editData, onSave]);
-
-  const handleCancel = useCallback(() => {
-    setEditData(
-      data || {
-        immich_album_id: null,
-      }
-    );
-    setIsEditing(false);
-  }, [data]);
+  const {
+    isEditing,
+    editData,
+    setEditData,
+    handleEdit,
+    handleSave,
+    handleCancel,
+  } = useTypeEditorState({
+    initialData,
+    onSave,
+  });
 
   return (
     <div
@@ -73,8 +69,7 @@ export function PhotoAlbumTypeEditor({
       {/* Immich Album ID */}
       <div className='space-y-2'>
         <Label htmlFor='immich-album-id' className='flex items-center gap-2'>
-          {/* eslint-disable-next-line jsx-a11y/alt-text */}
-          <Image className='h-4 w-4' aria-hidden='true' />
+          <ImageIcon className='h-4 w-4' aria-hidden='true' />
           Immich Album ID
         </Label>
         <Input
@@ -96,37 +91,12 @@ export function PhotoAlbumTypeEditor({
       </div>
 
       {/* Edit/Save/Cancel buttons */}
-      <div className='flex gap-2'>
-        {!isEditing ? (
-          <Button
-            variant='outline'
-            size='sm'
-            onClick={() => setIsEditing(true)}
-            data-testid='edit-button'
-          >
-            Edit
-          </Button>
-        ) : (
-          <>
-            <Button
-              variant='default'
-              size='sm'
-              onClick={handleSave}
-              data-testid='save-button'
-            >
-              Save
-            </Button>
-            <Button
-              variant='outline'
-              size='sm'
-              onClick={handleCancel}
-              data-testid='cancel-button'
-            >
-              Cancel
-            </Button>
-          </>
-        )}
-      </div>
+      <TypeEditorActions
+        isEditing={isEditing}
+        onEdit={handleEdit}
+        onSave={handleSave}
+        onCancel={handleCancel}
+      />
     </div>
   );
 }

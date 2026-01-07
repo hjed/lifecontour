@@ -14,8 +14,6 @@ import {
   ClipboardList,
   Plane,
   Image,
-  Dumbbell,
-  Mountain,
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { JournalType } from '@/types/journals';
@@ -28,17 +26,17 @@ interface JournalTypeBadgesProps {
 }
 
 // Icon mapping for journal types
-const TYPE_ICONS = {
+const TYPE_ICONS: Record<
+  JournalType,
+  React.ComponentType<{ className?: string }>
+> = {
   [JournalType.NOTE]: FileText,
   [JournalType.EVENT]: Calendar,
   [JournalType.MOOD_RATING]: Heart,
   [JournalType.PLAN]: ClipboardList,
   [JournalType.TRAVEL]: Plane,
   [JournalType.PHOTO_ALBUM]: Image,
-  // Future types (not yet in enum but prepared for expansion)
-  FITNESS: Dumbbell,
-  OUTDOOR_ACTIVITY: Mountain,
-} as const;
+};
 
 // Display labels for journal types
 const TYPE_LABELS: Record<JournalType, string> = {

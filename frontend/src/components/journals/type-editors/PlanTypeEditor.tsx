@@ -6,7 +6,7 @@
 
 'use client';
 
-import { useCallback, useState } from 'react';
+import { useCallback, useMemo } from 'react';
 import { ClipboardList, Plus, Trash2 } from 'lucide-react';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
@@ -14,6 +14,8 @@ import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { cn } from '@/lib/utils';
 import type { PlanData, PlanDocument } from '@/types/journals';
+import { useTypeEditorState } from './useTypeEditorState';
+import { TypeEditorActions } from './TypeEditorActions';
 
 interface PlanTypeEditorProps {
   readonly journalId: string;
@@ -22,6 +24,10 @@ interface PlanTypeEditorProps {
   readonly className?: string;
   readonly 'data-testid'?: string;
 }
+
+const DEFAULT_DATA: PlanData = {
+  documents: [],
+};
 
 /**
  * PlanTypeEditor component for editing plan documents.
@@ -42,28 +48,19 @@ export function PlanTypeEditor({
   className,
   'data-testid': testId,
 }: PlanTypeEditorProps) {
-  const [isEditing, setIsEditing] = useState(false);
-  const [editData, setEditData] = useState<PlanData>(
-    data || {
-      documents: [],
-    }
-  );
+  const initialData = useMemo(() => data ?? DEFAULT_DATA, [data]);
 
-  const handleSave = useCallback(async () => {
-    if (onSave) {
-      await onSave(editData);
-      setIsEditing(false);
-    }
-  }, [editData, onSave]);
-
-  const handleCancel = useCallback(() => {
-    setEditData(
-      data || {
-        documents: [],
-      }
-    );
-    setIsEditing(false);
-  }, [data]);
+  const {
+    isEditing,
+    editData,
+    setEditData,
+    handleEdit,
+    handleSave,
+    handleCancel,
+  } = useTypeEditorState({
+    initialData,
+    onSave,
+  });
 
   const handleAddDocument = useCallback(() => {
     setEditData({
@@ -78,7 +75,7 @@ export function PlanTypeEditor({
         },
       ],
     });
-  }, [editData]);
+  }, [editData, setEditData]);
 
   const handleRemoveDocument = useCallback(
     (index: number) => {
@@ -87,7 +84,7 @@ export function PlanTypeEditor({
         documents: editData.documents.filter((_, i) => i !== index),
       });
     },
-    [editData]
+    [editData, setEditData]
   );
 
   const handleUpdateDocument = useCallback(
@@ -95,14 +92,15 @@ export function PlanTypeEditor({
       const updatedDocuments = [...editData.documents];
       updatedDocuments[index] = {
         ...updatedDocuments[index],
-        [field]: value || null,
+        // url is required, so keep empty string; other fields can be null
+        [field]: field === 'url' ? value : value || null,
       };
       setEditData({
         ...editData,
         documents: updatedDocuments,
       });
     },
-    [editData]
+    [editData, setEditData]
   );
 
   return (
@@ -125,7 +123,7 @@ export function PlanTypeEditor({
           <div className='space-y-3'>
             {editData.documents.map((doc, index) => (
               <div
-                key={index}
+                key={`${doc.url}-${doc.order}`}
                 className='space-y-2 rounded-md border p-3'
                 data-testid={`document-${index}`}
               >
@@ -196,37 +194,12 @@ export function PlanTypeEditor({
       </div>
 
       {/* Edit/Save/Cancel buttons */}
-      <div className='flex gap-2'>
-        {!isEditing ? (
-          <Button
-            variant='outline'
-            size='sm'
-            onClick={() => setIsEditing(true)}
-            data-testid='edit-button'
-          >
-            Edit
-          </Button>
-        ) : (
-          <>
-            <Button
-              variant='default'
-              size='sm'
-              onClick={handleSave}
-              data-testid='save-button'
-            >
-              Save
-            </Button>
-            <Button
-              variant='outline'
-              size='sm'
-              onClick={handleCancel}
-              data-testid='cancel-button'
-            >
-              Cancel
-            </Button>
-          </>
-        )}
-      </div>
+      <TypeEditorActions
+        isEditing={isEditing}
+        onEdit={handleEdit}
+        onSave={handleSave}
+        onCancel={handleCancel}
+      />
     </div>
   );
 }

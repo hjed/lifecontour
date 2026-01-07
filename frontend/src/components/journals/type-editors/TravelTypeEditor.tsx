@@ -6,12 +6,13 @@
 
 'use client';
 
-import { useCallback, useState } from 'react';
+import { useMemo } from 'react';
 import { Plane, Hotel, Car } from 'lucide-react';
 import { Label } from '@/components/ui/label';
-import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import type { TravelData } from '@/types/journals';
+import { useTypeEditorState } from './useTypeEditorState';
+import { TypeEditorActions } from './TypeEditorActions';
 
 interface TravelTypeEditorProps {
   readonly journalId: string;
@@ -20,6 +21,12 @@ interface TravelTypeEditorProps {
   readonly className?: string;
   readonly 'data-testid'?: string;
 }
+
+const DEFAULT_DATA: TravelData = {
+  flights: [],
+  accommodations: [],
+  transportation: [],
+};
 
 /**
  * TravelTypeEditor component for editing travel data.
@@ -40,32 +47,13 @@ export function TravelTypeEditor({
   className,
   'data-testid': testId,
 }: TravelTypeEditorProps) {
-  const [isEditing, setIsEditing] = useState(false);
-  const [editData, setEditData] = useState<TravelData>(
-    data || {
-      flights: [],
-      accommodations: [],
-      transportation: [],
-    }
-  );
+  const initialData = useMemo(() => data ?? DEFAULT_DATA, [data]);
 
-  const handleSave = useCallback(async () => {
-    if (onSave) {
-      await onSave(editData);
-      setIsEditing(false);
-    }
-  }, [editData, onSave]);
-
-  const handleCancel = useCallback(() => {
-    setEditData(
-      data || {
-        flights: [],
-        accommodations: [],
-        transportation: [],
-      }
-    );
-    setIsEditing(false);
-  }, [data]);
+  const { isEditing, editData, handleEdit, handleSave, handleCancel } =
+    useTypeEditorState({
+      initialData,
+      onSave,
+    });
 
   return (
     <div
@@ -111,37 +99,12 @@ export function TravelTypeEditor({
       </div>
 
       {/* Edit/Save/Cancel buttons */}
-      <div className='flex gap-2'>
-        {!isEditing ? (
-          <Button
-            variant='outline'
-            size='sm'
-            onClick={() => setIsEditing(true)}
-            data-testid='edit-button'
-          >
-            Edit
-          </Button>
-        ) : (
-          <>
-            <Button
-              variant='default'
-              size='sm'
-              onClick={handleSave}
-              data-testid='save-button'
-            >
-              Save
-            </Button>
-            <Button
-              variant='outline'
-              size='sm'
-              onClick={handleCancel}
-              data-testid='cancel-button'
-            >
-              Cancel
-            </Button>
-          </>
-        )}
-      </div>
+      <TypeEditorActions
+        isEditing={isEditing}
+        onEdit={handleEdit}
+        onSave={handleSave}
+        onCancel={handleCancel}
+      />
     </div>
   );
 }
