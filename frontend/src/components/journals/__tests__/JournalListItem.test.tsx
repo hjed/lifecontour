@@ -81,8 +81,8 @@ describe('JournalListItem', () => {
       attributes: {
         ...baseJournal.attributes,
         tags: [
-          { id: '1', name: 'Personal', color: '#FF0000' },
-          { id: '2', name: 'Work', color: '#00FF00' },
+          { id: 1, name: 'Personal', color: '#FF0000' },
+          { id: 2, name: 'Work', color: '#00FF00' },
         ],
       },
     };
@@ -100,14 +100,14 @@ describe('JournalListItem', () => {
         ...baseJournal.attributes,
         contacts: [
           {
-            id: 'contact-1',
+            id: 1,
             name: 'John Doe',
-            relationship_type: JournalContactRelationshipType.PARTICIPANT,
+            relationshipType: JournalContactRelationshipType.PARTICIPANT,
           },
           {
-            id: 'contact-2',
+            id: 2,
             name: 'Jane Smith',
-            relationship_type: JournalContactRelationshipType.INVITEE,
+            relationshipType: JournalContactRelationshipType.INVITEE,
           },
         ],
       },
@@ -115,9 +115,9 @@ describe('JournalListItem', () => {
 
     render(<JournalListItem journal={journalWithContacts} />);
 
-    expect(screen.getByTestId('contact-contact-1')).toBeInTheDocument();
+    expect(screen.getByTestId('contact-1')).toBeInTheDocument();
     expect(screen.getByText('John Doe')).toBeInTheDocument();
-    expect(screen.getByTestId('contact-contact-2')).toBeInTheDocument();
+    expect(screen.getByTestId('contact-2')).toBeInTheDocument();
     expect(screen.getByText('Jane Smith')).toBeInTheDocument();
   });
 

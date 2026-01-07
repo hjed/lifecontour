@@ -120,8 +120,8 @@ describe('JournalDetail', () => {
     it('renders tag badges', () => {
       renderWithQueryClient(<JournalDetail journal={mockJournal} />);
 
-      expect(screen.getByTestId('tag-badge-tag1')).toBeInTheDocument();
-      expect(screen.getByTestId('tag-badge-tag2')).toBeInTheDocument();
+      expect(screen.getByTestId('tag-badge-1')).toBeInTheDocument();
+      expect(screen.getByTestId('tag-badge-2')).toBeInTheDocument();
       expect(screen.getByText('Work')).toBeInTheDocument();
       expect(screen.getByText('Important')).toBeInTheDocument();
     });

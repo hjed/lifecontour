@@ -1,0 +1,180 @@
+/**
+ * Tests for JournalTypeSection component.
+ *
+ * Tests collapsible functionality, type-specific rendering, and accessibility.
+ */
+
+import { render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { JournalTypeSection } from '../JournalTypeSection';
+import { JournalType } from '@/types/journals';
+import type { MoodData } from '@/types/journals';
+
+describe('JournalTypeSection', () => {
+  const mockJournalId = '123';
+
+  it('renders with collapsed state by default', () => {
+    render(
+      <JournalTypeSection journalId={mockJournalId} type={JournalType.EVENT} />
+    );
+
+    const trigger = screen.getByTestId('type-section-trigger-EVENT');
+    expect(trigger).toBeInTheDocument();
+    expect(trigger).toHaveAttribute('aria-label', 'Expand Event Details');
+  });
+
+  it('renders with expanded state when defaultOpen is true', () => {
+    render(
+      <JournalTypeSection
+        journalId={mockJournalId}
+        type={JournalType.MOOD_RATING}
+        defaultOpen={true}
+      />
+    );
+
+    const trigger = screen.getByTestId('type-section-trigger-MOOD_RATING');
+    expect(trigger).toHaveAttribute('aria-label', 'Collapse Mood & Energy');
+
+    // Content should be visible (type-specific editor)
+    const content = screen.getByTestId('mood-rating-type-editor');
+    expect(content).toBeInTheDocument();
+  });
+
+  it('toggles open/closed state when clicked', async () => {
+    const user = userEvent.setup();
+
+    render(
+      <JournalTypeSection journalId={mockJournalId} type={JournalType.PLAN} />
+    );
+
+    const trigger = screen.getByTestId('type-section-trigger-PLAN');
+
+    // Initially collapsed
+    expect(trigger).toHaveAttribute('aria-label', 'Expand Plan Documents');
+
+    // Click to expand
+    await user.click(trigger);
+    expect(trigger).toHaveAttribute('aria-label', 'Collapse Plan Documents');
+    expect(screen.getByTestId('plan-type-editor')).toBeInTheDocument();
+
+    // Click to collapse
+    await user.click(trigger);
+    expect(trigger).toHaveAttribute('aria-label', 'Expand Plan Documents');
+  });
+
+  it('displays correct section labels for all types', () => {
+    const types = [
+      { type: JournalType.NOTE, label: 'Note Details' },
+      { type: JournalType.EVENT, label: 'Event Details' },
+      { type: JournalType.MOOD_RATING, label: 'Mood & Energy' },
+      { type: JournalType.PLAN, label: 'Plan Documents' },
+      { type: JournalType.TRAVEL, label: 'Travel Itinerary' },
+      { type: JournalType.PHOTO_ALBUM, label: 'Photo Album' },
+    ];
+
+    types.forEach(({ type, label }) => {
+      const { unmount } = render(
+        <JournalTypeSection journalId={mockJournalId} type={type} />
+      );
+      expect(screen.getByText(label)).toBeInTheDocument();
+      unmount();
+    });
+  });
+
+  it('renders type-specific content when expanded', () => {
+    const moodData: MoodData = {
+      mood_value: 8,
+      mood_label: 'Happy',
+      energy_level: 7,
+    };
+
+    render(
+      <JournalTypeSection
+        journalId={mockJournalId}
+        type={JournalType.MOOD_RATING}
+        typeData={moodData}
+        defaultOpen={true}
+      />
+    );
+
+    const content = screen.getByTestId('mood-rating-type-editor');
+    expect(content).toBeInTheDocument();
+
+    // Verify data is passed to the editor
+    expect(screen.getByTestId('mood-value-display')).toHaveTextContent('8');
+    expect(screen.getByTestId('mood-label-input')).toHaveValue('Happy');
+    expect(screen.getByTestId('energy-level-display')).toHaveTextContent('7');
+  });
+
+  it('applies custom className', () => {
+    render(
+      <JournalTypeSection
+        journalId={mockJournalId}
+        type={JournalType.EVENT}
+        className='custom-class'
+      />
+    );
+
+    const section = screen.getByTestId('type-section-EVENT');
+    expect(section).toHaveClass('custom-class');
+  });
+
+  it('applies custom test ID', () => {
+    render(
+      <JournalTypeSection
+        journalId={mockJournalId}
+        type={JournalType.EVENT}
+        data-testid='custom-test-id'
+      />
+    );
+
+    expect(screen.getByTestId('custom-test-id')).toBeInTheDocument();
+  });
+
+  it('shows chevron icons for expand/collapse state', () => {
+    const { container, rerender } = render(
+      <JournalTypeSection
+        journalId={mockJournalId}
+        type={JournalType.EVENT}
+        defaultOpen={false}
+      />
+    );
+
+    // Collapsed state should show ChevronRight
+    let chevrons = container.querySelectorAll('svg');
+    expect(chevrons.length).toBeGreaterThan(0);
+
+    // Expanded state should show ChevronDown
+    rerender(
+      <JournalTypeSection
+        journalId={mockJournalId}
+        type={JournalType.EVENT}
+        defaultOpen={true}
+      />
+    );
+
+    chevrons = container.querySelectorAll('svg');
+    expect(chevrons.length).toBeGreaterThan(0);
+  });
+
+  it('maintains state across re-renders', async () => {
+    const user = userEvent.setup();
+    const { rerender } = render(
+      <JournalTypeSection journalId={mockJournalId} type={JournalType.EVENT} />
+    );
+
+    const trigger = screen.getByTestId('type-section-trigger-EVENT');
+
+    // Expand
+    await user.click(trigger);
+    expect(screen.getByTestId('event-type-editor')).toBeInTheDocument();
+
+    // Re-render with same props
+    rerender(
+      <JournalTypeSection journalId={mockJournalId} type={JournalType.EVENT} />
+    );
+
+    // Should still be expanded
+    expect(screen.getByTestId('event-type-editor')).toBeInTheDocument();
+  });
+});
