@@ -95,12 +95,12 @@ export function JournalDetailView({
 
   const handleContactAdd = async (
     contactId: number,
-    relationshipType: string
+    relationshipType: JournalContactRelationshipType
   ) => {
     await addContact.mutateAsync({
       journalId: journal.id,
       contactId: contactId.toString(),
-      relationshipType: relationshipType as JournalContactRelationshipType,
+      relationshipType,
     });
   };
 
@@ -113,7 +113,7 @@ export function JournalDetailView({
     await removeContact.mutateAsync({
       journalId: journal.id,
       contactId: contactId.toString(),
-      relationshipType: contact.relationshipType,
+      relationshipType: contact.relationship_type,
     });
   };
 

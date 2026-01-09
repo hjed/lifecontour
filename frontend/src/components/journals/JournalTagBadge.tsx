@@ -133,13 +133,15 @@ export function JournalTagBadge({
           <PopoverContent className='w-64 p-3' align='start'>
             <div className='space-y-3'>
               <div className='space-y-2'>
-                <label className='text-sm font-medium'>Select Tag</label>
+                <label htmlFor='tag-select' className='text-sm font-medium'>
+                  Select Tag
+                </label>
                 <Select
                   value={selectedTagId?.toString()}
                   onValueChange={value => setSelectedTagId(Number(value))}
                   disabled={isLoading}
                 >
-                  <SelectTrigger data-testid='tag-select'>
+                  <SelectTrigger id='tag-select' data-testid='tag-select'>
                     <SelectValue placeholder='Choose a tag' />
                   </SelectTrigger>
                   <SelectContent>

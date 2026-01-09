@@ -66,7 +66,7 @@ export function JournalTypeDataDisplay({
 }
 
 // MOOD Data Display
-function MoodDataDisplay({ data }: { data: MoodData }) {
+function MoodDataDisplay({ data }: { readonly data: MoodData }) {
   return (
     <Card data-testid='mood-data'>
       <CardHeader>
@@ -96,7 +96,7 @@ function MoodDataDisplay({ data }: { data: MoodData }) {
 }
 
 // PLAN Data Display
-function PlanDataDisplay({ data }: { data: PlanData }) {
+function PlanDataDisplay({ data }: { readonly data: PlanData }) {
   if (!data.documents || data.documents.length === 0) {
     return null;
   }
@@ -135,7 +135,7 @@ function PlanDataDisplay({ data }: { data: PlanData }) {
 }
 
 // TRAVEL Data Display
-function TravelDataDisplay({ data }: { data: TravelData }) {
+function TravelDataDisplay({ data }: { readonly data: TravelData }) {
   const hasFlights = data.flights && data.flights.length > 0;
   const hasAccommodations =
     data.accommodations && data.accommodations.length > 0;
@@ -253,7 +253,7 @@ function TravelDataDisplay({ data }: { data: TravelData }) {
 }
 
 // PHOTO_ALBUM Data Display
-function PhotoAlbumDataDisplay({ data }: { data: PhotoAlbumData }) {
+function PhotoAlbumDataDisplay({ data }: { readonly data: PhotoAlbumData }) {
   if (!data.immich_album_id) {
     return null;
   }

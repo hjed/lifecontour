@@ -126,7 +126,7 @@ export function JournalListItem({ journal, className }: JournalListItemProps) {
           <div className='flex flex-wrap gap-2'>
             {attributes.contacts.map(contact => (
               <div
-                key={`${contact.id}-${contact.relationshipType}`}
+                key={`${contact.id}-${contact.relationship_type}`}
                 className='bg-muted text-muted-foreground flex items-center gap-1 rounded-full px-2 py-1 text-xs'
                 data-testid={`contact-${contact.id}`}
               >

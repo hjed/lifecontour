@@ -76,7 +76,7 @@ export interface TravelAccommodation {
   id?: string | null;
   name: string;
   address?: string | null;
-  location?: string | null;
+  location?: string | null; // Location/city of accommodation
   check_in_date?: string | null; // ISO date string
   check_out_date?: string | null; // ISO date string
   booking_reference?: string | null;
@@ -114,7 +114,7 @@ export type JournalTypeData =
 export interface JournalContactRelationship {
   id: number;
   name?: string | null;
-  relationshipType: JournalContactRelationshipType;
+  relationship_type: JournalContactRelationshipType;
 }
 
 // Alias for backward compatibility

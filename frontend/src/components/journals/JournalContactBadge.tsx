@@ -25,20 +25,21 @@ import {
 } from '@/components/ui/select';
 import { cn } from '@/lib/utils';
 import type { JournalContact } from '@/types/journals';
+import { JournalContactRelationshipType } from '@/types/journals';
 
 interface JournalContactBadgeProps {
   readonly contacts: JournalContact[];
   readonly onContactAdd?: (
     contactId: number,
-    relationshipType: string
+    relationshipType: JournalContactRelationshipType
   ) => Promise<void>;
   readonly onContactRemove?: (contactId: number) => Promise<void>;
   readonly onRelationshipChange?: (
     contactId: number,
-    relationshipType: string
+    relationshipType: JournalContactRelationshipType
   ) => Promise<void>;
   readonly availableContacts?: Array<{ id: number; name: string }>;
-  readonly relationshipTypes?: string[];
+  readonly relationshipTypes?: JournalContactRelationshipType[];
   readonly disabled?: boolean;
   readonly className?: string;
 }
@@ -53,7 +54,12 @@ export function JournalContactBadge({
   onContactRemove,
   onRelationshipChange,
   availableContacts = [],
-  relationshipTypes = ['MENTIONED', 'PARTICIPANT', 'ORGANIZER', 'RELATED'],
+  relationshipTypes = [
+    JournalContactRelationshipType.PARTICIPANT,
+    JournalContactRelationshipType.INVITEE,
+    JournalContactRelationshipType.MENTION,
+    JournalContactRelationshipType.ABOUT,
+  ],
   disabled = false,
   className,
 }: JournalContactBadgeProps) {
@@ -62,7 +68,9 @@ export function JournalContactBadge({
     null
   );
   const [selectedRelationshipType, setSelectedRelationshipType] =
-    useState<string>('MENTIONED');
+    useState<JournalContactRelationshipType>(
+      JournalContactRelationshipType.PARTICIPANT
+    );
   const [isLoading, setIsLoading] = useState(false);
 
   const handleAddContact = async () => {
@@ -73,7 +81,7 @@ export function JournalContactBadge({
       await onContactAdd(selectedContactId, selectedRelationshipType);
       setIsAddOpen(false);
       setSelectedContactId(null);
-      setSelectedRelationshipType('MENTIONED');
+      setSelectedRelationshipType(JournalContactRelationshipType.PARTICIPANT);
     } catch (error) {
       console.error('Failed to add contact:', error);
     } finally {
@@ -172,7 +180,11 @@ export function JournalContactBadge({
                 </label>
                 <Select
                   value={selectedRelationshipType}
-                  onValueChange={setSelectedRelationshipType}
+                  onValueChange={value =>
+                    setSelectedRelationshipType(
+                      value as JournalContactRelationshipType
+                    )
+                  }
                   disabled={isLoading}
                 >
                   <SelectTrigger
@@ -223,9 +235,9 @@ function ContactBadge({ contact, onRemove, disabled }: ContactBadgeProps) {
     >
       <User className='h-3 w-3' />
       <span>{contact.name}</span>
-      {contact.relationshipType && (
+      {contact.relationship_type && (
         <span className='text-muted-foreground text-[10px]'>
-          ({contact.relationshipType})
+          ({contact.relationship_type})
         </span>
       )}
       {onRemove && (
