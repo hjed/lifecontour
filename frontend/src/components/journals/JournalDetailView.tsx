@@ -54,7 +54,8 @@ export function JournalDetailView({
   className,
 }: JournalDetailViewProps) {
   const router = useRouter();
-  const [availableCalendars] = useState<JournalCalendar[]>([]); // TODO: Fetch from API
+  // Note: Calendar fetching will be implemented when calendar API is available
+  const [availableCalendars] = useState<JournalCalendar[]>([]);
 
   // Mutations
   const updateJournal = useUpdateJournal();
@@ -71,7 +72,7 @@ export function JournalDetailView({
   const availableTags = tagsResponse?.data || [];
   const availableContacts =
     contactsResponse?.data.map(c => ({
-      id: parseInt(c.id, 10),
+      id: Number.parseInt(c.id, 10),
       name: `${c.attributes.first_name} ${c.attributes.last_name || ''}`.trim(),
     })) || [];
 
@@ -251,7 +252,7 @@ export function JournalDetailView({
 
       {/* Children List */}
       {journal.children && journal.children.length > 0 && (
-        <JournalChildrenList>{journal.children}</JournalChildrenList>
+        <JournalChildrenList childJournals={journal.children} />
       )}
     </div>
   );

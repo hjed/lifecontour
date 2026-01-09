@@ -132,13 +132,18 @@ export function JournalContactBadge({
           <PopoverContent className='w-80 p-3' align='start'>
             <div className='space-y-3'>
               <div className='space-y-2'>
-                <label className='text-sm font-medium'>Select Contact</label>
+                <label htmlFor='contact-select' className='text-sm font-medium'>
+                  Select Contact
+                </label>
                 <Select
                   value={selectedContactId?.toString()}
                   onValueChange={value => setSelectedContactId(Number(value))}
                   disabled={isLoading}
                 >
-                  <SelectTrigger data-testid='contact-select'>
+                  <SelectTrigger
+                    id='contact-select'
+                    data-testid='contact-select'
+                  >
                     <SelectValue placeholder='Choose a contact' />
                   </SelectTrigger>
                   <SelectContent>
@@ -159,13 +164,21 @@ export function JournalContactBadge({
               </div>
 
               <div className='space-y-2'>
-                <label className='text-sm font-medium'>Relationship Type</label>
+                <label
+                  htmlFor='relationship-type-select'
+                  className='text-sm font-medium'
+                >
+                  Relationship Type
+                </label>
                 <Select
                   value={selectedRelationshipType}
                   onValueChange={setSelectedRelationshipType}
                   disabled={isLoading}
                 >
-                  <SelectTrigger data-testid='relationship-type-select'>
+                  <SelectTrigger
+                    id='relationship-type-select'
+                    data-testid='relationship-type-select'
+                  >
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>

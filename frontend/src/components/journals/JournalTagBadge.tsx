@@ -103,7 +103,7 @@ export function JournalTagBadge({
           {onTagRemove && (
             <button
               type='button'
-              onClick={() => handleRemoveTag(Number(tag.id))}
+              onClick={() => handleRemoveTag(tag.id)}
               disabled={disabled || isLoading}
               className='hover:bg-muted ml-1 rounded-sm p-0.5 transition-colors'
               aria-label={`Remove tag ${tag.name}`}

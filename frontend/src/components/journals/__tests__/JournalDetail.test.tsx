@@ -45,15 +45,17 @@ jest.mock('@/components/journals/JournalContentInline', () => ({
 describe('JournalDetail', () => {
   const mockJournal = createMockJournalWithMetadata();
 
+  // Helper to render the component with default props
+  const renderJournalDetail = (props = {}) =>
+    renderWithQueryClient(<JournalDetail journal={mockJournal} {...props} />);
+
   beforeEach(() => {
     jest.clearAllMocks();
   });
 
   describe('Loading State', () => {
     it('renders skeleton when loading', () => {
-      const { container } = renderWithQueryClient(
-        <JournalDetail journal={mockJournal} isLoading={true} />
-      );
+      const { container } = renderJournalDetail({ isLoading: true });
 
       // Should show skeleton loaders (using data-slot attribute)
       const skeletons = container.querySelectorAll('[data-slot="skeleton"]');
@@ -64,9 +66,7 @@ describe('JournalDetail', () => {
   describe('Error State', () => {
     it('renders error message when error occurs', () => {
       const error = new Error('Failed to load journal');
-      renderWithQueryClient(
-        <JournalDetail journal={mockJournal} error={error} />
-      );
+      renderJournalDetail({ error });
 
       expect(screen.getByText(/Failed to load journal/i)).toBeInTheDocument();
     });
@@ -74,7 +74,7 @@ describe('JournalDetail', () => {
 
   describe('Content Rendering', () => {
     it('renders journal detail with all sections', () => {
-      renderWithQueryClient(<JournalDetail journal={mockJournal} />);
+      renderJournalDetail();
 
       expect(screen.getByTestId('journal-detail')).toBeInTheDocument();
       expect(screen.getByTestId('journal-identity')).toBeInTheDocument();
@@ -82,22 +82,20 @@ describe('JournalDetail', () => {
     });
 
     it('renders back button', () => {
-      renderWithQueryClient(<JournalDetail journal={mockJournal} />);
+      renderJournalDetail();
 
       expect(screen.getByTestId('back-button')).toBeInTheDocument();
       expect(screen.getByText('Back')).toBeInTheDocument();
     });
 
     it('renders delete button', () => {
-      renderWithQueryClient(<JournalDetail journal={mockJournal} />);
+      renderJournalDetail();
 
       expect(screen.getByTestId('delete-button')).toBeInTheDocument();
     });
 
     it('displays calendar color bar', () => {
-      const { container } = renderWithQueryClient(
-        <JournalDetail journal={mockJournal} />
-      );
+      const { container } = renderJournalDetail();
 
       const colorBar = container.querySelector('[style*="background-color"]');
       expect(colorBar).toBeInTheDocument();
@@ -105,20 +103,20 @@ describe('JournalDetail', () => {
     });
 
     it('renders type badges', () => {
-      renderWithQueryClient(<JournalDetail journal={mockJournal} />);
+      renderJournalDetail();
 
       expect(screen.getByTestId('type-badge-NOTE')).toBeInTheDocument();
     });
 
     it('renders calendar badge', () => {
-      renderWithQueryClient(<JournalDetail journal={mockJournal} />);
+      renderJournalDetail();
 
       expect(screen.getByTestId('calendar-badge')).toBeInTheDocument();
       expect(screen.getByText('Personal')).toBeInTheDocument();
     });
 
     it('renders tag badges', () => {
-      renderWithQueryClient(<JournalDetail journal={mockJournal} />);
+      renderJournalDetail();
 
       expect(screen.getByTestId('tag-badge-1')).toBeInTheDocument();
       expect(screen.getByTestId('tag-badge-2')).toBeInTheDocument();
@@ -127,7 +125,7 @@ describe('JournalDetail', () => {
     });
 
     it('renders timestamps', () => {
-      renderWithQueryClient(<JournalDetail journal={mockJournal} />);
+      renderJournalDetail();
 
       expect(screen.getByText(/Created:/)).toBeInTheDocument();
       expect(screen.getByText(/Updated:/)).toBeInTheDocument();
@@ -137,7 +135,7 @@ describe('JournalDetail', () => {
   describe('Navigation', () => {
     it('navigates back when back button clicked', async () => {
       const user = userEvent.setup();
-      renderWithQueryClient(<JournalDetail journal={mockJournal} />);
+      renderJournalDetail();
 
       const backButton = screen.getByTestId('back-button');
       await user.click(backButton);
@@ -148,16 +146,14 @@ describe('JournalDetail', () => {
 
   describe('Accessibility', () => {
     it('has proper ARIA labels on buttons', () => {
-      renderWithQueryClient(<JournalDetail journal={mockJournal} />);
+      renderJournalDetail();
 
       expect(screen.getByLabelText('Back to journals')).toBeInTheDocument();
       expect(screen.getByLabelText('Delete journal')).toBeInTheDocument();
     });
 
     it('applies custom className', () => {
-      renderWithQueryClient(
-        <JournalDetail journal={mockJournal} className='custom-class' />
-      );
+      renderJournalDetail({ className: 'custom-class' });
 
       expect(screen.getByTestId('journal-detail')).toHaveClass('custom-class');
     });

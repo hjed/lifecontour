@@ -111,7 +111,7 @@ function PlanDataDisplay({ data }: { data: PlanData }) {
       </CardHeader>
       <CardContent>
         <div className='space-y-2'>
-          {data.documents
+          {[...data.documents]
             .sort((a, b) => (a.order || 0) - (b.order || 0))
             .map((doc, index) => (
               <div
@@ -162,7 +162,7 @@ function TravelDataDisplay({ data }: { data: TravelData }) {
               <Plane className='h-3 w-3' />
               Flights
             </div>
-            {data.flights
+            {[...data.flights]
               .sort((a, b) => (a.order || 0) - (b.order || 0))
               .map((flight, index) => (
                 <div
@@ -194,7 +194,7 @@ function TravelDataDisplay({ data }: { data: TravelData }) {
               <Hotel className='h-3 w-3' />
               Accommodations
             </div>
-            {data.accommodations
+            {[...data.accommodations]
               .sort((a, b) => (a.order || 0) - (b.order || 0))
               .map((acc, index) => (
                 <div
@@ -225,7 +225,7 @@ function TravelDataDisplay({ data }: { data: TravelData }) {
               <Car className='h-3 w-3' />
               Transportation
             </div>
-            {data.transportation
+            {[...data.transportation]
               .sort((a, b) => (a.order || 0) - (b.order || 0))
               .map((trans, index) => (
                 <div

@@ -16,7 +16,7 @@ import { cn } from '@/lib/utils';
 import { JournalType, type ChildJournalSummary } from '@/types/journals';
 
 interface JournalChildrenListProps {
-  readonly children: ChildJournalSummary[];
+  readonly childJournals: ChildJournalSummary[];
   readonly className?: string;
 }
 
@@ -25,10 +25,10 @@ interface JournalChildrenListProps {
  * Shows child journals with navigation links.
  */
 export function JournalChildrenList({
-  children,
+  childJournals,
   className,
 }: JournalChildrenListProps) {
-  if (children.length === 0) {
+  if (childJournals.length === 0) {
     return null;
   }
 
@@ -39,7 +39,7 @@ export function JournalChildrenList({
       </CardHeader>
       <CardContent>
         <div className='space-y-2'>
-          {children.map(child => (
+          {childJournals.map(child => (
             <ChildJournalItem key={child.id} child={child} />
           ))}
         </div>

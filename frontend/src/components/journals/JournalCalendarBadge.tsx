@@ -36,6 +36,47 @@ interface JournalCalendarBadgeProps {
 }
 
 /**
+ * Renders a calendar select dropdown with color indicators.
+ */
+function CalendarSelect({
+  value,
+  availableCalendars,
+  onValueChange,
+  disabled,
+  placeholder,
+  selectId,
+}: {
+  readonly value?: string;
+  readonly availableCalendars: JournalCalendar[];
+  readonly onValueChange: (value: string) => void;
+  readonly disabled: boolean;
+  readonly placeholder?: string;
+  readonly selectId: string;
+}) {
+  return (
+    <Select value={value} onValueChange={onValueChange} disabled={disabled}>
+      <SelectTrigger id={selectId} data-testid='calendar-select'>
+        <SelectValue placeholder={placeholder} />
+      </SelectTrigger>
+      <SelectContent>
+        {availableCalendars.map(cal => (
+          <SelectItem key={cal.id} value={cal.id}>
+            <div className='flex items-center gap-2'>
+              <div
+                className='h-3 w-3 rounded-full'
+                style={{ backgroundColor: cal.color || '#6b7280' }}
+                aria-hidden='true'
+              />
+              <span>{cal.name}</span>
+            </div>
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  );
+}
+
+/**
  * Calendar badge component with inline editing for EVENT type journals.
  * Displays calendar name with color indicator.
  */
@@ -90,26 +131,16 @@ export function JournalCalendarBadge({
         </PopoverTrigger>
         <PopoverContent className='w-64 p-3' align='start'>
           <div className='space-y-2'>
-            <label className='text-sm font-medium'>Select Calendar</label>
-            <Select onValueChange={handleCalendarChange} disabled={isLoading}>
-              <SelectTrigger data-testid='calendar-select'>
-                <SelectValue placeholder='Choose a calendar' />
-              </SelectTrigger>
-              <SelectContent>
-                {availableCalendars.map(cal => (
-                  <SelectItem key={cal.id} value={cal.id}>
-                    <div className='flex items-center gap-2'>
-                      <div
-                        className='h-3 w-3 rounded-full'
-                        style={{ backgroundColor: cal.color || '#6b7280' }}
-                        aria-hidden='true'
-                      />
-                      <span>{cal.name}</span>
-                    </div>
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <label htmlFor='calendar-select' className='text-sm font-medium'>
+              Select Calendar
+            </label>
+            <CalendarSelect
+              availableCalendars={availableCalendars}
+              onValueChange={handleCalendarChange}
+              disabled={isLoading}
+              placeholder='Choose a calendar'
+              selectId='calendar-select'
+            />
           </div>
         </PopoverContent>
       </Popover>
@@ -153,30 +184,16 @@ export function JournalCalendarBadge({
       </PopoverTrigger>
       <PopoverContent className='w-64 p-3' align='start'>
         <div className='space-y-2'>
-          <label className='text-sm font-medium'>Change Calendar</label>
-          <Select
+          <label htmlFor='calendar-select-edit' className='text-sm font-medium'>
+            Change Calendar
+          </label>
+          <CalendarSelect
             value={calendar.id}
+            availableCalendars={availableCalendars}
             onValueChange={handleCalendarChange}
             disabled={isLoading}
-          >
-            <SelectTrigger data-testid='calendar-select'>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {availableCalendars.map(cal => (
-                <SelectItem key={cal.id} value={cal.id}>
-                  <div className='flex items-center gap-2'>
-                    <div
-                      className='h-3 w-3 rounded-full'
-                      style={{ backgroundColor: cal.color || '#6b7280' }}
-                      aria-hidden='true'
-                    />
-                    <span>{cal.name}</span>
-                  </div>
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+            selectId='calendar-select-edit'
+          />
         </div>
       </PopoverContent>
     </Popover>
