@@ -62,6 +62,19 @@ export interface TestContact {
   isFavourite?: boolean;
 }
 
+export interface TestJournal {
+  id: string;
+  title: string;
+  content: string;
+  event_date_range: {
+    start: string;
+    end: string;
+  };
+  types?: string[];
+  contacts?: Array<{ id: string; name: string; relationship_type: string }>;
+  tags?: Array<{ id: number; name: string; color: string }>;
+}
+
 export interface TestFixtures {
   // Authentication fixtures
   authenticatedPage: Page;
@@ -86,6 +99,10 @@ export interface TestFixtures {
   favouriteContacts: { page: Page; contacts: TestContact[] };
   regularContacts: { page: Page; contacts: TestContact[] };
   taggedContactsData: { page: Page; contacts: TestContact[]; tags: any[] };
+
+  // Journal fixtures
+  journalsWithData: { page: Page; journals: TestJournal[] };
+  emptyJournalsPage: Page;
 
   // Utility fixtures
   testCleanup: (cleanupFn: () => Promise<void>) => void;
@@ -750,6 +767,62 @@ export const test = base.extend<TestFixtures, WorkerFixtures>({
       contacts: createdContacts,
       tags: createdTags,
     });
+  },
+
+  // Journal fixtures
+  journalsWithData: async ({ authenticatedPage, testCleanup }, use) => {
+    const dataManager = new TestDataManager(authenticatedPage);
+
+    // Clear all existing journals first to ensure clean state
+    console.log(
+      '🧹 [Fixture] Clearing all existing journals before creating test data...'
+    );
+    await dataManager.clearAllJournals();
+
+    // Create test journals via API
+    const journals = await dataManager.createJournals([
+      {
+        title: 'Weekend Hike',
+        content: 'Had a great hike in the mountains today.',
+        event_date_range: {
+          start: '2024-01-15T09:00:00Z',
+          end: '2024-01-15T15:00:00Z',
+        },
+        types: ['NOTE'],
+      },
+      {
+        title: 'Team Meeting',
+        content: 'Discussed Q1 goals and project timelines.',
+        event_date_range: {
+          start: '2024-01-16T14:00:00Z',
+          end: '2024-01-16T15:00:00Z',
+        },
+        types: ['EVENT'],
+      },
+    ]);
+
+    // Register cleanup
+    testCleanup(async () => {
+      await dataManager.cleanup();
+    });
+
+    await use({ page: authenticatedPage, journals });
+  },
+
+  // Test-scoped fixture: Empty journals page (authenticated but no data)
+  emptyJournalsPage: async ({ authenticatedPage, testCleanup }, use) => {
+    const dataManager = new TestDataManager(authenticatedPage);
+
+    // Clear all existing journals to ensure empty state
+    console.log('🧹 [Fixture] Clearing all journals for empty state...');
+    await dataManager.clearAllJournals();
+
+    // Register cleanup (even though there's no data, for consistency)
+    testCleanup(async () => {
+      await dataManager.cleanup();
+    });
+
+    await use(authenticatedPage);
   },
 
   // Utility fixtures
