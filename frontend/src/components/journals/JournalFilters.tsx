@@ -89,11 +89,12 @@ export function JournalFilters({
   };
 
   // Handle tag toggle
-  const handleTagToggle = (tagId: string) => {
+  const handleTagToggle = (tagId: number) => {
     const currentTags = filters.tag_ids || [];
-    const newTags = currentTags.includes(tagId)
-      ? currentTags.filter(t => t !== tagId)
-      : [...currentTags, tagId];
+    const tagIdStr = tagId.toString();
+    const newTags = currentTags.includes(tagIdStr)
+      ? currentTags.filter(t => t !== tagIdStr)
+      : [...currentTags, tagIdStr];
 
     onFiltersChange({
       ...filters,
@@ -259,7 +260,9 @@ export function JournalFilters({
               <div key={tag.id} className='flex items-center space-x-2'>
                 <Checkbox
                   id={`tag-${tag.id}`}
-                  checked={filters.tag_ids?.includes(tag.id) || false}
+                  checked={
+                    filters.tag_ids?.includes(tag.id.toString()) || false
+                  }
                   onCheckedChange={() => handleTagToggle(tag.id)}
                 />
                 <label
