@@ -76,6 +76,7 @@ export interface TravelAccommodation {
   id?: string | null;
   name: string;
   address?: string | null;
+  location?: string | null; // Location/city of accommodation
   check_in_date?: string | null; // ISO date string
   check_out_date?: string | null; // ISO date string
   booking_reference?: string | null;
@@ -111,14 +112,17 @@ export type JournalTypeData =
 
 // Contact Relationship
 export interface JournalContactRelationship {
-  id: string;
+  id: number;
   name?: string | null;
   relationship_type: JournalContactRelationshipType;
 }
 
+// Alias for backward compatibility
+export type JournalContact = JournalContactRelationship;
+
 // Journal Tag
 export interface JournalTag {
-  id: string;
+  id: number;
   name: string;
   color?: string | null;
 }
@@ -134,6 +138,14 @@ export interface JournalCalendar {
 export interface ParentJournalSummary {
   id: string;
   title: string;
+}
+
+// Child Journal Summary
+export interface ChildJournalSummary {
+  id: string;
+  title: string;
+  date?: string | null;
+  types: JournalType[];
 }
 
 // Journal Attributes
@@ -154,6 +166,7 @@ export interface JournalAttributes {
   calendar?: JournalCalendar | null;
   // Hierarchy information
   parent?: ParentJournalSummary | null;
+  children?: ChildJournalSummary[];
   children_count?: number | null;
 }
 
@@ -185,6 +198,9 @@ export interface JournalResource {
   links?: JsonApiLinks;
   meta?: JsonApiMeta;
 }
+
+// Convenience type that combines resource and attributes
+export type Journal = JournalResource['attributes'] & { id: string };
 
 // API Response Types
 export interface JournalResponse {

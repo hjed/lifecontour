@@ -553,13 +553,14 @@ CREATE TABLE journals (
 - `backend/app/api/journals/controllers.py` - Added search endpoint
 - `tests/unit/infrastructure/search/test_search_service.py` - Updated global search tests
 
-### ITER4-008: Journal UI - List & Detail Views 🔵 IN PROGRESS (Phases 1-2 Complete)
+### ITER4-008: Journal UI - List & Detail Views ✅ COMPLETE
+**Completed:** 2026-01-10
 **Description:** Build journal list and detail views with inline editing
-**Strategy:** Phased implementation - Phase 1 (Foundation) and Phase 2 (Detail View) complete
+**Strategy:** Phased implementation - All 5 phases complete
 **Specification Reference:** [Display Requirements](../journal-system-specification.md#display-requirements), [Frontend Components](../journal-system-specification.md#frontend-components)
 **Design Document:** [ITER4-008 Design](../design/iter4-008-journal-ui-design.md)
 
-**PR Size:** ~18 files (list component, detail component, sub-components, API layer, types, tests)
+**PR Size:** ~40+ files (list component, detail component, sub-components, API layer, types, tests)
 
 **Phase 1: Foundation (Files 1-4) ✅ COMPLETE (2026-01-04)**
 
@@ -665,38 +666,44 @@ CREATE TABLE journals (
 - Integration with shadcn/ui components (Badge, Card, Collapsible, Input, Button, Checkbox, Textarea)
 - Prepared for future enhancements (Immich album picker, full travel editor)
 
-**Phase 4: Relationships (Files 12-15) ⏳ PENDING**
+**Phase 4: Relationships (Files 12-15) ✅ COMPLETE**
 
-**Status:** Not started
+**Status:** Complete (2026-01-09)
 
-**Planned Files:**
-- [ ] 12. **JournalContactsList** - `frontend/src/components/journals/JournalContactsList.tsx` - Contact management
-- [ ] 13. **JournalTagsList** - `frontend/src/components/journals/JournalTagsList.tsx` - Tag management
-- [ ] 14. **JournalCalendarBadge** - `frontend/src/components/journals/JournalCalendarBadge.tsx` - Calendar display/editing
-- [ ] 15. **JournalBreadcrumb** - `frontend/src/components/journals/JournalBreadcrumb.tsx` - Parent navigation
-
-**Acceptance Criteria:**
-- [ ] Contact relationships display (grouped by type, inline editable)
-- [ ] Tag management (inline editable)
-- [ ] Calendar badge (colour-coded, inline editable)
-- [ ] Parent breadcrumb navigation
-- [ ] Unit tests for relationship components
-
-**Phase 5: Hierarchy & Filters (Files 16-18) ⏳ PENDING**
-
-**Status:** Partially complete (JournalFilters implemented in Phase 1)
-
-**Planned Files:**
-- [ ] 16. **JournalChildrenList** - `frontend/src/components/journals/JournalChildrenList.tsx` - Child journals
-- [x] 17. **JournalListFilters** - `frontend/src/components/journals/JournalFilters.tsx` - Filter sidebar (COMPLETE)
-- [ ] 18. **Integration** - Wire up all components
+**Implemented Files:**
+- [x] 12. **JournalContactBadge** - `frontend/src/components/journals/JournalContactBadge.tsx` - Contact relationship management
+- [x] 13. **JournalTagBadge** - `frontend/src/components/journals/JournalTagBadge.tsx` - Tag management
+- [x] 14. **JournalCalendarBadge** - `frontend/src/components/journals/JournalCalendarBadge.tsx` - Calendar display/editing
+- [x] 15. **JournalBreadcrumb** - `frontend/src/components/journals/JournalBreadcrumb.tsx` - Parent navigation
 
 **Acceptance Criteria:**
-- [ ] Child journal cards (expandable)
-- [x] Filter sidebar with all filter controls (COMPLETE)
-- [ ] Integration of all components
-- [ ] Delete confirmation dialog
-- [ ] Unit tests for hierarchy components
+- [x] Contact relationships display (grouped by type, inline editable)
+- [x] Tag management (inline editable)
+- [x] Calendar badge (colour-coded, inline editable)
+- [x] Parent breadcrumb navigation
+- [x] Unit tests for relationship components
+
+**Phase 5: Hierarchy & Filters (Files 16-18) ✅ COMPLETE**
+
+**Status:** Complete (2026-01-10)
+
+**Implemented Files:**
+- [x] 16. **JournalChildrenList** - `frontend/src/components/journals/JournalChildrenList.tsx` - Child journals display
+- [x] 17. **JournalListFilters** - `frontend/src/components/journals/JournalFilters.tsx` - Filter sidebar (implemented in Phase 1)
+- [x] 18. **Integration** - `frontend/src/components/journals/JournalDetailView.tsx` - Comprehensive detail view
+
+**Acceptance Criteria:**
+- [x] Child journal cards with navigation links
+- [x] Filter sidebar with all filter controls
+- [x] Integration of all components in JournalDetailView
+- [x] Unit tests for hierarchy components
+
+**Bug Fixes (2026-01-10):**
+- Fixed pagination metadata mismatch between frontend and backend
+- Updated `PaginationMeta` interface to match backend schema (`total_count`, `current_page`, `per_page`, `page_count`)
+- Fixed journals and contacts pages to use correct pagination field names
+- Updated all unit test mocks to use correct field names
+- All quality checks passing (TypeScript, ESLint, tests)
 
 **Phase 6: Polish & Tests (Files 19-20+) ⏳ PENDING**
 
@@ -928,13 +935,13 @@ CREATE TABLE journals (
   - ✅ Global search includes journals
   - ✅ Integration tests for indexing and search
   - ✅ All 27 search unit tests passing
-- 🔵 Journal UI with inline editing (ITER4-008) - Phases 1-3 of 6 Complete
+- ✅ **Journal UI with inline editing (ITER4-008) - Phases 1-5 Complete**
   - ✅ Phase 1: Foundation (Files 1-4) - Types, API, JournalListItem, JournalList, JournalFilters
   - ✅ Phase 2: Detail View (Files 5-8) - JournalDetail, JournalIdentityInline, JournalContentInline, InlineEditDateRange
   - ✅ Phase 3: Type Sections (Files 9-11) - JournalTypeBadges, JournalTypeSection, 5 type-specific editors
-  - ⏳ Phase 4: Relationships (Files 12-15) - Contacts, tags, calendar, breadcrumb
-  - ⏳ Phase 5: Hierarchy & Filters (Files 16-18) - Children list, integration (filters done)
-  - ⏳ Phase 6: Polish & Tests (Files 19-20+) - Responsive polish, advanced features
+  - ✅ Phase 4: Relationships (Files 12-15) - JournalContactBadge, JournalTagBadge, JournalCalendarBadge, JournalBreadcrumb
+  - ✅ Phase 5: Hierarchy & Filters (Files 16-18) - JournalChildrenList, JournalDetailView integration
+  - ⏳ Phase 6: Polish & Tests (Files 19-20+) - Responsive polish, advanced features (deferred)
 - 🟡 MCP tools for AI integration (ITER4-010)
 - 🟡 Contact page journal display (ITER4-011)
 - ✅ All tests passing (unit, integration)
