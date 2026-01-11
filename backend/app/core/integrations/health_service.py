@@ -155,7 +155,7 @@ class IntegrationHealthService:
             async with aiohttp.ClientSession() as session:
                 # Test Google's OAuth2 discovery endpoint (public, no auth required)
                 async with session.get(
-                    "https://accounts.google.com/.well-known/openid_configuration",
+                    "https://accounts.google.com/.well-known/openid-configuration",
                     timeout=aiohttp.ClientTimeout(total=10),
                 ) as response:
                     if response.status == 200:
