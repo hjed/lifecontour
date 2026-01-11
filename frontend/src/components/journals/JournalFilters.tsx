@@ -177,7 +177,7 @@ export function JournalFilters({
     filters.calendar_id;
 
   return (
-    <div className={cn('space-y-4', className)}>
+    <div className={cn('space-y-4', className)} data-testid='journal-filters'>
       {/* Date Range Filter */}
       <div className='space-y-2'>
         <Label>Date Range</Label>

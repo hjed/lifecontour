@@ -6,7 +6,7 @@
  */
 
 import { Page } from '@playwright/test';
-import { TestContact } from './fixtures';
+import { TestContact, TestJournal } from './fixtures';
 
 /**
  * Utility function to generate realistic phone numbers
@@ -29,23 +29,47 @@ export interface TagCreateRequest {
   color?: string;
 }
 
+export interface JournalCreateRequest {
+  title: string;
+  content: string;
+  event_date_range: {
+    start: string;
+    end: string;
+  };
+  types?: string[];
+  type_data?: Record<string, unknown>;
+  contacts?: Array<{ contact_id: string; relationship_type: string }>;
+  tags?: number[];
+  calendar_id?: string;
+  parent_id?: string;
+}
+
 /**
  * Manages test data creation and cleanup via API calls
  */
 export class TestDataManager {
   private createdContactIds: string[] = [];
   private createdTagIds: string[] = [];
+  private createdJournalIds: string[] = [];
 
   constructor(private readonly page: Page) {}
+
+  /**
+   * Generate a unique identifier for test data
+   * Uses crypto.randomUUID() for guaranteed uniqueness even in parallel tests
+   */
+  private generateUniqueId(): string {
+    return crypto.randomUUID().slice(0, 8);
+  }
 
   /**
    * Create a test contact via API
    */
   async createContact(contactData: ContactCreateRequest): Promise<TestContact> {
-    // Make contact names unique to avoid conflicts
-    const timestamp = Date.now();
-    const uniqueFirstName = `${contactData.firstName}_${timestamp}`;
-    const uniqueLastName = `${contactData.lastName}_${timestamp}`;
+    // Make contact names unique to avoid conflicts using UUID
+    const uniqueId = this.generateUniqueId();
+    const uniqueFirstName = `${contactData.firstName}_${uniqueId}`;
+    const uniqueLastName = `${contactData.lastName}_${uniqueId}`;
 
     console.log(
       `📝 [Data Manager] Creating contact: ${uniqueFirstName} ${uniqueLastName}`
@@ -60,15 +84,15 @@ export class TestDataManager {
       );
 
       const authTestResponse = await this.page.request.get('/api/auth/status');
-      if (!authTestResponse.ok()) {
+      if (authTestResponse.ok()) {
+        const authData = await authTestResponse.json();
+        console.log(`🔐 [Data Manager] Auth test successful:`, authData);
+      } else {
         console.log(
           `🔐 [Data Manager] Auth test failed: ${authTestResponse.status()}`
         );
         const errorText = await authTestResponse.text();
         console.log(`🔐 [Data Manager] Auth error response:`, errorText);
-      } else {
-        const authData = await authTestResponse.json();
-        console.log(`🔐 [Data Manager] Auth test successful:`, authData);
       }
 
       // Make API request to create contact (JSON API format)
@@ -365,16 +389,16 @@ export class TestDataManager {
           }
         );
 
-        if (!response.ok()) {
+        if (response.ok()) {
+          console.log(
+            `✅ [Data Manager] Tag ${tagId} assigned to contact ${contactId}`
+          );
+        } else {
           const errorText = await response.text();
           console.warn(
             `⚠️ [Data Manager] Failed to assign tag ${tagId} to contact ${contactId}: ${response.status()}`
           );
           console.warn(`⚠️ [Data Manager] Error response:`, errorText);
-        } else {
-          console.log(
-            `✅ [Data Manager] Tag ${tagId} assigned to contact ${contactId}`
-          );
         }
       }
 
@@ -419,7 +443,11 @@ export class TestDataManager {
       const currentFavourite = contactData.data.attributes.is_favourite;
 
       // Only toggle if the current status is different from desired status
-      if (currentFavourite !== isFavourite) {
+      if (currentFavourite === isFavourite) {
+        console.log(
+          `✅ [Data Manager] Contact favourite status already correct`
+        );
+      } else {
         const response = await this.page.request.post(
           `/api/contacts/${contactId}/favourite`,
           {
@@ -429,20 +457,158 @@ export class TestDataManager {
           }
         );
 
-        if (!response.ok()) {
+        if (response.ok()) {
+          console.log(`✅ [Data Manager] Contact favourite status updated`);
+        } else {
           console.warn(
             `⚠️ [Data Manager] Failed to set favourite status: ${response.status()}`
           );
-        } else {
-          console.log(`✅ [Data Manager] Contact favourite status updated`);
         }
-      } else {
-        console.log(
-          `✅ [Data Manager] Contact favourite status already correct`
-        );
       }
     } catch (error) {
       console.error(`❌ [Data Manager] Failed to set favourite status:`, error);
+    }
+  }
+
+  /**
+   * Create a test journal via API
+   */
+  async createJournal(journalData: JournalCreateRequest): Promise<TestJournal> {
+    // Make journal titles unique to avoid conflicts using UUID
+    const uniqueId = this.generateUniqueId();
+    const uniqueTitle = `${journalData.title}_${uniqueId}`;
+
+    console.log(`📝 [Data Manager] Creating journal: ${uniqueTitle}`);
+
+    try {
+      // Make API request to create journal (JSON API format)
+      const response = await this.page.request.post('/api/journals', {
+        headers: {
+          'Content-Type': 'application/vnd.api+json',
+        },
+        data: JSON.stringify({
+          data: {
+            type: 'journals',
+            attributes: {
+              title: uniqueTitle,
+              content: journalData.content,
+              event_date_range: journalData.event_date_range,
+              types: journalData.types || [],
+              type_data: journalData.type_data || {},
+            },
+            relationships: journalData.contacts
+              ? {
+                  contacts: {
+                    data: journalData.contacts.map(c => ({
+                      type: 'journal-contact-relationships',
+                      attributes: {
+                        contact_id: c.contact_id,
+                        relationship_type: c.relationship_type,
+                      },
+                    })),
+                  },
+                }
+              : undefined,
+          },
+        }),
+      });
+
+      if (!response.ok()) {
+        throw new Error(
+          `Failed to create journal: ${response.status()} ${await response.text()}`
+        );
+      }
+
+      const responseData = await response.json();
+      const journalId = responseData.data.id;
+      const journalAttributes = responseData.data.attributes;
+
+      // Track for cleanup
+      this.createdJournalIds.push(journalId);
+
+      console.log(`✅ [Data Manager] Created journal ${journalId}`);
+
+      return {
+        id: journalId,
+        title: journalAttributes.title,
+        content: journalAttributes.content,
+        event_date_range: journalAttributes.event_date_range,
+        types: journalAttributes.types || [],
+        contacts: journalAttributes.contacts || [],
+        tags: journalAttributes.tags || [],
+      };
+    } catch (error) {
+      console.error(`❌ [Data Manager] Failed to create journal:`, error);
+      throw error;
+    }
+  }
+
+  /**
+   * Create multiple test journals
+   */
+  async createJournals(
+    journalsData: JournalCreateRequest[]
+  ): Promise<TestJournal[]> {
+    const journals: TestJournal[] = [];
+
+    for (const journalData of journalsData) {
+      const journal = await this.createJournal(journalData);
+      journals.push(journal);
+    }
+
+    return journals;
+  }
+
+  /**
+   * Clear all journals (for test setup)
+   */
+  async clearAllJournals(): Promise<void> {
+    console.log(`🧹 [Data Manager] Clearing all journals...`);
+
+    try {
+      // Get all journals
+      const response = await this.page.request.get('/api/journals', {
+        headers: {
+          Accept: 'application/vnd.api+json',
+        },
+      });
+
+      if (!response.ok()) {
+        console.warn(
+          `⚠️ [Data Manager] Failed to fetch journals: ${response.status()}`
+        );
+        return;
+      }
+
+      const data = await response.json();
+      const journals = data.data || [];
+
+      console.log(
+        `🧹 [Data Manager] Found ${journals.length} journals to delete`
+      );
+
+      // Delete each journal
+      for (const journal of journals) {
+        try {
+          const deleteResponse = await this.page.request.delete(
+            `/api/journals/${journal.id}`
+          );
+          if (deleteResponse.ok()) {
+            console.log(
+              `🗑️ [Data Manager] Deleted existing journal ${journal.id}`
+            );
+          }
+        } catch (error) {
+          console.warn(
+            `⚠️ [Data Manager] Error deleting journal ${journal.id}:`,
+            error
+          );
+        }
+      }
+
+      console.log(`✅ [Data Manager] All journals cleared`);
+    } catch (error) {
+      console.error(`❌ [Data Manager] Failed to clear journals:`, error);
     }
   }
 
@@ -451,7 +617,7 @@ export class TestDataManager {
    */
   async cleanup(): Promise<void> {
     console.log(
-      `🧹 [Data Manager] Starting cleanup of ${this.createdContactIds.length} contacts and ${this.createdTagIds.length} tags...`
+      `🧹 [Data Manager] Starting cleanup of ${this.createdContactIds.length} contacts, ${this.createdTagIds.length} tags, and ${this.createdJournalIds.length} journals...`
     );
 
     // Add timeout to prevent cleanup from hanging
@@ -498,6 +664,27 @@ export class TestDataManager {
       await this.fallbackIndividualCleanup();
     }
 
+    // Clean up journals (if any were created)
+    for (const journalId of this.createdJournalIds) {
+      try {
+        const response = await this.page.request.delete(
+          `/api/journals/${journalId}`
+        );
+        if (response.ok()) {
+          console.log(`🗑️ [Data Manager] Deleted journal ${journalId}`);
+        } else {
+          console.warn(
+            `⚠️ [Data Manager] Failed to delete journal ${journalId}: ${response.status()}`
+          );
+        }
+      } catch (error) {
+        console.warn(
+          `⚠️ [Data Manager] Error deleting journal ${journalId}:`,
+          error
+        );
+      }
+    }
+
     // Clean up tags (if any were created)
     for (const tagId of this.createdTagIds) {
       try {
@@ -517,6 +704,7 @@ export class TestDataManager {
     // Clear tracking arrays
     this.createdContactIds = [];
     this.createdTagIds = [];
+    this.createdJournalIds = [];
 
     console.log(`✅ [Data Manager] Cleanup completed`);
   }
