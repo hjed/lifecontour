@@ -788,7 +788,7 @@ export const test = base.extend<TestFixtures, WorkerFixtures>({
           start: '2024-01-15T09:00:00Z',
           end: '2024-01-15T15:00:00Z',
         },
-        types: ['NOTE'],
+        types: ['note'],
       },
       {
         title: 'Team Meeting',
@@ -797,7 +797,7 @@ export const test = base.extend<TestFixtures, WorkerFixtures>({
           start: '2024-01-16T14:00:00Z',
           end: '2024-01-16T15:00:00Z',
         },
-        types: ['EVENT'],
+        types: ['event'],
       },
     ]);
 

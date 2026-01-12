@@ -516,16 +516,30 @@ class TestJournalFilteringAndPagination:
             title="Mood Journal", content="Mood content", types=["MOOD_RATING"]
         )
 
-        await integration_api_client.post("/api/journals", json=note_data)
-        await integration_api_client.post("/api/journals", json=mood_data)
+        note_response = await integration_api_client.post(
+            "/api/journals", json=note_data
+        )
+        mood_response = await integration_api_client.post(
+            "/api/journals", json=mood_data
+        )
 
         # Filter by type
         response = await integration_api_client.get("/api/journals?type=MOOD_RATING")
 
         assert response.status_code == 200
         data = response.json()
-        # Should have at least the mood journal
+
+        # Should have at least 1 journal (the mood journal we just created)
         assert len(data["data"]) >= 1
+
+        # Verify the mood journal we created is in the results
+        mood_id = mood_response.json()["data"]["id"]
+        returned_ids = [j["id"] for j in data["data"]]
+        assert mood_id in returned_ids
+
+        # Verify the note journal is NOT returned
+        note_id = note_response.json()["data"]["id"]
+        assert note_id not in returned_ids
 
     async def test_list_journals_with_date_range_filter(self, integration_api_client):
         """Test listing journals filtered by date range."""
@@ -561,6 +575,56 @@ class TestJournalFilteringAndPagination:
 
         # May fail due to date parsing, which is acceptable for this test
         assert response.status_code in [200, 400]
+
+    async def test_list_journals_with_note_type_filter(self, integration_api_client):
+        """Test listing journals filtered by NOTE type (journals with no other types)."""
+        # Create a pure NOTE journal (no additional types)
+        note_data = create_journal_request_data(
+            title="Pure Note", content="Just a note"
+        )
+
+        # Create a journal with MOOD_RATING type (also has NOTE implicitly)
+        mood_data = create_journal_request_data(
+            title="Mood Journal", content="Mood content", types=["MOOD_RATING"]
+        )
+
+        # Create a journal with PLAN type
+        plan_data = create_journal_request_data(
+            title="Plan Journal", content="Plan content", types=["PLAN"]
+        )
+
+        note_response = await integration_api_client.post(
+            "/api/journals", json=note_data
+        )
+        mood_response = await integration_api_client.post(
+            "/api/journals", json=mood_data
+        )
+        plan_response = await integration_api_client.post(
+            "/api/journals", json=plan_data
+        )
+
+        # Filter by NOTE type - should only return journals with NO other types
+        response = await integration_api_client.get("/api/journals?type=NOTE")
+
+        assert response.status_code == 200
+        data = response.json()
+
+        # Should have at least 1 journal (the pure note we just created)
+        assert len(data["data"]) >= 1
+
+        # Verify the pure note journal is in the results
+        note_id = note_response.json()["data"]["id"]
+        returned_ids = [j["id"] for j in data["data"]]
+        assert note_id in returned_ids
+
+        # Verify journals with other types are NOT returned
+        mood_id = mood_response.json()["data"]["id"]
+        plan_id = plan_response.json()["data"]["id"]
+        assert mood_id not in returned_ids
+        assert plan_id not in returned_ids
+
+        # Verify total count matches filtered results
+        assert data["meta"]["total_count"] == len(data["data"])
 
     async def test_list_journals_empty_result(self, integration_api_client):
         """Test listing journals with filter that returns no results."""

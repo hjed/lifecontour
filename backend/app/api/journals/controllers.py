@@ -77,6 +77,69 @@ router = APIRouter(
 )
 
 
+def _parse_journal_type(type_str: str) -> JournalType:
+    """
+    Convert a type string to JournalType enum.
+
+    Handles both enum value (lowercase like "mood_rating") and
+    enum name (uppercase like "MOOD_RATING").
+
+    Args:
+        type_str: The type string to convert
+
+    Returns:
+        The corresponding JournalType enum value
+
+    Raises:
+        ValueError: If the type string is invalid
+        KeyError: If the type string doesn't match any enum
+    """
+    try:
+        # First try as enum value (lowercase like "mood_rating")
+        return JournalType(type_str)
+    except ValueError:
+        # Fall back to enum name (uppercase like "MOOD_RATING")
+        return JournalType[type_str.upper()]
+
+
+async def _create_type_specific_data(
+    journal_type: "JournalType",
+    journal_id: int,
+    mood_data_repo: MoodDataRepository,
+    plan_data_repo: PlanDataRepository,
+    travel_data_repo: TravelDataRepository,
+) -> None:
+    """
+    Create type-specific data row with default values for the given journal type.
+
+    Args:
+        journal_type: The type of journal
+        journal_id: The ID of the journal
+        mood_data_repo: Repository for mood data
+        plan_data_repo: Repository for plan data
+        travel_data_repo: Repository for travel data
+    """
+    from app.core.journal.models.journal_types import JournalType
+
+    if journal_type == JournalType.MOOD_RATING:
+        from app.core.journal.models.mood_data import MoodData
+
+        mood_data = MoodData(journal_id=journal_id)
+        await mood_data_repo.save(mood_data)
+    elif journal_type == JournalType.PLAN:
+        from app.core.journal.models.plan_data import PlanData
+
+        plan_data = PlanData(journal_id=journal_id)
+        await plan_data_repo.save(plan_data)
+    elif journal_type == JournalType.TRAVEL:
+        from app.core.journal.models.travel_data import TravelData
+
+        travel_data = TravelData(journal_id=journal_id)
+        await travel_data_repo.save(travel_data)
+    # EVENT and PHOTO_ALBUM types require additional data (calendar_id, immich_album_id)
+    # These will be created when the user updates the type data
+
+
 async def _enrich_journal_data(
     journal: Journal,
     calendar_info_repo: CalendarInfoRepository,
@@ -162,6 +225,14 @@ async def _enrich_journal_data(
 async def list_journals(
     request: Request,
     journal_service: FromDishka[JournalService],
+    calendar_info_repo: FromDishka[CalendarInfoRepository],
+    calendar_repo: FromDishka[CalendarRepository],
+    mood_data_repo: FromDishka[MoodDataRepository],
+    plan_data_repo: FromDishka[PlanDataRepository],
+    travel_data_repo: FromDishka[TravelDataRepository],
+    photo_album_data_repo: FromDishka[PhotoAlbumDataRepository],
+    contact_relationship_repo: FromDishka[JournalContactRelationshipRepository],
+    tag_repo: FromDishka[JournalTagRepository],
     user: FromDishka[SessionUser],  # Require authentication
     page: int = Query(default=1, description="Page number", ge=1),
     limit: int = Query(default=20, description="Items per page", ge=1, le=100),
@@ -193,14 +264,32 @@ async def list_journals(
         user_id=user.id,
         offset=pagination.offset,
         limit=pagination.limit,
+        journal_type=journal_type,
     )
 
-    total_count = await journal_service.get_journals_count(user_id=user.id)
+    total_count = await journal_service.get_journals_count(
+        user_id=user.id, journal_type=journal_type
+    )
 
-    # Convert to resources
+    # Convert to resources with enriched data
     journal_resources = []
     for journal in journals:
-        resource = JournalConverter.to_resource(journal, base_url)
+        # Enrich journal with types, contacts, tags, etc.
+        types, type_data, _, _, _ = await _enrich_journal_data(
+            journal,
+            calendar_info_repo,
+            calendar_repo,
+            mood_data_repo,
+            plan_data_repo,
+            travel_data_repo,
+            photo_album_data_repo,
+            contact_relationship_repo,
+            tag_repo,
+        )
+
+        resource = JournalConverter.to_resource(
+            journal, base_url, types=types, type_data=type_data
+        )
         journal_resources.append(resource)
 
     meta = create_pagination_meta(total_count, page, limit)
@@ -289,6 +378,35 @@ async def create_journal(
     journal = JournalRequestConverter.from_create_request(journal_request.data, user.id)
 
     created_journal = await journal_service.create_journal(journal, connection)
+
+    # Add types if provided in the request
+    if journal_request.data.attributes.types:
+        # Ensure journal_id is not None (it should always be set after creation)
+        if created_journal.id is None:
+            msg = "Journal ID should be set after creation"
+            raise ValueError(msg)
+        journal_id = created_journal.id
+
+        for type_str in journal_request.data.attributes.types:
+            try:
+                # Convert type string to enum
+                journal_type = _parse_journal_type(type_str)
+
+                await journal_service.add_type_to_journal(
+                    journal_id, journal_type, connection
+                )
+
+                # Create type-specific data row with default values
+                await _create_type_specific_data(
+                    journal_type,
+                    journal_id,
+                    mood_data_repo,
+                    plan_data_repo,
+                    travel_data_repo,
+                )
+            except (ValueError, KeyError):
+                # Invalid type, skip
+                pass
 
     # Fetch all enrichment data
     types, type_data, contacts, tags, calendar = await _enrich_journal_data(
@@ -548,8 +666,6 @@ async def add_type_to_journal(
 
     When a type is added, all its dependent types are automatically added as well.
     """
-    from app.core.journal.models.journal_types import JournalType
-
     base_url = get_request_base_url(request)
 
     # Verify journal exists
@@ -559,8 +675,8 @@ async def add_type_to_journal(
 
     # Parse journal type
     try:
-        journal_type = JournalType[type_request.data.attributes.journal_type]
-    except KeyError as e:
+        journal_type = _parse_journal_type(type_request.data.attributes.journal_type)
+    except (ValueError, KeyError) as e:
         from app.core.journal.models.exceptions import JournalValidationError
 
         raise JournalValidationError(
@@ -619,8 +735,6 @@ async def remove_type_from_journal(
 
     Validates that removing the type won't break dependencies.
     """
-    from app.core.journal.models.journal_types import JournalType
-
     base_url = get_request_base_url(request)
 
     # Verify journal exists
@@ -630,8 +744,8 @@ async def remove_type_from_journal(
 
     # Parse journal type
     try:
-        jtype = JournalType[journal_type]
-    except KeyError as e:
+        jtype = _parse_journal_type(journal_type)
+    except (ValueError, KeyError) as e:
         from app.core.journal.models.exceptions import JournalValidationError
 
         raise JournalValidationError(
@@ -775,8 +889,8 @@ async def update_type_data(
 
     # Parse journal type
     try:
-        jtype = JournalType[journal_type]
-    except KeyError as e:
+        jtype = _parse_journal_type(journal_type)
+    except (ValueError, KeyError) as e:
         raise JournalValidationError(
             "journal_type", f"Invalid journal type: {journal_type}"
         ) from e

@@ -11,9 +11,9 @@ import Link from 'next/link';
 import type { Route } from 'next';
 import { ChevronRight, Calendar, FileText } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
 import { JournalType, type ChildJournalSummary } from '@/types/journals';
+import { JournalTypeBadges } from './JournalTypeBadges';
 
 interface JournalChildrenListProps {
   readonly childJournals: ChildJournalSummary[];
@@ -90,17 +90,10 @@ function ChildJournalItem({ child }: ChildJournalItemProps) {
         </div>
 
         {/* Type Badges */}
-        <div className='flex flex-shrink-0 gap-1'>
-          {child.types.map((type: string) => (
-            <Badge
-              key={type}
-              variant='secondary'
-              className='h-5 px-1.5 text-[10px]'
-            >
-              {type}
-            </Badge>
-          ))}
-        </div>
+        <JournalTypeBadges
+          types={child.types}
+          className='flex-shrink-0 gap-1 [&>*]:h-5 [&>*]:px-1.5 [&>*]:text-[10px]'
+        />
       </div>
 
       {/* Navigation Arrow */}

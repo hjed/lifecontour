@@ -68,9 +68,9 @@ describe('JournalChildrenList', () => {
     it('displays type badges for each child', () => {
       render(<JournalChildrenList childJournals={mockChildren} />);
 
-      expect(screen.getByText('NOTE')).toBeInTheDocument();
-      expect(screen.getByText('EVENT')).toBeInTheDocument();
-      expect(screen.getByText('PLAN')).toBeInTheDocument();
+      expect(screen.getByText('Note')).toBeInTheDocument();
+      expect(screen.getByText('Event')).toBeInTheDocument();
+      expect(screen.getByText('Plan')).toBeInTheDocument();
     });
   });
 
@@ -135,10 +135,10 @@ describe('JournalChildrenList', () => {
       render(<JournalChildrenList childJournals={[childWithManyTypes]} />);
 
       expect(screen.getByText('Multi-type Child')).toBeInTheDocument();
-      expect(screen.getByText('NOTE')).toBeInTheDocument();
-      expect(screen.getByText('EVENT')).toBeInTheDocument();
-      expect(screen.getByText('MOOD_RATING')).toBeInTheDocument();
-      expect(screen.getByText('PLAN')).toBeInTheDocument();
+      expect(screen.getByText('Note')).toBeInTheDocument();
+      expect(screen.getByText('Event')).toBeInTheDocument();
+      expect(screen.getByText('Mood Rating')).toBeInTheDocument();
+      expect(screen.getByText('Plan')).toBeInTheDocument();
     });
   });
 });

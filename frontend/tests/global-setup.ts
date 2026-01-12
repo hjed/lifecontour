@@ -10,7 +10,7 @@
  */
 
 import { FullConfig } from '@playwright/test';
-import { execSync } from 'child_process';
+import { execSync } from 'node:child_process';
 
 /**
  * Wait for a service to be ready by polling its health endpoint
@@ -84,7 +84,11 @@ function getDockerComposeCommand(): string {
 /**
  * Execute shell command with error handling
  */
-function execCommand(command: string, description: string): void {
+function execCommand(
+  command: string,
+  description: string,
+  options?: { ignoreError?: boolean }
+): void {
   console.log(`🔧 ${description}...`);
   try {
     execSync(command, {
@@ -93,8 +97,13 @@ function execCommand(command: string, description: string): void {
     });
     console.log(`✅ ${description} completed`);
   } catch (error) {
-    console.error(`❌ ${description} failed:`, error);
-    throw error;
+    if (options?.ignoreError) {
+      console.log(`⚠️  ${description} completed with warnings (ignored)`);
+      console.error(`ℹ️  Ignored error details for "${description}":`, error);
+    } else {
+      console.error(`❌ ${description} failed:`, error);
+      throw error;
+    }
   }
 }
 
@@ -113,7 +122,7 @@ function areServicesRunning(): boolean {
       }
     );
 
-    const runningServices = result.trim().split('\n').filter(Boolean);
+    const runningServices = new Set(result.trim().split('\n').filter(Boolean));
     const expectedServices = [
       'database',
       'oauth-provider',
@@ -122,7 +131,7 @@ function areServicesRunning(): boolean {
       'redis',
     ];
 
-    return expectedServices.every(service => runningServices.includes(service));
+    return expectedServices.every(service => runningServices.has(service));
   } catch {
     return false;
   }
@@ -166,9 +175,12 @@ async function globalSetup(_config: FullConfig) {
         );
 
         // Start Docker services (docker-compose v1 doesn't support --wait)
+        // Note: This may exit with error code if init containers exit after completing,
+        // but we ignore that since we verify service health separately
         execCommand(
           `${dockerComposeCmd} --profile test --env-file .env.test up -d --build`,
-          'Starting Docker services'
+          'Starting Docker services',
+          { ignoreError: true }
         );
       }
 

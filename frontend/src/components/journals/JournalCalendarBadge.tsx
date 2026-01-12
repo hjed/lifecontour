@@ -24,7 +24,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { cn } from '@/lib/utils';
-import type { JournalCalendar, JournalType } from '@/types/journals';
+import { JournalType, type JournalCalendar } from '@/types/journals';
 
 interface JournalCalendarBadgeProps {
   readonly calendar?: JournalCalendar | null;
@@ -92,7 +92,7 @@ export function JournalCalendarBadge({
   const [isLoading, setIsLoading] = useState(false);
 
   // Only allow editing for EVENT type journals
-  const isEventJournal = journalTypes.includes('EVENT' as JournalType);
+  const isEventJournal = journalTypes.includes(JournalType.EVENT);
   const canEdit = isEventJournal && !disabled && onCalendarChange;
 
   const handleCalendarChange = async (calendarId: string) => {

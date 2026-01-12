@@ -158,7 +158,7 @@ describe('Journals API', () => {
       // Backend expects singular 'type' and 'tag_id', and 'start_date'/'end_date'
       // Currently only the first type and tag are sent since backend doesn't support multiple
       const expectedUrl =
-        '/api/journals?search=test&type=NOTE&contact_id=contact-1&tag_id=tag-1&start_date=2024-01-01&end_date=2024-12-31';
+        '/api/journals?search=test&type=note&contact_id=contact-1&tag_id=tag-1&start_date=2024-01-01&end_date=2024-12-31';
       expect(mockFetch).toHaveBeenCalledWith(expectedUrl, expect.any(Object));
     });
 

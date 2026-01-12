@@ -135,7 +135,7 @@ describe('JournalDetailView', () => {
     it('renders type badges', () => {
       renderWithQueryClient(<JournalDetailView journal={mockJournal} />);
 
-      expect(screen.getByText('NOTE')).toBeInTheDocument();
+      expect(screen.getByText('Note')).toBeInTheDocument();
     });
 
     it('renders formatted date', () => {

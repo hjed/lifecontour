@@ -634,6 +634,34 @@ Run after every changes
 
 **Run integration tests separately after quality checks pass:**
 
+### End-to-End Testing (Playwright)
+
+**Running E2E tests:**
+
+```bash
+# Run all E2E tests
+cd frontend && pnpm test:e2e
+
+# Run specific test file
+cd frontend && pnpm test:e2e tests/e2e/journals-types.spec.ts
+
+# Run tests for specific browser
+cd frontend && pnpm test:e2e --project=chromium
+
+# View HTML report after tests complete
+cd frontend && pnpm exec playwright show-report
+```
+
+**Important Notes:**
+- E2E tests automatically start Docker services (backend, database, OAuth, etc.) via global setup
+- The dev server (`pnpm dev`) is automatically started by Playwright's `webServer` configuration
+- Tests use the `list` reporter locally (prints to console) and `html` reporter in CI
+- The `webServer.reuseExistingServer` is set to `!process.env.CI`, meaning:
+  - **Locally**: Reuses existing dev server if running, starts new one if not
+  - **In CI**: Always starts a fresh dev server
+- Dev server runs in background during tests and is automatically terminated when tests complete
+- HTML reports are saved to `frontend/playwright-report/` but don't auto-open a server locally
+
 ### CI/CD Compliance
 
 - **All tests must pass** before considering any change complete

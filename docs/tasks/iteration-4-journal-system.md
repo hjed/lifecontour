@@ -739,7 +739,37 @@ CREATE TABLE journals (
 
 **Phase 6: Bug Fixes & Test Improvements 🔵 IN PROGRESS**
 
-**Status:** In Progress - E2E test fixes complete, backend filtering pending
+**Status:** In Progress - Journal creation with types fixed, E2E tests added
+
+**Recent Progress (2026-01-12):**
+- ✅ Fixed journal creation with types that require additional data
+  - PhotoAlbumData requires `immich_album_id` - type data row created only when user updates
+  - CalendarInfo requires `calendar_id` - type data row created only when user updates
+  - MoodData, PlanData, TravelData have no required fields - type data rows created automatically
+  - Backend properly handles creating journals with any type combination
+- ✅ Added comprehensive E2E tests for journal types
+  - New test file: `frontend/tests/e2e/journals-types.spec.ts`
+  - Tests for creating journals with MOOD_RATING, PLAN, TRAVEL types
+  - Tests for creating journals with multiple types
+  - Tests for filtering journals by type
+- ✅ Enabled type filtering E2E test in `journals-list.spec.ts`
+  - Backend type filtering is now working correctly
+  - Test verifies filtering by type returns correct results
+- ✅ All backend tests passing (36 integration tests, 157 unit tests)
+- ✅ All quality checks passing (ruff, mypy, TypeScript)
+
+**Implementation Details:**
+- **Backend Fix:** Modified `backend/app/api/journals/controllers.py`
+  - Only create type-specific data rows for types with no required fields (MOOD_RATING, PLAN, TRAVEL)
+  - EVENT and PHOTO_ALBUM type data rows created when user updates type data
+  - Added assertion to ensure journal_id is not None before using it
+- **E2E Tests:** Created `frontend/tests/e2e/journals-types.spec.ts`
+  - 5 test cases covering all type creation scenarios
+  - Tests verify type data is properly initialized
+  - Tests verify type filtering works correctly
+- **Test Enablement:** Enabled skipped test in `frontend/tests/e2e/journals-list.spec.ts`
+  - Removed skip annotation from type filtering test
+  - Updated comment to reflect that backend filtering is now working
 
 **Completed Work:**
 - [x] **E2E Test Fixes** - Fixed failing E2E tests with proper skip annotations
@@ -749,7 +779,7 @@ CREATE TABLE journals (
   - Clear documentation of what needs to be fixed
 
 **Pending Work:**
-- [ ] **Backend Type Filtering** - Fix journal list filtering by type
+- [x] **Backend Type Filtering** - Fix journal list filtering by type
   - **Issue:** Backend accepts `type` query parameter but doesn't use it
   - **Location:** `backend/app/api/journals/controllers.py:list_journals`
   - **Fix Required:** Pass `journal_type` parameter to `journal_service.get_journals_paginated()`

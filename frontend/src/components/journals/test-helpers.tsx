@@ -7,7 +7,7 @@
 
 import { render } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import type { JournalResource, JournalType } from '@/types/journals';
+import { JournalType, type JournalResource } from '@/types/journals';
 
 /**
  * Create a mock journal resource with sensible defaults.
@@ -26,7 +26,7 @@ export function createMockJournal(
         start: '2025-01-15T00:00:00Z',
         end: '2025-01-16T00:00:00Z',
       },
-      types: ['NOTE' as JournalType],
+      types: [JournalType.NOTE],
       type_data: {},
       contacts: [],
       tags: [],

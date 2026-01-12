@@ -14,12 +14,12 @@ import {
 describe('Journal Types', () => {
   describe('JournalType enum', () => {
     it('should have all expected journal types', () => {
-      expect(JournalType.NOTE).toBe('NOTE');
-      expect(JournalType.EVENT).toBe('EVENT');
-      expect(JournalType.MOOD_RATING).toBe('MOOD_RATING');
-      expect(JournalType.PLAN).toBe('PLAN');
-      expect(JournalType.TRAVEL).toBe('TRAVEL');
-      expect(JournalType.PHOTO_ALBUM).toBe('PHOTO_ALBUM');
+      expect(JournalType.NOTE).toBe('note');
+      expect(JournalType.EVENT).toBe('event');
+      expect(JournalType.MOOD_RATING).toBe('mood_rating');
+      expect(JournalType.PLAN).toBe('plan');
+      expect(JournalType.TRAVEL).toBe('travel');
+      expect(JournalType.PHOTO_ALBUM).toBe('photo_album');
     });
   });
 

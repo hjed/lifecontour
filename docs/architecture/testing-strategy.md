@@ -292,7 +292,7 @@ export class TestDataHelpers {
 
 #### Docker PostgreSQL Setup
 
-- Use `docker-compose.test.yml` for test database container
+- Use `docker-compose.yml` with the test profile for test database container
 - Separate test database from development database
 - Automated container lifecycle management in test fixtures
 - Health checks to ensure database readiness before tests

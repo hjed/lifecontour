@@ -18,7 +18,7 @@ describe('JournalTypeSection', () => {
       <JournalTypeSection journalId={mockJournalId} type={JournalType.EVENT} />
     );
 
-    const trigger = screen.getByTestId('type-section-trigger-EVENT');
+    const trigger = screen.getByTestId('type-section-trigger-event');
     expect(trigger).toBeInTheDocument();
     expect(trigger).toHaveAttribute('aria-label', 'Expand Event Details');
   });
@@ -32,7 +32,7 @@ describe('JournalTypeSection', () => {
       />
     );
 
-    const trigger = screen.getByTestId('type-section-trigger-MOOD_RATING');
+    const trigger = screen.getByTestId('type-section-trigger-mood_rating');
     expect(trigger).toHaveAttribute('aria-label', 'Collapse Mood & Energy');
 
     // Content should be visible (type-specific editor)
@@ -47,7 +47,7 @@ describe('JournalTypeSection', () => {
       <JournalTypeSection journalId={mockJournalId} type={JournalType.PLAN} />
     );
 
-    const trigger = screen.getByTestId('type-section-trigger-PLAN');
+    const trigger = screen.getByTestId('type-section-trigger-plan');
 
     // Initially collapsed
     expect(trigger).toHaveAttribute('aria-label', 'Expand Plan Documents');
@@ -115,7 +115,7 @@ describe('JournalTypeSection', () => {
       />
     );
 
-    const section = screen.getByTestId('type-section-EVENT');
+    const section = screen.getByTestId('type-section-event');
     expect(section).toHaveClass('custom-class');
   });
 
@@ -163,7 +163,7 @@ describe('JournalTypeSection', () => {
       <JournalTypeSection journalId={mockJournalId} type={JournalType.EVENT} />
     );
 
-    const trigger = screen.getByTestId('type-section-trigger-EVENT');
+    const trigger = screen.getByTestId('type-section-trigger-event');
 
     // Expand
     await user.click(trigger);

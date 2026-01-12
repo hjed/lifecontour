@@ -936,7 +936,7 @@ Check if these are installed, add if needed:
     - `frontend/tests/e2e/fixtures.ts`
 
 **Pending Work:**
-- [ ] **Backend Type Filtering** - Fix journal list filtering by type
+- [x] **Backend Type Filtering** - Fix journal list filtering by type
   - **Issue:** Backend accepts `type` query parameter but doesn't use it
   - **Location:** `backend/app/api/journals/controllers.py:list_journals` (lines 160-215)
   - **Root Cause:** Controller receives `journal_type` parameter but doesn't pass it to service

@@ -65,7 +65,8 @@ docker compose --profile test down -v
 - MeiliSearch (port 7701)
 - OAuth provider + UI (ports 4446, 4447, 3002)
 - Backend (port 8001)
-- Frontend (port 3000)
+
+**Note:** The frontend dev server is managed by Playwright's `webServer` configuration during E2E tests, not by Docker Compose.
 
 ### Backend Integration Tests Only
 
@@ -124,7 +125,7 @@ Each profile uses environment variables from `.env` files:
 - MeiliSearch: port 7701
 - OAuth: ports 4446, 4447, 3002
 - Backend: port 8001
-- Frontend: port 3000
+- Frontend: port 3000 (managed by Playwright, not Docker Compose)
 
 ### .env.prod (Production)
 - Database: personal_management (port 5432)
@@ -158,7 +159,8 @@ Each profile uses environment variables from `.env` files:
 - **oauth-login-consent**: OAuth UI
 - **oauth-init**: OAuth client initialization
 - **backend**: FastAPI (test mode)
-- **frontend**: Next.js (test mode)
+
+**Note:** The frontend is not included in the test profile. For E2E tests, Playwright manages the frontend dev server via its `webServer` configuration.
 
 ### Test-Backend Profile
 - Core services only (minimal setup)

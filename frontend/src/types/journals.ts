@@ -8,13 +8,14 @@
 import { JsonApiResource, JsonApiLinks, JsonApiMeta } from './api';
 
 // Journal Type Enum
+// Values must match backend JournalType enum (lowercase)
 export enum JournalType {
-  NOTE = 'NOTE',
-  EVENT = 'EVENT',
-  MOOD_RATING = 'MOOD_RATING',
-  PLAN = 'PLAN',
-  TRAVEL = 'TRAVEL',
-  PHOTO_ALBUM = 'PHOTO_ALBUM',
+  NOTE = 'note',
+  EVENT = 'event',
+  MOOD_RATING = 'mood_rating',
+  PLAN = 'plan',
+  TRAVEL = 'travel',
+  PHOTO_ALBUM = 'photo_album',
 }
 
 // Journal Contact Relationship Type Enum

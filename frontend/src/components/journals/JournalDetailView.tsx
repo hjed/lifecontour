@@ -11,7 +11,6 @@ import { useState } from 'react';
 import { Calendar, Edit, Trash2 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 import { cn } from '@/lib/utils';
 import type {
@@ -21,6 +20,7 @@ import type {
 } from '@/types/journals';
 import { JournalContactRelationshipType } from '@/types/journals';
 import { JournalBreadcrumb } from './JournalBreadcrumb';
+import { JournalTypeBadges } from './JournalTypeBadges';
 import { JournalCalendarBadge } from './JournalCalendarBadge';
 import { JournalContactBadge } from './JournalContactBadge';
 import { JournalTagBadge } from './JournalTagBadge';
@@ -191,13 +191,7 @@ export function JournalDetailView({
 
         <CardContent className='space-y-6'>
           {/* Type Badges */}
-          <div className='flex flex-wrap gap-2'>
-            {journal.types.map((type: string) => (
-              <Badge key={type} variant='default'>
-                {type}
-              </Badge>
-            ))}
-          </div>
+          <JournalTypeBadges types={journal.types} />
 
           {/* Metadata Section */}
           <div className='space-y-4'>

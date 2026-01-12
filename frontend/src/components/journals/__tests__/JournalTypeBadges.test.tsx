@@ -17,7 +17,7 @@ describe('JournalTypeBadges', () => {
   it('renders a single type badge', () => {
     render(<JournalTypeBadges types={[JournalType.NOTE]} />);
 
-    const badge = screen.getByTestId('type-badge-NOTE');
+    const badge = screen.getByTestId('type-badge-note');
     expect(badge).toBeInTheDocument();
     expect(badge).toHaveTextContent('Note');
   });
@@ -29,9 +29,9 @@ describe('JournalTypeBadges', () => {
       />
     );
 
-    expect(screen.getByTestId('type-badge-EVENT')).toBeInTheDocument();
-    expect(screen.getByTestId('type-badge-MOOD_RATING')).toBeInTheDocument();
-    expect(screen.getByTestId('type-badge-TRAVEL')).toBeInTheDocument();
+    expect(screen.getByTestId('type-badge-event')).toBeInTheDocument();
+    expect(screen.getByTestId('type-badge-mood_rating')).toBeInTheDocument();
+    expect(screen.getByTestId('type-badge-travel')).toBeInTheDocument();
   });
 
   it('displays correct labels for all types', () => {
@@ -101,8 +101,8 @@ describe('JournalTypeBadges', () => {
     );
 
     const badges = container.querySelectorAll('[data-testid^="type-badge-"]');
-    expect(badges[0]).toHaveAttribute('data-testid', 'type-badge-TRAVEL');
-    expect(badges[1]).toHaveAttribute('data-testid', 'type-badge-NOTE');
-    expect(badges[2]).toHaveAttribute('data-testid', 'type-badge-EVENT');
+    expect(badges[0]).toHaveAttribute('data-testid', 'type-badge-travel');
+    expect(badges[1]).toHaveAttribute('data-testid', 'type-badge-note');
+    expect(badges[2]).toHaveAttribute('data-testid', 'type-badge-event');
   });
 });
