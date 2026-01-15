@@ -10,7 +10,7 @@
 import { useState, useCallback } from 'react';
 import { Calendar as CalendarIcon, Check, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { formatDateRange, formatDateOnly } from '@/lib/date-utils';
+import { formatDateRange } from '@/lib/date-utils';
 import { Button } from '@/components/ui/button';
 import { Calendar } from '@/components/ui/calendar';
 import {
@@ -91,9 +91,16 @@ export function InlineEditDateRange({
     setIsLoading(true);
     setError(null);
 
+    // Convert dates to ISO datetime strings (with time set to midnight UTC)
+    // The backend expects datetime objects, not just date strings
+    const startDate = new Date(dateRange.from);
+    startDate.setUTCHours(0, 0, 0, 0);
+    const endDate = new Date(dateRange.to);
+    endDate.setUTCHours(23, 59, 59, 999);
+
     const newValue: EventDateRange = {
-      start: formatDateOnly(dateRange.from),
-      end: formatDateOnly(dateRange.to),
+      start: startDate.toISOString(),
+      end: endDate.toISOString(),
     };
 
     try {
@@ -141,7 +148,7 @@ export function InlineEditDateRange({
       className={cn('inline-flex items-center gap-2', className)}
       data-testid={testId}
     >
-      <Popover open={isEditing} onOpenChange={setIsEditing}>
+      <Popover open={isEditing} modal={false}>
         <PopoverTrigger asChild>
           <Button
             variant='outline'

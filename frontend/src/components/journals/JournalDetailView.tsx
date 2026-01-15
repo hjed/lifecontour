@@ -3,13 +3,14 @@
  *
  * Main component that orchestrates all Phase 4 components to display
  * a complete journal view with breadcrumb, metadata, content, and children.
+ * Includes inline editing for title and content.
  */
 
 'use client';
 
-import { useState } from 'react';
-import { Calendar, Edit, Trash2 } from 'lucide-react';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { useState, useCallback } from 'react';
+import { Trash2 } from 'lucide-react';
+import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
 import { cn } from '@/lib/utils';
@@ -17,6 +18,7 @@ import type {
   Journal,
   JournalCalendar,
   JournalContactRelationship,
+  EventDateRange,
 } from '@/types/journals';
 import { JournalContactRelationshipType } from '@/types/journals';
 import { JournalBreadcrumb } from './JournalBreadcrumb';
@@ -26,6 +28,10 @@ import { JournalContactBadge } from './JournalContactBadge';
 import { JournalTagBadge } from './JournalTagBadge';
 import { JournalChildrenList } from './JournalChildrenList';
 import { JournalTypeDataDisplay } from './JournalTypeDataDisplay';
+import { InlineEditField } from '@/components/contacts/InlineEditField';
+import { JournalContentInline } from './JournalContentInline';
+import { InlineEditDateRange } from './InlineEditDateRange';
+import { validateRequired } from '@/lib/validation';
 import {
   useUpdateJournal,
   useDeleteJournal,
@@ -40,7 +46,6 @@ import { useRouter } from 'next/navigation';
 
 interface JournalDetailViewProps {
   readonly journal: Journal;
-  readonly onEdit?: () => void;
   readonly className?: string;
 }
 
@@ -50,7 +55,6 @@ interface JournalDetailViewProps {
  */
 export function JournalDetailView({
   journal,
-  onEdit,
   className,
 }: JournalDetailViewProps) {
   const router = useRouter();
@@ -138,13 +142,44 @@ export function JournalDetailView({
     router.push('/journals');
   };
 
-  const formattedDate = journal.event_date_range?.start
-    ? new Date(journal.event_date_range.start).toLocaleDateString('en-US', {
-        year: 'numeric',
-        month: 'long',
-        day: 'numeric',
-      })
-    : null;
+  // Handle title update
+  const handleTitleSave = useCallback(
+    async (value: string) => {
+      await updateJournal.mutateAsync({
+        id: journal.id,
+        data: {
+          title: value,
+        },
+      });
+    },
+    [journal.id, updateJournal]
+  );
+
+  // Handle content update
+  const handleContentSave = useCallback(
+    async (value: string) => {
+      await updateJournal.mutateAsync({
+        id: journal.id,
+        data: {
+          content: value,
+        },
+      });
+    },
+    [journal.id, updateJournal]
+  );
+
+  // Handle date range update
+  const handleDateRangeSave = useCallback(
+    async (value: EventDateRange) => {
+      await updateJournal.mutateAsync({
+        id: journal.id,
+        data: {
+          event_date_range: value,
+        },
+      });
+    },
+    [journal.id, updateJournal]
+  );
 
   return (
     <div
@@ -158,30 +193,39 @@ export function JournalDetailView({
       <Card>
         <CardHeader>
           <div className='flex items-start justify-between gap-4'>
-            <div className='flex-1 space-y-2'>
-              <CardTitle className='text-2xl'>{journal.title}</CardTitle>
+            <div className='flex-1 space-y-3'>
+              {/* Title - Inline Editable */}
+              <InlineEditField
+                value={journal.title}
+                onSave={handleTitleSave}
+                validation={validateRequired}
+                placeholder='Journal title'
+                className='text-2xl font-bold tracking-tight'
+                aria-label='Journal title'
+                data-testid='journal-title-field'
+              />
 
-              {/* Date */}
-              {formattedDate && (
-                <div className='text-muted-foreground flex items-center gap-2 text-sm'>
-                  <Calendar className='h-4 w-4' />
-                  {formattedDate}
-                </div>
-              )}
+              {/* Date Range - Inline Editable */}
+              {journal.event_date_range &&
+                (journal.event_date_range.start ||
+                  journal.event_date_range.end) && (
+                  <InlineEditDateRange
+                    value={journal.event_date_range}
+                    onSave={handleDateRangeSave}
+                    aria-label='Event date range'
+                    data-testid='journal-date-range-field'
+                  />
+                )}
             </div>
 
             {/* Action Buttons */}
             <div className='flex gap-2'>
-              {onEdit && (
-                <Button variant='outline' size='sm' onClick={onEdit}>
-                  <Edit className='h-4 w-4' />
-                </Button>
-              )}
               <Button
                 variant='outline'
                 size='sm'
                 onClick={handleDelete}
                 disabled={deleteJournal.isPending}
+                aria-label='Delete journal'
               >
                 <Trash2 className='h-4 w-4' />
               </Button>
@@ -231,9 +275,15 @@ export function JournalDetailView({
 
           <Separator />
 
-          {/* Content */}
-          <div className='prose prose-sm dark:prose-invert max-w-none'>
-            <div className='whitespace-pre-wrap'>{journal.content}</div>
+          {/* Content - Inline Editable */}
+          <div>
+            <h3 className='mb-2 text-sm font-medium'>Content</h3>
+            <JournalContentInline
+              value={journal.content}
+              onSave={handleContentSave}
+              placeholder='Add journal content...'
+              data-testid='journal-content'
+            />
           </div>
 
           {/* Type-Specific Data */}
