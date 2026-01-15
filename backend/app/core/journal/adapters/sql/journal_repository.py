@@ -10,6 +10,21 @@ from app.core.journal.models.exceptions import JournalNotFoundError
 from app.core.journal.models.repositories import JournalRepository
 from app.core.journal.models.value_objects import EventDateRange
 
+# Module-level constant for journal type to table mapping
+# Supports both uppercase (MOOD_RATING) and lowercase (mood_rating) type names
+_JOURNAL_TYPE_TABLE_MAP = {
+    "MOOD_RATING": "journal_mood_data",
+    "mood_rating": "journal_mood_data",
+    "EVENT": "journal_calendar_info",
+    "event": "journal_calendar_info",
+    "PLAN": "journal_plan_data",
+    "plan": "journal_plan_data",
+    "TRAVEL": "journal_travel_data",
+    "travel": "journal_travel_data",
+    "PHOTO_ALBUM": "journal_photo_album_data",
+    "photo_album": "journal_photo_album_data",
+}
+
 
 class SqlJournalRepository(JournalRepository):
     """SQL implementation of JournalRepository using SQLAlchemy Core."""
@@ -217,20 +232,97 @@ class SqlJournalRepository(JournalRepository):
         return row.max_depth if row and row.max_depth else 0
 
     async def get_all(
-        self, user_id: str, limit: int = 100, offset: int = 0
+        self,
+        user_id: str,
+        limit: int = 100,
+        offset: int = 0,
+        journal_type: str | None = None,
     ) -> list[Journal]:
-        """Get all journals for a user with pagination."""
-        query = text(
-            """
-            SELECT id, user_id, title, content,
-                   event_date_range_start, event_date_range_end,
-                   parent_id, "order", created_at, updated_at
-            FROM journals
-            WHERE user_id = :user_id
-            ORDER BY event_date_range_start DESC, created_at DESC
+        """Get all journals for a user with pagination.
+
+        Args:
+            user_id: The user ID to filter by
+            limit: Maximum number of journals to return
+            offset: Number of journals to skip
+            journal_type: Optional journal type to filter by (e.g., "MOOD_RATING", "EVENT")
+
+        Returns:
+            List of journals matching the criteria
+        """
+        # Build the base query
+        base_query = """
+            SELECT j.id, j.user_id, j.title, j.content,
+                   j.event_date_range_start, j.event_date_range_end,
+                   j.parent_id, j."order", j.created_at, j.updated_at
+            FROM journals j
+        """
+
+        # Handle NOTE type filtering specially - NOTE journals have no other type data
+        if journal_type and journal_type.upper() in ("NOTE", "note"):
+            # Filter for journals that have NO type-specific data tables
+            base_query += """
+            LEFT JOIN journal_calendar_info jci ON j.id = jci.journal_id
+            LEFT JOIN journal_mood_data jmd ON j.id = jmd.journal_id
+            LEFT JOIN journal_plan_data jpd ON j.id = jpd.journal_id
+            LEFT JOIN journal_travel_data jtd ON j.id = jtd.journal_id
+            LEFT JOIN journal_photo_album_data jpad ON j.id = jpad.journal_id
+            WHERE j.user_id = :user_id
+                AND jci.journal_id IS NULL
+                AND jmd.journal_id IS NULL
+                AND jpd.journal_id IS NULL
+                AND jtd.journal_id IS NULL
+                AND jpad.journal_id IS NULL
+            ORDER BY j.event_date_range_start DESC, j.created_at DESC
             LIMIT :limit OFFSET :offset
             """
-        )
+        # Add JOIN if filtering by other types
+        # Use explicit join clauses for each allowed table to prevent SQL injection
+        elif journal_type and journal_type in _JOURNAL_TYPE_TABLE_MAP:
+            type_table = _JOURNAL_TYPE_TABLE_MAP[journal_type]
+
+            # Use explicit if-elif chain instead of f-string interpolation
+            # This prevents any possibility of SQL injection
+            if type_table == "journal_mood_data":
+                base_query += """
+            INNER JOIN journal_mood_data t ON j.id = t.journal_id
+                """
+            elif type_table == "journal_calendar_info":
+                base_query += """
+            INNER JOIN journal_calendar_info t ON j.id = t.journal_id
+                """
+            elif type_table == "journal_plan_data":
+                base_query += """
+            INNER JOIN journal_plan_data t ON j.id = t.journal_id
+                """
+            elif type_table == "journal_travel_data":
+                base_query += """
+            INNER JOIN journal_travel_data t ON j.id = t.journal_id
+                """
+            elif type_table == "journal_photo_album_data":
+                base_query += """
+            INNER JOIN journal_photo_album_data t ON j.id = t.journal_id
+                """
+            else:
+                # This should not be reachable due to the dictionary check,
+                # but is kept as an extra safeguard
+                msg = f"Unsupported table name: {type_table}"
+                raise ValueError(msg)
+
+            # Add WHERE clause and ordering for non-NOTE types
+            base_query += """
+            WHERE j.user_id = :user_id
+            ORDER BY j.event_date_range_start DESC, j.created_at DESC
+            LIMIT :limit OFFSET :offset
+            """
+        else:
+            # No type filter - add WHERE clause and ordering
+            base_query += """
+            WHERE j.user_id = :user_id
+            ORDER BY j.event_date_range_start DESC, j.created_at DESC
+            LIMIT :limit OFFSET :offset
+            """
+
+        query = text(base_query)
         result = await self.conn.execute(
             query, {"user_id": user_id, "limit": limit, "offset": offset}
         )

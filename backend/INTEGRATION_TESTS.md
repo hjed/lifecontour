@@ -119,7 +119,7 @@ If you get Docker-related errors:
 2. Check that port 5433 is not in use
 3. Try stopping any existing containers:
    ```bash
-   docker-compose -f docker-compose.test.yml down -v
+   docker-compose -f docker-compose.yml down -v
    ```
 
 ### Database Connection Issues

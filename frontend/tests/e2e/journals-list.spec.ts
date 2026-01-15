@@ -74,14 +74,7 @@ test.describe('Journal List Page', () => {
       // ).toBeVisible();
     });
 
-    test.skip('should filter journals by type', async ({
-      journalsWithData,
-    }) => {
-      // SKIPPED: Backend filtering by type is not implemented yet.
-      // The backend accepts the 'type' query parameter but doesn't use it to filter results.
-      // See backend/app/api/journals/controllers.py:list_journals - it accepts journal_type
-      // parameter but doesn't pass it to journal_service.get_journals_paginated().
-      // This needs to be fixed in the backend before this test can pass.
+    test('should filter journals by type', async ({ journalsWithData }) => {
       const { page, journals } = journalsWithData;
 
       // Navigate to journals page
@@ -109,8 +102,8 @@ test.describe('Journal List Page', () => {
       await noteCheckbox.check();
       await responsePromise;
 
-      // Verify only NOTE type journals are shown
-      const noteJournal = journals.find(j => j.types?.includes('NOTE'));
+      // Verify only note type journals are shown
+      const noteJournal = journals.find(j => j.types?.includes('note'));
       if (noteJournal) {
         await expect(
           page.getByRole('heading', {
@@ -119,8 +112,8 @@ test.describe('Journal List Page', () => {
         ).toBeVisible();
       }
 
-      // Verify non-NOTE journals are not shown
-      const nonNoteJournal = journals.find(j => !j.types?.includes('NOTE'));
+      // Verify non-note journals are not shown
+      const nonNoteJournal = journals.find(j => !j.types?.includes('note'));
       if (nonNoteJournal) {
         await expect(
           page.getByRole('heading', {

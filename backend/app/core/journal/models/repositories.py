@@ -111,7 +111,11 @@ class JournalRepository(ABC):
 
     @abstractmethod
     async def get_all(
-        self, user_id: str, limit: int = 100, offset: int = 0
+        self,
+        user_id: str,
+        limit: int = 100,
+        offset: int = 0,
+        journal_type: str | None = None,
     ) -> list[Journal]:
         """
         Get all journals for a user with pagination.
@@ -120,6 +124,7 @@ class JournalRepository(ABC):
             user_id: The user ID to filter by
             limit: Maximum number of journals to return
             offset: Number of journals to skip
+            journal_type: Optional journal type to filter by (e.g., "MOOD_RATING", "EVENT")
 
         Returns:
             List of journals

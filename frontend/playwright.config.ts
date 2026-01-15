@@ -33,8 +33,8 @@ export default defineConfig({
   /* Use single worker to prevent OAuth race conditions between parallel tests */
   workers: 1,
 
-  /* Reporter configuration: GitHub annotations + HTML report on CI */
-  reporter: process.env.CI ? [['github'], ['html']] : 'html',
+  /* Reporter configuration: GitHub annotations + HTML report on CI, list reporter locally */
+  reporter: process.env.CI ? [['github'], ['html']] : 'list',
 
   /* Global test timeout - generous but prevents hanging tests */
   timeout: 3 * 60 * 1000, // 3 minutes per test
@@ -123,10 +123,11 @@ export default defineConfig({
   webServer: {
     command: 'pnpm dev',
     url: 'http://localhost:3000',
-    // In CI, Docker compose starts the frontend, so reuse it
-    // Locally, start the dev server if not already running
-    reuseExistingServer: true,
+    // In CI, start a fresh server. Locally, reuse existing server if running
+    reuseExistingServer: !process.env.CI,
     timeout: 120 * 1000, // 2 minutes for dev server to start
+    stdout: 'ignore', // Suppress dev server output to avoid cluttering test output
+    stderr: 'pipe', // Show errors from dev server
     env: {
       BACKEND_URL: 'http://localhost:8001', // Use test backend port
       NEXT_PUBLIC_API_URL: 'http://localhost:8001',

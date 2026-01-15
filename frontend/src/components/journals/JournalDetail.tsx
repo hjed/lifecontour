@@ -19,6 +19,7 @@ import { Alert } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { JournalIdentityInline } from './JournalIdentityInline';
 import { JournalContentInline } from './JournalContentInline';
+import { JournalTypeBadges } from './JournalTypeBadges';
 import { useUpdateJournalField } from '@/lib/api/journals';
 import type { JournalResource } from '@/types/journals';
 import { cn } from '@/lib/utils';
@@ -121,15 +122,7 @@ export function JournalDetail({
           {/* Metadata bar - types, calendar, tags */}
           <div className='flex flex-wrap items-center gap-2'>
             {/* Type badges */}
-            {attributes.types.map(type => (
-              <Badge
-                key={type}
-                variant='secondary'
-                data-testid={`type-badge-${type}`}
-              >
-                {type}
-              </Badge>
-            ))}
+            <JournalTypeBadges types={attributes.types} />
 
             {/* Calendar badge */}
             {attributes.calendar && (

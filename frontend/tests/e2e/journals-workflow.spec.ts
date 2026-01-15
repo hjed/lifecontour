@@ -75,11 +75,11 @@ test.describe('Journal Complete Workflows', () => {
             response.url().includes('/api/journals') &&
             response.status() === 200
         );
-        await typeFilter.selectOption('NOTE');
+        await typeFilter.selectOption('note');
         await responsePromise;
 
-        // Step 3: Find a NOTE type journal
-        const noteJournal = journals.find(j => j.types?.includes('NOTE'));
+        // Step 3: Find a note type journal
+        const noteJournal = journals.find(j => j.types?.includes('note'));
         if (noteJournal) {
           // Step 4: Click on the journal
           await page

@@ -105,7 +105,7 @@ describe('JournalDetail', () => {
     it('renders type badges', () => {
       renderJournalDetail();
 
-      expect(screen.getByTestId('type-badge-NOTE')).toBeInTheDocument();
+      expect(screen.getByTestId('type-badge-note')).toBeInTheDocument();
     });
 
     it('renders calendar badge', () => {

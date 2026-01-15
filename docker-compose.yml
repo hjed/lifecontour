@@ -247,7 +247,7 @@ services:
         BUILD_ENV: ${BUILD_ENV:-development}
         NODE_ENV: ${NODE_ENV:-development}
     container_name: pms-frontend
-    profiles: [dev, test, prod]
+    profiles: [dev, prod]
     environment:
       - NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL:-http://localhost:8000}
       - NEXT_PUBLIC_OAUTH_PROVIDER_URL=${NEXT_PUBLIC_OAUTH_PROVIDER_URL:-http://localhost:4444}
