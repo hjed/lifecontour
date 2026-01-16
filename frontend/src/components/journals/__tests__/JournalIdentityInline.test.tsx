@@ -11,7 +11,7 @@ import { createMockJournal, renderWithQueryClient } from '../test-helpers';
 // Mock the API hook
 const mockMutateAsync = jest.fn();
 jest.mock('@/lib/api/journals', () => ({
-  useUpdateJournalField: () => ({
+  useUpdateJournal: () => ({
     mutateAsync: mockMutateAsync,
   }),
 }));
