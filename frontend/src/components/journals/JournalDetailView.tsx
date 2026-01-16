@@ -28,7 +28,7 @@ import { JournalContactBadge } from './JournalContactBadge';
 import { JournalTagBadge } from './JournalTagBadge';
 import { JournalChildrenList } from './JournalChildrenList';
 import { JournalTypeDataDisplay } from './JournalTypeDataDisplay';
-import { InlineEditField } from '@/components/contacts/InlineEditField';
+import { InlineEditHeading } from './InlineEditHeading';
 import { JournalContentInline } from './JournalContentInline';
 import { InlineEditDateRange } from './InlineEditDateRange';
 import { validateRequired } from '@/lib/validation';
@@ -195,9 +195,10 @@ export function JournalDetailView({
           <div className='flex items-start justify-between gap-4'>
             <div className='flex-1 space-y-3'>
               {/* Title - Inline Editable */}
-              <InlineEditField
+              <InlineEditHeading
                 value={journal.title}
                 onSave={handleTitleSave}
+                level={2}
                 validation={validateRequired}
                 placeholder='Journal title'
                 className='text-2xl font-bold tracking-tight'
