@@ -12,8 +12,10 @@ import structlog
 from arq import create_pool
 from arq.connections import ArqRedis, RedisSettings
 from arq.jobs import Job, JobDef, JobStatus
+from core_shared.repositories import SyncJobRepository
 from redis.asyncio import Redis
 
+from app.core.integrations.database import IntegrationDatabaseManager
 from app.infrastructure.config import Settings
 
 logger = structlog.get_logger()
@@ -28,7 +30,11 @@ class TaskQueueService:
     """
 
     def __init__(
-        self, redis_pool: Redis, redis_settings: RedisSettings, settings: Settings
+        self,
+        redis_pool: Redis,
+        redis_settings: RedisSettings,
+        settings: Settings,
+        db_manager: IntegrationDatabaseManager,
     ):
         """
         Initialize the task queue service.
@@ -37,10 +43,12 @@ class TaskQueueService:
             redis_pool: Redis connection pool
             redis_settings: Redis settings for ARQ
             settings: Application settings
+            db_manager: Database manager for persisting sync jobs
         """
         self.redis_pool = redis_pool
         self.redis_settings = redis_settings
         self.settings = settings
+        self.db_manager = db_manager
         self._arq_pool: ArqRedis | None = None
 
     async def _get_arq_pool(self) -> ArqRedis:
@@ -56,14 +64,14 @@ class TaskQueueService:
             self._arq_pool = None
 
     async def enqueue_google_contacts_sync(
-        self, google_account_email: str, user_id: int, sync_type: str = "smart"
+        self, google_account_email: str, user_id: str | int, sync_type: str = "smart"
     ) -> str:
         """
         Enqueue a Google Contacts sync job.
 
         Args:
             google_account_email: Google account email to sync
-            user_id: ID of the user requesting the sync
+            user_id: ID of the user requesting the sync (string or integer)
             sync_type: Type of sync ('full', 'incremental', or 'smart')
 
         Returns:
@@ -108,6 +116,19 @@ class TaskQueueService:
             # Store user-job association for security
             await self._store_user_job_association(user_id, job_id)
 
+            # Persist job to database for history tracking
+            async with self.db_manager.get_session() as session:
+                async with session.begin():
+                    conn = await session.connection()
+                    repo = SyncJobRepository(conn)
+                    await repo.create(
+                        job_id=job_id,
+                        user_id=str(user_id),
+                        integration_source="google_contacts",
+                        sync_type=sync_type,
+                        status="queued",
+                    )
+
             return job_id
 
         except Exception as e:
@@ -120,13 +141,13 @@ class TaskQueueService:
             )
             raise
 
-    async def get_job_status(self, job_id: str, user_id: int) -> dict[str, Any]:
+    async def get_job_status(self, job_id: str, user_id: str | int) -> dict[str, Any]:
         """
         Get the status of a specific job.
 
         Args:
             job_id: Job ID to check
-            user_id: ID of the user requesting the status
+            user_id: ID of the user requesting the status (string or integer)
 
         Returns:
             Dictionary with job status information
@@ -289,12 +310,14 @@ class TaskQueueService:
         else:
             return f"Job status: {status}"
 
-    async def _store_user_job_association(self, user_id: int, job_id: str) -> None:
+    async def _store_user_job_association(
+        self, user_id: str | int, job_id: str
+    ) -> None:
         """
         Store user-job association for security checks.
 
         Args:
-            user_id: User ID
+            user_id: User ID (string or integer)
             job_id: Job ID
         """
         try:
@@ -313,12 +336,12 @@ class TaskQueueService:
             )
             # Don't raise - this is a security enhancement, not critical for functionality
 
-    async def _verify_user_job_ownership(self, user_id: int, job_id: str) -> bool:
+    async def _verify_user_job_ownership(self, user_id: str | int, job_id: str) -> bool:
         """
         Verify that a user owns a specific job.
 
         Args:
-            user_id: User ID
+            user_id: User ID (string or integer)
             job_id: Job ID
 
         Returns:
@@ -344,3 +367,75 @@ class TaskQueueService:
             )
             # On error, deny access for security
             return False
+
+    async def list_sync_jobs(
+        self,
+        user_id: str | int,
+        status: str | None = None,
+        sync_type: str | None = None,
+        integration_source: str | None = None,
+        date_from: datetime | None = None,
+        date_to: datetime | None = None,
+        limit: int = 20,
+        offset: int = 0,
+    ) -> tuple[list[dict[str, Any]], int]:
+        """
+        List sync jobs for a user with filtering and pagination.
+
+        Args:
+            user_id: User ID to filter by (string or integer)
+            status: Filter by status (optional)
+            sync_type: Filter by sync type (optional)
+            integration_source: Filter by integration source (optional)
+            date_from: Filter by created_at >= date_from (optional)
+            date_to: Filter by created_at <= date_to (optional)
+            limit: Maximum number of results
+            offset: Number of results to skip
+
+        Returns:
+            Tuple of (list of job dicts, total count)
+        """
+        async with self.db_manager.get_session() as session:
+            async with session.begin():
+                conn = await session.connection()
+                repo = SyncJobRepository(conn)
+                jobs, total = await repo.list_by_user(
+                    user_id=str(user_id),
+                    status=status,
+                    sync_type=sync_type,
+                    integration_source=integration_source,
+                    date_from=date_from,
+                    date_to=date_to,
+                    limit=limit,
+                    offset=offset,
+                )
+
+                # Convert SyncJob objects to dicts
+                job_dicts = [
+                    {
+                        "id": job.id,
+                        "job_id": job.job_id,
+                        "user_id": job.user_id,
+                        "integration_source": job.integration_source,
+                        "sync_type": job.sync_type,
+                        "status": job.status,
+                        "created_at": job.created_at.isoformat()
+                        if job.created_at
+                        else None,
+                        "started_at": job.started_at.isoformat()
+                        if job.started_at
+                        else None,
+                        "completed_at": job.completed_at.isoformat()
+                        if job.completed_at
+                        else None,
+                        "error_message": job.error_message,
+                        "contacts_processed": job.contacts_processed,
+                        "contacts_created": job.contacts_created,
+                        "contacts_updated": job.contacts_updated,
+                        "contacts_deleted": job.contacts_deleted,
+                        "progress": job.progress,
+                    }
+                    for job in jobs
+                ]
+
+                return job_dicts, total

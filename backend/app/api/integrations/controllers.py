@@ -8,11 +8,12 @@ This module provides REST API endpoints for:
 """
 
 import urllib.parse
+from datetime import datetime
 from typing import Any
 
 import structlog
 from dishka.integrations.fastapi import FromDishka, inject
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel
 
 from app.api.integrations.schemas import (
@@ -24,6 +25,10 @@ from app.api.integrations.schemas import (
     OAuthCallbackRequest,
     OAuthCallbackResponse,
     OAuthDisconnectResponse,
+    SyncJobAttributes,
+    SyncJobData,
+    SyncJobListMeta,
+    SyncJobListResponse,
     SyncJobRequest,
     SyncType,
 )
@@ -86,7 +91,7 @@ async def trigger_google_contacts_sync(
         # Enqueue the sync job
         job_id = await task_queue_service.enqueue_google_contacts_sync(
             google_account_email=google_account_email,
-            user_id=int(user.id),  # Convert string ID to int for security
+            user_id=user.id,
             sync_type=sync_type,
         )
 
@@ -116,6 +121,128 @@ async def trigger_google_contacts_sync(
         ) from e
 
 
+@router.get("/google/contacts/sync-history", response_model=SyncJobListResponse)
+@inject
+async def list_sync_jobs(
+    user: FromDishka[SessionUser],
+    task_queue_service: FromDishka[TaskQueueService],
+    status: str | None = Query(None, description="Filter by status"),
+    sync_type: str | None = Query(None, description="Filter by sync type"),
+    date_from: str | None = Query(
+        None, description="Filter by created_at >= date_from (ISO format)"
+    ),
+    date_to: str | None = Query(
+        None, description="Filter by created_at <= date_to (ISO format)"
+    ),
+    limit: int = Query(20, ge=1, le=100, description="Maximum number of results"),
+    offset: int = Query(0, ge=0, description="Number of results to skip"),
+) -> SyncJobListResponse:
+    """
+    List sync job history for the authenticated user.
+
+    Returns a paginated list of sync jobs with optional filtering by status,
+    sync type, and date range.
+    """
+    try:
+        # Parse date filters if provided
+        date_from_dt = None
+        date_to_dt = None
+
+        if date_from:
+            try:
+                date_from_dt = datetime.fromisoformat(date_from.replace("Z", "+00:00"))
+            except ValueError as e:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Invalid date_from format: {str(e)}",
+                ) from e
+
+        if date_to:
+            try:
+                date_to_dt = datetime.fromisoformat(date_to.replace("Z", "+00:00"))
+            except ValueError as e:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Invalid date_to format: {str(e)}",
+                ) from e
+
+        # Get sync jobs from the task queue service
+        # Filter by google_contacts integration source since this endpoint is specific to Google Contacts
+        jobs, total = await task_queue_service.list_sync_jobs(
+            user_id=user.id,
+            status=status,
+            sync_type=sync_type,
+            integration_source="google_contacts",
+            date_from=date_from_dt,
+            date_to=date_to_dt,
+            limit=limit,
+            offset=offset,
+        )
+
+        # Convert to JSON API format
+        data = []
+        for job in jobs:
+            # created_at should never be None since it's set when job is created
+            # If it is None, this indicates a data integrity issue
+            if job["created_at"] is None:
+                logger.error(
+                    "Sync job has missing created_at",
+                    job_id=job.get("job_id"),
+                    user_id=user.id,
+                )
+                raise HTTPException(
+                    status_code=500,
+                    detail="Sync job has missing created_at; data integrity issue detected.",
+                )
+
+            data.append(
+                SyncJobData(
+                    id=job["job_id"],
+                    type="sync-job",
+                    attributes=SyncJobAttributes(
+                        status=job["status"],
+                        sync_type=job["sync_type"],
+                        created_at=job["created_at"],
+                        started_at=job["started_at"],
+                        completed_at=job["completed_at"],
+                        error_message=job["error_message"],
+                        contacts_processed=job["contacts_processed"],
+                        contacts_created=job["contacts_created"],
+                        contacts_updated=job["contacts_updated"],
+                        contacts_deleted=job["contacts_deleted"],
+                        progress=job["progress"],
+                    ),
+                )
+            )
+
+        # Calculate page number
+        page = (offset // limit) + 1 if limit > 0 else 1
+
+        return SyncJobListResponse(
+            data=data,
+            meta=SyncJobListMeta(
+                total=total,
+                page=page,
+                page_size=limit,
+            ),
+        )
+
+    except HTTPException:
+        # Re-raise HTTP exceptions
+        raise
+    except Exception as e:
+        logger.error(
+            "Failed to list sync jobs",
+            user_id=user.id,
+            error=str(e),
+            exc_info=True,
+        )
+        raise HTTPException(
+            status_code=500,
+            detail="An unexpected error occurred while retrieving sync history",
+        ) from e
+
+
 @router.get("/google/contacts/sync/{job_id}", response_model=SyncJobResponse)
 @inject
 async def get_sync_job_status(
@@ -130,7 +257,7 @@ async def get_sync_job_status(
     """
     try:
         # Get job status from the task queue
-        job_status = await task_queue_service.get_job_status(job_id, int(user.id))
+        job_status = await task_queue_service.get_job_status(job_id, user.id)
 
         return SyncJobResponse(
             job_id=job_id,

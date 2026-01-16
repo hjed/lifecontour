@@ -30,6 +30,9 @@ from core_shared.database.engine import create_session_factory
 from core_shared.models.outbox import OutboxEvent
 from core_shared.models.sync_metadata import SyncStatus
 
+# Import sync job repository from core_shared
+from core_shared.repositories import SyncJobRepository
+
 # Import worker-specific services
 from google_auth_service import GoogleAuthService
 from google_contacts_client import GoogleContactsAPIClient
@@ -967,8 +970,64 @@ async def _save_sync_token(
     )
 
 
+async def _update_sync_job_status(
+    session: AsyncSession,
+    job_id: str,
+    status: str,
+    started_at: datetime | None = None,
+    completed_at: datetime | None = None,
+    error_message: str | None = None,
+    contacts_processed: int | None = None,
+    contacts_created: int | None = None,
+    contacts_updated: int | None = None,
+    contacts_deleted: int | None = None,
+    progress: int | None = None,
+) -> None:
+    """
+    Update sync job status in the database using the repository.
+
+    Args:
+        session: Database session
+        job_id: ARQ job ID
+        status: New status
+        started_at: When the job started (optional)
+        completed_at: When the job completed (optional)
+        error_message: Error message if failed (optional)
+        contacts_processed: Number of contacts processed (optional)
+        contacts_created: Number of contacts created (optional)
+        contacts_updated: Number of contacts updated (optional)
+        contacts_deleted: Number of contacts deleted (optional)
+        progress: Progress percentage 0-100 (optional)
+    """
+    # Get connection from session
+    conn = await session.connection()
+    repo = SyncJobRepository(conn)
+
+    # Update job status using repository
+    result = await repo.update_status(
+        job_id=job_id,
+        status=status,
+        started_at=started_at,
+        completed_at=completed_at,
+        error_message=error_message,
+        contacts_processed=contacts_processed,
+        contacts_created=contacts_created,
+        contacts_updated=contacts_updated,
+        contacts_deleted=contacts_deleted,
+        progress=progress,
+    )
+
+    # Log warning if no row was updated
+    if result is None:
+        logger.warning(
+            "Failed to update sync job status - job not found",
+            job_id=job_id,
+            status=status,
+        )
+
+
 async def sync_google_contacts(
-    ctx: dict[str, Any], google_account_email: str, sync_type: str = "smart"
+    ctx: dict[str, Any], google_account_email: str, user_id: str | int, sync_type: str = "smart"
 ) -> dict[str, Any]:
     """
     Sync Google Contacts for a specific Google account.
@@ -979,13 +1038,18 @@ async def sync_google_contacts(
     Args:
         ctx: ARQ context dictionary
         google_account_email: Google account email to sync
+        user_id: User ID who initiated the sync
         sync_type: Type of sync - "full", "incremental", or "smart" (default)
 
     Returns:
         Task result dictionary with sync status and metrics
     """
+    # Get job_id from ARQ context
+    job_id = ctx.get("job_id", "unknown")
+
     logger.info(
         "Starting Google Contacts sync task",
+        job_id=job_id,
         google_account_email=google_account_email,
         sync_type=sync_type,
         worker_id=settings.worker_id,
@@ -1004,9 +1068,21 @@ async def sync_google_contacts(
         "started_at": datetime.now(UTC).isoformat(),
     }
 
+    started_at = datetime.now(UTC)
+
     try:
         # Use session-per-task pattern
         async with session_factory() as session:
+            # Update job status to running
+            await _update_sync_job_status(
+                session=session,
+                job_id=job_id,
+                status="running",
+                started_at=started_at,
+                progress=0,
+            )
+            await session.commit()
+
             # Create services
             auth_service = GoogleAuthService(
                 session=session,
@@ -1046,7 +1122,21 @@ async def sync_google_contacts(
                 raise ValueError(f"Unknown sync type: {sync_type}")
 
             metrics.update(result)
-            metrics["completed_at"] = datetime.now(UTC).isoformat()
+            completed_at = datetime.now(UTC)
+            metrics["completed_at"] = completed_at.isoformat()
+
+            # Update job status to completed
+            await _update_sync_job_status(
+                session=session,
+                job_id=job_id,
+                status="completed",
+                completed_at=completed_at,
+                contacts_processed=metrics.get("contacts_processed", 0),
+                contacts_created=metrics.get("contacts_created", 0),
+                contacts_updated=metrics.get("contacts_updated", 0),
+                contacts_deleted=metrics.get("contacts_deleted", 0),
+                progress=100,
+            )
 
             # Create sync completion event
             completion_event = OutboxEvent.create_sync_completed_event(
@@ -1056,11 +1146,12 @@ async def sync_google_contacts(
             )
             session.add(completion_event)
 
-            # Commit all changes (contact events + completion event + sync token)
+            # Commit all changes (contact events + completion event + sync token + job status)
             await session.commit()
 
             logger.info(
                 "Google Contacts sync task completed successfully",
+                job_id=job_id,
                 google_account_email=google_account_email,
                 **metrics,
             )
@@ -1074,10 +1165,29 @@ async def sync_google_contacts(
     except Exception as e:
         logger.error(
             "Google Contacts sync task failed",
+            job_id=job_id,
             google_account_email=google_account_email,
             error=str(e),
             error_type=type(e).__name__,
         )
+
+        # Update job status to failed
+        try:
+            async with session_factory() as session:
+                await _update_sync_job_status(
+                    session=session,
+                    job_id=job_id,
+                    status="failed",
+                    completed_at=datetime.now(UTC),
+                    error_message=str(e),
+                )
+                await session.commit()
+        except Exception as update_error:
+            logger.error(
+                "Failed to update job status to failed",
+                job_id=job_id,
+                error=str(update_error),
+            )
 
         # Return error result
         return {

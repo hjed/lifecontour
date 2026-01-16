@@ -113,8 +113,11 @@ class IntegrationProvider(Provider):
         )
 
     @provide(scope=Scope.REQUEST)
-    def provide_task_queue_service(
-        self, redis_pool: Redis, settings: Settings
+    async def provide_task_queue_service(
+        self,
+        redis_pool: Redis,
+        settings: Settings,
+        db_manager: IntegrationDatabaseManager,
     ) -> TaskQueueService:
         """
         Provide task queue service for request scope.
@@ -122,13 +125,17 @@ class IntegrationProvider(Provider):
         Args:
             redis_pool: Redis connection pool
             settings: Application settings
+            db_manager: Database manager for persisting sync jobs
 
         Returns:
             TaskQueueService: Task queue service instance
         """
         redis_settings = get_redis_settings(settings)
         return TaskQueueService(
-            redis_pool=redis_pool, redis_settings=redis_settings, settings=settings
+            redis_pool=redis_pool,
+            redis_settings=redis_settings,
+            settings=settings,
+            db_manager=db_manager,
         )
 
     @provide(scope=Scope.REQUEST)

@@ -50,9 +50,14 @@ class IntegrationDatabaseManager:
         if self._engine is not None:
             return
 
+        # Convert postgresql:// to postgresql+asyncpg:// for async driver
+        async_url = str(self.settings.database_url).replace(
+            "postgresql://", "postgresql+asyncpg://"
+        )
+
         # Use NullPool for workers to avoid connection sharing issues
         self._engine = create_async_engine(
-            self.settings.database_url,
+            async_url,
             poolclass=NullPool,  # No connection pooling for workers
             echo=self.settings.debug,  # Log SQL in debug mode
             future=True,
