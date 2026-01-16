@@ -15,6 +15,17 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useInlineEdit } from '@/hooks/useInlineEdit';
 
+export interface InlineEditFieldViewProps {
+  /** Display text (value or placeholder) */
+  readonly displayText: string;
+  /** Whether the field is empty */
+  readonly isEmpty: boolean;
+  /** Handler for view mode click */
+  readonly handleViewClick: () => void;
+  /** Handler for view mode keyboard events */
+  readonly handleViewKeyDown: (event: React.KeyboardEvent) => void;
+}
+
 export interface InlineEditFieldProps {
   /** Current field value */
   readonly value: string | null | undefined;
@@ -34,6 +45,8 @@ export interface InlineEditFieldProps {
   readonly 'data-testid'?: string;
   /** ARIA label for accessibility */
   readonly 'aria-label'?: string;
+  /** Custom render function for view mode (allows customization of the view element) */
+  readonly renderView?: (props: InlineEditFieldViewProps) => React.ReactNode;
 }
 
 /**
@@ -49,6 +62,7 @@ export function InlineEditField({
   className,
   'data-testid': testId,
   'aria-label': ariaLabel,
+  renderView,
 }: InlineEditFieldProps) {
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -171,6 +185,21 @@ export function InlineEditField({
   const displayText = displayValue || placeholder;
   const isEmpty = !displayValue;
 
+  // Use custom render function if provided
+  if (renderView) {
+    return (
+      <>
+        {renderView({
+          displayText,
+          isEmpty,
+          handleViewClick,
+          handleViewKeyDown,
+        })}
+      </>
+    );
+  }
+
+  // Default view mode rendering
   return (
     <button
       type='button'

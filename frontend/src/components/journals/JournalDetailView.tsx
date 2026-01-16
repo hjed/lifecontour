@@ -202,7 +202,6 @@ export function JournalDetailView({
                 validation={validateRequired}
                 placeholder='Journal title'
                 className='text-2xl font-bold tracking-tight'
-                aria-label='Journal title'
                 data-testid='journal-title-field'
               />
 

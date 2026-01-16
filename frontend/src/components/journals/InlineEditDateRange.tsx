@@ -21,6 +21,15 @@ import {
 import type { EventDateRange } from '@/types/journals';
 import type { DateRange } from 'react-day-picker';
 
+// Time constants for date range conversion
+const START_OF_DAY_UTC = { hours: 0, minutes: 0, seconds: 0, milliseconds: 0 };
+const END_OF_DAY_UTC = {
+  hours: 23,
+  minutes: 59,
+  seconds: 59,
+  milliseconds: 999,
+};
+
 export interface InlineEditDateRangeProps {
   /** Current date range value */
   readonly value: EventDateRange;
@@ -94,9 +103,19 @@ export function InlineEditDateRange({
     // Convert dates to ISO datetime strings (with time set to midnight UTC)
     // The backend expects datetime objects, not just date strings
     const startDate = new Date(dateRange.from);
-    startDate.setUTCHours(0, 0, 0, 0);
+    startDate.setUTCHours(
+      START_OF_DAY_UTC.hours,
+      START_OF_DAY_UTC.minutes,
+      START_OF_DAY_UTC.seconds,
+      START_OF_DAY_UTC.milliseconds
+    );
     const endDate = new Date(dateRange.to);
-    endDate.setUTCHours(23, 59, 59, 999);
+    endDate.setUTCHours(
+      END_OF_DAY_UTC.hours,
+      END_OF_DAY_UTC.minutes,
+      END_OF_DAY_UTC.seconds,
+      END_OF_DAY_UTC.milliseconds
+    );
 
     const newValue: EventDateRange = {
       start: startDate.toISOString(),

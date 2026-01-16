@@ -147,6 +147,9 @@ test.describe('Journal Detail Page', () => {
       // - First click on a new date: sets the start date (clears the range)
       // - Second click on another date: sets the end date
 
+      // Get the save button reference early
+      const saveButton = page.getByTestId('journal-date-range-field-save');
+
       // Click January 20th to set it as the start date (this clears the existing range)
       const day20 = page.getByRole('button', {
         name: 'Tuesday, January 20th, 2026',
@@ -154,8 +157,9 @@ test.describe('Journal Detail Page', () => {
       await expect(day20).toBeVisible();
       await day20.click();
 
-      // Wait for the calendar to update
-      await page.waitForTimeout(200);
+      // Wait for the calendar to update by checking the save button state
+      // After clicking the first date, we should have a partial range
+      await expect(saveButton).toBeVisible();
 
       // Now click January 22nd to set it as the end date
       const day22 = page.getByRole('button', {
@@ -164,11 +168,7 @@ test.describe('Journal Detail Page', () => {
       await expect(day22).toBeVisible();
       await day22.click();
 
-      // Wait for the calendar to update
-      await page.waitForTimeout(200);
-
       // Wait for the save button to be enabled (both dates selected)
-      const saveButton = page.getByTestId('journal-date-range-field-save');
       await expect(saveButton).toBeVisible();
       await expect(saveButton).toBeEnabled();
 
