@@ -5,7 +5,6 @@
  */
 
 import { screen } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
 import { JournalDetailView } from '../JournalDetailView';
 import {
   createMockJournalWithMetadata,
@@ -28,6 +27,7 @@ const mockAddContact = jest.fn();
 const mockRemoveContact = jest.fn();
 const mockAddTag = jest.fn();
 const mockRemoveTag = jest.fn();
+const mockUpdateField = jest.fn();
 
 jest.mock('@/lib/api/journals', () => ({
   useUpdateJournal: () => ({
@@ -52,6 +52,10 @@ jest.mock('@/lib/api/journals', () => ({
   }),
   useJournalTags: () => ({
     data: { data: [] },
+  }),
+  useUpdateJournalField: () => ({
+    mutateAsync: mockUpdateField,
+    isPending: false,
   }),
 }));
 
@@ -86,6 +90,26 @@ jest.mock('../JournalChildrenList', () => ({
 
 jest.mock('../JournalTypeDataDisplay', () => ({
   JournalTypeDataDisplay: () => <div data-testid='type-data'>Type Data</div>,
+}));
+
+jest.mock('@/components/contacts/InlineEditField', () => ({
+  InlineEditField: ({ value, 'data-testid': testId }: any) => (
+    <div data-testid={testId}>{value}</div>
+  ),
+}));
+
+jest.mock('../JournalContentInline', () => ({
+  JournalContentInline: ({ value, 'data-testid': testId }: any) => (
+    <div data-testid={testId}>{value}</div>
+  ),
+}));
+
+jest.mock('../InlineEditDateRange', () => ({
+  InlineEditDateRange: ({ value, 'data-testid': testId }: any) => (
+    <div data-testid={testId}>
+      {value?.start} - {value?.end}
+    </div>
+  ),
 }));
 
 describe('JournalDetailView', () => {
@@ -138,10 +162,13 @@ describe('JournalDetailView', () => {
       expect(screen.getByText('Note')).toBeInTheDocument();
     });
 
-    it('renders formatted date', () => {
+    it('renders date range field', () => {
       renderWithQueryClient(<JournalDetailView journal={mockJournal} />);
 
-      expect(screen.getByText(/January 15, 2025/)).toBeInTheDocument();
+      // The date range is now shown in an inline editable field
+      expect(
+        screen.getByTestId('journal-date-range-field')
+      ).toBeInTheDocument();
     });
 
     it('applies custom className', () => {
@@ -156,37 +183,11 @@ describe('JournalDetailView', () => {
   });
 
   describe('Action Buttons', () => {
-    it('renders edit button when onEdit is provided', () => {
-      const mockOnEdit = jest.fn();
-      renderWithQueryClient(
-        <JournalDetailView journal={mockJournal} onEdit={mockOnEdit} />
-      );
-
-      const buttons = screen.getAllByRole('button');
-      // Should have at least one button (edit button)
-      expect(buttons.length).toBeGreaterThan(0);
-    });
-
-    it('calls onEdit when edit button is clicked', async () => {
-      const user = userEvent.setup();
-      const mockOnEdit = jest.fn();
-      renderWithQueryClient(
-        <JournalDetailView journal={mockJournal} onEdit={mockOnEdit} />
-      );
-
-      // The first button should be the edit button
-      const buttons = screen.getAllByRole('button');
-      await user.click(buttons[0]);
-
-      expect(mockOnEdit).toHaveBeenCalled();
-    });
-
-    it('does not render edit button when onEdit is not provided', () => {
+    it('renders delete button', () => {
       renderWithQueryClient(<JournalDetailView journal={mockJournal} />);
 
-      // Without onEdit, there should be fewer buttons
-      const buttons = screen.getAllByRole('button');
-      expect(buttons.length).toBeGreaterThan(0);
+      const deleteButton = screen.getByLabelText('Delete journal');
+      expect(deleteButton).toBeInTheDocument();
     });
   });
 
@@ -233,7 +234,7 @@ describe('JournalDetailView', () => {
       expect(screen.getByText('Test content')).toBeInTheDocument();
     });
 
-    it('preserves whitespace in content', () => {
+    it('renders content in inline editable field', () => {
       const journalWithWhitespace = {
         ...mockJournal,
         content: 'Line 1\n\nLine 2',
@@ -243,25 +244,25 @@ describe('JournalDetailView', () => {
         <JournalDetailView journal={journalWithWhitespace} />
       );
 
-      const content = screen.getByText(/Line 1/);
-      expect(content).toHaveClass('whitespace-pre-wrap');
+      // Content is now in an inline editable component
+      const content = screen.getByTestId('journal-content');
+      expect(content).toBeInTheDocument();
       expect(content.textContent).toBe('Line 1\n\nLine 2');
     });
   });
 
   describe('Date Handling', () => {
-    it('does not render date when event_date_range start is empty', () => {
+    it('does not render date field when event_date_range is not set', () => {
       const journalWithoutDate = {
         ...mockJournal,
-        event_date_range: {
-          start: '',
-          end: '',
-        },
+        event_date_range: { start: '', end: '' },
       };
 
       renderWithQueryClient(<JournalDetailView journal={journalWithoutDate} />);
 
-      expect(screen.queryByText(/January/)).not.toBeInTheDocument();
+      expect(
+        screen.queryByTestId('journal-date-range-field')
+      ).not.toBeInTheDocument();
     });
   });
 });

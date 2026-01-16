@@ -19,10 +19,10 @@ test.describe('Journal Detail Page', () => {
       // Wait for page to load
       await page.waitForLoadState('networkidle');
 
-      // Verify journal title is displayed
-      await expect(
-        page.getByRole('heading', { name: journal.title })
-      ).toBeVisible();
+      // Verify journal title is displayed (now in an inline editable field)
+      const titleField = page.getByTestId('journal-title-field');
+      await expect(titleField).toBeVisible();
+      await expect(titleField).toContainText(journal.title);
 
       // Verify journal content is displayed
       await expect(page.getByText(journal.content)).toBeVisible();
@@ -49,12 +49,7 @@ test.describe('Journal Detail Page', () => {
   });
 
   test.describe('Inline Editing', () => {
-    test.skip('should allow editing journal title', async ({
-      journalsWithData,
-    }) => {
-      // SKIPPED: The journal detail page currently uses JournalDetailView which doesn't have inline editing.
-      // The JournalDetail component with inline editing exists but isn't wired up to the page yet.
-      // This test will be enabled when the page is updated to use JournalDetail component.
+    test('should allow editing journal title', async ({ journalsWithData }) => {
       const { page, journals } = journalsWithData;
       const journal = journals[0];
 
@@ -87,12 +82,9 @@ test.describe('Journal Detail Page', () => {
       await expect(titleField).not.toContainText(journal.title);
     });
 
-    test.skip('should allow editing journal content', async ({
+    test('should allow editing journal content', async ({
       journalsWithData,
     }) => {
-      // SKIPPED: The journal detail page currently uses JournalDetailView which doesn't have inline editing.
-      // The JournalDetail component with inline editing exists but isn't wired up to the page yet.
-      // This test will be enabled when the page is updated to use JournalDetail component.
       const { page, journals } = journalsWithData;
       const journal = journals[0];
 
@@ -125,6 +117,70 @@ test.describe('Journal Detail Page', () => {
       // Wait for save to complete and verify the content was updated
       await expect(contentField).toContainText(newContent);
       await expect(contentField).not.toContainText(journal.content);
+    });
+
+    test('should allow editing journal date range', async ({
+      journalsWithData,
+    }) => {
+      const { page, journals } = journalsWithData;
+      const journal = journals[0];
+
+      // Navigate to journal detail page
+      await page.goto(`/journals/${journal.id}`);
+      await page.waitForLoadState('networkidle');
+
+      // Find the date range field (it's a button in view mode)
+      const dateField = page.getByTestId('journal-date-range-field');
+      await expect(dateField).toBeVisible();
+
+      // Get the original date range text
+      const originalDateRange = await dateField.textContent();
+
+      // Click to enter edit mode (this automatically opens the calendar)
+      await dateField.click();
+
+      // Wait for the calendar to appear and be interactive
+      await page.waitForSelector('[role="grid"]', { state: 'visible' });
+
+      // The calendar starts with the existing range selected (15-16 Jan 2024)
+      // In react-day-picker range mode with a range already selected:
+      // - First click on a new date: sets the start date (clears the range)
+      // - Second click on another date: sets the end date
+
+      // Get the save button reference early
+      const saveButton = page.getByTestId('journal-date-range-field-save');
+
+      // Click January 20th to set it as the start date (this clears the existing range)
+      const day20 = page.getByRole('button', {
+        name: 'Tuesday, January 20th, 2026',
+      });
+      await expect(day20).toBeVisible();
+      await day20.click();
+
+      // Wait for the calendar to update by checking the save button state
+      // After clicking the first date, we should have a partial range
+      await expect(saveButton).toBeVisible();
+
+      // Now click January 22nd to set it as the end date
+      const day22 = page.getByRole('button', {
+        name: 'Thursday, January 22nd, 2026',
+      });
+      await expect(day22).toBeVisible();
+      await day22.click();
+
+      // Wait for the save button to be enabled (both dates selected)
+      await expect(saveButton).toBeVisible();
+      await expect(saveButton).toBeEnabled();
+
+      // Save the changes
+      await saveButton.click();
+
+      // Wait for the edit mode to close
+      await expect(saveButton).not.toBeVisible();
+
+      // Verify the date range was updated (should be different from original)
+      await expect(dateField).not.toContainText(originalDateRange || '');
+      await expect(dateField).toBeVisible();
     });
   });
 

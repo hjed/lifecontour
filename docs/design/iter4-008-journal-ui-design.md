@@ -915,9 +915,9 @@ Check if these are installed, add if needed:
 7. `frontend/src/app/journals/[id]/page.tsx` - Integrated JournalDetailView
 8. `frontend/src/app/journals/__tests__/page.test.tsx` - Updated unit tests
 
-### Phase 6: Bug Fixes & Test Improvements 🔵 IN PROGRESS
+### Phase 6: Bug Fixes & Test Improvements ✅ MOSTLY COMPLETE
 
-**Status:** In Progress - E2E test fixes complete, backend filtering pending
+**Status:** Mostly Complete - E2E tests fixed, backend filtering fixed, inline editing integrated. Only search functionality remains.
 
 **Completed Work:**
 - [x] **E2E Test Fixes** - Fixed failing E2E tests with proper skip annotations
@@ -948,16 +948,42 @@ Check if these are installed, add if needed:
   - **Test:** `frontend/tests/e2e/journals-list.spec.ts` - "should filter journals by type" (currently skipped)
   - **Backend Test:** `backend/tests/integration/api/test_journal_endpoints.py:test_list_journals_with_type_filter` exists but may need verification
 
-- [ ] **Inline Editing Integration** - Wire up inline editing to journal detail page
-  - **Issue:** `JournalDetail` component with inline editing exists but isn't used on the page
-  - **Location:** `frontend/src/app/journals/[id]/page.tsx` uses `JournalDetailView` instead
-  - **Root Cause:** Two components exist - `JournalDetail` (with inline editing) and `JournalDetailView` (read-only)
-  - **Fix Required:**
-    1. Replace `JournalDetailView` with `JournalDetail` in `frontend/src/app/journals/[id]/page.tsx`
-    2. Verify all inline editing functionality works correctly
-    3. Consider removing `JournalDetailView` if no longer needed
-  - **Impact:** Inline editing functionality not available on detail page
-  - **Tests:** `frontend/tests/e2e/journal-detail.spec.ts` - inline editing tests (currently skipped)
+- [x] **Inline Editing Integration** - Wire up inline editing to journal detail page ✅ COMPLETE
+  - **Issue:** `JournalDetailView` component was read-only, missing inline editing for title and content
+  - **Location:** `frontend/src/components/journals/JournalDetailView.tsx`
+  - **Solution Implemented:** Added inline editing to `JournalDetailView` instead of replacing it
+  - **Changes Made:**
+    1. Added `InlineEditField` for title editing
+    2. Added `JournalContentInline` for content editing
+    3. Added `InlineEditDateRange` for date range editing
+    4. Added `useUpdateJournalField` mutation hook
+    5. Updated unit tests to mock inline editing components
+    6. Enabled E2E tests for inline editing
+    7. All tests passing (unit + E2E)
+  - **Files Modified:**
+    - `frontend/src/components/journals/JournalDetailView.tsx` - Added inline editing
+    - `frontend/src/components/journals/__tests__/JournalDetailView.test.tsx` - Updated tests
+    - `frontend/tests/e2e/journal-detail.spec.ts` - Enabled inline editing tests
+  - **Result:** `JournalDetailView` now has both comprehensive Phase 4 features AND inline editing
+  - **Note:** `JournalDetail` component (Phase 2) remains for reference and has its own test coverage
+
+- [x] **Date Range Editing Bug Fix** - Fixed Popover closing issue preventing save (2026-01-16) ✅ COMPLETE
+  - **Issue:** Save button click was not triggering when editing journal date range
+  - **Root Cause:** Popover's `onOpenChange` was being triggered when clicking the save button (outside popover content), causing the popover to close and re-render before the onClick handler could execute
+  - **Location:** `frontend/src/components/journals/InlineEditDateRange.tsx`
+  - **Solution Implemented:**
+    1. Set `modal={false}` on Popover component to prevent auto-closing on outside clicks
+    2. Fixed date format conversion from date-only strings to ISO datetime strings (backend expects datetime objects)
+       - Start date: midnight UTC (`00:00:00.000Z`)
+       - End date: end of day UTC (`23:59:59.999Z`)
+    3. Removed unused `formatDateOnly` import
+  - **Files Modified:**
+    - `frontend/src/components/journals/InlineEditDateRange.tsx` - Fixed Popover modal behavior and date format
+    - `frontend/tests/e2e/journal-detail.spec.ts` - Added comprehensive test for date range editing
+  - **Tests:**
+    - ✅ All 7 E2E tests in journal-detail.spec.ts passing
+    - ✅ Date range editing test verifies full workflow (click to edit, select dates, save, verify update)
+  - **Commit:** `7d9432902` - "ITER4-008: Fix inline editing for journal date range"
 
 - [ ] **Journal Text Search** - Implement local search on journals page (following contacts pattern)
   - **Issue:** Journals page has no search input, only filters sidebar
@@ -991,9 +1017,9 @@ Check if these are installed, add if needed:
 
 **Acceptance Criteria:**
 - [x] E2E tests fixed with proper skip annotations and documentation
-- [ ] Backend type filtering implemented and working
-- [ ] Inline editing wired up to journal detail page
-- [ ] All E2E tests passing (no skipped tests)
+- [x] Backend type filtering implemented and working
+- [x] Inline editing wired up to journal detail page
+- [ ] All E2E tests passing (no skipped tests) - 2 tests still skipped (search functionality)
 - [ ] Responsive polish for all screen sizes (deferred)
 - [ ] Infinite scroll pagination (deferred)
 - [ ] Date grouping in list view (deferred)

@@ -786,7 +786,7 @@ CREATE TABLE journals (
   - **Impact:** Type filter checkboxes in UI don't filter results
   - **Test:** `frontend/tests/e2e/journals-list.spec.ts` - "should filter journals by type" (currently skipped)
 
-- [ ] **Inline Editing Integration** - Wire up inline editing to journal detail page
+- [X] **Inline Editing Integration** - Wire up inline editing to journal detail page
   - **Issue:** `JournalDetail` component with inline editing exists but isn't used on the page
   - **Location:** `frontend/src/app/journals/[id]/page.tsx` uses `JournalDetailView` instead
   - **Fix Required:** Replace `JournalDetailView` with `JournalDetail` component

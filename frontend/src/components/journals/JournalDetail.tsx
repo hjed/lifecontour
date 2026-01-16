@@ -20,7 +20,7 @@ import { Badge } from '@/components/ui/badge';
 import { JournalIdentityInline } from './JournalIdentityInline';
 import { JournalContentInline } from './JournalContentInline';
 import { JournalTypeBadges } from './JournalTypeBadges';
-import { useUpdateJournalField } from '@/lib/api/journals';
+import { useUpdateJournal } from '@/lib/api/journals';
 import type { JournalResource } from '@/types/journals';
 import { cn } from '@/lib/utils';
 
@@ -41,14 +41,15 @@ export function JournalDetail({
   className,
 }: JournalDetailProps) {
   const router = useRouter();
-  const updateFieldMutation = useUpdateJournalField();
+  const updateJournal = useUpdateJournal();
 
   // Handle content update
   const handleContentSave = async (value: string) => {
-    await updateFieldMutation.mutateAsync({
-      journalId: journal.id,
-      fieldName: 'content',
-      value,
+    await updateJournal.mutateAsync({
+      id: journal.id,
+      data: {
+        content: value,
+      },
     });
   };
 

@@ -9,7 +9,7 @@
 
 import { useCallback } from 'react';
 import { validateRequired } from '@/lib/validation';
-import { useUpdateJournalField } from '@/lib/api/journals';
+import { useUpdateJournal } from '@/lib/api/journals';
 import { InlineEditField } from '@/components/contacts/InlineEditField';
 import { InlineEditDateRange } from './InlineEditDateRange';
 import type { JournalResource, EventDateRange } from '@/types/journals';
@@ -27,30 +27,32 @@ export function JournalIdentityInline({
   journal,
   className,
 }: JournalIdentityInlineProps) {
-  const updateFieldMutation = useUpdateJournalField();
+  const updateJournal = useUpdateJournal();
 
   // Handle title update
   const handleTitleSave = useCallback(
     async (value: string) => {
-      await updateFieldMutation.mutateAsync({
-        journalId: journal.id,
-        fieldName: 'title',
-        value,
+      await updateJournal.mutateAsync({
+        id: journal.id,
+        data: {
+          title: value,
+        },
       });
     },
-    [journal.id, updateFieldMutation]
+    [journal.id, updateJournal]
   );
 
   // Handle date range update
   const handleDateRangeSave = useCallback(
     async (value: EventDateRange) => {
-      await updateFieldMutation.mutateAsync({
-        journalId: journal.id,
-        fieldName: 'event_date_range',
-        value,
+      await updateJournal.mutateAsync({
+        id: journal.id,
+        data: {
+          event_date_range: value,
+        },
       });
     },
-    [journal.id, updateFieldMutation]
+    [journal.id, updateJournal]
   );
 
   return (

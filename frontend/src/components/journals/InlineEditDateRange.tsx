@@ -10,7 +10,7 @@
 import { useState, useCallback } from 'react';
 import { Calendar as CalendarIcon, Check, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { formatDateRange, formatDateOnly } from '@/lib/date-utils';
+import { formatDateRange } from '@/lib/date-utils';
 import { Button } from '@/components/ui/button';
 import { Calendar } from '@/components/ui/calendar';
 import {
@@ -20,6 +20,15 @@ import {
 } from '@/components/ui/popover';
 import type { EventDateRange } from '@/types/journals';
 import type { DateRange } from 'react-day-picker';
+
+// Time constants for date range conversion
+const START_OF_DAY_UTC = { hours: 0, minutes: 0, seconds: 0, milliseconds: 0 };
+const END_OF_DAY_UTC = {
+  hours: 23,
+  minutes: 59,
+  seconds: 59,
+  milliseconds: 999,
+};
 
 export interface InlineEditDateRangeProps {
   /** Current date range value */
@@ -91,9 +100,26 @@ export function InlineEditDateRange({
     setIsLoading(true);
     setError(null);
 
+    // Convert dates to ISO datetime strings (with time set to midnight UTC)
+    // The backend expects datetime objects, not just date strings
+    const startDate = new Date(dateRange.from);
+    startDate.setUTCHours(
+      START_OF_DAY_UTC.hours,
+      START_OF_DAY_UTC.minutes,
+      START_OF_DAY_UTC.seconds,
+      START_OF_DAY_UTC.milliseconds
+    );
+    const endDate = new Date(dateRange.to);
+    endDate.setUTCHours(
+      END_OF_DAY_UTC.hours,
+      END_OF_DAY_UTC.minutes,
+      END_OF_DAY_UTC.seconds,
+      END_OF_DAY_UTC.milliseconds
+    );
+
     const newValue: EventDateRange = {
-      start: formatDateOnly(dateRange.from),
-      end: formatDateOnly(dateRange.to),
+      start: startDate.toISOString(),
+      end: endDate.toISOString(),
     };
 
     try {
@@ -141,7 +167,7 @@ export function InlineEditDateRange({
       className={cn('inline-flex items-center gap-2', className)}
       data-testid={testId}
     >
-      <Popover open={isEditing} onOpenChange={setIsEditing}>
+      <Popover open={isEditing} modal={false}>
         <PopoverTrigger asChild>
           <Button
             variant='outline'

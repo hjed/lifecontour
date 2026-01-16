@@ -785,8 +785,8 @@ export const test = base.extend<TestFixtures, WorkerFixtures>({
         title: 'Weekend Hike',
         content: 'Had a great hike in the mountains today.',
         event_date_range: {
-          start: '2024-01-15T09:00:00Z',
-          end: '2024-01-15T15:00:00Z',
+          start: '2026-01-15T09:00:00Z',
+          end: '2026-01-16T15:00:00Z',
         },
         types: ['note'],
       },
@@ -794,8 +794,8 @@ export const test = base.extend<TestFixtures, WorkerFixtures>({
         title: 'Team Meeting',
         content: 'Discussed Q1 goals and project timelines.',
         event_date_range: {
-          start: '2024-01-16T14:00:00Z',
-          end: '2024-01-16T15:00:00Z',
+          start: '2026-01-16T14:00:00Z',
+          end: '2026-01-16T15:00:00Z',
         },
         types: ['event'],
       },
