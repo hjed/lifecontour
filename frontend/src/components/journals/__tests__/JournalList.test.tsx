@@ -5,13 +5,13 @@
 import { render, screen } from '@testing-library/react';
 import { JournalList } from '../JournalList';
 import { JournalResource, JournalType } from '@/types/journals';
+import { DisplayJournal } from '@/hooks/useDisplayJournals';
+import { toDisplayJournal } from '../test-helpers';
 
 // Mock JournalListItem component
 jest.mock('../JournalListItem', () => ({
-  JournalListItem: ({ journal }: { journal: JournalResource }) => (
-    <div data-testid={`journal-item-${journal.id}`}>
-      {journal.attributes.title}
-    </div>
+  JournalListItem: ({ journal }: { journal: DisplayJournal }) => (
+    <div data-testid={`journal-item-${journal.id}`}>{journal.title}</div>
   ),
 }));
 
@@ -71,7 +71,8 @@ describe('JournalList', () => {
   ];
 
   it('renders all journals', () => {
-    render(<JournalList journals={mockJournals} />);
+    const displayJournals = mockJournals.map(j => toDisplayJournal(j));
+    render(<JournalList journals={displayJournals} />);
 
     expect(screen.getByTestId('journal-item-1')).toBeInTheDocument();
     expect(screen.getByTestId('journal-item-2')).toBeInTheDocument();
@@ -94,7 +95,8 @@ describe('JournalList', () => {
   });
 
   it('applies default grid className', () => {
-    const { container } = render(<JournalList journals={mockJournals} />);
+    const displayJournals = mockJournals.map(j => toDisplayJournal(j));
+    const { container } = render(<JournalList journals={displayJournals} />);
 
     const gridElement = container.firstChild as HTMLElement;
     expect(gridElement).toHaveClass('grid');
@@ -104,8 +106,9 @@ describe('JournalList', () => {
   });
 
   it('applies custom className', () => {
+    const displayJournals = mockJournals.map(j => toDisplayJournal(j));
     const { container } = render(
-      <JournalList journals={mockJournals} className='custom-grid' />
+      <JournalList journals={displayJournals} className='custom-grid' />
     );
 
     const gridElement = container.firstChild as HTMLElement;
@@ -113,14 +116,16 @@ describe('JournalList', () => {
   });
 
   it('renders single journal', () => {
-    render(<JournalList journals={[mockJournals[0]]} />);
+    const displayJournals = [toDisplayJournal(mockJournals[0])];
+    render(<JournalList journals={displayJournals} />);
 
     expect(screen.getByTestId('journal-item-1')).toBeInTheDocument();
     expect(screen.queryByTestId('journal-item-2')).not.toBeInTheDocument();
   });
 
   it('maintains journal order', () => {
-    const { container } = render(<JournalList journals={mockJournals} />);
+    const displayJournals = mockJournals.map(j => toDisplayJournal(j));
+    const { container } = render(<JournalList journals={displayJournals} />);
 
     const items = container.querySelectorAll('[data-testid^="journal-item-"]');
     expect(items[0]).toHaveAttribute('data-testid', 'journal-item-1');

@@ -9,6 +9,7 @@ import {
   JournalType,
   JournalContactRelationshipType,
 } from '@/types/journals';
+import { toDisplayJournal } from '../test-helpers';
 
 // Mock date-fns
 jest.mock('date-fns', () => ({
@@ -39,7 +40,8 @@ describe('JournalListItem', () => {
   };
 
   it('renders journal item with correct structure', () => {
-    render(<JournalListItem journal={baseJournal} />);
+    const displayJournal = toDisplayJournal(baseJournal);
+    render(<JournalListItem journal={displayJournal} />);
 
     expect(screen.getByTestId('journal-1')).toBeInTheDocument();
     expect(screen.getByText('Test Journal')).toBeInTheDocument();
@@ -47,14 +49,16 @@ describe('JournalListItem', () => {
   });
 
   it('displays journal title as a link', () => {
-    render(<JournalListItem journal={baseJournal} />);
+    const displayJournal = toDisplayJournal(baseJournal);
+    render(<JournalListItem journal={displayJournal} />);
 
     const link = screen.getByRole('link', { name: 'Test Journal' });
     expect(link).toHaveAttribute('href', '/journals/1');
   });
 
   it('displays type icons', () => {
-    render(<JournalListItem journal={baseJournal} />);
+    const displayJournal = toDisplayJournal(baseJournal);
+    render(<JournalListItem journal={displayJournal} />);
 
     const typeIcons = screen.getByLabelText('Journal types');
     expect(typeIcons).toBeInTheDocument();
@@ -69,7 +73,8 @@ describe('JournalListItem', () => {
       },
     };
 
-    render(<JournalListItem journal={multiTypeJournal} />);
+    const displayJournal = toDisplayJournal(multiTypeJournal);
+    render(<JournalListItem journal={displayJournal} />);
 
     const typeIcons = screen.getByLabelText('Journal types');
     expect(typeIcons.children).toHaveLength(3);
@@ -87,7 +92,8 @@ describe('JournalListItem', () => {
       },
     };
 
-    render(<JournalListItem journal={journalWithTags} />);
+    const displayJournal = toDisplayJournal(journalWithTags);
+    render(<JournalListItem journal={displayJournal} />);
 
     expect(screen.getByTestId('tag-Personal')).toBeInTheDocument();
     expect(screen.getByTestId('tag-Work')).toBeInTheDocument();
@@ -113,7 +119,8 @@ describe('JournalListItem', () => {
       },
     };
 
-    render(<JournalListItem journal={journalWithContacts} />);
+    const displayJournal = toDisplayJournal(journalWithContacts);
+    render(<JournalListItem journal={displayJournal} />);
 
     expect(screen.getByTestId('contact-1')).toBeInTheDocument();
     expect(screen.getByText('John Doe')).toBeInTheDocument();
@@ -122,7 +129,8 @@ describe('JournalListItem', () => {
   });
 
   it('displays content excerpt', () => {
-    render(<JournalListItem journal={baseJournal} />);
+    const displayJournal = toDisplayJournal(baseJournal);
+    render(<JournalListItem journal={displayJournal} />);
 
     expect(
       screen.getByText('This is a test journal entry with some content.')
@@ -139,7 +147,8 @@ describe('JournalListItem', () => {
       },
     };
 
-    render(<JournalListItem journal={journalWithLongContent} />);
+    const displayJournal = toDisplayJournal(journalWithLongContent);
+    render(<JournalListItem journal={displayJournal} />);
 
     const displayedContent = screen.getByText(/A+\.\.\./);
     expect(displayedContent.textContent?.length).toBeLessThan(
@@ -160,14 +169,18 @@ describe('JournalListItem', () => {
       },
     };
 
-    render(<JournalListItem journal={journalWithCalendar} />);
+    const displayJournal = toDisplayJournal(journalWithCalendar);
+    render(<JournalListItem journal={displayJournal} />);
 
     const colorBar = screen.getByTestId('journal-1').querySelector('.absolute');
     expect(colorBar).toHaveStyle({ backgroundColor: '#FF0000' });
   });
 
   it('applies custom className', () => {
-    render(<JournalListItem journal={baseJournal} className='custom-class' />);
+    const displayJournal = toDisplayJournal(baseJournal);
+    render(
+      <JournalListItem journal={displayJournal} className='custom-class' />
+    );
 
     const item = screen.getByTestId('journal-1');
     expect(item).toHaveClass('custom-class');

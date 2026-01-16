@@ -8,6 +8,10 @@
 import { render } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { JournalType, type JournalResource } from '@/types/journals';
+import {
+  DisplayJournal,
+  transformJournalForDisplay,
+} from '@/utils/journalTransformers';
 
 /**
  * Create a mock journal resource with sensible defaults.
@@ -140,4 +144,15 @@ export function createMockUseInlineEdit(
     handleKeyDown: jest.fn(),
     ...overrides,
   };
+}
+
+/**
+ * Transform JournalResource to DisplayJournal for testing.
+ * Uses the shared transformation utility to maintain consistency.
+ */
+export function toDisplayJournal(
+  journal: JournalResource,
+  shouldUseSearch = false
+): DisplayJournal {
+  return transformJournalForDisplay(journal, shouldUseSearch);
 }

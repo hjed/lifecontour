@@ -19,12 +19,14 @@ import {
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { JournalResource, JournalType } from '@/types/journals';
+import { JournalType } from '@/types/journals';
+import { DisplayJournal } from '@/hooks/useDisplayJournals';
+import { SearchHighlight } from '@/components/search/SearchHighlight';
 import { cn } from '@/lib/utils';
 import { formatDateRange } from '@/lib/date-utils';
 
 interface JournalListItemProps {
-  readonly journal: JournalResource;
+  readonly journal: DisplayJournal;
   readonly className?: string;
 }
 
@@ -50,8 +52,12 @@ function truncateContent(content: string, maxLength: number = 200): string {
  * JournalListItem component displays a journal card with all relevant information
  */
 export function JournalListItem({ journal, className }: JournalListItemProps) {
-  const { attributes } = journal;
-  const calendarColor = attributes.calendar?.color || '#6b7280'; // Default gray
+  const calendarColor = journal.calendar?.color || '#6b7280'; // Default gray
+
+  // Use highlighted text if available, otherwise use regular text
+  const displayTitle = journal.highlightedTitle || journal.title;
+  const displayContent =
+    journal.highlightedContent || truncateContent(journal.content);
 
   return (
     <Card
@@ -74,7 +80,7 @@ export function JournalListItem({ journal, className }: JournalListItemProps) {
           <CardTitle className='flex items-center gap-2 text-lg'>
             {/* Type icons */}
             <div className='flex gap-1' aria-label='Journal types'>
-              {attributes.types.map(type => {
+              {journal.types.map(type => {
                 const Icon = TYPE_ICONS[type];
                 return Icon ? (
                   <Icon
@@ -89,7 +95,11 @@ export function JournalListItem({ journal, className }: JournalListItemProps) {
               href={`/journals/${journal.id}` as Route}
               className='hover:underline'
             >
-              {attributes.title}
+              {journal.isSearchResult ? (
+                <SearchHighlight text={displayTitle} fallback={journal.title} />
+              ) : (
+                journal.title
+              )}
             </Link>
           </CardTitle>
         </div>
@@ -99,15 +109,15 @@ export function JournalListItem({ journal, className }: JournalListItemProps) {
         {/* Date display */}
         <div className='text-muted-foreground text-sm'>
           {formatDateRange(
-            attributes.event_date_range.start,
-            attributes.event_date_range.end
+            journal.event_date_range.start,
+            journal.event_date_range.end
           )}
         </div>
 
         {/* Tags */}
-        {attributes.tags.length > 0 && (
+        {journal.tags.length > 0 && (
           <div className='flex flex-wrap gap-1'>
-            {attributes.tags.map(tag => (
+            {journal.tags.map(tag => (
               <Badge
                 key={tag.id}
                 variant='secondary'
@@ -122,9 +132,9 @@ export function JournalListItem({ journal, className }: JournalListItemProps) {
         )}
 
         {/* Contact chips */}
-        {attributes.contacts.length > 0 && (
+        {journal.contacts.length > 0 && (
           <div className='flex flex-wrap gap-2'>
-            {attributes.contacts.map(contact => (
+            {journal.contacts.map(contact => (
               <div
                 key={`${contact.id}-${contact.relationship_type}`}
                 className='bg-muted text-muted-foreground flex items-center gap-1 rounded-full px-2 py-1 text-xs'
@@ -138,9 +148,16 @@ export function JournalListItem({ journal, className }: JournalListItemProps) {
         )}
 
         {/* Content excerpt */}
-        {attributes.content && (
+        {journal.content && (
           <p className='text-muted-foreground text-sm'>
-            {truncateContent(attributes.content)}
+            {journal.isSearchResult ? (
+              <SearchHighlight
+                text={displayContent}
+                fallback={truncateContent(journal.content)}
+              />
+            ) : (
+              truncateContent(journal.content)
+            )}
           </p>
         )}
       </CardContent>
