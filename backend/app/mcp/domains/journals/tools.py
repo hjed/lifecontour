@@ -62,6 +62,25 @@ DEFAULT_PAGE_SIZE = 20
 MAX_PAGE_SIZE = 50
 
 
+def _parse_iso_datetime(datetime_str: str) -> datetime:
+    """
+    Parse ISO 8601 datetime string, handling 'Z' suffix for UTC.
+
+    Python's datetime.fromisoformat() doesn't accept 'Z' suffix, so we
+    replace it with '+00:00' for UTC timezone.
+
+    Args:
+        datetime_str: ISO 8601 datetime string (e.g., "2024-01-15T14:00:00Z")
+
+    Returns:
+        Parsed datetime object with timezone info
+    """
+    # Replace 'Z' suffix with '+00:00' for UTC
+    if datetime_str.endswith("Z"):
+        datetime_str = datetime_str[:-1] + "+00:00"
+    return datetime.fromisoformat(datetime_str)
+
+
 def register_journal_tools(mcp: FastMCP[None]) -> None:
     """
     Register journal-related MCP tools with the FastMCP server.
@@ -369,9 +388,9 @@ def register_journal_tools(mcp: FastMCP[None]) -> None:
         data = json.loads(journal_data)
         request = JournalCreateRequest(**data)
 
-        # Parse event date range
-        start_date = datetime.fromisoformat(request.event_date_range["start"])
-        end_date = datetime.fromisoformat(request.event_date_range["end"])
+        # Parse event date range (handle 'Z' suffix for UTC)
+        start_date = _parse_iso_datetime(request.event_date_range["start"])
+        end_date = _parse_iso_datetime(request.event_date_range["end"])
         event_date_range = EventDateRange(start=start_date, end=end_date)
 
         # Create journal entity
@@ -515,8 +534,9 @@ def register_journal_tools(mcp: FastMCP[None]) -> None:
             changed_fields["content"] = request.content
 
         if request.event_date_range is not None:
-            start_date = datetime.fromisoformat(request.event_date_range["start"])
-            end_date = datetime.fromisoformat(request.event_date_range["end"])
+            # Parse dates (handle 'Z' suffix for UTC)
+            start_date = _parse_iso_datetime(request.event_date_range["start"])
+            end_date = _parse_iso_datetime(request.event_date_range["end"])
             existing_journal.event_date_range = EventDateRange(
                 start=start_date, end=end_date
             )
