@@ -174,3 +174,59 @@ class ErrorResponse(BaseModel):
         default_factory=dict, description="Additional error details"
     )
     timestamp: str = Field(description="ISO timestamp of the error")
+
+
+# Sync Job List Response Models (JSON API format)
+class SyncJobAttributes(BaseModel):
+    """Attributes for a sync job (JSON API format)."""
+
+    status: str = Field(description="Job status")
+    sync_type: str = Field(description="Type of sync")
+    created_at: str = Field(description="ISO timestamp when job was created")
+    started_at: str | None = Field(
+        default=None, description="ISO timestamp when job started"
+    )
+    completed_at: str | None = Field(
+        default=None, description="ISO timestamp when job completed"
+    )
+    error_message: str | None = Field(
+        default=None, description="Error message if failed"
+    )
+    contacts_processed: int | None = Field(
+        default=None, description="Number of contacts processed"
+    )
+    contacts_created: int | None = Field(
+        default=None, description="Number of contacts created"
+    )
+    contacts_updated: int | None = Field(
+        default=None, description="Number of contacts updated"
+    )
+    contacts_deleted: int | None = Field(
+        default=None, description="Number of contacts deleted"
+    )
+    progress: int | None = Field(
+        default=None, description="Progress percentage (0-100)"
+    )
+
+
+class SyncJobData(BaseModel):
+    """Data wrapper for a sync job (JSON API format)."""
+
+    id: str = Field(description="Job ID")
+    type: str = Field(default="sync-job", description="Resource type")
+    attributes: SyncJobAttributes = Field(description="Job attributes")
+
+
+class SyncJobListMeta(BaseModel):
+    """Metadata for sync job list response."""
+
+    total: int = Field(description="Total number of jobs matching filters")
+    page: int = Field(description="Current page number")
+    page_size: int = Field(description="Number of items per page")
+
+
+class SyncJobListResponse(BaseModel):
+    """Response model for sync job list (JSON API format)."""
+
+    data: list[SyncJobData] = Field(description="List of sync jobs")
+    meta: SyncJobListMeta = Field(description="Response metadata")

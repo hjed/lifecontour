@@ -43,6 +43,11 @@ class TestIntegrationsControllers:
         class TestAuthProvider(Provider):
             """Test provider for authenticated client."""
 
+            @provide(scope=Scope.APP)
+            def get_settings(self) -> Settings:
+                """Provide test settings to all providers."""
+                return test_settings  # type: ignore
+
             @provide(scope=Scope.REQUEST)
             def get_session_user(self) -> SessionUser:
                 return test_user  # type: ignore
@@ -58,7 +63,7 @@ class TestIntegrationsControllers:
         test_container = make_async_container(
             DatabaseProvider(test_settings),
             InfrastructureProvider(),
-            TestAuthProvider(),  # Override auth with test user
+            TestAuthProvider(),  # Override auth with test user and provide settings
             ContactProvider(),
             JournalProvider(),
             IntegrationProvider(),
@@ -145,8 +150,8 @@ class TestIntegrationsControllers:
             assert data["status"] == "completed"
             assert data["message"] == "Job completed successfully"
 
-            # Verify service was called with job_id and user_id
-            mock_get_status.assert_called_once_with(job_id, 123)
+            # Verify service was called with job_id and user_id (user.id is a string)
+            mock_get_status.assert_called_once_with(job_id, "123")
 
     def test_get_sync_job_status_failure(self, client: TestClient):
         """Test job status retrieval failure."""

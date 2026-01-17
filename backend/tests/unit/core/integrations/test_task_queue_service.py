@@ -45,10 +45,14 @@ class TestTaskQueueService:
         mock_settings: Settings,
     ) -> TaskQueueService:
         """Create TaskQueueService instance."""
+        from app.core.integrations.database import IntegrationDatabaseManager
+
+        mock_db_manager = AsyncMock(spec=IntegrationDatabaseManager)
         return TaskQueueService(
             redis_pool=mock_redis_pool,
             redis_settings=redis_settings,
             settings=mock_settings,
+            db_manager=mock_db_manager,
         )
 
     @pytest.mark.asyncio
@@ -62,10 +66,36 @@ class TestTaskQueueService:
         mock_job.job_id = "test-job-123"
         mock_pool.enqueue_job.return_value = mock_job
 
-        with patch(
-            "app.core.integrations.task_queue_service.create_pool"
-        ) as mock_create_pool:
+        # Mock database session and repository
+        mock_session = MagicMock()
+        mock_conn = AsyncMock()
+        mock_session.connection = AsyncMock(return_value=mock_conn)
+
+        # Create async context manager for session.begin()
+        mock_begin_ctx = MagicMock()
+        mock_begin_ctx.__aenter__ = AsyncMock(return_value=None)
+        mock_begin_ctx.__aexit__ = AsyncMock(return_value=None)
+        mock_session.begin = MagicMock(return_value=mock_begin_ctx)
+
+        # Create async context manager for db_manager.get_session()
+        mock_get_session_ctx = MagicMock()
+        mock_get_session_ctx.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_get_session_ctx.__aexit__ = AsyncMock(return_value=None)
+
+        # Mock the db_manager's get_session method
+        service.db_manager.get_session = MagicMock(return_value=mock_get_session_ctx)  # type: ignore[method-assign]
+
+        with (
+            patch(
+                "app.core.integrations.task_queue_service.create_pool"
+            ) as mock_create_pool,
+            patch(
+                "app.core.integrations.task_queue_service.SyncJobRepository"
+            ) as mock_repo_class,
+        ):
             mock_create_pool.return_value = mock_pool
+            mock_repo = AsyncMock()
+            mock_repo_class.return_value = mock_repo
 
             # Mock Redis operations for user-job association
             mock_redis_pool.hset = AsyncMock()

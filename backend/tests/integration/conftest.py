@@ -725,6 +725,9 @@ def test_settings():
     return Settings(
         debug=True,
         database_url=get_test_database_url(),  # Use the same database URL as other integration tests
+        redis_url=os.getenv(
+            "REDIS_URL", "redis://localhost:6380"
+        ),  # Use test Redis port
         meilisearch_url=os.getenv("MEILISEARCH_URL", "http://localhost:7701"),
         meilisearch_api_key=os.getenv("MEILISEARCH_API_KEY", "test_master_key"),
         allowed_hosts=["*"],  # Allow all hosts for testing
