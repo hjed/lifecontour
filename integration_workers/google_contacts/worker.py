@@ -7,6 +7,7 @@ It runs as a separate process from the main FastAPI application.
 """
 
 import logging
+import random
 import sys
 from datetime import UTC, datetime
 from typing import Any
@@ -297,7 +298,7 @@ def _transform_nicknames(contact: dict[str, Any]) -> list[dict[str, str]] | None
     return None
 
 
-def _normalize_contact_type(label: str) -> str:
+def _normalize_contact_type(label: str | None) -> str:
     """
     Normalize contact method labels to Google's standard types.
 
@@ -305,10 +306,11 @@ def _normalize_contact_type(label: str) -> str:
     Standard types: home, work, other, mobile, main
 
     Args:
-        label: The label from our system
+        label: The label from our system (can be None or empty)
 
     Returns:
-        Normalized type string (defaults to original label if no mapping exists)
+        Normalized type string (defaults to "other" if label is None/empty,
+        or original label if no mapping exists)
     """
     if not label:
         return "other"
@@ -1315,6 +1317,41 @@ async def push_local_contacts_to_google(
         }
 
 
+def retry_delay_func(retry_count: int) -> float:
+    """
+    Calculate retry delay with exponential backoff and jitter.
+
+    Implements exponential backoff strategy:
+    - Retry 0 (1st retry): ~60s (48-72s with jitter)
+    - Retry 1 (2nd retry): ~120s (96-144s with jitter)
+    - Retry 2 (3rd retry): ~240s (192-288s with jitter)
+    - Retry 3 (4th retry): ~480s (384-576s with jitter)
+    - Retry 4+ (5th+ retry): capped at 900s (720-900s with jitter)
+
+    Note: Jitter is intentionally random (±20%) to prevent thundering herd problems
+    in production. Unit tests verify correct behavior by testing many samples and
+    checking that average delays match expected values.
+
+    Args:
+        retry_count: Number of retries already attempted (0-based)
+
+    Returns:
+        Delay in seconds before next retry
+    """
+    # Base delay: 60 seconds
+    base_delay = 60
+
+    # Exponential backoff: 60 * (2 ^ retry_count)
+    delay = base_delay * (2**retry_count)
+
+    # Apply jitter: ±20% to prevent thundering herd
+    jitter = random.uniform(0.8, 1.2)
+    delay_with_jitter = delay * jitter
+
+    # Cap at 15 minutes (900 seconds)
+    return min(delay_with_jitter, 900)
+
+
 # ARQ Worker Settings
 class GoogleContactsWorkerSettings:
     """ARQ worker configuration."""
@@ -1334,9 +1371,9 @@ class GoogleContactsWorkerSettings:
     job_timeout = 600  # 10 minutes
     keep_result = 3600  # Keep results for 1 hour
 
-    # Retry configuration
+    # Retry configuration with exponential backoff
     max_tries = 5
-    retry_delay = 60  # 1 minute base delay
+    retry_delay = retry_delay_func  # Use function for exponential backoff with jitter
 
     # Queue name
     queue_name = "google_contacts"
