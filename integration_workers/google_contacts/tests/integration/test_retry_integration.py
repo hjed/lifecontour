@@ -16,6 +16,7 @@ import pytest_asyncio
 from arq import create_pool, Worker
 from arq.connections import RedisSettings
 from arq.jobs import JobStatus
+from redis.exceptions import RedisError
 
 sys.path.insert(0, "/core_shared")
 
@@ -28,13 +29,18 @@ _arq_task_state = {
 }
 
 
+class IntentionalTaskFailure(RuntimeError):
+    """Specific exception for intentional test failures in ARQ tasks."""
+    pass
+
+
 async def arq_failing_task(ctx):
     """ARQ task that fails a specified number of times before succeeding."""
     _arq_task_state["call_count"] += 1
     _arq_task_state["call_times"].append(datetime.now(UTC))
 
     if _arq_task_state["call_count"] <= _arq_task_state["should_fail_count"]:
-        raise Exception(f"Intentional test failure #{_arq_task_state['call_count']}")
+        raise IntentionalTaskFailure(f"Intentional test failure #{_arq_task_state['call_count']}")
 
     return {
         "status": "success",
@@ -47,7 +53,7 @@ async def arq_always_failing_task(ctx):
     """ARQ task that always fails."""
     _arq_task_state["call_count"] += 1
     _arq_task_state["call_times"].append(datetime.now(UTC))
-    raise Exception(f"Always fails - attempt #{_arq_task_state['call_count']}")
+    raise IntentionalTaskFailure(f"Always fails - attempt #{_arq_task_state['call_count']}")
 
 
 class TestARQRetryIntegration:
@@ -72,7 +78,7 @@ class TestARQRetryIntegration:
         # Clean up any existing jobs in the queue
         try:
             await pool.flushdb()
-        except Exception:
+        except RedisError:
             pass  # Ignore if Redis is not available
 
         yield pool
@@ -80,11 +86,11 @@ class TestARQRetryIntegration:
         # Cleanup
         try:
             await pool.flushdb()
-        except Exception:
+        except RedisError:
             pass  # Ignore cleanup errors
         try:
             await pool.close()
-        except Exception:
+        except RedisError:
             pass  # Ignore cleanup errors
 
     @pytest.mark.asyncio
@@ -161,16 +167,10 @@ class TestARQRetryIntegration:
         """
         Test that a worker actually retries a failing job.
 
-        Note: This test uses accelerated retry delays for faster testing.
-        This test is skipped in CI as it requires a running worker process.
+        Note: This test is skipped in CI as it requires a running worker process.
         """
         # Set up test to fail 2 times before succeeding
         _arq_task_state["should_fail_count"] = 2
-
-        # Create a test worker with accelerated retry delays
-        def fast_retry_delay(retry_num: int) -> int:
-            """Fast retry delays for testing (1 second instead of 60+)."""
-            return 1  # 1 second for all retries
 
         # Enqueue the job
         job = await redis_pool.enqueue_job(
@@ -214,5 +214,6 @@ class TestARQRetryIntegration:
             try:
                 await worker_task
             except asyncio.CancelledError:
-                pass
+                # Re-raise CancelledError after cleanup as required by asyncio best practices
+                raise
 
