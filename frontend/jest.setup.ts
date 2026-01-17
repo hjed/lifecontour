@@ -1,6 +1,13 @@
 import '@testing-library/jest-dom';
 import type { AppRouterInstance } from 'next/dist/shared/lib/app-router-context.shared-runtime';
 
+// Mock ResizeObserver for Radix UI components
+global.ResizeObserver = jest.fn().mockImplementation(() => ({
+  observe: jest.fn(),
+  unobserve: jest.fn(),
+  disconnect: jest.fn(),
+}));
+
 // Create a mock router with proper typing
 const mockPush = jest.fn();
 const mockReplace = jest.fn();

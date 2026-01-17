@@ -8,6 +8,8 @@
 'use client';
 
 import { useState } from 'react';
+import Link from 'next/link';
+import type { Route } from 'next';
 import { AuthGuard } from '@/components/auth/AuthGuard';
 import { JournalList } from '@/components/journals/JournalList';
 import { JournalFilters } from '@/components/journals/JournalFilters';
@@ -107,9 +109,11 @@ export default function JournalsPage() {
             <Filter className='h-4 w-4' />
             {showFilters ? 'Hide' : 'Show'} Filters
           </Button>
-          <Button size='sm' className='gap-2' disabled title='Coming soon'>
-            <Plus className='h-4 w-4' />
-            New Journal
+          <Button asChild size='sm' className='gap-2'>
+            <Link href={'/journals/new' as Route}>
+              <Plus className='h-4 w-4' />
+              New Journal
+            </Link>
           </Button>
         </div>
       </div>
@@ -197,9 +201,11 @@ export default function JournalsPage() {
                           ? 'Try adjusting your filters or create a new journal.'
                           : 'Get started by creating your first journal entry.'}
                     </p>
-                    <Button className='mt-4 gap-2' disabled title='Coming soon'>
-                      <Plus className='h-4 w-4' />
-                      Create Journal
+                    <Button asChild className='mt-4 gap-2'>
+                      <Link href={'/journals/new' as Route}>
+                        <Plus className='h-4 w-4' />
+                        Create Journal
+                      </Link>
                     </Button>
                   </CardContent>
                 </Card>

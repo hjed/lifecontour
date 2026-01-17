@@ -83,11 +83,11 @@ describe('JournalsPage', () => {
     ).toBeInTheDocument();
   });
 
-  it('renders new journal button', () => {
+  it('renders new journal link', () => {
     renderWithQueryClient(<JournalsPage />);
 
     expect(
-      screen.getByRole('button', { name: /new journal/i })
+      screen.getByRole('link', { name: /new journal/i })
     ).toBeInTheDocument();
   });
 
