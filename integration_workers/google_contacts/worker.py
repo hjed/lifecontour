@@ -298,7 +298,7 @@ def _transform_nicknames(contact: dict[str, Any]) -> list[dict[str, str]] | None
     return None
 
 
-def _normalize_contact_type(label: str) -> str:
+def _normalize_contact_type(label: str | None) -> str:
     """
     Normalize contact method labels to Google's standard types.
 
@@ -306,10 +306,11 @@ def _normalize_contact_type(label: str) -> str:
     Standard types: home, work, other, mobile, main
 
     Args:
-        label: The label from our system
+        label: The label from our system (can be None or empty)
 
     Returns:
-        Normalized type string (defaults to original label if no mapping exists)
+        Normalized type string (defaults to "other" if label is None/empty,
+        or original label if no mapping exists)
     """
     if not label:
         return "other"

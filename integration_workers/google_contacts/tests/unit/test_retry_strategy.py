@@ -67,6 +67,7 @@ class TestRetryDelayFunction:
 
     def test_retry_delay_deterministic_with_seed(self):
         """Test that retry delay is deterministic when random seed is set."""
+        import math
         from worker import retry_delay_func
 
         # Set random seed for reproducibility
@@ -74,10 +75,10 @@ class TestRetryDelayFunction:
             mock_uniform.return_value = 1.0  # No jitter
 
             delay = retry_delay_func(0)
-            assert delay == 60.0, f"Expected 60s with no jitter, got {delay}s"
+            assert math.isclose(delay, 60.0, rel_tol=1e-9), f"Expected 60s with no jitter, got {delay}s"
 
             delay = retry_delay_func(1)
-            assert delay == 120.0, f"Expected 120s with no jitter, got {delay}s"
+            assert math.isclose(delay, 120.0, rel_tol=1e-9), f"Expected 120s with no jitter, got {delay}s"
 
     def test_retry_delay_jitter_variation(self):
         """Test that jitter produces variation in retry delays."""

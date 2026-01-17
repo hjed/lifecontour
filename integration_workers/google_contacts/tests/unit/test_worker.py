@@ -6,6 +6,7 @@ Tests the actual sync logic implementation using the Google People API.
 """
 
 # Add core_shared to path for imports
+import asyncio
 import sys
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -49,6 +50,8 @@ class TestGoogleContactsWorker:
         # Create mock connection with proper async behavior
         mock_connection = AsyncMock()
         async def mock_execute(*args, **kwargs):
+            # Yield control to event loop (required for async function)
+            await asyncio.sleep(0)
             return mock_result
         mock_connection.execute = mock_execute
 
@@ -56,6 +59,8 @@ class TestGoogleContactsWorker:
         mock_session = AsyncMock()
         # Make connection() return the mock connection (it's an async method)
         async def mock_connection_func():
+            # Yield control to event loop (required for async function)
+            await asyncio.sleep(0)
             return mock_connection
         mock_session.connection = mock_connection_func
 
