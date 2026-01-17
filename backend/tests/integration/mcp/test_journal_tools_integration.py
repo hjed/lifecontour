@@ -18,6 +18,25 @@ from app.core.journal.services.journal_service import JournalService
 class TestJournalToolsIntegration:
     """Integration tests for MCP journal tools with real services."""
 
+    @pytest.fixture
+    def journal_service(self, clean_database: AsyncConnection) -> JournalService:
+        """Create JournalService with real dependencies."""
+        from app.core.journal.adapters.sql_journal_repository import (  # type: ignore[import-untyped]
+            SqlJournalRepository,
+        )
+
+        from app.infrastructure.events.outbox_event_publisher import (
+            OutboxEventPublisher,
+        )
+
+        journal_repo = SqlJournalRepository(clean_database)
+        event_publisher = OutboxEventPublisher(clean_database)
+
+        return JournalService(
+            journal_repo=journal_repo,
+            event_publisher=event_publisher,
+        )
+
     @pytest.mark.asyncio
     async def test_create_journal_integration_real_db(
         self, journal_service: JournalService, clean_database: AsyncConnection
