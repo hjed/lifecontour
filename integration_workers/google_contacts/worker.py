@@ -6,13 +6,12 @@ This worker processes Google Contacts synchronization tasks using ARQ.
 It runs as a separate process from the main FastAPI application.
 """
 
-import logging
 import random
 import sys
+import uuid
 from datetime import UTC, datetime
 from typing import Any
 
-import structlog
 from arq import run_worker
 from arq.connections import RedisSettings
 from pydantic import SecretStr
@@ -26,6 +25,15 @@ sys.path.insert(0, "/core_shared")
 # Import from the installed core_shared package
 from api_models import ListConnectionsResponse
 from core_shared.database.engine import create_session_factory
+
+# Import shared observability modules
+from core_shared.logging import (
+    configure_logging,
+    get_logger,
+    set_job_id,
+    set_worker_id,
+)
+from core_shared.metrics import MetricsCollector
 
 # Import outbox models from core_shared
 from core_shared.models.outbox import OutboxEvent
@@ -70,21 +78,17 @@ class WorkerSettings(BaseSettings):
 # Global settings instance
 settings = WorkerSettings()
 
-# Configure structured logging
-structlog.configure(
-    processors=[
-        structlog.processors.add_log_level,
-        structlog.processors.TimeStamper(fmt="iso"),
-        structlog.processors.JSONRenderer(),
-    ],
-    wrapper_class=structlog.make_filtering_bound_logger(
-        getattr(logging, settings.log_level.upper())
-    ),
-    logger_factory=structlog.PrintLoggerFactory(),
-    cache_logger_on_first_use=True,
+# Configure structured logging using shared module
+configure_logging(
+    log_level=settings.log_level,
+    service_name=settings.worker_id,
+    json_output=True,
 )
 
-logger = structlog.get_logger()
+logger = get_logger(__name__)
+
+# Initialize metrics collector for this worker
+metrics_collector = MetricsCollector(worker_type="google_contacts")
 
 # Constants
 SITE_USER_ID = 1  # Single-user system assumption - change if multi-user support needed
@@ -743,6 +747,7 @@ async def _perform_full_sync(
     client: GoogleContactsAPIClient,
     google_account_email: str,
     metrics: dict[str, Any],
+    job_id: str | None = None,
 ) -> dict[str, Any]:
     """
     Perform a full sync of Google Contacts.
@@ -752,9 +757,13 @@ async def _perform_full_sync(
         client: Google Contacts API client
         google_account_email: Google account email
         metrics: Metrics dictionary to update
+        job_id: ARQ job ID for cancellation checks (optional)
 
     Returns:
         Updated metrics
+
+    Raises:
+        Exception: If job is cancelled
     """
     logger.info("Starting full sync", google_account_email=google_account_email)
 
@@ -762,6 +771,10 @@ async def _perform_full_sync(
     total_processed = 0
 
     while True:
+        # Check if job has been cancelled
+        if job_id and await _check_job_cancelled(session, job_id):
+            raise Exception("Job cancelled by user")
+
         # Fetch contacts from Google
         response = await client.list_connections(page_size=100, page_token=page_token)
 
@@ -841,6 +854,7 @@ async def _perform_incremental_sync(
     client: GoogleContactsAPIClient,
     google_account_email: str,
     metrics: dict[str, Any],
+    job_id: str | None = None,
 ) -> dict[str, Any]:
     """
     Perform an incremental sync of Google Contacts using sync token.
@@ -850,11 +864,19 @@ async def _perform_incremental_sync(
         client: Google Contacts API client
         google_account_email: Google account email
         metrics: Metrics dictionary to update
+        job_id: ARQ job ID for cancellation checks (optional)
 
     Returns:
         Updated metrics
+
+    Raises:
+        Exception: If job is cancelled
     """
     logger.info("Starting incremental sync", google_account_email=google_account_email)
+
+    # Check if job has been cancelled
+    if job_id and await _check_job_cancelled(session, job_id):
+        raise Exception("Job cancelled by user")
 
     # Get existing sync token
     stmt = text("""
@@ -872,7 +894,9 @@ async def _perform_incremental_sync(
             "No sync token found for incremental sync, falling back to full sync",
             google_account_email=google_account_email,
         )
-        return await _perform_full_sync(session, client, google_account_email, metrics)
+        return await _perform_full_sync(
+            session, client, google_account_email, metrics, job_id
+        )
 
     # Fetch changes since last sync
     response = await client.list_connections(sync_token=sync_token)
@@ -1028,6 +1052,30 @@ async def _update_sync_job_status(
         )
 
 
+async def _check_job_cancelled(session: AsyncSession, job_id: str) -> bool:
+    """
+    Check if a job has been cancelled.
+
+    Args:
+        session: Database session
+        job_id: ARQ job ID to check
+
+    Returns:
+        True if job is cancelled, False otherwise
+    """
+    conn = await session.connection()
+    repo = SyncJobRepository(conn)
+
+    # Get job from database
+    job = await repo.get_by_job_id(job_id)
+
+    if job and job.status == "cancelled":
+        logger.info("Job has been cancelled", job_id=job_id)
+        return True
+
+    return False
+
+
 async def sync_google_contacts(
     ctx: dict[str, Any], google_account_email: str, user_id: str | int, sync_type: str = "smart"
 ) -> dict[str, Any]:
@@ -1048,6 +1096,10 @@ async def sync_google_contacts(
     """
     # Get job_id from ARQ context
     job_id = ctx.get("job_id", "unknown")
+
+    # Set context for logging
+    set_job_id(job_id)
+    set_worker_id(settings.worker_id)
 
     logger.info(
         "Starting Google Contacts sync task",
@@ -1114,11 +1166,11 @@ async def sync_google_contacts(
             # Perform sync based on type
             if sync_type == "full":
                 result = await _perform_full_sync(
-                    session, client, google_account_email, metrics
+                    session, client, google_account_email, metrics, job_id
                 )
             elif sync_type == "incremental":
                 result = await _perform_incremental_sync(
-                    session, client, google_account_email, metrics
+                    session, client, google_account_email, metrics, job_id
                 )
             else:
                 raise ValueError(f"Unknown sync type: {sync_type}")
@@ -1126,6 +1178,9 @@ async def sync_google_contacts(
             metrics.update(result)
             completed_at = datetime.now(UTC)
             metrics["completed_at"] = completed_at.isoformat()
+
+            # Calculate job duration
+            duration = (completed_at - started_at).total_seconds()
 
             # Update job status to completed
             await _update_sync_job_status(
@@ -1151,10 +1206,32 @@ async def sync_google_contacts(
             # Commit all changes (contact events + completion event + sync token + job status)
             await session.commit()
 
+            # Record metrics
+            metrics_collector.record_job_duration(
+                job_type="sync", status="success", duration=duration
+            )
+            metrics_collector.increment_job_total(job_type="sync", status="success")
+            metrics_collector.increment_items_processed(
+                sync_type=metrics.get("sync_type_used", "unknown"),
+                action="created",
+                count=metrics.get("contacts_created", 0),
+            )
+            metrics_collector.increment_items_processed(
+                sync_type=metrics.get("sync_type_used", "unknown"),
+                action="updated",
+                count=metrics.get("contacts_updated", 0),
+            )
+            metrics_collector.increment_items_processed(
+                sync_type=metrics.get("sync_type_used", "unknown"),
+                action="deleted",
+                count=metrics.get("contacts_deleted", 0),
+            )
+
             logger.info(
                 "Google Contacts sync task completed successfully",
                 job_id=job_id,
                 google_account_email=google_account_email,
+                duration_seconds=duration,
                 **metrics,
             )
 
@@ -1165,12 +1242,45 @@ async def sync_google_contacts(
             }
 
     except Exception as e:
+        # Calculate duration for error case
+        duration = (datetime.now(UTC) - started_at).total_seconds()
+
+        # Check if this is a cancellation
+        is_cancelled = "cancelled" in str(e).lower()
+
+        if is_cancelled:
+            logger.info(
+                "Google Contacts sync task cancelled",
+                job_id=job_id,
+                google_account_email=google_account_email,
+                duration_seconds=duration,
+            )
+            # Job status is already set to cancelled in the database
+            # No need to update it again
+            return {
+                "status": "cancelled",
+                "google_account_email": google_account_email,
+                "message": "Job cancelled by user",
+                "worker_id": settings.worker_id,
+                "cancelled_at": datetime.now(UTC).isoformat(),
+            }
+
         logger.error(
             "Google Contacts sync task failed",
             job_id=job_id,
             google_account_email=google_account_email,
             error=str(e),
             error_type=type(e).__name__,
+            duration_seconds=duration,
+        )
+
+        # Record error metrics
+        metrics_collector.record_job_duration(
+            job_type="sync", status="error", duration=duration
+        )
+        metrics_collector.increment_job_total(job_type="sync", status="error")
+        metrics_collector.increment_sync_errors(
+            sync_type=sync_type, error_type=type(e).__name__
         )
 
         # Update job status to failed
@@ -1218,8 +1328,16 @@ async def push_local_contacts_to_google(
     Returns:
         Task result dictionary with push status and metrics
     """
+    # Get job_id from ARQ context
+    job_id = ctx.get("job_id", "unknown")
+
+    # Set context for logging
+    set_job_id(job_id)
+    set_worker_id(settings.worker_id)
+
     logger.info(
         "Starting push local contacts to Google task",
+        job_id=job_id,
         google_account_email=google_account_email,
         worker_id=settings.worker_id,
     )
@@ -1236,6 +1354,8 @@ async def push_local_contacts_to_google(
         "worker_id": settings.worker_id,
         "started_at": datetime.now(UTC).isoformat(),
     }
+
+    started_at = datetime.now(UTC)
 
     try:
         # Use session-per-task pattern
@@ -1283,12 +1403,35 @@ async def push_local_contacts_to_google(
             metrics.update(push_result)
             metrics["completed_at"] = datetime.now(UTC).isoformat()
 
+            # Calculate duration
+            duration = (datetime.now(UTC) - started_at).total_seconds()
+
             # Commit all sync metadata updates
             await session.commit()
 
+            # Record metrics
+            metrics_collector.record_job_duration(
+                job_type="push", status="success", duration=duration
+            )
+            metrics_collector.increment_job_total(job_type="push", status="success")
+            metrics_collector.increment_items_processed(
+                sync_type="push",
+                action="created",
+                count=metrics.get("created_count", 0),
+            )
+            metrics_collector.increment_items_processed(
+                sync_type="push",
+                action="updated",
+                count=metrics.get("updated_count", 0),
+            )
+            if metrics.get("conflict_count", 0) > 0:
+                metrics_collector.increment_sync_conflicts(sync_type="push")
+
             logger.info(
                 "Push local contacts to Google task completed successfully",
+                job_id=job_id,
                 google_account_email=google_account_email,
+                duration_seconds=duration,
                 **metrics,
             )
 
@@ -1299,11 +1442,25 @@ async def push_local_contacts_to_google(
             }
 
     except Exception as e:
+        # Calculate duration for error case
+        duration = (datetime.now(UTC) - started_at).total_seconds()
+
         logger.error(
             "Push local contacts to Google task failed",
+            job_id=job_id,
             google_account_email=google_account_email,
             error=str(e),
             error_type=type(e).__name__,
+            duration_seconds=duration,
+        )
+
+        # Record error metrics
+        metrics_collector.record_job_duration(
+            job_type="push", status="error", duration=duration
+        )
+        metrics_collector.increment_job_total(job_type="push", status="error")
+        metrics_collector.increment_sync_errors(
+            sync_type="push", error_type=type(e).__name__
         )
 
         # Return error result

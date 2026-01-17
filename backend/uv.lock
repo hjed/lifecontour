@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 2
 requires-python = ">=3.11"
 resolution-markers = [
     "python_full_version >= '3.13'",
@@ -464,6 +464,7 @@ version = "0.1.0"
 source = { editable = "../core_shared" }
 dependencies = [
     { name = "asyncpg" },
+    { name = "prometheus-client" },
     { name = "psycopg2-binary" },
     { name = "pydantic" },
     { name = "sqlalchemy" },
@@ -474,6 +475,7 @@ dependencies = [
 requires-dist = [
     { name = "asyncpg", specifier = ">=0.29.0" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.7.0" },
+    { name = "prometheus-client", specifier = ">=0.19.0" },
     { name = "psycopg2-binary", specifier = ">=2.9.0" },
     { name = "pydantic", specifier = ">=2.5.0" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=7.4.0" },

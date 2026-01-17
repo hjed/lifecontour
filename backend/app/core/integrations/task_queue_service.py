@@ -8,17 +8,18 @@ and managing the ARQ task queue for integration workers.
 from datetime import UTC, datetime
 from typing import Any
 
-import structlog
 from arq import create_pool
 from arq.connections import ArqRedis, RedisSettings
 from arq.jobs import Job, JobDef, JobStatus
+from core_shared.logging import get_logger
+from core_shared.metrics import queue_depth
 from core_shared.repositories import SyncJobRepository
 from redis.asyncio import Redis
 
 from app.core.integrations.database import IntegrationDatabaseManager
 from app.infrastructure.config import Settings
 
-logger = structlog.get_logger()
+logger = get_logger(__name__)
 
 
 class TaskQueueService:
@@ -246,6 +247,59 @@ class TaskQueueService:
             logger.error("Failed to get job status", job_id=job_id, error=str(e))
             raise
 
+    async def cancel_job(self, job_id: str, user_id: str | int) -> dict[str, Any]:
+        """
+        Cancel a running or queued job.
+
+        Args:
+            job_id: ARQ job ID to cancel
+            user_id: User ID requesting cancellation (for authorization)
+
+        Returns:
+            Dictionary with cancellation status
+
+        Raises:
+            Exception: If job cancellation fails or user is not authorized
+        """
+        logger.info("Cancelling job", job_id=job_id, user_id=user_id)
+
+        try:
+            # Verify user owns this job
+            await self._verify_user_job_ownership(user_id, job_id)
+
+            # Update job status to cancelled in database
+            async with self.db_manager.get_session() as session:
+                conn = await session.connection()
+                repo = SyncJobRepository(conn)
+                sync_job = await repo.update_status(
+                    job_id=job_id,
+                    status="cancelled",
+                    completed_at=datetime.now(UTC),
+                    progress=None,  # Clear progress on cancellation
+                )
+                await session.commit()
+
+                if not sync_job:
+                    raise Exception(f"Job {job_id} not found in database")
+
+            # Note: ARQ doesn't support job cancellation directly
+            # The worker will check the database status and stop processing
+            logger.info(
+                "Job marked as cancelled",
+                job_id=job_id,
+                user_id=user_id,
+            )
+
+            return {
+                "job_id": job_id,
+                "status": "cancelled",
+                "message": "Job has been marked for cancellation. Worker will stop processing.",
+            }
+
+        except Exception as e:
+            logger.error("Failed to cancel job", job_id=job_id, error=str(e))
+            raise
+
     async def get_queue_health(self) -> dict[str, Any]:
         """
         Get the health status of the task queue.
@@ -264,6 +318,9 @@ class TaskQueueService:
             queue_length = (
                 int(queue_length_result) if queue_length_result is not None else 0
             )
+
+            # Update queue depth metric
+            queue_depth.labels(worker_type="google_contacts").set(queue_length)
 
             # Check if Redis is responsive
             start_time = datetime.now(UTC)

@@ -9,10 +9,10 @@ from datetime import UTC, datetime
 from typing import Any
 
 import aiohttp
-import structlog
+from core_shared.logging import get_logger
 from redis.asyncio import Redis
 
-logger = structlog.get_logger()
+logger = get_logger(__name__)
 
 
 class IntegrationHealthService:

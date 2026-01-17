@@ -301,6 +301,56 @@ async def get_sync_job_status(
             ) from e
 
 
+@router.post("/google/contacts/sync/{job_id}/cancel", response_model=SyncJobResponse)
+@inject
+async def cancel_sync_job(
+    job_id: str,
+    user: FromDishka[SessionUser],
+    task_queue_service: FromDishka[TaskQueueService],
+) -> SyncJobResponse:
+    """
+    Cancel a running or queued sync job.
+
+    Marks the job as cancelled in the database. The worker will check this status
+    and stop processing at the next opportunity.
+    """
+    try:
+        # Cancel the job
+        result = await task_queue_service.cancel_job(job_id, user.id)
+
+        return SyncJobResponse(
+            job_id=job_id,
+            status=result["status"],
+            message=result["message"],
+        )
+
+    except ValueError as e:
+        logger.error(
+            "Invalid job ID format", job_id=job_id, error=str(e), exc_info=True
+        )
+        raise HTTPException(status_code=400, detail="Invalid job ID format") from e
+    except PermissionError as e:
+        logger.error(
+            "Job cancellation access denied",
+            job_id=job_id,
+            user_id=user.id,
+            error=str(e),
+            exc_info=True,
+        )
+        raise HTTPException(
+            status_code=403, detail="Access denied to cancel this job"
+        ) from e
+    except Exception as e:
+        logger.error("Failed to cancel job", job_id=job_id, error=str(e), exc_info=True)
+        if "not found" in str(e).lower():
+            raise HTTPException(status_code=404, detail="Job not found") from e
+        else:
+            raise HTTPException(
+                status_code=500,
+                detail="An unexpected error occurred while cancelling job",
+            ) from e
+
+
 @router.get(
     "/google/contacts/status", response_model=GoogleContactsStatusJsonApiResponse
 )
