@@ -83,7 +83,7 @@ class TestJournalToolsIntegration:
         assert created_journal.user_id == "test-user-123"
 
         # Verify the journal was actually saved to the database
-        retrieved_journal = await journal_service.get_journal_by_id(created_journal.id)
+        retrieved_journal = await journal_service.get_journal(created_journal.id)
         assert retrieved_journal is not None
         assert retrieved_journal.title == "Test Journal Entry"
 
@@ -121,7 +121,7 @@ class TestJournalToolsIntegration:
         assert updated_journal.content == "Updated content"
 
         # Verify the update was persisted
-        retrieved_journal = await journal_service.get_journal_by_id(created_journal.id)
+        retrieved_journal = await journal_service.get_journal(created_journal.id)
         assert retrieved_journal is not None
         assert retrieved_journal.title == "Updated Title"
         assert retrieved_journal.content == "Updated content"
@@ -149,5 +149,5 @@ class TestJournalToolsIntegration:
         await journal_service.delete_journal(created_journal.id, clean_database)
 
         # Verify the journal was deleted
-        retrieved_journal = await journal_service.get_journal_by_id(created_journal.id)
+        retrieved_journal = await journal_service.get_journal(created_journal.id)
         assert retrieved_journal is None

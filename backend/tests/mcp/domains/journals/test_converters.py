@@ -108,7 +108,8 @@ class TestJournalConverter:
             event_date_range=EventDateRange(start=start_date, end=end_date),
         )
 
-        tag = JournalTag(id=789, name="work", color="#FF5733")
+        tag_id = UUID("12345678-1234-5678-1234-567812345789")
+        tag = JournalTag(id=tag_id, name="work", color="#FF5733")
 
         # Act
         response = JournalConverter.to_journal_response(
@@ -122,7 +123,7 @@ class TestJournalConverter:
 
         # Assert
         assert len(response.tags) == 1
-        assert response.tags[0].tag_id == "789"
+        assert response.tags[0].tag_id == str(tag_id)
         assert response.tags[0].tag_name == "work"
         assert response.tags[0].tag_color == "#FF5733"
         assert "work" in response.summary
