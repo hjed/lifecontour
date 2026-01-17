@@ -1,17 +1,17 @@
 # Iteration 2: Integration Architecture Foundation
 
-**Status:** ✅ COMPLETED (100% complete)
+**Status:** 🟡 IN PROGRESS (core steel thread complete; resilience & observability from the Integration Architecture doc still outstanding)
 **Dependencies:** Iteration 1.5
 **Goal:** Establish robust integration architecture with Google Contacts sync using modern patterns
 
 ## Overview
 
-This iteration implements a production-ready integration architecture:
+This iteration implements a production-ready integration architecture and lays the groundwork for the full design in `docs/architecture/integration-architecture.md`:
 - ✅ Dishka dependency injection framework migration (COMPLETED)
 - ✅ ARQ task queue with Redis for background processing (COMPLETED)
 - ✅ Google Contacts bidirectional synchronization (COMPLETED - Core functionality with outbox pattern)
 - ✅ Isolated worker architecture for scalability (COMPLETED)
-- ✅ Production resilience patterns - Critical issues resolved (Idempotency, security, error handling)
+- ✅ Production resilience patterns - Phase 1 critical issues resolved (idempotency, security, error handling); advanced resilience & observability patterns are tracked as remaining work below
 - ✅ FastMCP v2 integration for AI assistant capabilities (COMPLETED)
 
 ## Tasks
@@ -38,7 +38,7 @@ This iteration implements a production-ready integration architecture:
 
 **Final Status:** All integration foundation components implemented and verified. Steel thread complete with Redis task queue, core shared models, integration domain, dependency injection, and comprehensive testing.
 
-### ITER2-002: Google Contacts Integration 🟡 IN PROGRESS (70% complete)
+### ITER2-002: Google Contacts Integration ✅ COMPLETED
 **Description:** Implement Google Contacts integration using isolated worker architecture
 **Strategy:** Break into 5 manageable slices for reviewable PRs
 
@@ -376,37 +376,39 @@ The integration architecture foundation and core Google Contacts sync functional
 - [ ] Add security audit logging for integration operations
 - [ ] Create production readiness tests and monitoring
 
-### ITER2-006: Integration Management UI 🟡 PENDING
-**Description:** Create UI for managing integrations and sync status
+### ITER2-006: Integration Management UI & UX 🟡 IN PROGRESS
+**Description:** Refine and extend the UI for managing integrations and sync status
 **PR Size:** Split into 3 sub-tasks for focused development
 
-#### Phase 1: Integration Dashboard 🟡 PENDING
+> Note: The initial `/integrations` dashboard, OAuth flow, sync controls, job status display, and basic health views were implemented as part of Google Contacts work (see ITER2-002 Slice 4). This task now focuses on rounding out the UX and aligning it with the broader Integration Architecture (progress, cancellation, richer health/metrics, and documentation).
+
+#### Phase 1: Integration Dashboard ✅ COMPLETED (baseline)
 **PR Size:** ~5 files (Dashboard components, API endpoints, tests)
 
-**Acceptance Criteria:**
-- [ ] Create integration management dashboard
-- [ ] Add Google OAuth authentication flow
-- [ ] Implement sync status monitoring and controls
-- [ ] Create sync history and error log views
-- [ ] Add manual sync trigger functionality
+**Acceptance Criteria (baseline implemented):**
+- [x] Create integration management dashboard (`/integrations` page)
+- [x] Add Google OAuth authentication flow and connection controls
+- [x] Implement sync status monitoring and controls (trigger smart/full sync)
+- [x] Create sync history and error log views
+- [x] Add manual sync trigger functionality wired to real ARQ jobs
 
-#### Phase 2: Monitoring & Health 🟡 PENDING
+#### Phase 2: Monitoring & Health 🟡 PENDING (enhancements)
 **PR Size:** ~4 files (Health monitoring, metrics display, alerts)
 
-**Acceptance Criteria:**
-- [ ] Implement integration health monitoring with metrics
-- [ ] Create conflict resolution UI
-- [ ] Add integration configuration management
-- [ ] Display job progress and cancellation controls
+**Acceptance Criteria (enhanced behaviour):**
+- [ ] Extend integration health monitoring to surface queue depth, recent failures, and worker liveness
+- [ ] Add UI for conflict resolution workflows surfaced by Google Contacts sync
+- [ ] Add integration configuration management UI (e.g. per-integration settings & credentials overview)
+- [ ] Display long-running job progress and expose cancellation controls backed by real APIs
 
 #### Phase 3: Documentation & Help 🟡 PENDING
 **PR Size:** ~3 files (Help system, documentation, user guides)
 
 **Acceptance Criteria:**
-- [ ] Test integration management workflows
-- [ ] Add integration documentation and help
-- [ ] Create user guides for integration setup
-- [ ] Add troubleshooting guides and FAQ
+- [ ] Test integration management workflows end-to-end (link account → run sync → inspect results & errors)
+- [ ] Add integration documentation and in-app help for Google Contacts
+- [ ] Create user guides for integration setup and troubleshooting
+- [ ] Add troubleshooting guides and FAQ linked from the UI
 
 ## Architecture Notes
 
@@ -420,7 +422,7 @@ The integration architecture foundation and core Google Contacts sync functional
 
 ## Current Status
 
-**Completed (100%):**
+**Completed (core steel thread):**
 - ✅ Integration foundation with ARQ and Redis
 - ✅ Google API client with automatic token refresh
 - ✅ Data modeling and transformation
@@ -435,10 +437,12 @@ The integration architecture foundation and core Google Contacts sync functional
 - ✅ Critical security fixes (idempotency, user authorization, error sanitization)
 - ✅ Comprehensive test coverage (76 passing unit tests)
 
-**Ready for Future Enhancement:**
-- 🟡 Two-way sync and conflict resolution (optional enhancement)
-- 🟡 Production resilience patterns (performance optimization, monitoring)
-- 🟡 Integration management UI (user experience enhancement)
+**Remaining Work (this iteration):**
+- 🟡 Production resilience patterns (retry behaviour, DLQ handling, observability) – see ITER2-005 Phases 2–4
+- 🟡 Integration management UI & UX enhancements (progress, cancellation, advanced health/metrics, docs) – see ITER2-006 Phases 2–3
+
+**Out of Scope for Iteration 2 (separate iterations):**
+- 🔜 Additional integrations (Immich, Strava, Firefly III, etc.) – see Iteration 3+/5+/6+ task specs
 
 ## Testing Status
 
@@ -470,15 +474,55 @@ The integration architecture foundation and core Google Contacts sync functional
 - `backend/app/api/integrations/controllers.py` - Endpoints fully functional with real ARQ integration
 - `integration_workers/google_contacts/worker.py` - Contains complete sync logic with outbox pattern
 
-## Next Steps
+## Next Steps (Revised Plan Aligned with Integration Architecture)
 
-**Core Integration Complete ✅** - All primary objectives achieved
+**Core Integration Steel Thread ✅** – Google Contacts end-to-end sync (including outbox pattern, ARQ worker, API endpoints, and baseline integration UI) is implemented and well covered by unit and integration tests.
 
-**Optional Enhancements (Future Iterations):**
-1. **Re-enable integration e2e tests** by removing `.skip` from test suites
-2. **Two-way sync and conflict resolution** (Slice 5) - Optional bidirectional sync
-3. **Production resilience patterns** (ITER2-005) - Performance optimization and monitoring
-4. **Integration management UI** (ITER2-006) - Enhanced user experience
-5. **Additional integrations** (Photo management, Calendar) - Expand integration ecosystem
+The remaining work for Iteration 2 focuses on bringing the implementation in line with `docs/architecture/integration-architecture.md`, with each step independently testable (unit, integration, and e2e):
 
-**Production Readiness:** See `ITER2-004-Phase2-Production-Readiness.md` for detailed improvement roadmap focusing on performance optimization, enhanced monitoring, and operational excellence.
+1. **ITER2-005 Phase 2 – Retry & Error Handling (Google Contacts worker)**
+   - Configure ARQ retry strategy on the Google Contacts worker (`integration_workers/google_contacts/worker.py::GoogleContactsWorkerSettings`) using exponential backoff with jitter (as per the architecture doc), replacing the fixed `retry_delay = 60` with a `retry_delay` function and introducing clear separation of transient vs permanent failures in `sync_google_contacts` and `push_local_contacts_to_google`.
+   - Ensure failed jobs surface clear, structured errors (including `job_id`, `user_id`, `integration_source`, and `google_account_email`) in logs and API responses, plumbed through `TaskQueueService.get_job_status` in `backend/app/core/integrations/task_queue_service.py` and the corresponding JSON-API controllers in `backend/app/api/integrations/controllers.py`.
+   - Keep tasks strictly idempotent under retries by relying on `SyncMetadataRepository` in `backend/app/core/integrations/adapters/sql/sync_metadata_repository.py` and the existing locking/idempotency patterns used by the Google Contacts worker and outbox event processor.
+   - **Testing:**
+     - Unit tests for custom retry delay logic and error classification.
+     - Integration tests that run the worker against a failing stub task, verifying ARQ re-enqueues jobs and moves them to DLQ after `max_tries`.
+     - API integration tests that verify job status and error information via `/api/integrations/google/contacts/jobs/*` endpoints.
+
+2. **ITER2-005 Phase 3 – Observability & Monitoring (shared patterns + Google Contacts)**
+   - Introduce shared observability helpers (e.g. `core_shared.logging` and `core_shared.metrics`) implementing the structured logging and Prometheus metrics patterns from the architecture doc, and wire them into `backend/app/core/integrations/task_queue_service.py`, `backend/app/core/integrations/health_service.py`, and `integration_workers/google_contacts/worker.py`.
+   - Update the Google Contacts worker and `TaskQueueService` to use the shared logging configuration (trace/job/worker IDs) and to emit golden-signal metrics (`job_duration`, `job_total`, `queue_depth`) for the `google_contacts` queue.
+   - Wire metrics into the main FastAPI app’s `/metrics` endpoint (or equivalent) so they can be scraped in dev/prod, and ensure the integration health endpoints plus `get_google_contacts_status` in `backend/app/api/integrations/controllers.py` consume the same underlying status/metrics data.
+   - Implement long-running job progress tracking and cancellation using the existing `SyncJob` model (progress field) plus explicit "cancel job" APIs that workers honour between batches (via `TaskQueueService` and the Google Contacts job handlers).
+   - **Testing:**
+     - Unit tests for logging and metrics helpers (correct labels, safe defaults, no global state leaks).
+     - Integration tests that execute a real Google Contacts sync in a test environment and assert metrics and `SyncJob` progress updates.
+     - E2E tests exercising job progress display and cancellation from the `/integrations` UI.
+
+3. **ITER2-005 Phase 4 – Security & Configuration (workers)**
+   - Harden worker configuration by centralising `WorkerSettings` for the Google Contacts worker in `integration_workers/google_contacts/worker.py` (database URL, Redis URL, Google credentials, operational limits) and documenting how it is configured via environment variables and, optionally, secrets managers / Docker secrets.
+   - Review and ensure encryption-at-rest for any remaining sensitive integration data beyond the existing token storage (re-using `EncryptionService` and the Google auth service used by the worker), and verify that no secrets are logged by either the worker or API.
+   - Add security-focused logging for integration operations (who triggered a job, which resources were touched, and high-level outcome) without leaking sensitive payloads, and ensure `TaskQueueService` user-job ownership checks are consistently applied on all job status and cancellation routes.
+   - **Testing:**
+     - Unit tests for `WorkerSettings` (validation, required fields, failure modes when misconfigured).
+     - Unit/integration tests verifying that encrypted fields are never written or logged in plaintext.
+     - Security regression tests for job ownership checks (e.g. job status and cancellation endpoints cannot be used across users).
+
+4. **ITER2-006 Phases 2–3 – Integration Management UI & UX Enhancements**
+   - Extend the existing `/integrations` dashboard to surface the new observability data: queue health, recent failures, retry counts, and per-job progress, with the ability to cancel running jobs (backed by `TaskQueueService` APIs and Google Contacts worker status).
+   - Replace the TODO-based mock implementation in `backend/app/api/integrations/controllers.py::get_google_contacts_status` with real data from `SyncJobRepository` and/or integration health endpoints so the UI shows accurate connection status, last sync time, and sync counts.
+   - Add configuration views for Google Contacts (e.g. connected accounts, last sync timestamps) and prepare the layout for future integrations.
+   - Add in-app documentation and troubleshooting flows for common integration issues (auth failures, quota errors, schema mismatches).
+   - **Testing:**
+     - Unit tests for new UI components and hooks (state handling, error states, loading states).
+     - Integration tests for the integration management page (React Testing Library or equivalent).
+     - E2E tests in `frontend/tests/e2e/integrations.spec.ts` covering connection, sync trigger, progress display, cancellation, and error handling; remove any remaining `.skip` flags as these flows stabilise.
+
+5. **ITER2-006 – Clean up remaining integration TODOs (back-end foundations)**
+   - Complete the organizations/company/job-title mapping TODO in `backend/app/core/integrations/google_contacts/transformer.py::GoogleContactTransformer.transform_person`, and add/extend unit tests to lock in the behaviour.
+
+6. **Future Iterations (tracked elsewhere, not part of Iteration 2)**
+   - Implement additional integrations (Immich, Strava, Firefly III, etc.) following the patterns established here – see `docs/tasks/iteration-3-extended-integrations.md`, `docs/tasks/iteration-5-strava-integration.md`, and `docs/tasks/iteration-6-immich-integration.md`.
+   - Where those iterations introduce new patterns, update the Integration Architecture doc so it remains the single source of truth.
+
+**Production Readiness:** See `ITER2-004-Phase2-Production-Readiness.md` for the historical steel-thread checklist. The items above define the remaining work required for Iteration 2 to fully realise the Integration Architecture patterns in production.
