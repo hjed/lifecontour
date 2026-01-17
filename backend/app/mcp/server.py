@@ -13,6 +13,7 @@ from starlette.middleware import Middleware
 
 from app.mcp.auth.session_auth import SessionAuthMiddleware
 from app.mcp.domains.contacts.tools import register_contact_tools
+from app.mcp.domains.journals.tools import register_journal_tools
 
 logger = structlog.get_logger()
 
@@ -34,10 +35,14 @@ def create_mcp_server() -> FastMCP[None]:
 
         Available domains:
         - Contacts: Retrieve contact information, search contacts, manage relationships
+        - Journals: Create and manage journal entries with types, tags, and relationships
 
         All data is formatted for AI analysis and decision making. Use the tools to:
         - Get detailed contact information by ID
         - Access contact methods (email, phone) and tags
+        - Create and manage journal entries with rich metadata
+        - Search journals with full-text search and filtering
+        - Link journals to contacts and organize with tags
         - Understand relationships and context through AI-friendly summaries
 
         The system maintains data privacy and requires valid authentication.
@@ -49,8 +54,10 @@ def create_mcp_server() -> FastMCP[None]:
     logger.info("MCP: Registering contact domain tools")
     register_contact_tools(mcp)
 
+    logger.info("MCP: Registering journal domain tools")
+    register_journal_tools(mcp)
+
     # Future domains can be registered here:
-    # register_journal_tools(mcp)
     # register_calendar_tools(mcp)
     # register_photos_tools(mcp)
 
