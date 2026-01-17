@@ -827,44 +827,79 @@ CREATE TABLE journals (
 - Advanced markdown editor with toolbar
 - E2E Playwright tests (separate task)
 
-### ITER4-009: Journal UI - Forms & Editing 🟡 PLANNED
-**Description:** Build journal creation and editing forms with type management
-**Strategy:** Single task for form components
+### ITER4-009: Journal Creation Flow 🟡 PLANNED
+**Description:** Build minimal journal creation form that leverages existing inline editing for detailed modifications
+**Strategy:** Simple "create quickly, edit inline" approach - reuse existing components from ITER4-008
 **Specification Reference:** [Journal Form Component](../journal-system-specification.md#journal-form-component)
 
-**PR Size:** ~9 files (form component, type-specific forms, tests)
+**Philosophy:**
+- Keep creation simple - capture only essential info (title, date, content, types)
+- All detailed editing happens inline on the detail view (already built in ITER4-008)
+- Reuse existing components: type icons from `JournalTypeBadges`, date picker, API hooks
+- Don't duplicate functionality that already exists in type editors
+
+**PR Size:** ~5 files (create page, form component, list page modification, tests)
 
 **Acceptance Criteria:**
-- [ ] Create `JournalForm` component in `frontend/src/components/journals/`:
-  - Title and content fields (markdown editor with preview)
-  - Date range picker with time selection
-  - Type selector with dependency handling (show dependent types automatically)
-  - Type-specific field forms (conditional rendering based on selected types)
-  - Contact relationship builder (add/remove contacts with relationship type)
-  - Tag selector (hierarchical tag tree)
-  - Calendar selector (with color preview)
-  - Parent journal selector (for creating child journals)
-  - Validation and error handling
-  - Auto-save draft functionality
-- [ ] Create type-specific form components:
-  - `EventForm` (calendar, times, location, all-day toggle)
-  - `MoodRatingForm` (mood value slider, mood label, energy level slider)
-  - `PlanForm` (document links with title/description/order)
-  - `TravelForm` (flights, accommodations, transportation with order)
-  - `PhotoAlbumForm` (Immich album selector - preparation for Iteration 6)
-- [ ] Implement form validation with Zod schemas
-- [ ] Add error messages with accessibility (FormMessage components)
-- [ ] Write Jest unit tests for form components
-- [ ] Write React Testing Library tests for form interactions
-- [ ] Document form patterns and validation rules in code comments
 
-**Form Features:**
-- Real-time validation with error messages
-- Type dependency visualization (show which types will be auto-added)
-- Markdown editor with toolbar and preview
-- Date/time picker with timezone support
-- Hierarchical tag selector with search
-- Contact autocomplete with relationship type selection
+**1. Create Journal Page** (`frontend/src/app/journals/new/page.tsx`)
+- [ ] Route accessible from journals list page
+- [ ] Authenticated users only (AuthGuard)
+- [ ] Renders JournalCreateForm component
+- [ ] Loading and error states
+
+**2. JournalCreateForm Component** (`frontend/src/components/journals/JournalCreateForm.tsx`)
+- [ ] Title input (required, with validation)
+- [ ] Date range picker (required, defaults to today) - reuse date picker patterns
+- [ ] Content textarea (optional) - simple textarea like JournalContentInline
+- [ ] Type selector (optional) - checkboxes for all 6 base types with icons (FileText, Calendar, Heart, ClipboardList, Plane, Image)
+- [ ] Parent journal selector (optional) - search/dropdown for creating child journals
+- [ ] Submit button creates journal via existing `useCreateJournal()` hook
+- [ ] On success, redirect to `/journals/[id]` for inline editing
+- [ ] Form validation with Zod schema and accessible error messages
+
+**3. Navigation Updates**
+- [ ] "New Journal" button on journals list page (`frontend/src/app/journals/page.tsx`)
+- [ ] Link to `/journals/new`
+
+**4. Tests**
+- [ ] Unit tests for JournalCreateForm component
+- [ ] E2E test for complete create journal workflow (create → redirect → view)
+
+**NOT in scope (already handled by ITER4-008 components):**
+- Type-specific form components - Use existing type editors (`EventTypeEditor`, `MoodRatingTypeEditor`, etc.) on detail page after creation
+- Contact relationship builder - Handled by `JournalContactBadge` on detail page
+- Tag selector - Handled by `JournalTagBadge` on detail page
+- Calendar selector - Handled by `JournalCalendarBadge` on detail page
+- Markdown editor with toolbar/preview - Simple textarea is sufficient; user can edit inline after creation
+- Auto-save drafts - Not needed for MVP; journals are created and immediately available for inline editing
+
+**Workflow:**
+1. User clicks "New Journal" on list page
+2. Minimal form collects: Title, Date Range, Content (optional), Types (optional), Parent (optional)
+3. Submit creates journal via API
+4. Redirect to detail page where all inline editing components are available:
+   - Title editing via `InlineEditHeading`
+   - Content editing via `JournalContentInline`
+   - Date editing via `InlineEditDateRange`
+   - Type-specific data via `JournalTypeSection` with type editors
+   - Contacts via `JournalContactBadge`
+   - Tags via `JournalTagBadge`
+   - Calendar via `JournalCalendarBadge`
+
+**Files to Create:**
+- `frontend/src/app/journals/new/page.tsx` - Create page
+- `frontend/src/components/journals/JournalCreateForm.tsx` - Form component
+- `frontend/src/components/journals/__tests__/JournalCreateForm.test.tsx` - Unit tests
+
+**Files to Modify:**
+- `frontend/src/app/journals/page.tsx` - Add "New Journal" button
+
+**Existing Components Reused:**
+- `useCreateJournal()` - API hook (already exists)
+- `JournalType` enum and type icons - For type selector
+- Date picker components - For date range input
+- `JournalFormData` interface - Already defined in types
 
 ### ITER4-010: Journal MCP Tools 🟡 PLANNED
 **Description:** Implement MCP tools for AI-assisted journal management
