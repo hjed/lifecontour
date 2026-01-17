@@ -424,8 +424,16 @@ class TestJournalRelationshipEndpoints:
         # Endpoint should exist and return appropriate status
         assert response.status_code in [200, 404, 422]
 
-    async def test_add_contact_relationship(self, integration_api_client):
+    async def test_add_contact_relationship(
+        self, integration_api_client, contact_factory
+    ):
         """Test adding a contact relationship to a journal."""
+        # Create a contact first
+        contact = await contact_factory.create_contact(
+            first_name="Test", last_name="Contact"
+        )
+        contact_id = contact["id"]
+
         # Create a journal
         create_data = create_journal_request_data(
             title="Contact Test", content="Test content"
@@ -436,12 +444,12 @@ class TestJournalRelationshipEndpoints:
         )
         journal_id = create_response.json()["data"]["id"]
 
-        # Add contact relationship (using a non-existent contact ID for now)
+        # Add contact relationship
         contact_data = {
             "data": {
                 "type": "journal-contact-relationship",
                 "attributes": {
-                    "contact_id": "999",  # Must be string
+                    "contact_id": contact_id,  # Use real contact ID
                     "relationship_type": "PARTICIPANT",
                 },
             }
@@ -451,12 +459,19 @@ class TestJournalRelationshipEndpoints:
             f"/api/journals/{journal_id}/relationships/contacts", json=contact_data
         )
 
-        # Endpoint should exist and return appropriate status
-        # 500 is acceptable for FK constraint violation (non-existent contact)
-        assert response.status_code in [200, 400, 404, 422, 500]
+        # Should successfully create the relationship
+        assert response.status_code in [200, 201]
 
-    async def test_remove_contact_relationship(self, integration_api_client):
+    async def test_remove_contact_relationship(
+        self, integration_api_client, contact_factory
+    ):
         """Test removing a contact relationship from a journal."""
+        # Create a contact first
+        contact = await contact_factory.create_contact(
+            first_name="Test", last_name="Contact"
+        )
+        contact_id = contact["id"]
+
         # Create a journal
         create_data = create_journal_request_data(
             title="Contact Remove Test", content="Test content"
@@ -467,13 +482,27 @@ class TestJournalRelationshipEndpoints:
         )
         journal_id = create_response.json()["data"]["id"]
 
-        # Try to remove a contact relationship
-        response = await integration_api_client.delete(
-            f"/api/journals/{journal_id}/relationships/contacts/999/PARTICIPANT"
+        # Add a contact relationship first
+        contact_data = {
+            "data": {
+                "type": "journal-contact-relationship",
+                "attributes": {
+                    "contact_id": contact_id,
+                    "relationship_type": "PARTICIPANT",
+                },
+            }
+        }
+        await integration_api_client.post(
+            f"/api/journals/{journal_id}/relationships/contacts", json=contact_data
         )
 
-        # Endpoint should exist and return appropriate status
-        assert response.status_code in [200, 204, 404, 422]
+        # Now remove the contact relationship
+        response = await integration_api_client.delete(
+            f"/api/journals/{journal_id}/relationships/contacts/{contact_id}/PARTICIPANT"
+        )
+
+        # Should successfully remove the relationship
+        assert response.status_code in [200, 204]
 
 
 @pytest.mark.integration
