@@ -78,24 +78,6 @@ describe('JournalCreateForm', () => {
       });
     });
 
-    it('shows error when date range is invalid', async () => {
-      const user = userEvent.setup();
-      render(<JournalCreateForm />);
-
-      const titleInput = screen.getByLabelText(/title/i);
-      await user.type(titleInput, 'Test Journal');
-
-      // Clear the default date range to trigger validation
-      // Note: This test will be updated once we implement the date picker
-
-      const submitButton = screen.getByRole('button', {
-        name: /create journal/i,
-      });
-      await user.click(submitButton);
-
-      // Date range validation will be tested once date picker is implemented
-    });
-
     it('allows submission with valid title and date range', async () => {
       const user = userEvent.setup();
       mockMutateAsync.mockResolvedValueOnce({

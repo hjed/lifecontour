@@ -9,6 +9,7 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
+import type { Route } from 'next';
 import { AuthGuard } from '@/components/auth/AuthGuard';
 import { JournalList } from '@/components/journals/JournalList';
 import { JournalFilters } from '@/components/journals/JournalFilters';
@@ -109,8 +110,7 @@ export default function JournalsPage() {
             {showFilters ? 'Hide' : 'Show'} Filters
           </Button>
           <Button asChild size='sm' className='gap-2'>
-            {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
-            <Link href={'/journals/new' as any}>
+            <Link href={'/journals/new' as Route}>
               <Plus className='h-4 w-4' />
               New Journal
             </Link>
@@ -202,8 +202,7 @@ export default function JournalsPage() {
                           : 'Get started by creating your first journal entry.'}
                     </p>
                     <Button asChild className='mt-4 gap-2'>
-                      {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
-                      <Link href={'/journals/new' as any}>
+                      <Link href={'/journals/new' as Route}>
                         <Plus className='h-4 w-4' />
                         Create Journal
                       </Link>

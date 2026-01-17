@@ -8,6 +8,7 @@
 'use client';
 
 import { useRouter } from 'next/navigation';
+import type { Route } from 'next';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
@@ -87,8 +88,7 @@ export function JournalCreateForm({ onCancel }: JournalCreateFormProps = {}) {
       });
 
       // Redirect to the newly created journal
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      router.push(`/journals/${result.data.id}` as any);
+      router.push(`/journals/${result.data.id}` as Route);
     } catch (error) {
       console.error('Failed to create journal:', error);
       // Error handling will be improved in future iterations
@@ -99,8 +99,7 @@ export function JournalCreateForm({ onCancel }: JournalCreateFormProps = {}) {
     if (onCancel) {
       onCancel();
     } else {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      router.push('/journals' as any);
+      router.push('/journals' as Route);
     }
   };
 
