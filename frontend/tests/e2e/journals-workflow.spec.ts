@@ -101,11 +101,9 @@ test.describe('Journal Complete Workflows', () => {
   });
 
   test.describe('Empty State to Create Workflow', () => {
-    test.skip('should navigate from empty state to create page', async ({
+    test('should navigate from empty state to create page', async ({
       emptyJournalsPage,
     }) => {
-      // SKIPPED: Create button is currently disabled with "Coming soon" tooltip
-      // This test will be enabled when journal creation is implemented
       const page = emptyJournalsPage;
 
       // Step 1: Navigate to journals page
@@ -115,42 +113,145 @@ test.describe('Journal Complete Workflows', () => {
       // Step 2: Verify empty state is displayed
       await expect(page.getByText(/no journals found/i)).toBeVisible();
 
-      // Step 3: Click create button from empty state
-      const createButton = page.getByRole('button', { name: /create/i });
-      if (
-        (await createButton.isVisible()) &&
-        !(await createButton.isDisabled())
-      ) {
-        await createButton.click();
-        await page.waitForLoadState('networkidle');
+      // Step 3: Click create link from empty state
+      const createLink = page.getByRole('link', { name: /create journal/i });
+      await expect(createLink).toBeVisible();
 
-        // Step 4: Verify we're on the create page
-        expect(page.url()).toContain('/journals/new');
-      }
+      // Wait for navigation to complete
+      await Promise.all([
+        page.waitForURL('**/journals/new'),
+        createLink.click(),
+      ]);
+
+      // Step 4: Verify we're on the create page
+      expect(page.url()).toContain('/journals/new');
+      await expect(
+        page.getByRole('heading', { name: /create new journal/i })
+      ).toBeVisible();
     });
   });
 
   test.describe('List to Create Workflow', () => {
-    test.skip('should navigate from list to create page', async ({
+    test('should navigate from list to create page', async ({
       journalsWithData,
     }) => {
-      // SKIPPED: New button is currently disabled with "Coming soon" tooltip
-      // This test will be enabled when journal creation is implemented
       const { page } = journalsWithData;
 
       // Step 1: Navigate to journals page
       await page.goto('/journals');
       await page.waitForLoadState('networkidle');
 
-      // Step 2: Click new journal button
-      const newButton = page.getByRole('button', { name: /new/i });
-      if ((await newButton.isVisible()) && !(await newButton.isDisabled())) {
-        await newButton.click();
-        await page.waitForLoadState('networkidle');
+      // Step 2: Click new journal link
+      const newLink = page.getByRole('link', { name: /new journal/i });
+      await expect(newLink).toBeVisible();
 
-        // Step 3: Verify we're on the create page
-        expect(page.url()).toContain('/journals/new');
-      }
+      // Wait for navigation to complete
+      await Promise.all([page.waitForURL('**/journals/new'), newLink.click()]);
+
+      // Step 3: Verify we're on the create page
+      expect(page.url()).toContain('/journals/new');
+      await expect(
+        page.getByRole('heading', { name: /create new journal/i })
+      ).toBeVisible();
+    });
+  });
+
+  test.describe('Create Journal Workflow', () => {
+    test('should create a journal and redirect to detail page', async ({
+      authenticatedPage,
+    }) => {
+      const page = authenticatedPage;
+
+      // Step 1: Navigate to create page
+      await page.goto('/journals/new');
+      await page.waitForLoadState('networkidle');
+
+      // Step 2: Verify we're on the create page
+      await expect(
+        page.getByRole('heading', { name: /create new journal/i })
+      ).toBeVisible();
+
+      // Step 3: Fill in the form
+      const testTitle = `Test Journal ${Date.now()}`;
+      const testContent = 'This is a test journal entry created by E2E tests.';
+
+      await page.getByLabel(/title/i).fill(testTitle);
+      await page.getByLabel(/content/i).fill(testContent);
+
+      // Step 4: Select a journal type
+      await page.getByLabel(/note/i).check();
+
+      // Step 5: Submit the form
+      const createButton = page.getByRole('button', {
+        name: /create journal/i,
+      });
+      await expect(createButton).toBeEnabled();
+
+      // Wait for the API response
+      const responsePromise = page.waitForResponse(
+        response =>
+          response.url().includes('/api/journals') &&
+          response.request().method() === 'POST' &&
+          response.status() === 201
+      );
+
+      await createButton.click();
+      await responsePromise;
+
+      // Step 6: Verify we're redirected to the detail page
+      await page.waitForURL(/\/journals\/\d+/);
+      expect(page.url()).toMatch(/\/journals\/\d+/);
+
+      // Step 7: Verify the journal details are displayed
+      await expect(
+        page.getByRole('heading', { name: testTitle })
+      ).toBeVisible();
+      await expect(page.getByText(testContent)).toBeVisible();
+
+      // Step 8: Verify the type badge is displayed
+      await expect(page.getByText(/note/i)).toBeVisible();
+    });
+
+    test('should show validation errors for empty title', async ({
+      authenticatedPage,
+    }) => {
+      const page = authenticatedPage;
+
+      // Step 1: Navigate to create page
+      await page.goto('/journals/new');
+      await page.waitForLoadState('networkidle');
+
+      // Step 2: Try to submit without filling in title
+      const createButton = page.getByRole('button', {
+        name: /create journal/i,
+      });
+      await createButton.click();
+
+      // Step 3: Verify validation error is displayed
+      await expect(page.getByText(/title is required/i)).toBeVisible();
+
+      // Step 4: Verify we're still on the create page
+      expect(page.url()).toContain('/journals/new');
+    });
+
+    test('should cancel and return to journals list', async ({
+      authenticatedPage,
+    }) => {
+      const page = authenticatedPage;
+
+      // Step 1: Navigate to create page
+      await page.goto('/journals/new');
+      await page.waitForLoadState('networkidle');
+
+      // Step 2: Click cancel button
+      const cancelButton = page.getByRole('button', { name: /cancel/i });
+      await expect(cancelButton).toBeVisible();
+      await cancelButton.click();
+
+      // Step 3: Verify we're redirected to journals list
+      await page.waitForURL('/journals');
+      expect(page.url()).toContain('/journals');
+      expect(page.url()).not.toContain('/journals/new');
     });
   });
 
