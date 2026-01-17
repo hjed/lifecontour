@@ -134,7 +134,14 @@ class TestARQRetryIntegration:
 
     @pytest.mark.asyncio
     async def test_job_enqueue_and_status(self, redis_pool):
-        """Test that jobs can be enqueued and their status tracked."""
+        """
+        Test that jobs can be enqueued and their status tracked.
+
+        This is a simpler integration test that runs in CI to verify basic ARQ
+        functionality (job enqueuing and status tracking) without requiring a
+        full worker process. The more complex worker retry test is skipped in CI
+        but available for manual testing.
+        """
         # Enqueue a test job
         job = await redis_pool.enqueue_job(
             "arq_failing_task",

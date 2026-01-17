@@ -1327,6 +1327,10 @@ def retry_delay_func(retry_count: int) -> float:
     - Retry 3 (4th retry): ~480s (384-576s with jitter)
     - Retry 4+ (5th+ retry): capped at 900s (720-900s with jitter)
 
+    Note: Jitter is intentionally random (±20%) to prevent thundering herd problems
+    in production. Unit tests verify correct behavior by testing many samples and
+    checking that average delays match expected values.
+
     Args:
         retry_count: Number of retries already attempted (0-based)
 
