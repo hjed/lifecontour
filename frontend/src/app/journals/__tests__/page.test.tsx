@@ -45,6 +45,11 @@ jest.mock('@/lib/api/journals', () => ({
     isLoading: false,
     error: null,
   })),
+  useSearchJournals: jest.fn(() => ({
+    data: null,
+    isLoading: false,
+    error: null,
+  })),
   useJournalTags: jest.fn(() => ({
     data: { data: [] },
     isLoading: false,

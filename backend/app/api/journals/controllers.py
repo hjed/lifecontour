@@ -304,6 +304,131 @@ async def list_journals(
     )
 
 
+# Search endpoint - MUST be before /{journal_id} to avoid route conflicts
+@router.get("/search", response_model=JournalListResponse)
+@inject
+async def search_journals(
+    request: Request,
+    search_service: FromDishka[SearchService],
+    user: FromDishka[SessionUser],  # Require authentication
+    q: str = Query(..., description="Search query", min_length=1, max_length=500),
+    page: int = Query(default=1, description="Page number", ge=1),
+    limit: int = Query(default=20, description="Results per page", ge=1, le=100),
+    types: list[str] | None = Query(
+        default=None, description="Filter by journal types"
+    ),
+    sort: list[str] | None = Query(default=None, description="Sort criteria"),
+) -> JournalListResponse:
+    """
+    Search journals using MeiliSearch.
+
+    Supports full-text search across title and content with filtering and pagination.
+    """
+    # Calculate offset from page
+    offset = (page - 1) * limit
+
+    # Build filters - always filter by user_id for security
+    filters: dict[str, Any] = {"user_id": user.id}
+    if types:
+        filters["types"] = types
+
+    try:
+        results = search_service.search_journals(
+            query=q,
+            filters=filters,
+            limit=limit,
+            offset=offset,
+            sort=sort,
+        )
+    except MeilisearchError as e:
+        logger.error("MeiliSearch error during journal search", error=str(e), query=q)
+        raise SearchServiceUnavailableError("MeiliSearch", str(e)) from e
+
+    # Convert search results to journal resources
+    from app.api.journals.schemas import EventDateRangeSchema
+
+    base_url = get_request_base_url(request)
+    journal_resources: list[JournalResource] = []
+
+    for hit in results["hits"]:
+        # Create a minimal journal resource from search hit
+        # Note: This is a simplified resource from search results
+        # For full details, clients should fetch the complete journal via
+        # GET /journals/{id}
+
+        # Parse event date range from search results
+        start_date = hit.get("event_date_range_start")
+        end_date = hit.get("event_date_range_end")
+
+        # Use current time as fallback if dates are missing (should not happen in normal operation)
+        # This is a defensive measure for data integrity issues
+        if not start_date or not end_date:
+            logger.warning(
+                "Missing event_date_range in search results, using fallback",
+                journal_id=hit.get("id"),
+            )
+            start_date = datetime.now(UTC)
+            end_date = datetime.now(UTC)
+
+        event_date_range = EventDateRangeSchema(
+            start=start_date,
+            end=end_date,
+        )
+
+        # Normalize types from MeiliSearch (uppercase) to API format (lowercase)
+        types_from_search = hit.get("types", [])
+        normalized_types = [t.lower() for t in types_from_search]
+
+        attributes = JournalAttributes(
+            title=hit.get("title", ""),
+            content=hit.get("content", ""),
+            event_date_range=event_date_range,
+            types=normalized_types,
+            created_at=hit.get("created_at"),
+            updated_at=hit.get("updated_at"),
+        )
+
+        # Only include relevant search metadata fields to avoid exposing internal details
+        search_metadata = {
+            key: hit[key]
+            for key in ("_rankingScore", "_rankingScoreDetails")
+            if key in hit
+        }
+
+        resource = JournalResource(
+            id=str(hit["id"]),
+            attributes=attributes,
+            links=JsonApiLinks(self=f"{base_url}/api/journals/{hit['id']}"),
+            meta={
+                "highlighted": hit.get("_formatted", {}),
+                "search_metadata": search_metadata,
+            },
+        )
+        journal_resources.append(resource)
+
+    # Build pagination metadata
+    total_count = results.get("estimated_total_hits", 0)
+    pagination_meta = create_pagination_meta(total_count, page, limit)
+
+    # Build pagination links with query parameters
+    base_url_without_query = str(request.url).split("?")[0]
+    additional_params: dict[str, str | list[str]] = {"q": q}
+    if types:
+        additional_params["types"] = types
+    if sort:
+        additional_params["sort"] = sort
+
+    links = create_pagination_links(
+        base_url_without_query, page, limit, total_count, additional_params
+    )
+
+    return JournalListResponse(
+        data=journal_resources,
+        meta=pagination_meta,
+        links=links,
+    )
+
+
 @router.get("/{journal_id}", response_model=JournalResponse)
 @inject
 async def get_journal(
@@ -1253,123 +1378,3 @@ async def remove_tag_from_journal(
     )
 
     return JournalResponse(data=journal_resource)
-
-
-@router.get("/search", response_model=JournalListResponse)
-@inject
-async def search_journals(
-    request: Request,
-    search_service: FromDishka[SearchService],
-    user: FromDishka[SessionUser],  # Require authentication
-    q: str = Query(..., description="Search query", min_length=1, max_length=500),
-    page: int = Query(default=1, description="Page number", ge=1),
-    limit: int = Query(default=20, description="Results per page", ge=1, le=100),
-    types: list[str] | None = Query(
-        default=None, description="Filter by journal types"
-    ),
-    sort: list[str] | None = Query(default=None, description="Sort criteria"),
-) -> JournalListResponse:
-    """
-    Search journals using MeiliSearch.
-
-    Supports full-text search across title and content with filtering and pagination.
-    """
-    # Calculate offset from page
-    offset = (page - 1) * limit
-
-    # Build filters - always filter by user_id for security
-    filters: dict[str, Any] = {"user_id": user.id}
-    if types:
-        filters["types"] = types
-
-    try:
-        results = search_service.search_journals(
-            query=q,
-            filters=filters,
-            limit=limit,
-            offset=offset,
-            sort=sort,
-        )
-    except MeilisearchError as e:
-        logger.error("MeiliSearch error during journal search", error=str(e), query=q)
-        raise SearchServiceUnavailableError("MeiliSearch", str(e)) from e
-
-    # Convert search results to journal resources
-    from app.api.journals.schemas import EventDateRangeSchema
-
-    base_url = get_request_base_url(request)
-    journal_resources: list[JournalResource] = []
-
-    for hit in results["hits"]:
-        # Create a minimal journal resource from search hit
-        # Note: This is a simplified resource from search results
-        # For full details, clients should fetch the complete journal via
-        # GET /journals/{id}
-
-        # Parse event date range from search results
-        start_date = hit.get("event_date_range_start")
-        end_date = hit.get("event_date_range_end")
-
-        # Use current time as fallback if dates are missing (should not happen in normal operation)
-        # This is a defensive measure for data integrity issues
-        if not start_date or not end_date:
-            logger.warning(
-                "Missing event_date_range in search results, using fallback",
-                journal_id=hit.get("id"),
-            )
-            start_date = datetime.now(UTC)
-            end_date = datetime.now(UTC)
-
-        event_date_range = EventDateRangeSchema(
-            start=start_date,
-            end=end_date,
-        )
-
-        attributes = JournalAttributes(
-            title=hit.get("title", ""),
-            content=hit.get("content", ""),
-            event_date_range=event_date_range,
-            types=hit.get("types", []),
-            created_at=hit.get("created_at"),
-            updated_at=hit.get("updated_at"),
-        )
-
-        # Only include relevant search metadata fields to avoid exposing internal details
-        search_metadata = {
-            key: hit[key]
-            for key in ("_rankingScore", "_rankingScoreDetails")
-            if key in hit
-        }
-
-        resource = JournalResource(
-            id=str(hit["id"]),
-            attributes=attributes,
-            links=JsonApiLinks(self=f"{base_url}/api/journals/{hit['id']}"),
-            meta={
-                "highlighted": hit.get("_formatted", {}),
-                "search_metadata": search_metadata,
-            },
-        )
-        journal_resources.append(resource)
-
-    # Build pagination metadata
-    total_count = results.get("estimated_total_hits", 0)
-    pagination_meta = create_pagination_meta(total_count, page, limit)
-
-    # Build pagination links with query parameters
-    base_url_without_query = str(request.url).split("?")[0]
-    additional_params: dict[str, str | list[str]] = {"q": q}
-    if types:
-        additional_params["types"] = types
-    if sort:
-        additional_params["sort"] = sort
-
-    links = create_pagination_links(
-        base_url_without_query, page, limit, total_count, additional_params
-    )
-
-    return JournalListResponse(
-        data=journal_resources,
-        meta=pagination_meta,
-        links=links,
-    )

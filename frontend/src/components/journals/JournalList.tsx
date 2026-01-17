@@ -6,10 +6,10 @@
 
 import { ReactNode } from 'react';
 import { JournalListItem } from '@/components/journals/JournalListItem';
-import { JournalResource } from '@/types/journals';
+import { DisplayJournal } from '@/hooks/useDisplayJournals';
 
 interface JournalListProps {
-  readonly journals: JournalResource[];
+  readonly journals: DisplayJournal[];
   readonly emptyState?: ReactNode;
   readonly className?: string;
 }
