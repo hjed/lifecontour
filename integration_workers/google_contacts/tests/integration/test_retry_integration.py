@@ -63,7 +63,10 @@ class TestARQRetryIntegration:
     @pytest_asyncio.fixture
     async def redis_pool(self):
         """Create a real Redis connection pool for testing."""
-        redis_settings = RedisSettings(host="pms-redis", port=6379, database=1)  # Use DB 1 for tests
+        # Use environment variable or default to localhost for CI compatibility
+        import os
+        redis_host = os.getenv("REDIS_HOST", "localhost")
+        redis_settings = RedisSettings(host=redis_host, port=6379, database=1)  # Use DB 1 for tests
         pool = await create_pool(redis_settings)
 
         # Clean up any existing jobs in the queue
