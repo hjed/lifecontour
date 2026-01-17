@@ -132,3 +132,68 @@ class RateLimitError(IntegrationError):
         """
         super().__init__(message, integration_source)
         self.retry_after = retry_after
+
+
+class JobCancelledException(IntegrationError):
+    """Exception raised when a job is cancelled by the user."""
+
+    def __init__(
+        self,
+        job_id: str,
+        message: str = "Job cancelled by user",
+        integration_source: str | None = None,
+    ):
+        """
+        Initialize job cancelled exception.
+
+        Args:
+            job_id: ID of the cancelled job
+            message: Error message
+            integration_source: Source integration that was cancelled
+        """
+        super().__init__(message, integration_source)
+        self.job_id = job_id
+
+
+class JobNotFoundException(IntegrationError):
+    """Exception raised when a job is not found."""
+
+    def __init__(
+        self,
+        job_id: str,
+        message: str | None = None,
+        integration_source: str | None = None,
+    ):
+        """
+        Initialize job not found exception.
+
+        Args:
+            job_id: ID of the job that was not found
+            message: Error message (defaults to "Job {job_id} not found")
+            integration_source: Source integration
+        """
+        if message is None:
+            message = f"Job {job_id} not found"
+        super().__init__(message, integration_source)
+        self.job_id = job_id
+
+
+class JobEnqueueError(IntegrationError):
+    """Exception raised when a job fails to enqueue."""
+
+    def __init__(
+        self,
+        message: str = "Failed to enqueue job",
+        integration_source: str | None = None,
+        reason: str | None = None,
+    ):
+        """
+        Initialize job enqueue error.
+
+        Args:
+            message: Error message
+            integration_source: Source integration
+            reason: Reason for enqueue failure
+        """
+        super().__init__(message, integration_source)
+        self.reason = reason

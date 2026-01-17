@@ -17,6 +17,7 @@ from core_shared.repositories import SyncJobRepository
 from redis.asyncio import Redis
 
 from app.core.integrations.database import IntegrationDatabaseManager
+from app.core.integrations.exceptions import JobEnqueueError, JobNotFoundException
 from app.infrastructure.config import Settings
 
 logger = get_logger(__name__)
@@ -36,6 +37,7 @@ class TaskQueueService:
         redis_settings: RedisSettings,
         settings: Settings,
         db_manager: IntegrationDatabaseManager,
+        worker_type: str = "google_contacts",
     ):
         """
         Initialize the task queue service.
@@ -45,11 +47,13 @@ class TaskQueueService:
             redis_settings: Redis settings for ARQ
             settings: Application settings
             db_manager: Database manager for persisting sync jobs
+            worker_type: Type of worker for metrics labeling (default: "google_contacts")
         """
         self.redis_pool = redis_pool
         self.redis_settings = redis_settings
         self.settings = settings
         self.db_manager = db_manager
+        self.worker_type = worker_type
         self._arq_pool: ArqRedis | None = None
 
     async def _get_arq_pool(self) -> ArqRedis:
@@ -79,7 +83,8 @@ class TaskQueueService:
             Job ID for tracking the job status
 
         Raises:
-            Exception: If job enqueueing fails
+            JobEnqueueError: If job enqueueing fails
+            ConnectionError: If Redis connection fails
         """
         logger.info(
             "Enqueueing Google Contacts sync job",
@@ -103,7 +108,11 @@ class TaskQueueService:
             )
 
             if not job:
-                raise Exception("Failed to enqueue job - no job returned")
+                raise JobEnqueueError(
+                    message="Failed to enqueue job - no job returned",
+                    integration_source="google_contacts",
+                    reason="ARQ pool returned None",
+                )
 
             job_id = job.job_id
             logger.info(
@@ -154,13 +163,16 @@ class TaskQueueService:
             Dictionary with job status information
 
         Raises:
-            Exception: If job status check fails or user doesn't own the job
+            JobNotFoundException: If job is not found or user doesn't own the job
+            ConnectionError: If Redis connection fails
         """
         logger.debug("Checking job status", job_id=job_id, user_id=user_id)
 
         # Security check: Verify user owns this job
         if not await self._verify_user_job_ownership(user_id, job_id):
-            raise Exception(f"Job {job_id} not found or access denied")
+            raise JobNotFoundException(
+                job_id=job_id, message="Job not found or access denied"
+            )
 
         try:
             # Get reusable ARQ pool for job status checking
@@ -259,13 +271,17 @@ class TaskQueueService:
             Dictionary with cancellation status
 
         Raises:
-            Exception: If job cancellation fails or user is not authorized
+            JobNotFoundException: If job is not found or user is not authorized
+            PermissionError: If user doesn't own the job
         """
         logger.info("Cancelling job", job_id=job_id, user_id=user_id)
 
         try:
             # Verify user owns this job
-            await self._verify_user_job_ownership(user_id, job_id)
+            if not await self._verify_user_job_ownership(user_id, job_id):
+                raise PermissionError(
+                    f"User {user_id} is not authorized to cancel job {job_id}"
+                )
 
             # Update job status to cancelled in database
             async with self.db_manager.get_session() as session:
@@ -280,7 +296,9 @@ class TaskQueueService:
                 await session.commit()
 
                 if not sync_job:
-                    raise Exception(f"Job {job_id} not found in database")
+                    raise JobNotFoundException(
+                        job_id=job_id, message="Job not found in database"
+                    )
 
             # Note: ARQ doesn't support job cancellation directly
             # The worker will check the database status and stop processing
@@ -320,7 +338,7 @@ class TaskQueueService:
             )
 
             # Update queue depth metric
-            queue_depth.labels(worker_type="google_contacts").set(queue_length)
+            queue_depth.labels(worker_type=self.worker_type).set(queue_length)
 
             # Check if Redis is responsive
             start_time = datetime.now(UTC)

@@ -8,7 +8,6 @@ It runs as a separate process from the main FastAPI application.
 
 import random
 import sys
-import uuid
 from datetime import UTC, datetime
 from typing import Any
 
@@ -25,6 +24,10 @@ sys.path.insert(0, "/core_shared")
 # Import from the installed core_shared package
 from api_models import ListConnectionsResponse
 from core_shared.database.engine import create_session_factory
+
+# Import integration exceptions (from backend app)
+sys.path.insert(0, "/app")
+from app.core.integrations.exceptions import JobCancelledException
 
 # Import shared observability modules
 from core_shared.logging import (
@@ -763,7 +766,7 @@ async def _perform_full_sync(
         Updated metrics
 
     Raises:
-        Exception: If job is cancelled
+        JobCancelledException: If job is cancelled by user
     """
     logger.info("Starting full sync", google_account_email=google_account_email)
 
@@ -773,7 +776,7 @@ async def _perform_full_sync(
     while True:
         # Check if job has been cancelled
         if job_id and await _check_job_cancelled(session, job_id):
-            raise Exception("Job cancelled by user")
+            raise JobCancelledException(job_id=job_id)
 
         # Fetch contacts from Google
         response = await client.list_connections(page_size=100, page_token=page_token)
@@ -870,13 +873,13 @@ async def _perform_incremental_sync(
         Updated metrics
 
     Raises:
-        Exception: If job is cancelled
+        JobCancelledException: If job is cancelled by user
     """
     logger.info("Starting incremental sync", google_account_email=google_account_email)
 
     # Check if job has been cancelled
     if job_id and await _check_job_cancelled(session, job_id):
-        raise Exception("Job cancelled by user")
+        raise JobCancelledException(job_id=job_id)
 
     # Get existing sync token
     stmt = text("""
@@ -1241,29 +1244,36 @@ async def sync_google_contacts(
                 **metrics,
             }
 
+    except JobCancelledException as e:
+        # Calculate duration for cancellation case
+        duration = (datetime.now(UTC) - started_at).total_seconds()
+
+        logger.info(
+            "Google Contacts sync task cancelled",
+            job_id=job_id,
+            google_account_email=google_account_email,
+            duration_seconds=duration,
+        )
+
+        # Record cancellation metrics
+        metrics_collector.record_job_duration(
+            job_type="sync", status="cancelled", duration=duration
+        )
+        metrics_collector.increment_job_total(job_type="sync", status="cancelled")
+
+        # Job status is already set to cancelled in the database
+        # No need to update it again
+        return {
+            "status": "cancelled",
+            "google_account_email": google_account_email,
+            "message": "Job cancelled by user",
+            "worker_id": settings.worker_id,
+            "cancelled_at": datetime.now(UTC).isoformat(),
+        }
+
     except Exception as e:
         # Calculate duration for error case
         duration = (datetime.now(UTC) - started_at).total_seconds()
-
-        # Check if this is a cancellation
-        is_cancelled = "cancelled" in str(e).lower()
-
-        if is_cancelled:
-            logger.info(
-                "Google Contacts sync task cancelled",
-                job_id=job_id,
-                google_account_email=google_account_email,
-                duration_seconds=duration,
-            )
-            # Job status is already set to cancelled in the database
-            # No need to update it again
-            return {
-                "status": "cancelled",
-                "google_account_email": google_account_email,
-                "message": "Job cancelled by user",
-                "worker_id": settings.worker_id,
-                "cancelled_at": datetime.now(UTC).isoformat(),
-            }
 
         logger.error(
             "Google Contacts sync task failed",
