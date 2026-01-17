@@ -91,8 +91,8 @@ class TestRetryDelayFunction:
 
         # Should have some variation (not all identical)
         # With 10 samples, very unlikely all are identical with random jitter
-        unique_delays = len(set(delays))
-        assert unique_delays > 1, f"Expected variation in delays, got {unique_delays} unique values"
+        num_unique_delays = len(set(delays))
+        assert num_unique_delays > 1, f"Expected variation in delays, got {num_unique_delays} unique values"
 
     def test_retry_delay_exponential_growth(self):
         """Test that delays grow exponentially."""

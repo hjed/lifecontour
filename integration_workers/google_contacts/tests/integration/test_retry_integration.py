@@ -36,6 +36,9 @@ class IntentionalTaskFailure(RuntimeError):
 
 async def arq_failing_task(ctx):
     """ARQ task that fails a specified number of times before succeeding."""
+    # Yield control to event loop (required for async function)
+    await asyncio.sleep(0)
+
     _arq_task_state["call_count"] += 1
     _arq_task_state["call_times"].append(datetime.now(UTC))
 
@@ -51,6 +54,9 @@ async def arq_failing_task(ctx):
 
 async def arq_always_failing_task(ctx):
     """ARQ task that always fails."""
+    # Yield control to event loop (required for async function)
+    await asyncio.sleep(0)
+
     _arq_task_state["call_count"] += 1
     _arq_task_state["call_times"].append(datetime.now(UTC))
     raise IntentionalTaskFailure(f"Always fails - attempt #{_arq_task_state['call_count']}")
@@ -214,6 +220,6 @@ class TestARQRetryIntegration:
             try:
                 await worker_task
             except asyncio.CancelledError:
-                # Re-raise CancelledError after cleanup as required by asyncio best practices
-                raise
+                # Ignore CancelledError from task we cancelled ourselves during cleanup
+                pass
 
