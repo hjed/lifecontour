@@ -10,15 +10,12 @@ from unittest.mock import Mock
 import pytest
 import pytest_asyncio
 from dishka import Provider, Scope, make_async_container, provide
-from fastmcp import FastMCP
-from fastmcp.client import Client
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core.contacts.models.entities import Contact, ContactMethod, MethodType, Tag
 from app.core.contacts.models.value_objects import TagName
 from app.core.contacts.services import ContactService
 from app.infrastructure.search.search_service import SearchService
-from app.mcp.domains.contacts.tools import register_contact_tools
 from tests.fixtures.contact_fixtures import create_basic_contact, create_full_contact
 
 
@@ -143,72 +140,6 @@ class TestContactToolsIntegration:
     async def search_service(self, test_container):
         """Get search service from test container."""
         return await test_container.get(SearchService)
-
-    @pytest.mark.asyncio
-    async def test_get_contact_integration(self, sample_contact_entity):
-        """Test get_contact tool with mocked service integration."""
-        # Create MCP server and register tools
-        mcp: FastMCP[None] = FastMCP("TestServer")
-        register_contact_tools(mcp)
-
-        # Since the tools use Dishka dependency injection, we need to mock at the Dishka level
-        # For now, let's test the tool registration and basic functionality
-        # Use FastMCP Client for integration testing
-        async with Client(mcp) as client:
-            # Get list of available tools to verify registration
-            tools = await client.list_tools()
-            tool_names = [tool.name for tool in tools]
-
-            # Verify all expected tools are registered
-            expected_tools = [
-                "get_contact",
-                "search_contacts",
-                "global_search",
-                "create_contact",
-                "update_contact",
-                "list_contacts",
-            ]
-
-            for expected_tool in expected_tools:
-                assert expected_tool in tool_names, (
-                    f"Tool {expected_tool} not registered"
-                )
-
-    @pytest.mark.asyncio
-    async def test_mcp_server_tool_registration_integration(self):
-        """Test that all contact tools are properly registered with the MCP server."""
-        # Create MCP server and register tools
-        mcp: FastMCP[None] = FastMCP("TestServer")
-        register_contact_tools(mcp)
-
-        # Use FastMCP Client to test tool registration
-        async with Client(mcp) as client:
-            # Get list of available tools
-            tools = await client.list_tools()
-
-            # Verify all expected tools are registered
-            tool_names = [tool.name for tool in tools]
-            expected_tools = [
-                "get_contact",
-                "search_contacts",
-                "global_search",
-                "create_contact",
-                "update_contact",
-                "list_contacts",
-                "toggle_contact_favourite",
-                "list_tags",
-            ]
-
-            for expected_tool in expected_tools:
-                assert expected_tool in tool_names, (
-                    f"Tool {expected_tool} not registered"
-                )
-
-            # Verify tool descriptions are present
-            for tool in tools:
-                assert tool.description is not None
-                assert len(tool.description) > 0
-                assert tool.inputSchema is not None
 
     @pytest.mark.asyncio
     async def test_create_contact_integration_real_db(

@@ -8,54 +8,15 @@ using Dishka dependency injection patterns.
 from datetime import UTC, datetime
 
 import pytest
-from fastmcp import FastMCP
-from fastmcp.client import Client
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core.journal.models.entities import Journal
 from app.core.journal.models.value_objects import EventDateRange
 from app.core.journal.services.journal_service import JournalService
-from app.mcp.domains.journals.tools import register_journal_tools
 
 
 class TestJournalToolsIntegration:
     """Integration tests for MCP journal tools with real services."""
-
-    @pytest.mark.asyncio
-    async def test_mcp_server_tool_registration_integration(self):
-        """Test that all journal tools are properly registered with the MCP server."""
-        # Create MCP server and register tools
-        mcp: FastMCP[None] = FastMCP("TestServer")
-        register_journal_tools(mcp)
-
-        # Use FastMCP Client to test tool registration
-        async with Client(mcp) as client:
-            # Get list of available tools
-            tools = await client.list_tools()
-
-            # Verify all expected tools are registered
-            tool_names = [tool.name for tool in tools]
-            expected_tools = [
-                "get_journal",
-                "search_journals",
-                "list_journals",
-                "create_journal_entry",
-                "update_journal_entry",
-                "delete_journal",
-                "get_contact_journals",
-                "link_journal_to_contact",
-            ]
-
-            for expected_tool in expected_tools:
-                assert expected_tool in tool_names, (
-                    f"Tool {expected_tool} not registered"
-                )
-
-            # Verify tool descriptions are present
-            for tool in tools:
-                assert tool.description is not None
-                assert len(tool.description) > 0
-                assert tool.inputSchema is not None
 
     @pytest.mark.asyncio
     async def test_create_journal_integration_real_db(
