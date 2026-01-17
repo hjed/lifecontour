@@ -407,7 +407,7 @@ def register_journal_tools(mcp: FastMCP[None]) -> None:
                     journal_id=final_journal.id,
                     contact_id=int(rel_data["contact_id"]),
                     relationship_type=JournalContactRelationshipType(
-                        rel_data["relationship_type"].lower()
+                        rel_data["relationship_type"]
                     ),
                 )
                 await contact_relationship_repo.create(relationship)
@@ -702,7 +702,7 @@ def register_journal_tools(mcp: FastMCP[None]) -> None:
 
         # Filter by relationship type if provided
         if relationship_type:
-            rel_type = JournalContactRelationshipType(relationship_type.lower())
+            rel_type = JournalContactRelationshipType(relationship_type)
             relationships = [
                 rel for rel in all_relationships if rel.relationship_type == rel_type
             ]
@@ -819,7 +819,7 @@ def register_journal_tools(mcp: FastMCP[None]) -> None:
             )
 
         # Create relationship
-        rel_type = JournalContactRelationshipType(relationship_type.lower())
+        rel_type = JournalContactRelationshipType(relationship_type)
         relationship = JournalContactRelationship(
             journal_id=journal_id,
             contact_id=contact_id,
