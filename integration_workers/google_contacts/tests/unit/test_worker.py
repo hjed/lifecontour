@@ -22,7 +22,49 @@ class TestGoogleContactsWorker:
     @pytest.fixture
     def mock_session_factory(self):
         """Mock session factory for database operations."""
+        # Create a mock row object for database results
+        mock_row = MagicMock()
+        mock_row.id = 1
+        mock_row.job_id = "test-job-id"
+        mock_row.user_id = "1"
+        mock_row.integration_source = "google_contacts"
+        mock_row.sync_type = "full"
+        mock_row.status = "running"
+        mock_row.created_at = datetime.now(UTC)
+        mock_row.started_at = None
+        mock_row.completed_at = None
+        mock_row.error_message = None
+        mock_row.contacts_processed = 0
+        mock_row.contacts_created = 0
+        mock_row.contacts_updated = 0
+        mock_row.contacts_deleted = 0
+        mock_row.progress = 0
+        mock_row.updated_at = datetime.now(UTC)
+
+        # Create mock result for connection.execute()
+        mock_result = MagicMock()
+        mock_result.fetchone.return_value = mock_row
+        mock_result.scalar.return_value = None
+
+        # Create mock connection with proper async behavior
+        mock_connection = AsyncMock()
+        async def mock_execute(*args, **kwargs):
+            return mock_result
+        mock_connection.execute = mock_execute
+
+        # Create mock session with proper async behavior
         mock_session = AsyncMock()
+        # Make connection() return the mock connection (it's an async method)
+        async def mock_connection_func():
+            return mock_connection
+        mock_session.connection = mock_connection_func
+
+        # Mock session.execute to return a result with fetchone and scalar
+        mock_session_result = MagicMock()
+        mock_session_result.fetchone.return_value = None
+        mock_session_result.scalar.return_value = None
+        mock_session.execute.return_value = mock_session_result
+
         mock_factory = MagicMock()
         mock_factory.return_value.__aenter__.return_value = mock_session
         return mock_factory
@@ -76,6 +118,7 @@ class TestGoogleContactsWorker:
             result = await sync_google_contacts(
                 ctx={"session_factory": mock_session_factory},
                 google_account_email="test@example.com",
+                user_id=1,
                 sync_type="full",
             )
 
@@ -111,6 +154,7 @@ class TestGoogleContactsWorker:
             result = await sync_google_contacts(
                 ctx={"session_factory": mock_session_factory},
                 google_account_email="test@example.com",
+                user_id=1,
                 sync_type="incremental",
             )
 
@@ -143,6 +187,7 @@ class TestGoogleContactsWorker:
             result = await sync_google_contacts(
                 ctx={"session_factory": mock_session_factory},
                 google_account_email="test@example.com",
+                user_id=1,
                 sync_type="smart",
             )
 
@@ -177,6 +222,7 @@ class TestGoogleContactsWorker:
             result = await sync_google_contacts(
                 ctx={"session_factory": mock_session_factory},
                 google_account_email="test@example.com",
+                user_id=1,
                 sync_type="full",
             )
 
@@ -208,6 +254,7 @@ class TestGoogleContactsWorker:
             result = await sync_google_contacts(
                 ctx={"session_factory": mock_session_factory},
                 google_account_email="test@example.com",
+                user_id=1,
                 sync_type="full",
             )
 
