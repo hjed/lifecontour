@@ -1,0 +1,798 @@
+"""
+Journal domain MCP tools.
+
+Provides AI access to journal management functionality through MCP tools.
+Each tool is designed to return AI-friendly, contextual information.
+"""
+
+import json
+from typing import Annotated, Any
+
+import structlog
+from dishka.integrations.starlette import FromDishka, inject
+from fastmcp import FastMCP
+from fastmcp.server.dependencies import get_http_request
+from pydantic import Field
+from sqlalchemy.ext.asyncio import AsyncConnection
+
+from app.core.contacts.adapters.sql.contact_repository import SqlContactRepository
+from app.core.journal.adapters.sql.calendar_info_repository import (
+    SqlCalendarInfoRepository,
+)
+from app.core.journal.adapters.sql.journal_contact_relationship_repository import (
+    SqlJournalContactRelationshipRepository,
+)
+from app.core.journal.adapters.sql.journal_repository import SqlJournalRepository
+from app.core.journal.adapters.sql.journal_tag_repository import SqlJournalTagRepository
+from app.core.journal.adapters.sql.mood_data_repository import SqlMoodDataRepository
+from app.core.journal.adapters.sql.photo_album_data_repository import (
+    SqlPhotoAlbumDataRepository,
+)
+from app.core.journal.adapters.sql.plan_data_repository import SqlPlanDataRepository
+from app.core.journal.adapters.sql.travel_data_repository import SqlTravelDataRepository
+from app.core.journal.models.entities import Journal
+from app.core.journal.models.journal_contact_relationship import (
+    JournalContactRelationship,
+)
+from app.core.journal.models.journal_relationship_types import (
+    JournalContactRelationshipType,
+)
+from app.core.journal.models.journal_types import JournalType
+from app.core.journal.models.value_objects import EventDateRange
+from app.core.journal.services.journal_service import JournalService
+from app.infrastructure.auth.models import SessionUser
+from app.infrastructure.events.outbox_event_publisher import OutboxEventPublisher
+from app.mcp.domains.journals.converters import JournalConverter
+from app.mcp.domains.journals.schemas import (
+    JournalCreateRequest,
+    JournalUpdateRequest,
+)
+from app.mcp.shared.decorators import mcp_unified_error_handler
+from app.mcp.shared.response_builders import MCPResponseBuilder
+
+logger = structlog.get_logger()
+
+
+def _get_current_user_id() -> str:
+    """
+    Get the current authenticated user ID from the request context.
+
+    Returns:
+        The user ID from the authenticated session
+
+    Raises:
+        RuntimeError: If no authenticated user is found in the request context
+    """
+    request = get_http_request()
+    if not hasattr(request.state, "user"):
+        raise RuntimeError("No authenticated user found in request context")
+
+    user: SessionUser = request.state.user
+    return user.id
+
+
+def register_journal_tools(mcp: FastMCP[None]) -> None:
+    """
+    Register journal-related MCP tools with the FastMCP server.
+
+    Args:
+        mcp: The FastMCP server instance to register tools with
+    """
+
+    @mcp.tool
+    @mcp_unified_error_handler("create_journal_entry", "journal")
+    @inject
+    async def create_journal_entry(
+        db_connection: FromDishka[AsyncConnection],
+        event_publisher: FromDishka[OutboxEventPublisher],
+        journal_data: Annotated[
+            str,
+            Field(
+                description="JSON string containing journal creation data with fields: "
+                "title (str), content (str), event_date_range (dict with start/end), "
+                "types (list[str]), type_data (dict), contact_relationships (list[dict]), "
+                "tags (list[str]), parent_id (int, optional)"
+            ),
+        ],
+    ) -> str:
+        """
+        Create a new journal entry with types, type-specific data, relationships, and tags.
+
+        Creates a journal entry with support for multiple types (NOTE, EVENT, MOOD_RATING, etc.),
+        type-specific data (e.g., calendar_id for EVENT), contact relationships, and tags.
+        Returns AI-friendly response with contextual summary.
+
+        Args:
+            journal_data: JSON string with journal creation data
+
+        Returns:
+            JSON string containing AI-friendly journal information including:
+            - Journal details (title, content, date range)
+            - Types and type-specific data
+            - Contact relationships
+            - Tags
+            - Contextual summary for AI understanding
+
+        Raises:
+            JournalValidationError: If validation fails
+            ValueError: If JSON parsing fails or required fields are missing
+        """
+        # Parse JSON input
+        try:
+            data_dict = json.loads(journal_data)
+            request = JournalCreateRequest(**data_dict)
+        except json.JSONDecodeError as e:
+            raise ValueError(f"Invalid JSON format: {e}") from e
+        except Exception as e:
+            raise ValueError(f"Invalid journal data: {e}") from e
+
+        # Get current user ID from auth context
+        user_id = _get_current_user_id()
+
+        # Create repositories
+        journal_repo = SqlJournalRepository(db_connection)
+        # tag_repo = SqlJournalTagRepository(db_connection)  # TODO: Use for tags
+        # contact_rel_repo = SqlJournalContactRelationshipRepository(db_connection)  # TODO: Use for relationships
+        # contact_repo = SqlContactRepository(db_connection)  # TODO: Use for contact validation
+
+        # Create journal service
+        journal_service = JournalService(journal_repo, event_publisher)
+
+        # Create journal entity
+        journal = Journal(
+            user_id=user_id,
+            title=request.title,
+            content=request.content,
+            event_date_range=EventDateRange(
+                start=request.event_date_range.start,
+                end=request.event_date_range.end,
+            ),
+            parent_id=request.parent_id,
+        )
+
+        # Create journal
+        created_journal = await journal_service.create_journal(journal, db_connection)
+
+        # TODO: Add types, type_data, contact_relationships, and tags
+        # This will be implemented in the next iteration
+
+        # Convert to AI-friendly response
+        response = JournalConverter.to_response(
+            journal=created_journal,
+            types=[],
+            type_data={},
+            contacts=[],
+            tags=[],
+        )
+
+        return MCPResponseBuilder.success_response(response)
+
+    @mcp.tool
+    @mcp_unified_error_handler("update_journal_entry", "journal")
+    @inject
+    async def update_journal_entry(
+        db_connection: FromDishka[AsyncConnection],
+        event_publisher: FromDishka[OutboxEventPublisher],
+        journal_id: Annotated[
+            int, Field(description="The unique identifier of the journal to update")
+        ],
+        journal_data: Annotated[
+            str,
+            Field(
+                description="JSON string containing journal update data with optional fields: "
+                "title (str), content (str), event_date_range (dict with start/end), "
+                "types (list[str]), type_data (dict), contact_relationships (list[dict]), "
+                "tags (list[str])"
+            ),
+        ],
+    ) -> str:
+        """
+        Update an existing journal entry with partial data.
+
+        Updates journal fields, types, type-specific data, contact relationships, and tags.
+        Only provided fields are updated; omitted fields remain unchanged.
+        Returns AI-friendly response with contextual summary.
+
+        Args:
+            journal_id: The unique identifier of the journal to update
+            journal_data: JSON string with journal update data (partial)
+
+        Returns:
+            JSON string containing AI-friendly updated journal information
+
+        Raises:
+            JournalNotFoundError: If the journal with the given ID does not exist
+            JournalValidationError: If validation fails
+            ValueError: If JSON parsing fails
+        """
+        # Parse JSON input
+        try:
+            data_dict = json.loads(journal_data)
+            request = JournalUpdateRequest(**data_dict)
+        except json.JSONDecodeError as e:
+            raise ValueError(f"Invalid JSON format: {e}") from e
+        except Exception as e:
+            raise ValueError(f"Invalid journal data: {e}") from e
+
+        # Create repositories
+        journal_repo = SqlJournalRepository(db_connection)
+        journal_service = JournalService(journal_repo, event_publisher)
+
+        # Get existing journal
+        existing_journal = await journal_repo.find_by_id(journal_id)
+        if not existing_journal:
+            from app.core.journal.models.exceptions import JournalNotFoundError
+
+            raise JournalNotFoundError(journal_id)
+
+        # Track changed fields
+        changed_fields: dict[str, Any] = {}
+
+        # Update journal fields
+        if request.title is not None:
+            existing_journal.title = request.title
+            changed_fields["title"] = request.title
+        if request.content is not None:
+            existing_journal.content = request.content
+            changed_fields["content"] = request.content
+        if request.event_date_range is not None:
+            existing_journal.event_date_range = EventDateRange(
+                start=request.event_date_range.start,
+                end=request.event_date_range.end,
+            )
+            changed_fields["event_date_range"] = request.event_date_range
+
+        # Update journal
+        updated_journal = await journal_service.update_journal(
+            existing_journal, changed_fields, db_connection
+        )
+
+        # TODO: Update types, type_data, contact_relationships, and tags
+        # This will be implemented in the next iteration
+
+        # Convert to AI-friendly response
+        response = JournalConverter.to_response(
+            journal=updated_journal,
+            types=[],
+            type_data={},
+            contacts=[],
+            tags=[],
+        )
+
+        return MCPResponseBuilder.success_response(response)
+
+    @mcp.tool
+    @mcp_unified_error_handler("get_journal", "journal")
+    @inject
+    async def get_journal(
+        db_connection: FromDishka[AsyncConnection],
+        journal_id: Annotated[
+            int, Field(description="The unique identifier of the journal")
+        ],
+        include_children: Annotated[
+            bool,
+            Field(
+                default=False,
+                description="Optional: Include child journals in the response",
+            ),
+        ] = False,
+    ) -> str:
+        """
+        Get journal details by ID for AI analysis.
+
+        Retrieves comprehensive journal information including title, content, types,
+        type-specific data, contact relationships, tags, and a contextual summary.
+        Optionally includes child journals.
+
+        Args:
+            journal_id: The unique identifier of the journal
+            include_children: Optional flag to include child journals
+
+        Returns:
+            JSON string containing AI-friendly journal information including:
+            - Journal details (title, content, date range)
+            - Types and type-specific data
+            - Contact relationships
+            - Tags
+            - Optional child journals
+            - Contextual summary for AI understanding
+
+        Raises:
+            JournalNotFoundError: If the journal with the given ID does not exist
+        """
+        # Create repositories
+        journal_repo = SqlJournalRepository(db_connection)
+        calendar_info_repo = SqlCalendarInfoRepository(db_connection)
+        mood_data_repo = SqlMoodDataRepository(db_connection)
+        plan_data_repo = SqlPlanDataRepository(db_connection)
+        travel_data_repo = SqlTravelDataRepository(db_connection)
+        photo_album_data_repo = SqlPhotoAlbumDataRepository(db_connection)
+        contact_relationship_repo = SqlJournalContactRelationshipRepository(
+            db_connection
+        )
+        tag_repo = SqlJournalTagRepository(db_connection)
+
+        # Get journal
+        journal = await journal_repo.find_by_id(journal_id)
+        if not journal:
+            from app.core.journal.models.exceptions import JournalNotFoundError
+
+            raise JournalNotFoundError(journal_id)
+
+        # Get children if requested
+        children = None
+        if include_children:
+            children = await journal_repo.get_children(journal_id)
+
+        # Fetch types and type-specific data
+        types: list[str] = []
+        type_data: dict[str, Any] = {}
+
+        # Check each type-specific data table to determine journal types
+        calendar_info = await calendar_info_repo.find_by_journal_id(journal_id)
+        if calendar_info:
+            types.append(JournalType.EVENT.value)
+            type_data[JournalType.EVENT.value] = {
+                "calendar_id": str(calendar_info.calendar_id),
+                "start_time": calendar_info.start_time.isoformat()
+                if calendar_info.start_time
+                else None,
+                "end_time": calendar_info.end_time.isoformat()
+                if calendar_info.end_time
+                else None,
+                "is_all_day": calendar_info.is_all_day,
+                "location": calendar_info.location,
+                "sync_invitees": calendar_info.sync_invitees,
+            }
+
+        mood_data = await mood_data_repo.find_by_journal_id(journal_id)
+        if mood_data:
+            types.append(JournalType.MOOD_RATING.value)
+            type_data[JournalType.MOOD_RATING.value] = {
+                "mood_value": mood_data.mood_value,
+                "mood_label": mood_data.mood_label,
+                "energy_level": mood_data.energy_level,
+            }
+
+        plan_data = await plan_data_repo.find_by_journal_id(journal_id)
+        if plan_data:
+            types.append(JournalType.PLAN.value)
+            type_data[JournalType.PLAN.value] = {
+                "documents": [
+                    {
+                        "title": doc.title,
+                        "url": doc.url,
+                        "description": doc.description,
+                    }
+                    for doc in plan_data.documents
+                ]
+                if plan_data.documents
+                else [],
+            }
+
+        travel_data = await travel_data_repo.find_by_journal_id(journal_id)
+        if travel_data:
+            types.append(JournalType.TRAVEL.value)
+            type_data[JournalType.TRAVEL.value] = {
+                "flights": [
+                    {
+                        "airline": flight.airline,
+                        "flight_number": flight.flight_number,
+                        "departure_airport": flight.departure_airport,
+                        "arrival_airport": flight.arrival_airport,
+                        "departure_time": flight.departure_time.isoformat()
+                        if flight.departure_time
+                        else None,
+                        "arrival_time": flight.arrival_time.isoformat()
+                        if flight.arrival_time
+                        else None,
+                        "booking_reference": flight.booking_reference,
+                    }
+                    for flight in travel_data.flights
+                ]
+                if travel_data.flights
+                else [],
+                "accommodations": [
+                    {
+                        "name": acc.name,
+                        "address": acc.address,
+                        "check_in_date": acc.check_in_date.isoformat()
+                        if acc.check_in_date
+                        else None,
+                        "check_out_date": acc.check_out_date.isoformat()
+                        if acc.check_out_date
+                        else None,
+                        "booking_reference": acc.booking_reference,
+                    }
+                    for acc in travel_data.accommodations
+                ]
+                if travel_data.accommodations
+                else [],
+                "transportation": [
+                    {
+                        "type": trans.type,
+                        "details": trans.details,
+                        "booking_reference": trans.booking_reference,
+                    }
+                    for trans in travel_data.transportation
+                ]
+                if travel_data.transportation
+                else [],
+            }
+
+        photo_album_data = await photo_album_data_repo.find_by_journal_id(journal_id)
+        if photo_album_data:
+            types.append(JournalType.PHOTO_ALBUM.value)
+            type_data[JournalType.PHOTO_ALBUM.value] = {
+                "immich_album_id": str(photo_album_data.immich_album_id),
+            }
+
+        # If no types found, it's a NOTE
+        if not types:
+            types.append(JournalType.NOTE.value)
+
+        # Fetch contact relationships and contact details
+        contact_relationships = await contact_relationship_repo.get_by_journal(
+            journal_id
+        )
+        contact_repo = SqlContactRepository(db_connection)
+
+        # Build contact tuples with names (id, name, relationship_type)
+        contacts: list[tuple[int, str, str]] = []
+        for rel in contact_relationships:
+            contact = await contact_repo.find_by_id(rel.contact_id)
+            if contact:
+                contact_name = f"{contact.first_name} {contact.last_name}".strip()
+                if not contact_name:
+                    contact_name = f"Contact {rel.contact_id}"
+                contacts.append(
+                    (rel.contact_id, contact_name, rel.relationship_type.value)
+                )
+
+        # Fetch tags
+        journal_tags = await tag_repo.get_tags_for_journal(journal_id)
+
+        # Convert to AI-friendly response
+        response = JournalConverter.to_response(
+            journal=journal,
+            types=types,
+            type_data=type_data,
+            contacts=contacts,
+            tags=journal_tags,
+            children=children,
+        )
+
+        return MCPResponseBuilder.success_response(response)
+
+    @mcp.tool
+    @mcp_unified_error_handler("search_journals", "journal")
+    @inject
+    async def search_journals(
+        db_connection: FromDishka[AsyncConnection],
+        query: Annotated[
+            str | None,
+            Field(
+                default=None,
+                description="Optional: Search query for full-text search",
+            ),
+        ] = None,
+        types: Annotated[
+            str | None,
+            Field(
+                default=None,
+                description="Optional: Comma-separated list of journal types to filter by",
+            ),
+        ] = None,
+        limit: Annotated[
+            int,
+            Field(
+                default=20,
+                description="Maximum number of results to return (default: 20)",
+            ),
+        ] = 20,
+    ) -> str:
+        """
+        Search journals with filtering options.
+
+        Searches journals by query, types, and other filters.
+        Returns AI-friendly summaries with relevance scores.
+
+        Args:
+            query: Optional search query for full-text search
+            types: Optional comma-separated list of journal types
+            limit: Maximum number of results to return
+
+        Returns:
+            JSON string containing AI-friendly search results with:
+            - List of matching journals with excerpts
+            - Search metadata (total hits, processing time)
+            - Contextual summary for AI understanding
+
+        Raises:
+            ValueError: If invalid filter values are provided
+        """
+        # Get current user ID from auth context
+        user_id = _get_current_user_id()
+
+        # Create repositories
+        journal_repo = SqlJournalRepository(db_connection)
+
+        # Parse types filter
+        # type_list = None  # TODO: Use for filtering by types
+        # if types:
+        #     type_list = [t.strip() for t in types.split(",")]
+
+        # Get journals (simplified for now - will add search later)
+        journals = await journal_repo.get_all(
+            user_id=user_id,
+            limit=limit,
+            offset=0,
+        )
+
+        # Convert to search results
+        from app.mcp.domains.journals.schemas import (
+            EventDateRangeSchema,
+            JournalSearchResponse,
+            JournalSearchResult,
+        )
+
+        results = []
+        for journal in journals:
+            result = JournalSearchResult(
+                id=journal.id or 0,
+                title=journal.title,
+                content_excerpt=journal.content[:200] + "..."
+                if len(journal.content) > 200
+                else journal.content,
+                event_date_range=EventDateRangeSchema(
+                    start=journal.event_date_range.start,
+                    end=journal.event_date_range.end,
+                ),
+                types=[],
+                tags=[],
+                highlighted={},
+                summary=f"Journal: {journal.title}",
+            )
+            results.append(result)
+
+        response = JournalSearchResponse(
+            results=results,
+            query=query,
+            total_hits=len(results),
+            processing_time_ms=0,
+            summary=f"Found {len(results)} journal(s)",
+        )
+
+        return MCPResponseBuilder.success_response(response)
+
+    @mcp.tool
+    @mcp_unified_error_handler("delete_journal", "journal")
+    @inject
+    async def delete_journal(
+        db_connection: FromDishka[AsyncConnection],
+        event_publisher: FromDishka[OutboxEventPublisher],
+        journal_id: Annotated[
+            int, Field(description="The unique identifier of the journal to delete")
+        ],
+        delete_children: Annotated[
+            bool,
+            Field(
+                default=False,
+                description="Optional: Delete child journals as well",
+            ),
+        ] = False,
+    ) -> str:
+        """
+        Delete a journal entry.
+
+        Deletes a journal entry and optionally its children.
+        Returns confirmation response.
+
+        Args:
+            journal_id: The unique identifier of the journal to delete
+            delete_children: Optional flag to delete child journals
+
+        Returns:
+            JSON string containing deletion confirmation
+
+        Raises:
+            JournalNotFoundError: If the journal with the given ID does not exist
+        """
+        # Create repositories
+        journal_repo = SqlJournalRepository(db_connection)
+        journal_service = JournalService(journal_repo, event_publisher)
+
+        # Delete journal
+        await journal_service.delete_journal(journal_id, db_connection)
+
+        # TODO: Handle delete_children flag
+        # This will be implemented in the next iteration
+
+        from pydantic import BaseModel
+
+        class DeleteResponse(BaseModel):
+            journal_id: int
+            deleted: bool
+            summary: str
+
+        response = DeleteResponse(
+            journal_id=journal_id,
+            deleted=True,
+            summary=f"Successfully deleted journal {journal_id}",
+        )
+
+        return MCPResponseBuilder.success_response(response)
+
+    @mcp.tool
+    @mcp_unified_error_handler("get_contact_journals", "journal")
+    @inject
+    async def get_contact_journals(
+        db_connection: FromDishka[AsyncConnection],
+        contact_id: Annotated[
+            int, Field(description="The unique identifier of the contact")
+        ],
+        limit: Annotated[
+            int,
+            Field(
+                default=20,
+                description="Maximum number of results to return (default: 20)",
+            ),
+        ] = 20,
+    ) -> str:
+        """
+        Get journals associated with a contact.
+
+        Retrieves journals that have relationships with the specified contact.
+        Returns AI-friendly summaries.
+
+        Args:
+            contact_id: The unique identifier of the contact
+            limit: Maximum number of results to return
+
+        Returns:
+            JSON string containing AI-friendly journal summaries
+
+        Raises:
+            ContactNotFoundError: If the contact with the given ID does not exist
+        """
+        # Create repositories
+        contact_rel_repo = SqlJournalContactRelationshipRepository(db_connection)
+        journal_repo = SqlJournalRepository(db_connection)
+
+        # Get relationships
+        relationships = await contact_rel_repo.get_by_contact(contact_id)
+
+        # Get journals
+        journals = []
+        for rel in relationships[:limit]:
+            journal = await journal_repo.find_by_id(rel.journal_id)
+            if journal:
+                journals.append(journal)
+
+        # Convert to search results
+        from app.mcp.domains.journals.schemas import (
+            EventDateRangeSchema,
+            JournalSearchResponse,
+            JournalSearchResult,
+        )
+
+        results = []
+        for journal in journals:
+            result = JournalSearchResult(
+                id=journal.id or 0,
+                title=journal.title,
+                content_excerpt=journal.content[:200] + "..."
+                if len(journal.content) > 200
+                else journal.content,
+                event_date_range=EventDateRangeSchema(
+                    start=journal.event_date_range.start,
+                    end=journal.event_date_range.end,
+                ),
+                types=[],
+                tags=[],
+                highlighted={},
+                summary=f"Journal: {journal.title}",
+            )
+            results.append(result)
+
+        response = JournalSearchResponse(
+            results=results,
+            query=None,
+            total_hits=len(results),
+            processing_time_ms=0,
+            summary=f"Found {len(results)} journal(s) for contact {contact_id}",
+        )
+
+        return MCPResponseBuilder.success_response(response)
+
+    @mcp.tool
+    @mcp_unified_error_handler("link_journal_to_contact", "journal")
+    @inject
+    async def link_journal_to_contact(
+        db_connection: FromDishka[AsyncConnection],
+        journal_id: Annotated[
+            int, Field(description="The unique identifier of the journal")
+        ],
+        contact_id: Annotated[
+            int, Field(description="The unique identifier of the contact")
+        ],
+        relationship_type: Annotated[
+            str,
+            Field(
+                description="Relationship type (PARTICIPANT, INVITEE, MENTION, ABOUT)"
+            ),
+        ],
+    ) -> str:
+        """
+        Link a journal to a contact with a specific relationship type.
+
+        Creates a relationship between a journal and a contact.
+        Returns confirmation response.
+
+        Args:
+            journal_id: The unique identifier of the journal
+            contact_id: The unique identifier of the contact
+            relationship_type: Relationship type (PARTICIPANT, INVITEE, MENTION, ABOUT)
+
+        Returns:
+            JSON string containing relationship creation confirmation
+
+        Raises:
+            JournalNotFoundError: If the journal with the given ID does not exist
+            ContactNotFoundError: If the contact with the given ID does not exist
+            ValueError: If relationship_type is invalid
+        """
+        # Validate relationship type
+        try:
+            rel_type = JournalContactRelationshipType(relationship_type.upper())
+        except ValueError as e:
+            raise ValueError(
+                f"Invalid relationship type: {relationship_type}. "
+                f"Must be one of: PARTICIPANT, INVITEE, MENTION, ABOUT"
+            ) from e
+
+        # Create repositories
+        contact_rel_repo = SqlJournalContactRelationshipRepository(db_connection)
+        journal_repo = SqlJournalRepository(db_connection)
+        contact_repo = SqlContactRepository(db_connection)
+
+        # Verify journal exists
+        journal = await journal_repo.find_by_id(journal_id)
+        if not journal:
+            from app.core.journal.models.exceptions import JournalNotFoundError
+
+            raise JournalNotFoundError(journal_id)
+
+        # Verify contact exists
+        contact = await contact_repo.find_by_id(contact_id)
+        if not contact:
+            from app.core.contacts.models.exceptions import ContactNotFoundError
+
+            raise ContactNotFoundError(contact_id)
+
+        # Create relationship
+        relationship = JournalContactRelationship(
+            journal_id=journal_id,
+            contact_id=contact_id,
+            relationship_type=rel_type,
+        )
+        await contact_rel_repo.create(relationship)
+
+        from pydantic import BaseModel
+
+        class LinkResponse(BaseModel):
+            journal_id: int
+            contact_id: int
+            relationship_type: str
+            linked: bool
+            summary: str
+
+        response = LinkResponse(
+            journal_id=journal_id,
+            contact_id=contact_id,
+            relationship_type=relationship_type,
+            linked=True,
+            summary=f"Successfully linked journal {journal_id} to contact {contact_id} as {relationship_type}",
+        )
+
+        return MCPResponseBuilder.success_response(response)

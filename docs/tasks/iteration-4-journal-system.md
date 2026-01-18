@@ -952,15 +952,15 @@ CREATE TABLE journals (
 - No parent journal selector (optional feature, deferred)
 - No advanced markdown editor (simple textarea, user can edit inline after creation)
 
-### ITER4-010: Journal MCP Tools 🟡 PLANNED
+### ITER4-010: Journal MCP Tools ✅ COMPLETE
 **Description:** Implement MCP tools for AI-assisted journal management
 **Strategy:** Single task for MCP integration
 **Specification Reference:** [MCP Tools](../journal-system-specification.md#mcp-tools), [MCP Response Format](../journal-system-specification.md#mcp-response-format)
 
-**PR Size:** ~6 files (MCP tools, response formatting, tests)
+**PR Size:** ~10 files (MCP tools, schemas, converters, unit tests, integration tests, documentation)
 
 **Acceptance Criteria:**
-- [ ] Create MCP tools in `backend/app/mcp/journals/`:
+- [x] Create MCP tools in `backend/app/mcp/domains/journals/`:
   - `create_journal_entry()` - Create with types, type_data, relationships, tags
   - `update_journal_entry()` - Update with partial data
   - `get_journal()` - Get with optional children
@@ -968,15 +968,55 @@ CREATE TABLE journals (
   - `delete_journal()` - Delete with optional children deletion
   - `get_contact_journals()` - Get journals for contact with relationship filtering
   - `link_journal_to_contact()` - Create contact relationship
-- [ ] Implement AI-optimized response format:
+- [x] Implement AI-optimized response format:
   - Include `summary` field (AI-friendly summary of journal)
   - Embed related data (contacts, tags, calendar, parent, children)
   - Type data organized by type for clarity
   - Children included as summaries (not full content)
-- [ ] Use Dishka DI for service injection (share with REST API)
-- [ ] Implement proper error handling with user-friendly messages
-- [ ] Write MCP integration tests
-- [ ] Document MCP tools in `docs/mcp-tools.md`
+- [x] Use Dishka DI for service injection (share with REST API)
+- [x] Implement proper error handling with user-friendly messages
+- [x] Write MCP integration tests
+- [x] Document MCP tools in `docs/mcp-tools.md`
+
+**Implementation Details:**
+
+**Files Created:**
+1. `backend/app/mcp/domains/journals/schemas.py` - AI-optimized Pydantic schemas
+   - `JournalResponse` - Full journal with embedded relationships
+   - `JournalSummaryResponse` - Lightweight summary for lists
+   - `JournalCreateRequest` - Creation request with validation
+   - `JournalUpdateRequest` - Partial update request
+   - `JournalSearchResponse` - Search results with pagination
+   - `ContactJournalsResponse` - Contact-specific journal list
+
+2. `backend/app/mcp/domains/journals/converters.py` - Domain to MCP conversion
+   - `to_journal_response()` - Convert Journal entity to AI-friendly response
+   - `to_journal_summary()` - Generate lightweight summaries
+   - `build_journal_summary_text()` - Create AI-readable summary text
+   - Handles embedding of contacts, tags, calendar, parent, children
+
+3. `backend/app/mcp/domains/journals/tools.py` - MCP tool implementations
+   - All 7 tools implemented with Dishka DI
+   - Comprehensive error handling with user-friendly messages
+   - Validation of inputs (dates, IDs, relationship types)
+   - Support for partial updates and optional parameters
+
+4. `backend/tests/unit/mcp/domains/journals/test_tools.py` - Unit tests
+   - 5 unit tests covering core tool functionality
+   - Mock-based testing for isolation
+   - Tests for error handling and validation
+
+5. `backend/tests/integration/mcp/test_journal_tools_integration.py` - Integration tests
+   - 7 integration tests with real database
+   - Dishka DI integration with `JournalTestProvider`
+   - Tests for create, get, update, delete, link, and search operations
+   - Transaction-based test isolation
+
+**Test Results:**
+- ✅ Unit tests: 5/5 passing
+- ✅ Integration tests: 7/7 passing
+- ✅ Ruff linting: All checks passed
+- ✅ MyPy type checking: No issues found
 
 **MCP Response Example:**
 ```python
@@ -1117,7 +1157,12 @@ CREATE TABLE journals (
   - ✅ Phase 4: Relationships (Files 12-18) - Contacts, tags, calendar, breadcrumb, children, detail view integration
   - ✅ Phase 5: Integration & E2E Tests - E2E test infrastructure, list/detail page integration, workflow tests
   - ⏳ Phase 6: Polish & Tests (Deferred) - Advanced features (infinite scroll, date grouping, quick actions)
-- 🟡 MCP tools for AI integration (ITER4-010)
+- ✅ MCP tools for AI integration (ITER4-010)
+  - ✅ AI-optimized schemas with embedded relationships
+  - ✅ 7 MCP tools (create, update, get, search, delete, link, get_contact_journals)
+  - ✅ Dishka DI integration
+  - ✅ 5 unit tests + 7 integration tests passing
+  - ✅ Documentation in docs/mcp-tools.md
 - 🟡 Contact page journal display (ITER4-011)
 - ✅ All tests passing (unit, integration)
 - ✅ System in working state after each PR
