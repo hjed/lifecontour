@@ -308,7 +308,7 @@ class SyncJobRepository:
         # Build WHERE clause
         where_clauses = [
             "status = 'failed'",
-            "created_at >= NOW() - INTERVAL ':hours hours'",
+            "created_at >= NOW() - (:hours * INTERVAL '1 hour')",
         ]
         params: dict[str, Any] = {"hours": hours, "limit": limit}
 
@@ -358,7 +358,7 @@ class SyncJobRepository:
             - retry_count: Number of jobs that were retried (failed then succeeded)
         """
         # Build WHERE clause
-        where_clause = "created_at >= NOW() - INTERVAL ':hours hours'"
+        where_clause = "created_at >= NOW() - (:hours * INTERVAL '1 hour')"
         params: dict[str, Any] = {"hours": hours}
 
         if integration_source is not None:
