@@ -145,6 +145,12 @@ class ContactAttributes(BaseModel):
     last_name: str | None = Field(default=None, description="Contact last name")
     middle_name: str | None = Field(default=None, description="Contact middle name")
     nick_name: str | None = Field(default=None, description="Contact nickname")
+    company: str | None = Field(
+        default=None, max_length=200, description="Company or organization name"
+    )
+    job_title: str | None = Field(
+        default=None, max_length=200, description="Job title or position"
+    )
     is_favourite: bool = Field(
         default=False, description="Whether contact is marked as favourite"
     )

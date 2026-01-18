@@ -88,8 +88,12 @@ class GoogleContactTransformer:
             self._transform_memberships_to_tags(google_person.memberships)
         )
 
-        # TODO: Transform organizations to contact information (company, job title, etc.)
-        # Organizations contain company/work information, not tags
+        # Transform organizations to contact information (company, job title)
+        company, job_title = self._extract_organization_info(
+            google_person.organizations
+        )
+        contact.company = company
+        contact.job_title = job_title
 
         # Note: External references are not part of the Contact entity in this architecture
         # They would be handled separately by the integration service
@@ -101,6 +105,8 @@ class GoogleContactTransformer:
             addresses_count=len(contact.addresses),
             notes_count=len(contact.notes),
             tags_count=len(contact.tags),
+            company=contact.company,
+            job_title=contact.job_title,
         )
 
         return contact
@@ -363,3 +369,53 @@ class GoogleContactTransformer:
             return None
 
         return sanitized
+
+    def _extract_organization_info(
+        self, organizations: list[Any]
+    ) -> tuple[str | None, str | None]:
+        """
+        Extract company and job title from Google organizations.
+
+        Prefers the current organization (where current=True), otherwise uses the first organization.
+        Empty strings are treated as None.
+
+        Args:
+            organizations: List of Google organization objects
+
+        Returns:
+            Tuple of (company_name, job_title)
+        """
+        if not organizations:
+            return (None, None)
+
+        # Find current organization or use first one
+        selected_org = None
+        for org in organizations:
+            if hasattr(org, "current") and org.current is True:
+                selected_org = org
+                break
+
+        # If no current organization found, use the first one
+        if selected_org is None:
+            selected_org = organizations[0]
+
+        # Extract company name (from organization.name)
+        company = None
+        if hasattr(selected_org, "name") and selected_org.name:
+            company = selected_org.name.strip() if selected_org.name.strip() else None
+
+        # Extract job title (from organization.title)
+        job_title = None
+        if hasattr(selected_org, "title") and selected_org.title:
+            job_title = (
+                selected_org.title.strip() if selected_org.title.strip() else None
+            )
+
+        logger.debug(
+            "Extracted organization info",
+            company=company,
+            job_title=job_title,
+            total_organizations=len(organizations),
+        )
+
+        return (company, job_title)

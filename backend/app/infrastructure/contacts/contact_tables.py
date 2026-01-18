@@ -30,6 +30,8 @@ contacts_table = Table(
     Column("last_name", String(100), nullable=True),
     Column("middle_name", String(100), nullable=True),
     Column("nick_name", String(100), nullable=True),
+    Column("company", String(200), nullable=True),
+    Column("job_title", String(200), nullable=True),
     Column(
         "created_at",
         DateTime(timezone=True),

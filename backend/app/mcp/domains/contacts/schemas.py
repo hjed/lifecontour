@@ -9,6 +9,10 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
+# Constants for field descriptions
+_COMPANY_DESC = "Company or organization name"
+_JOB_TITLE_DESC = "Job title or position"
+
 
 class ContactResponse(BaseModel):
     """
@@ -31,6 +35,10 @@ class ContactResponse(BaseModel):
         default=None, description="Primary phone number of the contact"
     )
 
+    company: str | None = Field(default=None, description=_COMPANY_DESC)
+
+    job_title: str | None = Field(default=None, description=_JOB_TITLE_DESC)
+
     tags: list[str] = Field(
         default_factory=list,
         description="List of tags associated with the contact (e.g., 'friend', 'work', 'family')",
@@ -52,6 +60,8 @@ class ContactResponse(BaseModel):
                 "name": "John Doe",
                 "email": "john@example.com",
                 "phone": "+1234567890",
+                "company": "TechCorp",
+                "job_title": "Software Engineer",
                 "tags": ["friend", "work"],
                 "is_favourite": True,
                 "summary": "John is a software engineer and close friend who works at TechCorp. We collaborate on side projects and meet regularly for coffee.",
@@ -79,6 +89,10 @@ class ContactSearchResult(BaseModel):
     phone: str | None = Field(
         default=None, description="Primary phone number of the contact"
     )
+
+    company: str | None = Field(default=None, description=_COMPANY_DESC)
+
+    job_title: str | None = Field(default=None, description=_JOB_TITLE_DESC)
 
     tags: list[str] = Field(
         default_factory=list,
@@ -137,6 +151,10 @@ class ContactCreateRequest(BaseModel):
 
     nick_name: str | None = Field(default=None, description="Contact nickname")
 
+    company: str | None = Field(default=None, description=_COMPANY_DESC)
+
+    job_title: str | None = Field(default=None, description=_JOB_TITLE_DESC)
+
     email: str | None = Field(default=None, description="Primary email address")
 
     phone: str | None = Field(default=None, description="Primary phone number")
@@ -166,6 +184,14 @@ class ContactUpdateRequest(BaseModel):
     middle_name: str | None = Field(default=None, description="Updated middle name")
 
     nick_name: str | None = Field(default=None, description="Updated nickname")
+
+    company: str | None = Field(
+        default=None, description=f"Updated {_COMPANY_DESC.lower()}"
+    )
+
+    job_title: str | None = Field(
+        default=None, description=f"Updated {_JOB_TITLE_DESC.lower()}"
+    )
 
     email: str | None = Field(default=None, description="Updated primary email")
 

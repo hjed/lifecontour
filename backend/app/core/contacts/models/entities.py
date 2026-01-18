@@ -173,6 +173,8 @@ class Contact:
     last_name: str | None = None
     middle_name: str | None = None
     nick_name: str | None = None
+    company: str | None = None
+    job_title: str | None = None
     is_favourite: bool = False
     created_at: datetime | None = None
     updated_at: datetime | None = None
@@ -201,6 +203,12 @@ class Contact:
 
         if self.nick_name and len(self.nick_name) > 100:
             raise ValueError("Nick name cannot exceed 100 characters")
+
+        if self.company and len(self.company) > 200:
+            raise ValueError("Company cannot exceed 200 characters")
+
+        if self.job_title and len(self.job_title) > 200:
+            raise ValueError("Job title cannot exceed 200 characters")
 
     def get_full_name(self) -> str:
         """Get formatted full name."""

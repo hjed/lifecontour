@@ -7,19 +7,11 @@ It runs as a separate process from the main FastAPI application.
 """
 
 import random
-import sys
 from datetime import UTC, datetime
 from typing import Any
 
 from arq import run_worker
 from arq.connections import RedisSettings
-from pydantic import SecretStr
-from pydantic_settings import BaseSettings, SettingsConfigDict
-from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncSession
-
-# Import from the installed core_shared package
-from api_models import ListConnectionsResponse
 from core_shared.database.engine import create_session_factory
 
 # Import integration exceptions from core_shared
@@ -40,6 +32,13 @@ from core_shared.models.sync_metadata import SyncStatus
 
 # Import sync job repository from core_shared
 from core_shared.repositories import SyncJobRepository
+from pydantic import SecretStr
+from pydantic_settings import BaseSettings, SettingsConfigDict
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession
+
+# Import from the installed core_shared package
+from api_models import ListConnectionsResponse
 
 # Import worker-specific services
 from google_auth_service import GoogleAuthService
@@ -414,6 +413,32 @@ def _transform_notes(notes: list[dict[str, Any]]) -> list[dict[str, str]] | None
     return None
 
 
+def _transform_organizations(contact: dict[str, Any]) -> list[dict[str, Any]] | None:
+    """Transform contact company and job_title to Google Person organizations format."""
+    company = contact.get("company")
+    job_title = contact.get("job_title")
+
+    # Normalize whitespace - strip and convert empty strings to None
+    if company:
+        company = company.strip() if company.strip() else None
+    if job_title:
+        job_title = job_title.strip() if job_title.strip() else None
+
+    # Only create organization if at least one field is present
+    if not company and not job_title:
+        return None
+
+    organization_data: dict[str, Any] = {"current": True}
+
+    if company:
+        organization_data["name"] = company
+
+    if job_title:
+        organization_data["title"] = job_title
+
+    return [organization_data]
+
+
 def _transform_contact_to_google_person(contact: dict[str, Any]) -> dict[str, Any]:
     """
     Transform internal contact format to Google People API Person format.
@@ -426,12 +451,11 @@ def _transform_contact_to_google_person(contact: dict[str, Any]) -> dict[str, An
     """
     person_data: dict[str, Any] = {}
 
-    # Transform names
+    # Transform names and nicknames
     names = _transform_names(contact)
     if names:
         person_data["names"] = names
 
-    # Transform nicknames
     nicknames = _transform_nicknames(contact)
     if nicknames:
         person_data["nicknames"] = nicknames
@@ -445,17 +469,19 @@ def _transform_contact_to_google_person(contact: dict[str, Any]) -> dict[str, An
         person_data["phoneNumbers"] = phone_numbers
 
     # Transform addresses
-    addresses = contact.get("addresses", [])
-    if addresses:
-        google_addresses = _transform_addresses(addresses)
-        if google_addresses:
-            person_data["addresses"] = google_addresses
+    google_addresses = _transform_addresses(contact.get("addresses", []))
+    if google_addresses:
+        person_data["addresses"] = google_addresses
 
     # Transform notes to biographies
-    notes = contact.get("notes", [])
-    biographies = _transform_notes(notes)
+    biographies = _transform_notes(contact.get("notes", []))
     if biographies:
         person_data["biographies"] = biographies
+
+    # Transform company and job_title to organizations
+    organizations = _transform_organizations(contact)
+    if organizations:
+        person_data["organizations"] = organizations
 
     return person_data
 
@@ -1240,7 +1266,7 @@ async def sync_google_contacts(
                 **metrics,
             }
 
-    except JobCancelledException as e:
+    except JobCancelledException:
         # Calculate duration for cancellation case
         duration = (datetime.now(UTC) - started_at).total_seconds()
 

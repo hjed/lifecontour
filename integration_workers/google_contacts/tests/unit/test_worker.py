@@ -1037,5 +1037,105 @@ class TestContactTypeNormalization:
         assert _normalize_contact_type("  Home  ") == "home"
 
 
+class TestOrganizationTransformation:
+    """Test cases for organization transformation functions."""
+
+    def test_transform_organizations_with_both_fields(self):
+        """Test transformation when both company and job_title are present."""
+        from worker import _transform_organizations
+
+        contact = {
+            "company": "Tech Corp",
+            "job_title": "Senior Developer",
+        }
+
+        result = _transform_organizations(contact)
+
+        assert result is not None
+        assert len(result) == 1
+        assert result[0]["name"] == "Tech Corp"
+        assert result[0]["title"] == "Senior Developer"
+        assert result[0]["current"] is True
+
+    def test_transform_organizations_with_company_only(self):
+        """Test transformation when only company is present."""
+        from worker import _transform_organizations
+
+        contact = {
+            "company": "Tech Corp",
+            "job_title": None,
+        }
+
+        result = _transform_organizations(contact)
+
+        assert result is not None
+        assert len(result) == 1
+        assert result[0]["name"] == "Tech Corp"
+        assert "title" not in result[0]
+        assert result[0]["current"] is True
+
+    def test_transform_organizations_with_job_title_only(self):
+        """Test transformation when only job_title is present."""
+        from worker import _transform_organizations
+
+        contact = {
+            "company": None,
+            "job_title": "Freelance Developer",
+        }
+
+        result = _transform_organizations(contact)
+
+        assert result is not None
+        assert len(result) == 1
+        assert "name" not in result[0]
+        assert result[0]["title"] == "Freelance Developer"
+        assert result[0]["current"] is True
+
+    def test_transform_organizations_with_no_fields(self):
+        """Test transformation when neither company nor job_title are present."""
+        from worker import _transform_organizations
+
+        contact = {
+            "company": None,
+            "job_title": None,
+        }
+
+        result = _transform_organizations(contact)
+
+        assert result is None
+
+    def test_transform_organizations_with_missing_keys(self):
+        """Test transformation when keys are missing from contact dict."""
+        from worker import _transform_organizations
+
+        contact = {}
+
+        result = _transform_organizations(contact)
+
+        assert result is None
+
+    def test_transform_contact_to_google_person_includes_organizations(self):
+        """Test that _transform_contact_to_google_person includes organizations."""
+        from worker import _transform_contact_to_google_person
+
+        contact = {
+            "first_name": "John",
+            "last_name": "Doe",
+            "company": "Tech Corp",
+            "job_title": "Senior Developer",
+            "methods": [],
+            "addresses": [],
+            "notes": [],
+        }
+
+        result = _transform_contact_to_google_person(contact)
+
+        assert "organizations" in result
+        assert len(result["organizations"]) == 1
+        assert result["organizations"][0]["name"] == "Tech Corp"
+        assert result["organizations"][0]["title"] == "Senior Developer"
+        assert result["organizations"][0]["current"] is True
+
+
 if __name__ == "__main__":
     pytest.main([__file__])
