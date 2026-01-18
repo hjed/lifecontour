@@ -8,17 +8,19 @@ and managing the ARQ task queue for integration workers.
 from datetime import UTC, datetime
 from typing import Any
 
-import structlog
 from arq import create_pool
 from arq.connections import ArqRedis, RedisSettings
 from arq.jobs import Job, JobDef, JobStatus
+from core_shared.logging import get_logger
+from core_shared.metrics import queue_depth
 from core_shared.repositories import SyncJobRepository
 from redis.asyncio import Redis
 
 from app.core.integrations.database import IntegrationDatabaseManager
+from app.core.integrations.exceptions import JobEnqueueError, JobNotFoundException
 from app.infrastructure.config import Settings
 
-logger = structlog.get_logger()
+logger = get_logger(__name__)
 
 
 class TaskQueueService:
@@ -35,6 +37,7 @@ class TaskQueueService:
         redis_settings: RedisSettings,
         settings: Settings,
         db_manager: IntegrationDatabaseManager,
+        worker_type: str = "google_contacts",
     ):
         """
         Initialize the task queue service.
@@ -44,11 +47,13 @@ class TaskQueueService:
             redis_settings: Redis settings for ARQ
             settings: Application settings
             db_manager: Database manager for persisting sync jobs
+            worker_type: Type of worker for metrics labeling (default: "google_contacts")
         """
         self.redis_pool = redis_pool
         self.redis_settings = redis_settings
         self.settings = settings
         self.db_manager = db_manager
+        self.worker_type = worker_type
         self._arq_pool: ArqRedis | None = None
 
     async def _get_arq_pool(self) -> ArqRedis:
@@ -78,7 +83,8 @@ class TaskQueueService:
             Job ID for tracking the job status
 
         Raises:
-            Exception: If job enqueueing fails
+            JobEnqueueError: If job enqueueing fails
+            ConnectionError: If Redis connection fails
         """
         logger.info(
             "Enqueueing Google Contacts sync job",
@@ -102,7 +108,11 @@ class TaskQueueService:
             )
 
             if not job:
-                raise Exception("Failed to enqueue job - no job returned")
+                raise JobEnqueueError(
+                    message="Failed to enqueue job - no job returned",
+                    integration_source="google_contacts",
+                    reason="ARQ pool returned None",
+                )
 
             job_id = job.job_id
             logger.info(
@@ -153,13 +163,16 @@ class TaskQueueService:
             Dictionary with job status information
 
         Raises:
-            Exception: If job status check fails or user doesn't own the job
+            JobNotFoundException: If job is not found or user doesn't own the job
+            ConnectionError: If Redis connection fails
         """
         logger.debug("Checking job status", job_id=job_id, user_id=user_id)
 
         # Security check: Verify user owns this job
         if not await self._verify_user_job_ownership(user_id, job_id):
-            raise Exception(f"Job {job_id} not found or access denied")
+            raise JobNotFoundException(
+                job_id=job_id, message="Job not found or access denied"
+            )
 
         try:
             # Get reusable ARQ pool for job status checking
@@ -246,6 +259,65 @@ class TaskQueueService:
             logger.error("Failed to get job status", job_id=job_id, error=str(e))
             raise
 
+    async def cancel_job(self, job_id: str, user_id: str | int) -> dict[str, Any]:
+        """
+        Cancel a running or queued job.
+
+        Args:
+            job_id: ARQ job ID to cancel
+            user_id: User ID requesting cancellation (for authorization)
+
+        Returns:
+            Dictionary with cancellation status
+
+        Raises:
+            JobNotFoundException: If job is not found or user is not authorized
+            PermissionError: If user doesn't own the job
+        """
+        logger.info("Cancelling job", job_id=job_id, user_id=user_id)
+
+        try:
+            # Verify user owns this job
+            if not await self._verify_user_job_ownership(user_id, job_id):
+                raise PermissionError(
+                    f"User {user_id} is not authorized to cancel job {job_id}"
+                )
+
+            # Update job status to cancelled in database
+            async with self.db_manager.get_session() as session:
+                conn = await session.connection()
+                repo = SyncJobRepository(conn)
+                sync_job = await repo.update_status(
+                    job_id=job_id,
+                    status="cancelled",
+                    completed_at=datetime.now(UTC),
+                    progress=None,  # Clear progress on cancellation
+                )
+                await session.commit()
+
+                if not sync_job:
+                    raise JobNotFoundException(
+                        job_id=job_id, message="Job not found in database"
+                    )
+
+            # Note: ARQ doesn't support job cancellation directly
+            # The worker will check the database status and stop processing
+            logger.info(
+                "Job marked as cancelled",
+                job_id=job_id,
+                user_id=user_id,
+            )
+
+            return {
+                "job_id": job_id,
+                "status": "cancelled",
+                "message": "Job has been marked for cancellation. Worker will stop processing.",
+            }
+
+        except Exception as e:
+            logger.error("Failed to cancel job", job_id=job_id, error=str(e))
+            raise
+
     async def get_queue_health(self) -> dict[str, Any]:
         """
         Get the health status of the task queue.
@@ -264,6 +336,9 @@ class TaskQueueService:
             queue_length = (
                 int(queue_length_result) if queue_length_result is not None else 0
             )
+
+            # Update queue depth metric
+            queue_depth.labels(worker_type=self.worker_type).set(queue_length)
 
             # Check if Redis is responsive
             start_time = datetime.now(UTC)

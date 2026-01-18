@@ -12,6 +12,7 @@ from datetime import datetime
 from typing import Any
 
 import structlog
+from core_shared.repositories.sync_job_repository import SyncJobRepository
 from dishka.integrations.fastapi import FromDishka, inject
 from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel
@@ -32,6 +33,8 @@ from app.api.integrations.schemas import (
     SyncJobRequest,
     SyncType,
 )
+from app.core.integrations.database import IntegrationDatabaseManager
+from app.core.integrations.exceptions import JobNotFoundException
 from app.core.integrations.health_service import IntegrationHealthService
 from app.core.integrations.task_queue_service import TaskQueueService
 from app.infrastructure.auth.models import SessionUser
@@ -39,6 +42,9 @@ from app.infrastructure.auth.oauth_service import OAuthService
 
 router = APIRouter(prefix="/integrations", tags=["integrations"])
 logger = structlog.get_logger()
+
+# Error message constants
+ERROR_INVALID_JOB_ID_FORMAT = "Invalid job ID format"
 
 
 class SyncJobResponse(BaseModel):
@@ -267,9 +273,9 @@ async def get_sync_job_status(
 
     except ValueError as e:
         logger.error(
-            "Invalid job ID format", job_id=job_id, error=str(e), exc_info=True
+            ERROR_INVALID_JOB_ID_FORMAT, job_id=job_id, error=str(e), exc_info=True
         )
-        raise HTTPException(status_code=400, detail="Invalid job ID format") from e
+        raise HTTPException(status_code=400, detail=ERROR_INVALID_JOB_ID_FORMAT) from e
     except PermissionError as e:
         logger.error(
             "Job access denied",
@@ -301,6 +307,63 @@ async def get_sync_job_status(
             ) from e
 
 
+@router.post("/google/contacts/sync/{job_id}/cancel", response_model=SyncJobResponse)
+@inject
+async def cancel_sync_job(
+    job_id: str,
+    user: FromDishka[SessionUser],
+    task_queue_service: FromDishka[TaskQueueService],
+) -> SyncJobResponse:
+    """
+    Cancel a running or queued sync job.
+
+    Marks the job as cancelled in the database. The worker will check this status
+    and stop processing at the next opportunity.
+    """
+    try:
+        # Cancel the job
+        result = await task_queue_service.cancel_job(job_id, user.id)
+
+        return SyncJobResponse(
+            job_id=job_id,
+            status=result["status"],
+            message=result["message"],
+        )
+
+    except JobNotFoundException as e:
+        logger.error(
+            "Sync job not found",
+            job_id=job_id,
+            user_id=user.id,
+            error=str(e),
+            exc_info=True,
+        )
+        raise HTTPException(status_code=404, detail="Job not found") from e
+    except PermissionError as e:
+        logger.error(
+            "Job cancellation access denied",
+            job_id=job_id,
+            user_id=user.id,
+            error=str(e),
+            exc_info=True,
+        )
+        raise HTTPException(
+            status_code=403, detail="Access denied to cancel this job"
+        ) from e
+    except Exception as e:
+        logger.error(
+            "Failed to cancel job",
+            job_id=job_id,
+            user_id=user.id,
+            error=str(e),
+            exc_info=True,
+        )
+        raise HTTPException(
+            status_code=500,
+            detail="An unexpected error occurred while cancelling job",
+        ) from e
+
+
 @router.get(
     "/google/contacts/status", response_model=GoogleContactsStatusJsonApiResponse
 )
@@ -308,6 +371,7 @@ async def get_sync_job_status(
 async def get_google_contacts_status(
     user: FromDishka[SessionUser],
     oauth_service: FromDishka[OAuthService],
+    db_manager: FromDishka[IntegrationDatabaseManager],
 ) -> GoogleContactsStatusJsonApiResponse:
     """
     Get the current status of Google Contacts integration.
@@ -322,10 +386,31 @@ async def get_google_contacts_status(
         # Build status based on connection state
         status = "active" if is_connected else "disconnected"
 
-        # TODO: Get actual sync stats from database when implemented
-        # For now, return mock sync data if connected
-        last_sync = "2024-01-01T12:00:00Z" if is_connected else None
-        sync_count = 150 if is_connected else 0
+        # Get actual sync stats from database
+        last_sync = None
+        sync_count = 0
+
+        if is_connected:
+            async with db_manager.get_session() as session:
+                conn = await session.connection()
+                repo = SyncJobRepository(conn)
+
+                # Get the most recent completed sync
+                completed_syncs, total_count = await repo.list_by_user(
+                    user_id=str(user.id),
+                    status="completed",
+                    integration_source="google_contacts",
+                    limit=1,
+                    offset=0,
+                )
+
+                if completed_syncs:
+                    last_sync_job = completed_syncs[0]
+                    if last_sync_job.completed_at:
+                        last_sync = last_sync_job.completed_at.isoformat()
+
+                # Get total count of completed syncs
+                sync_count = total_count
 
         return GoogleContactsStatusJsonApiResponse(
             data=GoogleContactsStatusData(

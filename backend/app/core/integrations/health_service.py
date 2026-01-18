@@ -9,10 +9,13 @@ from datetime import UTC, datetime
 from typing import Any
 
 import aiohttp
-import structlog
+from core_shared.logging import get_logger
 from redis.asyncio import Redis
 
-logger = structlog.get_logger()
+logger = get_logger(__name__)
+
+# ARQ queue key constant
+ARQ_QUEUE_KEY = "arq:queue"
 
 
 class IntegrationHealthService:
@@ -84,7 +87,7 @@ class IntegrationHealthService:
             connected_clients = info.get("connected_clients", 0)
 
             # Check queue length
-            queue_length_result = await self.redis_pool.llen("arq:queue")  # type: ignore
+            queue_length_result = await self.redis_pool.llen(ARQ_QUEUE_KEY)  # type: ignore
             queue_length = (
                 int(queue_length_result) if queue_length_result is not None else 0
             )
@@ -115,7 +118,7 @@ class IntegrationHealthService:
 
             # Check if there are any recent jobs in the queue or completed
             # This will raise an exception if Redis is not accessible
-            recent_jobs_result = await self.redis_pool.llen("arq:queue")  # type: ignore
+            recent_jobs_result = await self.redis_pool.llen(ARQ_QUEUE_KEY)  # type: ignore
             recent_jobs = (
                 int(recent_jobs_result) if recent_jobs_result is not None else 0
             )
@@ -208,7 +211,7 @@ class IntegrationHealthService:
             # or use ARQ's built-in job tracking
 
             # For now, just return the current queue length as a proxy
-            queue_length_result = await self.redis_pool.llen("arq:queue")  # type: ignore
+            queue_length_result = await self.redis_pool.llen(ARQ_QUEUE_KEY)  # type: ignore
             return int(queue_length_result) if queue_length_result is not None else 0
 
         except Exception:

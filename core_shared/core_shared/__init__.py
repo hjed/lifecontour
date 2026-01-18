@@ -21,6 +21,28 @@ from core_shared.database.engine import (
     create_async_engine_from_url,
     create_session_factory,
 )
+from core_shared.logging import (
+    clear_context,
+    configure_logging,
+    get_logger,
+    job_id_var,
+    set_job_id,
+    set_trace_id,
+    set_worker_id,
+    trace_id_var,
+    worker_id_var,
+)
+from core_shared.metrics import (
+    MetricsCollector,
+    api_request_duration,
+    api_requests_total,
+    job_duration,
+    job_total,
+    queue_depth,
+    sync_conflicts,
+    sync_errors,
+    sync_items_processed,
+)
 from core_shared.models import Base, ExternalReference, SyncMetadata, SyncStatus
 
 __all__ = [
@@ -36,4 +58,24 @@ __all__ = [
     "IntegrationError",
     "SyncError",
     "TransformationError",
+    # Logging
+    "configure_logging",
+    "get_logger",
+    "set_trace_id",
+    "set_job_id",
+    "set_worker_id",
+    "clear_context",
+    "trace_id_var",
+    "job_id_var",
+    "worker_id_var",
+    # Metrics
+    "job_duration",
+    "job_total",
+    "queue_depth",
+    "sync_items_processed",
+    "sync_errors",
+    "sync_conflicts",
+    "api_requests_total",
+    "api_request_duration",
+    "MetricsCollector",
 ]

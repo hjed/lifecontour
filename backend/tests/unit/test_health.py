@@ -94,6 +94,21 @@ def test_readiness_check_unhealthy(mock_db_check, unit_test_client: TestClient) 
 
 
 @pytest.mark.unit
+def test_metrics_endpoint(unit_test_client: TestClient) -> None:
+    """Test Prometheus metrics endpoint."""
+    response = unit_test_client.get("/api/metrics")
+
+    assert response.status_code == 200
+    # Check content type starts with text/plain (version may vary)
+    assert response.headers["content-type"].startswith("text/plain")
+    assert "charset=utf-8" in response.headers["content-type"]
+
+    # Verify metrics are in Prometheus format
+    content = response.text
+    assert "# HELP" in content or "# TYPE" in content  # Prometheus format markers
+
+
+@pytest.mark.unit
 def test_integration_health_check_components_importable() -> None:
     """Test that integration health check components can be imported (unit test safe)."""
     # Test core_shared package accessibility

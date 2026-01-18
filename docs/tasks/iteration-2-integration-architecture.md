@@ -357,15 +357,29 @@ The integration architecture foundation and core Google Contacts sync functional
 - [ ] Implement graceful shutdown handling for workers
 - [ ] Add comprehensive error handling and recovery procedures
 
-#### Phase 3: Observability & Monitoring 🟡 PENDING
-**PR Size:** ~6 files (Metrics, logging, health checks, dashboards)
+#### Phase 3: Observability & Monitoring ✅ COMPLETED
+**PR Size:** ~10 files (Metrics endpoint, logging, health checks, cancellation, tests)
 
 **Acceptance Criteria:**
-- [ ] Implement Prometheus metrics collection (golden signals)
-- [ ] Add long-running job progress tracking and cancellation support
-- [ ] Create comprehensive health checks for all integration components
-- [ ] Add integration-specific monitoring dashboards
-- [ ] Implement alerting for critical integration failures
+- [x] Implement Prometheus metrics collection (golden signals)
+  - Added `/api/metrics` endpoint exposing Prometheus metrics in standard text format
+  - Metrics include worker job duration, job totals, queue depth, sync items processed, errors, and conflicts
+  - Integrated with existing `core_shared.metrics` module
+- [x] Add long-running job progress tracking and cancellation support
+  - Implemented `cancel_job()` method in `TaskQueueService` with authorization checks
+  - Added `POST /api/integrations/google/contacts/sync/{job_id}/cancel` endpoint
+  - Updated Google Contacts worker to check for cancellation between batches
+  - Added `_check_job_cancelled()` helper function in worker
+  - Proper exception handling for cancelled jobs (doesn't mark as failed)
+- [x] Create comprehensive health checks for all integration components
+  - Existing health checks already cover database, Redis, and worker components
+  - `/api/health/detailed` endpoint provides comprehensive service status
+- [x] Add comprehensive test coverage
+  - Added unit test for `/api/metrics` endpoint
+  - Added 3 unit tests for job cancellation (success, not found, unauthorized)
+  - All tests passing (17/17 in health and task queue service tests)
+- [ ] Add integration-specific monitoring dashboards (deferred to ITER2-006 Phase 2)
+- [ ] Implement alerting for critical integration failures (deferred to future iteration)
 
 #### Phase 4: Security & Configuration 🟡 PENDING
 **PR Size:** ~3 files (Secrets management, configuration, security)
@@ -439,8 +453,8 @@ The integration architecture foundation and core Google Contacts sync functional
 - ✅ Comprehensive test coverage (76 passing unit tests)
 
 **Remaining Work (this iteration):**
-- 🟡 Production resilience patterns (retry behaviour, DLQ handling, observability) – see ITER2-005 Phases 2–4
-- 🟡 Integration management UI & UX enhancements (progress, cancellation, advanced health/metrics, docs) – see ITER2-006 Phases 2–3
+- 🟡 Production resilience patterns (DLQ handling, advanced alerting) – see ITER2-005 Phase 4
+- 🟡 Integration management UI & UX enhancements (progress display, cancellation UI, monitoring dashboards, docs) – see ITER2-006 Phases 2–3
 
 **Out of Scope for Iteration 2 (separate iterations):**
 - 🔜 Additional integrations (Immich, Strava, Firefly III, etc.) – see Iteration 3+/5+/6+ task specs
@@ -499,9 +513,17 @@ The remaining work for Iteration 2 focuses on bringing the implementation in lin
      - ✅ All worker unit tests passing (34/34 tests including sync logic, API client, and contact normalization).
      - 🔲 API integration tests that verify job status and error information via `/api/integrations/google/contacts/jobs/*` endpoints.
 
-2. **ITER2-005 Phase 3 – Observability & Monitoring (shared patterns + Google Contacts)**
-   - Introduce shared observability helpers (e.g. `core_shared.logging` and `core_shared.metrics`) implementing the structured logging and Prometheus metrics patterns from the architecture doc, and wire them into `backend/app/core/integrations/task_queue_service.py`, `backend/app/core/integrations/health_service.py`, and `integration_workers/google_contacts/worker.py`.
-   - Update the Google Contacts worker and `TaskQueueService` to use the shared logging configuration (trace/job/worker IDs) and to emit golden-signal metrics (`job_duration`, `job_total`, `queue_depth`) for the `google_contacts` queue.
+2. **ITER2-005 Phase 3 – Observability & Monitoring (shared patterns + Google Contacts)** ✅ COMPLETED
+   - ✅ Introduced shared observability helpers (`core_shared.logging` and `core_shared.metrics`) implementing structured logging and Prometheus metrics patterns from the architecture doc
+   - ✅ Wired observability into `backend/app/core/integrations/task_queue_service.py`, `backend/app/core/integrations/health_service.py`, and `integration_workers/google_contacts/worker.py`
+   - ✅ Updated Google Contacts worker and `TaskQueueService` to use shared logging configuration (trace/job/worker IDs) and emit golden-signal metrics (`job_duration`, `job_total`, `queue_depth`)
+   - ✅ Added `/api/metrics` endpoint for Prometheus scraping
+   - ✅ Implemented job progress tracking and cancellation support:
+     - `TaskQueueService.cancel_job()` method with user authorization
+     - `POST /api/integrations/google/contacts/sync/{job_id}/cancel` endpoint
+     - Worker cancellation checks in `_perform_full_sync()` and `_perform_incremental_sync()`
+     - Graceful handling of cancelled jobs without marking as failed
+   - ✅ Added comprehensive test coverage (metrics endpoint, job cancellation scenarios)
    - Wire metrics into the main FastAPI app’s `/metrics` endpoint (or equivalent) so they can be scraped in dev/prod, and ensure the integration health endpoints plus `get_google_contacts_status` in `backend/app/api/integrations/controllers.py` consume the same underlying status/metrics data.
    - Implement long-running job progress tracking and cancellation using the existing `SyncJob` model (progress field) plus explicit "cancel job" APIs that workers honour between batches (via `TaskQueueService` and the Google Contacts job handlers).
    - **Testing:**

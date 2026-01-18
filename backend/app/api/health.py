@@ -11,7 +11,8 @@ from typing import Any
 
 import structlog
 from dishka.integrations.fastapi import FromDishka, inject
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, Response, status
+from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from pydantic import BaseModel
 from redis.asyncio import Redis
 from sqlalchemy.orm import Session
@@ -307,4 +308,27 @@ async def integration_health_check(
         version="0.1.0",
         uptime=_get_uptime(),
         services=services,
+    )
+
+
+@router.get("/metrics")
+async def metrics() -> Response:
+    """
+    Prometheus metrics endpoint.
+
+    Returns metrics in Prometheus text format for scraping by monitoring systems.
+    Includes:
+    - Worker job metrics (duration, total, queue depth)
+    - Sync metrics (items processed, errors, conflicts)
+    - API metrics (requests, duration)
+    - Python runtime metrics (GC, memory, etc.)
+
+    This endpoint is typically scraped by Prometheus or compatible monitoring systems.
+    """
+    # Generate Prometheus metrics in text format
+    metrics_data = generate_latest()
+
+    return Response(
+        content=metrics_data,
+        media_type=CONTENT_TYPE_LATEST,
     )

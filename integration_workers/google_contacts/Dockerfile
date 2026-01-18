@@ -13,9 +13,9 @@ RUN apt-get update && apt-get install -y \
 COPY ./core_shared/ /core_shared/
 RUN pip install -e /core_shared/
 
-# Copy worker requirements and install dependencies
-COPY ./integration_workers/google_contacts/requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# Copy worker pyproject.toml and install dependencies
+COPY ./integration_workers/google_contacts/pyproject.toml .
+RUN pip install --no-cache-dir .
 
 # Copy worker code
 COPY ./integration_workers/google_contacts/ .

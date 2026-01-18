@@ -12,6 +12,7 @@ from arq.connections import RedisSettings
 from arq.jobs import JobStatus
 from redis.asyncio import Redis
 
+from app.core.integrations.exceptions import JobNotFoundException
 from app.core.integrations.task_queue_service import TaskQueueService
 from app.infrastructure.config import Settings
 
@@ -340,3 +341,103 @@ class TestTaskQueueService:
             service._get_status_message("unknown", mock_job_info)
             == "Job status: unknown"
         )
+
+    @pytest.mark.asyncio
+    async def test_cancel_job_success(
+        self, service: TaskQueueService, mock_redis_pool: AsyncMock
+    ):
+        """Test successful job cancellation."""
+        job_id = "test-job-123"
+        user_id = "user-456"
+
+        # Mock Redis for user-job ownership verification
+        mock_redis_pool.hexists = AsyncMock(return_value=True)
+
+        # Mock database session and repository
+        mock_session = AsyncMock()
+        mock_conn = AsyncMock()
+        mock_session.connection = AsyncMock(return_value=mock_conn)
+
+        # Create async context manager for db_manager.get_session()
+        mock_session_ctx = MagicMock()
+        mock_session_ctx.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_session_ctx.__aexit__ = AsyncMock(return_value=None)
+        service.db_manager.get_session = MagicMock(return_value=mock_session_ctx)  # type: ignore[method-assign]
+
+        # Mock repository
+        mock_sync_job = MagicMock()
+        mock_sync_job.user_id = user_id
+        mock_sync_job.status = "cancelled"
+
+        with patch(
+            "app.core.integrations.task_queue_service.SyncJobRepository"
+        ) as mock_repo_class:
+            mock_repo = mock_repo_class.return_value
+            mock_repo.get_by_job_id = AsyncMock(return_value=mock_sync_job)
+            mock_repo.update_status = AsyncMock(return_value=mock_sync_job)
+
+            # Cancel job
+            result = await service.cancel_job(job_id, user_id)
+
+            # Verify result
+            assert result["job_id"] == job_id
+            assert result["status"] == "cancelled"
+            assert "cancellation" in result["message"].lower()
+
+            # Verify repository calls
+            mock_repo.update_status.assert_called_once()
+            mock_session.commit.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_cancel_job_not_found(
+        self, service: TaskQueueService, mock_redis_pool: AsyncMock
+    ):
+        """Test cancelling a job that doesn't exist."""
+        job_id = "nonexistent-job"
+        user_id = "user-456"
+
+        # Mock Redis for user-job ownership verification (user owns the job)
+        mock_redis_pool.hexists = AsyncMock(return_value=True)
+
+        # Mock database session and repository
+        mock_session = AsyncMock()
+        mock_conn = AsyncMock()
+        mock_session.connection = AsyncMock(return_value=mock_conn)
+
+        # Create async context manager for db_manager.get_session()
+        mock_session_ctx = MagicMock()
+        mock_session_ctx.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_session_ctx.__aexit__ = AsyncMock(return_value=None)
+        service.db_manager.get_session = MagicMock(return_value=mock_session_ctx)  # type: ignore[method-assign]
+
+        with patch(
+            "app.core.integrations.task_queue_service.SyncJobRepository"
+        ) as mock_repo_class:
+            mock_repo = mock_repo_class.return_value
+            mock_repo.get_by_job_id = AsyncMock(return_value=None)
+            mock_repo.update_status = AsyncMock(return_value=None)
+
+            # Cancel job should raise JobNotFoundException
+            with pytest.raises(JobNotFoundException) as exc_info:
+                await service.cancel_job(job_id, user_id)
+
+            # Verify the exception has the correct job_id
+            assert exc_info.value.job_id == job_id
+
+    @pytest.mark.asyncio
+    async def test_cancel_job_unauthorized(
+        self, service: TaskQueueService, mock_redis_pool: AsyncMock
+    ):
+        """Test cancelling a job owned by another user."""
+        job_id = "test-job-123"
+        user_id = "user-456"
+
+        # Mock Redis for user-job ownership verification (user does NOT own the job)
+        mock_redis_pool.hexists = AsyncMock(return_value=False)
+
+        # Cancel job should raise PermissionError (user doesn't own the job)
+        with pytest.raises(PermissionError) as exc_info:
+            await service.cancel_job(job_id, user_id)
+
+        # Verify the exception message mentions authorization
+        assert "not authorized" in str(exc_info.value).lower()
