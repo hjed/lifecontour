@@ -125,6 +125,15 @@ class HealthResponse(BaseModel):
     status: str = Field(description="Overall health status")
     timestamp: str = Field(description="ISO timestamp of the health check")
     services: dict[str, Any] = Field(description="Health status of individual services")
+    queue_metrics: dict[str, Any] = Field(
+        default_factory=dict, description="Queue depth and statistics"
+    )
+    job_statistics: dict[str, Any] = Field(
+        default_factory=dict, description="Job statistics (failures, retries, etc.)"
+    )
+    recent_failures: list[dict[str, Any]] = Field(
+        default_factory=list, description="List of recent failed jobs"
+    )
     version: str = Field(default="1.0.0", description="API version")
 
 

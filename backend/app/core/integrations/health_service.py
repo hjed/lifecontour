@@ -10,7 +10,10 @@ from typing import Any
 
 import aiohttp
 from core_shared.logging import get_logger
+from core_shared.repositories import SyncJobRepository
 from redis.asyncio import Redis
+
+from app.core.integrations.database import IntegrationDatabaseManager
 
 logger = get_logger(__name__)
 
@@ -26,21 +29,28 @@ class IntegrationHealthService:
     components including Redis, workers, and external APIs.
     """
 
-    def __init__(self, redis_pool: Redis):
+    def __init__(self, redis_pool: Redis, db_manager: IntegrationDatabaseManager):
         """
         Initialize the health service.
 
         Args:
             redis_pool: Redis connection pool for health checks
+            db_manager: Database manager for job statistics
         """
         self.redis_pool = redis_pool
+        self.db_manager = db_manager
 
     async def get_overall_health(self) -> dict[str, Any]:
         """
         Get the overall health status of all integration services.
 
         Returns:
-            Dictionary with comprehensive health information
+            Dictionary with comprehensive health information including:
+            - status: Overall health status
+            - services: Health of individual services
+            - queue_metrics: Queue depth and statistics
+            - job_statistics: Recent job statistics (failures, retries, etc.)
+            - recent_failures: List of recent failed jobs
         """
         logger.debug("Performing overall health check")
 
@@ -48,6 +58,10 @@ class IntegrationHealthService:
         redis_health = await self._check_redis_health()
         worker_health = await self._check_worker_health()
         external_api_health = await self._check_external_api_health()
+
+        # Get job statistics
+        job_stats = await self._get_job_statistics()
+        recent_failures = await self._get_recent_failures()
 
         # Determine overall status
         all_services = [redis_health, worker_health, external_api_health]
@@ -60,6 +74,12 @@ class IntegrationHealthService:
             elif service["status"] == "degraded":
                 overall_status = "degraded"
 
+        # Degrade status if there are many recent failures
+        if job_stats.get("failed_jobs", 0) > 5:
+            overall_status = (
+                "degraded" if overall_status == "healthy" else overall_status
+            )
+
         return {
             "status": overall_status,
             "timestamp": datetime.now(UTC).isoformat(),
@@ -68,6 +88,19 @@ class IntegrationHealthService:
                 "google_contacts_worker": worker_health,
                 "google_api": external_api_health,
             },
+            "queue_metrics": {
+                "queue_depth": redis_health.get("queue_length", 0),
+                "queued_jobs": job_stats.get("queued_jobs", 0),
+                "running_jobs": job_stats.get("running_jobs", 0),
+            },
+            "job_statistics": {
+                "total_jobs_24h": job_stats.get("total_jobs", 0),
+                "completed_jobs_24h": job_stats.get("completed_jobs", 0),
+                "failed_jobs_24h": job_stats.get("failed_jobs", 0),
+                "cancelled_jobs_24h": job_stats.get("cancelled_jobs", 0),
+                "retry_count_24h": job_stats.get("retry_count", 0),
+            },
+            "recent_failures": recent_failures,
             "version": "1.0.0",
         }
 
@@ -216,6 +249,58 @@ class IntegrationHealthService:
 
         except Exception:
             return 0
+
+    async def _get_job_statistics(self) -> dict[str, Any]:
+        """Get job statistics from the database."""
+        try:
+            async with self.db_manager.get_session() as session:
+                conn = await session.connection()
+                repo = SyncJobRepository(conn)
+                stats = await repo.get_job_statistics(
+                    integration_source="google_contacts", hours=24
+                )
+                return stats
+        except Exception as e:
+            logger.error("Failed to get job statistics", error=str(e))
+            return {
+                "total_jobs": 0,
+                "completed_jobs": 0,
+                "failed_jobs": 0,
+                "cancelled_jobs": 0,
+                "running_jobs": 0,
+                "queued_jobs": 0,
+                "retry_count": 0,
+            }
+
+    async def _get_recent_failures(self, limit: int = 5) -> list[dict[str, Any]]:
+        """Get recent failed jobs."""
+        try:
+            async with self.db_manager.get_session() as session:
+                conn = await session.connection()
+                repo = SyncJobRepository(conn)
+                failures = await repo.get_recent_failures(
+                    integration_source="google_contacts", hours=24, limit=limit
+                )
+
+                # Convert to dict format for API response
+                return [
+                    {
+                        "job_id": job.job_id,
+                        "user_id": job.user_id,
+                        "sync_type": job.sync_type,
+                        "error_message": job.error_message,
+                        "created_at": job.created_at.isoformat()
+                        if job.created_at
+                        else None,
+                        "failed_at": (
+                            job.completed_at.isoformat() if job.completed_at else None
+                        ),
+                    }
+                    for job in failures
+                ]
+        except Exception as e:
+            logger.error("Failed to get recent failures", error=str(e))
+            return []
 
     async def check_service_connectivity(self, service_name: str) -> dict[str, Any]:
         """

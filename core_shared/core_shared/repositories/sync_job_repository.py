@@ -288,6 +288,120 @@ class SyncJobRepository:
 
         return jobs, total
 
+    async def get_recent_failures(
+        self,
+        integration_source: str | None = None,
+        hours: int = 24,
+        limit: int = 10,
+    ) -> list[SyncJob]:
+        """
+        Get recent failed sync jobs.
+
+        Args:
+            integration_source: Filter by integration source (optional)
+            hours: Number of hours to look back (default: 24)
+            limit: Maximum number of results (default: 10)
+
+        Returns:
+            List of recent failed SyncJobs
+        """
+        # Build WHERE clause
+        where_clauses = [
+            "status = 'failed'",
+            "created_at >= NOW() - INTERVAL ':hours hours'",
+        ]
+        params: dict[str, Any] = {"hours": hours, "limit": limit}
+
+        if integration_source is not None:
+            where_clauses.append("integration_source = :integration_source")
+            params["integration_source"] = integration_source
+
+        where_clause = " AND ".join(where_clauses)
+
+        query_sql = f"""
+            SELECT id, job_id, user_id, integration_source, sync_type, status,
+                   created_at, started_at, completed_at, error_message,
+                   contacts_processed, contacts_created, contacts_updated,
+                   contacts_deleted, progress, updated_at
+            FROM sync_jobs
+            WHERE {where_clause}
+            ORDER BY created_at DESC
+            LIMIT :limit
+        """
+        query = text(query_sql)
+
+        result = await self.conn.execute(query, params)
+        rows = result.fetchall()
+
+        return [self._row_to_sync_job(row) for row in rows]
+
+    async def get_job_statistics(
+        self,
+        integration_source: str | None = None,
+        hours: int = 24,
+    ) -> dict[str, Any]:
+        """
+        Get job statistics for monitoring.
+
+        Args:
+            integration_source: Filter by integration source (optional)
+            hours: Number of hours to look back (default: 24)
+
+        Returns:
+            Dictionary with job statistics including:
+            - total_jobs: Total number of jobs
+            - completed_jobs: Number of completed jobs
+            - failed_jobs: Number of failed jobs
+            - cancelled_jobs: Number of cancelled jobs
+            - running_jobs: Number of running jobs
+            - queued_jobs: Number of queued jobs
+            - retry_count: Number of jobs that were retried (failed then succeeded)
+        """
+        # Build WHERE clause
+        where_clause = "created_at >= NOW() - INTERVAL ':hours hours'"
+        params: dict[str, Any] = {"hours": hours}
+
+        if integration_source is not None:
+            where_clause += " AND integration_source = :integration_source"
+            params["integration_source"] = integration_source
+
+        query_sql = f"""
+            SELECT
+                COUNT(*) as total_jobs,
+                COUNT(CASE WHEN status = 'completed' THEN 1 END) as completed_jobs,
+                COUNT(CASE WHEN status = 'failed' THEN 1 END) as failed_jobs,
+                COUNT(CASE WHEN status = 'cancelled' THEN 1 END) as cancelled_jobs,
+                COUNT(CASE WHEN status = 'running' THEN 1 END) as running_jobs,
+                COUNT(CASE WHEN status = 'queued' THEN 1 END) as queued_jobs
+            FROM sync_jobs
+            WHERE {where_clause}
+        """
+        query = text(query_sql)
+
+        result = await self.conn.execute(query, params)
+        row = result.fetchone()
+
+        if not row:
+            return {
+                "total_jobs": 0,
+                "completed_jobs": 0,
+                "failed_jobs": 0,
+                "cancelled_jobs": 0,
+                "running_jobs": 0,
+                "queued_jobs": 0,
+                "retry_count": 0,
+            }
+
+        return {
+            "total_jobs": row.total_jobs or 0,
+            "completed_jobs": row.completed_jobs or 0,
+            "failed_jobs": row.failed_jobs or 0,
+            "cancelled_jobs": row.cancelled_jobs or 0,
+            "running_jobs": row.running_jobs or 0,
+            "queued_jobs": row.queued_jobs or 0,
+            "retry_count": 0,  # TODO: Implement retry tracking
+        }
+
     def _row_to_sync_job(self, row: Any) -> SyncJob:
         """Convert a database row to a SyncJob object."""
         return SyncJob(

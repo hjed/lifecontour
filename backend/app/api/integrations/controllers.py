@@ -8,8 +8,7 @@ This module provides REST API endpoints for:
 """
 
 import urllib.parse
-from datetime import datetime
-from typing import Any
+from datetime import UTC, datetime
 
 import structlog
 from core_shared.repositories.sync_job_repository import SyncJobRepository
@@ -21,6 +20,7 @@ from app.api.integrations.schemas import (
     GoogleContactsStatusAttributes,
     GoogleContactsStatusData,
     GoogleContactsStatusJsonApiResponse,
+    HealthResponse,
     OAuthAuthorizeRequest,
     OAuthAuthorizeResponse,
     OAuthCallbackRequest,
@@ -62,13 +62,6 @@ class IntegrationStatusResponse(BaseModel):
     status: str
     last_sync: str | None = None
     next_sync: str | None = None
-
-
-class HealthResponse(BaseModel):
-    """Response model for integration health checks."""
-
-    status: str
-    services: dict[str, Any]
 
 
 @router.post("/google/contacts/sync", response_model=SyncJobResponse)
@@ -380,19 +373,23 @@ async def get_google_contacts_status(
     last sync time, and sync count.
     """
     try:
-        # Check if user has Google Contacts connected
-        is_connected = await oauth_service.is_google_contacts_connected(user.id)
-
-        # Build status based on connection state
-        status = "active" if is_connected else "disconnected"
-
         # Get actual sync stats from database
         last_sync = None
         sync_count = 0
+        is_connected = False
 
-        if is_connected:
-            async with db_manager.get_session() as session:
-                conn = await session.connection()
+        async with db_manager.get_session() as session:
+            conn = await session.connection()
+
+            # Check if user has Google Contacts connected
+            is_connected = await oauth_service.is_google_contacts_connected(
+                user.id, conn
+            )
+
+            # Build status based on connection state
+            status = "active" if is_connected else "disconnected"
+
+            if is_connected:
                 repo = SyncJobRepository(conn)
 
                 # Get the most recent completed sync
@@ -457,6 +454,9 @@ async def get_integrations_health(
     - Redis task queue
     - Integration workers
     - External API connectivity
+    - Queue metrics (depth, queued jobs, running jobs)
+    - Job statistics (failures, retries, completion rates)
+    - Recent failures for troubleshooting
     """
     try:
         # Get comprehensive health status
@@ -464,13 +464,20 @@ async def get_integrations_health(
 
         return HealthResponse(
             status=health_status["status"],
+            timestamp=health_status["timestamp"],
             services=health_status["services"],
+            queue_metrics=health_status.get("queue_metrics", {}),
+            job_statistics=health_status.get("job_statistics", {}),
+            recent_failures=health_status.get("recent_failures", []),
+            version=health_status.get("version", "1.0.0"),
         )
 
     except Exception as e:
+        logger.error("Health check failed", error=str(e), exc_info=True)
         # Return unhealthy status if health check fails
         return HealthResponse(
             status="unhealthy",
+            timestamp=datetime.now(UTC).isoformat(),
             services={
                 "error": {"status": "unhealthy", "message": str(e)},
             },
