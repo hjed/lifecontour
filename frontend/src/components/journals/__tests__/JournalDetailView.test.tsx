@@ -88,8 +88,10 @@ jest.mock('../JournalChildrenList', () => ({
   JournalChildrenList: () => <div data-testid='children-list'>Children</div>,
 }));
 
-jest.mock('../JournalTypeDataDisplay', () => ({
-  JournalTypeDataDisplay: () => <div data-testid='type-data'>Type Data</div>,
+jest.mock('../JournalTypeSection', () => ({
+  JournalTypeSection: ({ type }: any) => (
+    <div data-testid={`type-section-${type}`}>Type Section: {type}</div>
+  ),
 }));
 
 jest.mock('@/components/contacts/InlineEditField', () => ({
@@ -223,7 +225,8 @@ describe('JournalDetailView', () => {
     it('renders type data display', () => {
       renderWithQueryClient(<JournalDetailView journal={mockJournal} />);
 
-      expect(screen.getByTestId('type-data')).toBeInTheDocument();
+      // Check that type sections are rendered for each type
+      expect(screen.getByTestId('type-section-note')).toBeInTheDocument();
     });
   });
 

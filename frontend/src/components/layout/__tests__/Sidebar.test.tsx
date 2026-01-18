@@ -133,7 +133,7 @@ describe('Sidebar Components', () => {
 
       await waitFor(() => {
         expect(journalsButton).toHaveAttribute('aria-expanded', 'true');
-        expect(screen.getByText('Etc')).toBeInTheDocument();
+        expect(screen.getByText('All Journals')).toBeInTheDocument();
       });
 
       // Click to collapse
@@ -310,7 +310,7 @@ describe('Sidebar Components', () => {
       fireEvent.click(journalsButton);
 
       await waitFor(() => {
-        expect(screen.getByText('Etc')).toBeInTheDocument();
+        expect(screen.getByText('All Journals')).toBeInTheDocument();
       });
 
       // Collapse contacts section
@@ -322,7 +322,7 @@ describe('Sidebar Components', () => {
       });
 
       // Journals should still be expanded
-      expect(screen.getByText('Etc')).toBeInTheDocument();
+      expect(screen.getByText('All Journals')).toBeInTheDocument();
     });
   });
 });
