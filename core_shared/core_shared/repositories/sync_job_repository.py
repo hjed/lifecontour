@@ -399,7 +399,10 @@ class SyncJobRepository:
             "cancelled_jobs": row.cancelled_jobs or 0,
             "running_jobs": row.running_jobs or 0,
             "queued_jobs": row.queued_jobs or 0,
-            "retry_count": 0,  # TODO: Implement retry tracking
+            # Note: Retry tracking requires additional schema changes to track
+            # job retry attempts. Currently not implemented as ARQ handles retries
+            # internally and we track final job status only.
+            "retry_count": 0,
         }
 
     def _row_to_sync_job(self, row: Any) -> SyncJob:

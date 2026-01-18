@@ -674,12 +674,44 @@ class TestOAuthServiceGoogleContacts:
             assert exc_info.value.status_code == 400
             assert "Invalid CSRF token" in str(exc_info.value.detail)
 
-    async def test_disconnect_google_contacts_not_implemented(
-        self, oauth_service_with_google
+    async def test_disconnect_google_contacts_success(
+        self, oauth_service_with_google, mock_connection
     ):
-        """Test Google Contacts disconnect returns False (not implemented)."""
+        """Test Google Contacts disconnect successfully deletes tokens."""
+        # Arrange
+        user_id = "test-user-123"
+
+        # Mock database delete to return 1 row deleted
+        mock_result = Mock()
+        mock_result.rowcount = 1
+        mock_connection.execute = AsyncMock(return_value=mock_result)
+
+        # Act
         result = await oauth_service_with_google.disconnect_google_contacts(
-            "test_user_id"
+            user_id, mock_connection
         )
 
+        # Assert
+        assert result is True
+        mock_connection.execute.assert_called_once()
+
+    async def test_disconnect_google_contacts_no_tokens(
+        self, oauth_service_with_google, mock_connection
+    ):
+        """Test Google Contacts disconnect returns False when no tokens exist."""
+        # Arrange
+        user_id = "test-user-123"
+
+        # Mock database delete to return 0 rows deleted
+        mock_result = Mock()
+        mock_result.rowcount = 0
+        mock_connection.execute = AsyncMock(return_value=mock_result)
+
+        # Act
+        result = await oauth_service_with_google.disconnect_google_contacts(
+            user_id, mock_connection
+        )
+
+        # Assert
         assert result is False
+        mock_connection.execute.assert_called_once()

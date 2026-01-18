@@ -632,6 +632,7 @@ async def google_contacts_oauth_callback(
 async def google_contacts_oauth_disconnect(
     user: FromDishka[SessionUser],
     oauth_service: FromDishka[OAuthService],
+    db_manager: FromDishka[IntegrationDatabaseManager],
 ) -> OAuthDisconnectResponse:
     """
     Disconnect Google Contacts integration for the authenticated user.
@@ -640,8 +641,17 @@ async def google_contacts_oauth_disconnect(
     the Google Contacts integration.
     """
     try:
-        # Disconnect the Google Contacts integration
-        success = await oauth_service.disconnect_google_contacts(user.id)
+        # Get database connection
+        async with db_manager.get_session() as session:
+            connection = await session.connection()
+
+            # Disconnect the Google Contacts integration
+            success = await oauth_service.disconnect_google_contacts(
+                user.id, connection
+            )
+
+            # Commit the transaction
+            await session.commit()
 
         if success:
             logger.info(
@@ -653,13 +663,13 @@ async def google_contacts_oauth_disconnect(
                 message="Google Contacts disconnected successfully",
             )
         else:
-            logger.warning(
-                "Google Contacts OAuth disconnect not implemented",
+            logger.info(
+                "No Google Contacts connection found to disconnect",
                 user_id=user.id,
             )
             return OAuthDisconnectResponse(
                 success=False,
-                message="Google Contacts disconnect feature not yet implemented",
+                message="No Google Contacts connection found",
             )
 
     except ValueError as e:
