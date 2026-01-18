@@ -501,6 +501,7 @@ class TestOAuthServiceGoogleContacts:
                 == "openid email profile https://www.googleapis.com/auth/contacts.readonly"
             )
             assert call_args[1]["access_type"] == "offline"
+            assert call_args[1]["prompt"] == "consent"
 
     async def test_is_google_contacts_connected_no_tokens(
         self, oauth_service_with_google, mock_connection

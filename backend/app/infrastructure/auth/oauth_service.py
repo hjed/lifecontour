@@ -15,6 +15,7 @@ import structlog
 from authlib.common.security import generate_token
 from authlib.integrations.starlette_client import OAuth
 from fastapi import HTTPException, Request, status
+from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.infrastructure.auth.models import OAuthUserInfo
 from app.infrastructure.config import Settings
@@ -779,7 +780,9 @@ class OAuthService:
                 detail=f"Failed to exchange authorization code: {str(e)}",
             ) from e
 
-    async def disconnect_google_contacts(self, user_id: str, connection: Any) -> bool:
+    async def disconnect_google_contacts(
+        self, user_id: str, connection: AsyncConnection
+    ) -> bool:
         """
         Disconnect Google Contacts integration for a user.
 
@@ -832,7 +835,9 @@ class OAuthService:
                 detail="Failed to disconnect Google Contacts integration",
             ) from e
 
-    async def is_google_contacts_connected(self, user_id: str, connection: Any) -> bool:
+    async def is_google_contacts_connected(
+        self, user_id: str, connection: AsyncConnection
+    ) -> bool:
         """
         Check if Google Contacts integration is connected for a user.
 
