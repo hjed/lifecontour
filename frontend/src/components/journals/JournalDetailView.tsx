@@ -27,7 +27,7 @@ import { JournalCalendarBadge } from './JournalCalendarBadge';
 import { JournalContactBadge } from './JournalContactBadge';
 import { JournalTagBadge } from './JournalTagBadge';
 import { JournalChildrenList } from './JournalChildrenList';
-import { JournalTypeDataDisplay } from './JournalTypeDataDisplay';
+import { JournalTypeSection } from './JournalTypeSection';
 import { InlineEditHeading } from './InlineEditHeading';
 import { JournalContentInline } from './JournalContentInline';
 import { InlineEditDateRange } from './InlineEditDateRange';
@@ -43,6 +43,15 @@ import {
 } from '@/lib/api/journals';
 import { useContacts } from '@/lib/api/contacts';
 import { useRouter } from 'next/navigation';
+import {
+  JournalType,
+  type CalendarInfoData,
+  type MoodData,
+  type PhotoAlbumData,
+  type PlanData,
+  type TravelData,
+  type JournalTypeData,
+} from '@/types/journals';
 
 interface JournalDetailViewProps {
   readonly journal: Journal;
@@ -141,6 +150,26 @@ export function JournalDetailView({
     await deleteJournal.mutateAsync(journal.id);
     router.push('/journals');
   };
+
+  // Handle type-specific data update
+  const handleTypeDataSave = useCallback(
+    async (
+      type: JournalType,
+      data: CalendarInfoData | MoodData | PhotoAlbumData | PlanData | TravelData
+    ) => {
+      // Update the journal with the new type data
+      await updateJournal.mutateAsync({
+        id: journal.id,
+        data: {
+          type_data: {
+            ...journal.type_data,
+            [type]: data,
+          },
+        },
+      });
+    },
+    [journal.id, journal.type_data, updateJournal]
+  );
 
   // Handle title update
   const handleTitleSave = useCallback(
@@ -286,11 +315,21 @@ export function JournalDetailView({
             />
           </div>
 
-          {/* Type-Specific Data */}
-          <JournalTypeDataDisplay
-            types={journal.types}
-            typeData={journal.type_data}
-          />
+          {/* Type-Specific Data Sections */}
+          {journal.types && journal.types.length > 0 && (
+            <div className='space-y-4'>
+              {journal.types.map(type => (
+                <JournalTypeSection
+                  key={type}
+                  journalId={journal.id}
+                  type={type}
+                  typeData={journal.type_data?.[type] as JournalTypeData}
+                  onSave={handleTypeDataSave}
+                  defaultOpen={false}
+                />
+              ))}
+            </div>
+          )}
         </CardContent>
       </Card>
 

@@ -110,7 +110,7 @@ function useNavigationSections(): NavigationSection[] {
       label: 'Journals',
       icon: BookOpen,
       defaultExpanded: false,
-      items: [{ label: 'Etc', href: '/journals' as Route }],
+      items: [{ label: 'All Journals', href: '/journals' as Route }],
     },
     {
       label: 'Integrations',

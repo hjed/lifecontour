@@ -89,7 +89,9 @@ test.describe('Sidebar Navigation', () => {
       await expect(journalsButton).toHaveAttribute('aria-expanded', 'false');
 
       // Journal navigation items should not be visible
-      await expect(page.getByRole('link', { name: 'Etc' })).not.toBeVisible();
+      await expect(
+        page.getByRole('link', { name: 'All Journals' })
+      ).not.toBeVisible();
     });
 
     test('can toggle section expansion', async ({
@@ -106,17 +108,23 @@ test.describe('Sidebar Navigation', () => {
 
       // Initially collapsed
       await expect(journalsButton).toHaveAttribute('aria-expanded', 'false');
-      await expect(page.getByRole('link', { name: 'Etc' })).not.toBeVisible();
+      await expect(
+        page.getByRole('link', { name: 'All Journals' })
+      ).not.toBeVisible();
 
       // Click to expand
       await journalsButton.click();
       await expect(journalsButton).toHaveAttribute('aria-expanded', 'true');
-      await expect(page.getByRole('link', { name: 'Etc' })).toBeVisible();
+      await expect(
+        page.getByRole('link', { name: 'All Journals' })
+      ).toBeVisible();
 
       // Click to collapse
       await journalsButton.click();
       await expect(journalsButton).toHaveAttribute('aria-expanded', 'false');
-      await expect(page.getByRole('link', { name: 'Etc' })).not.toBeVisible();
+      await expect(
+        page.getByRole('link', { name: 'All Journals' })
+      ).not.toBeVisible();
     });
 
     test('highlights active navigation item', async ({
@@ -281,7 +289,9 @@ test.describe('Sidebar Navigation', () => {
       await page.setViewportSize({ width: 1024, height: 768 });
       await page.goto('/contacts');
       await page.getByRole('button', { name: /journals/i }).click();
-      await expect(page.getByRole('link', { name: 'Etc' })).toBeVisible();
+      await expect(
+        page.getByRole('link', { name: 'All Journals' })
+      ).toBeVisible();
 
       // Switch to mobile - wait for UI to stabilize after viewport change
       await page.setViewportSize({ width: 375, height: 667 });
@@ -294,7 +304,9 @@ test.describe('Sidebar Navigation', () => {
       await expect(
         page.getByRole('button', { name: /journals/i })
       ).toHaveAttribute('aria-expanded', 'true');
-      await expect(page.getByRole('link', { name: 'Etc' })).toBeVisible();
+      await expect(
+        page.getByRole('link', { name: 'All Journals' })
+      ).toBeVisible();
     });
   });
 

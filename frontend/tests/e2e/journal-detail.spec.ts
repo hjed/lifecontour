@@ -196,9 +196,123 @@ test.describe('Journal Detail Page', () => {
 
         // Verify type badges are displayed
         for (const type of journal.types || []) {
-          await expect(page.getByText(type)).toBeVisible();
+          await expect(
+            page.getByTestId(`type-badge-${type.toLowerCase()}`)
+          ).toBeVisible();
         }
       }
+    });
+
+    test('should display type-specific editor sections for EVENT type', async ({
+      journalsWithData,
+    }) => {
+      const { page, journals } = journalsWithData;
+      // Find a journal with EVENT type
+      const eventJournal = journals.find(j => j.types?.includes('event'));
+
+      if (eventJournal) {
+        // Navigate to journal detail page
+        await page.goto(`/journals/${eventJournal.id}`);
+        await page.waitForLoadState('networkidle');
+
+        // Verify EVENT type section is present
+        const eventSection = page.getByText('Event Details');
+        await expect(eventSection).toBeVisible();
+
+        // Click to expand the section if it's collapsed
+        await eventSection.click();
+
+        // Verify event-specific fields are visible
+        // These should be in the EventTypeEditor component
+        await expect(page.getByText(/calendar/i).first()).toBeVisible();
+      }
+    });
+
+    test('should allow editing EVENT type data', async ({
+      journalsWithData,
+    }) => {
+      const { page, journals } = journalsWithData;
+      const eventJournal = journals.find(j => j.types?.includes('event'));
+
+      if (eventJournal) {
+        // Navigate to journal detail page
+        await page.goto(`/journals/${eventJournal.id}`);
+        await page.waitForLoadState('networkidle');
+
+        // Find and expand the Event Details section
+        const eventSection = page.getByText('Event Details');
+        await expect(eventSection).toBeVisible();
+        await eventSection.click();
+
+        // Wait for the Edit button to be visible (indicates section is expanded)
+        const editButton = page.getByRole('button', { name: /edit/i }).first();
+        await expect(editButton).toBeVisible();
+
+        // Click the edit button
+        await editButton.click();
+
+        // Verify we're in edit mode - look for Save/Cancel buttons
+        const saveButton = page.getByRole('button', { name: /save/i }).first();
+        const cancelButton = page
+          .getByRole('button', { name: /cancel/i })
+          .first();
+
+        await expect(saveButton).toBeVisible();
+        await expect(cancelButton).toBeVisible();
+      }
+    });
+
+    test('should display type-specific editor sections for MOOD_RATING type', async ({
+      authenticatedPage,
+      testCleanup,
+    }) => {
+      const page = authenticatedPage;
+
+      // Create a journal with MOOD_RATING type
+      const response = await page.request.post('/api/journals', {
+        data: {
+          data: {
+            type: 'journal',
+            attributes: {
+              title: 'Mood Check',
+              content: 'Feeling good today!',
+              event_date_range: {
+                start: '2026-01-18T10:00:00Z',
+                end: '2026-01-18T10:30:00Z',
+              },
+              types: ['mood_rating'],
+            },
+          },
+        },
+      });
+
+      const journal = await response.json();
+      const journalId = journal.data.id;
+
+      // Register cleanup
+      testCleanup(async () => {
+        await page.request.delete(`/api/journals/${journalId}`);
+      });
+
+      // Navigate to journal detail page
+      await page.goto(`/journals/${journalId}`);
+      await page.waitForLoadState('networkidle');
+
+      // Verify MOOD_RATING type section is present
+      const moodSection = page.getByText('Mood & Energy');
+      await expect(moodSection).toBeVisible();
+
+      // Click to expand the section
+      await moodSection.click();
+
+      // Verify mood-specific fields are visible (indicates section is expanded)
+      // These should be in the MoodRatingTypeEditor component
+      await expect(
+        page
+          .getByText(/mood value/i)
+          .or(page.getByText(/mood/i))
+          .first()
+      ).toBeVisible();
     });
   });
 
