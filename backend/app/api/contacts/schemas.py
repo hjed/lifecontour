@@ -18,11 +18,6 @@ from app.api.common.schemas import (
     JsonApiUpdateRequest,
 )
 
-# Constants for field descriptions
-_RESOURCE_IDENTIFIER_DESC = "Resource identifier"
-_RESOURCE_LINKS_DESC = "Resource links"
-_RESOURCE_METADATA_DESC = "Resource metadata"
-
 
 # Contact Method Schemas (embedded in contact)
 class ContactMethodAttributes(BaseModel):
@@ -105,12 +100,10 @@ class TagResource(BaseModel):
     """Tag resource following JSON API specification."""
 
     type: str = Field(default="tags", description="Resource type")
-    id: str = Field(..., description=_RESOURCE_IDENTIFIER_DESC)
+    id: str = Field(..., description="Resource identifier")
     attributes: TagAttributes = Field(..., description="Tag attributes")
-    links: JsonApiLinks | None = Field(default=None, description=_RESOURCE_LINKS_DESC)
-    meta: dict[str, Any] | None = Field(
-        default=None, description=_RESOURCE_METADATA_DESC
-    )
+    links: JsonApiLinks | None = Field(default=None, description="Resource links")
+    meta: dict[str, Any] | None = Field(default=None, description="Resource metadata")
 
 
 # Contact Relationship Schemas
@@ -136,14 +129,12 @@ class ContactRelationshipResource(BaseModel):
     """Contact relationship resource following JSON API specification."""
 
     type: str = Field(default="contact_relationships", description="Resource type")
-    id: str = Field(..., description=_RESOURCE_IDENTIFIER_DESC)
+    id: str = Field(..., description="Resource identifier")
     attributes: ContactRelationshipAttributes = Field(
         ..., description="Relationship attributes"
     )
-    links: JsonApiLinks | None = Field(default=None, description=_RESOURCE_LINKS_DESC)
-    meta: dict[str, Any] | None = Field(
-        default=None, description=_RESOURCE_METADATA_DESC
-    )
+    links: JsonApiLinks | None = Field(default=None, description="Resource links")
+    meta: dict[str, Any] | None = Field(default=None, description="Resource metadata")
 
 
 # Contact Schemas
@@ -155,9 +146,11 @@ class ContactAttributes(BaseModel):
     middle_name: str | None = Field(default=None, description="Contact middle name")
     nick_name: str | None = Field(default=None, description="Contact nickname")
     company: str | None = Field(
-        default=None, description="Company or organization name"
+        default=None, max_length=200, description="Company or organization name"
     )
-    job_title: str | None = Field(default=None, description="Job title or position")
+    job_title: str | None = Field(
+        default=None, max_length=200, description="Job title or position"
+    )
     is_favourite: bool = Field(
         default=False, description="Whether contact is marked as favourite"
     )
@@ -193,15 +186,13 @@ class ContactResource(BaseModel):
     """Contact resource following JSON API specification."""
 
     type: str = Field(default="contacts", description="Resource type")
-    id: str = Field(..., description=_RESOURCE_IDENTIFIER_DESC)
+    id: str = Field(..., description="Resource identifier")
     attributes: ContactAttributes = Field(..., description="Contact attributes")
     relationships: ContactRelationships | None = Field(
         default=None, description="Contact relationships"
     )
-    links: JsonApiLinks | None = Field(default=None, description=_RESOURCE_LINKS_DESC)
-    meta: dict[str, Any] | None = Field(
-        default=None, description=_RESOURCE_METADATA_DESC
-    )
+    links: JsonApiLinks | None = Field(default=None, description="Resource links")
+    meta: dict[str, Any] | None = Field(default=None, description="Resource metadata")
 
 
 # Request/Response Models
