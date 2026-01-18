@@ -293,6 +293,8 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
             last_name=request.last_name,
             middle_name=request.middle_name,
             nick_name=request.nick_name,
+            company=request.company,
+            job_title=request.job_title,
         )
 
         # Add contact methods if provided
@@ -403,6 +405,8 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
                 - last_name (optional): Updated last name
                 - middle_name (optional): Updated middle name
                 - nick_name (optional): Updated nickname
+                - company (optional): Updated company or organization name
+                - job_title (optional): Updated job title or position
                 - email (optional): Updated primary email address
                 - phone (optional): Updated primary phone number
                 - tags (optional): Updated tags (replaces existing tags)
@@ -460,6 +464,12 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
                 last_name=request.last_name or existing_contact.last_name,
                 middle_name=request.middle_name or existing_contact.middle_name,
                 nick_name=request.nick_name or existing_contact.nick_name,
+                company=request.company
+                if request.company is not None
+                else existing_contact.company,
+                job_title=request.job_title
+                if request.job_title is not None
+                else existing_contact.job_title,
             )
 
             # Add contact methods if provided (replacement strategy)

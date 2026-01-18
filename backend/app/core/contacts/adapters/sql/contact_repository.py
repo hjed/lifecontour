@@ -35,7 +35,7 @@ class SqlContactRepository(ContactRepository):
         # Get contact basic info
         contact_query = text(
             """
-            SELECT id, first_name, last_name, middle_name, nick_name, is_favourite, created_at, updated_at
+            SELECT id, first_name, last_name, middle_name, nick_name, company, job_title, is_favourite, created_at, updated_at
             FROM contacts WHERE id = :contact_id
         """
         )
@@ -52,6 +52,8 @@ class SqlContactRepository(ContactRepository):
             last_name=contact_row.last_name,
             middle_name=contact_row.middle_name,
             nick_name=contact_row.nick_name,
+            company=contact_row.company,
+            job_title=contact_row.job_title,
             is_favourite=contact_row.is_favourite,
             created_at=contact_row.created_at,
             updated_at=contact_row.updated_at,
@@ -287,8 +289,8 @@ class SqlContactRepository(ContactRepository):
                 # Insert new contact
                 query = text(
                     """
-                    INSERT INTO contacts (first_name, last_name, middle_name, nick_name, is_favourite)
-                    VALUES (:first_name, :last_name, :middle_name, :nick_name, :is_favourite)
+                    INSERT INTO contacts (first_name, last_name, middle_name, nick_name, company, job_title, is_favourite)
+                    VALUES (:first_name, :last_name, :middle_name, :nick_name, :company, :job_title, :is_favourite)
                     RETURNING id, created_at, updated_at
                 """
                 )
@@ -299,6 +301,8 @@ class SqlContactRepository(ContactRepository):
                         "last_name": contact.last_name,
                         "middle_name": contact.middle_name,
                         "nick_name": contact.nick_name,
+                        "company": contact.company,
+                        "job_title": contact.job_title,
                         "is_favourite": contact.is_favourite,
                     },
                 )
@@ -315,6 +319,7 @@ class SqlContactRepository(ContactRepository):
                     UPDATE contacts
                     SET first_name = :first_name, last_name = :last_name,
                         middle_name = :middle_name, nick_name = :nick_name,
+                        company = :company, job_title = :job_title,
                         is_favourite = :is_favourite, updated_at = NOW()
                     WHERE id = :id
                     RETURNING updated_at
@@ -328,6 +333,8 @@ class SqlContactRepository(ContactRepository):
                         "last_name": contact.last_name,
                         "middle_name": contact.middle_name,
                         "nick_name": contact.nick_name,
+                        "company": contact.company,
+                        "job_title": contact.job_title,
                         "is_favourite": contact.is_favourite,
                     },
                 )
@@ -724,7 +731,7 @@ class SqlContactRepository(ContactRepository):
         # Single query to get all contact data
         query = text(
             """
-            SELECT id, first_name, last_name, middle_name, nick_name,
+            SELECT id, first_name, last_name, middle_name, nick_name, company, job_title,
                    is_favourite, created_at, updated_at
             FROM contacts
             WHERE is_favourite = true
@@ -742,6 +749,8 @@ class SqlContactRepository(ContactRepository):
                 last_name=row.last_name,
                 middle_name=row.middle_name,
                 nick_name=row.nick_name,
+                company=row.company,
+                job_title=row.job_title,
                 is_favourite=row.is_favourite,
                 created_at=row.created_at,
                 updated_at=row.updated_at,
@@ -779,7 +788,7 @@ class SqlContactRepository(ContactRepository):
         query_parts = [
             """
             SELECT DISTINCT c.id, c.first_name, c.last_name, c.middle_name, c.nick_name,
-                   c.is_favourite, c.created_at, c.updated_at
+                   c.company, c.job_title, c.is_favourite, c.created_at, c.updated_at
             FROM contacts c
             """
         ]
@@ -838,6 +847,8 @@ class SqlContactRepository(ContactRepository):
                 last_name=row.last_name,
                 middle_name=row.middle_name,
                 nick_name=row.nick_name,
+                company=row.company,
+                job_title=row.job_title,
                 is_favourite=row.is_favourite,
                 created_at=row.created_at,
                 updated_at=row.updated_at,

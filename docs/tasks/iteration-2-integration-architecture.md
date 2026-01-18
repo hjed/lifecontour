@@ -393,9 +393,44 @@ The integration architecture foundation and core Google Contacts sync functional
 
 ### ITER2-006: Integration Management UI & UX 🟡 IN PROGRESS
 **Description:** Refine and extend the UI for managing integrations and sync status
-**PR Size:** Split into 3 sub-tasks for focused development
+**PR Size:** Split into 4 sub-tasks for focused development
 
 > Note: The initial `/integrations` dashboard, OAuth flow, sync controls, job status display, and basic health views were implemented as part of Google Contacts work (see ITER2-002 Slice 4). This task now focuses on rounding out the UX and aligning it with the broader Integration Architecture (progress, cancellation, richer health/metrics, and documentation).
+
+#### Phase 0: Backend Foundations ✅ COMPLETED
+**PR Size:** ~16 files (Database schema, transformers, API/MCP schemas, search integration, tests)
+
+**Acceptance Criteria:**
+- [x] Complete company/job_title mapping for Google Contacts integration
+  - Added `company` and `job_title` fields to Contact entity (200 chars each)
+  - Created database migration `0014_add_company_and_job_title_to_contacts.py`
+  - Updated ContactRepository with new fields in all SQL queries
+- [x] Implement bidirectional organization sync
+  - Implemented `_extract_organization_info` in GoogleContactTransformer (Google → Local)
+  - Implemented `_transform_organizations` in worker (Local → Google)
+  - Prefers "current" organization, falls back to first organization
+  - Handles empty strings as None for clean data
+- [x] Update all API and MCP schemas
+  - Updated ContactAttributes, ContactResponse, ContactSearchResult
+  - Updated ContactCreateRequest, ContactUpdateRequest
+  - Enhanced summary generation to include work info: "John Doe is a contact. Senior Developer at TechCorp."
+- [x] Integrate with search infrastructure
+  - Added company/job_title to MeiliSearch searchable and displayed attributes
+  - Updated search service to retrieve and highlight company/job_title
+  - Updated search indexer to fetch and index organization data
+  - Search results now include work information
+- [x] Comprehensive test coverage
+  - Added 8 unit tests for GoogleContactTransformer organization extraction
+  - Added 6 unit tests for worker organization transformation
+  - All 111 backend unit tests passing ✅
+  - All 40 worker unit tests passing ✅
+  - Type checking (mypy) passing on 160 source files ✅
+  - Linting (ruff) passing ✅
+
+**Next Steps:**
+- Run database migration: `cd backend && uv run alembic upgrade head`
+- Reindex existing contacts to populate search with company/job_title data
+- Test end-to-end with actual Google Contacts sync
 
 #### Phase 1: Integration Dashboard ✅ COMPLETED (baseline)
 **PR Size:** ~5 files (Dashboard components, API endpoints, tests)
@@ -558,8 +593,19 @@ The remaining work for Iteration 2 focuses on bringing the implementation in lin
      - Integration tests for the integration management page (React Testing Library or equivalent).
      - E2E tests in `frontend/tests/e2e/integrations.spec.ts` covering connection, sync trigger, progress display, cancellation, and error handling; remove any remaining `.skip` flags as these flows stabilise.
 
-5. **ITER2-006 – Clean up remaining integration TODOs (back-end foundations)**
-   - Complete the organizations/company/job-title mapping TODO in `backend/app/core/integrations/google_contacts/transformer.py::GoogleContactTransformer.transform_person`, and add/extend unit tests to lock in the behaviour.
+5. **ITER2-006 – Clean up remaining integration TODOs (back-end foundations)** ✅ COMPLETE
+   - ✅ Complete the organizations/company/job-title mapping TODO in `backend/app/core/integrations/google_contacts/transformer.py::GoogleContactTransformer.transform_person`, and add/extend unit tests to lock in the behaviour.
+
+   **Implementation Summary:**
+   - Added `company` and `job_title` fields to Contact entity and database (migration 0014)
+   - Implemented `_extract_organization_info` in GoogleContactTransformer for Google → Local sync
+   - Implemented `_transform_organizations` in worker for Local → Google bidirectional sync
+   - Updated all API and MCP schemas to include company/job_title fields
+   - Integrated company/job_title into MeiliSearch indexing and search results
+   - Added 14 comprehensive unit tests (8 for transformer, 6 for worker)
+   - All quality gates pass: 111 backend tests ✅, 40 worker tests ✅, mypy ✅, ruff ✅
+   - Files modified: 16 files across backend, worker, and tests
+   - Ready for database migration: `cd backend && uv run alembic upgrade head`
 
 6. **Future Iterations (tracked elsewhere, not part of Iteration 2)**
    - Implement additional integrations (Immich, Strava, Firefly III, etc.) following the patterns established here – see `docs/tasks/iteration-3-extended-integrations.md`, `docs/tasks/iteration-5-strava-integration.md`, and `docs/tasks/iteration-6-immich-integration.md`.

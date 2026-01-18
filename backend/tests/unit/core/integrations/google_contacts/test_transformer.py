@@ -358,3 +358,205 @@ class TestGoogleContactTransformer:
         assert last is None
         assert middle is None
         assert nick is None
+
+
+class TestOrganizationTransformation:
+    """Tests for organization transformation to company and job_title fields."""
+
+    def test_transform_person_with_current_organization(self, transformer):
+        """Test transformation of current organization to company and job_title."""
+        person = GooglePerson(
+            resourceName="people/c123456789",
+            names=[
+                GoogleName(
+                    metadata=GoogleFieldMetadata(primary=True),
+                    givenName="John",
+                    familyName="Doe",
+                )
+            ],
+            organizations=[
+                GoogleOrganization(
+                    metadata=GoogleFieldMetadata(primary=True),
+                    name="Tech Corp",
+                    title="Senior Software Engineer",
+                    current=True,
+                )
+            ],
+        )
+
+        contact = transformer.transform_person(person)
+
+        assert contact.company == "Tech Corp"
+        assert contact.job_title == "Senior Software Engineer"
+
+    def test_transform_person_with_multiple_organizations_uses_current(
+        self, transformer
+    ):
+        """Test that current organization is preferred over others."""
+        person = GooglePerson(
+            resourceName="people/c123456789",
+            names=[
+                GoogleName(
+                    metadata=GoogleFieldMetadata(primary=True),
+                    givenName="John",
+                    familyName="Doe",
+                )
+            ],
+            organizations=[
+                GoogleOrganization(
+                    metadata=GoogleFieldMetadata(primary=False),
+                    name="Old Company",
+                    title="Junior Developer",
+                    current=False,
+                ),
+                GoogleOrganization(
+                    metadata=GoogleFieldMetadata(primary=True),
+                    name="Current Company",
+                    title="Senior Developer",
+                    current=True,
+                ),
+                GoogleOrganization(
+                    metadata=GoogleFieldMetadata(primary=False),
+                    name="Another Old Company",
+                    title="Intern",
+                    current=False,
+                ),
+            ],
+        )
+
+        contact = transformer.transform_person(person)
+
+        assert contact.company == "Current Company"
+        assert contact.job_title == "Senior Developer"
+
+    def test_transform_person_with_no_current_organization_uses_first(
+        self, transformer
+    ):
+        """Test that first organization is used when none are marked current."""
+        person = GooglePerson(
+            resourceName="people/c123456789",
+            names=[
+                GoogleName(
+                    metadata=GoogleFieldMetadata(primary=True),
+                    givenName="John",
+                    familyName="Doe",
+                )
+            ],
+            organizations=[
+                GoogleOrganization(
+                    metadata=GoogleFieldMetadata(primary=True),
+                    name="First Company",
+                    title="Developer",
+                    current=None,  # Not specified
+                ),
+                GoogleOrganization(
+                    metadata=GoogleFieldMetadata(primary=False),
+                    name="Second Company",
+                    title="Manager",
+                    current=None,
+                ),
+            ],
+        )
+
+        contact = transformer.transform_person(person)
+
+        assert contact.company == "First Company"
+        assert contact.job_title == "Developer"
+
+    def test_transform_person_with_organization_name_only(self, transformer):
+        """Test transformation when organization has only name (no title)."""
+        person = GooglePerson(
+            resourceName="people/c123456789",
+            names=[
+                GoogleName(
+                    metadata=GoogleFieldMetadata(primary=True),
+                    givenName="John",
+                    familyName="Doe",
+                )
+            ],
+            organizations=[
+                GoogleOrganization(
+                    metadata=GoogleFieldMetadata(primary=True),
+                    name="Tech Corp",
+                    title=None,
+                    current=True,
+                )
+            ],
+        )
+
+        contact = transformer.transform_person(person)
+
+        assert contact.company == "Tech Corp"
+        assert contact.job_title is None
+
+    def test_transform_person_with_organization_title_only(self, transformer):
+        """Test transformation when organization has only title (no company name)."""
+        person = GooglePerson(
+            resourceName="people/c123456789",
+            names=[
+                GoogleName(
+                    metadata=GoogleFieldMetadata(primary=True),
+                    givenName="John",
+                    familyName="Doe",
+                )
+            ],
+            organizations=[
+                GoogleOrganization(
+                    metadata=GoogleFieldMetadata(primary=True),
+                    name=None,
+                    title="Freelance Developer",
+                    current=True,
+                )
+            ],
+        )
+
+        contact = transformer.transform_person(person)
+
+        assert contact.company is None
+        assert contact.job_title == "Freelance Developer"
+
+    def test_transform_person_with_no_organizations(self, transformer):
+        """Test transformation when person has no organizations."""
+        person = GooglePerson(
+            resourceName="people/c123456789",
+            names=[
+                GoogleName(
+                    metadata=GoogleFieldMetadata(primary=True),
+                    givenName="John",
+                    familyName="Doe",
+                )
+            ],
+            organizations=[],
+        )
+
+        contact = transformer.transform_person(person)
+
+        assert contact.company is None
+        assert contact.job_title is None
+
+    def test_transform_person_with_empty_organization_fields(self, transformer):
+        """Test transformation when organization has empty string fields."""
+        person = GooglePerson(
+            resourceName="people/c123456789",
+            names=[
+                GoogleName(
+                    metadata=GoogleFieldMetadata(primary=True),
+                    givenName="John",
+                    familyName="Doe",
+                )
+            ],
+            organizations=[
+                GoogleOrganization(
+                    metadata=GoogleFieldMetadata(primary=True),
+                    name="",  # Empty string
+                    title="",  # Empty string
+                    current=True,
+                )
+            ],
+        )
+
+        contact = transformer.transform_person(person)
+
+        # Empty strings should be treated as None
+        assert contact.company is None
+        assert contact.job_title is None

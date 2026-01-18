@@ -19,6 +19,26 @@ class ContactConverter:
     """Converter for Contact entities to MCP response formats."""
 
     @staticmethod
+    def _format_work_info(job_title: str | None, company: str | None) -> str | None:
+        """
+        Format work information (job title and company) into a readable string.
+
+        Args:
+            job_title: Job title or position
+            company: Company or organization name
+
+        Returns:
+            Formatted work information string, or None if no work info available
+        """
+        if job_title and company:
+            return f"{job_title} at {company}"
+        elif job_title:
+            return job_title
+        elif company:
+            return f"works at {company}"
+        return None
+
+    @staticmethod
     def to_contact_response(
         contact: Contact, additional_context: str = ""
     ) -> ContactResponse:
@@ -44,6 +64,8 @@ class ContactConverter:
             tags=tag_names,
             email=primary_email,
             phone=primary_phone,
+            company=contact.company,
+            job_title=contact.job_title,
             notes=contact.notes,
             additional_context=additional_context,
         )
@@ -53,6 +75,8 @@ class ContactConverter:
             name=full_name,
             email=primary_email,
             phone=primary_phone,
+            company=contact.company,
+            job_title=contact.job_title,
             tags=tag_names,
             is_favourite=contact.is_favourite,
             summary=summary,
@@ -79,6 +103,8 @@ class ContactConverter:
         full_name = search_hit.get("full_name", f"{first_name} {last_name}".strip())
         email = search_hit.get("email")
         phone = search_hit.get("phone")
+        company = search_hit.get("company")
+        job_title = search_hit.get("job_title")
         tags = search_hit.get("tags", [])
         highlighted = search_hit.get("_formatted", {})
 
@@ -87,6 +113,11 @@ class ContactConverter:
         if tags:
             tag_list = ", ".join(tags)
             summary_parts.append(f"tagged as: {tag_list}")
+
+        # Add work information
+        work_info = ContactConverter._format_work_info(job_title, company)
+        if work_info:
+            summary_parts.append(work_info)
 
         if email:
             summary_parts.append(f"Email: {email}")
@@ -107,6 +138,8 @@ class ContactConverter:
             name=full_name,
             email=email,
             phone=phone,
+            company=company,
+            job_title=job_title,
             tags=tags,
             highlighted=highlighted,
             summary=summary,
@@ -118,6 +151,8 @@ class ContactConverter:
         tags: list[str],
         email: str | None = None,
         phone: str | None = None,
+        company: str | None = None,
+        job_title: str | None = None,
         notes: list[Any] | None = None,
         additional_context: str = "",
     ) -> str:
@@ -129,6 +164,8 @@ class ContactConverter:
             tags: List of tag names
             email: Primary email address
             phone: Primary phone number
+            company: Company or organization name
+            job_title: Job title or position
             notes: List of contact notes
             additional_context: Additional context to include
 
@@ -140,6 +177,11 @@ class ContactConverter:
         if tags:
             tag_list = ", ".join(tags)
             summary_parts.append(f"tagged as: {tag_list}")
+
+        # Add work information
+        work_info = ContactConverter._format_work_info(job_title, company)
+        if work_info:
+            summary_parts.append(work_info)
 
         # Include notes if available
         if notes:

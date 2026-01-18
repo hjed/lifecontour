@@ -149,7 +149,7 @@ class SearchIndexer:
             # Fetch basic contact info
             contact_query = text("""
                 SELECT id, first_name, last_name, middle_name, nick_name,
-                       is_favourite, created_at, updated_at
+                       company, job_title, is_favourite, created_at, updated_at
                 FROM contacts
                 WHERE id = :contact_id
             """)
@@ -231,6 +231,8 @@ class SearchIndexer:
                 "last_name": contact_row.last_name or "",
                 "middle_name": contact_row.middle_name or "",
                 "nick_name": contact_row.nick_name or "",
+                "company": contact_row.company or "",
+                "job_title": contact_row.job_title or "",
                 "full_name": full_name,
                 "email": primary_email,
                 "emails": emails,

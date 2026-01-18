@@ -171,6 +171,8 @@ class SearchService:
             attributes_to_highlight=[
                 "first_name",
                 "last_name",
+                "company",
+                "job_title",
                 "email",
                 "notes_content",
             ],
@@ -179,6 +181,8 @@ class SearchService:
                 "first_name",
                 "last_name",
                 "full_name",
+                "company",
+                "job_title",
                 "email",
                 "phone",
                 "tags",
