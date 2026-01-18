@@ -4,20 +4,10 @@ Integration domain exceptions.
 Contains exceptions specific to external service integration operations.
 """
 
+from core_shared.exceptions import IntegrationError, JobCancelledException
 
-class IntegrationError(Exception):
-    """Base exception for integration-related errors."""
-
-    def __init__(self, message: str, integration_source: str | None = None):
-        """
-        Initialize integration error.
-
-        Args:
-            message: Error message
-            integration_source: Source integration that caused the error
-        """
-        super().__init__(message)
-        self.integration_source = integration_source
+# Re-export for backward compatibility
+__all__ = ["IntegrationError", "JobCancelledException"]
 
 
 class SyncError(IntegrationError):
@@ -132,27 +122,6 @@ class RateLimitError(IntegrationError):
         """
         super().__init__(message, integration_source)
         self.retry_after = retry_after
-
-
-class JobCancelledException(IntegrationError):
-    """Exception raised when a job is cancelled by the user."""
-
-    def __init__(
-        self,
-        job_id: str,
-        message: str = "Job cancelled by user",
-        integration_source: str | None = None,
-    ):
-        """
-        Initialize job cancelled exception.
-
-        Args:
-            job_id: ID of the cancelled job
-            message: Error message
-            integration_source: Source integration that was cancelled
-        """
-        super().__init__(message, integration_source)
-        self.job_id = job_id
 
 
 class JobNotFoundException(IntegrationError):

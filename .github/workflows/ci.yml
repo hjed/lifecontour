@@ -281,13 +281,14 @@ jobs:
         with:
           python-version: "3.12"  # Worker uses Python 3.12
 
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
       - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
+        run: uv sync
 
       - name: Run unit tests
-        run: pytest tests/unit/ -v --tb=short
+        run: uv run pytest tests/unit/ -v --tb=short
 
   worker-integration-test:
     name: Google Contacts Worker Integration Tests
@@ -321,15 +322,16 @@ jobs:
         with:
           python-version: "3.12"  # Worker uses Python 3.12
 
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
       - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
+        run: uv sync
 
       - name: Run integration tests
         env:
           REDIS_URL: redis://localhost:6379
-        run: pytest tests/integration/ -v --tb=short
+        run: uv run pytest tests/integration/ -v --tb=short
 
   backend-integration-test:
     name: Backend Integration Tests

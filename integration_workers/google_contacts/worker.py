@@ -18,16 +18,12 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-# Add core_shared to path for imports
-sys.path.insert(0, "/core_shared")
-
 # Import from the installed core_shared package
 from api_models import ListConnectionsResponse
 from core_shared.database.engine import create_session_factory
 
-# Import integration exceptions (from backend app)
-sys.path.insert(0, "/app")
-from app.core.integrations.exceptions import JobCancelledException
+# Import integration exceptions from core_shared
+from core_shared.exceptions import JobCancelledException
 
 # Import shared observability modules
 from core_shared.logging import (
