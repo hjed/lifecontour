@@ -1,6 +1,33 @@
 import { test, expect } from './fixtures';
+import type { Page } from '@playwright/test';
 
 test.describe('Contact Inline Editing', () => {
+  /**
+   * Helper function to wait for and verify a field update API request
+   */
+  async function waitForFieldUpdateRequest(
+    page: Page,
+    contactId: string,
+    fieldName: string,
+    expectedValue: string
+  ) {
+    const requestPromise = page.waitForRequest(
+      req =>
+        req.url().includes(`/api/contacts/${contactId}/fields/${fieldName}`) &&
+        req.method() === 'PATCH',
+      { timeout: 10000 }
+    );
+
+    const apiRequest = await requestPromise;
+    const requestBody = apiRequest.postDataJSON();
+
+    // Verify request format matches backend expectations
+    expect(requestBody).toHaveProperty('data');
+    expect(requestBody.data).toHaveProperty('type', 'contact_fields');
+    expect(requestBody.data).toHaveProperty('attributes');
+    expect(requestBody.data.attributes).toHaveProperty('value', expectedValue);
+  }
+
   test('should display contact detail page', async ({ contactsWithData }) => {
     const { page, contacts } = contactsWithData;
     const contact = contacts[0];
@@ -44,7 +71,7 @@ test.describe('Contact Inline Editing', () => {
     await expect(input).not.toBeVisible();
   });
 
-  test('should edit contact first name inline and save', async ({
+  test('should edit contact first name inline and save with correct API call', async ({
     contactsWithData,
   }) => {
     const { page, contacts } = contactsWithData;
@@ -59,10 +86,77 @@ test.describe('Contact Inline Editing', () => {
     await input.clear();
     await input.fill('UpdatedFirstName');
 
-    await page.keyboard.press('Enter');
-    await page.waitForLoadState('networkidle');
+    // Set up request interception and press Enter
+    const verifyRequest = waitForFieldUpdateRequest(
+      page,
+      contact.id,
+      'first_name',
+      'UpdatedFirstName'
+    );
+    await input.press('Enter');
+    await verifyRequest;
 
+    // Wait for the UI to update
+    await page.waitForLoadState('networkidle');
     await expect(firstNameField).toContainText('UpdatedFirstName');
+  });
+
+  test('should edit contact last name inline and save with correct API call', async ({
+    contactsWithData,
+  }) => {
+    const { page, contacts } = contactsWithData;
+    const contact = contacts[0];
+
+    await page.goto(`/contacts/${contact.id}`);
+
+    const lastNameField = page.locator('[data-testid="last-name-field"]');
+    await lastNameField.click();
+
+    const input = page.locator('[data-testid="last-name-field"] input');
+    await input.clear();
+    await input.fill('UpdatedLastName');
+
+    // Set up request interception and press Enter
+    const verifyRequest = waitForFieldUpdateRequest(
+      page,
+      contact.id,
+      'last_name',
+      'UpdatedLastName'
+    );
+    await input.press('Enter');
+    await verifyRequest;
+
+    await page.waitForLoadState('networkidle');
+    await expect(lastNameField).toContainText('UpdatedLastName');
+  });
+
+  test('should edit contact nickname inline and save with correct API call', async ({
+    contactsWithData,
+  }) => {
+    const { page, contacts } = contactsWithData;
+    const contact = contacts[0];
+
+    await page.goto(`/contacts/${contact.id}`);
+
+    const nicknameField = page.locator('[data-testid="nickname-field"]');
+    await nicknameField.click();
+
+    const input = page.locator('[data-testid="nickname-field"] input');
+    await input.clear();
+    await input.fill('UpdatedNickname');
+
+    // Set up request interception and press Enter
+    const verifyRequest = waitForFieldUpdateRequest(
+      page,
+      contact.id,
+      'nick_name',
+      'UpdatedNickname'
+    );
+    await input.press('Enter');
+    await verifyRequest;
+
+    await page.waitForLoadState('networkidle');
+    await expect(nicknameField).toContainText('UpdatedNickname');
   });
 
   test('should display contact methods section', async ({

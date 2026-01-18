@@ -377,18 +377,18 @@ export async function updateContactField(
   value: string
 ): Promise<ContactResponse> {
   const response = await fetch(
-    `${API_ENDPOINTS.CONTACTS}/${contactId}/fields/${fieldName}`,
+    `${API_ENDPOINTS.CONTACTS.BASE}/${contactId}/fields/${fieldName}`,
     {
       method: 'PATCH',
+      credentials: 'include',
       headers: {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
         data: {
-          type: 'contacts',
-          id: contactId,
+          type: 'contact_fields',
           attributes: {
-            [fieldName]: value,
+            value,
           },
         },
       }),
