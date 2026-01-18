@@ -31,14 +31,6 @@ import type { TagResource } from '@/types/contacts';
 import { AuthGuard } from '@/components/auth/AuthGuard';
 import { DATE_FORMATS } from '@/lib/constants';
 
-// Helper components to reduce duplication
-// TODO: Implement PrimaryBadge when needed for primary field indicators
-// const PrimaryBadge = () => (
-//   <Badge variant='secondary' className='ml-2 text-xs'>
-//     Primary
-//   </Badge>
-// );
-
 const MetadataItem = ({ label, value }: { label: string; value: string }) => (
   <div className='flex items-center gap-2 text-sm'>
     <Calendar className='text-muted-foreground h-4 w-4' />

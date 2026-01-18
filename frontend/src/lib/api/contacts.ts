@@ -51,8 +51,8 @@ export async function fetchContacts(
   if (filters.tags?.length) {
     filters.tags.forEach(tag => {
       // Convert tag to integer ID if it's a string representation
-      const tagId = typeof tag === 'string' ? parseInt(tag, 10) : tag;
-      if (!isNaN(tagId)) {
+      const tagId = typeof tag === 'string' ? Number.parseInt(tag, 10) : tag;
+      if (!Number.isNaN(tagId)) {
         params.append('tag_ids', tagId.toString());
       }
     });
@@ -284,9 +284,9 @@ export function useSearchContacts(
     queryKey: contactKeys.search(`${query}-${JSON.stringify(options)}`),
     queryFn: () => searchContacts(query, options),
     enabled:
-      queryOptions.enabled !== undefined
-        ? queryOptions.enabled
-        : query.length > 0,
+      queryOptions.enabled === undefined
+        ? query.length > 0
+        : queryOptions.enabled,
     staleTime: 2 * 60 * 1000, // 2 minutes for search results
   });
 }
