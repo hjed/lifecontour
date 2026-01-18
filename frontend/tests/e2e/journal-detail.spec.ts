@@ -244,27 +244,21 @@ test.describe('Journal Detail Page', () => {
         await expect(eventSection).toBeVisible();
         await eventSection.click();
 
-        // Wait for the section content to be visible
-        await page.waitForTimeout(500); // Wait for animation
-
-        // Look for the Edit button in the event section
+        // Wait for the Edit button to be visible (indicates section is expanded)
         const editButton = page.getByRole('button', { name: /edit/i }).first();
+        await expect(editButton).toBeVisible();
 
-        // Only proceed if edit button is visible
-        if (await editButton.isVisible()) {
-          await editButton.click();
+        // Click the edit button
+        await editButton.click();
 
-          // Verify we're in edit mode - look for Save/Cancel buttons
-          const saveButton = page
-            .getByRole('button', { name: /save/i })
-            .first();
-          const cancelButton = page
-            .getByRole('button', { name: /cancel/i })
-            .first();
+        // Verify we're in edit mode - look for Save/Cancel buttons
+        const saveButton = page.getByRole('button', { name: /save/i }).first();
+        const cancelButton = page
+          .getByRole('button', { name: /cancel/i })
+          .first();
 
-          await expect(saveButton).toBeVisible();
-          await expect(cancelButton).toBeVisible();
-        }
+        await expect(saveButton).toBeVisible();
+        await expect(cancelButton).toBeVisible();
       }
     });
 
@@ -311,10 +305,7 @@ test.describe('Journal Detail Page', () => {
       // Click to expand the section
       await moodSection.click();
 
-      // Wait for animation
-      await page.waitForTimeout(500);
-
-      // Verify mood-specific fields are visible
+      // Verify mood-specific fields are visible (indicates section is expanded)
       // These should be in the MoodRatingTypeEditor component
       await expect(
         page
