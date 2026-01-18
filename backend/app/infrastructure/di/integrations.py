@@ -139,17 +139,20 @@ class IntegrationProvider(Provider):
         )
 
     @provide(scope=Scope.REQUEST)
-    def provide_health_service(self, redis_pool: Redis) -> IntegrationHealthService:
+    def provide_health_service(
+        self, redis_pool: Redis, db_manager: IntegrationDatabaseManager
+    ) -> IntegrationHealthService:
         """
         Provide integration health service for request scope.
 
         Args:
             redis_pool: Redis connection pool
+            db_manager: Database manager for job statistics
 
         Returns:
             IntegrationHealthService: Health service instance
         """
-        return IntegrationHealthService(redis_pool=redis_pool)
+        return IntegrationHealthService(redis_pool=redis_pool, db_manager=db_manager)
 
     @provide
     def provide_redis_settings(self, settings: Settings) -> RedisSettings:

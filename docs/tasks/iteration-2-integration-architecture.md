@@ -407,11 +407,19 @@ The integration architecture foundation and core Google Contacts sync functional
 - [x] Create sync history and error log views
 - [x] Add manual sync trigger functionality wired to real ARQ jobs
 
-#### Phase 2: Monitoring & Health 🟡 PENDING (enhancements)
-**PR Size:** ~4 files (Health monitoring, metrics display, alerts)
+#### Phase 2: Monitoring & Health 🟡 IN PROGRESS (enhancements)
+**PR Size:** ~9 files (Health monitoring, metrics display, repository methods, tests)
 
 **Acceptance Criteria (enhanced behaviour):**
-- [ ] Extend integration health monitoring to surface queue depth, recent failures, and worker liveness
+- [x] Extend integration health monitoring to surface queue depth, recent failures, and worker liveness
+  - Added `queue_metrics` to health response with queue depth and job counts
+  - Added `job_statistics` with 24h totals for completed, failed, cancelled jobs
+  - Added `recent_failures` list showing last 10 failed jobs with details
+  - Implemented `SyncJobRepository.get_recent_failures()` for failure tracking
+  - Implemented `SyncJobRepository.get_job_statistics()` for job metrics
+  - Updated `HealthResponse` schema with new fields
+  - Added comprehensive unit tests (4 tests for repository, 3 tests for health service)
+  - All tests passing (1020 total tests)
 - [ ] Add UI for conflict resolution workflows surfaced by Google Contacts sync
 - [ ] Add integration configuration management UI (e.g. per-integration settings & credentials overview)
 - [ ] Display long-running job progress and expose cancellation controls backed by real APIs

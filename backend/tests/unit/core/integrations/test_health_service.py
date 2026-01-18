@@ -22,9 +22,18 @@ class TestIntegrationHealthService:
         return AsyncMock(spec=Redis)
 
     @pytest.fixture
-    def service(self, mock_redis_pool: AsyncMock) -> IntegrationHealthService:
+    def mock_db_manager(self) -> MagicMock:
+        """Create mock database manager."""
+        return MagicMock()
+
+    @pytest.fixture
+    def service(
+        self, mock_redis_pool: AsyncMock, mock_db_manager: MagicMock
+    ) -> IntegrationHealthService:
         """Create IntegrationHealthService instance."""
-        return IntegrationHealthService(redis_pool=mock_redis_pool)
+        return IntegrationHealthService(
+            redis_pool=mock_redis_pool, db_manager=mock_db_manager
+        )
 
     @pytest.mark.asyncio
     async def test_get_overall_health_all_healthy(
@@ -292,3 +301,200 @@ class TestIntegrationHealthService:
 
         # Verify it returns 0 on failure
         assert count == 0
+
+    @pytest.mark.asyncio
+    async def test_get_overall_health_includes_queue_metrics(
+        self, service: IntegrationHealthService, mock_redis_pool: AsyncMock
+    ):
+        """Test that overall health includes queue metrics."""
+        # Mock Redis responses
+        mock_redis_pool.ping = AsyncMock(return_value=True)
+        mock_redis_pool.info = AsyncMock(
+            return_value={
+                "used_memory_human": "1M",
+                "connected_clients": 5,
+            }
+        )
+        mock_redis_pool.llen = AsyncMock(return_value=10)
+
+        # Mock job statistics and failures
+        with (
+            patch.object(
+                service, "_get_job_statistics", new_callable=AsyncMock
+            ) as mock_stats,
+            patch.object(
+                service, "_get_recent_failures", new_callable=AsyncMock
+            ) as mock_failures,
+            patch("aiohttp.ClientSession") as mock_session_class,
+        ):
+            mock_stats.return_value = {
+                "total_jobs": 100,
+                "completed_jobs": 95,
+                "failed_jobs": 3,
+                "cancelled_jobs": 2,
+                "running_jobs": 2,
+                "queued_jobs": 5,
+                "retry_count": 0,
+            }
+            mock_failures.return_value = []
+
+            # Mock aiohttp session
+            mock_response = AsyncMock()
+            mock_response.status = 200
+            mock_response.__aenter__ = AsyncMock(return_value=mock_response)
+            mock_response.__aexit__ = AsyncMock(return_value=None)
+
+            mock_session = AsyncMock()
+            mock_session.get = MagicMock(return_value=mock_response)
+            mock_session.__aenter__ = AsyncMock(return_value=mock_session)
+            mock_session.__aexit__ = AsyncMock(return_value=None)
+            mock_session_class.return_value = mock_session
+
+            # Get overall health
+            health = await service.get_overall_health()
+
+            # Verify queue metrics are included
+            assert "queue_metrics" in health
+            assert health["queue_metrics"]["queue_depth"] == 10
+            assert health["queue_metrics"]["queued_jobs"] == 5
+            assert health["queue_metrics"]["running_jobs"] == 2
+
+    @pytest.mark.asyncio
+    async def test_get_overall_health_includes_job_statistics(
+        self, service: IntegrationHealthService, mock_redis_pool: AsyncMock
+    ):
+        """Test that overall health includes job statistics."""
+        # Mock Redis responses
+        mock_redis_pool.ping = AsyncMock(return_value=True)
+        mock_redis_pool.info = AsyncMock(
+            return_value={
+                "used_memory_human": "1M",
+                "connected_clients": 5,
+            }
+        )
+        mock_redis_pool.llen = AsyncMock(return_value=0)
+
+        # Mock job statistics and failures
+        with (
+            patch.object(
+                service, "_get_job_statistics", new_callable=AsyncMock
+            ) as mock_stats,
+            patch.object(
+                service, "_get_recent_failures", new_callable=AsyncMock
+            ) as mock_failures,
+            patch("aiohttp.ClientSession") as mock_session_class,
+        ):
+            mock_stats.return_value = {
+                "total_jobs": 100,
+                "completed_jobs": 90,
+                "failed_jobs": 8,
+                "cancelled_jobs": 2,
+                "running_jobs": 0,
+                "queued_jobs": 0,
+                "retry_count": 3,
+            }
+            mock_failures.return_value = []
+
+            # Mock aiohttp session
+            mock_response = AsyncMock()
+            mock_response.status = 200
+            mock_response.__aenter__ = AsyncMock(return_value=mock_response)
+            mock_response.__aexit__ = AsyncMock(return_value=None)
+
+            mock_session = AsyncMock()
+            mock_session.get = MagicMock(return_value=mock_response)
+            mock_session.__aenter__ = AsyncMock(return_value=mock_session)
+            mock_session.__aexit__ = AsyncMock(return_value=None)
+            mock_session_class.return_value = mock_session
+
+            # Get overall health
+            health = await service.get_overall_health()
+
+            # Verify job statistics are included
+            assert "job_statistics" in health
+            assert health["job_statistics"]["total_jobs_24h"] == 100
+            assert health["job_statistics"]["completed_jobs_24h"] == 90
+            assert health["job_statistics"]["failed_jobs_24h"] == 8
+            assert health["job_statistics"]["cancelled_jobs_24h"] == 2
+            assert health["job_statistics"]["retry_count_24h"] == 3
+
+    @pytest.mark.asyncio
+    async def test_get_overall_health_includes_recent_failures(
+        self, service: IntegrationHealthService, mock_redis_pool: AsyncMock
+    ):
+        """Test that overall health includes recent failures."""
+        # Mock Redis responses
+        mock_redis_pool.ping = AsyncMock(return_value=True)
+        mock_redis_pool.info = AsyncMock(
+            return_value={
+                "used_memory_human": "1M",
+                "connected_clients": 5,
+            }
+        )
+        mock_redis_pool.llen = AsyncMock(return_value=0)
+
+        # Mock job statistics and failures
+        from datetime import UTC, datetime
+
+        with (
+            patch.object(
+                service, "_get_job_statistics", new_callable=AsyncMock
+            ) as mock_stats,
+            patch.object(
+                service, "_get_recent_failures", new_callable=AsyncMock
+            ) as mock_failures,
+            patch("aiohttp.ClientSession") as mock_session_class,
+        ):
+            mock_stats.return_value = {
+                "total_jobs": 10,
+                "completed_jobs": 8,
+                "failed_jobs": 2,
+                "cancelled_jobs": 0,
+                "running_jobs": 0,
+                "queued_jobs": 0,
+                "retry_count": 0,
+            }
+            mock_failures.return_value = [
+                {
+                    "job_id": "job-1",
+                    "user_id": "user-1",
+                    "sync_type": "smart",
+                    "error_message": "Connection timeout",
+                    "created_at": datetime.now(UTC).isoformat(),
+                    "failed_at": datetime.now(UTC).isoformat(),
+                },
+                {
+                    "job_id": "job-2",
+                    "user_id": "user-2",
+                    "sync_type": "full",
+                    "error_message": "API rate limit exceeded",
+                    "created_at": datetime.now(UTC).isoformat(),
+                    "failed_at": datetime.now(UTC).isoformat(),
+                },
+            ]
+
+            # Mock aiohttp session
+            mock_response = AsyncMock()
+            mock_response.status = 200
+            mock_response.__aenter__ = AsyncMock(return_value=mock_response)
+            mock_response.__aexit__ = AsyncMock(return_value=None)
+
+            mock_session = AsyncMock()
+            mock_session.get = MagicMock(return_value=mock_response)
+            mock_session.__aenter__ = AsyncMock(return_value=mock_session)
+            mock_session.__aexit__ = AsyncMock(return_value=None)
+            mock_session_class.return_value = mock_session
+
+            # Get overall health
+            health = await service.get_overall_health()
+
+            # Verify recent failures are included
+            assert "recent_failures" in health
+            assert len(health["recent_failures"]) == 2
+            assert health["recent_failures"][0]["job_id"] == "job-1"
+            assert health["recent_failures"][0]["error_message"] == "Connection timeout"
+            assert health["recent_failures"][1]["job_id"] == "job-2"
+            assert (
+                health["recent_failures"][1]["error_message"]
+                == "API rate limit exceeded"
+            )

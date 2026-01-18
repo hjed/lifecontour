@@ -15,11 +15,22 @@ import structlog
 from authlib.common.security import generate_token
 from authlib.integrations.starlette_client import OAuth
 from fastapi import HTTPException, Request, status
+from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.infrastructure.auth.models import OAuthUserInfo
 from app.infrastructure.config import Settings
 
 logger = structlog.get_logger()
+
+# OAuth error messages
+OAUTH_STATE_DECODE_ERROR = "Failed to decode OAuth state"
+OAUTH_REDIRECT_URI_MISMATCH = "OAuth redirect URI mismatch"
+
+# OAuth scopes
+OAUTH_BASIC_SCOPE = "openid email profile"
+GOOGLE_CONTACTS_SCOPE = (
+    "openid email profile https://www.googleapis.com/auth/contacts.readonly"
+)
 
 
 class OAuthService:
@@ -74,7 +85,7 @@ class OAuthService:
             return state_data
         except (ValueError, json.JSONDecodeError, Exception) as e:
             logger.warning(
-                "Failed to decode OAuth state",
+                OAUTH_STATE_DECODE_ERROR,
                 error=str(e),
                 has_state=bool(encoded_state),
             )
@@ -112,7 +123,7 @@ class OAuthService:
                     client_secret=self.settings.microsoft_client_secret,
                     authorize_url="https://login.microsoftonline.com/common/oauth2/v2.0/authorize",
                     access_token_url="https://login.microsoftonline.com/common/oauth2/v2.0/token",
-                    client_kwargs={"scope": "openid email profile"},
+                    client_kwargs={"scope": OAUTH_BASIC_SCOPE},
                     code_challenge_method="S256",
                 )
                 logger.info("Configured Microsoft OAuth provider with PKCE")
@@ -148,7 +159,7 @@ class OAuthService:
                     client_secret=self.settings.google_client_secret,
                     authorize_url="https://accounts.google.com/o/oauth2/v2/auth",
                     access_token_url="https://oauth2.googleapis.com/token",
-                    client_kwargs={"scope": "openid email profile"},
+                    client_kwargs={"scope": OAUTH_BASIC_SCOPE},
                     code_challenge_method="S256",
                 )
                 logger.info("Configured Google OAuth provider with PKCE")
@@ -167,7 +178,7 @@ class OAuthService:
         ):
             try:
                 # Build client kwargs with userinfo URL if available
-                client_kwargs = {"scope": "openid email profile"}
+                client_kwargs = {"scope": OAUTH_BASIC_SCOPE}
                 if self.settings.oauth_userinfo_url:
                     client_kwargs["userinfo_endpoint"] = (
                         self.settings.oauth_userinfo_url
@@ -259,7 +270,7 @@ class OAuthService:
             # Re-raise HTTPException from _decode_state
             raise
         except Exception as e:
-            logger.error("Failed to decode OAuth state in callback", error=str(e))
+            logger.error(OAUTH_STATE_DECODE_ERROR, error=str(e), context="callback")
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Invalid OAuth state parameter",
@@ -325,9 +336,7 @@ class OAuthService:
             # Re-raise HTTPException from _decode_state
             raise
         except Exception as e:
-            logger.error(
-                "Failed to decode OAuth state", error=str(e), has_state=bool(state)
-            )
+            logger.error(OAUTH_STATE_DECODE_ERROR, error=str(e), has_state=bool(state))
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Invalid OAuth state parameter",
@@ -373,14 +382,14 @@ class OAuthService:
         # Validate redirect URI matches the one encoded in state
         if redirect_uri != state_redirect_uri:
             logger.warning(
-                "OAuth redirect URI mismatch",
+                OAUTH_REDIRECT_URI_MISMATCH,
                 requested_redirect_uri=redirect_uri,
                 state_redirect_uri=state_redirect_uri,
                 provider=provider,
             )
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="OAuth redirect URI mismatch",
+                detail=OAUTH_REDIRECT_URI_MISMATCH,
             )
 
         if provider not in self.oauth._clients:
@@ -622,7 +631,7 @@ class OAuthService:
             redirect_uri,
             state=encoded_state,
             code_verifier=code_verifier,
-            scope="openid email profile https://www.googleapis.com/auth/contacts.readonly",
+            scope=GOOGLE_CONTACTS_SCOPE,
             access_type="offline",  # Request refresh token
             prompt="consent",  # Force consent to get refresh token
         )
@@ -661,7 +670,7 @@ class OAuthService:
             csrf_token = decoded_state["csrf_token"]
             state_redirect_uri = decoded_state["redirect_uri"]
         except Exception as e:
-            logger.warning("Failed to decode OAuth state", error=str(e))
+            logger.warning(OAUTH_STATE_DECODE_ERROR, error=str(e))
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Invalid state parameter",
@@ -685,14 +694,14 @@ class OAuthService:
         # Validate redirect URI matches the one encoded in state
         if redirect_uri != state_redirect_uri:
             logger.warning(
-                "OAuth redirect URI mismatch",
+                OAUTH_REDIRECT_URI_MISMATCH,
                 requested_redirect_uri=redirect_uri,
                 state_redirect_uri=state_redirect_uri,
                 provider=provider,
             )
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="OAuth redirect URI mismatch",
+                detail=OAUTH_REDIRECT_URI_MISMATCH,
             )
 
         # Get code verifier from session
@@ -771,54 +780,104 @@ class OAuthService:
                 detail=f"Failed to exchange authorization code: {str(e)}",
             ) from e
 
-    async def disconnect_google_contacts(self, user_id: str) -> bool:
+    async def disconnect_google_contacts(
+        self, user_id: str, connection: AsyncConnection
+    ) -> bool:
         """
         Disconnect Google Contacts integration for a user.
 
+        This removes the stored OAuth tokens from the database. Note that this
+        does not revoke the tokens with Google - the tokens will remain valid
+        until they expire, but the user will need to re-authenticate to use
+        the integration again.
+
         Args:
             user_id: User ID to disconnect integration for
+            connection: Database connection for deleting tokens
 
         Returns:
-            False - feature not yet implemented
+            True if tokens were deleted, False if no tokens existed
         """
-        # TODO: Implement actual token storage and removal
-        # For now, this is a placeholder that indicates the feature is not implemented
-        # In a real implementation, this would:
-        # 1. Check if user has stored Google Contacts tokens
-        # 2. Revoke the tokens with Google
-        # 3. Remove tokens from storage
-        # 4. Return success/failure status
+        from sqlalchemy import text
 
-        logger.warning(
-            "Google Contacts disconnect not implemented; returning False",
-            user_id=user_id,
-        )
+        try:
+            # Delete user's Google auth tokens
+            stmt = text("""
+                DELETE FROM user_google_auth
+                WHERE user_id = :user_id
+            """)
 
-        # Return False to indicate the feature is not implemented
-        # This prevents false success responses when there's nothing to disconnect
-        return False
+            result = await connection.execute(stmt, {"user_id": user_id})
+            deleted_count = result.rowcount
 
-    async def is_google_contacts_connected(self, user_id: str) -> bool:
+            if deleted_count > 0:
+                logger.info(
+                    "Google Contacts OAuth tokens deleted",
+                    user_id=user_id,
+                    deleted_count=deleted_count,
+                )
+                return True
+            else:
+                logger.info(
+                    "No Google Contacts OAuth tokens found to delete",
+                    user_id=user_id,
+                )
+                return False
+
+        except Exception as e:
+            logger.error(
+                "Failed to disconnect Google Contacts",
+                user_id=user_id,
+                error=str(e),
+            )
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to disconnect Google Contacts integration",
+            ) from e
+
+    async def is_google_contacts_connected(
+        self, user_id: str, connection: AsyncConnection
+    ) -> bool:
         """
         Check if Google Contacts integration is connected for a user.
 
         Args:
             user_id: User ID to check connection status for
+            connection: Database connection for querying token storage
 
         Returns:
-            False - feature not yet implemented (no token storage)
+            True if user has Google Contacts tokens stored, False otherwise
         """
-        # TODO: Implement actual token storage check
-        # For now, this is a placeholder that indicates no connection exists
-        # In a real implementation, this would:
-        # 1. Check if user has stored Google Contacts tokens
-        # 2. Optionally validate the tokens are not expired
-        # 3. Return True if valid tokens exist, False otherwise
+        from sqlalchemy import text
 
-        logger.debug(
-            "Google Contacts connection check - not implemented; returning False",
-            user_id=user_id,
-        )
+        try:
+            # Query user_google_auth table to check if user has tokens
+            stmt = text("""
+                SELECT user_id, google_account_email
+                FROM user_google_auth
+                WHERE user_id = :user_id
+                LIMIT 1
+            """)
 
-        # Return False since token storage is not yet implemented
-        return False
+            result = await connection.execute(stmt, {"user_id": user_id})
+            row = result.fetchone()
+
+            has_tokens = row is not None
+
+            logger.debug(
+                "Google Contacts connection check",
+                user_id=user_id,
+                has_tokens=has_tokens,
+            )
+
+            return has_tokens
+
+        except Exception as e:
+            logger.error(
+                "Failed to check Google Contacts connection",
+                user_id=user_id,
+                error=str(e),
+                exc_info=True,
+            )
+            # Return False on error to avoid breaking the UI
+            return False
