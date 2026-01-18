@@ -393,12 +393,34 @@ class TestIntegrationsControllers:
             assert len(data["errors"]) > 0
             assert "Invalid authorization code" in data["errors"][0]["detail"]
 
-    def test_google_contacts_oauth_disconnect_not_implemented(self, client: TestClient):
-        """Test Google Contacts OAuth disconnect (not implemented)."""
+    def test_google_contacts_oauth_disconnect_success(self, client: TestClient):
+        """Test Google Contacts OAuth disconnect successfully deletes tokens."""
         with patch(
             "app.infrastructure.auth.oauth_service.OAuthService.disconnect_google_contacts"
         ) as mock_disconnect:
-            # Mock not implemented (returns False)
+            # Mock successful disconnect (returns True)
+            mock_disconnect.return_value = True
+
+            # Make request
+            response = client.delete(
+                "/api/integrations/google/contacts/oauth/disconnect"
+            )
+
+            # Verify response
+            assert response.status_code == 200
+            data = response.json()
+            assert data["success"] is True
+            assert "disconnected successfully" in data["message"]
+
+            # Verify service was called
+            mock_disconnect.assert_called_once()
+
+    def test_google_contacts_oauth_disconnect_no_tokens(self, client: TestClient):
+        """Test Google Contacts OAuth disconnect when no tokens exist."""
+        with patch(
+            "app.infrastructure.auth.oauth_service.OAuthService.disconnect_google_contacts"
+        ) as mock_disconnect:
+            # Mock no tokens found (returns False)
             mock_disconnect.return_value = False
 
             # Make request
@@ -410,7 +432,7 @@ class TestIntegrationsControllers:
             assert response.status_code == 200
             data = response.json()
             assert data["success"] is False
-            assert "not yet implemented" in data["message"]
+            assert "No Google Contacts connection found" in data["message"]
 
             # Verify service was called
             mock_disconnect.assert_called_once()
