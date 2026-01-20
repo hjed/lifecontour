@@ -71,6 +71,199 @@ def _get_current_user_id() -> str:
     return user.id
 
 
+def _journal_to_search_result(journal: Journal) -> Any:
+    """
+    Convert a Journal entity to a JournalSearchResult.
+
+    Args:
+        journal: The journal entity to convert
+
+    Returns:
+        JournalSearchResult with basic journal information
+    """
+    from app.mcp.domains.journals.schemas import (
+        EventDateRangeSchema,
+        JournalSearchResult,
+    )
+
+    return JournalSearchResult(
+        id=journal.id or 0,
+        title=journal.title,
+        content_excerpt=journal.content[:200] + "..."
+        if len(journal.content) > 200
+        else journal.content,
+        event_date_range=EventDateRangeSchema(
+            start=journal.event_date_range.start,
+            end=journal.event_date_range.end,
+        ),
+        types=[],
+        tags=[],
+        highlighted={},
+        summary=f"Journal: {journal.title}",
+    )
+
+
+async def _fetch_contact_relationships_with_names(
+    journal_id: int,
+    contact_relationship_repo: SqlJournalContactRelationshipRepository,
+    contact_repo: SqlContactRepository,
+) -> list[tuple[int, str, str]]:
+    """
+    Fetch contact relationships with contact names for a journal.
+
+    Args:
+        journal_id: The journal ID to fetch relationships for
+        contact_relationship_repo: Contact relationship repository
+        contact_repo: Contact repository
+
+    Returns:
+        List of tuples (contact_id, contact_name, relationship_type)
+    """
+    contact_relationships = await contact_relationship_repo.get_by_journal(journal_id)
+
+    contacts: list[tuple[int, str, str]] = []
+    for rel in contact_relationships:
+        contact = await contact_repo.find_by_id(rel.contact_id)
+        if contact:
+            contact_name = f"{contact.first_name} {contact.last_name}".strip()
+            if not contact_name:
+                contact_name = f"Contact {rel.contact_id}"
+            contacts.append((rel.contact_id, contact_name, rel.relationship_type.value))
+
+    return contacts
+
+
+async def _fetch_journal_types_and_data(
+    journal_id: int,
+    calendar_info_repo: SqlCalendarInfoRepository,
+    mood_data_repo: SqlMoodDataRepository,
+    plan_data_repo: SqlPlanDataRepository,
+    travel_data_repo: SqlTravelDataRepository,
+    photo_album_data_repo: SqlPhotoAlbumDataRepository,
+) -> tuple[list[str], dict[str, Any]]:
+    """
+    Fetch all type-specific data for a journal.
+
+    Args:
+        journal_id: The journal ID to fetch data for
+        calendar_info_repo: Calendar info repository
+        mood_data_repo: Mood data repository
+        plan_data_repo: Plan data repository
+        travel_data_repo: Travel data repository
+        photo_album_data_repo: Photo album data repository
+
+    Returns:
+        Tuple of (types list, type_data dict)
+    """
+    types: list[str] = []
+    type_data: dict[str, Any] = {}
+
+    # Check each type-specific data table to determine journal types
+    calendar_info = await calendar_info_repo.find_by_journal_id(journal_id)
+    if calendar_info:
+        types.append(JournalType.EVENT.value)
+        type_data[JournalType.EVENT.value] = {
+            "calendar_id": str(calendar_info.calendar_id),
+            "start_time": calendar_info.start_time.isoformat()
+            if calendar_info.start_time
+            else None,
+            "end_time": calendar_info.end_time.isoformat()
+            if calendar_info.end_time
+            else None,
+            "is_all_day": calendar_info.is_all_day,
+            "location": calendar_info.location,
+            "sync_invitees": calendar_info.sync_invitees,
+        }
+
+    mood_data = await mood_data_repo.find_by_journal_id(journal_id)
+    if mood_data:
+        types.append(JournalType.MOOD_RATING.value)
+        type_data[JournalType.MOOD_RATING.value] = {
+            "mood_value": mood_data.mood_value,
+            "mood_label": mood_data.mood_label,
+            "energy_level": mood_data.energy_level,
+        }
+
+    plan_data = await plan_data_repo.find_by_journal_id(journal_id)
+    if plan_data:
+        types.append(JournalType.PLAN.value)
+        type_data[JournalType.PLAN.value] = {
+            "documents": [
+                {
+                    "title": doc.title,
+                    "url": doc.url,
+                    "description": doc.description,
+                }
+                for doc in plan_data.documents
+            ]
+            if plan_data.documents
+            else [],
+        }
+
+    travel_data = await travel_data_repo.find_by_journal_id(journal_id)
+    if travel_data:
+        types.append(JournalType.TRAVEL.value)
+        type_data[JournalType.TRAVEL.value] = {
+            "flights": [
+                {
+                    "airline": flight.airline,
+                    "flight_number": flight.flight_number,
+                    "departure_airport": flight.departure_airport,
+                    "arrival_airport": flight.arrival_airport,
+                    "departure_time": flight.departure_time.isoformat()
+                    if flight.departure_time
+                    else None,
+                    "arrival_time": flight.arrival_time.isoformat()
+                    if flight.arrival_time
+                    else None,
+                    "booking_reference": flight.booking_reference,
+                }
+                for flight in travel_data.flights
+            ]
+            if travel_data.flights
+            else [],
+            "accommodations": [
+                {
+                    "name": acc.name,
+                    "address": acc.address,
+                    "check_in_date": acc.check_in_date.isoformat()
+                    if acc.check_in_date
+                    else None,
+                    "check_out_date": acc.check_out_date.isoformat()
+                    if acc.check_out_date
+                    else None,
+                    "booking_reference": acc.booking_reference,
+                }
+                for acc in travel_data.accommodations
+            ]
+            if travel_data.accommodations
+            else [],
+            "transportation": [
+                {
+                    "type": trans.type,
+                    "details": trans.details,
+                    "booking_reference": trans.booking_reference,
+                }
+                for trans in travel_data.transportation
+            ]
+            if travel_data.transportation
+            else [],
+        }
+
+    photo_album_data = await photo_album_data_repo.find_by_journal_id(journal_id)
+    if photo_album_data:
+        types.append(JournalType.PHOTO_ALBUM.value)
+        type_data[JournalType.PHOTO_ALBUM.value] = {
+            "immich_album_id": str(photo_album_data.immich_album_id),
+        }
+
+    # If no types found, it's a NOTE
+    if not types:
+        types.append(JournalType.NOTE.value)
+
+    return types, type_data
+
+
 def register_journal_tools(mcp: FastMCP[None]) -> None:
     """
     Register journal-related MCP tools with the FastMCP server.
@@ -325,129 +518,20 @@ def register_journal_tools(mcp: FastMCP[None]) -> None:
             children = await journal_repo.get_children(journal_id)
 
         # Fetch types and type-specific data
-        types: list[str] = []
-        type_data: dict[str, Any] = {}
-
-        # Check each type-specific data table to determine journal types
-        calendar_info = await calendar_info_repo.find_by_journal_id(journal_id)
-        if calendar_info:
-            types.append(JournalType.EVENT.value)
-            type_data[JournalType.EVENT.value] = {
-                "calendar_id": str(calendar_info.calendar_id),
-                "start_time": calendar_info.start_time.isoformat()
-                if calendar_info.start_time
-                else None,
-                "end_time": calendar_info.end_time.isoformat()
-                if calendar_info.end_time
-                else None,
-                "is_all_day": calendar_info.is_all_day,
-                "location": calendar_info.location,
-                "sync_invitees": calendar_info.sync_invitees,
-            }
-
-        mood_data = await mood_data_repo.find_by_journal_id(journal_id)
-        if mood_data:
-            types.append(JournalType.MOOD_RATING.value)
-            type_data[JournalType.MOOD_RATING.value] = {
-                "mood_value": mood_data.mood_value,
-                "mood_label": mood_data.mood_label,
-                "energy_level": mood_data.energy_level,
-            }
-
-        plan_data = await plan_data_repo.find_by_journal_id(journal_id)
-        if plan_data:
-            types.append(JournalType.PLAN.value)
-            type_data[JournalType.PLAN.value] = {
-                "documents": [
-                    {
-                        "title": doc.title,
-                        "url": doc.url,
-                        "description": doc.description,
-                    }
-                    for doc in plan_data.documents
-                ]
-                if plan_data.documents
-                else [],
-            }
-
-        travel_data = await travel_data_repo.find_by_journal_id(journal_id)
-        if travel_data:
-            types.append(JournalType.TRAVEL.value)
-            type_data[JournalType.TRAVEL.value] = {
-                "flights": [
-                    {
-                        "airline": flight.airline,
-                        "flight_number": flight.flight_number,
-                        "departure_airport": flight.departure_airport,
-                        "arrival_airport": flight.arrival_airport,
-                        "departure_time": flight.departure_time.isoformat()
-                        if flight.departure_time
-                        else None,
-                        "arrival_time": flight.arrival_time.isoformat()
-                        if flight.arrival_time
-                        else None,
-                        "booking_reference": flight.booking_reference,
-                    }
-                    for flight in travel_data.flights
-                ]
-                if travel_data.flights
-                else [],
-                "accommodations": [
-                    {
-                        "name": acc.name,
-                        "address": acc.address,
-                        "check_in_date": acc.check_in_date.isoformat()
-                        if acc.check_in_date
-                        else None,
-                        "check_out_date": acc.check_out_date.isoformat()
-                        if acc.check_out_date
-                        else None,
-                        "booking_reference": acc.booking_reference,
-                    }
-                    for acc in travel_data.accommodations
-                ]
-                if travel_data.accommodations
-                else [],
-                "transportation": [
-                    {
-                        "type": trans.type,
-                        "details": trans.details,
-                        "booking_reference": trans.booking_reference,
-                    }
-                    for trans in travel_data.transportation
-                ]
-                if travel_data.transportation
-                else [],
-            }
-
-        photo_album_data = await photo_album_data_repo.find_by_journal_id(journal_id)
-        if photo_album_data:
-            types.append(JournalType.PHOTO_ALBUM.value)
-            type_data[JournalType.PHOTO_ALBUM.value] = {
-                "immich_album_id": str(photo_album_data.immich_album_id),
-            }
-
-        # If no types found, it's a NOTE
-        if not types:
-            types.append(JournalType.NOTE.value)
+        types, type_data = await _fetch_journal_types_and_data(
+            journal_id,
+            calendar_info_repo,
+            mood_data_repo,
+            plan_data_repo,
+            travel_data_repo,
+            photo_album_data_repo,
+        )
 
         # Fetch contact relationships and contact details
-        contact_relationships = await contact_relationship_repo.get_by_journal(
-            journal_id
-        )
         contact_repo = SqlContactRepository(db_connection)
-
-        # Build contact tuples with names (id, name, relationship_type)
-        contacts: list[tuple[int, str, str]] = []
-        for rel in contact_relationships:
-            contact = await contact_repo.find_by_id(rel.contact_id)
-            if contact:
-                contact_name = f"{contact.first_name} {contact.last_name}".strip()
-                if not contact_name:
-                    contact_name = f"Contact {rel.contact_id}"
-                contacts.append(
-                    (rel.contact_id, contact_name, rel.relationship_type.value)
-                )
+        contacts = await _fetch_contact_relationships_with_names(
+            journal_id, contact_relationship_repo, contact_repo
+        )
 
         # Fetch tags
         journal_tags = await tag_repo.get_tags_for_journal(journal_id)
@@ -530,30 +614,9 @@ def register_journal_tools(mcp: FastMCP[None]) -> None:
         )
 
         # Convert to search results
-        from app.mcp.domains.journals.schemas import (
-            EventDateRangeSchema,
-            JournalSearchResponse,
-            JournalSearchResult,
-        )
+        from app.mcp.domains.journals.schemas import JournalSearchResponse
 
-        results = []
-        for journal in journals:
-            result = JournalSearchResult(
-                id=journal.id or 0,
-                title=journal.title,
-                content_excerpt=journal.content[:200] + "..."
-                if len(journal.content) > 200
-                else journal.content,
-                event_date_range=EventDateRangeSchema(
-                    start=journal.event_date_range.start,
-                    end=journal.event_date_range.end,
-                ),
-                types=[],
-                tags=[],
-                highlighted={},
-                summary=f"Journal: {journal.title}",
-            )
-            results.append(result)
+        results = [_journal_to_search_result(journal) for journal in journals]
 
         response = JournalSearchResponse(
             results=results,
@@ -598,15 +661,19 @@ def register_journal_tools(mcp: FastMCP[None]) -> None:
         Raises:
             JournalNotFoundError: If the journal with the given ID does not exist
         """
+        # Explicitly reject unsupported delete_children behavior to avoid silent misuse
+        if delete_children:
+            raise NotImplementedError(
+                "The 'delete_children' flag is not yet supported. "
+                "Child journals are not deleted automatically."
+            )
+
         # Create repositories
         journal_repo = SqlJournalRepository(db_connection)
         journal_service = JournalService(journal_repo, event_publisher)
 
         # Delete journal
         await journal_service.delete_journal(journal_id, db_connection)
-
-        # TODO: Handle delete_children flag
-        # This will be implemented in the next iteration
 
         from pydantic import BaseModel
 
@@ -670,30 +737,9 @@ def register_journal_tools(mcp: FastMCP[None]) -> None:
                 journals.append(journal)
 
         # Convert to search results
-        from app.mcp.domains.journals.schemas import (
-            EventDateRangeSchema,
-            JournalSearchResponse,
-            JournalSearchResult,
-        )
+        from app.mcp.domains.journals.schemas import JournalSearchResponse
 
-        results = []
-        for journal in journals:
-            result = JournalSearchResult(
-                id=journal.id or 0,
-                title=journal.title,
-                content_excerpt=journal.content[:200] + "..."
-                if len(journal.content) > 200
-                else journal.content,
-                event_date_range=EventDateRangeSchema(
-                    start=journal.event_date_range.start,
-                    end=journal.event_date_range.end,
-                ),
-                types=[],
-                tags=[],
-                highlighted={},
-                summary=f"Journal: {journal.title}",
-            )
-            results.append(result)
+        results = [_journal_to_search_result(journal) for journal in journals]
 
         response = JournalSearchResponse(
             results=results,

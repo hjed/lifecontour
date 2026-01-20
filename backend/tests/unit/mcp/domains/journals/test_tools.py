@@ -24,12 +24,6 @@ class TestJournalTools:
         register_journal_tools(mcp)
         return mcp
 
-    def test_register_journal_tools(self, mcp_server):
-        """Test that journal tools are registered successfully."""
-        # Tools are already registered in the mcp_server fixture
-        # If we get here without exceptions, registration was successful
-        assert True
-
     @pytest.mark.asyncio
     async def test_list_tools(self, mcp_server):
         """Test that journal tools are properly registered and listed."""
