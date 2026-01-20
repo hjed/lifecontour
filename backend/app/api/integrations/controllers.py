@@ -37,6 +37,7 @@ from app.core.integrations.database import IntegrationDatabaseManager
 from app.core.integrations.exceptions import JobNotFoundException
 from app.core.integrations.health_service import IntegrationHealthService
 from app.core.integrations.task_queue_service import TaskQueueService
+from app.infrastructure.auth.google_token_service import GoogleTokenService
 from app.infrastructure.auth.models import SessionUser
 from app.infrastructure.auth.oauth_service import OAuthService
 
@@ -568,6 +569,7 @@ async def google_contacts_oauth_callback(
     request: Request,
     user: FromDishka[SessionUser],
     oauth_service: FromDishka[OAuthService],
+    google_token_service: FromDishka[GoogleTokenService],
 ) -> OAuthCallbackResponse:
     """
     Handle OAuth callback for Google Contacts integration.
@@ -585,14 +587,37 @@ async def google_contacts_oauth_callback(
             request, callback_data.code, callback_data.state, callback_url
         )
 
+        # Get Google user email from access token
+        access_token = token_data.get("access_token")
+        if not access_token:
+            raise ValueError("No access token in OAuth response")
+
+        google_email = await oauth_service.get_google_user_email(access_token)
+
+        # Store tokens in database
+        refresh_token = token_data.get("refresh_token")
+        if not refresh_token:
+            raise ValueError("No refresh token in OAuth response")
+
+        expires_in = token_data.get("expires_in", 3600)
+
+        await google_token_service.store_tokens(
+            user_id=user.id,
+            google_email=google_email,
+            access_token=access_token,
+            refresh_token=refresh_token,
+            expires_in=expires_in,
+        )
+
         # Get redirect URL from session
         redirect_url = request.session.pop("integration_redirect_url", "/integrations")
 
         logger.info(
-            "Google Contacts OAuth callback successful",
+            "Google Contacts OAuth callback successful and tokens stored",
             user_id=user.id,
-            has_access_token=bool(token_data.get("access_token")),
-            has_refresh_token=bool(token_data.get("refresh_token")),
+            google_email=google_email,
+            has_access_token=bool(access_token),
+            has_refresh_token=bool(refresh_token),
         )
 
         return OAuthCallbackResponse(

@@ -7,7 +7,9 @@ Provides authentication-related services and user session management.
 import structlog
 from dishka import Provider, Scope, provide
 from fastapi import HTTPException, Request, status
+from sqlalchemy.ext.asyncio import AsyncConnection
 
+from app.infrastructure.auth.google_token_service import GoogleTokenService
 from app.infrastructure.auth.models import SessionUser
 from app.infrastructure.auth.oauth_service import OAuthService
 from app.infrastructure.config import Settings
@@ -22,6 +24,16 @@ class AuthProvider(Provider):
     def get_oauth_service(self, settings: Settings) -> OAuthService:
         """Get OAuth service instance for request scope."""
         return OAuthService(settings)
+
+    @provide(scope=Scope.REQUEST)
+    def get_google_token_service(
+        self, connection: AsyncConnection, settings: Settings
+    ) -> GoogleTokenService:
+        """Get Google Token service instance for request scope."""
+        return GoogleTokenService(
+            connection=connection,
+            encryption_key=settings.google_encryption_key,
+        )
 
     @provide(scope=Scope.REQUEST)
     def get_current_user(self, request: Request, settings: Settings) -> SessionUser:
