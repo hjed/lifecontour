@@ -11,7 +11,9 @@ import pytest
 from dishka import Provider, Scope, make_async_container, provide
 from dishka.integrations.fastapi import FastapiProvider, setup_dishka
 from fastapi.testclient import TestClient
+from sqlalchemy.ext.asyncio import AsyncConnection
 
+from app.infrastructure.auth.google_token_service import GoogleTokenService
 from app.infrastructure.auth.models import SessionUser
 from app.infrastructure.auth.oauth_service import OAuthService
 from app.infrastructure.config import Settings
@@ -55,6 +57,17 @@ class TestIntegrationsControllers:
             @provide(scope=Scope.REQUEST)
             def get_oauth_service(self, settings: Settings) -> OAuthService:
                 return OAuthService(settings)
+
+            @provide(scope=Scope.REQUEST)
+            def get_google_token_service(
+                self, connection: AsyncConnection, settings: Settings
+            ) -> GoogleTokenService:
+                """Get Google Token service instance for request scope."""
+                return GoogleTokenService(
+                    connection=connection,
+                    encryption_key=settings.google_encryption_key
+                    or "EQbCaxDnFZZ4_mrcOMbMPmgz9-NDcv3ZfxxmzPu0j0s=",
+                )
 
         # Create app with test settings
         app = create_app(settings=test_settings)
@@ -346,15 +359,24 @@ class TestIntegrationsControllers:
 
     def test_google_contacts_oauth_callback_success(self, client: TestClient):
         """Test successful Google Contacts OAuth callback."""
-        with patch(
-            "app.infrastructure.auth.oauth_service.OAuthService.handle_google_contacts_callback"
-        ) as mock_callback:
+        with (
+            patch(
+                "app.infrastructure.auth.oauth_service.OAuthService.handle_google_contacts_callback"
+            ) as mock_callback,
+            patch(
+                "app.infrastructure.auth.oauth_service.OAuthService.get_google_user_email"
+            ) as mock_get_email,
+            patch(
+                "app.infrastructure.auth.google_token_service.GoogleTokenService.store_tokens"
+            ) as mock_store_tokens,
+        ):
             # Mock successful callback handling
             mock_callback.return_value = {
                 "access_token": "test_access_token",
                 "refresh_token": "test_refresh_token",
-                "expires_at": "2024-12-31T23:59:59Z",
+                "expires_in": 3600,
             }
+            mock_get_email.return_value = "test@gmail.com"
 
             # Make request
             response = client.post(
@@ -369,8 +391,10 @@ class TestIntegrationsControllers:
             assert "Google Contacts connected successfully" in data["message"]
             assert data["redirect_url"] == "/integrations"
 
-            # Verify service was called
+            # Verify services were called
             mock_callback.assert_called_once()
+            mock_get_email.assert_called_once_with("test_access_token")
+            mock_store_tokens.assert_called_once()
 
     def test_google_contacts_oauth_callback_invalid_code(self, client: TestClient):
         """Test OAuth callback with invalid authorization code."""
