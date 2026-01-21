@@ -133,6 +133,104 @@ async def _fetch_contact_relationships_with_names(
     return contacts
 
 
+def _build_calendar_data(calendar_info: Any) -> dict[str, Any]:
+    """Build calendar event data dictionary."""
+    return {
+        "calendar_id": str(calendar_info.calendar_id),
+        "start_time": calendar_info.start_time.isoformat()
+        if calendar_info.start_time
+        else None,
+        "end_time": calendar_info.end_time.isoformat()
+        if calendar_info.end_time
+        else None,
+        "is_all_day": calendar_info.is_all_day,
+        "location": calendar_info.location,
+        "sync_invitees": calendar_info.sync_invitees,
+    }
+
+
+def _build_mood_data(mood_data: Any) -> dict[str, Any]:
+    """Build mood rating data dictionary."""
+    return {
+        "mood_value": mood_data.mood_value,
+        "mood_label": mood_data.mood_label,
+        "energy_level": mood_data.energy_level,
+    }
+
+
+def _build_plan_data(plan_data: Any) -> dict[str, Any]:
+    """Build plan data dictionary."""
+    return {
+        "documents": [
+            {
+                "title": doc.title,
+                "url": doc.url,
+                "description": doc.description,
+            }
+            for doc in plan_data.documents
+        ]
+        if plan_data.documents
+        else [],
+    }
+
+
+def _build_travel_data(travel_data: Any) -> dict[str, Any]:
+    """Build travel data dictionary."""
+    return {
+        "flights": [
+            {
+                "airline": flight.airline,
+                "flight_number": flight.flight_number,
+                "departure_airport": flight.departure_airport,
+                "arrival_airport": flight.arrival_airport,
+                "departure_time": flight.departure_time.isoformat()
+                if flight.departure_time
+                else None,
+                "arrival_time": flight.arrival_time.isoformat()
+                if flight.arrival_time
+                else None,
+                "booking_reference": flight.booking_reference,
+            }
+            for flight in travel_data.flights
+        ]
+        if travel_data.flights
+        else [],
+        "accommodations": [
+            {
+                "name": acc.name,
+                "address": acc.address,
+                "check_in_date": acc.check_in_date.isoformat()
+                if acc.check_in_date
+                else None,
+                "check_out_date": acc.check_out_date.isoformat()
+                if acc.check_out_date
+                else None,
+                "booking_reference": acc.booking_reference,
+            }
+            for acc in travel_data.accommodations
+        ]
+        if travel_data.accommodations
+        else [],
+        "transportation": [
+            {
+                "type": trans.type,
+                "details": trans.details,
+                "booking_reference": trans.booking_reference,
+            }
+            for trans in travel_data.transportation
+        ]
+        if travel_data.transportation
+        else [],
+    }
+
+
+def _build_photo_album_data(photo_album_data: Any) -> dict[str, Any]:
+    """Build photo album data dictionary."""
+    return {
+        "immich_album_id": str(photo_album_data.immich_album_id),
+    }
+
+
 async def _fetch_journal_types_and_data(
     journal_id: int,
     calendar_info_repo: SqlCalendarInfoRepository,
@@ -162,100 +260,29 @@ async def _fetch_journal_types_and_data(
     calendar_info = await calendar_info_repo.find_by_journal_id(journal_id)
     if calendar_info:
         types.append(JournalType.EVENT.value)
-        type_data[JournalType.EVENT.value] = {
-            "calendar_id": str(calendar_info.calendar_id),
-            "start_time": calendar_info.start_time.isoformat()
-            if calendar_info.start_time
-            else None,
-            "end_time": calendar_info.end_time.isoformat()
-            if calendar_info.end_time
-            else None,
-            "is_all_day": calendar_info.is_all_day,
-            "location": calendar_info.location,
-            "sync_invitees": calendar_info.sync_invitees,
-        }
+        type_data[JournalType.EVENT.value] = _build_calendar_data(calendar_info)
 
     mood_data = await mood_data_repo.find_by_journal_id(journal_id)
     if mood_data:
         types.append(JournalType.MOOD_RATING.value)
-        type_data[JournalType.MOOD_RATING.value] = {
-            "mood_value": mood_data.mood_value,
-            "mood_label": mood_data.mood_label,
-            "energy_level": mood_data.energy_level,
-        }
+        type_data[JournalType.MOOD_RATING.value] = _build_mood_data(mood_data)
 
     plan_data = await plan_data_repo.find_by_journal_id(journal_id)
     if plan_data:
         types.append(JournalType.PLAN.value)
-        type_data[JournalType.PLAN.value] = {
-            "documents": [
-                {
-                    "title": doc.title,
-                    "url": doc.url,
-                    "description": doc.description,
-                }
-                for doc in plan_data.documents
-            ]
-            if plan_data.documents
-            else [],
-        }
+        type_data[JournalType.PLAN.value] = _build_plan_data(plan_data)
 
     travel_data = await travel_data_repo.find_by_journal_id(journal_id)
     if travel_data:
         types.append(JournalType.TRAVEL.value)
-        type_data[JournalType.TRAVEL.value] = {
-            "flights": [
-                {
-                    "airline": flight.airline,
-                    "flight_number": flight.flight_number,
-                    "departure_airport": flight.departure_airport,
-                    "arrival_airport": flight.arrival_airport,
-                    "departure_time": flight.departure_time.isoformat()
-                    if flight.departure_time
-                    else None,
-                    "arrival_time": flight.arrival_time.isoformat()
-                    if flight.arrival_time
-                    else None,
-                    "booking_reference": flight.booking_reference,
-                }
-                for flight in travel_data.flights
-            ]
-            if travel_data.flights
-            else [],
-            "accommodations": [
-                {
-                    "name": acc.name,
-                    "address": acc.address,
-                    "check_in_date": acc.check_in_date.isoformat()
-                    if acc.check_in_date
-                    else None,
-                    "check_out_date": acc.check_out_date.isoformat()
-                    if acc.check_out_date
-                    else None,
-                    "booking_reference": acc.booking_reference,
-                }
-                for acc in travel_data.accommodations
-            ]
-            if travel_data.accommodations
-            else [],
-            "transportation": [
-                {
-                    "type": trans.type,
-                    "details": trans.details,
-                    "booking_reference": trans.booking_reference,
-                }
-                for trans in travel_data.transportation
-            ]
-            if travel_data.transportation
-            else [],
-        }
+        type_data[JournalType.TRAVEL.value] = _build_travel_data(travel_data)
 
     photo_album_data = await photo_album_data_repo.find_by_journal_id(journal_id)
     if photo_album_data:
         types.append(JournalType.PHOTO_ALBUM.value)
-        type_data[JournalType.PHOTO_ALBUM.value] = {
-            "immich_album_id": str(photo_album_data.immich_album_id),
-        }
+        type_data[JournalType.PHOTO_ALBUM.value] = _build_photo_album_data(
+            photo_album_data
+        )
 
     # If no types found, it's a NOTE
     if not types:
@@ -324,9 +351,6 @@ def register_journal_tools(mcp: FastMCP[None]) -> None:
 
         # Create repositories
         journal_repo = SqlJournalRepository(db_connection)
-        # tag_repo = SqlJournalTagRepository(db_connection)  # TODO: Use for tags
-        # contact_rel_repo = SqlJournalContactRelationshipRepository(db_connection)  # TODO: Use for relationships
-        # contact_repo = SqlContactRepository(db_connection)  # TODO: Use for contact validation
 
         # Create journal service
         journal_service = JournalService(journal_repo, event_publisher)
@@ -346,8 +370,9 @@ def register_journal_tools(mcp: FastMCP[None]) -> None:
         # Create journal
         created_journal = await journal_service.create_journal(journal, db_connection)
 
-        # TODO: Add types, type_data, contact_relationships, and tags
-        # This will be implemented in the next iteration
+        # Note: types, type_data, contact_relationships, and tags are accepted in the
+        # request schema but not yet persisted. This is tracked in the backlog and will
+        # be implemented when the type-specific repositories are integrated with MCP tools.
 
         # Convert to AI-friendly response
         response = JournalConverter.to_response(
@@ -440,8 +465,9 @@ def register_journal_tools(mcp: FastMCP[None]) -> None:
             existing_journal, changed_fields, db_connection
         )
 
-        # TODO: Update types, type_data, contact_relationships, and tags
-        # This will be implemented in the next iteration
+        # Note: types, type_data, contact_relationships, and tags are accepted in the
+        # request schema but not yet persisted. This is tracked in the backlog and will
+        # be implemented when the type-specific repositories are integrated with MCP tools.
 
         # Convert to AI-friendly response
         response = JournalConverter.to_response(

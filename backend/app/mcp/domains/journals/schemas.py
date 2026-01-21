@@ -10,6 +10,9 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+# Field description constants
+JOURNAL_TITLE_DESC = "Journal title"
+
 
 class EventDateRangeSchema(BaseModel):
     """AI-friendly event date range format."""
@@ -40,7 +43,7 @@ class JournalChildSummary(BaseModel):
     """AI-friendly child journal summary."""
 
     id: int = Field(description="Journal ID")
-    title: str = Field(description="Journal title")
+    title: str = Field(description=JOURNAL_TITLE_DESC)
     summary: str = Field(description="Brief summary of the child journal")
 
 
@@ -55,7 +58,7 @@ class JournalResponse(BaseModel):
 
     id: int = Field(description="Unique identifier for the journal")
 
-    title: str = Field(description="Journal title")
+    title: str = Field(description=JOURNAL_TITLE_DESC)
 
     content: str = Field(description="Journal content (markdown)")
 
@@ -104,7 +107,7 @@ class JournalSearchResult(BaseModel):
     """AI-friendly journal search result format."""
 
     id: int = Field(description="Journal ID")
-    title: str = Field(description="Journal title")
+    title: str = Field(description=JOURNAL_TITLE_DESC)
     content_excerpt: str = Field(description="Excerpt of journal content")
     event_date_range: EventDateRangeSchema = Field(description="Event date range")
     types: list[str] = Field(default_factory=list, description="Journal types")
@@ -134,7 +137,7 @@ class JournalSearchResponse(BaseModel):
 class JournalCreateRequest(BaseModel):
     """AI-friendly journal creation request format."""
 
-    title: str = Field(description="Journal title")
+    title: str = Field(description=JOURNAL_TITLE_DESC)
     content: str = Field(description="Journal content (markdown)")
     event_date_range: EventDateRangeSchema = Field(description="Event date range")
     types: list[str] = Field(default_factory=list, description="Journal types to add")
