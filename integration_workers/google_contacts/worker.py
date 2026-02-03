@@ -1144,11 +1144,10 @@ async def periodic_sync_all_accounts(ctx: dict[str, Any]) -> dict[str, Any]:
     try:
         # Create database session
         async with session_factory() as session:
-            # Query all active Google integrations
+            # Query all Google integrations (all accounts in table are considered active)
             stmt = text("""
                 SELECT user_id, google_account_email
                 FROM user_google_auth
-                WHERE is_active = true
                 ORDER BY user_id
             """)
             result = await session.execute(stmt)

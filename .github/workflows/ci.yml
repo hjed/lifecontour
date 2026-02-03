@@ -303,6 +303,20 @@ jobs:
       needs.changes.outputs.backend == 'true'
 
     services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: personal_management_test
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        options: >-
+          --health-cmd "pg_isready -U postgres -d personal_management_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
       redis:
         image: redis:7-alpine
         options: >-
@@ -328,8 +342,20 @@ jobs:
       - name: Install dependencies
         run: uv sync
 
+      - name: Run database migrations
+        working-directory: ./backend
+        env:
+          DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/personal_management_test
+        run: |
+          echo "Installing backend dependencies for migrations..."
+          uv sync
+          echo "Running database migrations..."
+          uv run alembic upgrade head
+          echo "Database migrations completed successfully"
+
       - name: Run integration tests
         env:
+          DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/personal_management_test
           REDIS_URL: redis://localhost:6379
         run: uv run pytest tests/integration/ -v --tb=short
 
