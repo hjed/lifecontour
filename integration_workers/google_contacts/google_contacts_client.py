@@ -222,11 +222,7 @@ class GoogleContactsAPIClient:
             )
 
             # Make the API call
-            result = (
-                service.people()
-                .createContact(body=contact_data)
-                .execute()
-            )
+            result = service.people().createContact(body=contact_data).execute()
 
             logger.info(
                 "Successfully created Google contact",
@@ -295,7 +291,9 @@ class GoogleContactsAPIClient:
             # Build request parameters
             # Extract field names from contact_data (excluding metadata, resourceName, and etag)
             excluded_fields = {"metadata", "resourceName", "etag"}
-            update_fields = [key for key in contact_data.keys() if key not in excluded_fields]
+            update_fields = [
+                key for key in contact_data.keys() if key not in excluded_fields
+            ]
 
             # Validate that we have fields to update
             if not update_fields:
