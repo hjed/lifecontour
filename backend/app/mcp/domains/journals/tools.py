@@ -38,6 +38,7 @@ from app.core.journal.models.journal_contact_relationship import (
 from app.core.journal.models.journal_relationship_types import (
     JournalContactRelationshipType,
 )
+from app.core.journal.models.journal_tag import JournalTag
 from app.core.journal.models.journal_types import JournalType
 from app.core.journal.models.mood_data import MoodData
 from app.core.journal.models.photo_album_data import PhotoAlbumData
@@ -387,6 +388,129 @@ async def _update_type_specific_data(
             await photo_album_data_repo.save(photo_album_data)
 
 
+async def _persist_contact_relationships(
+    journal_id: int,
+    contact_relationships: list[dict[str, Any]],
+    contact_relationship_repo: SqlJournalContactRelationshipRepository,
+) -> None:
+    """
+    Create contact relationships for a journal.
+
+    Args:
+        journal_id: The ID of the journal
+        contact_relationships: List of relationship dictionaries with contact_id and relationship_type
+        contact_relationship_repo: Repository for contact relationships
+    """
+    for rel_dict in contact_relationships:
+        try:
+            contact_id = rel_dict.get("contact_id")
+            relationship_type_str = rel_dict.get("relationship_type")
+
+            if contact_id and relationship_type_str:
+                # Convert relationship type string to enum
+                relationship_type = JournalContactRelationshipType[
+                    relationship_type_str.upper()
+                ]
+
+                # Create relationship
+                relationship = JournalContactRelationship(
+                    journal_id=journal_id,
+                    contact_id=contact_id,
+                    relationship_type=relationship_type,
+                )
+                await contact_relationship_repo.create(relationship)
+        except (ValueError, KeyError):
+            # Invalid relationship, skip
+            pass
+
+
+async def _persist_tags(
+    journal_id: int,
+    tags: list[str],
+    tag_repo: SqlJournalTagRepository,
+) -> None:
+    """
+    Find or create tags and assign them to a journal.
+
+    Args:
+        journal_id: The ID of the journal
+        tags: List of tag names
+        tag_repo: Repository for tags
+    """
+    from uuid import uuid4
+
+    for tag_name in tags:
+        try:
+            # Find or create tag by name
+            all_tags = await tag_repo.get_all()
+            tag: JournalTag | None = next(
+                (t for t in all_tags if t.name.lower() == tag_name.lower()),
+                None,
+            )
+
+            if not tag:
+                # Tag doesn't exist, create it
+                tag = JournalTag(
+                    id=uuid4(),
+                    name=tag_name,
+                    color="#808080",  # Default gray color
+                )
+                tag = await tag_repo.save(tag)
+
+            # Assign tag to journal (tag.id is guaranteed to be set after save)
+            if tag.id is not None:
+                await tag_repo.assign_tag(journal_id, tag.id)
+        except Exception:
+            # Error creating/assigning tag, skip
+            pass
+
+
+async def _fetch_enrichment_data(
+    journal_id: int,
+    calendar_info_repo: SqlCalendarInfoRepository,
+    mood_data_repo: SqlMoodDataRepository,
+    plan_data_repo: SqlPlanDataRepository,
+    travel_data_repo: SqlTravelDataRepository,
+    photo_album_data_repo: SqlPhotoAlbumDataRepository,
+    contact_relationship_repo: SqlJournalContactRelationshipRepository,
+    contact_repo: SqlContactRepository,
+    tag_repo: SqlJournalTagRepository,
+) -> tuple[list[str], dict[str, Any], list[tuple[int, str, str]], list[JournalTag]]:
+    """
+    Fetch all enrichment data for a journal (types, type_data, contacts, tags).
+
+    Args:
+        journal_id: The ID of the journal
+        calendar_info_repo: Repository for calendar info
+        mood_data_repo: Repository for mood data
+        plan_data_repo: Repository for plan data
+        travel_data_repo: Repository for travel data
+        photo_album_data_repo: Repository for photo album data
+        contact_relationship_repo: Repository for contact relationships
+        contact_repo: Repository for contacts
+        tag_repo: Repository for tags
+
+    Returns:
+        Tuple of (types, type_data, contacts, tags)
+    """
+    types, type_data = await _fetch_journal_types_and_data(
+        journal_id,
+        calendar_info_repo,
+        mood_data_repo,
+        plan_data_repo,
+        travel_data_repo,
+        photo_album_data_repo,
+    )
+
+    contacts = await _fetch_contact_relationships_with_names(
+        journal_id, contact_relationship_repo, contact_repo
+    )
+
+    tags = await tag_repo.get_tags_for_journal(journal_id)
+
+    return types, type_data, contacts, tags
+
+
 def register_journal_tools(mcp: FastMCP[None]) -> None:
     """
     Register journal-related MCP tools with the FastMCP server.
@@ -516,78 +640,26 @@ def register_journal_tools(mcp: FastMCP[None]) -> None:
 
         # Add contact relationships if provided
         if request.contact_relationships:
-            for rel_dict in request.contact_relationships:
-                try:
-                    contact_id = rel_dict.get("contact_id")
-                    relationship_type_str = rel_dict.get("relationship_type")
-
-                    if contact_id and relationship_type_str:
-                        # Convert relationship type string to enum
-                        relationship_type = JournalContactRelationshipType[
-                            relationship_type_str.upper()
-                        ]
-
-                        # Create relationship
-                        relationship = JournalContactRelationship(
-                            journal_id=journal_id,
-                            contact_id=contact_id,
-                            relationship_type=relationship_type,
-                        )
-                        await contact_relationship_repo.create(relationship)
-                except (ValueError, KeyError):
-                    # Invalid relationship, skip
-                    pass
+            await _persist_contact_relationships(
+                journal_id, request.contact_relationships, contact_relationship_repo
+            )
 
         # Add tags if provided
         if request.tags:
-            from uuid import uuid4
-
-            from app.core.journal.models.journal_tag import JournalTag
-
-            for tag_name in request.tags:
-                try:
-                    # Find or create tag by name
-                    existing_tags = await tag_repo.get_all()
-                    tag = next(
-                        (
-                            t
-                            for t in existing_tags
-                            if t.name.lower() == tag_name.lower()
-                        ),
-                        None,
-                    )
-
-                    if not tag:
-                        # Tag doesn't exist, create it
-                        tag = JournalTag(
-                            id=uuid4(),
-                            name=tag_name,
-                            color="#808080",  # Default gray color
-                        )
-                        tag = await tag_repo.save(tag)
-
-                    # Assign tag to journal (tag.id is guaranteed to be set after save)
-                    if tag.id is not None:
-                        await tag_repo.assign_tag(journal_id, tag.id)
-                except Exception:
-                    # Error creating/assigning tag, skip
-                    pass
+            await _persist_tags(journal_id, request.tags, tag_repo)
 
         # Fetch all enrichment data
-        types, type_data = await _fetch_journal_types_and_data(
+        types, type_data, contacts, tags = await _fetch_enrichment_data(
             journal_id,
             calendar_info_repo,
             mood_data_repo,
             plan_data_repo,
             travel_data_repo,
             photo_album_data_repo,
+            contact_relationship_repo,
+            contact_repo,
+            tag_repo,
         )
-
-        contacts = await _fetch_contact_relationships_with_names(
-            journal_id, contact_relationship_repo, contact_repo
-        )
-
-        tags = await tag_repo.get_tags_for_journal(journal_id)
 
         # Convert to AI-friendly response
         response = JournalConverter.to_response(
@@ -774,32 +846,12 @@ def register_journal_tools(mcp: FastMCP[None]) -> None:
                 )
 
             # Add new relationships
-            for rel_dict in request.contact_relationships:
-                try:
-                    contact_id = rel_dict.get("contact_id")
-                    relationship_type_str = rel_dict.get("relationship_type")
-
-                    if contact_id and relationship_type_str:
-                        relationship_type = JournalContactRelationshipType[
-                            relationship_type_str.upper()
-                        ]
-
-                        relationship = JournalContactRelationship(
-                            journal_id=journal_id,
-                            contact_id=contact_id,
-                            relationship_type=relationship_type,
-                        )
-                        await contact_relationship_repo.create(relationship)
-                except (ValueError, KeyError):
-                    # Invalid relationship, skip
-                    pass
+            await _persist_contact_relationships(
+                journal_id, request.contact_relationships, contact_relationship_repo
+            )
 
         # Update tags if provided (replace all tags)
         if request.tags is not None:
-            from uuid import uuid4
-
-            from app.core.journal.models.journal_tag import JournalTag
-
             # Remove all existing tags
             existing_tags = await tag_repo.get_tags_for_journal(journal_id)
             for existing_tag in existing_tags:
@@ -807,46 +859,20 @@ def register_journal_tools(mcp: FastMCP[None]) -> None:
                     await tag_repo.remove_tag(journal_id, existing_tag.id)
 
             # Add new tags
-            for tag_name in request.tags:
-                try:
-                    # Find or create tag by name
-                    all_tags = await tag_repo.get_all()
-                    tag: JournalTag | None = next(
-                        (t for t in all_tags if t.name.lower() == tag_name.lower()),
-                        None,
-                    )
-
-                    if not tag:
-                        # Tag doesn't exist, create it
-                        tag = JournalTag(
-                            id=uuid4(),
-                            name=tag_name,
-                            color="#808080",  # Default gray color
-                        )
-                        tag = await tag_repo.save(tag)
-
-                    # Assign tag to journal (tag.id is guaranteed to be set after save)
-                    if tag.id is not None:
-                        await tag_repo.assign_tag(journal_id, tag.id)
-                except Exception:
-                    # Error creating/assigning tag, skip
-                    pass
+            await _persist_tags(journal_id, request.tags, tag_repo)
 
         # Fetch all enrichment data
-        types, type_data = await _fetch_journal_types_and_data(
+        types, type_data, contacts, tags = await _fetch_enrichment_data(
             journal_id,
             calendar_info_repo,
             mood_data_repo,
             plan_data_repo,
             travel_data_repo,
             photo_album_data_repo,
+            contact_relationship_repo,
+            contact_repo,
+            tag_repo,
         )
-
-        contacts = await _fetch_contact_relationships_with_names(
-            journal_id, contact_relationship_repo, contact_repo
-        )
-
-        tags = await tag_repo.get_tags_for_journal(journal_id)
 
         # Convert to AI-friendly response
         response = JournalConverter.to_response(
