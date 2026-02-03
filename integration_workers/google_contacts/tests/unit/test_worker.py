@@ -16,7 +16,6 @@ import pytest
 sys.path.insert(0, "/core_shared")
 
 
-
 class TestGoogleContactsWorker:
     """Test cases for Google Contacts worker sync logic."""
 
@@ -49,19 +48,23 @@ class TestGoogleContactsWorker:
 
         # Create mock connection with proper async behavior
         mock_connection = AsyncMock()
+
         async def mock_execute(*args, **kwargs):
             # Yield control to event loop (required for async function)
             await asyncio.sleep(0)
             return mock_result
+
         mock_connection.execute = mock_execute
 
         # Create mock session with proper async behavior
         mock_session = AsyncMock()
+
         # Make connection() return the mock connection (it's an async method)
         async def mock_connection_func():
             # Yield control to event loop (required for async function)
             await asyncio.sleep(0)
             return mock_connection
+
         mock_session.connection = mock_connection_func
 
         # Mock session.execute to return a result with fetchone and scalar
@@ -213,7 +216,9 @@ class TestGoogleContactsWorker:
     ):
         """Test sync handles authentication errors gracefully."""
         # Mock client to raise auth error when list_connections is called
-        mock_google_contacts_client.list_connections.side_effect = Exception("Auth failed")
+        mock_google_contacts_client.list_connections.side_effect = Exception(
+            "Auth failed"
+        )
 
         from worker import sync_google_contacts
 
@@ -292,7 +297,13 @@ class TestGoogleContactsAPIClient:
         mock_google_service.people().createContact().execute.return_value = {
             "resourceName": "people/c987654321",
             "etag": "new_etag_123",
-            "names": [{"displayName": "Jane Smith", "givenName": "Jane", "familyName": "Smith"}],
+            "names": [
+                {
+                    "displayName": "Jane Smith",
+                    "givenName": "Jane",
+                    "familyName": "Smith",
+                }
+            ],
             "emailAddresses": [{"value": "jane@example.com"}],
         }
 
@@ -325,7 +336,9 @@ class TestGoogleContactsAPIClient:
             assert "emailAddresses" in result
 
             # Verify API was called correctly with expected data
-            mock_google_service.people().createContact.assert_called_once_with(body=contact_data)
+            mock_google_service.people().createContact.assert_called_once_with(
+                body=contact_data
+            )
 
     @pytest.mark.asyncio
     async def test_update_contact_success(self, mock_auth_service, mock_google_service):
@@ -336,7 +349,13 @@ class TestGoogleContactsAPIClient:
         mock_google_service.people().updateContact().execute.return_value = {
             "resourceName": "people/c123456789",
             "etag": "updated_etag_456",
-            "names": [{"displayName": "John Updated", "givenName": "John", "familyName": "Updated"}],
+            "names": [
+                {
+                    "displayName": "John Updated",
+                    "givenName": "John",
+                    "familyName": "Updated",
+                }
+            ],
             "emailAddresses": [{"value": "john.updated@example.com"}],
         }
 
@@ -373,12 +392,12 @@ class TestGoogleContactsAPIClient:
             # Verify API was called correctly
             expected_body = {
                 **contact_data,
-                "metadata": {"sources": [{"etag": "old_etag_123"}]}
+                "metadata": {"sources": [{"etag": "old_etag_123"}]},
             }
             mock_google_service.people().updateContact.assert_called_once_with(
                 resourceName="people/c123456789",
                 updatePersonFields="names,emailAddresses",
-                body=expected_body
+                body=expected_body,
             )
 
     @pytest.mark.asyncio
@@ -386,8 +405,9 @@ class TestGoogleContactsAPIClient:
         self, mock_auth_service, mock_google_service
     ):
         """Test update contact handles 400 with failedPrecondition (ETag conflict)."""
-        from google_contacts_client import GoogleContactsAPIClient
         from googleapiclient.errors import HttpError
+
+        from google_contacts_client import GoogleContactsAPIClient
 
         # Mock 400 error response with failedPrecondition
         mock_response = MagicMock()
@@ -682,7 +702,9 @@ class TestPushSyncLogic:
             }
 
             # Mock _upsert_sync_metadata
-            with patch("worker._upsert_sync_metadata", new_callable=AsyncMock) as mock_upsert:
+            with patch(
+                "worker._upsert_sync_metadata", new_callable=AsyncMock
+            ) as mock_upsert:
                 # Execute
                 result = await push_contacts_to_google(
                     session=mock_session,
@@ -704,7 +726,9 @@ class TestPushSyncLogic:
                 mock_upsert.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_push_updated_contact_to_google(self, mock_session, mock_google_client):
+    async def test_push_updated_contact_to_google(
+        self, mock_session, mock_google_client
+    ):
         """Test pushing an updated local contact to Google."""
         from worker import push_contacts_to_google
 
@@ -736,7 +760,9 @@ class TestPushSyncLogic:
             }
 
             # Mock _upsert_sync_metadata
-            with patch("worker._upsert_sync_metadata", new_callable=AsyncMock) as mock_upsert:
+            with patch(
+                "worker._upsert_sync_metadata", new_callable=AsyncMock
+            ) as mock_upsert:
                 # Execute
                 result = await push_contacts_to_google(
                     session=mock_session,
@@ -763,6 +789,7 @@ class TestPushSyncLogic:
     ):
         """Test push sync handles ETag conflicts gracefully."""
         from googleapiclient.errors import HttpError
+
         from worker import push_contacts_to_google
 
         # Mock local contact to push
@@ -808,11 +835,10 @@ class TestPushSyncLogic:
             assert result["conflict_count"] == 1
 
     @pytest.mark.asyncio
-    async def test_push_handles_412_conflict(
-        self, mock_session, mock_google_client
-    ):
+    async def test_push_handles_412_conflict(self, mock_session, mock_google_client):
         """Test push sync handles 412 Precondition Failed (standard HTTP conflict)."""
         from googleapiclient.errors import HttpError
+
         from worker import push_contacts_to_google
 
         # Mock local contact to push
@@ -900,7 +926,9 @@ class TestPushSyncLogic:
             }
 
             # Mock _upsert_sync_metadata
-            with patch("worker._upsert_sync_metadata", new_callable=AsyncMock) as mock_upsert:
+            with patch(
+                "worker._upsert_sync_metadata", new_callable=AsyncMock
+            ) as mock_upsert:
                 # Execute
                 result = await push_contacts_to_google(
                     session=mock_session,
@@ -953,7 +981,9 @@ class TestPushSyncLogic:
             }
 
             # Mock _upsert_sync_metadata
-            with patch("worker._upsert_sync_metadata", new_callable=AsyncMock) as mock_upsert:
+            with patch(
+                "worker._upsert_sync_metadata", new_callable=AsyncMock
+            ) as mock_upsert:
                 # Execute
                 result = await push_contacts_to_google(
                     session=mock_session,

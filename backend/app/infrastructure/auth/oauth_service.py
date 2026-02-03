@@ -780,6 +780,70 @@ class OAuthService:
                 detail=f"Failed to exchange authorization code: {str(e)}",
             ) from e
 
+    async def get_google_user_email(self, access_token: str) -> str:
+        """
+        Get Google user email from access token.
+
+        Args:
+            access_token: Google OAuth access token
+
+        Returns:
+            User's email address
+
+        Raises:
+            HTTPException: If unable to fetch user info
+        """
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.get(
+                    "https://www.googleapis.com/oauth2/v2/userinfo",
+                    headers={"Authorization": f"Bearer {access_token}"},
+                )
+
+                if response.status_code != 200:
+                    logger.error(
+                        "Failed to fetch Google user info",
+                        status_code=response.status_code,
+                        response_text=response.text[:200],
+                    )
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="Failed to fetch Google user information",
+                    )
+
+                user_info = response.json()
+                email: str | None = user_info.get("email")
+
+                if not email:
+                    logger.error(
+                        "No email in Google user info response",
+                        user_info_keys=list(user_info.keys()),
+                    )
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="No email found in Google user information",
+                    )
+
+                logger.info(
+                    "Successfully fetched Google user email",
+                    email=email,
+                )
+
+                return email
+
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(
+                "Failed to get Google user email",
+                error=str(e),
+                exc_info=True,
+            )
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to get Google user information",
+            ) from e
+
     async def disconnect_google_contacts(
         self, user_id: str, connection: AsyncConnection
     ) -> bool:

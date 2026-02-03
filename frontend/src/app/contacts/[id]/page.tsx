@@ -31,14 +31,6 @@ import type { TagResource } from '@/types/contacts';
 import { AuthGuard } from '@/components/auth/AuthGuard';
 import { DATE_FORMATS } from '@/lib/constants';
 
-// Helper components to reduce duplication
-// TODO: Implement PrimaryBadge when needed for primary field indicators
-// const PrimaryBadge = () => (
-//   <Badge variant='secondary' className='ml-2 text-xs'>
-//     Primary
-//   </Badge>
-// );
-
 const MetadataItem = ({ label, value }: { label: string; value: string }) => (
   <div className='flex items-center gap-2 text-sm'>
     <Calendar className='text-muted-foreground h-4 w-4' />
@@ -161,7 +153,7 @@ function ContactDetailPageContent() {
       </div>
 
       {/* Contact Header - Three Column Grid Layout */}
-      <header className='mb-8 grid grid-cols-1 items-start gap-x-8 gap-y-4 md:grid-cols-[128px,1fr] lg:grid-cols-[128px,1fr,280px]'>
+      <header className='mb-6 grid grid-cols-1 items-start gap-x-8 gap-y-4 md:grid-cols-[128px,1fr] lg:grid-cols-[128px,1fr,280px]'>
         {/* Column 1: Avatar */}
         <div className='col-start-1'>
           <ContactAvatar

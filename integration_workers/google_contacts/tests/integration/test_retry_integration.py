@@ -8,12 +8,11 @@ These tests require a running Redis instance.
 
 import asyncio
 import sys
-from datetime import datetime, UTC
-from unittest.mock import AsyncMock, MagicMock, patch
+from datetime import UTC, datetime
 
 import pytest
 import pytest_asyncio
-from arq import create_pool, Worker
+from arq import Worker, create_pool
 from arq.connections import RedisSettings
 from arq.jobs import JobStatus
 from redis.exceptions import RedisError
@@ -31,6 +30,7 @@ _arq_task_state = {
 
 class IntentionalTaskFailure(RuntimeError):
     """Specific exception for intentional test failures in ARQ tasks."""
+
     pass
 
 
@@ -43,7 +43,9 @@ async def arq_failing_task(ctx):
     _arq_task_state["call_times"].append(datetime.now(UTC))
 
     if _arq_task_state["call_count"] <= _arq_task_state["should_fail_count"]:
-        raise IntentionalTaskFailure(f"Intentional test failure #{_arq_task_state['call_count']}")
+        raise IntentionalTaskFailure(
+            f"Intentional test failure #{_arq_task_state['call_count']}"
+        )
 
     return {
         "status": "success",
@@ -59,7 +61,9 @@ async def arq_always_failing_task(ctx):
 
     _arq_task_state["call_count"] += 1
     _arq_task_state["call_times"].append(datetime.now(UTC))
-    raise IntentionalTaskFailure(f"Always fails - attempt #{_arq_task_state['call_count']}")
+    raise IntentionalTaskFailure(
+        f"Always fails - attempt #{_arq_task_state['call_count']}"
+    )
 
 
 class TestARQRetryIntegration:
@@ -77,8 +81,11 @@ class TestARQRetryIntegration:
         """Create a real Redis connection pool for testing."""
         # Use environment variable or default to localhost for CI compatibility
         import os
+
         redis_host = os.getenv("REDIS_HOST", "localhost")
-        redis_settings = RedisSettings(host=redis_host, port=6379, database=1)  # Use DB 1 for tests
+        redis_settings = RedisSettings(
+            host=redis_host, port=6379, database=1
+        )  # Use DB 1 for tests
         pool = await create_pool(redis_settings)
 
         # Clean up any existing jobs in the queue
@@ -129,7 +136,9 @@ class TestARQRetryIntegration:
         # Verify each average delay is close to expected base (within ±10% due to jitter averaging out)
         expected_bases = [60, 120, 240, 480, 900]  # 900 is capped
 
-        for i, (avg_delay, expected) in enumerate(zip(avg_delays, expected_bases)):
+        for i, (avg_delay, expected) in enumerate(
+            zip(avg_delays, expected_bases, strict=True)
+        ):
             min_delay = expected * 0.9
             max_delay = expected * 1.1
             assert min_delay <= avg_delay <= max_delay, (
@@ -139,10 +148,14 @@ class TestARQRetryIntegration:
         # Verify exponential growth pattern in averages
         for i in range(3):
             ratio = avg_delays[i + 1] / avg_delays[i]
-            assert 1.8 <= ratio <= 2.2, f"Retry {i} to {i+1}: average ratio {ratio} not ~2.0"
+            assert 1.8 <= ratio <= 2.2, (
+                f"Retry {i} to {i + 1}: average ratio {ratio} not ~2.0"
+            )
 
         # Verify cap is applied (last delay should not grow)
-        assert avg_delays[4] <= avg_delays[3] * 2.2  # Should be capped, not continue exponential growth
+        assert (
+            avg_delays[4] <= avg_delays[3] * 2.2
+        )  # Should be capped, not continue exponential growth
 
     @pytest.mark.asyncio
     async def test_job_enqueue_and_status(self, redis_pool):
@@ -167,7 +180,9 @@ class TestARQRetryIntegration:
         status = await job.status()
         assert status in [JobStatus.queued, JobStatus.deferred]
 
-    @pytest.mark.skip(reason="Complex worker retry test - requires running worker process. Manual testing recommended.")
+    @pytest.mark.skip(
+        reason="Complex worker retry test - requires running worker process. Manual testing recommended."
+    )
     @pytest.mark.asyncio
     async def test_job_retry_with_worker(self, redis_pool):
         """
@@ -222,4 +237,3 @@ class TestARQRetryIntegration:
             except asyncio.CancelledError:
                 # Ignore CancelledError from task we cancelled ourselves during cleanup
                 pass
-

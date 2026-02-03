@@ -716,3 +716,82 @@ class TestOAuthServiceGoogleContacts:
         # Assert
         assert result is False
         mock_connection.execute.assert_called_once()
+
+    async def test_get_google_user_email_success(self, oauth_service_with_google):
+        """Test successful retrieval of Google user email."""
+        # Mock HTTP client for userinfo endpoint
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
+            "email": "test@gmail.com",
+            "verified_email": True,
+            "name": "Test User",
+        }
+
+        with patch("httpx.AsyncClient") as mock_client_class:
+            mock_client = AsyncMock()
+            mock_client.__aenter__.return_value = mock_client
+            mock_client.__aexit__.return_value = None
+            mock_client.get = AsyncMock(return_value=mock_response)
+            mock_client_class.return_value = mock_client
+
+            email = await oauth_service_with_google.get_google_user_email(
+                "test_access_token"
+            )
+
+            assert email == "test@gmail.com"
+            mock_client.get.assert_called_once_with(
+                "https://www.googleapis.com/oauth2/v2/userinfo",
+                headers={"Authorization": "Bearer test_access_token"},
+            )
+
+    async def test_get_google_user_email_no_email_in_response(
+        self, oauth_service_with_google
+    ):
+        """Test get_google_user_email raises error when no email in response."""
+        # Mock HTTP client for userinfo endpoint
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
+            "name": "Test User",
+            # No email field
+        }
+
+        with patch("httpx.AsyncClient") as mock_client_class:
+            mock_client = AsyncMock()
+            mock_client.__aenter__.return_value = mock_client
+            mock_client.__aexit__.return_value = None
+            mock_client.get = AsyncMock(return_value=mock_response)
+            mock_client_class.return_value = mock_client
+
+            with pytest.raises(HTTPException) as exc_info:
+                await oauth_service_with_google.get_google_user_email(
+                    "test_access_token"
+                )
+
+            assert exc_info.value.status_code == 400
+            assert "No email found" in str(exc_info.value.detail)
+
+    async def test_get_google_user_email_api_error(self, oauth_service_with_google):
+        """Test get_google_user_email raises error when API returns error."""
+        # Mock HTTP client for userinfo endpoint
+        mock_response = Mock()
+        mock_response.status_code = 401
+        mock_response.text = "Unauthorized"
+
+        with patch("httpx.AsyncClient") as mock_client_class:
+            mock_client = AsyncMock()
+            mock_client.__aenter__.return_value = mock_client
+            mock_client.__aexit__.return_value = None
+            mock_client.get = AsyncMock(return_value=mock_response)
+            mock_client_class.return_value = mock_client
+
+            with pytest.raises(HTTPException) as exc_info:
+                await oauth_service_with_google.get_google_user_email(
+                    "test_access_token"
+                )
+
+            assert exc_info.value.status_code == 400
+            assert "Failed to fetch Google user information" in str(
+                exc_info.value.detail
+            )

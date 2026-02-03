@@ -293,6 +293,15 @@ services:
       LOG_LEVEL: ${WORKER_LOG_LEVEL:-DEBUG}
       WORKER_ID: google-contacts-worker
       MAX_CONCURRENT_JOBS: ${MAX_CONCURRENT_JOBS:-3}
+      # Periodic sync configuration
+      # Set to 'true' to enable automatic periodic syncing of Google Contacts
+      # When enabled, the worker will automatically sync all active Google accounts
+      # at the configured interval
+      ENABLE_PERIODIC_SYNC: ${ENABLE_PERIODIC_SYNC:-false}
+      # Sync interval in hours (default: 6 hours)
+      # Determines how often to sync contacts from Google
+      # Examples: 1 (hourly), 6 (every 6 hours), 12 (twice daily), 24 (daily)
+      SYNC_INTERVAL_HOURS: ${SYNC_INTERVAL_HOURS:-6}
     volumes:
       - ./core_shared:/core_shared:ro
       - ./integration_workers/google_contacts:/app
