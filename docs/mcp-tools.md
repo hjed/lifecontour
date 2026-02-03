@@ -197,9 +197,217 @@ All tools include comprehensive error handling with AI-friendly error messages:
 
 All MCP tools require valid session authentication. The MCP server integrates with the existing OAuth2 authentication system.
 
+## Journal Management Tools
+
+### create_journal_entry
+
+Creates a new journal entry with types, type-specific data, relationships, and tags.
+
+**Parameters:**
+- `journal_data` (string): JSON string containing journal creation data with fields:
+  - `title` (required): Journal entry title
+  - `content` (required): Journal content in markdown format
+  - `event_date_range` (required): Object with `start` and `end` datetime fields
+  - `types` (optional): Array of journal types (NOTE, EVENT, MOOD_RATING, PLAN, TRAVEL, PHOTO_ALBUM)
+  - `type_data` (optional): Object with type-specific data (e.g., `{"EVENT": {"calendar_id": "uuid"}}`)
+  - `contact_relationships` (optional): Array of contact relationships (e.g., `[{"contact_id": 123, "relationship_type": "PARTICIPANT"}]`)
+  - `tags` (optional): Array of tag names
+  - `parent_id` (optional): Parent journal ID for hierarchical organization
+
+**Returns:**
+AI-friendly journal information including:
+- Journal details (title, content, date range)
+- Types and type-specific data
+- Contact relationships
+- Tags
+- Contextual summary for AI understanding
+
+**Example:**
+```json
+{
+  "id": 456,
+  "title": "Team Meeting Notes",
+  "content": "Discussed Q1 goals and project timelines...",
+  "summary": "Journal: Team Meeting Notes. Types: NOTE, EVENT. Tags: work, meeting. 2 contact(s). Calendar: Work Calendar.",
+  "event_date_range": {
+    "start": "2024-01-15T10:00:00Z",
+    "end": "2024-01-15T11:00:00Z"
+  },
+  "types": ["NOTE", "EVENT"],
+  "type_data": {
+    "EVENT": {
+      "calendar_id": "abc-123"
+    }
+  },
+  "contacts": [
+    {
+      "id": 123,
+      "name": "John Doe",
+      "relationship_type": "PARTICIPANT"
+    }
+  ],
+  "tags": ["work", "meeting"],
+  "calendar": {
+    "id": "abc-123",
+    "name": "Work Calendar",
+    "color": "#4285F4"
+  },
+  "created_at": "2024-01-15T09:00:00Z",
+  "updated_at": "2024-01-15T09:00:00Z"
+}
+```
+
+### update_journal_entry
+
+Updates an existing journal entry with partial data.
+
+**Parameters:**
+- `journal_id` (integer): The unique identifier of the journal to update
+- `journal_data` (string): JSON string with journal update data (partial fields):
+  - `title` (optional): Updated title
+  - `content` (optional): Updated content
+  - `event_date_range` (optional): Updated date range
+  - `types` (optional): Replace all types
+  - `type_data` (optional): Update type-specific data
+  - `contact_relationships` (optional): Replace all contact relationships
+  - `tags` (optional): Replace all tags
+
+**Returns:**
+AI-friendly updated journal information with contextual summary.
+
+### get_journal
+
+Retrieves detailed journal information by ID.
+
+**Parameters:**
+- `journal_id` (integer): The unique identifier of the journal
+- `include_children` (boolean, optional): Include child journals in the response (default: false)
+
+**Returns:**
+AI-friendly journal information including:
+- Journal details (title, content, date range)
+- Types and type-specific data
+- Contact relationships
+- Tags
+- Optional child journals
+- Contextual summary for AI understanding
+
+**Example:**
+```json
+{
+  "id": 456,
+  "title": "Team Meeting Notes",
+  "content": "Discussed Q1 goals and project timelines...",
+  "summary": "Journal: Team Meeting Notes. Types: NOTE, EVENT. Tags: work, meeting. 2 contact(s). 3 child journal(s).",
+  "event_date_range": {
+    "start": "2024-01-15T10:00:00Z",
+    "end": "2024-01-15T11:00:00Z"
+  },
+  "types": ["NOTE", "EVENT"],
+  "contacts": [
+    {
+      "id": 123,
+      "name": "John Doe",
+      "relationship_type": "PARTICIPANT"
+    }
+  ],
+  "tags": ["work", "meeting"],
+  "children": [
+    {
+      "id": 457,
+      "title": "Action Items",
+      "summary": "Child journal: Action Items"
+    }
+  ]
+}
+```
+
+### search_journals
+
+Searches journals with filtering options.
+
+**Parameters:**
+- `query` (string, optional): Search query for full-text search
+- `types` (string, optional): Comma-separated list of journal types to filter by
+- `limit` (integer, optional): Maximum number of results (default: 20)
+
+**Returns:**
+AI-friendly search results including:
+- List of matching journals with excerpts
+- Search metadata (total hits, processing time)
+- Contextual summary for AI understanding
+
+**Example:**
+```json
+{
+  "results": [
+    {
+      "id": 456,
+      "title": "Team Meeting Notes",
+      "content_excerpt": "Discussed Q1 goals and project timelines...",
+      "event_date_range": {
+        "start": "2024-01-15T10:00:00Z",
+        "end": "2024-01-15T11:00:00Z"
+      },
+      "types": ["NOTE", "EVENT"],
+      "tags": ["work", "meeting"],
+      "summary": "Journal: Team Meeting Notes. Types: NOTE, EVENT. Tags: work, meeting."
+    }
+  ],
+  "query": "meeting",
+  "total_hits": 1,
+  "processing_time_ms": 12,
+  "summary": "Found 1 journal(s)"
+}
+```
+
+### delete_journal
+
+Deletes a journal entry.
+
+**Parameters:**
+- `journal_id` (integer): The unique identifier of the journal to delete
+- `delete_children` (boolean, optional): Delete child journals as well (default: false)
+
+**Returns:**
+Deletion confirmation with summary.
+
+### get_contact_journals
+
+Retrieves journals associated with a contact.
+
+**Parameters:**
+- `contact_id` (integer): The unique identifier of the contact
+- `limit` (integer, optional): Maximum number of results (default: 20)
+
+**Returns:**
+AI-friendly journal summaries for the specified contact.
+
+### link_journal_to_contact
+
+Links a journal to a contact with a specific relationship type.
+
+**Parameters:**
+- `journal_id` (integer): The unique identifier of the journal
+- `contact_id` (integer): The unique identifier of the contact
+- `relationship_type` (string): Relationship type (PARTICIPANT, INVITEE, MENTION, ABOUT)
+
+**Returns:**
+Relationship creation confirmation with summary.
+
+**Example:**
+```json
+{
+  "journal_id": 456,
+  "contact_id": 123,
+  "relationship_type": "PARTICIPANT",
+  "linked": true,
+  "summary": "Successfully linked journal 456 to contact 123 as PARTICIPANT"
+}
+```
+
 ## Future Enhancements
 
-- Journal entry management tools
 - Calendar event management tools
 - Photo album and person linking tools
 - Advanced analytics and insights tools
