@@ -142,31 +142,45 @@ test.describe('Journal Detail Page', () => {
       // Wait for the calendar to appear and be interactive
       await page.waitForSelector('[role="grid"]', { state: 'visible' });
 
-      // The calendar starts with the existing range selected (15-16 Jan 2024)
-      // In react-day-picker range mode with a range already selected:
-      // - First click on a new date: sets the start date (clears the range)
-      // - Second click on another date: sets the end date
+      // Dynamically pick two dates: today + 1 and today + 3
+      const today = new Date();
+      const startDate = new Date(today);
+      startDate.setDate(today.getDate() + 1);
+      const endDate = new Date(today);
+      endDate.setDate(today.getDate() + 3);
+
+      // Helper to format date as 'Wednesday, February 4th, 2026' (with ordinal suffix)
+      function getOrdinal(n: number) {
+        const s = ['th', 'st', 'nd', 'rd'],
+          v = n % 100;
+        return s[(v - 20) % 10] || s[v] || s[0];
+      }
+      function formatAriaLabel(date: Date) {
+        const weekday = date.toLocaleDateString('en-US', { weekday: 'long' });
+        const month = date.toLocaleDateString('en-US', { month: 'long' });
+        const day = date.getDate();
+        const year = date.getFullYear();
+        return `${weekday}, ${month} ${day}${getOrdinal(day)}, ${year}`;
+      }
+
+      const startLabel = formatAriaLabel(startDate);
+      const endLabel = formatAriaLabel(endDate);
 
       // Get the save button reference early
       const saveButton = page.getByTestId('journal-date-range-field-save');
 
-      // Click January 20th to set it as the start date (this clears the existing range)
-      const day20 = page.getByRole('button', {
-        name: 'Tuesday, January 20th, 2026',
-      });
-      await expect(day20).toBeVisible();
-      await day20.click();
+      // Click start date
+      const startButton = page.getByRole('button', { name: startLabel });
+      await expect(startButton).toBeVisible();
+      await startButton.click();
 
       // Wait for the calendar to update by checking the save button state
-      // After clicking the first date, we should have a partial range
       await expect(saveButton).toBeVisible();
 
-      // Now click January 22nd to set it as the end date
-      const day22 = page.getByRole('button', {
-        name: 'Thursday, January 22nd, 2026',
-      });
-      await expect(day22).toBeVisible();
-      await day22.click();
+      // Click end date
+      const endButton = page.getByRole('button', { name: endLabel });
+      await expect(endButton).toBeVisible();
+      await endButton.click();
 
       // Wait for the save button to be enabled (both dates selected)
       await expect(saveButton).toBeVisible();
