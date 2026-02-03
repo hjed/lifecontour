@@ -357,6 +357,9 @@ jobs:
         env:
           DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/personal_management_test
           REDIS_URL: redis://localhost:6379
+          GOOGLE_CLIENT_ID: test_client_id
+          GOOGLE_CLIENT_SECRET: test_client_secret
+          ENCRYPTION_KEY: test_encryption_key_32_characters_long_for_testing
         run: uv run pytest tests/integration/ -v --tb=short
 
   backend-integration-test:
