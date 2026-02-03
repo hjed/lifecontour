@@ -5,6 +5,7 @@ Provides utilities for converting journal domain entities to AI-friendly MCP res
 reducing duplication and ensuring consistent response structures.
 """
 
+from datetime import datetime
 from typing import Any
 
 from app.core.journal.models.calendar import Calendar
@@ -183,8 +184,6 @@ class JournalConverter:
         content_excerpt = content[:200] + "..." if len(content) > 200 else content
 
         # Extract date range
-        from datetime import datetime
-
         start = search_hit.get("event_date_range_start")
         end = search_hit.get("event_date_range_end")
 
