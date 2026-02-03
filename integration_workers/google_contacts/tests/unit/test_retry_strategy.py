@@ -8,8 +8,6 @@ Tests exponential backoff with jitter for ARQ task retries.
 import sys
 from unittest.mock import patch
 
-import pytest
-
 sys.path.insert(0, "/core_shared")
 
 
@@ -68,6 +66,7 @@ class TestRetryDelayFunction:
     def test_retry_delay_deterministic_with_seed(self):
         """Test that retry delay is deterministic when random seed is set."""
         import math
+
         from worker import retry_delay_func
 
         # Set random seed for reproducibility
@@ -75,10 +74,14 @@ class TestRetryDelayFunction:
             mock_uniform.return_value = 1.0  # No jitter
 
             delay = retry_delay_func(0)
-            assert math.isclose(delay, 60.0, rel_tol=1e-9), f"Expected 60s with no jitter, got {delay}s"
+            assert math.isclose(delay, 60.0, rel_tol=1e-9), (
+                f"Expected 60s with no jitter, got {delay}s"
+            )
 
             delay = retry_delay_func(1)
-            assert math.isclose(delay, 120.0, rel_tol=1e-9), f"Expected 120s with no jitter, got {delay}s"
+            assert math.isclose(delay, 120.0, rel_tol=1e-9), (
+                f"Expected 120s with no jitter, got {delay}s"
+            )
 
     def test_retry_delay_jitter_variation(self):
         """Test that jitter produces variation in retry delays."""
@@ -93,7 +96,9 @@ class TestRetryDelayFunction:
         # Should have some variation (not all identical)
         # With 10 samples, very unlikely all are identical with random jitter
         num_unique_delays = len(set(delays))
-        assert num_unique_delays > 1, f"Expected variation in delays, got {num_unique_delays} unique values"
+        assert num_unique_delays > 1, (
+            f"Expected variation in delays, got {num_unique_delays} unique values"
+        )
 
     def test_retry_delay_exponential_growth(self):
         """Test that delays grow exponentially."""
@@ -109,7 +114,6 @@ class TestRetryDelayFunction:
         for i in range(1, len(avg_delays)):
             ratio = avg_delays[i] / avg_delays[i - 1]
             assert 1.8 <= ratio <= 2.2, (
-                f"Expected ~2x growth from retry {i-1} to {i}, "
-                f"got {ratio:.2f}x ({avg_delays[i-1]:.1f}s -> {avg_delays[i]:.1f}s)"
+                f"Expected ~2x growth from retry {i - 1} to {i}, "
+                f"got {ratio:.2f}x ({avg_delays[i - 1]:.1f}s -> {avg_delays[i]:.1f}s)"
             )
-

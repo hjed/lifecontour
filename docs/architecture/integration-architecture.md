@@ -200,9 +200,93 @@ class ExternalReference(BaseModel):
 - **Cleanup Tasks**: Maintenance and cleanup operations
 
 #### Task Scheduling
-- **Periodic**: Cron-like scheduling for regular syncs
-- **Event-Driven**: Triggered by domain events
-- **Manual**: User-initiated sync operations
+
+Integration workers support three types of task scheduling:
+
+##### 1. Periodic Scheduling (Automated Syncs)
+Uses ARQ's `cron_jobs` feature for automatic, scheduled synchronization:
+
+```python
+from arq.cron import cron
+
+class GoogleContactsWorkerSettings:
+    functions = [sync_google_contacts, push_local_contacts_to_google]
+
+    # Periodic sync configuration
+    cron_jobs = [
+        # Sync every 6 hours at :00 minutes
+        cron(sync_google_contacts, hour={0, 6, 12, 18}, minute=0),
+
+        # Alternative: Daily sync at 2 AM
+        # cron(sync_google_contacts, hour=2, minute=0),
+
+        # Alternative: Hourly sync
+        # cron(sync_google_contacts, minute=0),
+    ]
+
+    # ... other settings ...
+```
+
+**Configuration Options:**
+- `minute`: 0-59 or set of minutes (e.g., `{0, 15, 30, 45}`)
+- `hour`: 0-23 or set of hours (e.g., `{0, 6, 12, 18}`)
+- `day`: 1-31 or set of days
+- `month`: 1-12 or set of months
+- `weekday`: 0-6 (Monday=0) or set of weekdays
+
+**Environment-Based Configuration:**
+```python
+# In worker settings
+import os
+
+class WorkerSettings(BaseSettings):
+    sync_interval_hours: int = Field(
+        default=6,
+        description="Hours between automatic syncs"
+    )
+
+class GoogleContactsWorkerSettings:
+    # Generate cron schedule from environment variable
+    cron_jobs = [
+        cron(
+            sync_google_contacts,
+            hour=set(range(0, 24, settings.sync_interval_hours)),
+            minute=0
+        )
+    ] if os.getenv('ENABLE_PERIODIC_SYNC', 'false').lower() == 'true' else []
+```
+
+##### 2. Event-Driven Scheduling
+Triggered by domain events from the main application:
+
+```python
+# In main application - triggered by user actions
+async def on_contact_updated(contact_id: UUID):
+    """Push local contact changes to Google."""
+    await task_queue.enqueue_job(
+        'push_local_contacts_to_google',
+        contact_id=contact_id
+    )
+```
+
+##### 3. Manual Scheduling
+User-initiated sync operations via API endpoints:
+
+```python
+# In API controller
+@router.post("/integrations/google/contacts/sync")
+async def trigger_sync(
+    user: SessionUser,
+    task_queue_service: TaskQueueService
+):
+    """Manually trigger Google Contacts sync."""
+    job = await task_queue_service.enqueue_google_contacts_sync(
+        google_account_email=user.email,
+        user_id=user.id,
+        sync_type="smart"
+    )
+    return {"job_id": job.job_id}
+```
 
 ### 3. Integration Services
 
@@ -717,6 +801,238 @@ async def publish_outbox_events():
 
         await asyncio.sleep(10)  # Poll every 10 seconds
 ```
+
+### Inbound Sync Flow (Pulling Data from External Systems)
+
+**Critical Architecture Pattern**: The outbox pattern is used for BOTH outbound events (local → external) AND inbound sync processing (external → local).
+
+#### Two-Way Sync Architecture
+
+The system supports bidirectional synchronization:
+
+1. **Outbound Sync** (Local Changes → External Systems)
+   - User updates contact in local database
+   - Domain event triggers worker task
+   - Worker pushes changes to external API (e.g., Google Contacts)
+
+2. **Inbound Sync** (External Systems → Local Database)
+   - Worker pulls data from external API (periodic, manual, or webhook-triggered)
+   - Worker creates OutboxEvent records for each external entity
+   - OutboxProcessor (running in main app) processes events
+   - OutboxEventProcessor transforms external data to internal models
+   - Domain services create/update local entities
+
+#### Inbound Sync Flow Diagram
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│ Integration Worker (Isolated Process)                              │
+│                                                                     │
+│  1. Periodic/Manual Trigger                                        │
+│     ↓                                                               │
+│  2. sync_google_contacts(ctx, email, sync_type)                   │
+│     ↓                                                               │
+│  3. Fetch contacts from Google API                                 │
+│     ↓                                                               │
+│  4. For each contact:                                              │
+│     - Create OutboxEvent with event_type='contact.created'         │
+│     - Store Google Person data in event_data                       │
+│     - Commit to database                                           │
+│                                                                     │
+│  ⚠️  Worker does NOT directly create/update Contact entities       │
+└─────────────────────────────────────────────────────────────────────┘
+                              ↓
+                    OutboxEvent Table
+                              ↓
+┌─────────────────────────────────────────────────────────────────────┐
+│ Main Application (FastAPI Process)                                 │
+│                                                                     │
+│  5. OutboxProcessor (runs every 10 seconds)                        │
+│     ↓                                                               │
+│  6. Fetch unprocessed OutboxEvents                                 │
+│     ↓                                                               │
+│  7. Route contact.* events to OutboxEventProcessor                 │
+│     ↓                                                               │
+│  8. OutboxEventProcessor.process_event(event)                      │
+│     ↓                                                               │
+│  9. Transform Google Person → Contact entity                       │
+│     (using GoogleContactTransformer)                               │
+│     ↓                                                               │
+│ 10. Create/Update Contact via ContactService                       │
+│     ↓                                                               │
+│ 11. Mark OutboxEvent as processed                                  │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+#### Implementation: Worker Side (Inbound Sync)
+
+```python
+# In integration_workers/google_contacts/worker.py
+
+async def sync_google_contacts(
+    ctx: dict[str, Any],
+    google_account_email: str,
+    sync_type: str = "smart"
+) -> dict[str, Any]:
+    """
+    Pull contacts from Google and create OutboxEvents for processing.
+
+    This task:
+    1. Fetches contacts from Google API
+    2. Creates OutboxEvent records (NOT Contact entities directly)
+    3. Returns sync metrics
+
+    The actual Contact creation happens in the main app via OutboxProcessor.
+    """
+    logger.info("Starting Google Contacts sync", email=google_account_email)
+
+    # Get database session from worker context
+    session = ctx['session']
+
+    # Fetch contacts from Google API
+    google_client = await get_google_client(session, google_account_email)
+    contacts = await google_client.fetch_contacts()
+
+    # Create OutboxEvent for each contact
+    for person in contacts:
+        outbox_event = OutboxEvent(
+            event_type='contact.created',  # or 'contact.updated'
+            aggregate_id=None,  # Will be set when Contact is created
+            event_data={
+                'google_account_email': google_account_email,
+                'person_data': person.to_dict(),  # Full Google Person object
+                'integration_source': 'google_contacts',
+                'external_id': person.resource_name
+            },
+            retry_count=0,
+            max_retries=3
+        )
+        session.add(outbox_event)
+
+    session.commit()
+
+    logger.info(
+        "Created outbox events for Google contacts",
+        count=len(contacts),
+        email=google_account_email
+    )
+
+    return {
+        'status': 'success',
+        'contacts_fetched': len(contacts),
+        'events_created': len(contacts)
+    }
+```
+
+#### Implementation: Main App Side (Event Processing)
+
+```python
+# In backend/app/infrastructure/events/outbox_processor.py
+
+class OutboxProcessor:
+    """Processes outbox events in the main application."""
+
+    async def process_events(self) -> None:
+        """Process unprocessed events from outbox table."""
+        async with engine.begin() as conn:
+            repository = OutboxRepository(conn)
+            events = await repository.get_unprocessed_events(limit=50)
+
+            for event in events:
+                try:
+                    # Route contact.* events to OutboxEventProcessor
+                    if event.event_type.startswith("contact."):
+                        await self._process_contact_event(event, conn)
+                    else:
+                        # Other events (search indexing, etc.)
+                        await search_indexer.process_event(event)
+
+                    # Mark as processed
+                    await repository.mark_as_processed(event.event_id)
+
+                except Exception as e:
+                    logger.error("Failed to process event", event_id=event.event_id)
+                    await repository.increment_retry_count(event.event_id)
+
+# In backend/app/core/integrations/outbox_event_processor.py
+
+class OutboxEventProcessor:
+    """Processes contact sync events from integration workers."""
+
+    def __init__(
+        self,
+        contact_service: ContactService,
+        transformer: GoogleContactTransformer,
+        db_connection: AsyncConnection
+    ):
+        self.contact_service = contact_service
+        self.transformer = transformer
+        self.db_connection = db_connection
+
+    async def process_event(self, event: OutboxEvent) -> dict[str, Any]:
+        """Process a single outbox event."""
+        if event.event_type == "contact.created":
+            return await self._process_contact_created(event)
+        elif event.event_type == "contact.updated":
+            return await self._process_contact_updated(event)
+        else:
+            raise OutboxEventProcessingError(f"Unknown event type: {event.event_type}")
+
+    async def _process_contact_created(self, event: OutboxEvent) -> dict[str, Any]:
+        """Transform Google Person data and create local Contact."""
+        # Extract Google Person data from event
+        person_data = event.event_data['person_data']
+        google_account_email = event.event_data['google_account_email']
+        external_id = event.event_data['external_id']
+
+        # Transform Google Person to Contact entity
+        contact_data = self.transformer.transform_person(person_data)
+
+        # Create Contact via domain service
+        contact = await self.contact_service.create_contact(
+            user_id=user_id,
+            contact_data=contact_data,
+            db_connection=self.db_connection
+        )
+
+        # Create sync metadata
+        await self._create_sync_metadata(
+            contact_id=contact.id,
+            external_id=external_id,
+            integration_source='google_contacts',
+            version_hash=calculate_hash(person_data)
+        )
+
+        logger.info(
+            "Created contact from Google sync",
+            contact_id=contact.id,
+            external_id=external_id
+        )
+
+        return {'contact_id': str(contact.id), 'status': 'created'}
+```
+
+#### Why This Architecture?
+
+**Separation of Concerns:**
+- Workers focus on external API communication and data fetching
+- Main app handles domain logic, validation, and entity creation
+- Clear boundary between integration layer and domain layer
+
+**Reliability:**
+- OutboxEvent provides transactional guarantee
+- If worker crashes after creating events, they're still processed
+- If main app crashes, events remain in outbox for retry
+
+**Dependency Isolation:**
+- Workers don't need domain service dependencies
+- Main app doesn't need external API client dependencies
+- Each can be deployed/scaled independently
+
+**Testability:**
+- Worker tests focus on API integration
+- Domain tests focus on business logic
+- Event processing can be tested independently
 
 ## Observability and Monitoring
 

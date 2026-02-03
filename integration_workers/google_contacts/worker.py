@@ -72,6 +72,10 @@ class WorkerSettings(BaseSettings):
     log_level: str = "INFO"
     max_concurrent_jobs: int = 5
 
+    # Periodic sync configuration
+    enable_periodic_sync: bool = False
+    sync_interval_hours: int = 6
+
 
 # Global settings instance
 settings = WorkerSettings()
@@ -351,7 +355,9 @@ def _transform_phone(method: dict[str, Any]) -> dict[str, Any]:
     return phone_data
 
 
-def _transform_contact_methods(methods: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+def _transform_contact_methods(
+    methods: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """Transform contact methods (emails and phones) to Google Person format."""
     email_addresses = []
     phone_numbers = []
@@ -562,7 +568,9 @@ async def _update_contact_in_google(
     return result
 
 
-def _handle_http_error(e: Exception, contact: dict[str, Any], metrics: dict[str, int]) -> None:
+def _handle_http_error(
+    e: Exception, contact: dict[str, Any], metrics: dict[str, int]
+) -> None:
     """Handle HTTP errors from Google API."""
     from googleapiclient.errors import HttpError
 
@@ -570,10 +578,14 @@ def _handle_http_error(e: Exception, contact: dict[str, Any], metrics: dict[str,
         raise e
 
     # Handle ETag conflicts (400 with failedPrecondition or 412 Precondition Failed)
-    error_content = e.content.decode() if isinstance(e.content, bytes) else str(e.content)
+    error_content = (
+        e.content.decode() if isinstance(e.content, bytes) else str(e.content)
+    )
     is_conflict = (
         e.resp.status == 412  # Standard HTTP precondition failed
-        or (e.resp.status == 400 and "failed_precondition" in error_content.lower())  # Google API specific
+        or (
+            e.resp.status == 400 and "failed_precondition" in error_content.lower()
+        )  # Google API specific
     )
 
     if is_conflict:
@@ -616,11 +628,15 @@ async def _push_single_contact(
         person_data = _transform_contact_to_google_person(contact)
 
         if contact["sync_action"] == "create":
-            await _create_contact_in_google(session, client, contact, person_data, google_account_email)
+            await _create_contact_in_google(
+                session, client, contact, person_data, google_account_email
+            )
             metrics["created_count"] += 1
             metrics["pushed_count"] += 1
         elif contact["sync_action"] == "update":
-            await _update_contact_in_google(session, client, contact, person_data, google_account_email)
+            await _update_contact_in_google(
+                session, client, contact, person_data, google_account_email
+            )
             metrics["updated_count"] += 1
             metrics["pushed_count"] += 1
 
@@ -663,7 +679,9 @@ async def push_contacts_to_google(
     }
 
     for contact in contacts:
-        await _push_single_contact(session, client, contact, google_account_email, metrics)
+        await _push_single_contact(
+            session, client, contact, google_account_email, metrics
+        )
 
     logger.info(
         "Completed pushing contacts to Google",
@@ -1101,8 +1119,123 @@ async def _check_job_cancelled(session: AsyncSession, job_id: str) -> bool:
     return False
 
 
+async def periodic_sync_all_accounts(ctx: dict[str, Any]) -> dict[str, Any]:
+    """
+    Periodic sync wrapper that syncs all active Google accounts.
+
+    This function is called by ARQ cron jobs and enqueues individual sync tasks
+    for each active Google integration. It only takes ctx as a parameter (ARQ requirement).
+
+    Args:
+        ctx: ARQ context dictionary containing Redis pool and session_factory
+
+    Returns:
+        Dictionary with sync summary (accounts_found, jobs_enqueued, errors)
+    """
+    logger.info("Starting periodic sync for all Google accounts")
+
+    # Get session factory from context
+    session_factory = ctx["session_factory"]
+
+    accounts_found = 0
+    jobs_enqueued = 0
+    errors = []
+
+    try:
+        # Create database session
+        async with session_factory() as session:
+            # Query all Google integrations (all accounts in table are considered active)
+            stmt = text("""
+                SELECT user_id, google_account_email
+                FROM user_google_auth
+                ORDER BY user_id
+            """)
+            result = await session.execute(stmt)
+            accounts = result.fetchall()
+
+            accounts_found = len(accounts)
+            logger.info(
+                "Found active Google accounts for periodic sync",
+                accounts_count=accounts_found,
+            )
+
+            # Enqueue sync job for each account
+            for row in accounts:
+                user_id = row[0]
+                google_account_email = row[1]
+
+                try:
+                    # Enqueue individual sync job using ARQ pool from context
+                    job = await ctx["redis"].enqueue_job(
+                        "sync_google_contacts",
+                        google_account_email,
+                        user_id,
+                        "smart",  # Use smart sync for periodic syncs
+                        _job_timeout=600,  # 10 minutes
+                    )
+
+                    if job:
+                        jobs_enqueued += 1
+                        logger.info(
+                            "Enqueued periodic sync job",
+                            job_id=job.job_id,
+                            google_account_email=google_account_email,
+                            user_id=user_id,
+                        )
+                    else:
+                        error_msg = f"Failed to enqueue job for {google_account_email}"
+                        errors.append(error_msg)
+                        logger.warning(
+                            "Failed to enqueue periodic sync job",
+                            google_account_email=google_account_email,
+                            user_id=user_id,
+                        )
+
+                except Exception as e:
+                    error_msg = (
+                        f"Error enqueueing job for {google_account_email}: {str(e)}"
+                    )
+                    errors.append(error_msg)
+                    logger.error(
+                        "Error enqueueing periodic sync job",
+                        google_account_email=google_account_email,
+                        user_id=user_id,
+                        error=str(e),
+                        error_type=type(e).__name__,
+                    )
+
+        logger.info(
+            "Periodic sync scheduling complete",
+            accounts_found=accounts_found,
+            jobs_enqueued=jobs_enqueued,
+            errors_count=len(errors),
+        )
+
+        return {
+            "status": "success",
+            "accounts_found": accounts_found,
+            "jobs_enqueued": jobs_enqueued,
+            "errors": errors,
+        }
+
+    except Exception as e:
+        logger.error(
+            "Periodic sync scheduling failed",
+            error=str(e),
+            error_type=type(e).__name__,
+        )
+        return {
+            "status": "error",
+            "error": str(e),
+            "error_type": type(e).__name__,
+        }
+
+
 async def sync_google_contacts(
-    ctx: dict[str, Any], google_account_email: str, user_id: str | int, sync_type: str = "smart"
+    ctx: dict[str, Any],
+    google_account_email: str,
+    user_id: str | int,
+    sync_type: str = "smart",
 ) -> dict[str, Any]:
     """
     Sync Google Contacts for a specific Google account.
@@ -1546,7 +1679,11 @@ class GoogleContactsWorkerSettings:
     """ARQ worker configuration."""
 
     # Task functions
-    functions = [sync_google_contacts, push_local_contacts_to_google]
+    functions = [
+        sync_google_contacts,
+        push_local_contacts_to_google,
+        periodic_sync_all_accounts,  # Wrapper for periodic cron syncs
+    ]
 
     # Worker lifecycle
     on_startup = startup
@@ -1566,6 +1703,34 @@ class GoogleContactsWorkerSettings:
 
     # Queue name
     queue_name = "google_contacts"
+
+    # Periodic sync configuration (cron jobs)
+    # Only configure cron_jobs if periodic sync is enabled
+    cron_jobs = []
+    if settings.enable_periodic_sync:
+        from arq.cron import cron
+
+        # Generate cron schedule based on sync_interval_hours
+        # For example: sync_interval_hours=6 -> hours={0, 6, 12, 18}
+        sync_hours = set(range(0, 24, settings.sync_interval_hours))
+
+        # Schedule periodic_sync_all_accounts to run at configured intervals
+        # This function queries all active Google integrations and enqueues
+        # individual sync jobs for each account
+        cron_jobs = [
+            cron(
+                periodic_sync_all_accounts,
+                hour=sync_hours,
+                minute=0,  # Run at the top of the hour
+                unique=True,  # Only run once even with multiple workers
+            )
+        ]
+
+        logger.info(
+            "Periodic sync enabled",
+            sync_interval_hours=settings.sync_interval_hours,
+            sync_hours=list(sync_hours),
+        )
 
 
 if __name__ == "__main__":
