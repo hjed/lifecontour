@@ -30,6 +30,7 @@ from app.core.journal.adapters.sql.photo_album_data_repository import (
 )
 from app.core.journal.adapters.sql.plan_data_repository import SqlPlanDataRepository
 from app.core.journal.adapters.sql.travel_data_repository import SqlTravelDataRepository
+from app.core.journal.models.calendar_info import CalendarInfo
 from app.core.journal.models.entities import Journal
 from app.core.journal.models.journal_contact_relationship import (
     JournalContactRelationship,
@@ -38,6 +39,10 @@ from app.core.journal.models.journal_relationship_types import (
     JournalContactRelationshipType,
 )
 from app.core.journal.models.journal_types import JournalType
+from app.core.journal.models.mood_data import MoodData
+from app.core.journal.models.photo_album_data import PhotoAlbumData
+from app.core.journal.models.plan_data import PlanData
+from app.core.journal.models.travel_data import TravelData
 from app.core.journal.models.value_objects import EventDateRange
 from app.core.journal.services.journal_service import JournalService
 from app.infrastructure.auth.models import SessionUser
@@ -291,6 +296,97 @@ async def _fetch_journal_types_and_data(
     return types, type_data
 
 
+async def _create_type_specific_data(
+    journal_type: JournalType,
+    journal_id: int,
+    mood_data_repo: SqlMoodDataRepository,
+    plan_data_repo: SqlPlanDataRepository,
+    travel_data_repo: SqlTravelDataRepository,
+) -> None:
+    """
+    Create type-specific data row with default values for the given journal type.
+
+    Args:
+        journal_type: The type of journal
+        journal_id: The ID of the journal
+        mood_data_repo: Repository for mood data
+        plan_data_repo: Repository for plan data
+        travel_data_repo: Repository for travel data
+    """
+    if journal_type == JournalType.MOOD_RATING:
+        mood_data = MoodData(journal_id=journal_id)
+        await mood_data_repo.save(mood_data)
+    elif journal_type == JournalType.PLAN:
+        plan_data = PlanData(journal_id=journal_id)
+        await plan_data_repo.save(plan_data)
+    elif journal_type == JournalType.TRAVEL:
+        travel_data = TravelData(journal_id=journal_id)
+        await travel_data_repo.save(travel_data)
+    # EVENT and PHOTO_ALBUM types require additional data (calendar_id, immich_album_id)
+    # These will be created when the user provides type_data
+
+
+async def _update_type_specific_data(
+    journal_type: JournalType,
+    journal_id: int,
+    type_data_dict: dict[str, Any],
+    calendar_info_repo: SqlCalendarInfoRepository,
+    mood_data_repo: SqlMoodDataRepository,
+    photo_album_data_repo: SqlPhotoAlbumDataRepository,
+) -> None:
+    """
+    Update type-specific data for a journal type.
+
+    Args:
+        journal_type: The type of journal
+        journal_id: The ID of the journal
+        type_data_dict: Dictionary containing type-specific data
+        calendar_info_repo: Repository for calendar info
+        mood_data_repo: Repository for mood data
+        photo_album_data_repo: Repository for photo album data
+    """
+    if journal_type == JournalType.EVENT and type_data_dict:
+        # Create or update calendar info (calendar_id is required)
+        calendar_id = type_data_dict.get("calendar_id")
+        if calendar_id is not None:
+            from uuid import UUID
+
+            # Convert string to UUID if needed
+            if isinstance(calendar_id, str):
+                calendar_id = UUID(calendar_id)
+
+            calendar_info = CalendarInfo(
+                journal_id=journal_id,
+                calendar_id=calendar_id,
+                start_time=type_data_dict.get("start_time"),
+                end_time=type_data_dict.get("end_time"),
+                is_all_day=type_data_dict.get("is_all_day", False),
+                location=type_data_dict.get("location"),
+                sync_invitees=type_data_dict.get("sync_invitees", False),
+            )
+            await calendar_info_repo.save(calendar_info)
+    elif journal_type == JournalType.MOOD_RATING and type_data_dict:
+        # Update mood data
+        existing_mood = await mood_data_repo.find_by_journal_id(journal_id)
+        if existing_mood:
+            if "mood_value" in type_data_dict:
+                existing_mood.mood_value = type_data_dict["mood_value"]
+            if "mood_label" in type_data_dict:
+                existing_mood.mood_label = type_data_dict["mood_label"]
+            if "energy_level" in type_data_dict:
+                existing_mood.energy_level = type_data_dict["energy_level"]
+            await mood_data_repo.save(existing_mood)
+    elif journal_type == JournalType.PHOTO_ALBUM and type_data_dict:
+        # Create or update photo album data (immich_album_id is required)
+        immich_album_id = type_data_dict.get("immich_album_id")
+        if immich_album_id is not None:
+            photo_album_data = PhotoAlbumData(
+                journal_id=journal_id,
+                immich_album_id=str(immich_album_id),
+            )
+            await photo_album_data_repo.save(photo_album_data)
+
+
 def register_journal_tools(mcp: FastMCP[None]) -> None:
     """
     Register journal-related MCP tools with the FastMCP server.
@@ -305,6 +401,14 @@ def register_journal_tools(mcp: FastMCP[None]) -> None:
     async def create_journal_entry(
         db_connection: FromDishka[AsyncConnection],
         event_publisher: FromDishka[OutboxEventPublisher],
+        calendar_info_repo: FromDishka[SqlCalendarInfoRepository],
+        mood_data_repo: FromDishka[SqlMoodDataRepository],
+        plan_data_repo: FromDishka[SqlPlanDataRepository],
+        travel_data_repo: FromDishka[SqlTravelDataRepository],
+        photo_album_data_repo: FromDishka[SqlPhotoAlbumDataRepository],
+        contact_relationship_repo: FromDishka[SqlJournalContactRelationshipRepository],
+        contact_repo: FromDishka[SqlContactRepository],
+        tag_repo: FromDishka[SqlJournalTagRepository],
         journal_data: Annotated[
             str,
             Field(
@@ -370,17 +474,128 @@ def register_journal_tools(mcp: FastMCP[None]) -> None:
         # Create journal
         created_journal = await journal_service.create_journal(journal, db_connection)
 
-        # Note: types, type_data, contact_relationships, and tags are accepted in the
-        # request schema but not yet persisted. This is tracked in the backlog and will
-        # be implemented when the type-specific repositories are integrated with MCP tools.
+        # Ensure journal_id is not None (it should always be set after creation)
+        if created_journal.id is None:
+            msg = "Journal ID should be set after creation"
+            raise ValueError(msg)
+        journal_id = created_journal.id
+
+        # Add types if provided in the request
+        if request.types:
+            for type_str in request.types:
+                try:
+                    # Convert type string to enum
+                    journal_type = JournalType[type_str.upper()]
+
+                    await journal_service.add_type_to_journal(
+                        journal_id, journal_type, db_connection
+                    )
+
+                    # Create type-specific data row with default values
+                    await _create_type_specific_data(
+                        journal_type,
+                        journal_id,
+                        mood_data_repo,
+                        plan_data_repo,
+                        travel_data_repo,
+                    )
+
+                    # Update type-specific data if provided
+                    if request.type_data and type_str.upper() in request.type_data:
+                        await _update_type_specific_data(
+                            journal_type,
+                            journal_id,
+                            request.type_data[type_str.upper()],
+                            calendar_info_repo,
+                            mood_data_repo,
+                            photo_album_data_repo,
+                        )
+                except (ValueError, KeyError):
+                    # Invalid type, skip
+                    pass
+
+        # Add contact relationships if provided
+        if request.contact_relationships:
+            for rel_dict in request.contact_relationships:
+                try:
+                    contact_id = rel_dict.get("contact_id")
+                    relationship_type_str = rel_dict.get("relationship_type")
+
+                    if contact_id and relationship_type_str:
+                        # Convert relationship type string to enum
+                        relationship_type = JournalContactRelationshipType[
+                            relationship_type_str.upper()
+                        ]
+
+                        # Create relationship
+                        relationship = JournalContactRelationship(
+                            journal_id=journal_id,
+                            contact_id=contact_id,
+                            relationship_type=relationship_type,
+                        )
+                        await contact_relationship_repo.create(relationship)
+                except (ValueError, KeyError):
+                    # Invalid relationship, skip
+                    pass
+
+        # Add tags if provided
+        if request.tags:
+            from uuid import uuid4
+
+            from app.core.journal.models.journal_tag import JournalTag
+
+            for tag_name in request.tags:
+                try:
+                    # Find or create tag by name
+                    existing_tags = await tag_repo.get_all()
+                    tag = next(
+                        (
+                            t
+                            for t in existing_tags
+                            if t.name.lower() == tag_name.lower()
+                        ),
+                        None,
+                    )
+
+                    if not tag:
+                        # Tag doesn't exist, create it
+                        tag = JournalTag(
+                            id=uuid4(),
+                            name=tag_name,
+                            color="#808080",  # Default gray color
+                        )
+                        tag = await tag_repo.save(tag)
+
+                    # Assign tag to journal (tag.id is guaranteed to be set after save)
+                    if tag.id is not None:
+                        await tag_repo.assign_tag(journal_id, tag.id)
+                except Exception:
+                    # Error creating/assigning tag, skip
+                    pass
+
+        # Fetch all enrichment data
+        types, type_data = await _fetch_journal_types_and_data(
+            journal_id,
+            calendar_info_repo,
+            mood_data_repo,
+            plan_data_repo,
+            travel_data_repo,
+            photo_album_data_repo,
+        )
+
+        contacts = await _fetch_contact_relationships_with_names(
+            journal_id, contact_relationship_repo, contact_repo
+        )
+
+        tags = await tag_repo.get_tags_for_journal(journal_id)
 
         # Convert to AI-friendly response
         response = JournalConverter.to_response(
             journal=created_journal,
-            types=[],
-            type_data={},
-            contacts=[],
-            tags=[],
+            types=types,
+            type_data=type_data,
+            contacts=contacts,
+            tags=tags,
         )
 
         return MCPResponseBuilder.success_response(response)
@@ -391,6 +606,14 @@ def register_journal_tools(mcp: FastMCP[None]) -> None:
     async def update_journal_entry(
         db_connection: FromDishka[AsyncConnection],
         event_publisher: FromDishka[OutboxEventPublisher],
+        calendar_info_repo: FromDishka[SqlCalendarInfoRepository],
+        mood_data_repo: FromDishka[SqlMoodDataRepository],
+        plan_data_repo: FromDishka[SqlPlanDataRepository],
+        travel_data_repo: FromDishka[SqlTravelDataRepository],
+        photo_album_data_repo: FromDishka[SqlPhotoAlbumDataRepository],
+        contact_relationship_repo: FromDishka[SqlJournalContactRelationshipRepository],
+        contact_repo: FromDishka[SqlContactRepository],
+        tag_repo: FromDishka[SqlJournalTagRepository],
         journal_id: Annotated[
             int, Field(description="The unique identifier of the journal to update")
         ],
@@ -465,17 +688,173 @@ def register_journal_tools(mcp: FastMCP[None]) -> None:
             existing_journal, changed_fields, db_connection
         )
 
-        # Note: types, type_data, contact_relationships, and tags are accepted in the
-        # request schema but not yet persisted. This is tracked in the backlog and will
-        # be implemented when the type-specific repositories are integrated with MCP tools.
+        # Update types if provided (replace all types)
+        if request.types is not None:
+            # Get current types
+            current_types, _ = await _fetch_journal_types_and_data(
+                journal_id,
+                calendar_info_repo,
+                mood_data_repo,
+                plan_data_repo,
+                travel_data_repo,
+                photo_album_data_repo,
+            )
+
+            # Remove types that are not in the new list
+            for current_type_str in current_types:
+                if current_type_str not in [t.upper() for t in request.types]:
+                    try:
+                        current_type = JournalType[current_type_str.upper()]
+                        await journal_service.remove_type_from_journal(
+                            journal_id, current_type, db_connection
+                        )
+                    except (ValueError, KeyError):
+                        pass
+
+            # Add new types
+            for type_str in request.types:
+                try:
+                    journal_type = JournalType[type_str.upper()]
+
+                    # Only add if not already present
+                    if type_str.upper() not in current_types:
+                        await journal_service.add_type_to_journal(
+                            journal_id, journal_type, db_connection
+                        )
+
+                        # Create type-specific data row with default values
+                        await _create_type_specific_data(
+                            journal_type,
+                            journal_id,
+                            mood_data_repo,
+                            plan_data_repo,
+                            travel_data_repo,
+                        )
+
+                    # Update type-specific data if provided
+                    if request.type_data and type_str.upper() in request.type_data:
+                        await _update_type_specific_data(
+                            journal_type,
+                            journal_id,
+                            request.type_data[type_str.upper()],
+                            calendar_info_repo,
+                            mood_data_repo,
+                            photo_album_data_repo,
+                        )
+                except (ValueError, KeyError):
+                    # Invalid type, skip
+                    pass
+
+        # Update type_data if provided (without changing types)
+        elif request.type_data is not None:
+            for type_str, type_data_dict in request.type_data.items():
+                try:
+                    journal_type = JournalType[type_str.upper()]
+                    await _update_type_specific_data(
+                        journal_type,
+                        journal_id,
+                        type_data_dict,
+                        calendar_info_repo,
+                        mood_data_repo,
+                        photo_album_data_repo,
+                    )
+                except (ValueError, KeyError):
+                    # Invalid type, skip
+                    pass
+
+        # Update contact relationships if provided (replace all relationships)
+        if request.contact_relationships is not None:
+            # Remove all existing relationships
+            existing_relationships = await contact_relationship_repo.get_by_journal(
+                journal_id
+            )
+            for rel in existing_relationships:
+                await contact_relationship_repo.delete(
+                    journal_id, rel.contact_id, rel.relationship_type
+                )
+
+            # Add new relationships
+            for rel_dict in request.contact_relationships:
+                try:
+                    contact_id = rel_dict.get("contact_id")
+                    relationship_type_str = rel_dict.get("relationship_type")
+
+                    if contact_id and relationship_type_str:
+                        relationship_type = JournalContactRelationshipType[
+                            relationship_type_str.upper()
+                        ]
+
+                        relationship = JournalContactRelationship(
+                            journal_id=journal_id,
+                            contact_id=contact_id,
+                            relationship_type=relationship_type,
+                        )
+                        await contact_relationship_repo.create(relationship)
+                except (ValueError, KeyError):
+                    # Invalid relationship, skip
+                    pass
+
+        # Update tags if provided (replace all tags)
+        if request.tags is not None:
+            from uuid import uuid4
+
+            from app.core.journal.models.journal_tag import JournalTag
+
+            # Remove all existing tags
+            existing_tags = await tag_repo.get_tags_for_journal(journal_id)
+            for existing_tag in existing_tags:
+                if existing_tag.id is not None:
+                    await tag_repo.remove_tag(journal_id, existing_tag.id)
+
+            # Add new tags
+            for tag_name in request.tags:
+                try:
+                    # Find or create tag by name
+                    all_tags = await tag_repo.get_all()
+                    tag: JournalTag | None = next(
+                        (t for t in all_tags if t.name.lower() == tag_name.lower()),
+                        None,
+                    )
+
+                    if not tag:
+                        # Tag doesn't exist, create it
+                        tag = JournalTag(
+                            id=uuid4(),
+                            name=tag_name,
+                            color="#808080",  # Default gray color
+                        )
+                        tag = await tag_repo.save(tag)
+
+                    # Assign tag to journal (tag.id is guaranteed to be set after save)
+                    if tag.id is not None:
+                        await tag_repo.assign_tag(journal_id, tag.id)
+                except Exception:
+                    # Error creating/assigning tag, skip
+                    pass
+
+        # Fetch all enrichment data
+        types, type_data = await _fetch_journal_types_and_data(
+            journal_id,
+            calendar_info_repo,
+            mood_data_repo,
+            plan_data_repo,
+            travel_data_repo,
+            photo_album_data_repo,
+        )
+
+        contacts = await _fetch_contact_relationships_with_names(
+            journal_id, contact_relationship_repo, contact_repo
+        )
+
+        tags = await tag_repo.get_tags_for_journal(journal_id)
 
         # Convert to AI-friendly response
         response = JournalConverter.to_response(
             journal=updated_journal,
-            types=[],
-            type_data={},
-            contacts=[],
-            tags=[],
+            types=types,
+            type_data=type_data,
+            contacts=contacts,
+            tags=tags,
         )
 
         return MCPResponseBuilder.success_response(response)
