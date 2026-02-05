@@ -31,7 +31,16 @@ export const journalKeys = {
   details: () => [...journalKeys.all, 'detail'] as const,
   detail: (id: string) => [...journalKeys.details(), id] as const,
   search: (query: string) => [...journalKeys.all, 'search', query] as const,
+  contactJournals: (contactId: string, filters?: ContactJournalsFilters) =>
+    [...journalKeys.all, 'contact', contactId, filters] as const,
 };
+
+// Contact Journals Filters
+export interface ContactJournalsFilters {
+  relationship_type?: string;
+  page?: number;
+  limit?: number;
+}
 
 export const journalTagKeys = {
   all: ['journal-tags'] as const,
@@ -127,6 +136,34 @@ async function searchJournals(
     const errorData: JsonApiErrorResponse = await response.json();
     throw new Error(
       errorData.errors?.[0]?.detail || ERROR_MESSAGES.SEARCH_FAILED
+    );
+  }
+
+  return response.json();
+}
+
+async function fetchContactJournals(
+  contactId: string,
+  filters: ContactJournalsFilters = {}
+): Promise<JournalListResponse> {
+  const params = new URLSearchParams();
+  params.append('page', (filters.page || 1).toString());
+  params.append('limit', (filters.limit || 20).toString());
+  if (filters.relationship_type) {
+    params.append('relationship_type', filters.relationship_type);
+  }
+
+  const response = await fetch(
+    `/api/contacts/${contactId}/journals?${params.toString()}`,
+    {
+      credentials: 'include',
+    }
+  );
+
+  if (!response.ok) {
+    const errorData: JsonApiErrorResponse = await response.json();
+    throw new Error(
+      errorData.errors?.[0]?.detail || ERROR_MESSAGES.FETCH_FAILED
     );
   }
 
@@ -685,5 +722,17 @@ export function useRemoveJournalTag() {
     onError: (error: Error) => {
       toast.error(error.message);
     },
+  });
+}
+
+export function useContactJournals(
+  contactId: string,
+  filters: ContactJournalsFilters = {}
+) {
+  return useQuery({
+    queryKey: journalKeys.contactJournals(contactId, filters),
+    queryFn: () => fetchContactJournals(contactId, filters),
+    enabled: !!contactId,
+    staleTime: 5 * 60 * 1000, // 5 minutes
   });
 }
