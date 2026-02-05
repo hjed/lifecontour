@@ -138,7 +138,7 @@ class TestWorkerOutboxEventCreation:
         assert hasattr(outbox_event, "event_type")
         assert hasattr(outbox_event, "event_data")
         assert hasattr(outbox_event, "id")
-        assert hasattr(outbox_event, "occurred_at")
+        assert hasattr(outbox_event, "created_at")
         assert hasattr(outbox_event, "processed_at")
         assert hasattr(outbox_event, "retry_count")
 
