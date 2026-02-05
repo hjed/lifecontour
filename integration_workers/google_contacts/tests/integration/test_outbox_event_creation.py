@@ -146,5 +146,6 @@ class TestWorkerOutboxEventCreation:
         assert outbox_event.event_type == "contact.created"
         assert isinstance(outbox_event.event_data, dict)
         assert outbox_event.processed_at is None
-        assert outbox_event.retry_count == 0
+        # retry_count is None until inserted (server default applies on insert)
+        assert outbox_event.retry_count is None
 
