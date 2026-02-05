@@ -113,7 +113,7 @@ export type JournalTypeData =
 
 // Contact Relationship
 export interface JournalContactRelationship {
-  id: number;
+  id: string; // Contact ID is returned as string from API
   name?: string | null;
   relationship_type: JournalContactRelationshipType;
 }

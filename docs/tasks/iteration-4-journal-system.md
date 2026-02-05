@@ -1194,6 +1194,15 @@ CREATE TABLE journals (
 - **TDD Approach:** Tests written first, then implementation for all components
 - **Backend API:** Already implemented in `backend/app/api/contacts/controllers.py` (lines 749-850)
 
+**Known Limitations / Follow-up Tasks:**
+- ⚠️ **Parent/Child Hierarchy Not Implemented:** The spec requires showing parent journals with children grouped underneath (line 1156), but the current implementation displays all journals in a flat list sorted by date. This needs to be implemented in a follow-up task:
+  - Filter out child journals from the main list
+  - Display child journals nested under their parent journals
+  - Handle hierarchy UI (expandable/collapsible child journal lists)
+  - Update sorting to respect parent-child relationships
+  - Add tests for hierarchical display
+  - Note: Backend API already returns both parent and child journals, so no backend changes needed
+
 ## Architecture Notes
 
 **Domain-Driven Design:**

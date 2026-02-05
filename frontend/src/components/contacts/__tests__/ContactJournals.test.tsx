@@ -23,7 +23,8 @@ jest.mock('next/navigation', () => ({
 const createMockJournal = (
   id: string,
   title: string,
-  relationshipType: string
+  relationshipType: string,
+  eventDate: string = '2024-01-01'
 ) => ({
   id,
   type: 'journals',
@@ -31,14 +32,14 @@ const createMockJournal = (
     title,
     content: 'Test content for journal ' + id,
     event_date_range: {
-      start: '2024-01-01',
-      end: '2024-01-01',
+      start: eventDate,
+      end: eventDate,
     },
     types: [JournalType.NOTE],
     tags: [],
     contacts: [
       {
-        id: 123,
+        id: '123', // Contact IDs are strings in the API
         name: 'Test Contact',
         relationship_type: relationshipType,
       },
@@ -206,5 +207,35 @@ describe('ContactJournals', () => {
     expect(
       screen.queryByText(/showing.*of.*journals/i)
     ).not.toBeInTheDocument();
+  });
+
+  it('should sort journals by event date (most recent first)', async () => {
+    const mockData = {
+      data: [
+        createMockJournal('1', 'Oldest Journal', 'PARTICIPANT', '2024-01-01'),
+        createMockJournal('2', 'Newest Journal', 'PARTICIPANT', '2024-03-01'),
+        createMockJournal('3', 'Middle Journal', 'PARTICIPANT', '2024-02-01'),
+      ],
+      meta: { total: 3 },
+    };
+
+    (journalsApi.useContactJournals as jest.Mock).mockReturnValue({
+      data: mockData,
+      isLoading: false,
+      isError: false,
+    });
+
+    render(<ContactJournals contactId='123' />, { wrapper: createWrapper() });
+
+    await waitFor(() => {
+      // Get their positions in the DOM
+      const cards = screen.getAllByTestId(/^journal-/);
+      const positions = cards.map(card => card.getAttribute('data-testid'));
+
+      // Should be sorted: Newest (2), Middle (3), Oldest (1)
+      expect(positions[0]).toBe('journal-2');
+      expect(positions[1]).toBe('journal-3');
+      expect(positions[2]).toBe('journal-1');
+    });
   });
 });

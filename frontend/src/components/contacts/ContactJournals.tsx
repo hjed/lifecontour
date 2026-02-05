@@ -138,7 +138,7 @@ export function ContactJournals({ contactId }: ContactJournalsProps) {
     (acc, journal) => {
       // Find the contact's relationship type in this journal
       const contactRelationship = journal.contacts.find(
-        c => c.id === Number(contactId)
+        c => c.id === contactId // Contact IDs are strings in the API
       );
       if (contactRelationship?.relationship_type) {
         const type = contactRelationship.relationship_type as RelationshipType;
@@ -149,6 +149,15 @@ export function ContactJournals({ contactId }: ContactJournalsProps) {
     },
     {} as Record<RelationshipType, typeof displayJournals>
   );
+
+  // Sort journals within each type by event_date_range (most recent first)
+  Object.keys(journalsByType).forEach(type => {
+    journalsByType[type as RelationshipType].sort((a, b) => {
+      const dateA = new Date(a.event_date_range.start).getTime();
+      const dateB = new Date(b.event_date_range.start).getTime();
+      return dateB - dateA; // Descending order (most recent first)
+    });
+  });
 
   // Empty state
   if (displayJournals.length === 0) {
