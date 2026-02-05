@@ -151,4 +151,60 @@ describe('ContactJournals', () => {
       ).toBeInTheDocument();
     });
   });
+
+  it('should display warning when there are more journals than shown', async () => {
+    // Mock 5 journals but total is 150 (more than the 100 limit)
+    const mockData = {
+      data: [
+        createMockJournal('1', 'Journal 1', 'PARTICIPANT'),
+        createMockJournal('2', 'Journal 2', 'PARTICIPANT'),
+        createMockJournal('3', 'Journal 3', 'PARTICIPANT'),
+        createMockJournal('4', 'Journal 4', 'PARTICIPANT'),
+        createMockJournal('5', 'Journal 5', 'PARTICIPANT'),
+      ],
+      meta: { total: 150 },
+    };
+
+    (journalsApi.useContactJournals as jest.Mock).mockReturnValue({
+      data: mockData,
+      isLoading: false,
+      isError: false,
+    });
+
+    render(<ContactJournals contactId='123' />, { wrapper: createWrapper() });
+
+    await waitFor(() => {
+      expect(
+        screen.getByText(/showing 5 of 150 journals/i)
+      ).toBeInTheDocument();
+      expect(screen.getByText(/journals page/i)).toBeInTheDocument();
+    });
+  });
+
+  it('should not display warning when all journals are shown', async () => {
+    const mockData = {
+      data: [
+        createMockJournal('1', 'Journal 1', 'PARTICIPANT'),
+        createMockJournal('2', 'Journal 2', 'PARTICIPANT'),
+      ],
+      meta: { total: 2 },
+    };
+
+    (journalsApi.useContactJournals as jest.Mock).mockReturnValue({
+      data: mockData,
+      isLoading: false,
+      isError: false,
+    });
+
+    render(<ContactJournals contactId='123' />, { wrapper: createWrapper() });
+
+    await waitFor(() => {
+      expect(screen.getByText('Journal 1')).toBeInTheDocument();
+    });
+
+    // Warning should not be present
+    expect(
+      screen.queryByText(/showing.*of.*journals/i)
+    ).not.toBeInTheDocument();
+  });
 });

@@ -37,6 +37,12 @@ const RELATIONSHIP_LABELS = {
 
 type RelationshipType = keyof typeof RELATIONSHIP_LABELS;
 
+interface RelationshipSectionProps {
+  readonly type: RelationshipType;
+  readonly journals: ReturnType<typeof useDisplayJournals>;
+  readonly defaultOpen?: boolean;
+}
+
 /**
  * Collapsible section for a specific relationship type
  */
@@ -44,11 +50,7 @@ function RelationshipSection({
   type,
   journals,
   defaultOpen = false,
-}: {
-  type: RelationshipType;
-  journals: ReturnType<typeof useDisplayJournals>;
-  defaultOpen?: boolean;
-}) {
+}: RelationshipSectionProps) {
   const [isOpen, setIsOpen] = useState(defaultOpen);
 
   if (journals.length === 0) return null;
@@ -91,9 +93,14 @@ function RelationshipSection({
  * ContactJournals component displays all journals for a contact grouped by relationship type
  */
 export function ContactJournals({ contactId }: ContactJournalsProps) {
-  const { data, isLoading, isError, error } = useContactJournals(contactId);
+  // Fetch journals with maximum limit (100) to show as many as possible
+  // Note: If a contact has >100 journals, we'd need to implement pagination UI
+  const { data, isLoading, isError, error } = useContactJournals(contactId, {
+    limit: 100,
+  });
 
   const journals = data?.data || [];
+  const meta = data?.meta;
 
   // Convert to display journals (must be called unconditionally)
   const displayJournals = useDisplayJournals(journals);
@@ -163,6 +170,11 @@ export function ContactJournals({ contactId }: ContactJournalsProps) {
     );
   }
 
+  // Check if there are more journals than displayed
+  const totalJournals = meta?.total as number | undefined;
+  const hasMoreJournals =
+    totalJournals !== undefined && totalJournals > journals.length;
+
   return (
     <div className='space-y-4'>
       <div className='flex items-center justify-between'>
@@ -174,13 +186,29 @@ export function ContactJournals({ contactId }: ContactJournalsProps) {
           </Link>
         </Button>
       </div>
+
+      {hasMoreJournals && (
+        <Alert>
+          <AlertDescription>
+            Showing {journals.length} of {totalJournals} journals. Visit the{' '}
+            <Link
+              href='/journals'
+              className='font-medium underline underline-offset-4'
+            >
+              Journals page
+            </Link>{' '}
+            to see all journals for this contact.
+          </AlertDescription>
+        </Alert>
+      )}
+
       <div className='space-y-3'>
         {(Object.keys(RELATIONSHIP_LABELS) as RelationshipType[]).map(type => (
           <RelationshipSection
             key={type}
             type={type}
             journals={journalsByType[type] || []}
-            defaultOpen={type === 'PARTICIPANT'}
+            defaultOpen={true}
           />
         ))}
       </div>

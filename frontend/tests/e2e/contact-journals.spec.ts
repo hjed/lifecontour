@@ -8,6 +8,18 @@
 
 import { test, expect } from './fixtures';
 import { TestDataManager } from './data-management';
+import type { Page } from '@playwright/test';
+
+/**
+ * Helper function to navigate to contact page and wait for journals section
+ */
+async function navigateToContactAndWaitForJournals(
+  page: Page,
+  contactId: string
+): Promise<void> {
+  await page.goto(`/contacts/${contactId}`);
+  await expect(page.getByRole('heading', { name: 'Journals' })).toBeVisible();
+}
 
 test.describe('Contact Journals Display', () => {
   test.describe('Viewing Journals on Contact Page', () => {
@@ -56,9 +68,7 @@ test.describe('Contact Journals Display', () => {
       ).toBeVisible();
 
       // Verify journals section is visible
-      await expect(
-        page.getByRole('heading', { name: 'Journals' })
-      ).toBeVisible();
+      await navigateToContactAndWaitForJournals(page, contact.id);
 
       // Verify participant journal is displayed
       await expect(
@@ -107,13 +117,8 @@ test.describe('Contact Journals Display', () => {
         contacts: [{ contact_id: contact.id, relationship_type: 'ABOUT' }],
       });
 
-      // Navigate to contact detail page
-      await page.goto(`/contacts/${contact.id}`);
-
-      // Wait for page to load by checking for journals section
-      await expect(
-        page.getByRole('heading', { name: 'Journals' })
-      ).toBeVisible();
+      // Navigate to contact detail page and wait for journals section
+      await navigateToContactAndWaitForJournals(page, contact.id);
 
       // Verify relationship type sections exist
       await expect(page.getByText('Participant')).toBeVisible();
@@ -144,13 +149,8 @@ test.describe('Contact Journals Display', () => {
         email: 'empty@example.com',
       });
 
-      // Navigate to contact detail page
-      await page.goto(`/contacts/${contact.id}`);
-
-      // Wait for page to load by checking for journals section
-      await expect(
-        page.getByRole('heading', { name: 'Journals' })
-      ).toBeVisible();
+      // Navigate to contact detail page and wait for journals section
+      await navigateToContactAndWaitForJournals(page, contact.id);
 
       // Verify empty state message
       await expect(
@@ -222,20 +222,17 @@ test.describe('Contact Journals Display', () => {
         email: 'create@example.com',
       });
 
-      // Navigate to contact detail page
-      await page.goto(`/contacts/${contact.id}`);
-
-      // Wait for page to load by checking for journals section
-      await expect(
-        page.getByRole('heading', { name: 'Journals' })
-      ).toBeVisible();
+      // Navigate to contact detail page and wait for journals section
+      await navigateToContactAndWaitForJournals(page, contact.id);
 
       // Click the "Add Journal" button
       const addJournalButton = page.getByRole('link', { name: /add journal/i });
       await expect(addJournalButton).toBeVisible();
 
       await Promise.all([
-        page.waitForURL(new RegExp(`/journals/new\\?contact=${contact.id}`)),
+        page.waitForURL(
+          new RegExp(String.raw`/journals/new\?contact=${contact.id}`)
+        ),
         addJournalButton.click(),
       ]);
 
@@ -257,13 +254,8 @@ test.describe('Contact Journals Display', () => {
         email: 'workflow@example.com',
       });
 
-      // Navigate to contact detail page
-      await page.goto(`/contacts/${contact.id}`);
-
-      // Wait for page to load by checking for journals section
-      await expect(
-        page.getByRole('heading', { name: 'Journals' })
-      ).toBeVisible();
+      // Navigate to contact detail page and wait for journals section
+      await navigateToContactAndWaitForJournals(page, contact.id);
 
       // Verify empty state initially
       await expect(
