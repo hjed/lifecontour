@@ -262,6 +262,7 @@ TEST_DATABASE_SCHEMA_STATEMENTS = [
     "DROP TABLE IF EXISTS journal_mood_data CASCADE",
     "DROP TABLE IF EXISTS journal_calendar_info CASCADE",
     "DROP TABLE IF EXISTS journals CASCADE",
+    "DROP TABLE IF EXISTS routes CASCADE",
     "DROP TABLE IF EXISTS calendars CASCADE",
     "DROP TABLE IF EXISTS contact_relationships CASCADE",
     "DROP TABLE IF EXISTS contact_tags CASCADE",
@@ -401,6 +402,19 @@ TEST_DATABASE_SCHEMA_STATEMENTS = [
     """CREATE INDEX idx_journals_event_date_range ON journals (event_date_range_start, event_date_range_end)""",
     """CREATE INDEX idx_journals_child_ordering ON journals (parent_id, event_date_range_start, "order")""",
     """CREATE INDEX idx_journals_created_at ON journals (created_at)""",
+    # Routes table
+    """CREATE TABLE routes (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        user_id VARCHAR(50) NOT NULL,
+        name VARCHAR(200) NOT NULL,
+        description TEXT,
+        gpx_data TEXT,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL,
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL
+    )""",
+    """CREATE INDEX idx_routes_user_id ON routes (user_id)""",
+    """CREATE INDEX idx_routes_name ON routes (name)""",
+    """CREATE INDEX idx_routes_created_at ON routes (created_at)""",
     # Calendars table
     """CREATE TABLE calendars (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

@@ -10,6 +10,7 @@ from .journal_tag_repository import SqlJournalTagRepository
 from .mood_data_repository import SqlMoodDataRepository
 from .photo_album_data_repository import SqlPhotoAlbumDataRepository
 from .plan_data_repository import SqlPlanDataRepository
+from .route_repository import SqlRouteRepository
 from .travel_data_repository import SqlTravelDataRepository
 
 __all__ = [
@@ -22,4 +23,5 @@ __all__ = [
     "SqlTravelDataRepository",
     "SqlJournalTagRepository",
     "SqlJournalContactRelationshipRepository",
+    "SqlRouteRepository",
 ]

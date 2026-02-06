@@ -3,6 +3,8 @@
 from abc import ABC, abstractmethod
 from uuid import UUID
 
+from core_shared.models.route import Route
+
 from .calendar import Calendar
 from .calendar_info import CalendarInfo
 from .entities import Journal
@@ -804,5 +806,99 @@ class JournalContactRelationshipRepository(ABC):
 
         Returns:
             List of relationships matching the criteria
+        """
+        pass
+
+
+class RouteRepository(ABC):
+    """
+    Repository interface for route operations.
+
+    Routes are shared across multiple activity types (BUSHWALKING, CANYONING,
+    CLIMBING, KAYAKING, CROSS_COUNTRY_SKIING, JOGGING) and are user-specific.
+    """
+
+    @abstractmethod
+    async def find_by_id(self, route_id: UUID) -> Route | None:
+        """
+        Find a route by ID.
+
+        Args:
+            route_id: The route UUID to look up
+
+        Returns:
+            The Route if found, None otherwise
+        """
+        pass
+
+    @abstractmethod
+    async def save(self, route: Route) -> Route:
+        """
+        Save a route (insert or update).
+
+        Args:
+            route: The route to save
+
+        Returns:
+            The saved route with updated fields (id, timestamps)
+        """
+        pass
+
+    @abstractmethod
+    async def delete(self, route_id: UUID) -> None:
+        """
+        Delete a route by ID.
+
+        Args:
+            route_id: The route UUID to delete
+        """
+        pass
+
+    @abstractmethod
+    async def get_all(
+        self, user_id: str, limit: int = 100, offset: int = 0
+    ) -> list[Route]:
+        """
+        Get all routes for a user with pagination.
+
+        Args:
+            user_id: The user ID to filter by
+            limit: Maximum number of routes to return
+            offset: Number of routes to skip
+
+        Returns:
+            List of routes
+        """
+        pass
+
+    @abstractmethod
+    async def get_count(self, user_id: str) -> int:
+        """
+        Get total count of routes for a user.
+
+        Args:
+            user_id: The user ID to filter by
+
+        Returns:
+            Total number of routes for the user
+        """
+        pass
+
+    @abstractmethod
+    async def check_usage_in_journals(self, route_id: UUID) -> bool:
+        """
+        Check if a route is referenced by any journal entries.
+
+        Routes are referenced by activity-specific data tables (journal_bushwalking_data,
+        journal_kayaking_data, journal_climbing_data, journal_skiing_data, journal_jogging_data,
+        journal_canyoning_data), NOT by the journals table itself.
+
+        This is used to prevent deletion of routes that are in use.
+
+        Args:
+            route_id: The route UUID to check
+
+        Returns:
+            True if the route is used in any activity-specific journal data, False otherwise
         """
         pass

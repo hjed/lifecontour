@@ -25,6 +25,9 @@ from .events import (
     JournalTypeAdded,
     JournalTypeRemoved,
     JournalUpdated,
+    RouteCreated,
+    RouteDeleted,
+    RouteUpdated,
 )
 from .exceptions import (
     CalendarInfoValidationError,
@@ -40,6 +43,9 @@ from .exceptions import (
     PhotoAlbumDataValidationError,
     PlanDataValidationError,
     PlanDocumentValidationError,
+    RouteInUseError,
+    RouteNotFoundError,
+    RouteValidationError,
     TravelAccommodationValidationError,
     TravelDataValidationError,
     TravelFlightValidationError,
@@ -61,6 +67,7 @@ from .repositories import (
     MoodDataRepository,
     PhotoAlbumDataRepository,
     PlanDataRepository,
+    RouteRepository,
     TravelDataRepository,
 )
 from .travel_data import (
@@ -110,6 +117,9 @@ __all__ = [
     "JournalDeleted",
     "JournalTypeAdded",
     "JournalTypeRemoved",
+    "RouteCreated",
+    "RouteUpdated",
+    "RouteDeleted",
     # Exceptions
     "JournalCycleError",
     "JournalError",
@@ -128,6 +138,9 @@ __all__ = [
     "TravelFlightValidationError",
     "TravelAccommodationValidationError",
     "TravelTransportationValidationError",
+    "RouteNotFoundError",
+    "RouteInUseError",
+    "RouteValidationError",
     # Repositories
     "JournalRepository",
     "CalendarRepository",
@@ -138,6 +151,7 @@ __all__ = [
     "TravelDataRepository",
     "JournalTagRepository",
     "JournalContactRelationshipRepository",
+    "RouteRepository",
     # Value Objects
     "EventDateRange",
 ]
