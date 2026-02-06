@@ -208,32 +208,5 @@ test.describe('Journal List Page', () => {
       // Verify we're on the detail page
       expect(page.url()).toContain(`/journals/${firstJournal.id}`);
     });
-
-    test.skip('should navigate to create journal page when clicking create button', async ({
-      emptyJournalsPage,
-    }) => {
-      // SKIPPED: Create button is currently disabled with "Coming soon" tooltip
-      // This test will be enabled when journal creation is implemented
-      const page = emptyJournalsPage;
-
-      // Navigate to journals page
-      await page.goto('/journals');
-      await page.waitForLoadState('networkidle');
-
-      // Find and click the create button
-      const createButton = page.getByRole('button', { name: /create|new/i });
-      if (
-        (await createButton.isVisible()) &&
-        !(await createButton.isDisabled())
-      ) {
-        await createButton.click();
-
-        // Wait for navigation
-        await page.waitForLoadState('networkidle');
-
-        // Verify we're on the create page
-        expect(page.url()).toContain('/journals/new');
-      }
-    });
   });
 });
