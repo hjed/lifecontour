@@ -121,8 +121,12 @@ test.describe('Contact Journals Display', () => {
       await navigateToContactAndWaitForJournals(page, contact.id);
 
       // Verify relationship type sections exist
-      await expect(page.getByText('Participant')).toBeVisible();
-      await expect(page.getByText('About')).toBeVisible();
+      await expect(
+        page.getByTestId('relationship-section-trigger-PARTICIPANT')
+      ).toBeVisible();
+      await expect(
+        page.getByTestId('relationship-section-trigger-ABOUT')
+      ).toBeVisible();
 
       // Test collapsible functionality
       const participantSection = page

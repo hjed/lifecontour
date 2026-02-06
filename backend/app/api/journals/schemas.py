@@ -255,6 +255,9 @@ class JournalCreateData(BaseModel):
     attributes: JournalAttributes = Field(
         ..., description="Journal attributes to create"
     )
+    relationships: JournalRelationships | None = Field(
+        default=None, description="Journal relationships (optional)"
+    )
 
 
 class JournalUpdateAttributes(BaseModel):

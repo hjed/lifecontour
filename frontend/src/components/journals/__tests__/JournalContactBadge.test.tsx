@@ -133,7 +133,7 @@ describe('JournalContactBadge', () => {
       const removeButton = screen.getByLabelText('Remove John Doe');
       await user.click(removeButton);
 
-      expect(mockOnContactRemove).toHaveBeenCalledWith(1);
+      expect(mockOnContactRemove).toHaveBeenCalledWith('1');
     });
   });
 
