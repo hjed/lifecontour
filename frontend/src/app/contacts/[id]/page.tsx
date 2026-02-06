@@ -27,6 +27,7 @@ import { ContactMethodsList } from '@/components/contacts/ContactMethodsList';
 import { ContactAddressesList } from '@/components/contacts/ContactAddressesList';
 import { RelationshipsList } from '@/components/contacts/RelationshipsList';
 import { ActivityFeed } from '@/components/contacts/ActivityFeed';
+import { ContactJournals } from '@/components/contacts/ContactJournals';
 import type { TagResource } from '@/types/contacts';
 import { AuthGuard } from '@/components/auth/AuthGuard';
 import { DATE_FORMATS } from '@/lib/constants';
@@ -237,6 +238,9 @@ function ContactDetailPageContent() {
             contactId={contact.id}
             addresses={contact.attributes.addresses || []}
           />
+
+          {/* Journals */}
+          <ContactJournals contactId={contact.id} />
 
           {/* Notes */}
           {contact.attributes.notes && contact.attributes.notes.length > 0 && (

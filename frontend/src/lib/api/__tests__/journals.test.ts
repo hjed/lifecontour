@@ -13,6 +13,7 @@ import {
   useCreateJournal,
   useUpdateJournal,
   useDeleteJournal,
+  useContactJournals,
 } from '../journals';
 import { JournalType } from '@/types/journals';
 
@@ -367,6 +368,110 @@ describe('Journals API', () => {
           method: 'DELETE',
         })
       );
+    });
+  });
+
+  describe('useContactJournals', () => {
+    it('should fetch journals for a contact', async () => {
+      const mockJournals = [
+        createMockJournal('1', { title: 'Journal 1' }),
+        createMockJournal('2', { title: 'Journal 2' }),
+      ];
+      const mockResponse = createMockJournalListResponse(mockJournals);
+
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => mockResponse,
+      } as Response);
+
+      const { result } = renderHook(() => useContactJournals('123'), {
+        wrapper: createWrapper,
+      });
+
+      await waitFor(() => {
+        expect(result.current.isSuccess).toBe(true);
+      });
+
+      expect(result.current.data).toEqual(mockResponse);
+      expect(mockFetch).toHaveBeenCalledWith(
+        '/api/contacts/123/journals?page=1&limit=20',
+        expect.objectContaining({
+          credentials: 'include',
+        })
+      );
+    });
+
+    it('should filter by relationship type', async () => {
+      const mockJournals = [createMockJournal('1')];
+      const mockResponse = createMockJournalListResponse(mockJournals);
+
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => mockResponse,
+      } as Response);
+
+      const { result } = renderHook(
+        () => useContactJournals('123', { relationship_type: 'PARTICIPANT' }),
+        { wrapper: createWrapper }
+      );
+
+      await waitFor(() => {
+        expect(result.current.isSuccess).toBe(true);
+      });
+
+      expect(mockFetch).toHaveBeenCalledWith(
+        '/api/contacts/123/journals?page=1&limit=20&relationship_type=PARTICIPANT',
+        expect.objectContaining({
+          credentials: 'include',
+        })
+      );
+    });
+
+    it('should handle pagination', async () => {
+      const mockJournals = [createMockJournal('1')];
+      const mockResponse = createMockJournalListResponse(mockJournals);
+
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => mockResponse,
+      } as Response);
+
+      const { result } = renderHook(
+        () => useContactJournals('123', { page: 2, limit: 10 }),
+        { wrapper: createWrapper }
+      );
+
+      await waitFor(() => {
+        expect(result.current.isSuccess).toBe(true);
+      });
+
+      expect(mockFetch).toHaveBeenCalledWith(
+        '/api/contacts/123/journals?page=2&limit=10',
+        expect.objectContaining({
+          credentials: 'include',
+        })
+      );
+    });
+
+    it('should handle errors', async () => {
+      const mockError = {
+        errors: [{ detail: 'Contact not found' }],
+      };
+
+      mockFetch.mockResolvedValueOnce({
+        ok: false,
+        json: async () => mockError,
+      } as Response);
+
+      const { result } = renderHook(() => useContactJournals('999'), {
+        wrapper: createWrapper,
+      });
+
+      await waitFor(() => {
+        expect(result.current.isError).toBe(true);
+      });
+
+      expect(result.current.error).toEqual(new Error('Contact not found'));
     });
   });
 });

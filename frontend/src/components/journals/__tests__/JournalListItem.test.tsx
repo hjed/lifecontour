@@ -106,12 +106,12 @@ describe('JournalListItem', () => {
         ...baseJournal.attributes,
         contacts: [
           {
-            id: 1,
+            id: '1',
             name: 'John Doe',
             relationship_type: JournalContactRelationshipType.PARTICIPANT,
           },
           {
-            id: 2,
+            id: '2',
             name: 'Jane Smith',
             relationship_type: JournalContactRelationshipType.INVITEE,
           },

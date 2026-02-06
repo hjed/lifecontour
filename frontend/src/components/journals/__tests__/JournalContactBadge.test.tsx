@@ -33,12 +33,12 @@ jest.mock('@/components/ui/select', () => ({
 describe('JournalContactBadge', () => {
   const mockContacts: JournalContactRelationship[] = [
     {
-      id: 1,
+      id: '1',
       name: 'John Doe',
       relationship_type: JournalContactRelationshipType.PARTICIPANT,
     },
     {
-      id: 2,
+      id: '2',
       name: 'Jane Smith',
       relationship_type: JournalContactRelationshipType.MENTION,
     },
@@ -133,7 +133,7 @@ describe('JournalContactBadge', () => {
       const removeButton = screen.getByLabelText('Remove John Doe');
       await user.click(removeButton);
 
-      expect(mockOnContactRemove).toHaveBeenCalledWith(1);
+      expect(mockOnContactRemove).toHaveBeenCalledWith('1');
     });
   });
 

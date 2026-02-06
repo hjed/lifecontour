@@ -30,12 +30,12 @@ import { JournalContactRelationshipType } from '@/types/journals';
 interface JournalContactBadgeProps {
   readonly contacts: JournalContact[];
   readonly onContactAdd?: (
-    contactId: number,
+    contactId: string,
     relationshipType: JournalContactRelationshipType
   ) => Promise<void>;
-  readonly onContactRemove?: (contactId: number) => Promise<void>;
+  readonly onContactRemove?: (contactId: string) => Promise<void>;
   readonly onRelationshipChange?: (
-    contactId: number,
+    contactId: string,
     relationshipType: JournalContactRelationshipType
   ) => Promise<void>;
   readonly availableContacts?: Array<{ id: number; name: string }>;
@@ -64,7 +64,7 @@ export function JournalContactBadge({
   className,
 }: JournalContactBadgeProps) {
   const [isAddOpen, setIsAddOpen] = useState(false);
-  const [selectedContactId, setSelectedContactId] = useState<number | null>(
+  const [selectedContactId, setSelectedContactId] = useState<string | null>(
     null
   );
   const [selectedRelationshipType, setSelectedRelationshipType] =
@@ -89,7 +89,7 @@ export function JournalContactBadge({
     }
   };
 
-  const handleRemoveContact = async (contactId: number) => {
+  const handleRemoveContact = async (contactId: string) => {
     if (!onContactRemove) return;
 
     setIsLoading(true);
@@ -145,7 +145,7 @@ export function JournalContactBadge({
                 </label>
                 <Select
                   value={selectedContactId?.toString()}
-                  onValueChange={value => setSelectedContactId(Number(value))}
+                  onValueChange={value => setSelectedContactId(value)}
                   disabled={isLoading}
                 >
                   <SelectTrigger
@@ -157,7 +157,10 @@ export function JournalContactBadge({
                   <SelectContent>
                     {availableContacts
                       .filter(
-                        c => !contacts.some(existing => existing.id === c.id)
+                        c =>
+                          !contacts.some(
+                            existing => existing.id === c.id.toString()
+                          )
                       )
                       .map(contact => (
                         <SelectItem

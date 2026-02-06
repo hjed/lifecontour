@@ -107,17 +107,17 @@ export function JournalDetailView({
   };
 
   const handleContactAdd = async (
-    contactId: number,
+    contactId: string,
     relationshipType: JournalContactRelationshipType
   ) => {
     await addContact.mutateAsync({
       journalId: journal.id,
-      contactId: contactId.toString(),
+      contactId: contactId,
       relationshipType,
     });
   };
 
-  const handleContactRemove = async (contactId: number) => {
+  const handleContactRemove = async (contactId: string) => {
     const contact = journal.contacts.find(
       (c: JournalContactRelationship) => c.id === contactId
     );
@@ -125,7 +125,7 @@ export function JournalDetailView({
 
     await removeContact.mutateAsync({
       journalId: journal.id,
-      contactId: contactId.toString(),
+      contactId: contactId,
       relationshipType: contact.relationship_type,
     });
   };

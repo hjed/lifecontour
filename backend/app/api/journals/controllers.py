@@ -533,6 +533,43 @@ async def create_journal(
                 # Invalid type, skip
                 pass
 
+    # Add contact relationships if provided in the request (via relationships field)
+    if (
+        hasattr(journal_request.data, "relationships")
+        and journal_request.data.relationships
+    ):
+        relationships = journal_request.data.relationships
+        if relationships.contacts:
+            # Ensure journal_id is not None
+            if created_journal.id is None:
+                msg = "Journal ID should be set after creation"
+                raise ValueError(msg)
+            journal_id = created_journal.id
+
+            # Process each contact relationship
+            contacts_data = relationships.contacts.get("data", [])
+            for contact_data in contacts_data:
+                try:
+                    # Extract contact_id and relationship_type from attributes
+                    # contact_data is a dict from JSON, not a Pydantic model
+                    if "attributes" in contact_data:
+                        attrs = contact_data["attributes"]
+                        contact_id = int(attrs["contact_id"])
+                        relationship_type = JournalContactRelationshipType[
+                            attrs["relationship_type"]
+                        ]
+
+                        # Create the relationship
+                        relationship = JournalContactRelationship(
+                            journal_id=journal_id,
+                            contact_id=contact_id,
+                            relationship_type=relationship_type,
+                        )
+                        await contact_relationship_repo.create(relationship)
+                except (ValueError, KeyError, AttributeError, IntegrityError):
+                    # Invalid contact relationship, skip
+                    pass
+
     # Fetch all enrichment data
     types, type_data, contacts, tags, calendar = await _enrich_journal_data(
         created_journal,
