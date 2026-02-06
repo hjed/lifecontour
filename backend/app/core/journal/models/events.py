@@ -3,6 +3,7 @@
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
+from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncConnection
 
@@ -126,5 +127,75 @@ class JournalTypeRemoved(DomainEvent):
                 "journal_id": journal_id,
                 "journal_type": journal_type,
             },
+            transaction=transaction,
+        )
+
+
+@dataclass(frozen=True)
+class RouteCreated(DomainEvent):
+    """Event raised when a route is created."""
+
+    def __init__(
+        self,
+        route_id: str,
+        user_id: str,
+        name: str,
+        transaction: AsyncConnection | None = None,
+    ):
+        now = datetime.now()
+        # Use UUID.int for deterministic aggregate_id (DomainEvent expects int)
+        # This is stable across process restarts unlike hash()
+        aggregate_id = UUID(route_id).int % (10**9)
+        super().__init__(
+            event_id=f"route_created_{route_id}_{now.isoformat()}",
+            occurred_at=now,
+            aggregate_id=aggregate_id,
+            event_type="RouteCreated",
+            event_data={
+                "route_id": route_id,
+                "user_id": user_id,
+                "name": name,
+            },
+            transaction=transaction,
+        )
+
+
+@dataclass(frozen=True)
+class RouteUpdated(DomainEvent):
+    """Event raised when a route is updated."""
+
+    def __init__(
+        self,
+        route_id: str,
+        changed_fields: dict[str, Any],
+        transaction: AsyncConnection | None = None,
+    ):
+        now = datetime.now()
+        # Use UUID.int for deterministic aggregate_id (DomainEvent expects int)
+        aggregate_id = UUID(route_id).int % (10**9)
+        super().__init__(
+            event_id=f"route_updated_{route_id}_{now.isoformat()}",
+            occurred_at=now,
+            aggregate_id=aggregate_id,
+            event_type="RouteUpdated",
+            event_data={"route_id": route_id, "changed_fields": changed_fields},
+            transaction=transaction,
+        )
+
+
+@dataclass(frozen=True)
+class RouteDeleted(DomainEvent):
+    """Event raised when a route is deleted."""
+
+    def __init__(self, route_id: str, transaction: AsyncConnection | None = None):
+        now = datetime.now()
+        # Use UUID.int for deterministic aggregate_id (DomainEvent expects int)
+        aggregate_id = UUID(route_id).int % (10**9)
+        super().__init__(
+            event_id=f"route_deleted_{route_id}_{now.isoformat()}",
+            occurred_at=now,
+            aggregate_id=aggregate_id,
+            event_type="RouteDeleted",
+            event_data={"route_id": route_id},
             transaction=transaction,
         )

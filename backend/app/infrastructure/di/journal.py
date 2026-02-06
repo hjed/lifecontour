@@ -17,6 +17,7 @@ from app.core.journal.adapters.sql.photo_album_data_repository import (
     SqlPhotoAlbumDataRepository,
 )
 from app.core.journal.adapters.sql.plan_data_repository import SqlPlanDataRepository
+from app.core.journal.adapters.sql.route_repository import SqlRouteRepository
 from app.core.journal.adapters.sql.travel_data_repository import SqlTravelDataRepository
 from app.core.journal.models.repositories import (
     CalendarInfoRepository,
@@ -27,9 +28,11 @@ from app.core.journal.models.repositories import (
     MoodDataRepository,
     PhotoAlbumDataRepository,
     PlanDataRepository,
+    RouteRepository,
     TravelDataRepository,
 )
 from app.core.journal.services.journal_service import JournalService
+from app.core.journal.services.route_service import RouteService
 from app.infrastructure.events.outbox_event_publisher import OutboxEventPublisher
 
 
@@ -92,6 +95,11 @@ class JournalProvider(Provider):
         return SqlJournalContactRelationshipRepository(connection)
 
     @provide(scope=Scope.REQUEST)
+    def route_repository(self, connection: AsyncConnection) -> RouteRepository:
+        """Provide a RouteRepository instance."""
+        return SqlRouteRepository(connection)
+
+    @provide(scope=Scope.REQUEST)
     def journal_service(
         self,
         journal_repo: JournalRepository,
@@ -100,5 +108,17 @@ class JournalProvider(Provider):
         """Provide a JournalService instance."""
         return JournalService(
             journal_repo=journal_repo,
+            event_publisher=event_publisher,
+        )
+
+    @provide(scope=Scope.REQUEST)
+    def route_service(
+        self,
+        route_repo: RouteRepository,
+        event_publisher: OutboxEventPublisher,
+    ) -> RouteService:
+        """Provide a RouteService instance."""
+        return RouteService(
+            route_repo=route_repo,
             event_publisher=event_publisher,
         )

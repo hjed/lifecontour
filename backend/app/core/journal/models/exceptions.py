@@ -166,3 +166,29 @@ class TravelTransportationValidationError(JournalError):
         self.field = field
         self.message = message
         super().__init__(f"{field}: {message}")
+
+
+class RouteNotFoundError(JournalDomainError):
+    """Exception raised when a route is not found."""
+
+    def __init__(self, route_id: str):
+        super().__init__(f"Route with ID {route_id} not found", 404)
+        self.route_id = route_id
+
+
+class RouteInUseError(JournalDomainError):
+    """Exception raised when attempting to delete a route that is in use."""
+
+    def __init__(self, route_id: str):
+        super().__init__(
+            f"Route with ID {route_id} is in use and cannot be deleted", 409
+        )
+        self.route_id = route_id
+
+
+class RouteValidationError(JournalDomainError):
+    """Exception raised when route validation fails."""
+
+    def __init__(self, field: str, message: str):
+        super().__init__(f"{field}: {message}", 400)
+        self.field = field
