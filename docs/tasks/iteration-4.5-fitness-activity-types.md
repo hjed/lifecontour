@@ -37,12 +37,12 @@ This iteration extends the journal system with fitness and outdoor activity type
 
 ## Tasks
 
-### ITER4.5-001: Routes Domain 🟢 IN PROGRESS
+### ITER4.5-001: Routes Domain ✅ COMPLETE
 **Description:** Create routes table for reusable route/track names
 **Strategy:** Single task for routes infrastructure
 **Specification Reference:** Multiple activity types reference routes table
 
-**PR Size:** ~6 files (domain, repository, service, API, tests)
+**PR Size:** ~10 files (domain, repository, service, API, tests)
 
 **Acceptance Criteria:**
 - [x] Create `routes` table in database:
@@ -62,30 +62,36 @@ This iteration extends the journal system with fitness and outdoor activity type
   - Implementation: `SqlRouteRepository` in `backend/app/core/journal/adapters/sql/route_repository.py`
   - Methods: `find_by_id`, `save`, `delete`, `get_all`, `get_count`, `check_usage_in_journals`
   - Uses SQLAlchemy Core with `text()` for raw SQL
-  - 13 integration tests passing
+  - 12 integration tests passing ✅
 - [x] Create `RouteService` with Dishka DI:
   - Service: `RouteService` in `backend/app/core/journal/services/route_service.py`
   - Domain events: `RouteCreated`, `RouteUpdated`, `RouteDeleted`
   - Domain exceptions: `RouteNotFoundError`, `RouteInUseError`, `RouteValidationError`
   - Methods: `create_route`, `update_route`, `delete_route`, `get_route`, `get_routes_for_user`, `get_route_count`
   - Registered in `JournalProvider` with REQUEST scope
-  - 10 unit tests passing
-- [ ] Implement routes API endpoints:
-  - `GET /api/routes` - List routes with filtering
+  - 11 unit tests passing ✅
+- [x] Implement routes API endpoints:
+  - `GET /api/routes` - List routes with pagination and filtering
   - `POST /api/routes` - Create route
   - `GET /api/routes/{id}` - Get route
   - `PUT /api/routes/{id}` - Update route
   - `DELETE /api/routes/{id}` - Delete route (check for usage in journals)
+  - All endpoints require authentication
+  - User ownership verification for all operations
+  - Proper error handling with domain exceptions
 - [x] Add database migration with proper indexes:
   - Migration `0016_create_routes_table.py` applied successfully
   - Indexes on `user_id`, `name`, `created_at`
 - [x] Write unit tests for route service:
-  - 10 unit tests in `backend/tests/unit/routes/test_route_service.py`
+  - 11 unit tests in `backend/tests/unit/routes/test_route_service.py`
   - All tests passing ✅
 - [x] Write integration tests for route repository:
-  - 13 integration tests in `backend/tests/integration/routes/test_route_repository_integration.py`
+  - 12 integration tests in `backend/tests/integration/routes/test_route_repository_integration.py`
   - All tests passing ✅
-- [ ] Write integration tests for route API
+- [x] Write integration tests for route API:
+  - 23 integration tests in `backend/tests/integration/api/test_route_endpoints.py`
+  - Tests cover CRUD operations, pagination, error handling, authentication
+  - All tests passing ✅
 - [x] Document routes domain in code comments:
   - Comprehensive docstrings in all route-related files
 
@@ -98,24 +104,27 @@ This iteration extends the journal system with fitness and outdoor activity type
 - **Domain Events:** `backend/app/core/journal/models/events.py` (RouteCreated, RouteUpdated, RouteDeleted)
 - **Domain Exceptions:** `backend/app/core/journal/models/exceptions.py` (RouteNotFoundError, RouteInUseError, RouteValidationError)
 - **Dependency Injection:** Registered in `backend/app/infrastructure/di/journal.py` (JournalProvider)
-- **Unit Tests:** `backend/tests/unit/routes/test_route_service.py` (10 tests, all passing)
-- **Integration Tests:** `backend/tests/integration/routes/test_route_repository_integration.py` (13 tests, all passing)
+- **API Layer:**
+  - **Schemas:** `backend/app/api/routes/schemas.py` (Pydantic models for JSON API)
+  - **Converters:** `backend/app/api/routes/converters.py` (Domain ↔ API transformations with error handling)
+  - **Controllers:** `backend/app/api/routes/controllers.py` (FastAPI endpoints with authentication)
+  - **Error Handlers:** Updated `backend/app/api/error_handlers.py` to include route exceptions
+- **Unit Tests:** `backend/tests/unit/routes/test_route_service.py` (11 tests, all passing ✅)
+- **Integration Tests:**
+  - Repository: `backend/tests/integration/routes/test_route_repository_integration.py` (12 tests, all passing ✅)
+  - API: `backend/tests/integration/api/test_route_endpoints.py` (23 tests, all passing ✅)
 
-**Progress:** 73% complete (11 of 15 tasks)
+**Progress:** 100% complete ✅
 - ✅ Database migration
 - ✅ Domain entity with validation
 - ✅ Repository interface and SQL implementation
 - ✅ Service layer with business logic and event publishing
 - ✅ Dependency injection setup
-- ✅ Unit tests (10/10 passing)
-- ✅ Integration tests for repository (13/13 passing)
-- ⏳ API endpoints (pending)
-- ⏳ Integration tests for API (pending)
-
-**Next Steps:**
-- Write integration tests for routes API endpoints
-- Implement routes API endpoints following JSON API spec
-- Run all quality gates (ruff, mypy, pytest, pre-commit)
+- ✅ API endpoints (5 endpoints: list, get, create, update, delete)
+- ✅ Unit tests (11/11 passing)
+- ✅ Integration tests for repository (12/12 passing)
+- ✅ Integration tests for API (23/23 passing)
+- ✅ All quality gates passing (ruff, mypy, pytest)
 
 **Note:** Routes are referenced by BUSHWALKING, CANYONING, CLIMBING, KAYAKING, CROSS_COUNTRY_SKIING, and JOGGING types.
 
