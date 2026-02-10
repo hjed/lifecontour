@@ -172,6 +172,22 @@ class JournalTagSchema(BaseModel):
     color: str | None = Field(default=None, description="Tag color (hex code)")
 
 
+# Tag resource (for standalone tag endpoints)
+class JournalTagResource(BaseModel):
+    """Journal tag resource following JSON API specification."""
+
+    type: str = Field(default="journal-tags", description=RESOURCE_TYPE_DESC)
+    id: str = Field(..., description="Tag ID")
+    attributes: dict[str, Any] = Field(..., description="Tag attributes")
+    links: JsonApiLinks | None = Field(default=None, description="Resource links")
+
+
+class JournalTagListResponse(JsonApiCollectionResponse[JournalTagResource]):
+    """Response model for a list of journal tags."""
+
+    pass
+
+
 # Calendar schema
 class CalendarSchema(BaseModel):
     """Calendar schema for journal responses."""

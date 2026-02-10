@@ -56,6 +56,8 @@ __all__ = [
     # Embedded schemas
     "JournalContactRelationshipSchema",
     "JournalTagSchema",
+    "JournalTagResource",
+    "JournalTagListResponse",
     "CalendarSchema",
     # Journal schemas
     "JournalAttributes",

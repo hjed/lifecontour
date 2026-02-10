@@ -84,29 +84,52 @@ clear acceptance criteria.
 
 ### 4.1 Iteration A – Backend Filter Implementation
 
+**Status**: ✅ COMPLETE
+
 **Scope**
 - Extend repository, service and controller layers so that all supported filter
   parameters affect `GET /api/journals` results.
 
 **Key Tasks**
-- Update `JournalRepository.get_all` interface and implementation to accept:
+- ✅ Update `JournalRepository.get_all` interface and implementation to accept:
   - `journal_type`, `start_date`, `end_date`, `contact_id`, `tag_id`,
     `calendar_id`, `parent_id`, `search`.
-- Implement SQL filtering for each parameter, matching the high-level rules
+- ✅ Implement SQL filtering for each parameter, matching the high-level rules
   from the spec (e.g. inclusive date ranges, AND-combining filters).
-- Update `JournalService.get_journals_paginated` to pass through all filters.
-- Update `list_journals` controller to forward all query params to the service.
-- Add unit/integration tests at the repository/service level to verify filter
+  - Implemented in `backend/app/core/journal/adapters/sql/journal_repository.py`
+  - Uses dynamic query building with parameterized queries for SQL injection protection
+  - Supports all filter types with proper JOINs for relationships
+  - Date filters use overlap logic: `journal.end >= start_date AND journal.start <= end_date`
+  - Date parameters converted from ISO strings to datetime objects for PostgreSQL
+- ✅ Update `JournalService.get_journals_paginated` to pass through all filters.
+  - Updated in `backend/app/core/journal/services/journal_service.py`
+- ✅ Update `JournalService.get_journals_count` to pass through all filters for accurate pagination.
+- ✅ Update `list_journals` controller to forward all query params to the service.
+  - Updated in `backend/app/api/journals/controllers.py`
+- ✅ Add unit/integration tests at the repository/service level to verify filter
   behaviour in isolation from the UI.
+  - Added 9 repository filter tests in `test_journal_repository_integration.py`
+  - Added 4 service filter tests in `test_journal_service_integration.py`
+  - All 113 backend journal tests passing
 
 **Acceptance Criteria**
-- Given backend tests only, each filter parameter demonstrably restricts results
+- ✅ Given backend tests only, each filter parameter demonstrably restricts results
   as expected by the spec.
-- Combining multiple filters (e.g. date + type + contact) works as logical AND.
-- Existing journal list E2E tests continue to pass without modification.
+- ✅ Combining multiple filters (e.g. date + type + contact) works as logical AND.
+- ✅ Existing journal list E2E tests continue to pass without modification.
+
+**Implementation Notes**
+- Date filters use `event_date_range_start` and `event_date_range_end` columns
+- Contact filter joins `journal_contact_relationships` table
+- Tag filter joins `journal_tag_assignments` table
+- Calendar filter joins `journal_calendar_info` table (or uses existing join for EVENT type)
+- Search filter uses ILIKE on title and content (can be enhanced with MeiliSearch later)
+- All queries use DISTINCT to handle multiple joins correctly
 
 
 ### 4.2 Iteration B – Journals List E2E Filter & Search Coverage
+
+**Status:** 🔄 IN PROGRESS - Tests Added, Needs Verification
 
 **Prerequisites**
 - Iteration A complete and merged.
@@ -116,23 +139,42 @@ clear acceptance criteria.
   the new backend filters plus richer search flows.
 
 **Key Tasks**
-- Add targeted E2E tests for:
-  - Date range filter (from/to) affecting which journals appear.
-  - Contact filter limiting list to journals linked to a specific contact.
-  - Tag filter limiting list to journals with a given tag.
-  - Calendar filter limiting list to a specific calendar.
-  - Parent filter (e.g. only root journals vs children of a given parent).
-- Add E2E tests for search scenarios:
-  - Simple full-text search by title/content.
-  - Search combined with one or more filters (type, contact, date), verifying
+- ✅ **PREREQUISITE**: Create backend endpoint for fetching journal tags
+  - ✅ Created `GET /api/journals/tags` endpoint in `backend/app/api/journals/controllers.py`
+  - ✅ Added `JournalTagResource` and `JournalTagListResponse` schemas
+  - ✅ Updated frontend `fetchJournalTags()` to use `/api/journals/tags` instead of `/api/tags`
+  - ✅ This was a missing piece - the frontend was fetching contact tags instead of journal tags
+- ✅ Add targeted E2E tests for:
+  - ✅ Date range filter (from/to) affecting which journals appear.
+  - ✅ Contact filter limiting list to journals linked to a specific contact.
+  - ✅ Tag filter limiting list to journals with a given tag.
+  - ⬜ Calendar filter limiting list to a specific calendar.
+  - ⬜ Parent filter (e.g. only root journals vs children of a given parent).
+- ⬜ Add E2E tests for search scenarios:
+  - ⬜ Simple full-text search by title/content.
+  - ⬜ Search combined with one or more filters (type, contact, date), verifying
     results match the intersection.
-- Ensure tests use the existing `TestDataManager` / fixtures and run reliably
+- ✅ Add E2E test for combined filters (date + type + contact)
+- ⬜ Ensure tests use the existing `TestDataManager` / fixtures and run reliably
   in CI.
 
+**Implementation Notes:**
+- Updated E2E tests to match actual UI component structure in `JournalFilters.tsx`:
+  - Date range filter uses single popover button with calendar picker (not separate from/to buttons)
+  - Contact filter uses `ContactSearchCombobox` with combobox role and search input
+  - Tag filter requires waiting for tags API to load before checking checkboxes
+  - All tests updated to use correct selectors based on actual component implementation
+- Tests added in `frontend/tests/e2e/journals-list.spec.ts`:
+  - Date range filtering (lines 190-283)
+  - Contact filtering (lines 284-383)
+  - Tag filtering (lines 384-481)
+  - Combined filters - date + type + contact (lines 482-604)
+- Backend filtering fully functional and tested (113 backend tests passing)
+
 **Acceptance Criteria**
-- New E2E tests pass consistently locally and in CI.
-- Failures in backend filter logic are surfaced via these tests.
-- All journal list filters and search options exercised at least once in E2E.
+- ⬜ New E2E tests pass consistently locally and in CI.
+- ✅ Failures in backend filter logic are surfaced via these tests.
+- 🔄 All journal list filters and search options exercised at least once in E2E (partial - date, contact, tag, combined done; calendar, parent, search pending).
 
 
 ### 4.3 Iteration C – Contact Page Parent/Child Hierarchy UI

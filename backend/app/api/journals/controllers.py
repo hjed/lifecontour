@@ -35,6 +35,8 @@ from app.api.journals.schemas import (
     JournalResource,
     JournalResponse,
     JournalTagAddRequest,
+    JournalTagListResponse,
+    JournalTagResource,
     JournalTypeAddRequest,
     JournalTypeDataUpdateRequest,
     JournalUpdateRequest,
@@ -220,6 +222,43 @@ async def _enrich_journal_data(
     return types, type_data, contacts, tags, calendar
 
 
+@router.get("/tags", response_model=JournalTagListResponse)
+@inject
+async def list_journal_tags(
+    request: Request,
+    tag_repo: FromDishka[JournalTagRepository],
+    user: FromDishka[SessionUser],  # Require authentication
+) -> JournalTagListResponse:
+    """
+    List all available journal tags.
+
+    Returns a list of all journal tags that can be used to categorize journals.
+    """
+    base_url = get_request_base_url(request)
+
+    # Get all tags from repository
+    all_tags = await tag_repo.get_all()
+
+    # Convert to resources
+    tag_resources = [
+        JournalTagResource(
+            type="journal-tags",
+            id=str(tag.id) if tag.id else "",
+            attributes={
+                "name": tag.name,
+                "color": tag.color,
+                "parent_id": str(tag.parent_id) if tag.parent_id else None,
+            },
+            links=JsonApiLinks(
+                self=f"{base_url}/api/journals/tags/{tag.id}",
+            ) if tag.id else None,
+        )
+        for tag in all_tags
+    ]
+
+    return JournalTagListResponse(data=tag_resources)
+
+
 @router.get("", response_model=JournalListResponse)
 @inject
 async def list_journals(
@@ -265,10 +304,25 @@ async def list_journals(
         offset=pagination.offset,
         limit=pagination.limit,
         journal_type=journal_type,
+        start_date=start_date.isoformat() if start_date else None,
+        end_date=end_date.isoformat() if end_date else None,
+        contact_id=str(contact_id) if contact_id else None,
+        tag_id=tag_id,
+        calendar_id=calendar_id,
+        parent_id=parent_id,
+        search=search,
     )
 
     total_count = await journal_service.get_journals_count(
-        user_id=user.id, journal_type=journal_type
+        user_id=user.id,
+        journal_type=journal_type,
+        start_date=start_date.isoformat() if start_date else None,
+        end_date=end_date.isoformat() if end_date else None,
+        contact_id=str(contact_id) if contact_id else None,
+        tag_id=tag_id,
+        calendar_id=calendar_id,
+        parent_id=parent_id,
+        search=search,
     )
 
     # Convert to resources with enriched data
