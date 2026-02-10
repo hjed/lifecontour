@@ -43,6 +43,9 @@ from app.core.journal.models.exceptions import (
     JournalNotFoundError,
     JournalTypeDependencyError,
     JournalValidationError,
+    RouteInUseError,
+    RouteNotFoundError,
+    RouteValidationError,
 )
 from app.core.search.exceptions import SearchDomainError
 from app.infrastructure.auth.exceptions import (
@@ -114,6 +117,10 @@ def create_domain_error_response(domain_error: DomainError) -> JsonApiErrorRespo
         JournalCycleError: "JOURNAL_CYCLE_ERROR",
         JournalMaxDepthExceededError: "JOURNAL_MAX_DEPTH_EXCEEDED",
         JournalTypeDependencyError: "JOURNAL_TYPE_DEPENDENCY_ERROR",
+        # Route errors
+        RouteNotFoundError: "ROUTE_NOT_FOUND",
+        RouteValidationError: "ROUTE_VALIDATION_ERROR",
+        RouteInUseError: "ROUTE_IN_USE",
     }
 
     error_code = error_code_map.get(type(domain_error), "DOMAIN_ERROR")
