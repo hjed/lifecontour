@@ -222,7 +222,7 @@ async def _enrich_journal_data(
     return types, type_data, contacts, tags, calendar
 
 
-@router.get("/tags", response_model=JournalTagListResponse)
+@router.get("/tags")
 @inject
 async def list_journal_tags(
     request: Request,
@@ -251,7 +251,9 @@ async def list_journal_tags(
             },
             links=JsonApiLinks(
                 self=f"{base_url}/api/journals/tags/{tag.id}",
-            ) if tag.id else None,
+            )
+            if tag.id
+            else None,
         )
         for tag in all_tags
     ]
@@ -259,7 +261,7 @@ async def list_journal_tags(
     return JournalTagListResponse(data=tag_resources)
 
 
-@router.get("", response_model=JournalListResponse)
+@router.get("")
 @inject
 async def list_journals(
     request: Request,
@@ -359,7 +361,7 @@ async def list_journals(
 
 
 # Search endpoint - MUST be before /{journal_id} to avoid route conflicts
-@router.get("/search", response_model=JournalListResponse)
+@router.get("/search")
 @inject
 async def search_journals(
     request: Request,
@@ -483,7 +485,7 @@ async def search_journals(
     )
 
 
-@router.get("/{journal_id}", response_model=JournalResponse)
+@router.get("/{journal_id}")
 @inject
 async def get_journal(
     journal_id: int,
@@ -530,7 +532,7 @@ async def get_journal(
     return JournalResponse(data=journal_resource)
 
 
-@router.post("", response_model=JournalResponse, status_code=status.HTTP_201_CREATED)
+@router.post("", status_code=status.HTTP_201_CREATED)
 @inject
 async def create_journal(
     request: Request,
@@ -859,7 +861,7 @@ async def delete_journal(
 
 
 # Type Management Endpoints
-@router.post("/{journal_id}/types", response_model=JournalResponse)
+@router.post("/{journal_id}/types")
 @inject
 async def add_type_to_journal(
     journal_id: int,
@@ -1165,7 +1167,7 @@ async def update_type_data(
 
 
 # Relationship Management Endpoints
-@router.post("/{journal_id}/relationships/contacts", response_model=JournalResponse)
+@router.post("/{journal_id}/relationships/contacts")
 @inject
 async def add_contact_to_journal(
     journal_id: int,
@@ -1332,7 +1334,7 @@ async def remove_contact_from_journal(
     return JournalResponse(data=journal_resource)
 
 
-@router.post("/{journal_id}/relationships/tags", response_model=JournalResponse)
+@router.post("/{journal_id}/relationships/tags")
 @inject
 async def add_tag_to_journal(
     journal_id: int,

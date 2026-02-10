@@ -5,13 +5,13 @@ This module defines the request and response models used by the integration
 API controllers for data validation and serialization.
 """
 
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 from pydantic import BaseModel, Field
 
 
-class SyncType(str, Enum):
+class SyncType(StrEnum):
     """Enumeration of available sync types."""
 
     FULL = "full"

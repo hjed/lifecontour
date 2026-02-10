@@ -11,10 +11,10 @@ Type System Architecture:
 - Type-specific data tables contain required and optional fields
 """
 
-from enum import Enum
+from enum import StrEnum
 
 
-class JournalType(str, Enum):
+class JournalType(StrEnum):
     """
     Enumeration of journal types.
 

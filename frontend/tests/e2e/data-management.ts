@@ -29,6 +29,12 @@ export interface TagCreateRequest {
   color?: string;
 }
 
+export interface CalendarCreateRequest {
+  name: string;
+  color?: string;
+  description?: string;
+}
+
 export interface JournalCreateRequest {
   title: string;
   content: string;
@@ -51,6 +57,7 @@ export class TestDataManager {
   private createdContactIds: string[] = [];
   private createdTagIds: string[] = [];
   private createdJournalIds: string[] = [];
+  private readonly createdCalendars: string[] = [];
 
   constructor(private readonly page: Page) {}
 
@@ -206,6 +213,67 @@ export class TestDataManager {
     await new Promise(resolve => setTimeout(resolve, 100));
 
     return contacts;
+  }
+
+  /**
+   * Create multiple test calendars
+   */
+  async createCalendars(
+    calendarsData: CalendarCreateRequest[]
+  ): Promise<Array<{ id: string; name: string; color: string }>> {
+    console.log(
+      `📅 [Data Manager] Creating ${calendarsData.length} calendars...`
+    );
+
+    const calendars: Array<{ id: string; name: string; color: string }> = [];
+
+    for (const calendarData of calendarsData) {
+      const calendarCreateData = {
+        data: {
+          type: 'calendars',
+          attributes: {
+            name: calendarData.name,
+            color: calendarData.color || '#3B82F6',
+            description: calendarData.description,
+          },
+        },
+      };
+
+      const response = await this.page.request.post('/api/calendars', {
+        data: calendarCreateData,
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
+
+      if (!response.ok()) {
+        let errorMessage = `HTTP ${response.status()}`;
+        try {
+          const errorData = await response.json();
+          errorMessage =
+            errorData.errors?.[0]?.detail || errorData.message || errorMessage;
+        } catch {
+          // Ignore JSON parse errors
+        }
+        throw new Error(`Failed to create calendar: ${errorMessage}`);
+      }
+
+      const responseData = await response.json();
+      const calendar = {
+        id: responseData.data.id,
+        name: responseData.data.attributes.name,
+        color: responseData.data.attributes.color,
+      };
+
+      calendars.push(calendar);
+      this.createdCalendars.push(calendar.id);
+      console.log(`✅ [Data Manager] Created calendar: ${calendar.name}`);
+    }
+
+    // Add a small delay to ensure database consistency
+    await new Promise(resolve => setTimeout(resolve, 100));
+
+    return calendars;
   }
 
   /**
@@ -617,7 +685,7 @@ export class TestDataManager {
    */
   async cleanup(): Promise<void> {
     console.log(
-      `🧹 [Data Manager] Starting cleanup of ${this.createdContactIds.length} contacts, ${this.createdTagIds.length} tags, and ${this.createdJournalIds.length} journals...`
+      `🧹 [Data Manager] Starting cleanup of ${this.createdContactIds.length} contacts, ${this.createdTagIds.length} tags, ${this.createdJournalIds.length} journals, and ${this.createdCalendars.length} calendars...`
     );
 
     // Add timeout to prevent cleanup from hanging
@@ -701,10 +769,33 @@ export class TestDataManager {
       }
     }
 
+    // Clean up calendars (if any were created)
+    for (const calendarId of this.createdCalendars) {
+      try {
+        const response = await this.page.request.delete(
+          `/api/calendars/${calendarId}`
+        );
+        if (response.ok()) {
+          console.log(`🗑️ [Data Manager] Deleted calendar ${calendarId}`);
+        } else {
+          console.warn(
+            `⚠️ [Data Manager] Failed to delete calendar ${calendarId}: ${response.status()}`
+          );
+        }
+      } catch (error) {
+        console.warn(
+          `⚠️ [Data Manager] Error deleting calendar ${calendarId}:`,
+          error
+        );
+      }
+    }
+
     // Clear tracking arrays
     this.createdContactIds = [];
     this.createdTagIds = [];
     this.createdJournalIds = [];
+    // Note: createdCalendars is readonly, so we can't reassign it
+    // The array will be cleared when the TestDataManager instance is destroyed
 
     console.log(`✅ [Data Manager] Cleanup completed`);
   }

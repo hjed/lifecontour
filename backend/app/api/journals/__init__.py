@@ -21,6 +21,8 @@ from app.api.journals.schemas import (
     JournalRelationships,
     JournalResource,
     JournalResponse,
+    JournalTagListResponse,
+    JournalTagResource,
     JournalTagSchema,
     JournalTypeAddAttributes,
     JournalTypeAddData,

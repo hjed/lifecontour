@@ -22,6 +22,7 @@ from app.api.common.schemas import (
 DISPLAY_ORDER_DESC = "Display order"
 BOOKING_REFERENCE_DESC = "Booking reference"
 RESOURCE_TYPE_DESC = "Resource type"
+RESOURCE_LINKS_DESC = "Resource links"
 
 
 # Event Date Range Schema
@@ -179,7 +180,7 @@ class JournalTagResource(BaseModel):
     type: str = Field(default="journal-tags", description=RESOURCE_TYPE_DESC)
     id: str = Field(..., description="Tag ID")
     attributes: dict[str, Any] = Field(..., description="Tag attributes")
-    links: JsonApiLinks | None = Field(default=None, description="Resource links")
+    links: JsonApiLinks | None = Field(default=None, description=RESOURCE_LINKS_DESC)
 
 
 class JournalTagListResponse(JsonApiCollectionResponse[JournalTagResource]):
@@ -259,7 +260,7 @@ class JournalResource(BaseModel):
     relationships: JournalRelationships | None = Field(
         default=None, description="Journal relationships"
     )
-    links: JsonApiLinks | None = Field(default=None, description="Resource links")
+    links: JsonApiLinks | None = Field(default=None, description=RESOURCE_LINKS_DESC)
     meta: dict[str, Any] | None = Field(default=None, description="Resource metadata")
 
 
@@ -461,7 +462,7 @@ class CalendarResource(BaseModel):
     type: str = Field(default="calendars", description=RESOURCE_TYPE_DESC)
     id: str = Field(..., description="Resource identifier")
     attributes: CalendarAttributes = Field(..., description="Calendar attributes")
-    links: JsonApiLinks | None = Field(default=None, description="Resource links")
+    links: JsonApiLinks | None = Field(default=None, description=RESOURCE_LINKS_DESC)
     meta: dict[str, Any] | None = Field(default=None, description="Resource metadata")
 
 

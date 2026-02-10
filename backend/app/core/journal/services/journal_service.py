@@ -219,40 +219,100 @@ class JournalService:
         offset: int = 0,
         limit: int = 20,
         journal_type: str | None = None,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        contact_id: str | None = None,
+        tag_id: str | None = None,
+        calendar_id: str | None = None,
+        parent_id: int | None = None,
+        search: str | None = None,
     ) -> list[Journal]:
         """
-        Get journals for a user with pagination.
+        Get journals for a user with pagination and filtering.
 
         Args:
             user_id: The user ID to filter by
             offset: Number of journals to skip
             limit: Maximum number of journals to return
             journal_type: Optional journal type to filter by (e.g., "MOOD_RATING", "EVENT")
+            start_date: Optional start date filter (ISO format)
+            end_date: Optional end date filter (ISO format)
+            contact_id: Optional contact ID to filter journals by
+            tag_id: Optional tag ID to filter journals by
+            calendar_id: Optional calendar ID to filter journals by
+            parent_id: Optional parent journal ID to filter by (None for root journals)
+            search: Optional search query for full-text search
 
         Returns:
-            List of journals
+            List of journals matching the filter criteria
         """
-        return await self.journal_repo.get_all(user_id, limit, offset, journal_type)
+        return await self.journal_repo.get_all(
+            user_id,
+            limit,
+            offset,
+            journal_type,
+            start_date,
+            end_date,
+            contact_id,
+            tag_id,
+            calendar_id,
+            parent_id,
+            search,
+        )
 
     async def get_journals_count(
-        self, user_id: str, journal_type: str | None = None
+        self,
+        user_id: str,
+        journal_type: str | None = None,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        contact_id: str | None = None,
+        tag_id: str | None = None,
+        calendar_id: str | None = None,
+        parent_id: int | None = None,
+        search: str | None = None,
     ) -> int:
         """
-        Get total count of journals for a user.
+        Get total count of journals for a user with filtering.
 
         Args:
             user_id: The user ID to count journals for
             journal_type: Optional journal type to filter by
+            start_date: Optional start date filter (ISO format)
+            end_date: Optional end date filter (ISO format)
+            contact_id: Optional contact ID to filter journals by
+            tag_id: Optional tag ID to filter journals by
+            calendar_id: Optional calendar ID to filter journals by
+            parent_id: Optional parent journal ID to filter by
+            search: Optional search query for full-text search
 
         Returns:
-            Total count of journals
+            Total count of journals matching the filter criteria
         """
-        if journal_type:
-            # When filtering by type, count the filtered results
-            journals = await self.journal_repo.get_all(
-                user_id, limit=10000, offset=0, journal_type=journal_type
+        # If any filters are applied, use the count_all method for efficiency
+        if any(
+            [
+                journal_type,
+                start_date,
+                end_date,
+                contact_id,
+                tag_id,
+                calendar_id,
+                parent_id,
+                search,
+            ]
+        ):
+            return await self.journal_repo.count_all(
+                user_id,
+                journal_type=journal_type,
+                start_date=start_date,
+                end_date=end_date,
+                contact_id=contact_id,
+                tag_id=tag_id,
+                calendar_id=calendar_id,
+                parent_id=parent_id,
+                search=search,
             )
-            return len(journals)
         return await self.journal_repo.count_by_user(user_id)
 
     async def _validate_hierarchy(
