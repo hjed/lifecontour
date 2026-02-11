@@ -118,18 +118,32 @@ class JournalRepository(ABC):
         limit: int = 100,
         offset: int = 0,
         journal_type: str | None = None,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        contact_id: str | None = None,
+        tag_id: str | None = None,
+        calendar_id: str | None = None,
+        parent_id: int | None = None,
+        search: str | None = None,
     ) -> list[Journal]:
         """
-        Get all journals for a user with pagination.
+        Get all journals for a user with pagination and filtering.
 
         Args:
             user_id: The user ID to filter by
             limit: Maximum number of journals to return
             offset: Number of journals to skip
             journal_type: Optional journal type to filter by (e.g., "MOOD_RATING", "EVENT")
+            start_date: Optional start date filter (ISO format)
+            end_date: Optional end date filter (ISO format)
+            contact_id: Optional contact ID to filter journals by
+            tag_id: Optional tag ID to filter journals by
+            calendar_id: Optional calendar ID to filter journals by
+            parent_id: Optional parent journal ID to filter by (None for root journals)
+            search: Optional search query for full-text search
 
         Returns:
-            List of journals
+            List of journals matching the filter criteria
         """
         pass
 
@@ -160,6 +174,41 @@ class JournalRepository(ABC):
 
         Returns:
             Total count of journals
+        """
+        pass
+
+    @abstractmethod
+    async def count_all(
+        self,
+        user_id: str,
+        journal_type: str | None = None,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        contact_id: str | None = None,
+        tag_id: str | None = None,
+        calendar_id: str | None = None,
+        parent_id: int | None = None,
+        search: str | None = None,
+    ) -> int:
+        """
+        Count journals for a user with filtering.
+
+        Uses the same filter logic as get_all() but returns only the count.
+        This is more efficient than fetching all records when only the count is needed.
+
+        Args:
+            user_id: The user ID to filter by
+            journal_type: Optional journal type to filter by
+            start_date: Optional start date filter (ISO format)
+            end_date: Optional end date filter (ISO format)
+            contact_id: Optional contact ID to filter journals by
+            tag_id: Optional tag ID to filter journals by
+            calendar_id: Optional calendar ID to filter journals by
+            parent_id: Optional parent journal ID to filter by
+            search: Optional search query for full-text search
+
+        Returns:
+            Count of journals matching the filter criteria
         """
         pass
 

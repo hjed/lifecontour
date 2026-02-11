@@ -1,9 +1,9 @@
 """Relationship types for journal-contact relationships."""
 
-from enum import Enum
+from enum import StrEnum
 
 
-class JournalContactRelationshipType(str, Enum):
+class JournalContactRelationshipType(StrEnum):
     """
     Enum for journal-contact relationship types.
 

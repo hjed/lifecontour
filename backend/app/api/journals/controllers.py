@@ -35,6 +35,8 @@ from app.api.journals.schemas import (
     JournalResource,
     JournalResponse,
     JournalTagAddRequest,
+    JournalTagListResponse,
+    JournalTagResource,
     JournalTypeAddRequest,
     JournalTypeDataUpdateRequest,
     JournalUpdateRequest,
@@ -220,7 +222,46 @@ async def _enrich_journal_data(
     return types, type_data, contacts, tags, calendar
 
 
-@router.get("", response_model=JournalListResponse)
+@router.get("/tags")
+@inject
+async def list_journal_tags(
+    request: Request,
+    tag_repo: FromDishka[JournalTagRepository],
+    user: FromDishka[SessionUser],  # Require authentication
+) -> JournalTagListResponse:
+    """
+    List all available journal tags.
+
+    Returns a list of all journal tags that can be used to categorize journals.
+    """
+    base_url = get_request_base_url(request)
+
+    # Get all tags from repository
+    all_tags = await tag_repo.get_all()
+
+    # Convert to resources
+    tag_resources = [
+        JournalTagResource(
+            type="journal-tags",
+            id=str(tag.id) if tag.id else "",
+            attributes={
+                "name": tag.name,
+                "color": tag.color,
+                "parent_id": str(tag.parent_id) if tag.parent_id else None,
+            },
+            links=JsonApiLinks(
+                self=f"{base_url}/api/journals/tags/{tag.id}",
+            )
+            if tag.id
+            else None,
+        )
+        for tag in all_tags
+    ]
+
+    return JournalTagListResponse(data=tag_resources)
+
+
+@router.get("")
 @inject
 async def list_journals(
     request: Request,
@@ -265,10 +306,25 @@ async def list_journals(
         offset=pagination.offset,
         limit=pagination.limit,
         journal_type=journal_type,
+        start_date=start_date.isoformat() if start_date else None,
+        end_date=end_date.isoformat() if end_date else None,
+        contact_id=str(contact_id) if contact_id else None,
+        tag_id=tag_id,
+        calendar_id=calendar_id,
+        parent_id=parent_id,
+        search=search,
     )
 
     total_count = await journal_service.get_journals_count(
-        user_id=user.id, journal_type=journal_type
+        user_id=user.id,
+        journal_type=journal_type,
+        start_date=start_date.isoformat() if start_date else None,
+        end_date=end_date.isoformat() if end_date else None,
+        contact_id=str(contact_id) if contact_id else None,
+        tag_id=tag_id,
+        calendar_id=calendar_id,
+        parent_id=parent_id,
+        search=search,
     )
 
     # Convert to resources with enriched data
@@ -305,7 +361,7 @@ async def list_journals(
 
 
 # Search endpoint - MUST be before /{journal_id} to avoid route conflicts
-@router.get("/search", response_model=JournalListResponse)
+@router.get("/search")
 @inject
 async def search_journals(
     request: Request,
@@ -429,7 +485,7 @@ async def search_journals(
     )
 
 
-@router.get("/{journal_id}", response_model=JournalResponse)
+@router.get("/{journal_id}")
 @inject
 async def get_journal(
     journal_id: int,
@@ -476,7 +532,7 @@ async def get_journal(
     return JournalResponse(data=journal_resource)
 
 
-@router.post("", response_model=JournalResponse, status_code=status.HTTP_201_CREATED)
+@router.post("", status_code=status.HTTP_201_CREATED)
 @inject
 async def create_journal(
     request: Request,
@@ -805,7 +861,7 @@ async def delete_journal(
 
 
 # Type Management Endpoints
-@router.post("/{journal_id}/types", response_model=JournalResponse)
+@router.post("/{journal_id}/types")
 @inject
 async def add_type_to_journal(
     journal_id: int,
@@ -1111,7 +1167,7 @@ async def update_type_data(
 
 
 # Relationship Management Endpoints
-@router.post("/{journal_id}/relationships/contacts", response_model=JournalResponse)
+@router.post("/{journal_id}/relationships/contacts")
 @inject
 async def add_contact_to_journal(
     journal_id: int,
@@ -1278,7 +1334,7 @@ async def remove_contact_from_journal(
     return JournalResponse(data=journal_resource)
 
 
-@router.post("/{journal_id}/relationships/tags", response_model=JournalResponse)
+@router.post("/{journal_id}/relationships/tags")
 @inject
 async def add_tag_to_journal(
     journal_id: int,

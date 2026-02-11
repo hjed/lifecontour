@@ -445,7 +445,7 @@ async function removeJournalTag(
 
 // Fetch available journal tags
 async function fetchJournalTags(): Promise<{ data: JournalTag[] }> {
-  const response = await fetch('/api/tags', {
+  const response = await fetch('/api/journals/tags', {
     credentials: 'include',
   });
 

@@ -3,6 +3,7 @@
 from datetime import datetime
 
 import pytest
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core.journal.adapters.sql.journal_repository import SqlJournalRepository
@@ -300,3 +301,149 @@ class TestJournalServiceIntegration:
         # Verify deletion
         deleted = await journal_service.get_journal(journal.id)
         assert deleted is None
+
+
+@pytest.mark.integration
+class TestJournalServiceFiltering:
+    """Integration tests for JournalService filtering operations."""
+
+    @pytest.fixture
+    def journal_repo(self, clean_database: AsyncConnection):
+        """Create real journal repository."""
+        return SqlJournalRepository(clean_database)
+
+    @pytest.fixture
+    def event_publisher(self, clean_database: AsyncConnection):
+        """Create real event publisher."""
+        return OutboxEventPublisher(clean_database)
+
+    @pytest.fixture
+    def journal_service(self, journal_repo, event_publisher):
+        """Create JournalService with real dependencies."""
+        return JournalService(
+            journal_repo=journal_repo,
+            event_publisher=event_publisher,
+        )
+
+    @pytest.mark.asyncio
+    async def test_get_journals_paginated_with_type_filter(
+        self, journal_service, clean_database: AsyncConnection
+    ):
+        """Test that service passes journal_type filter to repository."""
+        # Create a NOTE journal
+        note_journal = create_test_journal(title="Note Journal")
+        await journal_service.create_journal(note_journal, clean_database)
+
+        # Create a MOOD_RATING journal
+        mood_journal = create_test_journal(title="Mood Journal")
+        mood_journal = await journal_service.create_journal(
+            mood_journal, clean_database
+        )
+
+        # Add mood data
+        await clean_database.execute(
+            text("""
+            INSERT INTO journal_mood_data (journal_id, mood_value)
+            VALUES (:journal_id, :mood_value)
+            """),
+            {"journal_id": mood_journal.id, "mood_value": 8},
+        )
+
+        # Get journals with type filter
+        mood_journals = await journal_service.get_journals_paginated(
+            user_id="user123",
+            journal_type="MOOD_RATING",
+        )
+
+        assert len(mood_journals) == 1
+        assert mood_journals[0].title == "Mood Journal"
+
+    @pytest.mark.asyncio
+    async def test_get_journals_paginated_with_date_filter(
+        self, journal_service, clean_database: AsyncConnection
+    ):
+        """Test that service passes date filters to repository."""
+        # Create journals with different dates
+        old_journal = Journal(
+            user_id="user123",
+            title="Old Journal",
+            content="Old content",
+            event_date_range=EventDateRange(
+                start=datetime(2024, 1, 1),
+                end=datetime(2024, 1, 2),
+            ),
+        )
+        current_journal = Journal(
+            user_id="user123",
+            title="Current Journal",
+            content="Current content",
+            event_date_range=EventDateRange(
+                start=datetime(2024, 1, 15),
+                end=datetime(2024, 1, 16),
+            ),
+        )
+
+        await journal_service.create_journal(old_journal, clean_database)
+        await journal_service.create_journal(current_journal, clean_database)
+
+        # Filter by date range
+        filtered = await journal_service.get_journals_paginated(
+            user_id="user123",
+            start_date="2024-01-10",
+            end_date="2024-01-20",
+        )
+
+        assert len(filtered) == 1
+        assert filtered[0].title == "Current Journal"
+
+    @pytest.mark.asyncio
+    async def test_get_journals_paginated_with_search(
+        self, journal_service, clean_database: AsyncConnection
+    ):
+        """Test that service passes search filter to repository."""
+        # Create journals with different content
+        journal1 = create_test_journal(
+            title="Python Programming",
+            content="Learning Python",
+        )
+        journal2 = create_test_journal(
+            title="JavaScript Notes",
+            content="Learning JavaScript",
+        )
+
+        await journal_service.create_journal(journal1, clean_database)
+        await journal_service.create_journal(journal2, clean_database)
+
+        # Search for "Python"
+        filtered = await journal_service.get_journals_paginated(
+            user_id="user123",
+            search="Python",
+        )
+
+        assert len(filtered) == 1
+        assert filtered[0].title == "Python Programming"
+
+    @pytest.mark.asyncio
+    async def test_get_journals_count_with_filters(
+        self, journal_service, clean_database: AsyncConnection
+    ):
+        """Test that get_journals_count respects filters."""
+        # Create journals
+        journal1 = create_test_journal(title="Python Journal")
+        journal2 = create_test_journal(title="JavaScript Journal")
+        journal3 = create_test_journal(title="Python Tutorial")
+
+        await journal_service.create_journal(journal1, clean_database)
+        await journal_service.create_journal(journal2, clean_database)
+        await journal_service.create_journal(journal3, clean_database)
+
+        # Count all journals
+        total_count = await journal_service.get_journals_count(user_id="user123")
+        assert total_count == 3
+
+        # Count with search filter
+        python_count = await journal_service.get_journals_count(
+            user_id="user123",
+            search="Python",
+        )
+        assert python_count == 2

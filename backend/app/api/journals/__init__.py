@@ -21,6 +21,8 @@ from app.api.journals.schemas import (
     JournalRelationships,
     JournalResource,
     JournalResponse,
+    JournalTagListResponse,
+    JournalTagResource,
     JournalTagSchema,
     JournalTypeAddAttributes,
     JournalTypeAddData,
@@ -56,6 +58,8 @@ __all__ = [
     # Embedded schemas
     "JournalContactRelationshipSchema",
     "JournalTagSchema",
+    "JournalTagResource",
+    "JournalTagListResponse",
     "CalendarSchema",
     # Journal schemas
     "JournalAttributes",
