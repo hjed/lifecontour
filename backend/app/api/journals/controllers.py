@@ -35,8 +35,10 @@ from app.api.journals.schemas import (
     JournalResource,
     JournalResponse,
     JournalTagAddRequest,
+    JournalTagCreateRequest,
     JournalTagListResponse,
     JournalTagResource,
+    JournalTagResponse,
     JournalTypeAddRequest,
     JournalTypeDataUpdateRequest,
     JournalUpdateRequest,
@@ -72,6 +74,8 @@ logger = structlog.get_logger()
 
 # Constants for error messages
 JOURNAL_NOT_FOUND_ERROR = "Journal not found"
+INVALID_UUID_FORMAT_MSG = "Invalid UUID format"
+JOURNAL_ID_NOT_SET_MSG = "Journal ID should be set after creation"
 
 router = APIRouter(
     prefix="/journals",
@@ -259,6 +263,63 @@ async def list_journal_tags(
     ]
 
     return JournalTagListResponse(data=tag_resources)
+
+
+@router.post("/tags", status_code=status.HTTP_201_CREATED)
+@inject
+async def create_journal_tag(
+    request: Request,
+    tag_request: JournalTagCreateRequest,
+    tag_repo: FromDishka[JournalTagRepository],
+    connection: FromDishka[AsyncConnection],
+    user: FromDishka[SessionUser],  # Require authentication
+) -> JournalTagResponse:
+    """
+    Create a new journal tag.
+
+    Creates a new journal tag with the provided data and returns the created resource.
+    """
+    from uuid import UUID
+
+    from app.core.journal.models.journal_tag import JournalTag
+
+    base_url = get_request_base_url(request)
+
+    # Parse parent_id if provided
+    parent_id = None
+    if tag_request.data.attributes.parent_id:
+        try:
+            parent_id = UUID(tag_request.data.attributes.parent_id)
+        except ValueError as e:
+            raise JournalValidationError("parent_id", INVALID_UUID_FORMAT_MSG) from e
+
+    # Create tag entity
+    tag = JournalTag(
+        name=tag_request.data.attributes.name,
+        color=tag_request.data.attributes.color,
+        parent_id=parent_id,
+    )
+
+    # Save tag
+    created_tag = await tag_repo.save(tag)
+
+    # Convert to resource
+    tag_resource = JournalTagResource(
+        type="journal-tags",
+        id=str(created_tag.id) if created_tag.id else "",
+        attributes={
+            "name": created_tag.name,
+            "color": created_tag.color,
+            "parent_id": str(created_tag.parent_id) if created_tag.parent_id else None,
+        },
+        links=JsonApiLinks(
+            self=f"{base_url}/api/journals/tags/{created_tag.id}",
+        )
+        if created_tag.id
+        else None,
+    )
+
+    return JournalTagResponse(data=tag_resource)
 
 
 @router.get("")
@@ -532,6 +593,147 @@ async def get_journal(
     return JournalResponse(data=journal_resource)
 
 
+async def _process_journal_types(
+    journal_id: int,
+    types: list[str],
+    journal_service: JournalService,
+    mood_data_repo: MoodDataRepository,
+    plan_data_repo: PlanDataRepository,
+    travel_data_repo: TravelDataRepository,
+    connection: AsyncConnection,
+) -> None:
+    """
+    Process and add types to a journal.
+
+    Args:
+        journal_id: The ID of the journal
+        types: List of type strings to add
+        journal_service: Service for journal operations
+        mood_data_repo: Repository for mood data
+        plan_data_repo: Repository for plan data
+        travel_data_repo: Repository for travel data
+        connection: Database connection
+    """
+    for type_str in types:
+        try:
+            # Convert type string to enum
+            journal_type = _parse_journal_type(type_str)
+
+            await journal_service.add_type_to_journal(
+                journal_id, journal_type, connection
+            )
+
+            # Create type-specific data row with default values
+            await _create_type_specific_data(
+                journal_type,
+                journal_id,
+                mood_data_repo,
+                plan_data_repo,
+                travel_data_repo,
+            )
+        except (ValueError, KeyError):
+            # Invalid type, skip
+            pass
+
+
+async def _process_journal_type_data(
+    journal_id: int,
+    type_data: dict[str, Any],
+    calendar_info_repo: CalendarInfoRepository,
+    photo_album_data_repo: PhotoAlbumDataRepository,
+) -> None:
+    """
+    Process and save type-specific data for a journal.
+
+    Args:
+        journal_id: The ID of the journal
+        type_data: Dictionary of type-specific data
+        calendar_info_repo: Repository for calendar info
+        photo_album_data_repo: Repository for photo album data
+    """
+    # Process EVENT type data
+    if "EVENT" in type_data:
+        from datetime import time as dt_time
+        from uuid import UUID
+
+        from app.core.journal.models.calendar_info import CalendarInfo
+
+        event_data = type_data["EVENT"]
+
+        # Convert string times to time objects if provided
+        start_time = None
+        if event_data.get("start_time"):
+            start_time_str = event_data["start_time"]
+            # Parse HH:MM:SS format
+            hours, minutes, seconds = map(int, start_time_str.split(":"))
+            start_time = dt_time(hours, minutes, seconds)
+
+        end_time = None
+        if event_data.get("end_time"):
+            end_time_str = event_data["end_time"]
+            # Parse HH:MM:SS format
+            hours, minutes, seconds = map(int, end_time_str.split(":"))
+            end_time = dt_time(hours, minutes, seconds)
+
+        calendar_info = CalendarInfo(
+            journal_id=journal_id,
+            calendar_id=UUID(event_data["calendar_id"]),
+            start_time=start_time,
+            end_time=end_time,
+            is_all_day=event_data.get("is_all_day", False),
+            location=event_data.get("location"),
+            sync_invitees=event_data.get("sync_invitees", False),
+        )
+        await calendar_info_repo.save(calendar_info)
+
+    # Process PHOTO_ALBUM type data
+    if "PHOTO_ALBUM" in type_data:
+        from app.core.journal.models.photo_album_data import PhotoAlbumData
+
+        photo_data = type_data["PHOTO_ALBUM"]
+        photo_album_data = PhotoAlbumData(
+            journal_id=journal_id,
+            immich_album_id=photo_data["immich_album_id"],
+        )
+        await photo_album_data_repo.save(photo_album_data)
+
+
+async def _process_journal_contact_relationships(
+    journal_id: int,
+    contacts_data: list[dict[str, Any]],
+    contact_relationship_repo: JournalContactRelationshipRepository,
+) -> None:
+    """
+    Process and create contact relationships for a journal.
+
+    Args:
+        journal_id: The ID of the journal
+        contacts_data: List of contact relationship data
+        contact_relationship_repo: Repository for contact relationships
+    """
+    for contact_data in contacts_data:
+        try:
+            # Extract contact_id and relationship_type from attributes
+            # contact_data is a dict from JSON, not a Pydantic model
+            if "attributes" in contact_data:
+                attrs = contact_data["attributes"]
+                contact_id = int(attrs["contact_id"])
+                relationship_type = JournalContactRelationshipType[
+                    attrs["relationship_type"]
+                ]
+
+                # Create the relationship
+                relationship = JournalContactRelationship(
+                    journal_id=journal_id,
+                    contact_id=contact_id,
+                    relationship_type=relationship_type,
+                )
+                await contact_relationship_repo.create(relationship)
+        except (ValueError, KeyError, AttributeError, IntegrityError):
+            # Invalid contact relationship, skip
+            pass
+
+
 @router.post("", status_code=status.HTTP_201_CREATED)
 @inject
 async def create_journal(
@@ -560,34 +762,31 @@ async def create_journal(
 
     created_journal = await journal_service.create_journal(journal, connection)
 
+    # Ensure journal_id is not None (it should always be set after creation)
+    if created_journal.id is None:
+        raise ValueError(JOURNAL_ID_NOT_SET_MSG)
+    journal_id = created_journal.id
+
     # Add types if provided in the request
     if journal_request.data.attributes.types:
-        # Ensure journal_id is not None (it should always be set after creation)
-        if created_journal.id is None:
-            msg = "Journal ID should be set after creation"
-            raise ValueError(msg)
-        journal_id = created_journal.id
+        await _process_journal_types(
+            journal_id,
+            journal_request.data.attributes.types,
+            journal_service,
+            mood_data_repo,
+            plan_data_repo,
+            travel_data_repo,
+            connection,
+        )
 
-        for type_str in journal_request.data.attributes.types:
-            try:
-                # Convert type string to enum
-                journal_type = _parse_journal_type(type_str)
-
-                await journal_service.add_type_to_journal(
-                    journal_id, journal_type, connection
-                )
-
-                # Create type-specific data row with default values
-                await _create_type_specific_data(
-                    journal_type,
-                    journal_id,
-                    mood_data_repo,
-                    plan_data_repo,
-                    travel_data_repo,
-                )
-            except (ValueError, KeyError):
-                # Invalid type, skip
-                pass
+    # Process type_data if provided in the request
+    if journal_request.data.attributes.type_data:
+        await _process_journal_type_data(
+            journal_id,
+            journal_request.data.attributes.type_data,
+            calendar_info_repo,
+            photo_album_data_repo,
+        )
 
     # Add contact relationships if provided in the request (via relationships field)
     if (
@@ -596,35 +795,12 @@ async def create_journal(
     ):
         relationships = journal_request.data.relationships
         if relationships.contacts:
-            # Ensure journal_id is not None
-            if created_journal.id is None:
-                msg = "Journal ID should be set after creation"
-                raise ValueError(msg)
-            journal_id = created_journal.id
-
-            # Process each contact relationship
             contacts_data = relationships.contacts.get("data", [])
-            for contact_data in contacts_data:
-                try:
-                    # Extract contact_id and relationship_type from attributes
-                    # contact_data is a dict from JSON, not a Pydantic model
-                    if "attributes" in contact_data:
-                        attrs = contact_data["attributes"]
-                        contact_id = int(attrs["contact_id"])
-                        relationship_type = JournalContactRelationshipType[
-                            attrs["relationship_type"]
-                        ]
-
-                        # Create the relationship
-                        relationship = JournalContactRelationship(
-                            journal_id=journal_id,
-                            contact_id=contact_id,
-                            relationship_type=relationship_type,
-                        )
-                        await contact_relationship_repo.create(relationship)
-                except (ValueError, KeyError, AttributeError, IntegrityError):
-                    # Invalid contact relationship, skip
-                    pass
+            await _process_journal_contact_relationships(
+                journal_id,
+                contacts_data,
+                contact_relationship_repo,
+            )
 
     # Fetch all enrichment data
     types, type_data, contacts, tags, calendar = await _enrich_journal_data(
@@ -646,7 +822,7 @@ async def create_journal(
     return JournalResponse(data=journal_resource)
 
 
-@router.put("/{journal_id}", response_model=JournalResponse)
+@router.put("/{journal_id}")
 @inject
 async def update_journal(
     journal_id: int,
@@ -720,7 +896,7 @@ async def update_journal(
     return JournalResponse(data=journal_resource)
 
 
-@router.patch("/{journal_id}", response_model=JournalResponse)
+@router.patch("/{journal_id}")
 @inject
 async def partial_update_journal(
     journal_id: int,
@@ -930,7 +1106,7 @@ async def add_type_to_journal(
     return JournalResponse(data=journal_resource)
 
 
-@router.delete("/{journal_id}/types/{journal_type}", response_model=JournalResponse)
+@router.delete("/{journal_id}/types/{journal_type}")
 @inject
 async def remove_type_from_journal(
     journal_id: int,
@@ -1074,7 +1250,7 @@ async def _update_photo_album_type_data(
     await photo_album_data_repo.save(photo_album_data)
 
 
-@router.put("/{journal_id}/types/{journal_type}/data", response_model=JournalResponse)
+@router.put("/{journal_id}/types/{journal_type}/data")
 @inject
 async def update_type_data(
     journal_id: int,
@@ -1251,10 +1427,7 @@ async def add_contact_to_journal(
     return JournalResponse(data=journal_resource)
 
 
-@router.delete(
-    "/{journal_id}/relationships/contacts/{contact_id}/{relationship_type}",
-    response_model=JournalResponse,
-)
+@router.delete("/{journal_id}/relationships/contacts/{contact_id}/{relationship_type}")
 @inject
 async def remove_contact_from_journal(
     journal_id: int,
@@ -1370,7 +1543,7 @@ async def add_tag_to_journal(
     try:
         tag_uuid = UUID(tag_request.data.attributes.tag_id)
     except ValueError as e:
-        raise JournalValidationError("tag_id", "Invalid UUID format") from e
+        raise JournalValidationError("tag_id", INVALID_UUID_FORMAT_MSG) from e
 
     # Verify tag exists
     tag = await tag_repo.find_by_id(tag_uuid)
@@ -1405,9 +1578,7 @@ async def add_tag_to_journal(
     return JournalResponse(data=journal_resource)
 
 
-@router.delete(
-    "/{journal_id}/relationships/tags/{tag_id}", response_model=JournalResponse
-)
+@router.delete("/{journal_id}/relationships/tags/{tag_id}")
 @inject
 async def remove_tag_from_journal(
     journal_id: int,
@@ -1443,7 +1614,7 @@ async def remove_tag_from_journal(
     try:
         tag_uuid = UUID(tag_id)
     except ValueError as e:
-        raise JournalValidationError("tag_id", "Invalid UUID format") from e
+        raise JournalValidationError("tag_id", INVALID_UUID_FORMAT_MSG) from e
 
     # Remove tag from journal
     await tag_repo.remove_tag(journal_id, tag_uuid)
