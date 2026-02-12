@@ -37,15 +37,26 @@ from app.core.contacts.models.exceptions import (
 )
 from app.core.exceptions import DomainError
 from app.core.journal.models.exceptions import (
+    CalendarInfoValidationError,
+    CalendarNotFoundError,
+    CalendarValidationError,
     JournalCycleError,
     JournalDomainError,
     JournalMaxDepthExceededError,
     JournalNotFoundError,
     JournalTypeDependencyError,
     JournalValidationError,
+    MoodDataValidationError,
+    PhotoAlbumDataValidationError,
+    PlanDataValidationError,
+    PlanDocumentValidationError,
     RouteInUseError,
     RouteNotFoundError,
     RouteValidationError,
+    TravelAccommodationValidationError,
+    TravelDataValidationError,
+    TravelFlightValidationError,
+    TravelTransportationValidationError,
 )
 from app.core.search.exceptions import SearchDomainError
 from app.infrastructure.auth.exceptions import (
@@ -117,6 +128,19 @@ def create_domain_error_response(domain_error: DomainError) -> JsonApiErrorRespo
         JournalCycleError: "JOURNAL_CYCLE_ERROR",
         JournalMaxDepthExceededError: "JOURNAL_MAX_DEPTH_EXCEEDED",
         JournalTypeDependencyError: "JOURNAL_TYPE_DEPENDENCY_ERROR",
+        # Calendar errors
+        CalendarNotFoundError: "CALENDAR_NOT_FOUND",
+        CalendarValidationError: "CALENDAR_VALIDATION_ERROR",
+        CalendarInfoValidationError: "CALENDAR_INFO_VALIDATION_ERROR",
+        # Type-specific validation errors
+        MoodDataValidationError: "MOOD_DATA_VALIDATION_ERROR",
+        PhotoAlbumDataValidationError: "PHOTO_ALBUM_DATA_VALIDATION_ERROR",
+        PlanDataValidationError: "PLAN_DATA_VALIDATION_ERROR",
+        PlanDocumentValidationError: "PLAN_DOCUMENT_VALIDATION_ERROR",
+        TravelDataValidationError: "TRAVEL_DATA_VALIDATION_ERROR",
+        TravelFlightValidationError: "TRAVEL_FLIGHT_VALIDATION_ERROR",
+        TravelAccommodationValidationError: "TRAVEL_ACCOMMODATION_VALIDATION_ERROR",
+        TravelTransportationValidationError: "TRAVEL_TRANSPORTATION_VALIDATION_ERROR",
         # Route errors
         RouteNotFoundError: "ROUTE_NOT_FOUND",
         RouteValidationError: "ROUTE_VALIDATION_ERROR",

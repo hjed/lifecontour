@@ -24,39 +24,36 @@ class JournalValidationError(JournalDomainError):
         self.field = field
 
 
-class CalendarValidationError(JournalError):
+class CalendarValidationError(JournalDomainError):
     """Exception raised when calendar validation fails."""
 
     def __init__(self, field: str, message: str):
+        super().__init__(f"{field}: {message}", 400)
         self.field = field
-        self.message = message
-        super().__init__(f"{field}: {message}")
 
 
-class CalendarNotFoundError(JournalError):
+class CalendarNotFoundError(JournalDomainError):
     """Exception raised when a calendar is not found."""
 
     def __init__(self, calendar_id: str):
+        super().__init__(f"Calendar with ID {calendar_id} not found", 404)
         self.calendar_id = calendar_id
-        super().__init__(f"Calendar with ID {calendar_id} not found")
 
 
-class CalendarInfoValidationError(JournalError):
+class CalendarInfoValidationError(JournalDomainError):
     """Exception raised when calendar info (EVENT type) validation fails."""
 
     def __init__(self, field: str, message: str):
+        super().__init__(f"{field}: {message}", 400)
         self.field = field
-        self.message = message
-        super().__init__(f"{field}: {message}")
 
 
-class MoodDataValidationError(JournalError):
+class MoodDataValidationError(JournalDomainError):
     """Exception raised when mood data (MOOD_RATING type) validation fails."""
 
     def __init__(self, field: str, message: str):
+        super().__init__(f"{field}: {message}", 400)
         self.field = field
-        self.message = message
-        super().__init__(f"{field}: {message}")
 
 
 class JournalNotFoundError(JournalDomainError):
@@ -105,67 +102,60 @@ class JournalTypeDependencyError(JournalDomainError):
         super().__init__(message, 400)
 
 
-class PhotoAlbumDataValidationError(JournalError):
+class PhotoAlbumDataValidationError(JournalDomainError):
     """Exception raised when photo album data (PHOTO_ALBUM type) validation fails."""
 
     def __init__(self, field: str, message: str):
+        super().__init__(f"{field}: {message}", 400)
         self.field = field
-        self.message = message
-        super().__init__(f"{field}: {message}")
 
 
-class PlanDataValidationError(JournalError):
+class PlanDataValidationError(JournalDomainError):
     """Exception raised when plan data (PLAN type) validation fails."""
 
     def __init__(self, field: str, message: str):
+        super().__init__(f"{field}: {message}", 400)
         self.field = field
-        self.message = message
-        super().__init__(f"{field}: {message}")
 
 
-class PlanDocumentValidationError(JournalError):
+class PlanDocumentValidationError(JournalDomainError):
     """Exception raised when plan document validation fails."""
 
     def __init__(self, field: str, message: str):
+        super().__init__(f"{field}: {message}", 400)
         self.field = field
-        self.message = message
-        super().__init__(f"{field}: {message}")
 
 
-class TravelDataValidationError(JournalError):
+class TravelDataValidationError(JournalDomainError):
     """Exception raised when travel data (TRAVEL type) validation fails."""
 
     def __init__(self, field: str, message: str):
+        super().__init__(f"{field}: {message}", 400)
         self.field = field
-        self.message = message
-        super().__init__(f"{field}: {message}")
 
 
-class TravelFlightValidationError(JournalError):
+class TravelFlightValidationError(JournalDomainError):
     """Exception raised when travel flight validation fails."""
 
     def __init__(self, field: str, message: str):
+        super().__init__(f"{field}: {message}", 400)
         self.field = field
-        self.message = message
-        super().__init__(f"{field}: {message}")
 
 
-class TravelAccommodationValidationError(JournalError):
+class TravelAccommodationValidationError(JournalDomainError):
     """Exception raised when travel accommodation validation fails."""
 
     def __init__(self, field: str, message: str):
+        super().__init__(f"{field}: {message}", 400)
         self.field = field
-        self.message = message
-        super().__init__(f"{field}: {message}")
 
 
-class TravelTransportationValidationError(JournalError):
+class TravelTransportationValidationError(JournalDomainError):
     """Exception raised when travel transportation validation fails."""
 
     def __init__(self, field: str, message: str):
+        super().__init__(f"{field}: {message}", 400)
         self.field = field
-        self.message = message
-        super().__init__(f"{field}: {message}")
 
 
 class RouteNotFoundError(JournalDomainError):

@@ -189,6 +189,36 @@ class JournalTagListResponse(JsonApiCollectionResponse[JournalTagResource]):
     pass
 
 
+class JournalTagResponse(JsonApiResponse[JournalTagResource]):
+    """Response model for a single journal tag."""
+
+    pass
+
+
+# Journal Tag Creation Schemas
+class JournalTagCreateAttributes(BaseModel):
+    """Attributes for creating a journal tag."""
+
+    name: str = Field(..., description="Tag name", min_length=1, max_length=100)
+    color: str | None = Field(default=None, description="Tag color (hex code)")
+    parent_id: str | None = Field(
+        default=None, description="Parent tag ID (for hierarchy)"
+    )
+
+
+class JournalTagCreateData(BaseModel):
+    """Data for creating a journal tag."""
+
+    type: str = Field(default="journal-tags", description=RESOURCE_TYPE_DESC)
+    attributes: JournalTagCreateAttributes = Field(..., description="Tag attributes")
+
+
+class JournalTagCreateRequest(JsonApiCreateRequest[JournalTagCreateData]):
+    """Request model for creating a journal tag."""
+
+    pass
+
+
 # Calendar schema
 class CalendarSchema(BaseModel):
     """Calendar schema for journal responses."""

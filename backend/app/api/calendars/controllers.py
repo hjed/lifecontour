@@ -56,10 +56,20 @@ async def create_calendar(
     # Save calendar
     created_calendar = await calendar_repo.save(calendar)
 
-    # Convert to resource
+    # Convert to resource - use created_calendar to include defaults
+    from app.api.journals.schemas import CalendarAttributes
+
+    calendar_attributes = CalendarAttributes(
+        name=created_calendar.name,
+        description=created_calendar.description,
+        color=created_calendar.color,
+        is_synced_to_google=created_calendar.is_synced_to_google,
+        google_calendar_id=created_calendar.google_calendar_id,
+    )
+
     calendar_resource = CalendarResource(
         id=str(created_calendar.id),
-        attributes=calendar_request.data.attributes,
+        attributes=calendar_attributes,
         links=JsonApiLinks(self=f"{base_url}/api/calendars/{created_calendar.id}"),
     )
 
