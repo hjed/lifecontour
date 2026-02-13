@@ -33,13 +33,13 @@ jest.mock('@/components/ui/select', () => ({
 
 describe('JournalTagBadge', () => {
   const mockTags: JournalTag[] = [
-    { id: 1, name: 'Work', color: '#3b82f6' },
-    { id: 2, name: 'Important', color: '#ef4444' },
+    { id: '1', name: 'Work', color: '#3b82f6' },
+    { id: '2', name: 'Important', color: '#ef4444' },
   ];
 
   const mockAvailableTags: JournalTag[] = [
     ...mockTags,
-    { id: 3, name: 'Personal', color: '#10b981' },
+    { id: '3', name: 'Personal', color: '#10b981' },
   ];
 
   const mockOnTagAdd = jest.fn();

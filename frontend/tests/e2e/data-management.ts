@@ -47,7 +47,7 @@ export interface JournalCreateRequest {
   contacts?: Array<{ contact_id: string; relationship_type: string }>;
   tags?: number[];
   calendar_id?: string;
-  parent_id?: string;
+  parent_id?: number;
 }
 
 /**
@@ -55,7 +55,8 @@ export interface JournalCreateRequest {
  */
 export class TestDataManager {
   private createdContactIds: string[] = [];
-  private createdTagIds: string[] = [];
+  private createdTagIds: string[] = []; // Contact tags
+  private createdJournalTagIds: string[] = []; // Journal tags
   private createdJournalIds: string[] = [];
   private readonly createdCalendars: string[] = [];
 
@@ -539,6 +540,138 @@ export class TestDataManager {
   }
 
   /**
+   * Create a journal tag via API
+   */
+  async createJournalTag(
+    tagData: TagCreateRequest
+  ): Promise<{ id: string; name: string }> {
+    // Make tag names unique to avoid conflicts using UUID
+    const uniqueId = this.generateUniqueId();
+    const uniqueName = `${tagData.name}_${uniqueId}`;
+
+    console.log(`🏷️ [Data Manager] Creating journal tag: ${uniqueName}`);
+
+    try {
+      const response = await this.page.request.post('/api/journals/tags', {
+        headers: {
+          'Content-Type': 'application/vnd.api+json',
+        },
+        data: JSON.stringify({
+          data: {
+            type: 'journal-tags',
+            attributes: {
+              name: uniqueName,
+              color: tagData.color || '#3B82F6',
+            },
+          },
+        }),
+      });
+
+      if (!response.ok()) {
+        throw new Error(
+          `Failed to create journal tag: ${response.status()} ${await response.text()}`
+        );
+      }
+
+      const responseData = await response.json();
+      const createdTag = responseData.data;
+      const tagId = createdTag.id;
+
+      console.log(`✅ [Data Manager] Journal tag created with ID: ${tagId}`);
+
+      // Track the created journal tag for cleanup
+      this.createdJournalTagIds.push(tagId);
+
+      return {
+        id: tagId,
+        name: uniqueName, // Return the unique name that was actually created
+      };
+    } catch (error) {
+      console.error(
+        `❌ [Data Manager] Failed to create journal tag: ${tagData.name}`,
+        error
+      );
+      throw error;
+    }
+  }
+
+  /**
+   * Create multiple journal tags
+   */
+  async createJournalTags(
+    tagsData: TagCreateRequest[]
+  ): Promise<{ id: string; name: string }[]> {
+    console.log(
+      `🏷️ [Data Manager] Creating ${tagsData.length} journal tags...`
+    );
+
+    const tags: { id: string; name: string }[] = [];
+
+    for (const tagData of tagsData) {
+      try {
+        const tag = await this.createJournalTag(tagData);
+        tags.push(tag);
+      } catch (error) {
+        console.error(
+          `❌ [Data Manager] Failed to create journal tag: ${tagData.name}`,
+          error
+        );
+        // Don't add failed tags to the list
+      }
+    }
+
+    return tags;
+  }
+
+  /**
+   * Assign tags to a journal
+   */
+  async assignTagsToJournal(
+    journalId: string,
+    tagIds: string[]
+  ): Promise<void> {
+    console.log(
+      `🏷️ [Data Manager] Assigning ${tagIds.length} tags to journal ${journalId}`
+    );
+
+    try {
+      for (const tagId of tagIds) {
+        const response = await this.page.request.post(
+          `/api/journals/${journalId}/relationships/tags`,
+          {
+            headers: {
+              'Content-Type': 'application/vnd.api+json',
+            },
+            data: JSON.stringify({
+              data: {
+                type: 'journal-tag',
+                attributes: {
+                  tag_id: tagId,
+                },
+              },
+            }),
+          }
+        );
+
+        if (!response.ok()) {
+          console.warn(
+            `⚠️ [Data Manager] Failed to assign tag ${tagId} to journal ${journalId}: ${response.status()}`
+          );
+        } else {
+          console.log(
+            `✅ [Data Manager] Assigned tag ${tagId} to journal ${journalId}`
+          );
+        }
+      }
+    } catch (error) {
+      console.error(
+        `❌ [Data Manager] Failed to assign tags to journal ${journalId}:`,
+        error
+      );
+    }
+  }
+
+  /**
    * Create a test journal via API
    */
   async createJournal(journalData: JournalCreateRequest): Promise<TestJournal> {
@@ -550,35 +683,55 @@ export class TestDataManager {
 
     try {
       // Make API request to create journal (JSON API format)
+      const requestData: {
+        data: {
+          type: string;
+          attributes: {
+            title: string;
+            content: string;
+            event_date_range: { start: string; end: string };
+            types: string[];
+            type_data: Record<string, unknown>;
+            parent_id?: number;
+          };
+          relationships?: unknown;
+        };
+      } = {
+        data: {
+          type: 'journals',
+          attributes: {
+            title: uniqueTitle,
+            content: journalData.content,
+            event_date_range: journalData.event_date_range,
+            types: journalData.types || [],
+            type_data: journalData.type_data || {},
+          },
+          relationships: journalData.contacts
+            ? {
+                contacts: {
+                  data: journalData.contacts.map(c => ({
+                    type: 'journal-contact-relationships',
+                    attributes: {
+                      contact_id: c.contact_id,
+                      relationship_type: c.relationship_type,
+                    },
+                  })),
+                },
+              }
+            : undefined,
+        },
+      };
+
+      // Add parent_id if provided
+      if (journalData.parent_id !== undefined) {
+        requestData.data.attributes.parent_id = journalData.parent_id;
+      }
+
       const response = await this.page.request.post('/api/journals', {
         headers: {
           'Content-Type': 'application/vnd.api+json',
         },
-        data: JSON.stringify({
-          data: {
-            type: 'journals',
-            attributes: {
-              title: uniqueTitle,
-              content: journalData.content,
-              event_date_range: journalData.event_date_range,
-              types: journalData.types || [],
-              type_data: journalData.type_data || {},
-            },
-            relationships: journalData.contacts
-              ? {
-                  contacts: {
-                    data: journalData.contacts.map(c => ({
-                      type: 'journal-contact-relationships',
-                      attributes: {
-                        contact_id: c.contact_id,
-                        relationship_type: c.relationship_type,
-                      },
-                    })),
-                  },
-                }
-              : undefined,
-          },
-        }),
+        data: JSON.stringify(requestData),
       });
 
       if (!response.ok()) {
@@ -685,7 +838,7 @@ export class TestDataManager {
    */
   async cleanup(): Promise<void> {
     console.log(
-      `🧹 [Data Manager] Starting cleanup of ${this.createdContactIds.length} contacts, ${this.createdTagIds.length} tags, ${this.createdJournalIds.length} journals, and ${this.createdCalendars.length} calendars...`
+      `🧹 [Data Manager] Starting cleanup of ${this.createdContactIds.length} contacts, ${this.createdTagIds.length} contact tags, ${this.createdJournalTagIds.length} journal tags, ${this.createdJournalIds.length} journals, and ${this.createdCalendars.length} calendars...`
     );
 
     // Add timeout to prevent cleanup from hanging
@@ -753,19 +906,43 @@ export class TestDataManager {
       }
     }
 
-    // Clean up tags (if any were created)
+    // Clean up contact tags (if any were created)
     for (const tagId of this.createdTagIds) {
       try {
         const response = await this.page.request.delete(`/api/tags/${tagId}`);
         if (response.ok()) {
-          console.log(`🗑️ [Data Manager] Deleted tag ${tagId}`);
+          console.log(`🗑️ [Data Manager] Deleted contact tag ${tagId}`);
         } else {
           console.warn(
-            `⚠️ [Data Manager] Failed to delete tag ${tagId}: ${response.status()}`
+            `⚠️ [Data Manager] Failed to delete contact tag ${tagId}: ${response.status()}`
           );
         }
       } catch (error) {
-        console.warn(`⚠️ [Data Manager] Error deleting tag ${tagId}:`, error);
+        console.warn(
+          `⚠️ [Data Manager] Error deleting contact tag ${tagId}:`,
+          error
+        );
+      }
+    }
+
+    // Clean up journal tags (if any were created)
+    for (const tagId of this.createdJournalTagIds) {
+      try {
+        const response = await this.page.request.delete(
+          `/api/journals/tags/${tagId}`
+        );
+        if (response.ok()) {
+          console.log(`🗑️ [Data Manager] Deleted journal tag ${tagId}`);
+        } else {
+          console.warn(
+            `⚠️ [Data Manager] Failed to delete journal tag ${tagId}: ${response.status()}`
+          );
+        }
+      } catch (error) {
+        console.warn(
+          `⚠️ [Data Manager] Error deleting journal tag ${tagId}:`,
+          error
+        );
       }
     }
 
@@ -793,6 +970,7 @@ export class TestDataManager {
     // Clear tracking arrays
     this.createdContactIds = [];
     this.createdTagIds = [];
+    this.createdJournalTagIds = [];
     this.createdJournalIds = [];
     // Note: createdCalendars is readonly, so we can't reassign it
     // The array will be cleared when the TestDataManager instance is destroyed

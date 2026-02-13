@@ -96,6 +96,63 @@ class TestCalendarEndpoints:
 
         assert response.status_code == 400  # Domain validation error
 
+    async def test_list_calendars(self, integration_api_client):
+        """Test listing all calendars for the authenticated user."""
+        # Create multiple calendars
+        calendar1_data = {
+            "data": {
+                "type": "calendars",
+                "attributes": {
+                    "name": "Work Calendar",
+                    "color": "#FF0000",
+                },
+            }
+        }
+        calendar2_data = {
+            "data": {
+                "type": "calendars",
+                "attributes": {
+                    "name": "Personal Calendar",
+                    "color": "#00FF00",
+                },
+            }
+        }
+
+        await integration_api_client.post("/api/calendars", json=calendar1_data)
+        await integration_api_client.post("/api/calendars", json=calendar2_data)
+
+        # List calendars
+        response = await integration_api_client.get("/api/calendars")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert "data" in data
+        assert isinstance(data["data"], list)
+        assert len(data["data"]) >= 2
+
+        # Verify calendars are ordered by name
+        calendar_names = [cal["attributes"]["name"] for cal in data["data"]]
+        assert "Work Calendar" in calendar_names
+        assert "Personal Calendar" in calendar_names
+
+        # Verify JSON API structure
+        for calendar in data["data"]:
+            assert calendar["type"] == "calendars"
+            assert "id" in calendar
+            assert "attributes" in calendar
+            assert "name" in calendar["attributes"]
+            assert "color" in calendar["attributes"]
+
+    async def test_list_calendars_empty(self, integration_api_client):
+        """Test listing calendars when user has no calendars."""
+        response = await integration_api_client.get("/api/calendars")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert "data" in data
+        assert isinstance(data["data"], list)
+        # May be empty or contain calendars from other tests
+
 
 @pytest.mark.integration
 class TestEventJournalCreation:

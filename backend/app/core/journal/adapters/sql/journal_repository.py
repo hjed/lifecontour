@@ -356,6 +356,18 @@ class SqlJournalRepository(JournalRepository):
                 where_clauses.append("t.calendar_id = :calendar_id")
             params["calendar_id"] = calendar_id
 
+            # Debug logging
+            import structlog
+
+            logger = structlog.get_logger()
+            logger.debug(
+                "Calendar filter applied",
+                calendar_id=calendar_id,
+                journal_type=journal_type,
+                joins_count=len(joins),
+                where_clauses_count=len(where_clauses),
+            )
+
         # Add date range filters (overlap logic: journal overlaps with [start_date, end_date])
         # A journal overlaps if: journal.start <= end_date AND journal.end >= start_date
         if start_date is not None:
@@ -393,6 +405,17 @@ class SqlJournalRepository(JournalRepository):
         base_query += "\nWHERE " + " AND ".join(where_clauses)
         base_query += "\nORDER BY j.event_date_range_start DESC, j.created_at DESC"
         base_query += "\nLIMIT :limit OFFSET :offset"
+
+        # Debug logging
+        import structlog
+
+        logger = structlog.get_logger()
+        logger.debug(
+            "Executing journal query",
+            query=base_query,
+            params=params,
+            user_id=user_id,
+        )
 
         query = text(base_query)
         result = await self.conn.execute(query, params)

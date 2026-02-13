@@ -27,8 +27,8 @@ import type { JournalTag } from '@/types/journals';
 
 interface JournalTagBadgeProps {
   readonly tags: JournalTag[];
-  readonly onTagAdd?: (tagId: number) => Promise<void>;
-  readonly onTagRemove?: (tagId: number) => Promise<void>;
+  readonly onTagAdd?: (tagId: string) => Promise<void>;
+  readonly onTagRemove?: (tagId: string) => Promise<void>;
   readonly availableTags?: JournalTag[];
   readonly disabled?: boolean;
   readonly className?: string;
@@ -47,7 +47,7 @@ export function JournalTagBadge({
   className,
 }: JournalTagBadgeProps) {
   const [isAddOpen, setIsAddOpen] = useState(false);
-  const [selectedTagId, setSelectedTagId] = useState<number | null>(null);
+  const [selectedTagId, setSelectedTagId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
 
   const handleAddTag = async () => {
@@ -65,7 +65,7 @@ export function JournalTagBadge({
     }
   };
 
-  const handleRemoveTag = async (tagId: number) => {
+  const handleRemoveTag = async (tagId: string) => {
     if (!onTagRemove) return;
 
     setIsLoading(true);
@@ -137,8 +137,8 @@ export function JournalTagBadge({
                   Select Tag
                 </label>
                 <Select
-                  value={selectedTagId?.toString()}
-                  onValueChange={value => setSelectedTagId(Number(value))}
+                  value={selectedTagId ?? undefined}
+                  onValueChange={value => setSelectedTagId(value)}
                   disabled={isLoading}
                 >
                   <SelectTrigger id='tag-select' data-testid='tag-select'>
@@ -146,7 +146,7 @@ export function JournalTagBadge({
                   </SelectTrigger>
                   <SelectContent>
                     {unassignedTags.map(tag => (
-                      <SelectItem key={tag.id} value={tag.id.toString()}>
+                      <SelectItem key={tag.id} value={tag.id}>
                         {tag.name}
                       </SelectItem>
                     ))}

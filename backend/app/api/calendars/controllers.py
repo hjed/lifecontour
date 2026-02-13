@@ -11,7 +11,11 @@ from fastapi import APIRouter, Request, status
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.api.common.schemas import get_request_base_url
-from app.api.journals.schemas import CalendarCreateRequest, CalendarResponse
+from app.api.journals.schemas import (
+    CalendarCreateRequest,
+    CalendarListResponse,
+    CalendarResponse,
+)
 from app.core.journal.adapters.sql.calendar_repository import CalendarRepository
 from app.core.journal.models.calendar import Calendar
 from app.infrastructure.auth.models import SessionUser
@@ -20,6 +24,54 @@ from app.infrastructure.auth.models import SessionUser
 DEFAULT_CALENDAR_COLOR = "#3B82F6"
 
 router = APIRouter(prefix="/calendars")
+
+
+@router.get("")
+@inject
+async def list_calendars(
+    request: Request,
+    calendar_repo: FromDishka[CalendarRepository],
+    user: FromDishka[SessionUser],  # Require authentication
+) -> CalendarListResponse:
+    """
+    List all calendars for the authenticated user.
+
+    Returns all calendars owned by the user, ordered by name.
+    """
+    from app.api.common.schemas import JsonApiLinks
+    from app.api.journals.schemas import (
+        CalendarAttributes,
+        CalendarListResponse,
+        CalendarResource,
+    )
+
+    base_url = get_request_base_url(request)
+
+    # Get all calendars for the user
+    calendars = await calendar_repo.get_all(user.id)
+
+    # Convert to resources
+    calendar_resources = []
+    for calendar in calendars:
+        calendar_attributes = CalendarAttributes(
+            name=calendar.name,
+            description=calendar.description,
+            color=calendar.color,
+            is_synced_to_google=calendar.is_synced_to_google,
+            google_calendar_id=calendar.google_calendar_id,
+        )
+
+        calendar_resource = CalendarResource(
+            id=str(calendar.id),
+            attributes=calendar_attributes,
+            links=JsonApiLinks(self=f"{base_url}/api/calendars/{calendar.id}"),
+        )
+        calendar_resources.append(calendar_resource)
+
+    return CalendarListResponse(
+        data=calendar_resources,
+        links=JsonApiLinks(self=f"{base_url}/api/calendars"),
+    )
 
 
 @router.post("", status_code=status.HTTP_201_CREATED)
@@ -74,3 +126,50 @@ async def create_calendar(
     )
 
     return CalendarResponse(data=calendar_resource)
+
+
+@router.delete("/{calendar_id}", status_code=status.HTTP_204_NO_CONTENT)
+@inject
+async def delete_calendar(
+    calendar_id: str,
+    calendar_repo: FromDishka[CalendarRepository],
+    user: FromDishka[SessionUser],  # Require authentication
+) -> None:
+    """
+    Delete a calendar.
+
+    This is a minimal implementation to support E2E testing cleanup.
+    Full calendar CRUD operations are planned for Iteration 7.
+    """
+    from uuid import UUID
+
+    from fastapi import HTTPException
+
+    # Convert string ID to UUID
+    try:
+        calendar_uuid = UUID(calendar_id)
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid calendar ID format",
+        ) from e
+
+    # Get the calendar to verify ownership
+    calendar = await calendar_repo.find_by_id(calendar_uuid)
+    if not calendar:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Calendar not found",
+        )
+
+    # Verify the calendar belongs to the user
+    if calendar.user_id != user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You don't have permission to delete this calendar",
+        )
+
+    # Delete the calendar
+    await calendar_repo.delete(calendar_uuid)
+
+    return None

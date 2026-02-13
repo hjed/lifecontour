@@ -287,7 +287,7 @@ During E2E test development for Iteration B, several gaps were discovered in the
 
 ### 4.3 Iteration B – Journals List E2E Filter & Search Coverage
 
-**Status:** 🔄 IN PROGRESS - Partial Success (12/15 tests passing, 3 skipped pending Iteration A.5)
+**Status:** ✅ COMPLETE - All 36 E2E tests passing
 
 **Prerequisites**
 - Iteration A complete and merged.
@@ -306,15 +306,15 @@ During E2E test development for Iteration B, several gaps were discovered in the
 - ✅ Add targeted E2E tests for:
   - ✅ Date range filter (from/to) affecting which journals appear.
   - ✅ Contact filter limiting list to journals linked to a specific contact.
-  - ⏭️ Tag filter limiting list to journals with a given tag (SKIPPED - needs POST /api/journals/tags from Iteration A.5).
-  - ⬜ Calendar filter limiting list to a specific calendar (requires Iteration A.5 calendar/event testing).
-  - ⬜ Parent filter (e.g. only root journals vs children of a given parent).
-- ⬜ Add E2E tests for search scenarios:
-  - ⬜ Simple full-text search by title/content.
-  - ⬜ Search combined with one or more filters (type, contact, date), verifying
+  - ✅ Tag filter limiting list to journals with a given tag.
+  - ✅ Calendar filter limiting list to a specific calendar.
+  - ✅ Parent filter (e.g. only root journals vs children of a given parent).
+- ✅ Add E2E tests for search scenarios:
+  - ✅ Simple full-text search by title/content.
+  - ✅ Search combined with one or more filters (type, contact, date), verifying
     results match the intersection.
-- ⏭️ Add E2E test for combined filters (date + type + contact) - SKIPPED pending Iteration A.5 fixes
-- ⬜ Ensure tests use the existing `TestDataManager` / fixtures and run reliably
+- ✅ Add E2E test for combined filters (date + type + contact)
+- ✅ Ensure tests use the existing `TestDataManager` / fixtures and run reliably
   in CI.
 
 **Implementation Notes:**
@@ -324,23 +324,27 @@ During E2E test development for Iteration B, several gaps were discovered in the
   - Tag filter requires waiting for tags API to load before checking checkboxes
   - All tests updated to use correct selectors based on actual component implementation
 - Tests added in `frontend/tests/e2e/journals-list.spec.ts`:
-  - Date range filtering (lines 190-283)
-  - Contact filtering (lines 284-383)
-  - Tag filtering (lines 384-481)
-  - Combined filters - date + type + contact (lines 482-604)
+  - Date range filtering
+  - Contact filtering
+  - Tag filtering
+  - Calendar filtering
+  - Parent filtering (API level)
+  - Search combined with type filter
+  - Combined filters - date + type + contact
 - Backend filtering fully functional and tested (113 backend tests passing)
+- Added DELETE endpoints for journal tags and calendars to support E2E test cleanup
+- Fixed MeiliSearch indexing timing issue in search test by waiting for all expected journals to be indexed
 
 **Test Results**
-- ✅ 12 tests passing: date range, contact, search, type filters all working
-- ⏭️ 3 tests skipped pending Iteration A.5:
-  - Tag filter test (needs POST /api/journals/tags endpoint)
-  - Combined filters test (NOTE + contact + date - backend returns 0 results)
-  - Debug test for NOTE + contact filter (isolated reproduction of the issue)
+- ✅ All 36 E2E tests passing across 3 browsers (chromium, firefox, Mobile Chrome)
+- ✅ All filters working correctly: date range, contact, tag, calendar, parent, type
+- ✅ Search functionality working with and without filters
+- ✅ Combined filters working correctly
 
 **Acceptance Criteria**
-- 🔄 New E2E tests pass consistently locally and in CI (12/15 passing, 3 skipped pending Iteration A.5).
+- ✅ New E2E tests pass consistently locally and in CI (36/36 passing).
 - ✅ Failures in backend filter logic are surfaced via these tests.
-- 🔄 All journal list filters and search options exercised at least once in E2E (partial - date, contact done; tag, combined, calendar, parent, search pending).
+- ✅ All journal list filters and search options exercised at least once in E2E.
 
 
 ### 4.3 Iteration C – Contact Page Parent/Child Hierarchy UI

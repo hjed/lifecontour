@@ -33,7 +33,7 @@ import {
   JournalType,
 } from '@/types/journals';
 import { ContactResource } from '@/types/contacts';
-import { useJournalTags } from '@/lib/api/journals';
+import { useJournalTags, useCalendars } from '@/lib/api/journals';
 import { cn } from '@/lib/utils';
 import type { DateRange } from 'react-day-picker';
 
@@ -64,6 +64,9 @@ export function JournalFilters({
   const { data: tagsData } = useJournalTags();
   const tags = tagsData?.data || [];
 
+  const { data: calendarsData } = useCalendars();
+  const calendars = calendarsData?.data || [];
+
   // Date range state
   const [dateRange, setDateRange] = useState<DateRange | undefined>(() => {
     if (filters.date_from && filters.date_to) {
@@ -89,12 +92,11 @@ export function JournalFilters({
   };
 
   // Handle tag toggle
-  const handleTagToggle = (tagId: number) => {
+  const handleTagToggle = (tagId: string) => {
     const currentTags = filters.tag_ids || [];
-    const tagIdStr = tagId.toString();
-    const newTags = currentTags.includes(tagIdStr)
-      ? currentTags.filter(t => t !== tagIdStr)
-      : [...currentTags, tagIdStr];
+    const newTags = currentTags.includes(tagId)
+      ? currentTags.filter(t => t !== tagId)
+      : [...currentTags, tagId];
 
     onFiltersChange({
       ...filters,
@@ -260,9 +262,7 @@ export function JournalFilters({
               <div key={tag.id} className='flex items-center space-x-2'>
                 <Checkbox
                   id={`tag-${tag.id}`}
-                  checked={
-                    filters.tag_ids?.includes(tag.id.toString()) || false
-                  }
+                  checked={filters.tag_ids?.includes(tag.id) || false}
                   onCheckedChange={() => handleTagToggle(tag.id)}
                 />
                 <label
@@ -277,19 +277,23 @@ export function JournalFilters({
         </div>
       )}
 
-      {/* Calendar Filter - Placeholder for now */}
+      {/* Calendar Filter */}
       <div className='space-y-2'>
-        <Label>Calendar</Label>
+        <Label htmlFor='calendar-filter'>Calendar</Label>
         <Select
           value={filters.calendar_id || 'all'}
           onValueChange={handleCalendarChange}
         >
-          <SelectTrigger>
+          <SelectTrigger id='calendar-filter' aria-label='Calendar filter'>
             <SelectValue placeholder='All calendars' />
           </SelectTrigger>
           <SelectContent>
             <SelectItem value='all'>All calendars</SelectItem>
-            {/* Calendar options will be populated from API */}
+            {calendars.map(calendar => (
+              <SelectItem key={calendar.id} value={calendar.id}>
+                {calendar.attributes.name}
+              </SelectItem>
+            ))}
           </SelectContent>
         </Select>
       </div>

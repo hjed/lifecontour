@@ -187,6 +187,142 @@ test.describe('Journal List Page', () => {
       }
     });
 
+    test('should combine search with type filter', async ({
+      authenticatedPage,
+      testCleanup,
+    }) => {
+      const page = authenticatedPage;
+      const dataManager = new (
+        await import('./data-management')
+      ).TestDataManager(page);
+
+      // Clear existing data
+      await dataManager.clearAllJournals();
+
+      // Create a calendar for EVENT journals
+      const calendars = await dataManager.createCalendars([
+        { name: 'Test Calendar', color: '#FF0000' },
+      ]);
+
+      // Create journals with different types
+      await dataManager.createJournals([
+        {
+          title: 'Meeting Notes',
+          content: 'Discussion about project timeline',
+          event_date_range: {
+            start: '2026-02-10T09:00:00Z',
+            end: '2026-02-10T17:00:00Z',
+          },
+          // NOTE type (default)
+        },
+        {
+          title: 'Team Meeting',
+          content: 'Weekly sync with the team',
+          event_date_range: {
+            start: '2026-02-11T09:00:00Z',
+            end: '2026-02-11T17:00:00Z',
+          },
+          types: ['event'],
+          type_data: {
+            event: {
+              calendar_id: calendars[0].id,
+              is_all_day: false,
+              sync_invitees: false,
+            },
+          },
+        },
+        {
+          title: 'Random Note',
+          content: 'Some random thoughts',
+          event_date_range: {
+            start: '2026-02-12T09:00:00Z',
+            end: '2026-02-12T17:00:00Z',
+          },
+          // NOTE type (default)
+        },
+      ]);
+
+      testCleanup(async () => {
+        await dataManager.cleanup();
+      });
+
+      // Navigate to journals page
+      await page.goto('/journals');
+      await page.waitForLoadState('networkidle');
+
+      // Wait for journals to be indexed in MeiliSearch
+      // Increased timeout to 30 seconds to handle indexing delays when running as part of full test suite
+      let indexed = false;
+      for (let attempt = 0; attempt < 30 && !indexed; attempt++) {
+        await page.waitForTimeout(1000);
+
+        const response = await page.evaluate(async () => {
+          try {
+            const res = await fetch(
+              '/api/journals/search?q=Meeting&limit=20&page=1'
+            );
+            if (!res.ok) return { ok: false, count: 0 };
+            const data = await res.json();
+            return { ok: true, count: data.data?.length || 0 };
+          } catch {
+            return { ok: false, count: 0 };
+          }
+        });
+
+        // Wait for BOTH journals with "Meeting" in the title to be indexed (Meeting Notes and Team Meeting)
+        if (response.ok && response.count >= 2) {
+          indexed = true;
+        }
+      }
+
+      if (!indexed) {
+        throw new Error(
+          'Journals were not indexed in MeiliSearch within 30 seconds'
+        );
+      }
+
+      // Search for "Meeting" - should match both "Meeting Notes" and "Team Meeting"
+      const searchInput = page.getByTestId('search-input');
+      await searchInput.fill('Meeting');
+
+      // Wait for search results
+      await expect(
+        page.getByRole('heading', { name: /Meeting Notes/i })
+      ).toBeVisible({ timeout: 5000 });
+      await expect(
+        page.getByRole('heading', { name: /Team Meeting/i })
+      ).toBeVisible();
+
+      // Now filter by EVENT type - should only show "Team Meeting"
+      const filtersSection = page.locator('[data-testid=\"journal-filters\"]');
+      const eventCheckbox = filtersSection.getByLabel('Event', { exact: true });
+
+      const responsePromise = page.waitForResponse(
+        response =>
+          response.url().includes('/api/journals/search') &&
+          response.url().includes('types=event') &&
+          response.status() === 200
+      );
+
+      await eventCheckbox.check();
+      await responsePromise;
+
+      // Should only show "Team Meeting" (EVENT type with "Meeting" in title)
+      await expect(
+        page.getByRole('heading', { name: /Team Meeting/i })
+      ).toBeVisible();
+
+      // "Meeting Notes" should not be visible (NOTE type, not EVENT)
+      await expect(
+        page.getByRole('heading', { name: /Meeting Notes/i })
+      ).not.toBeVisible();
+
+      // "Random Note" should not be visible (doesn't match search)
+      await expect(
+        page.getByRole('heading', { name: /Random Note/i })
+      ).not.toBeVisible();
+    });
+
     test('should filter journals by date range', async ({
       authenticatedPage,
       testCleanup,
@@ -402,21 +538,146 @@ test.describe('Journal List Page', () => {
       ).not.toBeVisible();
     });
 
-    test.skip('should filter journals by tag', async () => {
-      // SKIPPED: This test requires a POST /api/journals/tags endpoint to create journal tags
-      // Currently, journal tags can only be created via the MCP tools (which use tag names)
-      // or by assigning existing tags to journals via POST /api/journals/{id}/relationships/tags
-      //
-      // To enable this test, we need to either:
-      // 1. Add a POST /api/journals/tags endpoint to create journal tags
-      // 2. Seed the database with test journal tags
-      // 3. Update the test to use the MCP tools to create journals with tag names
-      //
-      // For now, we're skipping this test and will implement it in a follow-up task.
-      // Implementation pending POST /api/journals/tags endpoint (see Iteration A.5 in task doc)
+    test('should filter journals by tag', async ({
+      authenticatedPage,
+      testCleanup,
+    }) => {
+      const page = authenticatedPage;
+      const dataManager = new (
+        await import('./data-management')
+      ).TestDataManager(page);
+
+      // Clear existing data
+      await dataManager.clearAllJournals();
+
+      // Create journal tags
+      const tags = await dataManager.createJournalTags([
+        { name: 'Work', color: '#FF0000' },
+        { name: 'Personal', color: '#00FF00' },
+      ]);
+
+      // Create journals
+      const journals = await dataManager.createJournals([
+        {
+          title: 'Work Meeting',
+          content: 'Quarterly review',
+          event_date_range: {
+            start: '2026-02-10T09:00:00Z',
+            end: '2026-02-10T17:00:00Z',
+          },
+        },
+        {
+          title: 'Personal Note',
+          content: 'Weekend plans',
+          event_date_range: {
+            start: '2026-02-11T09:00:00Z',
+            end: '2026-02-11T17:00:00Z',
+          },
+        },
+        {
+          title: 'Mixed Journal',
+          content: 'Both work and personal',
+          event_date_range: {
+            start: '2026-02-12T09:00:00Z',
+            end: '2026-02-12T17:00:00Z',
+          },
+        },
+      ]);
+
+      // Assign tags to journals
+      await dataManager.assignTagsToJournal(journals[0].id, [tags[0].id]); // Work tag
+      await dataManager.assignTagsToJournal(journals[1].id, [tags[1].id]); // Personal tag
+      await dataManager.assignTagsToJournal(journals[2].id, [
+        tags[0].id,
+        tags[1].id,
+      ]); // Both tags
+
+      testCleanup(async () => {
+        await dataManager.cleanup();
+      });
+
+      // Navigate to journals page
+      await page.goto('/journals');
+      await page.waitForLoadState('networkidle');
+
+      // Verify all journals are initially visible
+      await expect(
+        page.getByRole('heading', { name: /Work Meeting/i })
+      ).toBeVisible();
+      await expect(
+        page.getByRole('heading', { name: /Personal Note/i })
+      ).toBeVisible();
+      await expect(
+        page.getByRole('heading', { name: /Mixed Journal/i })
+      ).toBeVisible();
+
+      // Wait for tags to load in the filter panel
+      const filtersSection = page.locator('[data-testid="journal-filters"]');
+      await expect(filtersSection.getByText(tags[0].name)).toBeVisible();
+
+      // Filter by Work tag (use the exact tag name returned from creation)
+      const workCheckbox = filtersSection.getByLabel(tags[0].name);
+
+      // Start waiting for API response before checking the checkbox
+      const responsePromise = page.waitForResponse(
+        response =>
+          response.url().includes('/api/journals') &&
+          response.url().includes('tag_id') &&
+          response.status() === 200
+      );
+
+      await workCheckbox.check();
+      await responsePromise;
+
+      // Verify only journals with Work tag are visible
+      await expect(
+        page.getByRole('heading', { name: /Work Meeting/i })
+      ).toBeVisible();
+      await expect(
+        page.getByRole('heading', { name: /Mixed Journal/i })
+      ).toBeVisible();
+
+      // Verify Personal Note is not visible
+      await expect(
+        page.getByRole('heading', { name: /Personal Note/i })
+      ).not.toBeVisible();
+
+      // Uncheck Work tag
+      await workCheckbox.uncheck();
+
+      // Wait for all journals to be visible again
+      await expect(
+        page.getByRole('heading', { name: /Personal Note/i })
+      ).toBeVisible();
+
+      // Filter by Personal tag (use the exact tag name returned from creation)
+      const personalCheckbox = filtersSection.getByLabel(tags[1].name);
+
+      const personalResponsePromise = page.waitForResponse(
+        response =>
+          response.url().includes('/api/journals') &&
+          response.url().includes('tag_id') &&
+          response.status() === 200
+      );
+
+      await personalCheckbox.check();
+      await personalResponsePromise;
+
+      // Verify only journals with Personal tag are visible
+      await expect(
+        page.getByRole('heading', { name: /Personal Note/i })
+      ).toBeVisible();
+      await expect(
+        page.getByRole('heading', { name: /Mixed Journal/i })
+      ).toBeVisible();
+
+      // Verify Work Meeting is not visible
+      await expect(
+        page.getByRole('heading', { name: /Work Meeting/i })
+      ).not.toBeVisible();
     });
 
-    test.skip('should filter journals with combined filters (date + type + contact)', async ({
+    test('should filter journals with combined filters (date + type + contact)', async ({
       authenticatedPage,
       testCleanup,
     }) => {
@@ -575,6 +836,296 @@ test.describe('Journal List Page', () => {
       await expect(
         page.getByRole('heading', { name: /February Note Solo/i })
       ).not.toBeVisible();
+    });
+
+    test('should filter journals by calendar', async ({
+      authenticatedPage,
+      testCleanup,
+    }) => {
+      const page = authenticatedPage;
+      const dataManager = new (
+        await import('./data-management')
+      ).TestDataManager(page);
+
+      // Clear existing data
+      await dataManager.clearAllJournals();
+
+      // Create test calendars
+      const calendars = await dataManager.createCalendars([
+        { name: 'Work Calendar', color: '#FF0000' },
+        { name: 'Personal Calendar', color: '#00FF00' },
+      ]);
+
+      // Create journals with different calendars
+      await dataManager.createJournals([
+        {
+          title: 'Work Event',
+          content: 'Team meeting',
+          event_date_range: {
+            start: '2026-02-10T09:00:00Z',
+            end: '2026-02-10T17:00:00Z',
+          },
+          types: ['event'],
+          type_data: {
+            event: {
+              calendar_id: calendars[0].id,
+              is_all_day: false,
+              sync_invitees: false,
+            },
+          },
+        },
+        {
+          title: 'Personal Event',
+          content: 'Dentist appointment',
+          event_date_range: {
+            start: '2026-02-11T09:00:00Z',
+            end: '2026-02-11T17:00:00Z',
+          },
+          types: ['event'],
+          type_data: {
+            event: {
+              calendar_id: calendars[1].id,
+              is_all_day: false,
+              sync_invitees: false,
+            },
+          },
+        },
+        {
+          title: 'Note without Calendar',
+          content: 'Random note',
+          event_date_range: {
+            start: '2026-02-12T09:00:00Z',
+            end: '2026-02-12T17:00:00Z',
+          },
+        },
+      ]);
+
+      testCleanup(async () => {
+        await dataManager.cleanup();
+      });
+
+      // Navigate to journals page
+      await page.goto('/journals');
+      await page.waitForLoadState('networkidle');
+
+      // Debug: Check what journals were created
+      const journalsResponse = await page.request.get(
+        '/api/journals?limit=100'
+      );
+      const journalsData = await journalsResponse.json();
+      console.log(
+        '📋 Created journals:',
+        JSON.stringify(
+          journalsData.data.map((j: any) => ({
+            id: j.id,
+            title: j.attributes.title,
+            types: j.attributes.types,
+            calendar_id: j.attributes.type_data?.event?.calendar_id,
+          })),
+          null,
+          2
+        )
+      );
+
+      // Verify all journals are initially visible
+      await expect(
+        page.getByRole('heading', { name: /Work Event/i })
+      ).toBeVisible();
+      await expect(
+        page.getByRole('heading', { name: /Personal Event/i })
+      ).toBeVisible();
+      await expect(
+        page.getByRole('heading', { name: /Note without Calendar/i })
+      ).toBeVisible();
+
+      // Filter by Work Calendar
+      const filtersSection = page.locator('[data-testid="journal-filters"]');
+      const calendarSelect = filtersSection.getByRole('combobox', {
+        name: /calendar/i,
+      });
+
+      // Start waiting for API response before selecting calendar
+      const responsePromise = page.waitForResponse(
+        response =>
+          response.url().includes('/api/journals') &&
+          response.url().includes('calendar_id') &&
+          response.status() === 200
+      );
+
+      await calendarSelect.click();
+      await page
+        .getByRole('option', { name: /Work Calendar/i })
+        .first()
+        .click();
+      await responsePromise;
+
+      // Verify only Work Event is visible
+      await expect(
+        page.getByRole('heading', { name: /Work Event/i })
+      ).toBeVisible();
+
+      // Verify other journals are not visible
+      await expect(
+        page.getByRole('heading', { name: /Personal Event/i })
+      ).not.toBeVisible();
+      await expect(
+        page.getByRole('heading', { name: /Note without Calendar/i })
+      ).not.toBeVisible();
+
+      // Change to Personal Calendar
+      const personalResponsePromise = page.waitForResponse(
+        response =>
+          response.url().includes('/api/journals') &&
+          response.url().includes('calendar_id') &&
+          response.status() === 200
+      );
+
+      await calendarSelect.click();
+      await page.getByRole('option', { name: /Personal Calendar/i }).click();
+      await personalResponsePromise;
+
+      // Verify only Personal Event is visible
+      await expect(
+        page.getByRole('heading', { name: /Personal Event/i })
+      ).toBeVisible();
+
+      // Verify other journals are not visible
+      await expect(
+        page.getByRole('heading', { name: /Work Event/i })
+      ).not.toBeVisible();
+      await expect(
+        page.getByRole('heading', { name: /Note without Calendar/i })
+      ).not.toBeVisible();
+
+      // Select "All calendars" to clear filter
+      await calendarSelect.click();
+      await page.getByRole('option', { name: /All calendars/i }).click();
+
+      // Wait for the filter to be cleared and all journals to be visible
+      await expect(
+        page.getByRole('heading', { name: /Work Event/i })
+      ).toBeVisible();
+      await expect(
+        page.getByRole('heading', { name: /Personal Event/i })
+      ).toBeVisible();
+      await expect(
+        page.getByRole('heading', { name: /Note without Calendar/i })
+      ).toBeVisible();
+    });
+
+    test('should filter journals by parent (API level)', async ({
+      authenticatedPage,
+      testCleanup,
+    }) => {
+      const page = authenticatedPage;
+      const dataManager = new (
+        await import('./data-management')
+      ).TestDataManager(page);
+
+      // Clear existing data
+      await dataManager.clearAllJournals();
+
+      // Create a parent journal
+      const parentJournals = await dataManager.createJournals([
+        {
+          title: 'Parent Journal',
+          content: 'This is a parent journal',
+          event_date_range: {
+            start: '2026-02-10T09:00:00Z',
+            end: '2026-02-10T17:00:00Z',
+          },
+        },
+      ]);
+
+      const parentId = parseInt(parentJournals[0].id, 10);
+
+      // Create child journals
+      await dataManager.createJournals([
+        {
+          title: 'Child Journal 1',
+          content: 'First child',
+          event_date_range: {
+            start: '2026-02-11T09:00:00Z',
+            end: '2026-02-11T17:00:00Z',
+          },
+          parent_id: parentId,
+        },
+        {
+          title: 'Child Journal 2',
+          content: 'Second child',
+          event_date_range: {
+            start: '2026-02-12T09:00:00Z',
+            end: '2026-02-12T17:00:00Z',
+          },
+          parent_id: parentId,
+        },
+      ]);
+
+      // Create another root journal (no parent)
+      await dataManager.createJournals([
+        {
+          title: 'Another Root Journal',
+          content: 'This is another root journal',
+          event_date_range: {
+            start: '2026-02-13T09:00:00Z',
+            end: '2026-02-13T17:00:00Z',
+          },
+        },
+      ]);
+
+      testCleanup(async () => {
+        await dataManager.cleanup();
+      });
+
+      // Test 1: Filter by parent_id to get only children of the parent journal
+      const childrenResponse = await page.request.get(
+        `/api/journals?parent_id=${parentId}`
+      );
+      expect(childrenResponse.ok()).toBeTruthy();
+
+      const childrenData = await childrenResponse.json();
+      expect(childrenData.data).toHaveLength(2);
+
+      const childTitles = childrenData.data.map(
+        (j: { attributes: { title: string } }) => j.attributes.title
+      );
+      // Titles have random suffixes, so we need to check if they start with the expected text
+      expect(
+        childTitles.some((t: string) => t.startsWith('Child Journal 1'))
+      ).toBe(true);
+      expect(
+        childTitles.some((t: string) => t.startsWith('Child Journal 2'))
+      ).toBe(true);
+      expect(
+        childTitles.some((t: string) => t.startsWith('Parent Journal'))
+      ).toBe(false);
+      expect(
+        childTitles.some((t: string) => t.startsWith('Another Root Journal'))
+      ).toBe(false);
+
+      // Test 2: Get all journals (no parent filter) - should return all 4 journals
+      const allJournalsResponse = await page.request.get('/api/journals');
+      expect(allJournalsResponse.ok()).toBeTruthy();
+
+      const allJournalsData = await allJournalsResponse.json();
+      expect(allJournalsData.data.length).toBeGreaterThanOrEqual(4);
+
+      const allTitles = allJournalsData.data.map(
+        (j: { attributes: { title: string } }) => j.attributes.title
+      );
+      // Use partial matching since journals have unique suffixes
+      expect(
+        allTitles.some((t: string) => t.startsWith('Parent Journal'))
+      ).toBe(true);
+      expect(
+        allTitles.some((t: string) => t.startsWith('Child Journal 1'))
+      ).toBe(true);
+      expect(
+        allTitles.some((t: string) => t.startsWith('Child Journal 2'))
+      ).toBe(true);
+      expect(
+        allTitles.some((t: string) => t.startsWith('Another Root Journal'))
+      ).toBe(true);
     });
   });
 

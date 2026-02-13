@@ -86,8 +86,8 @@ describe('JournalListItem', () => {
       attributes: {
         ...baseJournal.attributes,
         tags: [
-          { id: 1, name: 'Personal', color: '#FF0000' },
-          { id: 2, name: 'Work', color: '#00FF00' },
+          { id: '1', name: 'Personal', color: '#FF0000' },
+          { id: '2', name: 'Work', color: '#00FF00' },
         ],
       },
     };

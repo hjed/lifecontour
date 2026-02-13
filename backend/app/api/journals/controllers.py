@@ -281,6 +281,8 @@ async def create_journal_tag(
     """
     from uuid import UUID
 
+    from sqlalchemy.exc import IntegrityError
+
     from app.core.journal.models.journal_tag import JournalTag
 
     base_url = get_request_base_url(request)
@@ -301,7 +303,17 @@ async def create_journal_tag(
     )
 
     # Save tag
-    created_tag = await tag_repo.save(tag)
+    try:
+        created_tag = await tag_repo.save(tag)
+    except IntegrityError as e:
+        # Check if it's a duplicate name error
+        if "uq_journal_tags_name" in str(e) or "duplicate key" in str(e).lower():
+            raise JournalValidationError(
+                "name",
+                f"A journal tag with the name '{tag.name}' already exists. Tag names must be unique.",
+            ) from e
+        # Re-raise other integrity errors
+        raise
 
     # Convert to resource
     tag_resource = JournalTagResource(
@@ -320,6 +332,46 @@ async def create_journal_tag(
     )
 
     return JournalTagResponse(data=tag_resource)
+
+
+@router.delete("/tags/{tag_id}", status_code=status.HTTP_204_NO_CONTENT)
+@inject
+async def delete_journal_tag(
+    tag_id: str,
+    tag_repo: FromDishka[JournalTagRepository],
+    user: FromDishka[SessionUser],  # Require authentication
+) -> None:
+    """
+    Delete a journal tag.
+
+    This is a minimal implementation to support E2E testing cleanup.
+    Note: Journal tags are global (not user-scoped), so no ownership verification is needed.
+    """
+    from uuid import UUID
+
+    from fastapi import HTTPException
+
+    # Convert string ID to UUID
+    try:
+        tag_uuid = UUID(tag_id)
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid tag ID format",
+        ) from e
+
+    # Get the tag to verify it exists
+    tag = await tag_repo.find_by_id(tag_uuid)
+    if not tag:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Tag not found",
+        )
+
+    # Delete the tag
+    await tag_repo.delete(tag_uuid)
+
+    return None
 
 
 @router.get("")
@@ -651,14 +703,29 @@ async def _process_journal_type_data(
         calendar_info_repo: Repository for calendar info
         photo_album_data_repo: Repository for photo album data
     """
+    import structlog
+
+    logger = structlog.get_logger()
+    logger.debug(
+        "Processing journal type data",
+        journal_id=journal_id,
+        type_data_keys=list(type_data.keys()),
+        type_data=type_data,
+    )
+
     # Process EVENT type data
-    if "EVENT" in type_data:
+    if "event" in type_data:
         from datetime import time as dt_time
         from uuid import UUID
 
         from app.core.journal.models.calendar_info import CalendarInfo
 
-        event_data = type_data["EVENT"]
+        event_data = type_data["event"]
+        logger.debug(
+            "Processing EVENT type data",
+            journal_id=journal_id,
+            event_data=event_data,
+        )
 
         # Convert string times to time objects if provided
         start_time = None
@@ -684,13 +751,23 @@ async def _process_journal_type_data(
             location=event_data.get("location"),
             sync_invitees=event_data.get("sync_invitees", False),
         )
+        logger.debug(
+            "Saving calendar info",
+            journal_id=journal_id,
+            calendar_id=str(calendar_info.calendar_id),
+        )
         await calendar_info_repo.save(calendar_info)
+        logger.debug(
+            "Calendar info saved successfully",
+            journal_id=journal_id,
+            calendar_id=str(calendar_info.calendar_id),
+        )
 
     # Process PHOTO_ALBUM type data
-    if "PHOTO_ALBUM" in type_data:
+    if "photo_album" in type_data:
         from app.core.journal.models.photo_album_data import PhotoAlbumData
 
-        photo_data = type_data["PHOTO_ALBUM"]
+        photo_data = type_data["photo_album"]
         photo_album_data = PhotoAlbumData(
             journal_id=journal_id,
             immich_album_id=photo_data["immich_album_id"],

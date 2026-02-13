@@ -130,17 +130,17 @@ export function JournalDetailView({
     });
   };
 
-  const handleTagAdd = async (tagId: number) => {
+  const handleTagAdd = async (tagId: string) => {
     await addTag.mutateAsync({
       journalId: journal.id,
-      tagId: tagId.toString(),
+      tagId: tagId,
     });
   };
 
-  const handleTagRemove = async (tagId: number) => {
+  const handleTagRemove = async (tagId: string) => {
     await removeTag.mutateAsync({
       journalId: journal.id,
-      tagId: tagId.toString(),
+      tagId: tagId,
     });
   };
 

@@ -47,6 +47,11 @@ export const journalTagKeys = {
   lists: () => [...journalTagKeys.all, 'list'] as const,
 };
 
+export const calendarKeys = {
+  all: ['calendars'] as const,
+  lists: () => [...calendarKeys.all, 'list'] as const,
+};
+
 // API Functions
 async function fetchJournals(
   filters: JournalFilters = {}
@@ -456,6 +461,50 @@ async function fetchJournalTags(): Promise<{ data: JournalTag[] }> {
     );
   }
 
+  const jsonApiResponse: {
+    data: Array<{
+      id: string;
+      type: string;
+      attributes: {
+        name: string;
+        color?: string | null;
+        parent_id?: string | null;
+      };
+    }>;
+  } = await response.json();
+
+  // Transform JSON:API format to flat JournalTag objects
+  const tags: JournalTag[] = jsonApiResponse.data.map(resource => ({
+    id: resource.id,
+    name: resource.attributes.name,
+    color: resource.attributes.color,
+  }));
+
+  return { data: tags };
+}
+
+// Fetch available calendars
+async function fetchCalendars(): Promise<{
+  data: Array<{
+    id: string;
+    attributes: {
+      name: string;
+      color: string;
+      description?: string;
+    };
+  }>;
+}> {
+  const response = await fetch('/api/calendars', {
+    credentials: 'include',
+  });
+
+  if (!response.ok) {
+    const errorData: JsonApiErrorResponse = await response.json();
+    throw new Error(
+      errorData.errors?.[0]?.detail || ERROR_MESSAGES.FETCH_FAILED
+    );
+  }
+
   return response.json();
 }
 
@@ -502,6 +551,14 @@ export function useJournalTags() {
   return useQuery({
     queryKey: journalTagKeys.lists(),
     queryFn: fetchJournalTags,
+    staleTime: 10 * 60 * 1000, // 10 minutes
+  });
+}
+
+export function useCalendars() {
+  return useQuery({
+    queryKey: calendarKeys.lists(),
+    queryFn: fetchCalendars,
     staleTime: 10 * 60 * 1000, // 10 minutes
   });
 }
