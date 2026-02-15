@@ -244,8 +244,16 @@ describe('Journals API', () => {
     it('should fetch journal tags successfully', async () => {
       const mockResponse = {
         data: [
-          { id: '1', name: 'Tag 1', color: '#FF0000' },
-          { id: '2', name: 'Tag 2', color: '#00FF00' },
+          {
+            id: '1',
+            type: 'journal_tag',
+            attributes: { name: 'Tag 1', color: '#FF0000', parent_id: null },
+          },
+          {
+            id: '2',
+            type: 'journal_tag',
+            attributes: { name: 'Tag 2', color: '#00FF00', parent_id: null },
+          },
         ],
       };
 
@@ -263,6 +271,11 @@ describe('Journals API', () => {
       });
 
       expect(result.current.data?.data).toHaveLength(2);
+      expect(result.current.data?.data[0]).toEqual({
+        id: '1',
+        name: 'Tag 1',
+        color: '#FF0000',
+      });
     });
   });
 
