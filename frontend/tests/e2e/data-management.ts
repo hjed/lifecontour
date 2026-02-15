@@ -622,6 +622,14 @@ export class TestDataManager {
       }
     }
 
+    // Fail fast if not all tags were created
+    if (tags.length !== tagsData.length) {
+      throw new Error(
+        `Failed to create all journal tags: expected ${tagsData.length}, but only created ${tags.length}. ` +
+          `See log output above for details on individual failures.`
+      );
+    }
+
     return tags;
   }
 
@@ -636,39 +644,45 @@ export class TestDataManager {
       `🏷️ [Data Manager] Assigning ${tagIds.length} tags to journal ${journalId}`
     );
 
-    try {
-      for (const tagId of tagIds) {
-        const response = await this.page.request.post(
-          `/api/journals/${journalId}/relationships/tags`,
-          {
-            headers: {
-              'Content-Type': 'application/vnd.api+json',
-            },
-            data: JSON.stringify({
-              data: {
-                type: 'journal-tag',
-                attributes: {
-                  tag_id: tagId,
-                },
-              },
-            }),
-          }
-        );
+    const failedAssignments: { tagId: string; status: number }[] = [];
 
-        if (!response.ok()) {
-          console.warn(
-            `⚠️ [Data Manager] Failed to assign tag ${tagId} to journal ${journalId}: ${response.status()}`
-          );
-        } else {
-          console.log(
-            `✅ [Data Manager] Assigned tag ${tagId} to journal ${journalId}`
-          );
+    for (const tagId of tagIds) {
+      const response = await this.page.request.post(
+        `/api/journals/${journalId}/relationships/tags`,
+        {
+          headers: {
+            'Content-Type': 'application/vnd.api+json',
+          },
+          data: JSON.stringify({
+            data: {
+              type: 'journal-tag',
+              attributes: {
+                tag_id: tagId,
+              },
+            },
+          }),
         }
+      );
+
+      if (!response.ok()) {
+        const status = response.status();
+        console.warn(
+          `⚠️ [Data Manager] Failed to assign tag ${tagId} to journal ${journalId}: ${status}`
+        );
+        failedAssignments.push({ tagId, status });
+      } else {
+        console.log(
+          `✅ [Data Manager] Assigned tag ${tagId} to journal ${journalId}`
+        );
       }
-    } catch (error) {
-      console.error(
-        `❌ [Data Manager] Failed to assign tags to journal ${journalId}:`,
-        error
+    }
+
+    if (failedAssignments.length > 0) {
+      const details = failedAssignments
+        .map(({ tagId, status }) => `${tagId} (status ${status})`)
+        .join(', ');
+      throw new Error(
+        `Failed to assign ${failedAssignments.length} tag(s) to journal ${journalId}: ${details}`
       );
     }
   }

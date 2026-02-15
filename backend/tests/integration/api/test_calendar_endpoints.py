@@ -132,8 +132,7 @@ class TestCalendarEndpoints:
 
         # Verify calendars are ordered by name
         calendar_names = [cal["attributes"]["name"] for cal in data["data"]]
-        assert "Work Calendar" in calendar_names
-        assert "Personal Calendar" in calendar_names
+        assert calendar_names == sorted(calendar_names)
 
         # Verify JSON API structure
         for calendar in data["data"]:
@@ -151,7 +150,7 @@ class TestCalendarEndpoints:
         data = response.json()
         assert "data" in data
         assert isinstance(data["data"], list)
-        # May be empty or contain calendars from other tests
+        assert data["data"] == []
 
 
 @pytest.mark.integration

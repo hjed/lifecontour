@@ -274,7 +274,7 @@ test.describe('Journal List Page', () => {
         });
 
         // Wait for BOTH journals with "Meeting" in the title to be indexed ("Meeting Notes" and "Team Meeting")
-        if (response.ok && response.count === 2) {
+        if (response.ok && response.count >= 2) {
           const titles: string[] = response.titles ?? [];
           const hasMeetingNotes = titles.some(t =>
             t.toLowerCase().includes('meeting notes')

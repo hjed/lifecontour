@@ -39,11 +39,7 @@ async def list_calendars(
     Returns all calendars owned by the user, ordered by name.
     """
     from app.api.common.schemas import JsonApiLinks
-    from app.api.journals.schemas import (
-        CalendarAttributes,
-        CalendarListResponse,
-        CalendarResource,
-    )
+    from app.api.journals.schemas import CalendarAttributes, CalendarResource
 
     base_url = get_request_base_url(request)
 
