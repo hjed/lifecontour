@@ -294,7 +294,7 @@ test.describe('Journal List Page', () => {
       ).toBeVisible();
 
       // Now filter by EVENT type - should only show "Team Meeting"
-      const filtersSection = page.locator('[data-testid=\"journal-filters\"]');
+      const filtersSection = page.locator('[data-testid="journal-filters"]');
       const eventCheckbox = filtersSection.getByLabel('Event', { exact: true });
 
       const responsePromise = page.waitForResponse(
@@ -907,25 +907,6 @@ test.describe('Journal List Page', () => {
       // Navigate to journals page
       await page.goto('/journals');
       await page.waitForLoadState('networkidle');
-
-      // Debug: Check what journals were created
-      const journalsResponse = await page.request.get(
-        '/api/journals?limit=100'
-      );
-      const journalsData = await journalsResponse.json();
-      console.log(
-        '📋 Created journals:',
-        JSON.stringify(
-          journalsData.data.map((j: any) => ({
-            id: j.id,
-            title: j.attributes.title,
-            types: j.attributes.types,
-            calendar_id: j.attributes.type_data?.event?.calendar_id,
-          })),
-          null,
-          2
-        )
-      );
 
       // Verify all journals are initially visible
       await expect(

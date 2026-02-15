@@ -339,17 +339,38 @@ async def create_journal_tag(
 async def delete_journal_tag(
     tag_id: str,
     tag_repo: FromDishka[JournalTagRepository],
+    connection: FromDishka[AsyncConnection],
     user: FromDishka[SessionUser],  # Require authentication
 ) -> None:
     """
     Delete a journal tag.
 
     This is a minimal implementation to support E2E testing cleanup.
-    Note: Journal tags are global (not user-scoped), so no ownership verification is needed.
+
+    IMPORTANT SECURITY NOTES:
+    - Journal tags are global (not user-scoped) - any authenticated user can delete any tag
+    - This endpoint checks if the tag is in use and returns 409 Conflict if it is
+    - In production, this endpoint should be restricted to admin users only
+    - Future improvement: Add role-based access control (admin-only deletion)
+
+    Args:
+        tag_id: UUID of the tag to delete
+        tag_repo: Tag repository
+        connection: Database connection (to check if tag is in use)
+        user: Authenticated user
+
+    Returns:
+        None (204 No Content)
+
+    Raises:
+        400: Invalid tag ID format
+        404: Tag not found
+        409: Tag is in use by one or more journals
     """
     from uuid import UUID
 
     from fastapi import HTTPException
+    from sqlalchemy import text
 
     # Convert string ID to UUID
     try:
@@ -366,6 +387,26 @@ async def delete_journal_tag(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Tag not found",
+        )
+
+    # Check if tag is in use by any journals
+    # This prevents accidental deletion of tags that are actively being used
+    check_query = text(
+        """
+        SELECT COUNT(*) as count
+        FROM journal_tag_assignments
+        WHERE tag_id = :tag_id
+        """
+    )
+    result = await connection.execute(check_query, {"tag_id": tag_uuid})
+    row = result.fetchone()
+    usage_count: int = row[0] if row else 0
+
+    if usage_count > 0:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Cannot delete tag '{tag.name}' because it is assigned to {usage_count} journal(s). "
+            "Remove the tag from all journals before deleting it.",
         )
 
     # Delete the tag
@@ -703,16 +744,6 @@ async def _process_journal_type_data(
         calendar_info_repo: Repository for calendar info
         photo_album_data_repo: Repository for photo album data
     """
-    import structlog
-
-    logger = structlog.get_logger()
-    logger.debug(
-        "Processing journal type data",
-        journal_id=journal_id,
-        type_data_keys=list(type_data.keys()),
-        type_data=type_data,
-    )
-
     # Process EVENT type data
     if "event" in type_data:
         from datetime import time as dt_time
@@ -721,11 +752,6 @@ async def _process_journal_type_data(
         from app.core.journal.models.calendar_info import CalendarInfo
 
         event_data = type_data["event"]
-        logger.debug(
-            "Processing EVENT type data",
-            journal_id=journal_id,
-            event_data=event_data,
-        )
 
         # Convert string times to time objects if provided
         start_time = None
@@ -751,17 +777,7 @@ async def _process_journal_type_data(
             location=event_data.get("location"),
             sync_invitees=event_data.get("sync_invitees", False),
         )
-        logger.debug(
-            "Saving calendar info",
-            journal_id=journal_id,
-            calendar_id=str(calendar_info.calendar_id),
-        )
         await calendar_info_repo.save(calendar_info)
-        logger.debug(
-            "Calendar info saved successfully",
-            journal_id=journal_id,
-            calendar_id=str(calendar_info.calendar_id),
-        )
 
     # Process PHOTO_ALBUM type data
     if "photo_album" in type_data:

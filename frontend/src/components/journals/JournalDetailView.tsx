@@ -19,8 +19,14 @@ import type {
   JournalCalendar,
   JournalContactRelationship,
   EventDateRange,
+  CalendarInfoData,
+  MoodData,
+  PhotoAlbumData,
+  PlanData,
+  TravelData,
+  JournalTypeData,
 } from '@/types/journals';
-import { JournalContactRelationshipType } from '@/types/journals';
+import { JournalContactRelationshipType, JournalType } from '@/types/journals';
 import { JournalBreadcrumb } from './JournalBreadcrumb';
 import { JournalTypeBadges } from './JournalTypeBadges';
 import { JournalCalendarBadge } from './JournalCalendarBadge';
@@ -43,15 +49,6 @@ import {
 } from '@/lib/api/journals';
 import { useContacts } from '@/lib/api/contacts';
 import { useRouter } from 'next/navigation';
-import {
-  JournalType,
-  type CalendarInfoData,
-  type MoodData,
-  type PhotoAlbumData,
-  type PlanData,
-  type TravelData,
-  type JournalTypeData,
-} from '@/types/journals';
 
 interface JournalDetailViewProps {
   readonly journal: Journal;

@@ -45,7 +45,7 @@ export interface JournalCreateRequest {
   types?: string[];
   type_data?: Record<string, unknown>;
   contacts?: Array<{ contact_id: string; relationship_type: string }>;
-  tags?: number[];
+  tags?: string[];
   calendar_id?: string;
   parent_id?: number;
 }
