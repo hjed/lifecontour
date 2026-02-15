@@ -140,7 +140,7 @@ describe('JournalTagBadge', () => {
       const removeButton = screen.getByLabelText('Remove tag Work');
       await user.click(removeButton);
 
-      expect(mockOnTagRemove).toHaveBeenCalledWith(1);
+      expect(mockOnTagRemove).toHaveBeenCalledWith('1');
     });
   });
 

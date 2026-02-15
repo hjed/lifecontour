@@ -54,6 +54,10 @@ jest.mock('@/lib/api/journals', () => ({
     data: { data: [] },
     isLoading: false,
   })),
+  useCalendars: jest.fn(() => ({
+    data: { data: [] },
+    isLoading: false,
+  })),
 }));
 
 // Mock AuthGuard

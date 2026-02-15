@@ -740,18 +740,21 @@ async def _process_journal_type_data(
 
     Args:
         journal_id: The ID of the journal
-        type_data: Dictionary of type-specific data
+        type_data: Dictionary of type-specific data (keys are case-insensitive)
         calendar_info_repo: Repository for calendar info
         photo_album_data_repo: Repository for photo album data
     """
+    # Normalize type_data keys to lowercase for case-insensitive matching
+    normalized_type_data = {k.lower(): v for k, v in type_data.items()}
+
     # Process EVENT type data
-    if "event" in type_data:
+    if "event" in normalized_type_data:
         from datetime import time as dt_time
         from uuid import UUID
 
         from app.core.journal.models.calendar_info import CalendarInfo
 
-        event_data = type_data["event"]
+        event_data = normalized_type_data["event"]
 
         # Convert string times to time objects if provided
         start_time = None
@@ -780,10 +783,10 @@ async def _process_journal_type_data(
         await calendar_info_repo.save(calendar_info)
 
     # Process PHOTO_ALBUM type data
-    if "photo_album" in type_data:
+    if "photo_album" in normalized_type_data:
         from app.core.journal.models.photo_album_data import PhotoAlbumData
 
-        photo_data = type_data["photo_album"]
+        photo_data = normalized_type_data["photo_album"]
         photo_album_data = PhotoAlbumData(
             journal_id=journal_id,
             immich_album_id=photo_data["immich_album_id"],

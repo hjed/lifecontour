@@ -23,6 +23,15 @@ jest.mock('@/lib/api/journals', () => ({
     },
     isLoading: false,
   })),
+  useCalendars: jest.fn(() => ({
+    data: {
+      data: [
+        { id: '1', attributes: { name: 'Personal', color: '#FF0000' } },
+        { id: '2', attributes: { name: 'Work', color: '#00FF00' } },
+      ],
+    },
+    isLoading: false,
+  })),
 }));
 
 // Mock ContactSearchCombobox
