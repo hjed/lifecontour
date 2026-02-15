@@ -261,17 +261,31 @@ test.describe('Journal List Page', () => {
             const res = await fetch(
               '/api/journals/search?q=Meeting&limit=20&page=1'
             );
-            if (!res.ok) return { ok: false, count: 0 };
+            if (!res.ok) return { ok: false, count: 0, titles: [] };
             const data = await res.json();
-            return { ok: true, count: data.data?.length || 0 };
+            const titles = (data.data ?? []).map(
+              (j: { attributes?: { title?: string } }) =>
+                j.attributes?.title ?? ''
+            );
+            return { ok: true, count: titles.length, titles };
           } catch {
-            return { ok: false, count: 0 };
+            return { ok: false, count: 0, titles: [] };
           }
         });
 
-        // Wait for BOTH journals with "Meeting" in the title to be indexed (Meeting Notes and Team Meeting)
-        if (response.ok && response.count >= 2) {
-          indexed = true;
+        // Wait for BOTH journals with "Meeting" in the title to be indexed ("Meeting Notes" and "Team Meeting")
+        if (response.ok && response.count === 2) {
+          const titles: string[] = response.titles ?? [];
+          const hasMeetingNotes = titles.some(t =>
+            t.toLowerCase().includes('meeting notes')
+          );
+          const hasTeamMeeting = titles.some(t =>
+            t.toLowerCase().includes('team meeting')
+          );
+
+          if (hasMeetingNotes && hasTeamMeeting) {
+            indexed = true;
+          }
         }
       }
 

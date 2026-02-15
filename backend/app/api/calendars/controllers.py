@@ -133,6 +133,7 @@ async def create_calendar(
 async def delete_calendar(
     calendar_id: str,
     calendar_repo: FromDishka[CalendarRepository],
+    connection: FromDishka[AsyncConnection],
     user: FromDishka[SessionUser],  # Require authentication
 ) -> None:
     """
@@ -140,10 +141,26 @@ async def delete_calendar(
 
     This is a minimal implementation to support E2E testing cleanup.
     Full calendar CRUD operations are planned for Iteration 7.
+
+    Args:
+        calendar_id: UUID of the calendar to delete
+        calendar_repo: Calendar repository
+        connection: Database connection (to check if calendar is in use)
+        user: Authenticated user
+
+    Returns:
+        None (204 No Content)
+
+    Raises:
+        400: Invalid calendar ID format
+        403: User doesn't own the calendar
+        404: Calendar not found
+        409: Calendar is in use by one or more journals
     """
     from uuid import UUID
 
     from fastapi import HTTPException
+    from sqlalchemy import text
 
     # Convert string ID to UUID
     try:
@@ -167,6 +184,26 @@ async def delete_calendar(
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="You don't have permission to delete this calendar",
+        )
+
+    # Check if calendar is in use by any journals
+    # This prevents accidental deletion of calendars that are actively being used
+    check_query = text(
+        """
+        SELECT COUNT(*) as count
+        FROM journal_calendar_info
+        WHERE calendar_id = :calendar_id
+        """
+    )
+    result = await connection.execute(check_query, {"calendar_id": calendar_uuid})
+    row = result.fetchone()
+    usage_count: int = row[0] if row else 0
+
+    if usage_count > 0:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Cannot delete calendar '{calendar.name}' because it is used by {usage_count} journal(s). "
+            "Remove the calendar from all journals before deleting it.",
         )
 
     # Delete the calendar

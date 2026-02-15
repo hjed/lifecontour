@@ -47,6 +47,8 @@ export interface JournalCreateRequest {
   contacts?: Array<{ contact_id: string; relationship_type: string }>;
   tags?: string[];
   calendar_id?: string;
+  // Note: Journal IDs are integers (SERIAL in database), not UUIDs
+  // This is different from calendars and tags which use UUIDs
   parent_id?: number;
 }
 
