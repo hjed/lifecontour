@@ -823,6 +823,58 @@ class TestJournalHierarchy:
         # Parent ID might be returned as int or string, so compare as int
         assert int(data["data"]["attributes"]["parent_id"]) == int(parent_id)
 
+    async def test_filter_journals_by_parent_id(self, integration_api_client):
+        """Test filtering journals by parent_id via API."""
+        # Create parent journal
+        parent_data = create_journal_request_data(
+            title="Parent Journal", content="Parent content"
+        )
+        parent_response = await integration_api_client.post(
+            "/api/journals", json=parent_data
+        )
+        parent_id = parent_response.json()["data"]["id"]
+
+        # Create child journals
+        child1_data = create_journal_request_data(
+            title="Child 1", content="First child", parent_id=parent_id
+        )
+        child1_response = await integration_api_client.post(
+            "/api/journals", json=child1_data
+        )
+        assert child1_response.status_code == 201
+
+        child2_data = create_journal_request_data(
+            title="Child 2", content="Second child", parent_id=parent_id
+        )
+        child2_response = await integration_api_client.post(
+            "/api/journals", json=child2_data
+        )
+        assert child2_response.status_code == 201
+
+        # Create another root journal
+        other_root_data = create_journal_request_data(
+            title="Other Root", content="Another root journal"
+        )
+        other_root_response = await integration_api_client.post(
+            "/api/journals", json=other_root_data
+        )
+        assert other_root_response.status_code == 201
+
+        # Filter by parent_id - should only return the 2 children
+        filter_response = await integration_api_client.get(
+            f"/api/journals?parent_id={parent_id}"
+        )
+        assert filter_response.status_code == 200
+
+        journals = filter_response.json()["data"]
+        assert len(journals) == 2, f"Expected 2 journals, got {len(journals)}"
+
+        titles = {j["attributes"]["title"] for j in journals}
+        assert "Child 1" in titles
+        assert "Child 2" in titles
+        assert "Parent Journal" not in titles
+        assert "Other Root" not in titles
+
     async def test_create_deeply_nested_journals(self, integration_api_client):
         """Test creating deeply nested journals (up to max depth)."""
         current_parent_id: int | None = None

@@ -131,6 +131,38 @@ class TestJournalTagEndpoints:
         # FastAPI returns 400 for validation errors in request body
         assert response.status_code == 400
 
+    async def test_create_duplicate_tag_name(self, integration_api_client):
+        """Test creating a journal tag with duplicate name returns 400 error."""
+        # Create first tag
+        tag_data = {
+            "data": {
+                "type": "journal-tags",
+                "attributes": {
+                    "name": "duplicate-test",
+                    "color": "#FF0000",
+                },
+            }
+        }
+
+        first_response = await integration_api_client.post(
+            "/api/journals/tags", json=tag_data
+        )
+        assert first_response.status_code == 201
+
+        # Try to create second tag with same name
+        second_response = await integration_api_client.post(
+            "/api/journals/tags", json=tag_data
+        )
+
+        # Should return 400 with clear error message
+        assert second_response.status_code == 400
+        error_json = second_response.json()
+        assert "errors" in error_json
+        assert len(error_json["errors"]) > 0
+        error = error_json["errors"][0]
+        assert "name" in error["detail"].lower()
+        assert "already exists" in error["detail"].lower()
+
     async def test_created_tag_appears_in_list(self, integration_api_client):
         """Test that created tags appear in GET /api/journals/tags."""
         # Create a tag

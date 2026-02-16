@@ -281,6 +281,8 @@ async def create_journal_tag(
     """
     from uuid import UUID
 
+    from sqlalchemy.exc import IntegrityError
+
     from app.core.journal.models.journal_tag import JournalTag
 
     base_url = get_request_base_url(request)
@@ -301,7 +303,17 @@ async def create_journal_tag(
     )
 
     # Save tag
-    created_tag = await tag_repo.save(tag)
+    try:
+        created_tag = await tag_repo.save(tag)
+    except IntegrityError as e:
+        # Check if it's a duplicate name error
+        if "uq_journal_tags_name" in str(e) or "duplicate key" in str(e).lower():
+            raise JournalValidationError(
+                "name",
+                f"A journal tag with the name '{tag.name}' already exists. Tag names must be unique.",
+            ) from e
+        # Re-raise other integrity errors
+        raise
 
     # Convert to resource
     tag_resource = JournalTagResource(
@@ -320,6 +332,87 @@ async def create_journal_tag(
     )
 
     return JournalTagResponse(data=tag_resource)
+
+
+@router.delete("/tags/{tag_id}", status_code=status.HTTP_204_NO_CONTENT)
+@inject
+async def delete_journal_tag(
+    tag_id: str,
+    tag_repo: FromDishka[JournalTagRepository],
+    connection: FromDishka[AsyncConnection],
+    user: FromDishka[SessionUser],  # Require authentication
+) -> None:
+    """
+    Delete a journal tag.
+
+    This is a minimal implementation to support E2E testing cleanup.
+
+    IMPORTANT SECURITY NOTES:
+    - Journal tags are global (not user-scoped) - any authenticated user can delete any tag
+    - This endpoint checks if the tag is in use and returns 409 Conflict if it is
+    - In production, this endpoint should be restricted to admin users only
+    - Future improvement: Add role-based access control (admin-only deletion)
+
+    Args:
+        tag_id: UUID of the tag to delete
+        tag_repo: Tag repository
+        connection: Database connection (to check if tag is in use)
+        user: Authenticated user
+
+    Returns:
+        None (204 No Content)
+
+    Raises:
+        400: Invalid tag ID format
+        404: Tag not found
+        409: Tag is in use by one or more journals
+    """
+    from uuid import UUID
+
+    from fastapi import HTTPException
+    from sqlalchemy import text
+
+    # Convert string ID to UUID
+    try:
+        tag_uuid = UUID(tag_id)
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid tag ID format",
+        ) from e
+
+    # Get the tag to verify it exists
+    tag = await tag_repo.find_by_id(tag_uuid)
+    if not tag:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Tag not found",
+        )
+
+    # Check if tag is in use by any journals
+    # This prevents accidental deletion of tags that are actively being used
+    check_query = text(
+        """
+        SELECT COUNT(*) as count
+        FROM journal_tag_assignments
+        WHERE tag_id = :tag_id
+        """
+    )
+    result = await connection.execute(check_query, {"tag_id": tag_uuid})
+    row = result.fetchone()
+    usage_count: int = row[0] if row else 0
+
+    if usage_count > 0:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Cannot delete tag '{tag.name}' because it is assigned to {usage_count} journal(s). "
+            "Remove the tag from all journals before deleting it.",
+        )
+
+    # Delete the tag
+    await tag_repo.delete(tag_uuid)
+
+    return None
 
 
 @router.get("")
@@ -647,18 +740,21 @@ async def _process_journal_type_data(
 
     Args:
         journal_id: The ID of the journal
-        type_data: Dictionary of type-specific data
+        type_data: Dictionary of type-specific data (keys are case-insensitive)
         calendar_info_repo: Repository for calendar info
         photo_album_data_repo: Repository for photo album data
     """
+    # Normalize type_data keys to lowercase for case-insensitive matching
+    normalized_type_data = {k.lower(): v for k, v in type_data.items()}
+
     # Process EVENT type data
-    if "EVENT" in type_data:
+    if "event" in normalized_type_data:
         from datetime import time as dt_time
         from uuid import UUID
 
         from app.core.journal.models.calendar_info import CalendarInfo
 
-        event_data = type_data["EVENT"]
+        event_data = normalized_type_data["event"]
 
         # Convert string times to time objects if provided
         start_time = None
@@ -687,10 +783,10 @@ async def _process_journal_type_data(
         await calendar_info_repo.save(calendar_info)
 
     # Process PHOTO_ALBUM type data
-    if "PHOTO_ALBUM" in type_data:
+    if "photo_album" in normalized_type_data:
         from app.core.journal.models.photo_album_data import PhotoAlbumData
 
-        photo_data = type_data["PHOTO_ALBUM"]
+        photo_data = normalized_type_data["photo_album"]
         photo_album_data = PhotoAlbumData(
             journal_id=journal_id,
             immich_album_id=photo_data["immich_album_id"],

@@ -123,7 +123,7 @@ export type JournalContact = JournalContactRelationship;
 
 // Journal Tag
 export interface JournalTag {
-  id: number;
+  id: string; // UUID from backend
   name: string;
   color?: string | null;
 }

@@ -52,8 +52,8 @@ export function createMockJournalWithMetadata(): JournalResource {
     title: 'Test Journal',
     content: 'Test content with some details',
     tags: [
-      { id: 1, name: 'Work', color: '#3b82f6' },
-      { id: 2, name: 'Important', color: '#ef4444' },
+      { id: '1', name: 'Work', color: '#3b82f6' },
+      { id: '2', name: 'Important', color: '#ef4444' },
     ],
     calendar: {
       id: 'cal1',
