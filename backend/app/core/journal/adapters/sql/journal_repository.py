@@ -70,6 +70,159 @@ class SqlJournalRepository(JournalRepository):
 
         return self._row_to_journal(row)
 
+    async def find_by_ids_for_user(
+        self, user_id: str, journal_ids: list[int]
+    ) -> list[Journal]:
+        """Find journals by IDs, scoped to a user."""
+        if not journal_ids:
+            return []
+
+        query = text(
+            """
+            SELECT id, user_id, title, content,
+                   event_date_range_start, event_date_range_end,
+                   parent_id, "order", created_at, updated_at
+            FROM journals
+            WHERE user_id = :user_id AND id = ANY(:journal_ids)
+            """
+        )
+        result = await self.conn.execute(
+            query, {"user_id": user_id, "journal_ids": journal_ids}
+        )
+        return [self._row_to_journal(row) for row in result.fetchall()]
+
+    async def get_by_ids_for_user(
+        self,
+        user_id: str,
+        journal_ids: list[int],
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[Journal]:
+        """Get journals by IDs for a user with ordering + pagination."""
+        if not journal_ids:
+            return []
+
+        query = text(
+            """
+            SELECT id, user_id, title, content,
+                   event_date_range_start, event_date_range_end,
+                   parent_id, "order", created_at, updated_at
+            FROM journals
+            WHERE user_id = :user_id AND id = ANY(:journal_ids)
+            ORDER BY event_date_range_start DESC, created_at DESC
+            LIMIT :limit OFFSET :offset
+            """
+        )
+        result = await self.conn.execute(
+            query,
+            {
+                "user_id": user_id,
+                "journal_ids": journal_ids,
+                "limit": limit,
+                "offset": offset,
+            },
+        )
+        return [self._row_to_journal(row) for row in result.fetchall()]
+
+    async def count_by_ids_for_user(self, user_id: str, journal_ids: list[int]) -> int:
+        """Count journals by IDs for a user."""
+        if not journal_ids:
+            return 0
+
+        query = text(
+            """
+            SELECT COUNT(*) as count
+            FROM journals
+            WHERE user_id = :user_id AND id = ANY(:journal_ids)
+            """
+        )
+        result = await self.conn.execute(
+            query, {"user_id": user_id, "journal_ids": journal_ids}
+        )
+        row = result.fetchone()
+        if row is None:
+            return 0
+        return int(row[0] or 0)
+
+    async def count_children_for_parents(
+        self, user_id: str, parent_ids: list[int]
+    ) -> dict[int, int]:
+        """Count direct children for each parent journal ID for a user."""
+        if not parent_ids:
+            return {}
+
+        query = text(
+            """
+            SELECT parent_id, COUNT(*) as count
+            FROM journals
+            WHERE user_id = :user_id AND parent_id = ANY(:parent_ids)
+            GROUP BY parent_id
+            """
+        )
+        result = await self.conn.execute(
+            query, {"user_id": user_id, "parent_ids": parent_ids}
+        )
+
+        counts: dict[int, int] = {}
+        for row in result.fetchall():
+            # row.parent_id / row.count may not be attribute-accessible depending on driver
+            parent_id = int(row[0])
+            count_value = int(row[1] or 0)
+            counts[parent_id] = count_value
+        return counts
+
+    async def find_descendants_for_user(
+        self,
+        user_id: str,
+        ancestor_ids: list[int],
+        max_depth: int = 5,
+    ) -> list[Journal]:
+        """Find all descendants of the given ancestor journals for a user.
+
+        Uses a recursive CTE and is tenant-safe via user_id filtering.
+        """
+        if not ancestor_ids:
+            return []
+
+        query = text(
+            """
+            WITH RECURSIVE descendants AS (
+                -- Base case: direct children of the provided ancestors
+                SELECT j.id, j.user_id, j.title, j.content,
+                       j.event_date_range_start, j.event_date_range_end,
+                       j.parent_id, j."order", j.created_at, j.updated_at,
+                       1 as depth
+                FROM journals j
+                WHERE j.user_id = :user_id AND j.parent_id = ANY(:ancestor_ids)
+
+                UNION ALL
+
+                -- Recursive case: children of already-found descendants
+                SELECT j.id, j.user_id, j.title, j.content,
+                       j.event_date_range_start, j.event_date_range_end,
+                       j.parent_id, j."order", j.created_at, j.updated_at,
+                       d.depth + 1 as depth
+                FROM journals j
+                JOIN descendants d ON j.parent_id = d.id
+                WHERE j.user_id = :user_id AND d.depth < :max_depth
+            )
+            SELECT id, user_id, title, content,
+                   event_date_range_start, event_date_range_end,
+                   parent_id, "order", created_at, updated_at
+            FROM descendants
+            """
+        )
+
+        result = await self.conn.execute(
+            query,
+            {
+                "user_id": user_id,
+                "ancestor_ids": ancestor_ids,
+                "max_depth": max_depth,
+            },
+        )
+        return [self._row_to_journal(row) for row in result.fetchall()]
+
     async def save(self, journal: Journal) -> Journal:
         """Save a journal (insert or update)."""
         if journal.id is None:

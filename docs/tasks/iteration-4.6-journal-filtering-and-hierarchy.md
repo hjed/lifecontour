@@ -35,16 +35,24 @@ This iteration focuses on:
   is effectively a no-op.
 
 ### 2.2 Contact page hierarchy
-- Contact detail page currently shows a **flat list** of journals sorted by date.
-- Spec requires parent journals with children grouped underneath per contact,
-  but Iteration 4 task doc explicitly notes this hierarchy as not yet implemented.
-- Backend already supports parent/child relationships; the gap is primarily in the UI
-  (and E2E coverage of that UI).
+- ✅ Implemented: contact detail page now renders a **parent/child tree** grouped by
+  relationship type (PARTICIPANT, ABOUT, etc.), rather than a flat list.
+  - **Important nuance**: the UI shows **all descendants** of a journal that is directly
+    related to the contact, **even if the descendant journals are not directly related**.
+    (Unrelated descendants inherit the nearest related ancestor's relationship type for
+    display/grouping.)
+- Backend support added to `GET /api/contacts/{contact_id}/journals` so it returns:
+  - Hierarchy enrichment fields used by the UI (`parent_id`, `parent` summary, `children_count`)
+  - Descendants of the directly-related journals (depth limited per spec)
+  - Pagination `meta.total_count` reflects **directly-related** journals only (descendants are additive)
+- E2E coverage added in `frontend/tests/e2e/contact-journals.spec.ts`.
 
 ### 2.3 E2E coverage gaps
 - Journals list & workflows:
   - Type filtering and basic search are covered.
   - No E2E coverage of date range, contact, tag, calendar or parent filters.
+- Contact detail page:
+  - ✅ Hierarchy (parent/child nesting + expand/collapse) now covered.
 - Journal detail view:
   - Inline editing of title/content/date range is covered.
   - Tags, contacts, calendar and some type-specific interactions are implemented
@@ -349,6 +357,8 @@ During E2E test development for Iteration B, several gaps were discovered in the
 
 ### 4.3 Iteration C – Contact Page Parent/Child Hierarchy UI
 
+**Status:** ✅ COMPLETE
+
 **Scope**
 - Update the contact detail journals section to respect journal hierarchy,
   while preserving existing relationship-type grouping (PARTICIPANT, ABOUT, etc.).
@@ -369,8 +379,25 @@ During E2E test development for Iteration B, several gaps were discovered in the
 - Existing contact-journals tests continue to pass (or are minimally adjusted
   to account for the new layout while preserving their intent).
 
+**Implementation Notes**
+- Hierarchy is applied **within each relationship-type group** (i.e. parent/child only
+  nest if both appear in the same group).
+- Sorting:
+  - Parents: most recent first by event date.
+  - Children: earliest first by event date start, then `order`.
+
+**Key Files**
+- Frontend UI: `frontend/src/components/contacts/ContactJournals.tsx`
+
+**Test Results**
+- ✅ Frontend unit tests: `pnpm test -- ContactJournals.test.tsx` (10/10 passing)
+- ✅ Frontend lint: `pnpm run lint`
+- ✅ Frontend type-check: `pnpm run type-check`
+
 
 ### 4.4 Iteration D – Contact Page Hierarchy E2E Coverage
+
+**Status:** ✅ COMPLETE
 
 **Prerequisites**
 - Iteration C complete and merged.
@@ -390,6 +417,27 @@ During E2E test development for Iteration B, several gaps were discovered in the
 - New hierarchy-focused E2E tests pass and are stable.
 - A regression in hierarchy rendering or expand/collapse behaviour would
   cause at least one E2E test to fail.
+
+**Key Files**
+- E2E spec: `frontend/tests/e2e/contact-journals.spec.ts`
+
+**Test Results**
+- ✅ Playwright: `pnpm run test:e2e contact-journals.spec.ts` (21 tests passing)
+
+**Backend Support (required for real data)**
+- API enrichment for hierarchy fields added to `GET /api/contacts/{contact_id}/journals`:
+  - Controller: `backend/app/api/contacts/controllers.py`
+  - Batch repository methods: `backend/app/core/journal/models/repositories.py`
+  - SQL implementation: `backend/app/core/journal/adapters/sql/journal_repository.py`
+  - Service wrappers: `backend/app/core/journal/services/journal_service.py`
+- Backend integration test:
+  - `backend/tests/integration/api/test_contact_endpoints.py::test_get_contact_journals_includes_hierarchy_fields`
+
+**Backend Verification**
+- ✅ Integration suite: `uv run pytest tests/integration/api/test_contact_endpoints.py -v` (11/11 passing)
+- ✅ Full backend suite: `uv run pytest tests` (all passing; 1 skipped MeiliSearch infra test)
+- ✅ Formatting/lint: `uv run ruff format --check` + `uv run ruff check`
+- ✅ Type-check: `uv run mypy app`
 
 
 ### 4.5 Iteration E – Journal Detail View E2E Enhancements

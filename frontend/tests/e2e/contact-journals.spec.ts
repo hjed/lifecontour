@@ -10,6 +10,19 @@ import { test, expect } from './fixtures';
 import { TestDataManager } from './data-management';
 import type { Page } from '@playwright/test';
 
+function attachClientErrorLogging(page: Page): void {
+  // Helpful for diagnosing generic Next.js “client-side exception” error pages.
+  page.on('pageerror', err => {
+    console.error('[pageerror]', err);
+  });
+
+  page.on('console', msg => {
+    if (msg.type() === 'error') {
+      console.error('[console:error]', msg.text());
+    }
+  });
+}
+
 /**
  * Helper function to navigate to contact page and wait for journals section
  */
@@ -22,6 +35,10 @@ async function navigateToContactAndWaitForJournals(
 }
 
 test.describe('Contact Journals Display', () => {
+  test.beforeEach(async ({ authenticatedPage }) => {
+    attachClientErrorLogging(authenticatedPage);
+  });
+
   test.describe('Viewing Journals on Contact Page', () => {
     test('should display journals section on contact detail page', async ({
       authenticatedPage,
@@ -160,6 +177,86 @@ test.describe('Contact Journals Display', () => {
       await expect(
         page.getByText(/no journals found for this contact/i)
       ).toBeVisible();
+    });
+
+    test('should display parent/child hierarchy with expand/collapse', async ({
+      authenticatedPage,
+    }) => {
+      const page = authenticatedPage;
+      const dataManager = new TestDataManager(page);
+
+      // Create a contact
+      const contact = await dataManager.createContact({
+        firstName: 'Hierarchy',
+        lastName: 'Test',
+        email: 'hierarchy@example.com',
+      });
+
+      // Create parent journal related to the contact
+      const parentJournal = await dataManager.createJournal({
+        title: 'Parent Journal',
+        content: 'Parent content',
+        event_date_range: {
+          start: '2024-01-15T10:00:00Z',
+          end: '2024-01-15T11:00:00Z',
+        },
+        contacts: [
+          { contact_id: contact.id, relationship_type: 'PARTICIPANT' },
+        ],
+      });
+
+      // Child is NOT directly related to the contact, but should still display
+      // because it's a descendant of a related journal.
+      const childJournal = await dataManager.createJournal({
+        title: 'Child Journal',
+        content: 'Child content',
+        event_date_range: {
+          start: '2024-01-16T10:00:00Z',
+          end: '2024-01-16T11:00:00Z',
+        },
+        parent_id: Number(parentJournal.id),
+      });
+
+      await navigateToContactAndWaitForJournals(page, contact.id);
+
+      // Parent should be visible
+      await expect(
+        page.getByRole('heading', { name: parentJournal.title })
+      ).toBeVisible();
+
+      // Child should render under parent's children container by default
+      const childContainer = page.getByTestId(
+        `journalChildrenContainer-${parentJournal.id}`
+      );
+      await expect(childContainer).toBeVisible();
+      await expect(
+        childContainer.getByRole('heading', { name: childJournal.title })
+      ).toBeVisible();
+
+      // Collapse children
+      const toggle = page.getByTestId(
+        `journalChildrenToggle-${parentJournal.id}`
+      );
+      await toggle.click();
+      await expect(
+        page.getByRole('heading', { name: childJournal.title })
+      ).toHaveCount(0);
+
+      // Expand children
+      await toggle.click();
+      await expect(
+        childContainer.getByRole('heading', { name: childJournal.title })
+      ).toBeVisible();
+
+      // Navigation to child detail should still work
+      await Promise.all([
+        page.waitForURL(`**/journals/${childJournal.id}`),
+        page.getByRole('heading', { name: childJournal.title }).click(),
+      ]);
+      await expect(
+        page.getByRole('heading', { name: childJournal.title })
+      ).toBeVisible();
+      await expect(page.getByText(childJournal.content)).toBeVisible();
     });
   });
 

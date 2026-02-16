@@ -53,6 +53,7 @@ from app.core.contacts.models.exceptions import (
 )
 from app.core.contacts.services import ContactService
 from app.core.contacts.services.contact_history_service import ContactHistoryService
+from app.core.journal.models.entities import Journal
 from app.core.journal.models.repositories import (
     CalendarInfoRepository,
     CalendarRepository,
@@ -805,23 +806,57 @@ async def get_contact_journals(
     # Get unique journal IDs
     journal_ids = list({r.journal_id for r in relationships})
 
-    # Apply pagination to journal IDs
     pagination = PaginationParams(page=page, limit=limit)
-    total_count = len(journal_ids)
-    paginated_journal_ids = journal_ids[
-        pagination.offset : pagination.offset + pagination.limit
-    ]
+    total_count = await journal_service.count_journals_by_ids_for_user(
+        user.id, journal_ids
+    )
+    journals = await journal_service.get_journals_by_ids_for_user(
+        user_id=user.id,
+        journal_ids=journal_ids,
+        offset=pagination.offset,
+        limit=pagination.limit,
+    )
 
-    # Fetch journals
-    journals = []
-    for journal_id in paginated_journal_ids:
-        journal = await journal_service.get_journal(journal_id)
-        if journal:
-            journals.append(journal)
+    # Include descendants of the journals on this page, even if those descendants
+    # have no direct relationship to the contact.
+    journal_ids_in_page = [j.id for j in journals if j.id is not None]
+    descendant_journals = await journal_service.find_descendants_for_user(
+        user_id=user.id,
+        ancestor_ids=journal_ids_in_page,
+        max_depth=5,
+    )
+
+    # Return the paginated (directly-related) journals plus their descendants.
+    seen_ids: set[int] = set()
+    all_journals: list[Journal] = []
+    for j in [*journals, *descendant_journals]:
+        if j.id is None:
+            continue
+        if j.id in seen_ids:
+            continue
+        seen_ids.add(j.id)
+        all_journals.append(j)
+
+    # Batch-load parents + children counts (tenant-safe) for hierarchy fields
+    returned_ids = {j.id for j in all_journals if j.id is not None}
+    parent_ids = list({j.parent_id for j in all_journals if j.parent_id is not None})
+    missing_parent_ids = [pid for pid in parent_ids if pid not in returned_ids]
+    parent_journals = await journal_service.find_journals_by_ids_for_user(
+        user_id=user.id, journal_ids=missing_parent_ids
+    )
+    parent_by_id = {
+        **{p.id: p for p in parent_journals if p.id is not None},
+        **{j.id: j for j in all_journals if j.id is not None},
+    }
+
+    returned_ids_list = [j.id for j in all_journals if j.id is not None]
+    children_count_by_parent_id = await journal_service.count_children_for_parents(
+        user_id=user.id, parent_ids=returned_ids_list
+    )
 
     # Enrich journals with type data, contacts, tags, etc.
     journal_resources = []
-    for journal in journals:
+    for journal in all_journals:
         types, type_data, contacts, tags, calendar = await _enrich_journal_data(
             journal,
             calendar_info_repo,
@@ -833,8 +868,20 @@ async def get_contact_journals(
             contact_relationship_repo,
             tag_repo,
         )
+        parent = parent_by_id.get(journal.parent_id) if journal.parent_id else None
+        children_count = (
+            children_count_by_parent_id.get(journal.id, 0) if journal.id else 0
+        )
         journal_resource = JournalConverter.to_resource(
-            journal, base_url, types, type_data, contacts, tags, calendar
+            journal,
+            base_url,
+            types,
+            type_data,
+            contacts,
+            tags,
+            calendar,
+            parent=parent,
+            children_count=children_count,
         )
         journal_resources.append(journal_resource)
 
