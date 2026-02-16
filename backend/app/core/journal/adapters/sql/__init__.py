@@ -2,6 +2,7 @@
 
 from .calendar_info_repository import SqlCalendarInfoRepository
 from .calendar_repository import SqlCalendarRepository
+from .fitness_data_repository import SqlFitnessDataRepository
 from .journal_contact_relationship_repository import (
     SqlJournalContactRelationshipRepository,
 )
@@ -17,6 +18,7 @@ __all__ = [
     "SqlJournalRepository",
     "SqlCalendarRepository",
     "SqlCalendarInfoRepository",
+    "SqlFitnessDataRepository",
     "SqlMoodDataRepository",
     "SqlPhotoAlbumDataRepository",
     "SqlPlanDataRepository",

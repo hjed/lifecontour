@@ -56,6 +56,14 @@ class MoodDataValidationError(JournalDomainError):
         self.field = field
 
 
+class FitnessDataValidationError(JournalDomainError):
+    """Exception raised when fitness data (FITNESS type) validation fails."""
+
+    def __init__(self, field: str, message: str):
+        super().__init__(f"{field}: {message}", 400)
+        self.field = field
+
+
 class JournalNotFoundError(JournalDomainError):
     """Exception raised when a journal is not found."""
 

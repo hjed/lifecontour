@@ -8,6 +8,7 @@ from core_shared.models.route import Route
 from .calendar import Calendar
 from .calendar_info import CalendarInfo
 from .entities import Journal
+from .fitness_data import FitnessData
 from .journal_contact_relationship import JournalContactRelationship
 from .journal_relationship_types import JournalContactRelationshipType
 from .journal_tag import JournalTag
@@ -479,6 +480,54 @@ class MoodDataRepository(ABC):
 
         Args:
             journal_id: The journal ID to delete mood data for
+        """
+        pass
+
+
+class FitnessDataRepository(ABC):
+    """
+    Repository interface for fitness data (FITNESS type) operations.
+
+    A journal has the FITNESS type if a FitnessData row exists for its journal_id.
+    """
+
+    @abstractmethod
+    async def find_by_journal_id(self, journal_id: int) -> FitnessData | None:
+        """
+        Find fitness data by journal ID.
+
+        Args:
+            journal_id: The journal ID to look up
+
+        Returns:
+            The FitnessData if found (journal has FITNESS type), None otherwise
+        """
+        pass
+
+    @abstractmethod
+    async def save(self, fitness_data: FitnessData) -> FitnessData:
+        """
+        Save fitness data (insert or update).
+
+        This effectively adds or updates the FITNESS type for a journal.
+
+        Args:
+            fitness_data: The fitness data to save
+
+        Returns:
+            The saved fitness data with updated timestamps
+        """
+        pass
+
+    @abstractmethod
+    async def delete(self, journal_id: int) -> None:
+        """
+        Delete fitness data by journal ID.
+
+        This effectively removes the FITNESS type from a journal.
+
+        Args:
+            journal_id: The journal ID to delete fitness data for
         """
         pass
 

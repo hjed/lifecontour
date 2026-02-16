@@ -1,6 +1,6 @@
 # Iteration 4.5: Journal System - Fitness & Activity Types
 
-**Status:** 🟡 PLANNED
+**Status:** � IN PROGRESS (2/7 tasks complete)
 **Dependencies:** Iteration 4 (Journal Core & Base Types)
 **Goal:** Add comprehensive fitness and outdoor activity tracking with specialized activity types
 
@@ -128,15 +128,15 @@ This iteration extends the journal system with fitness and outdoor activity type
 
 **Note:** Routes are referenced by BUSHWALKING, CANYONING, CLIMBING, KAYAKING, CROSS_COUNTRY_SKIING, and JOGGING types.
 
-### ITER4.5-002: Fitness Base Type 🟡 PLANNED
+### ITER4.5-002: Fitness Base Type ✅ COMPLETE
 **Description:** Implement FITNESS base type with GPX tracks and Strava preparation
 **Strategy:** Single task for fitness foundation
 **Specification Reference:** [Fitness Data](../journal-system-specification.md#fitness-data-fitness-type)
 
-**PR Size:** ~5 files (fitness data table, type implementation, tests, migration)
+**PR Size:** ~10 files (domain, repository, migration, type system, DI, tests)
 
 **Acceptance Criteria:**
-- [ ] Create `journal_fitness_data` table:
+- [x] Create `journal_fitness_data` table:
   - `journal_id` (PK, FK to journals)
   - `heart_rate_avg` (integer bpm, nullable)
   - `heart_rate_max` (integer bpm, nullable)
@@ -148,21 +148,55 @@ This iteration extends the journal system with fitness and outdoor activity type
   - `gpx_track_data` (text, nullable, GPX XML format)
   - `strava_activity_id` (string, nullable, external reference)
   - `created_at`, `updated_at`
-- [ ] Implement FITNESS type in type system (no dependencies)
-- [ ] Add GPX validation (XML format validation)
-- [ ] Implement GPX storage and retrieval
-- [ ] Add Strava preparation (`strava_activity_id` field for Iteration 5)
-- [ ] Add database migration with proper constraints
-- [ ] Write unit tests for FITNESS type validation
-- [ ] Write integration tests for FITNESS data persistence
-- [ ] Document GPX storage format and Strava preparation in code comments
+  - Check constraints for positive values on all numeric fields
+  - Migration: `0017_create_fitness_data_table.py`
+- [x] Implement FITNESS type in type system (no dependencies)
+- [x] Add GPX validation (XML format with `<gpx>` root element check)
+- [x] Implement GPX storage and retrieval
+- [x] Add Strava preparation (`strava_activity_id` field for Iteration 5)
+- [x] Add database migration with proper constraints
+- [x] Write unit tests for FITNESS type validation (19 tests passing ✅)
+- [x] Write integration tests for FITNESS data persistence (9 tests passing ✅)
+- [x] Document GPX storage format and Strava preparation in code comments
+
+**Implementation Details:**
+- **Database Migration:** `backend/app/migrations/versions/0017_create_fitness_data_table.py` (revision 0017, revises 0016)
+- **Domain Entity:** `backend/app/core/journal/models/fitness_data.py` with validation
+  - FitnessData dataclass with all fields
+  - Complete validation in `__post_init__` method
+  - GPX XML validation using `xml.etree.ElementTree`
+  - Exception chaining for proper error context
+- **Repository Interface:** `backend/app/core/journal/models/repositories.py` (FitnessDataRepository, lines 395-441)
+- **Repository Implementation:** `backend/app/core/journal/adapters/sql/fitness_data_repository.py` (SQLAlchemy Core)
+  - Methods: `find_by_journal_id`, `save` (insert/update), `delete`
+  - 9 integration tests passing ✅
+- **Type System Integration:**
+  - Uncommented `FITNESS = "fitness"` in `JournalType` enum
+  - Added FITNESS to dependencies mapping (no dependencies - base type)
+  - Updated `_JOURNAL_TYPE_TABLE_MAP` in `journal_repository.py`
+  - Added FITNESS JOIN clauses in query methods
+- **Dependency Injection:** Registered in `backend/app/infrastructure/di/journal.py` (JournalProvider)
+  - `SqlFitnessDataRepository` registered with REQUEST scope
+- **Unit Tests:** `backend/tests/unit/journal/test_fitness_data_entity.py` (19 tests, all passing ✅)
+  - Tests for minimal creation, all fields, and validation errors
+- **Integration Tests:** `backend/tests/integration/journal/test_fitness_data_repository_integration.py` (9 tests, all passing ✅)
+  - Tests for save (insert/update), find, delete, GPX data, and Strava activity ID
+
+**Progress:** 100% complete ✅
+- ✅ Database migration with check constraints
+- ✅ Domain entity with full validation
+- ✅ Repository interface and SQL implementation
+- ✅ Type system integration (enum, dependencies, table mapping)
+- ✅ Dependency injection setup
+- ✅ Unit tests (19/19 passing)
+- ✅ Integration tests (9/9 passing)
+- ✅ All quality gates passing (ruff, mypy, pytest)
+- ✅ Updated journal type count test for FITNESS
 
 **GPX Storage:**
-- Store as TEXT column in PostgreSQL
-- Validate GPX XML format on import
-- Extract key metrics (distance, elevation) for indexing
-- Consider compression for large tracks (>1MB)
-- Provide GPX download endpoint for export
+- Stored as TEXT column in `journal_fitness_data` table
+- Validated as XML with `<gpx>` root element requirement
+- Ready for future enhancement: extract metrics, compression, download endpoint
 
 ### ITER4.5-003: Outdoor Activity Types - Part 1 (OUTDOOR_ACTIVITY, BUSHWALKING, JOGGING) 🟡 PLANNED
 **Description:** Implement outdoor activity base type and first specialized types

@@ -24,6 +24,8 @@ _JOURNAL_TYPE_TABLE_MAP = {
     "travel": "journal_travel_data",
     "PHOTO_ALBUM": "journal_photo_album_data",
     "photo_album": "journal_photo_album_data",
+    "FITNESS": "journal_fitness_data",
+    "fitness": "journal_fitness_data",
 }
 
 
@@ -473,6 +475,8 @@ class SqlJournalRepository(JournalRepository):
                 joins.append(
                     "INNER JOIN journal_photo_album_data t ON j.id = t.journal_id"
                 )
+            elif type_table == "journal_fitness_data":
+                joins.append("INNER JOIN journal_fitness_data t ON j.id = t.journal_id")
             else:
                 msg = f"Unsupported table name: {type_table}"
                 raise ValueError(msg)
@@ -629,6 +633,8 @@ class SqlJournalRepository(JournalRepository):
                 joins.append(
                     "INNER JOIN journal_photo_album_data t ON j.id = t.journal_id"
                 )
+            elif type_table == "journal_fitness_data":
+                joins.append("INNER JOIN journal_fitness_data t ON j.id = t.journal_id")
             else:
                 msg = f"Unsupported table name: {type_table}"
                 raise ValueError(msg)
