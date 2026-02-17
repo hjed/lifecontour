@@ -139,6 +139,13 @@ test.describe('Contact Inline Editing', () => {
     await page.goto(`/contacts/${contact.id}`);
 
     const nicknameField = page.locator('[data-testid="nickname-field"]');
+
+    // Scroll the element into view and wait for it to be stable
+    await nicknameField.scrollIntoViewIfNeeded();
+    await page.waitForTimeout(100); // Brief wait for any animations to complete
+
+    // Wait for the element to be visible and clickable
+    await expect(nicknameField).toBeVisible();
     await nicknameField.click();
 
     const input = page.locator('[data-testid="nickname-field"] input');

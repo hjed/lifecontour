@@ -789,6 +789,39 @@ class TestJournalTypeManagement:
         # Should succeed or return validation error
         assert response.status_code in [200, 400, 422]
 
+    async def test_update_fitness_type_data(self, integration_api_client):
+        """Test updating FITNESS type data."""
+        # Create a FITNESS journal
+        create_data = create_journal_request_data(
+            title="Fitness Test", content="Test content", types=["FITNESS"]
+        )
+
+        create_response = await integration_api_client.post(
+            "/api/journals", json=create_data
+        )
+        journal_id = create_response.json()["data"]["id"]
+
+        # Update FITNESS type data
+        update_data = {
+            "data": {
+                "type": "journal-type-data",
+                "attributes": {
+                    "heart_rate_avg": 145,
+                    "heart_rate_max": 175,
+                    "distance": 5000,
+                    "duration": 1800,
+                    "calories": 450,
+                },
+            }
+        }
+
+        response = await integration_api_client.put(
+            f"/api/journals/{journal_id}/types/FITNESS/data", json=update_data
+        )
+
+        # Should succeed or return validation error
+        assert response.status_code in [200, 400, 422]
+
 
 @pytest.mark.integration
 class TestJournalHierarchy:

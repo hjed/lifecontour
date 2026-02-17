@@ -57,6 +57,7 @@ from app.core.journal.models.entities import Journal
 from app.core.journal.models.repositories import (
     CalendarInfoRepository,
     CalendarRepository,
+    FitnessDataRepository,
     JournalContactRelationshipRepository,
     JournalTagRepository,
     MoodDataRepository,
@@ -73,20 +74,26 @@ logger = structlog.get_logger()
 CONTACT_NOT_FOUND_ERROR = "Contact not found"
 FIELD_VALUE_REQUIRED_ERROR = "Field value is required"
 
+# Constants for pagination query descriptions
+PAGE_NUMBER_DESCRIPTION = "Page number"
+ITEMS_PER_PAGE_DESCRIPTION = "Items per page"
+
 router = APIRouter(
     prefix="/contacts",
     tags=["contacts"],
 )
 
 
-@router.get("", response_model=ContactListResponse)
+@router.get("")
 @inject
 async def list_contacts(
     request: Request,
     contact_service: FromDishka[ContactService],
-    user: FromDishka[SessionUser],  # Require authentication
-    page: int = Query(default=1, description="Page number", ge=1),
-    limit: int = Query(default=20, description="Items per page", ge=1, le=100),
+    _user: FromDishka[SessionUser],  # Require authentication
+    page: int = Query(default=1, description=PAGE_NUMBER_DESCRIPTION, ge=1),
+    limit: int = Query(
+        default=20, description=ITEMS_PER_PAGE_DESCRIPTION, ge=1, le=100
+    ),
     favourite: bool | None = Query(
         default=None, description="Filter by favourite status"
     ),
@@ -125,13 +132,13 @@ async def list_contacts(
     )
 
 
-@router.get("/{contact_id}", response_model=ContactResponse)
+@router.get("/{contact_id}")
 @inject
 async def get_contact(
     contact_id: int,
     request: Request,
     contact_service: FromDishka[ContactService],
-    user: FromDishka[SessionUser],  # Require authentication
+    _user: FromDishka[SessionUser],  # Require authentication
 ) -> ContactResponse:
     """
     Get a single contact by ID.
@@ -149,14 +156,14 @@ async def get_contact(
     return ContactResponse(data=contact_resource)
 
 
-@router.post("", response_model=ContactResponse, status_code=status.HTTP_201_CREATED)
+@router.post("", status_code=status.HTTP_201_CREATED)
 @inject
 async def create_contact(
     request: Request,
     contact_request: ContactCreateRequest,
     contact_service: FromDishka[ContactService],
     connection: FromDishka[AsyncConnection],
-    user: FromDishka[SessionUser],  # Require authentication
+    _user: FromDishka[SessionUser],  # Require authentication
 ) -> ContactResponse:
     """
     Create a new contact.
@@ -174,7 +181,7 @@ async def create_contact(
     return ContactResponse(data=contact_resource)
 
 
-@router.put("/{contact_id}", response_model=ContactResponse)
+@router.put("/{contact_id}")
 @inject
 async def update_contact(
     contact_id: int,
@@ -182,7 +189,7 @@ async def update_contact(
     contact_request: ContactUpdateRequest,
     contact_service: FromDishka[ContactService],
     connection: FromDishka[AsyncConnection],
-    user: FromDishka[SessionUser],  # Require authentication
+    _user: FromDishka[SessionUser],  # Require authentication
 ) -> ContactResponse:
     """
     Update an existing contact.
@@ -212,7 +219,7 @@ async def delete_contact(
     contact_id: int,
     contact_service: FromDishka[ContactService],
     engine: FromDishka[AsyncEngine],
-    user: FromDishka[SessionUser],  # Require authentication
+    _user: FromDishka[SessionUser],  # Require authentication
 ) -> None:
     """
     Delete a contact.
@@ -231,7 +238,7 @@ async def delete_contact(
 async def test_cleanup_contacts(
     contact_service: FromDishka[ContactService],
     engine: FromDishka[AsyncEngine],
-    user: FromDishka[SessionUser],  # Require authentication
+    _user: FromDishka[SessionUser],  # Require authentication
 ) -> None:
     """
     Test-only endpoint: Bulk delete all contacts for test cleanup.
@@ -254,7 +261,7 @@ async def assign_tag_to_contact(
     tag_request: TagAssignmentRequest,
     contact_service: FromDishka[ContactService],
     connection: FromDishka[AsyncConnection],
-    user: FromDishka[SessionUser],  # Require authentication
+    _user: FromDishka[SessionUser],  # Require authentication
 ) -> None:
     """
     Assign a tag to a contact.
@@ -277,7 +284,7 @@ async def remove_tag_from_contact(
     tag_id: int,
     contact_service: FromDishka[ContactService],
     connection: FromDishka[AsyncConnection],
-    user: FromDishka[SessionUser],  # Require authentication
+    _user: FromDishka[SessionUser],  # Require authentication
 ) -> None:
     """
     Remove a tag from a contact.
@@ -291,13 +298,13 @@ async def remove_tag_from_contact(
     await contact_service.remove_tag_from_contact(contact_id, tag_id, connection)
 
 
-@router.get("/{contact_id}/tags", response_model=TagListResponse)
+@router.get("/{contact_id}/tags")
 @inject
 async def get_contact_tags(
     contact_id: int,
     request: Request,
     contact_service: FromDishka[ContactService],
-    user: FromDishka[SessionUser],  # Require authentication
+    _user: FromDishka[SessionUser],  # Require authentication
 ) -> TagListResponse:
     """
     Get all tags assigned to a contact.
@@ -317,14 +324,14 @@ async def get_contact_tags(
     return TagListResponse(data=tag_resources)
 
 
-@router.post("/{contact_id}/favourite", response_model=ContactResponse)
+@router.post("/{contact_id}/favourite")
 @inject
 async def toggle_contact_favourite(
     contact_id: int,
     request: Request,
     contact_service: FromDishka[ContactService],
     connection: FromDishka[AsyncConnection],
-    user: FromDishka[SessionUser],  # Require authentication
+    _user: FromDishka[SessionUser],  # Require authentication
 ) -> ContactResponse:
     """
     Toggle the favourite status of a contact.
@@ -348,7 +355,7 @@ async def toggle_contact_favourite(
         raise
 
 
-@router.patch("/{contact_id}/fields/{field_name}", response_model=ContactFieldResponse)
+@router.patch("/{contact_id}/fields/{field_name}")
 @inject
 async def update_contact_field(
     contact_id: int,
@@ -356,7 +363,7 @@ async def update_contact_field(
     field_request: FieldUpdateRequest,
     contact_service: FromDishka[ContactService],
     connection: FromDishka[AsyncConnection],
-    user: FromDishka[SessionUser],  # Require authentication
+    _user: FromDishka[SessionUser],  # Require authentication
 ) -> ContactFieldResponse:
     """
     Update a single contact field.
@@ -399,7 +406,6 @@ async def update_contact_field(
 
 @router.patch(
     "/{contact_id}/methods/{method_id}/fields/{field_name}",
-    response_model=ContactFieldResponse,
 )
 @inject
 async def update_contact_method_field(
@@ -409,7 +415,7 @@ async def update_contact_method_field(
     field_request: MethodFieldUpdateRequest,
     contact_service: FromDishka[ContactService],
     connection: FromDishka[AsyncConnection],
-    user: FromDishka[SessionUser],  # Require authentication
+    _user: FromDishka[SessionUser],  # Require authentication
 ) -> ContactFieldResponse:
     """
     Update a single contact method field.
@@ -450,7 +456,6 @@ async def update_contact_method_field(
 
 @router.patch(
     "/{contact_id}/addresses/{address_id}/fields/{field_name}",
-    response_model=ContactFieldResponse,
 )
 @inject
 async def update_contact_address_field(
@@ -460,7 +465,7 @@ async def update_contact_address_field(
     field_request: AddressFieldUpdateRequest,
     contact_service: FromDishka[ContactService],
     connection: FromDishka[AsyncConnection],
-    user: FromDishka[SessionUser],  # Require authentication
+    _user: FromDishka[SessionUser],  # Require authentication
 ) -> ContactFieldResponse:
     """
     Update a single contact address field.
@@ -501,7 +506,6 @@ async def update_contact_address_field(
 
 @router.patch(
     "/{contact_id}/notes/{note_id}/fields/{field_name}",
-    response_model=ContactFieldResponse,
 )
 @inject
 async def update_contact_note_field(
@@ -511,7 +515,7 @@ async def update_contact_note_field(
     field_request: NoteFieldUpdateRequest,
     contact_service: FromDishka[ContactService],
     connection: FromDishka[AsyncConnection],
-    user: FromDishka[SessionUser],  # Require authentication
+    _user: FromDishka[SessionUser],  # Require authentication
 ) -> ContactFieldResponse:
     """
     Update a single contact note field.
@@ -550,16 +554,18 @@ async def update_contact_note_field(
         raise
 
 
-@router.get("/{contact_id}/history", response_model=ContactHistoryListResponse)
+@router.get("/{contact_id}/history")
 @inject
 async def get_contact_history(
     contact_id: int,
     request: Request,
     contact_service: FromDishka[ContactService],
     history_service: FromDishka[ContactHistoryService],
-    user: FromDishka[SessionUser],  # Require authentication
-    page: int = Query(default=1, description="Page number", ge=1),
-    limit: int = Query(default=20, description="Items per page", ge=1, le=100),
+    _user: FromDishka[SessionUser],  # Require authentication
+    page: int = Query(default=1, description=PAGE_NUMBER_DESCRIPTION, ge=1),
+    limit: int = Query(
+        default=20, description=ITEMS_PER_PAGE_DESCRIPTION, ge=1, le=100
+    ),
 ) -> ContactHistoryListResponse:
     """
     Get field change history for a contact.
@@ -612,7 +618,6 @@ async def get_contact_history(
 
 @router.post(
     "/{contact_id}/methods",
-    response_model=ContactResponse,
     status_code=status.HTTP_201_CREATED,
 )
 @inject
@@ -622,7 +627,7 @@ async def add_contact_method(
     method_request: ContactMethodCreateRequest,
     contact_service: FromDishka[ContactService],
     connection: FromDishka[AsyncConnection],
-    user: FromDishka[SessionUser],  # Require authentication
+    _user: FromDishka[SessionUser],  # Require authentication
 ) -> ContactResponse:
     """
     Add a new contact method to an existing contact.
@@ -667,7 +672,7 @@ async def delete_contact_method(
     method_id: int,
     contact_service: FromDishka[ContactService],
     connection: FromDishka[AsyncConnection],
-    user: FromDishka[SessionUser],  # Require authentication
+    _user: FromDishka[SessionUser],  # Require authentication
 ) -> None:
     """
     Delete a contact method.
@@ -682,7 +687,6 @@ async def delete_contact_method(
 
 @router.post(
     "/{contact_id}/addresses",
-    response_model=ContactResponse,
     status_code=status.HTTP_201_CREATED,
 )
 @inject
@@ -692,7 +696,7 @@ async def add_contact_address(
     address_request: ContactAddressCreateRequest,
     contact_service: FromDishka[ContactService],
     connection: FromDishka[AsyncConnection],
-    user: FromDishka[SessionUser],  # Require authentication
+    _user: FromDishka[SessionUser],  # Require authentication
 ) -> ContactResponse:
     """
     Add a new contact address to an existing contact.
@@ -737,7 +741,7 @@ async def delete_contact_address(
     address_id: int,
     contact_service: FromDishka[ContactService],
     connection: FromDishka[AsyncConnection],
-    user: FromDishka[SessionUser],  # Require authentication
+    _user: FromDishka[SessionUser],  # Require authentication
 ) -> None:
     """
     Delete a contact address.
@@ -761,10 +765,13 @@ async def get_contact_journals(
     plan_data_repo: FromDishka[PlanDataRepository],
     travel_data_repo: FromDishka[TravelDataRepository],
     photo_album_data_repo: FromDishka[PhotoAlbumDataRepository],
+    fitness_data_repo: FromDishka[FitnessDataRepository],
     tag_repo: FromDishka[JournalTagRepository],
-    user: FromDishka[SessionUser],  # Require authentication
-    page: int = Query(default=1, description="Page number", ge=1),
-    limit: int = Query(default=20, description="Items per page", ge=1, le=100),
+    _user: FromDishka[SessionUser],  # Require authentication
+    page: int = Query(default=1, description=PAGE_NUMBER_DESCRIPTION, ge=1),
+    limit: int = Query(
+        default=20, description=ITEMS_PER_PAGE_DESCRIPTION, ge=1, le=100
+    ),
     relationship_type: str | None = Query(
         default=None, description="Filter by relationship type"
     ),
@@ -865,6 +872,7 @@ async def get_contact_journals(
             plan_data_repo,
             travel_data_repo,
             photo_album_data_repo,
+            fitness_data_repo,
             contact_relationship_repo,
             tag_repo,
         )

@@ -126,15 +126,20 @@ test.describe('Login Page - Unauthenticated Users', () => {
       // Wait for providers to load
       await unauthenticatedPage.waitForLoadState('networkidle');
 
-      // Capture login requests to verify the flow is triggered
+      // Set up route handler BEFORE setting up the request promise
       let loginRequested = false;
-      const requestPromise =
-        unauthenticatedPage.waitForRequest('**/api/auth/login');
-
       await unauthenticatedPage.route('**/api/auth/login', route => {
         loginRequested = true;
         route.continue();
       });
+
+      // Now set up the request promise after the route is configured
+      const requestPromise = unauthenticatedPage.waitForRequest(
+        '**/api/auth/login',
+        {
+          timeout: 10000,
+        }
+      );
 
       // Get the first OAuth provider button
       const oauthButtons = unauthenticatedPage.locator(

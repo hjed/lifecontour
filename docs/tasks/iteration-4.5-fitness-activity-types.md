@@ -203,7 +203,7 @@ This iteration extends the journal system with fitness and outdoor activity type
 **Strategy:** Single task for three related types
 **Specification Reference:** [Outdoor Activity Data](../journal-system-specification.md#outdoor-activity-data-outdoor_activity-type), [Bushwalking Data](../journal-system-specification.md#bushwalking-data-bushwalking-type), [Jogging Data](../journal-system-specification.md#jogging-data-jogging-type)
 
-**PR Size:** ~8 files (3 type tables, dependency logic, tests, migrations)
+**PR Size:** ~12 files (3 type tables, dependency logic, API schemas/converters/controllers, tests, migrations)
 
 **Acceptance Criteria:**
 - [ ] Create `journal_outdoor_activity_data` table:
@@ -229,8 +229,15 @@ This iteration extends the journal system with fitness and outdoor activity type
 - [ ] Implement JOGGING type (requires FITNESS, not OUTDOOR_ACTIVITY)
 - [ ] Update type dependency resolution to handle these types
 - [ ] Add database migrations with proper foreign key constraints
+- [ ] **Add API schemas, converters, and controller integration:**
+  - [ ] Add `OutdoorActivityDataSchema`, `BushwalkingDataSchema`, `JoggingDataSchema` to `backend/app/api/journals/schemas.py`
+  - [ ] Add converter functions in `backend/app/api/journals/converters.py`
+  - [ ] Update `_enrich_journal_data()` and `_create_type_specific_data()` in `backend/app/api/journals/controllers.py`
+  - [ ] Add repository parameters to all journal endpoints
+  - [ ] Update `backend/app/api/contacts/controllers.py` if it uses `_enrich_journal_data()`
 - [ ] Write unit tests for type-specific validation and dependencies
 - [ ] Write integration tests for type data persistence
+- [ ] **Write API integration tests for type creation and updates**
 - [ ] Document Australian Track Grading System in code comments
 
 **Australian Track Grading System:**
@@ -245,7 +252,7 @@ This iteration extends the journal system with fitness and outdoor activity type
 **Strategy:** Single task for three complex types
 **Specification Reference:** [Abseiling Data](../journal-system-specification.md#abseiling-data-abseiling_trip-type), [Canyoning Data](../journal-system-specification.md#canyoning-data-canyoning-type), [Climbing Data](../journal-system-specification.md#climbing-data-climbing-type)
 
-**PR Size:** ~8 files (3 type tables, dependency logic, tests, migrations)
+**PR Size:** ~12 files (3 type tables, dependency logic, API schemas/converters/controllers, tests, migrations)
 
 **Acceptance Criteria:**
 - [ ] Create `journal_abseiling_data` table:
@@ -276,8 +283,15 @@ This iteration extends the journal system with fitness and outdoor activity type
 - [ ] Implement CLIMBING type (requires OUTDOOR_ACTIVITY, FITNESS)
 - [ ] Update type dependency resolution for complex dependencies (CANYONING)
 - [ ] Add database migrations with proper constraints
+- [ ] **Add API schemas, converters, and controller integration:**
+  - [ ] Add `AbseilingDataSchema`, `CanyoningDataSchema`, `ClimbingDataSchema` to `backend/app/api/journals/schemas.py`
+  - [ ] Add converter functions in `backend/app/api/journals/converters.py`
+  - [ ] Update `_enrich_journal_data()` and `_create_type_specific_data()` in `backend/app/api/journals/controllers.py`
+  - [ ] Add repository parameters to all journal endpoints
+  - [ ] Update `backend/app/api/contacts/controllers.py` if it uses `_enrich_journal_data()`
 - [ ] Write unit tests for type-specific validation and complex dependencies
 - [ ] Write integration tests for type data persistence
+- [ ] **Write API integration tests for type creation and updates**
 - [ ] Document French grading system for canyoning in code comments
 
 **French Canyoning Grading System:**
@@ -293,7 +307,7 @@ This iteration extends the journal system with fitness and outdoor activity type
 **Strategy:** Single task for two types
 **Specification Reference:** [Kayaking Data](../journal-system-specification.md#kayaking-data-kayaking-type), [Cross-Country Skiing Data](../journal-system-specification.md#cross-country-skiing-data-cross_country_skiing-type)
 
-**PR Size:** ~6 files (2 type tables, dependency logic, tests, migrations)
+**PR Size:** ~10 files (2 type tables, dependency logic, API schemas/converters/controllers, tests, migrations)
 
 **Acceptance Criteria:**
 - [ ] Create `journal_kayaking_data` table:
@@ -310,8 +324,15 @@ This iteration extends the journal system with fitness and outdoor activity type
 - [ ] Implement CROSS_COUNTRY_SKIING type (requires BUSHWALKING, OUTDOOR_ACTIVITY, FITNESS)
 - [ ] Update type dependency resolution for these types
 - [ ] Add database migrations with proper constraints
+- [ ] **Add API schemas, converters, and controller integration:**
+  - [ ] Add `KayakingDataSchema`, `CrossCountrySkiingDataSchema` to `backend/app/api/journals/schemas.py`
+  - [ ] Add converter functions in `backend/app/api/journals/converters.py`
+  - [ ] Update `_enrich_journal_data()` and `_create_type_specific_data()` in `backend/app/api/journals/controllers.py`
+  - [ ] Add repository parameters to all journal endpoints
+  - [ ] Update `backend/app/api/contacts/controllers.py` if it uses `_enrich_journal_data()`
 - [ ] Write unit tests for type-specific validation and dependencies
 - [ ] Write integration tests for type data persistence
+- [ ] **Write API integration tests for type creation and updates**
 - [ ] Document activity types in code comments
 
 ### ITER4.5-006: Activity UI Components 🟡 PLANNED

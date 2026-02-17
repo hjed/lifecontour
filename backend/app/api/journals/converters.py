@@ -14,6 +14,7 @@ from app.api.journals.schemas import (
     CalendarInfoDataSchema,
     CalendarSchema,
     EventDateRangeSchema,
+    FitnessDataSchema,
     JournalAttributes,
     JournalContactRelationshipSchema,
     JournalRelationships,
@@ -31,6 +32,7 @@ from app.api.journals.schemas import (
 from app.core.journal.models.calendar import Calendar
 from app.core.journal.models.calendar_info import CalendarInfo
 from app.core.journal.models.entities import Journal
+from app.core.journal.models.fitness_data import FitnessData
 from app.core.journal.models.journal_contact_relationship import (
     JournalContactRelationship,
 )
@@ -324,6 +326,21 @@ class TypeDataConverter:
         """Convert PhotoAlbumData domain entity to API schema."""
         return PhotoAlbumDataSchema(
             immich_album_id=photo_album_data.immich_album_id,
+        ).model_dump(exclude_none=True)
+
+    @staticmethod
+    def fitness_data_to_schema(fitness_data: FitnessData) -> dict[str, Any]:
+        """Convert FitnessData domain entity to API schema."""
+        return FitnessDataSchema(
+            heart_rate_avg=fitness_data.heart_rate_avg,
+            heart_rate_max=fitness_data.heart_rate_max,
+            distance=fitness_data.distance,
+            elevation_gain=fitness_data.elevation_gain,
+            elevation_loss=fitness_data.elevation_loss,
+            duration=fitness_data.duration,
+            calories=fitness_data.calories,
+            gpx_track_data=fitness_data.gpx_track_data,
+            strava_activity_id=fitness_data.strava_activity_id,
         ).model_dump(exclude_none=True)
 
 

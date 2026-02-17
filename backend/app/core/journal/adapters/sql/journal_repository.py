@@ -53,6 +53,167 @@ class SqlJournalRepository(JournalRepository):
             updated_at=row.updated_at,
         )
 
+    def _build_type_filter_joins(
+        self, journal_type: str | None
+    ) -> tuple[list[str], list[str]]:
+        """Build JOIN clauses and WHERE conditions for journal type filtering.
+
+        Args:
+            journal_type: The journal type to filter by (e.g., "MOOD_RATING", "NOTE")
+
+        Returns:
+            Tuple of (joins, where_clauses) to add to the query
+        """
+        joins: list[str] = []
+        where_clauses: list[str] = []
+
+        if not journal_type:
+            return joins, where_clauses
+
+        # Handle NOTE type - journals with no type-specific data
+        if journal_type.upper() in ("NOTE", "note"):
+            joins.extend(
+                [
+                    "LEFT JOIN journal_calendar_info jci ON j.id = jci.journal_id",
+                    "LEFT JOIN journal_mood_data jmd ON j.id = jmd.journal_id",
+                    "LEFT JOIN journal_plan_data jpd ON j.id = jpd.journal_id",
+                    "LEFT JOIN journal_travel_data jtd ON j.id = jtd.journal_id",
+                    "LEFT JOIN journal_photo_album_data jpad ON j.id = jpad.journal_id",
+                    "LEFT JOIN journal_fitness_data jfd ON j.id = jfd.journal_id",
+                ]
+            )
+            where_clauses.extend(
+                [
+                    "jci.journal_id IS NULL",
+                    "jmd.journal_id IS NULL",
+                    "jpd.journal_id IS NULL",
+                    "jtd.journal_id IS NULL",
+                    "jpad.journal_id IS NULL",
+                    "jfd.journal_id IS NULL",
+                ]
+            )
+            return joins, where_clauses
+
+        # Handle other types with explicit table mapping
+        if journal_type not in _JOURNAL_TYPE_TABLE_MAP:
+            return joins, where_clauses
+
+        type_table = _JOURNAL_TYPE_TABLE_MAP[journal_type]
+        join_clause = self._get_type_table_join(type_table)
+        if join_clause:
+            joins.append(join_clause)
+
+        return joins, where_clauses
+
+    def _get_type_table_join(self, type_table: str) -> str:
+        """Get the JOIN clause for a specific type table.
+
+        Args:
+            type_table: The table name to join
+
+        Returns:
+            The JOIN clause string
+
+        Raises:
+            ValueError: If the table name is not supported
+        """
+        table_joins = {
+            "journal_mood_data": "INNER JOIN journal_mood_data t ON j.id = t.journal_id",
+            "journal_calendar_info": "INNER JOIN journal_calendar_info t ON j.id = t.journal_id",
+            "journal_plan_data": "INNER JOIN journal_plan_data t ON j.id = t.journal_id",
+            "journal_travel_data": "INNER JOIN journal_travel_data t ON j.id = t.journal_id",
+            "journal_photo_album_data": "INNER JOIN journal_photo_album_data t ON j.id = t.journal_id",
+            "journal_fitness_data": "INNER JOIN journal_fitness_data t ON j.id = t.journal_id",
+        }
+
+        if type_table not in table_joins:
+            msg = f"Unsupported table name: {type_table}"
+            raise ValueError(msg)
+
+        return table_joins[type_table]
+
+    def _add_relationship_filters(
+        self,
+        joins: list[str],
+        where_clauses: list[str],
+        params: dict[str, Any],
+        contact_id: str | None,
+        tag_id: str | None,
+        calendar_id: str | None,
+        journal_type: str | None,
+    ) -> bool:
+        """Add JOIN and WHERE clauses for relationship filters.
+
+        Args:
+            joins: List to append JOIN clauses to
+            where_clauses: List to append WHERE conditions to
+            params: Dictionary to add query parameters to
+            contact_id: Optional contact ID filter
+            tag_id: Optional tag ID filter
+            calendar_id: Optional calendar ID filter
+            journal_type: Optional journal type (affects calendar join logic)
+
+        Returns:
+            True if DISTINCT is needed (due to many-to-many relationships)
+        """
+        needs_distinct = False
+
+        # Contact filter (many-to-many relationship)
+        if contact_id is not None:
+            joins.append(
+                "INNER JOIN journal_contact_relationships jcr ON j.id = jcr.journal_id"
+            )
+            where_clauses.append("jcr.contact_id = :contact_id")
+            params["contact_id"] = int(contact_id)
+            needs_distinct = True
+
+        # Tag filter (many-to-many relationship)
+        if tag_id is not None:
+            joins.append(
+                "INNER JOIN journal_tag_assignments jta ON j.id = jta.journal_id"
+            )
+            where_clauses.append("jta.tag_id = :tag_id")
+            params["tag_id"] = tag_id
+            needs_distinct = True
+
+        # Calendar filter
+        if calendar_id is not None:
+            if not (journal_type and journal_type.upper() == "EVENT"):
+                joins.append(
+                    "INNER JOIN journal_calendar_info jci_cal ON j.id = jci_cal.journal_id"
+                )
+                where_clauses.append("jci_cal.calendar_id = :calendar_id")
+            else:
+                where_clauses.append("t.calendar_id = :calendar_id")
+            params["calendar_id"] = calendar_id
+
+        return needs_distinct
+
+    def _add_date_filters(
+        self,
+        where_clauses: list[str],
+        params: dict[str, Any],
+        start_date: str | None,
+        end_date: str | None,
+    ) -> None:
+        """Add date range filter conditions.
+
+        Args:
+            where_clauses: List to append WHERE conditions to
+            params: Dictionary to add query parameters to
+            start_date: Optional start date (ISO format)
+            end_date: Optional end date (ISO format)
+        """
+        if start_date is not None:
+            where_clauses.append("j.event_date_range_end >= :start_date")
+            dt = datetime.fromisoformat(start_date)
+            params["start_date"] = dt if dt.tzinfo else dt.replace(tzinfo=UTC)
+
+        if end_date is not None:
+            where_clauses.append("j.event_date_range_start <= :end_date")
+            dt = datetime.fromisoformat(end_date)
+            params["end_date"] = dt if dt.tzinfo else dt.replace(tzinfo=UTC)
+
     async def find_by_id(self, journal_id: int) -> Journal | None:
         """Find a journal by ID."""
         query = text(
@@ -419,8 +580,7 @@ class SqlJournalRepository(JournalRepository):
         Returns:
             List of journals matching the filter criteria
         """
-        # Build the base query with all necessary joins
-        # Note: We'll conditionally add DISTINCT only if needed (when joins might produce duplicates)
+        # Initialize query building components
         base_query_select = """
             SELECT {distinct}j.id, j.user_id, j.title, j.content,
                    j.event_date_range_start, j.event_date_range_end,
@@ -428,119 +588,34 @@ class SqlJournalRepository(JournalRepository):
             FROM journals j
         """
 
-        # Track which joins we need and whether DISTINCT is needed
         joins = []
         where_clauses = ["j.user_id = :user_id"]
         params: dict[str, Any] = {"user_id": user_id, "limit": limit, "offset": offset}
-        needs_distinct = False  # Only use DISTINCT when joins might produce duplicates
 
-        # Handle NOTE type filtering specially - NOTE journals have no other type data
-        if journal_type and journal_type.upper() in ("NOTE", "note"):
-            # Filter for journals that have NO type-specific data tables
-            joins.extend(
-                [
-                    "LEFT JOIN journal_calendar_info jci ON j.id = jci.journal_id",
-                    "LEFT JOIN journal_mood_data jmd ON j.id = jmd.journal_id",
-                    "LEFT JOIN journal_plan_data jpd ON j.id = jpd.journal_id",
-                    "LEFT JOIN journal_travel_data jtd ON j.id = jtd.journal_id",
-                    "LEFT JOIN journal_photo_album_data jpad ON j.id = jpad.journal_id",
-                ]
-            )
-            where_clauses.extend(
-                [
-                    "jci.journal_id IS NULL",
-                    "jmd.journal_id IS NULL",
-                    "jpd.journal_id IS NULL",
-                    "jtd.journal_id IS NULL",
-                    "jpad.journal_id IS NULL",
-                ]
-            )
-        # Add JOIN if filtering by other types
-        elif journal_type and journal_type in _JOURNAL_TYPE_TABLE_MAP:
-            type_table = _JOURNAL_TYPE_TABLE_MAP[journal_type]
+        # Build type filter joins and conditions
+        type_joins, type_where = self._build_type_filter_joins(journal_type)
+        joins.extend(type_joins)
+        where_clauses.extend(type_where)
 
-            # Use explicit if-elif chain instead of f-string interpolation
-            # This prevents any possibility of SQL injection
-            if type_table == "journal_mood_data":
-                joins.append("INNER JOIN journal_mood_data t ON j.id = t.journal_id")
-            elif type_table == "journal_calendar_info":
-                joins.append(
-                    "INNER JOIN journal_calendar_info t ON j.id = t.journal_id"
-                )
-            elif type_table == "journal_plan_data":
-                joins.append("INNER JOIN journal_plan_data t ON j.id = t.journal_id")
-            elif type_table == "journal_travel_data":
-                joins.append("INNER JOIN journal_travel_data t ON j.id = t.journal_id")
-            elif type_table == "journal_photo_album_data":
-                joins.append(
-                    "INNER JOIN journal_photo_album_data t ON j.id = t.journal_id"
-                )
-            elif type_table == "journal_fitness_data":
-                joins.append("INNER JOIN journal_fitness_data t ON j.id = t.journal_id")
-            else:
-                msg = f"Unsupported table name: {type_table}"
-                raise ValueError(msg)
+        # Add relationship filters (contacts, tags, calendars)
+        needs_distinct = self._add_relationship_filters(
+            joins, where_clauses, params, contact_id, tag_id, calendar_id, journal_type
+        )
 
-        # Add contact filter
-        # Note: A journal can have multiple contacts, so this join might produce duplicates
-        if contact_id is not None:
-            joins.append(
-                "INNER JOIN journal_contact_relationships jcr ON j.id = jcr.journal_id"
-            )
-            where_clauses.append("jcr.contact_id = :contact_id")
-            params["contact_id"] = int(contact_id)
-            needs_distinct = True  # Multiple contacts per journal possible
-
-        # Add tag filter
-        # Note: A journal can have multiple tags, so this join might produce duplicates
-        if tag_id is not None:
-            joins.append(
-                "INNER JOIN journal_tag_assignments jta ON j.id = jta.journal_id"
-            )
-            where_clauses.append("jta.tag_id = :tag_id")
-            params["tag_id"] = tag_id
-            needs_distinct = True  # Multiple tags per journal possible
-
-        # Add calendar filter (via journal_calendar_info)
-        if calendar_id is not None:
-            # Only join if not already joined for EVENT type
-            if not (journal_type and journal_type.upper() == "EVENT"):
-                joins.append(
-                    "INNER JOIN journal_calendar_info jci_cal ON j.id = jci_cal.journal_id"
-                )
-                where_clauses.append("jci_cal.calendar_id = :calendar_id")
-            else:
-                where_clauses.append("t.calendar_id = :calendar_id")
-            params["calendar_id"] = calendar_id
-
-        # Add date range filters (overlap logic: journal overlaps with [start_date, end_date])
-        # A journal overlaps if: journal.start <= end_date AND journal.end >= start_date
-        if start_date is not None:
-            where_clauses.append("j.event_date_range_end >= :start_date")
-            # Convert ISO string to timezone-aware datetime for PostgreSQL
-            # Ensure timezone awareness to avoid environment-dependent comparisons
-            dt = datetime.fromisoformat(start_date)
-            params["start_date"] = dt if dt.tzinfo else dt.replace(tzinfo=UTC)
-
-        if end_date is not None:
-            where_clauses.append("j.event_date_range_start <= :end_date")
-            # Convert ISO string to timezone-aware datetime for PostgreSQL
-            # Ensure timezone awareness to avoid environment-dependent comparisons
-            dt = datetime.fromisoformat(end_date)
-            params["end_date"] = dt if dt.tzinfo else dt.replace(tzinfo=UTC)
+        # Add date range filters
+        self._add_date_filters(where_clauses, params, start_date, end_date)
 
         # Add parent filter
         if parent_id is not None:
             where_clauses.append("j.parent_id = :parent_id")
             params["parent_id"] = parent_id
 
-        # Add search filter (simple ILIKE for now, can be enhanced with full-text search later)
+        # Add search filter
         if search is not None:
             where_clauses.append("(j.title ILIKE :search OR j.content ILIKE :search)")
             params["search"] = f"%{search}%"
 
         # Assemble the complete query
-        # Apply DISTINCT only if needed (when joins might produce duplicates)
         distinct_keyword = "DISTINCT " if needs_distinct else ""
         base_query = base_query_select.format(distinct=distinct_keyword)
 
@@ -586,98 +661,28 @@ class SqlJournalRepository(JournalRepository):
         Returns:
             Count of journals matching the filter criteria
         """
-        # Build the count query with the same filter logic as get_all()
+        # Initialize query building components
         base_query = """
             SELECT COUNT(DISTINCT j.id)
             FROM journals j
         """
 
-        # Track which joins we need (same logic as get_all())
         joins = []
         where_clauses = ["j.user_id = :user_id"]
         params: dict[str, Any] = {"user_id": user_id}
 
-        # Handle NOTE type filtering (same as get_all())
-        if journal_type and journal_type.upper() in ("NOTE", "note"):
-            joins.extend(
-                [
-                    "LEFT JOIN journal_calendar_info jci ON j.id = jci.journal_id",
-                    "LEFT JOIN journal_mood_data jmd ON j.id = jmd.journal_id",
-                    "LEFT JOIN journal_plan_data jpd ON j.id = jpd.journal_id",
-                    "LEFT JOIN journal_travel_data jtd ON j.id = jtd.journal_id",
-                    "LEFT JOIN journal_photo_album_data jpad ON j.id = jpad.journal_id",
-                ]
-            )
-            where_clauses.extend(
-                [
-                    "jci.journal_id IS NULL",
-                    "jmd.journal_id IS NULL",
-                    "jpd.journal_id IS NULL",
-                    "jtd.journal_id IS NULL",
-                    "jpad.journal_id IS NULL",
-                ]
-            )
-        elif journal_type and journal_type in _JOURNAL_TYPE_TABLE_MAP:
-            type_table = _JOURNAL_TYPE_TABLE_MAP[journal_type]
-            if type_table == "journal_mood_data":
-                joins.append("INNER JOIN journal_mood_data t ON j.id = t.journal_id")
-            elif type_table == "journal_calendar_info":
-                joins.append(
-                    "INNER JOIN journal_calendar_info t ON j.id = t.journal_id"
-                )
-            elif type_table == "journal_plan_data":
-                joins.append("INNER JOIN journal_plan_data t ON j.id = t.journal_id")
-            elif type_table == "journal_travel_data":
-                joins.append("INNER JOIN journal_travel_data t ON j.id = t.journal_id")
-            elif type_table == "journal_photo_album_data":
-                joins.append(
-                    "INNER JOIN journal_photo_album_data t ON j.id = t.journal_id"
-                )
-            elif type_table == "journal_fitness_data":
-                joins.append("INNER JOIN journal_fitness_data t ON j.id = t.journal_id")
-            else:
-                msg = f"Unsupported table name: {type_table}"
-                raise ValueError(msg)
+        # Build type filter joins and conditions (reuse helper method)
+        type_joins, type_where = self._build_type_filter_joins(journal_type)
+        joins.extend(type_joins)
+        where_clauses.extend(type_where)
 
-        # Add contact filter
-        if contact_id is not None:
-            joins.append(
-                "INNER JOIN journal_contact_relationships jcr ON j.id = jcr.journal_id"
-            )
-            where_clauses.append("jcr.contact_id = :contact_id")
-            params["contact_id"] = int(contact_id)
+        # Add relationship filters (reuse helper method)
+        self._add_relationship_filters(
+            joins, where_clauses, params, contact_id, tag_id, calendar_id, journal_type
+        )
 
-        # Add tag filter
-        if tag_id is not None:
-            joins.append(
-                "INNER JOIN journal_tag_assignments jta ON j.id = jta.journal_id"
-            )
-            where_clauses.append("jta.tag_id = :tag_id")
-            params["tag_id"] = tag_id
-
-        # Add calendar filter
-        if calendar_id is not None:
-            if not (journal_type and journal_type.upper() == "EVENT"):
-                joins.append(
-                    "INNER JOIN journal_calendar_info jci_cal ON j.id = jci_cal.journal_id"
-                )
-                where_clauses.append("jci_cal.calendar_id = :calendar_id")
-            else:
-                where_clauses.append("t.calendar_id = :calendar_id")
-            params["calendar_id"] = calendar_id
-
-        # Add date range filters
-        if start_date is not None:
-            where_clauses.append("j.event_date_range_end >= :start_date")
-            # Convert ISO string to timezone-aware datetime for PostgreSQL
-            dt = datetime.fromisoformat(start_date)
-            params["start_date"] = dt if dt.tzinfo else dt.replace(tzinfo=UTC)
-
-        if end_date is not None:
-            where_clauses.append("j.event_date_range_start <= :end_date")
-            # Convert ISO string to timezone-aware datetime for PostgreSQL
-            dt = datetime.fromisoformat(end_date)
-            params["end_date"] = dt if dt.tzinfo else dt.replace(tzinfo=UTC)
+        # Add date range filters (reuse helper method)
+        self._add_date_filters(where_clauses, params, start_date, end_date)
 
         # Add parent filter
         if parent_id is not None:
