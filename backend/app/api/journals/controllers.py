@@ -1378,6 +1378,42 @@ async def _update_photo_album_type_data(
     await photo_album_data_repo.save(photo_album_data)
 
 
+async def _update_fitness_type_data(
+    journal_id: int,
+    journal_type: str,
+    attrs: dict[str, Any],
+    fitness_data_repo: FitnessDataRepository,
+) -> None:
+    """Update FITNESS type-specific data."""
+    fitness_data = await fitness_data_repo.find_by_journal_id(journal_id)
+    if not fitness_data:
+        raise JournalValidationError(
+            "journal_type", f"Journal does not have type {journal_type}"
+        )
+
+    # Update fields from request
+    if "heart_rate_avg" in attrs:
+        fitness_data.heart_rate_avg = attrs["heart_rate_avg"]
+    if "heart_rate_max" in attrs:
+        fitness_data.heart_rate_max = attrs["heart_rate_max"]
+    if "distance" in attrs:
+        fitness_data.distance = attrs["distance"]
+    if "elevation_gain" in attrs:
+        fitness_data.elevation_gain = attrs["elevation_gain"]
+    if "elevation_loss" in attrs:
+        fitness_data.elevation_loss = attrs["elevation_loss"]
+    if "duration" in attrs:
+        fitness_data.duration = attrs["duration"]
+    if "calories" in attrs:
+        fitness_data.calories = attrs["calories"]
+    if "gpx_track_data" in attrs:
+        fitness_data.gpx_track_data = attrs["gpx_track_data"]
+    if "strava_activity_id" in attrs:
+        fitness_data.strava_activity_id = attrs["strava_activity_id"]
+
+    await fitness_data_repo.save(fitness_data)
+
+
 @router.put("/{journal_id}/types/{journal_type}/data")
 @inject
 async def update_type_data(
@@ -1431,6 +1467,10 @@ async def update_type_data(
     elif jtype == JournalType.PHOTO_ALBUM:
         await _update_photo_album_type_data(
             journal_id, journal_type, attrs, photo_album_data_repo
+        )
+    elif jtype == JournalType.FITNESS:
+        await _update_fitness_type_data(
+            journal_id, journal_type, attrs, fitness_data_repo
         )
     elif jtype in (JournalType.PLAN, JournalType.TRAVEL):
         # PLAN and TRAVEL types have complex nested data structures

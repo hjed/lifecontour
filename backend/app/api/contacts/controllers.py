@@ -815,10 +815,10 @@ async def get_contact_journals(
 
     pagination = PaginationParams(page=page, limit=limit)
     total_count = await journal_service.count_journals_by_ids_for_user(
-        user.id, journal_ids
+        _user.id, journal_ids
     )
     journals = await journal_service.get_journals_by_ids_for_user(
-        user_id=user.id,
+        user_id=_user.id,
         journal_ids=journal_ids,
         offset=pagination.offset,
         limit=pagination.limit,
@@ -828,7 +828,7 @@ async def get_contact_journals(
     # have no direct relationship to the contact.
     journal_ids_in_page = [j.id for j in journals if j.id is not None]
     descendant_journals = await journal_service.find_descendants_for_user(
-        user_id=user.id,
+        user_id=_user.id,
         ancestor_ids=journal_ids_in_page,
         max_depth=5,
     )
@@ -849,7 +849,7 @@ async def get_contact_journals(
     parent_ids = list({j.parent_id for j in all_journals if j.parent_id is not None})
     missing_parent_ids = [pid for pid in parent_ids if pid not in returned_ids]
     parent_journals = await journal_service.find_journals_by_ids_for_user(
-        user_id=user.id, journal_ids=missing_parent_ids
+        user_id=_user.id, journal_ids=missing_parent_ids
     )
     parent_by_id = {
         **{p.id: p for p in parent_journals if p.id is not None},
@@ -858,7 +858,7 @@ async def get_contact_journals(
 
     returned_ids_list = [j.id for j in all_journals if j.id is not None]
     children_count_by_parent_id = await journal_service.count_children_for_parents(
-        user_id=user.id, parent_ids=returned_ids_list
+        user_id=_user.id, parent_ids=returned_ids_list
     )
 
     # Enrich journals with type data, contacts, tags, etc.

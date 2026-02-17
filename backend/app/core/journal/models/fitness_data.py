@@ -76,47 +76,53 @@ class FitnessData:
             )
 
     def _validate_heart_rate_avg(self) -> None:
-        """Validate heart_rate_avg is positive if provided."""
+        """Validate heart_rate_avg is non-negative if provided."""
         if self.heart_rate_avg is not None and self.heart_rate_avg < 0:
             raise FitnessDataValidationError(
-                "heart_rate_avg", "Heart rate average must be positive"
+                "heart_rate_avg", "Heart rate average must be non-negative"
             )
 
     def _validate_heart_rate_max(self) -> None:
-        """Validate heart_rate_max is positive if provided."""
+        """Validate heart_rate_max is non-negative if provided."""
         if self.heart_rate_max is not None and self.heart_rate_max < 0:
             raise FitnessDataValidationError(
-                "heart_rate_max", "Heart rate max must be positive"
+                "heart_rate_max", "Heart rate max must be non-negative"
             )
 
     def _validate_distance(self) -> None:
-        """Validate distance is positive if provided."""
+        """Validate distance is non-negative if provided."""
         if self.distance is not None and self.distance < 0:
-            raise FitnessDataValidationError("distance", "Distance must be positive")
+            raise FitnessDataValidationError(
+                "distance", "Distance must be non-negative"
+            )
 
     def _validate_elevation_gain(self) -> None:
-        """Validate elevation_gain is positive if provided."""
+        """Validate elevation_gain is non-negative if provided."""
         if self.elevation_gain is not None and self.elevation_gain < 0:
             raise FitnessDataValidationError(
-                "elevation_gain", "Elevation gain must be positive"
+                "elevation_gain", "Elevation gain must be non-negative"
             )
 
     def _validate_elevation_loss(self) -> None:
-        """Validate elevation_loss is positive if provided."""
+        """Validate elevation_loss is non-negative if provided."""
         if self.elevation_loss is not None and self.elevation_loss < 0:
             raise FitnessDataValidationError(
-                "elevation_loss", "Elevation loss must be positive"
+                "elevation_loss", "Elevation loss must be non-negative"
             )
 
     def _validate_duration(self) -> None:
-        """Validate duration is positive if provided."""
+        """Validate duration is non-negative if provided."""
         if self.duration is not None and self.duration < 0:
-            raise FitnessDataValidationError("duration", "Duration must be positive")
+            raise FitnessDataValidationError(
+                "duration", "Duration must be non-negative"
+            )
 
     def _validate_calories(self) -> None:
-        """Validate calories is positive if provided."""
+        """Validate calories is non-negative if provided."""
         if self.calories is not None and self.calories < 0:
-            raise FitnessDataValidationError("calories", "Calories must be positive")
+            raise FitnessDataValidationError(
+                "calories", "Calories must be non-negative"
+            )
 
     def _validate_gpx_track_data(self) -> None:
         """Validate GPX track data is valid XML with <gpx> root element if provided."""

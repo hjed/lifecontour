@@ -157,25 +157,27 @@ class FitnessDataSchema(BaseModel):
     """Fitness data for FITNESS type journals."""
 
     heart_rate_avg: int | None = Field(
-        default=None, description="Average heart rate (bpm)", gt=0
+        default=None, description="Average heart rate (bpm)", ge=0
     )
     heart_rate_max: int | None = Field(
-        default=None, description="Maximum heart rate (bpm)", gt=0
+        default=None, description="Maximum heart rate (bpm)", ge=0
     )
-    distance: int | None = Field(default=None, description="Distance (meters)", gt=0)
+    distance: int | None = Field(default=None, description="Distance (meters)", ge=0)
     elevation_gain: int | None = Field(
-        default=None, description="Elevation gain (meters)", gt=0
+        default=None, description="Elevation gain (meters)", ge=0
     )
     elevation_loss: int | None = Field(
-        default=None, description="Elevation loss (meters)", gt=0
+        default=None, description="Elevation loss (meters)", ge=0
     )
-    duration: int | None = Field(default=None, description="Duration (seconds)", gt=0)
-    calories: int | None = Field(default=None, description="Calories burned", gt=0)
+    duration: int | None = Field(default=None, description="Duration (seconds)", ge=0)
+    calories: int | None = Field(default=None, description="Calories burned", ge=0)
     gpx_track_data: str | None = Field(
         default=None, description="GPX track data (XML format)"
     )
     strava_activity_id: str | None = Field(
-        default=None, description="Strava activity ID (external reference)"
+        default=None,
+        description="Strava activity ID (external reference)",
+        max_length=255,
     )
 
 

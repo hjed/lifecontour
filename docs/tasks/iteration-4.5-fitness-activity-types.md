@@ -1,6 +1,6 @@
 # Iteration 4.5: Journal System - Fitness & Activity Types
 
-**Status:** � IN PROGRESS (2/7 tasks complete)
+**Status:** 🟡 IN PROGRESS (2/7 tasks complete)
 **Dependencies:** Iteration 4 (Journal Core & Base Types)
 **Goal:** Add comprehensive fitness and outdoor activity tracking with specialized activity types
 
@@ -148,7 +148,7 @@ This iteration extends the journal system with fitness and outdoor activity type
   - `gpx_track_data` (text, nullable, GPX XML format)
   - `strava_activity_id` (string, nullable, external reference)
   - `created_at`, `updated_at`
-  - Check constraints for positive values on all numeric fields
+  - Check constraints for non-negative values (>= 0) on all numeric fields
   - Migration: `0017_create_fitness_data_table.py`
 - [x] Implement FITNESS type in type system (no dependencies)
 - [x] Add GPX validation (XML format with `<gpx>` root element check)

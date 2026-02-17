@@ -819,8 +819,16 @@ class TestJournalTypeManagement:
             f"/api/journals/{journal_id}/types/FITNESS/data", json=update_data
         )
 
-        # Should succeed or return validation error
-        assert response.status_code in [200, 400, 422]
+        # Expect successful update and validate returned FITNESS type data
+        assert response.status_code == 200
+        response_json = response.json()
+        fitness_data = response_json["data"]["attributes"]["type_data"]["fitness"]
+        # Validate the updated values match what we sent
+        assert fitness_data["heart_rate_avg"] == 145
+        assert fitness_data["heart_rate_max"] == 175
+        assert fitness_data["distance"] == 5000
+        assert fitness_data["duration"] == 1800
+        assert fitness_data["calories"] == 450
 
 
 @pytest.mark.integration
