@@ -19,6 +19,8 @@ export interface DisplayJournal {
   tags: JournalTag[];
   contacts: JournalContactRelationship[];
   calendar?: JournalCalendar | null;
+  parent_id?: number | null;
+  order?: number | null;
   created_at?: string | null;
   updated_at?: string | null;
   // Optional search highlighting fields
@@ -62,6 +64,8 @@ export function transformJournalForDisplay(
     tags: journal.attributes.tags,
     contacts: journal.attributes.contacts,
     calendar: journal.attributes.calendar,
+    parent_id: journal.attributes.parent_id ?? null,
+    order: journal.attributes.order ?? null,
     created_at: journal.attributes.created_at,
     updated_at: journal.attributes.updated_at,
     highlighted,

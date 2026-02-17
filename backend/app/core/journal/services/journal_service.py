@@ -213,6 +213,54 @@ class JournalService:
         """
         return await self.journal_repo.find_by_id(journal_id)
 
+    async def find_journals_by_ids_for_user(
+        self, user_id: str, journal_ids: list[int]
+    ) -> list[Journal]:
+        """Batch-load journals by ID, scoped to a user."""
+        return await self.journal_repo.find_by_ids_for_user(user_id, journal_ids)
+
+    async def get_journals_by_ids_for_user(
+        self,
+        user_id: str,
+        journal_ids: list[int],
+        offset: int = 0,
+        limit: int = 20,
+    ) -> list[Journal]:
+        """Get journals by IDs for a user with ordering and pagination."""
+        return await self.journal_repo.get_by_ids_for_user(
+            user_id=user_id,
+            journal_ids=journal_ids,
+            limit=limit,
+            offset=offset,
+        )
+
+    async def count_journals_by_ids_for_user(
+        self, user_id: str, journal_ids: list[int]
+    ) -> int:
+        """Count journals by IDs for a user."""
+        return await self.journal_repo.count_by_ids_for_user(user_id, journal_ids)
+
+    async def count_children_for_parents(
+        self, user_id: str, parent_ids: list[int]
+    ) -> dict[int, int]:
+        """Count direct children for each parent journal ID for a user."""
+        return await self.journal_repo.count_children_for_parents(
+            user_id=user_id, parent_ids=parent_ids
+        )
+
+    async def find_descendants_for_user(
+        self,
+        user_id: str,
+        ancestor_ids: list[int],
+        max_depth: int = 5,
+    ) -> list[Journal]:
+        """Find all descendant journals for the given ancestor journals, scoped to a user."""
+        return await self.journal_repo.find_descendants_for_user(
+            user_id=user_id,
+            ancestor_ids=ancestor_ids,
+            max_depth=max_depth,
+        )
+
     async def get_journals_paginated(
         self,
         user_id: str,

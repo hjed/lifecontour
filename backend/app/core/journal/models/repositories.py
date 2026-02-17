@@ -44,6 +44,97 @@ class JournalRepository(ABC):
         pass
 
     @abstractmethod
+    async def find_by_ids_for_user(
+        self, user_id: str, journal_ids: list[int]
+    ) -> list[Journal]:
+        """Find journals by IDs, scoped to a user.
+
+        This is used for batch-loading related journals (e.g., parents) in a tenant-safe way.
+
+        Args:
+            user_id: The user ID to scope the lookup to
+            journal_ids: Journal IDs to fetch
+
+        Returns:
+            List of journals belonging to the user whose IDs match
+        """
+        pass
+
+    @abstractmethod
+    async def get_by_ids_for_user(
+        self,
+        user_id: str,
+        journal_ids: list[int],
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[Journal]:
+        """Get journals by IDs for a user with ordering + pagination.
+
+        Results are ordered consistently with other journal list endpoints.
+
+        Args:
+            user_id: The user ID to scope the lookup to
+            journal_ids: Journal IDs to fetch
+            limit: Maximum number of journals to return
+            offset: Number of journals to skip
+
+        Returns:
+            List of journals
+        """
+        pass
+
+    @abstractmethod
+    async def count_by_ids_for_user(self, user_id: str, journal_ids: list[int]) -> int:
+        """Count journals by IDs for a user.
+
+        Args:
+            user_id: The user ID to scope the count to
+            journal_ids: Journal IDs to count
+
+        Returns:
+            Count of matching journals
+        """
+        pass
+
+    @abstractmethod
+    async def count_children_for_parents(
+        self, user_id: str, parent_ids: list[int]
+    ) -> dict[int, int]:
+        """Count direct children for each parent journal ID for a user.
+
+        Args:
+            user_id: The user ID to scope the count to
+            parent_ids: Parent journal IDs to count children for
+
+        Returns:
+            Mapping of parent_id -> direct children count
+        """
+        pass
+
+    @abstractmethod
+    async def find_descendants_for_user(
+        self,
+        user_id: str,
+        ancestor_ids: list[int],
+        max_depth: int = 5,
+    ) -> list[Journal]:
+        """Find all descendant journals for the given ancestor journals, scoped to a user.
+
+        This is used to render contact-page hierarchy: when a journal is directly related
+        to a contact, we include its descendants even if those descendants have no direct
+        relationship to the contact.
+
+        Args:
+            user_id: The user ID to scope the lookup to (tenant isolation)
+            ancestor_ids: Journal IDs whose descendants should be returned
+            max_depth: Maximum recursion depth from the provided ancestors
+
+        Returns:
+            List of descendant journals (excluding the ancestors themselves)
+        """
+        pass
+
+    @abstractmethod
     async def save(self, journal: Journal) -> Journal:
         """
         Save a journal (insert or update).

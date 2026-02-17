@@ -7,7 +7,7 @@
 
 'use client';
 
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import Link from 'next/link';
 import type { Route } from 'next';
 import { ChevronDown, ChevronRight, Plus } from 'lucide-react';
@@ -43,6 +43,33 @@ interface RelationshipSectionProps {
   readonly defaultOpen?: boolean;
 }
 
+function compareByEventDateMostRecentFirst(
+  a: RelationshipSectionProps['journals'][number],
+  b: RelationshipSectionProps['journals'][number]
+): number {
+  const dateA = new Date(a.event_date_range.start).getTime();
+  const dateB = new Date(b.event_date_range.start).getTime();
+  return dateB - dateA;
+}
+
+function compareChildJournals(
+  a: RelationshipSectionProps['journals'][number],
+  b: RelationshipSectionProps['journals'][number]
+): number {
+  const dateA = new Date(a.event_date_range.start).getTime();
+  const dateB = new Date(b.event_date_range.start).getTime();
+
+  // Children ordered by event_date_range.start, then order field (spec)
+  if (dateA !== dateB) return dateA - dateB;
+
+  const orderA = a.order ?? Number.POSITIVE_INFINITY;
+  const orderB = b.order ?? Number.POSITIVE_INFINITY;
+  if (orderA !== orderB) return orderA - orderB;
+
+  // Stable fallback
+  return String(a.id).localeCompare(String(b.id));
+}
+
 /**
  * Collapsible section for a specific relationship type
  */
@@ -53,7 +80,100 @@ function RelationshipSection({
 }: RelationshipSectionProps) {
   const [isOpen, setIsOpen] = useState(defaultOpen);
 
+  // Per-parent expand/collapse state. Undefined => expanded by default.
+  const [childrenExpandedById, setChildrenExpandedById] = useState<
+    Record<string, boolean>
+  >({});
+
+  const { rootJournals, childrenByParentId } = useMemo(() => {
+    const journalById = new Map(journals.map(j => [String(j.id), j]));
+
+    const childrenMap = new Map<string, typeof journals>();
+    const roots: typeof journals = [];
+
+    for (const journal of journals) {
+      const parentId = journal.parent_id;
+      const parentKey =
+        parentId !== null && parentId !== undefined ? String(parentId) : null;
+
+      // Only nest if the parent is present in this relationship-type group
+      if (parentKey && journalById.has(parentKey)) {
+        const existing = childrenMap.get(parentKey) ?? [];
+        existing.push(journal);
+        childrenMap.set(parentKey, existing);
+      } else {
+        roots.push(journal);
+      }
+    }
+
+    roots.sort(compareByEventDateMostRecentFirst);
+    childrenMap.forEach(children => {
+      children.sort(compareChildJournals);
+    });
+
+    return { rootJournals: roots, childrenByParentId: childrenMap };
+  }, [journals]);
+
   if (journals.length === 0) return null;
+
+  const toggleChildren = (journalId: string) => {
+    setChildrenExpandedById(prev => {
+      const current = prev[journalId] ?? true;
+      return { ...prev, [journalId]: !current };
+    });
+  };
+
+  const renderJournalNode = (journal: (typeof journals)[number]) => {
+    const children = childrenByParentId.get(String(journal.id)) ?? [];
+    const hasChildren = children.length > 0;
+    const isExpanded = childrenExpandedById[String(journal.id)] ?? true;
+
+    return (
+      <div key={journal.id} className='space-y-3'>
+        <div className='flex items-start gap-2'>
+          {hasChildren ? (
+            <Button
+              type='button'
+              variant='ghost'
+              size='icon'
+              className='h-8 w-8 shrink-0'
+              aria-label={`${isExpanded ? 'Collapse' : 'Expand'} child journals`}
+              aria-expanded={isExpanded}
+              aria-controls={`journal-children-${journal.id}`}
+              data-testid={`journalChildrenToggle-${journal.id}`}
+              onClick={e => {
+                e.preventDefault();
+                e.stopPropagation();
+                toggleChildren(String(journal.id));
+              }}
+            >
+              {isExpanded ? (
+                <ChevronDown className='h-4 w-4' aria-hidden='true' />
+              ) : (
+                <ChevronRight className='h-4 w-4' aria-hidden='true' />
+              )}
+            </Button>
+          ) : (
+            <div className='h-8 w-8 shrink-0' aria-hidden='true' />
+          )}
+
+          <div className='min-w-0 flex-1'>
+            <JournalListItem journal={journal} className='w-full' />
+          </div>
+        </div>
+
+        {hasChildren && isExpanded ? (
+          <div
+            id={`journal-children-${journal.id}`}
+            data-testid={`journalChildrenContainer-${journal.id}`}
+            className='ml-6 space-y-3 border-l pl-4'
+          >
+            {children.map(child => renderJournalNode(child))}
+          </div>
+        ) : null}
+      </div>
+    );
+  };
 
   return (
     <Card className='overflow-hidden'>
@@ -79,9 +199,7 @@ function RelationshipSection({
         </CardHeader>
         <CollapsibleContent>
           <CardContent className='space-y-3 p-4 pt-0'>
-            {journals.map(journal => (
-              <JournalListItem key={journal.id} journal={journal} />
-            ))}
+            {rootJournals.map(journal => renderJournalNode(journal))}
           </CardContent>
         </CollapsibleContent>
       </Collapsible>
@@ -104,6 +222,78 @@ export function ContactJournals({ contactId }: ContactJournalsProps) {
 
   // Convert to display journals (must be called unconditionally)
   const displayJournals = useDisplayJournals(journals);
+
+  // Must be called unconditionally (React hook ordering)
+  const { journalsByType, directlyRelatedCount } = useMemo(() => {
+    // Map for quick parent lookups (used to inherit relationship type for descendants)
+    const journalById = new Map(displayJournals.map(j => [String(j.id), j]));
+
+    const resolvedTypeById = new Map<string, RelationshipType | null>();
+
+    const resolveRelationshipType = (
+      journalId: string,
+      visiting: Set<string>
+    ): RelationshipType | null => {
+      const cached = resolvedTypeById.get(journalId);
+      if (cached !== undefined) return cached;
+
+      if (visiting.has(journalId)) {
+        // Defensive: break cycles (should not occur in valid hierarchy)
+        resolvedTypeById.set(journalId, null);
+        return null;
+      }
+
+      const journal = journalById.get(journalId);
+      if (!journal) {
+        resolvedTypeById.set(journalId, null);
+        return null;
+      }
+
+      // Direct relationship takes precedence
+      const direct = journal.contacts.find(c => c.id === contactId);
+      if (direct?.relationship_type) {
+        const type = direct.relationship_type as RelationshipType;
+        resolvedTypeById.set(journalId, type);
+        return type;
+      }
+
+      // Otherwise inherit from nearest ancestor that is directly related
+      const parentId = journal.parent_id;
+      if (parentId !== null && parentId !== undefined) {
+        const parentKey = String(parentId);
+        if (journalById.has(parentKey)) {
+          visiting.add(journalId);
+          const inherited = resolveRelationshipType(parentKey, visiting);
+          visiting.delete(journalId);
+          resolvedTypeById.set(journalId, inherited);
+          return inherited;
+        }
+      }
+
+      resolvedTypeById.set(journalId, null);
+      return null;
+    };
+
+    const acc = {} as Record<RelationshipType, typeof displayJournals>;
+    let directCount = 0;
+
+    for (const journal of displayJournals) {
+      const direct = journal.contacts.find(c => c.id === contactId);
+      if (direct?.relationship_type) directCount += 1;
+
+      const type = resolveRelationshipType(String(journal.id), new Set());
+      if (!type) continue;
+      if (!acc[type]) acc[type] = [];
+      acc[type].push(journal);
+    }
+
+    // Sort journals within each type by event_date_range (most recent first)
+    Object.keys(acc).forEach(type => {
+      acc[type as RelationshipType].sort(compareByEventDateMostRecentFirst);
+    });
+
+    return { journalsByType: acc, directlyRelatedCount: directCount };
+  }, [displayJournals, contactId]);
 
   // Loading state
   if (isLoading) {
@@ -133,32 +323,6 @@ export function ContactJournals({ contactId }: ContactJournalsProps) {
     );
   }
 
-  // Group journals by relationship type
-  const journalsByType = displayJournals.reduce(
-    (acc, journal) => {
-      // Find the contact's relationship type in this journal
-      const contactRelationship = journal.contacts.find(
-        c => c.id === contactId // Contact IDs are strings in the API
-      );
-      if (contactRelationship?.relationship_type) {
-        const type = contactRelationship.relationship_type as RelationshipType;
-        if (!acc[type]) acc[type] = [];
-        acc[type].push(journal);
-      }
-      return acc;
-    },
-    {} as Record<RelationshipType, typeof displayJournals>
-  );
-
-  // Sort journals within each type by event_date_range (most recent first)
-  Object.keys(journalsByType).forEach(type => {
-    journalsByType[type as RelationshipType].sort((a, b) => {
-      const dateA = new Date(a.event_date_range.start).getTime();
-      const dateB = new Date(b.event_date_range.start).getTime();
-      return dateB - dateA; // Descending order (most recent first)
-    });
-  });
-
   // Empty state
   if (displayJournals.length === 0) {
     return (
@@ -179,10 +343,15 @@ export function ContactJournals({ contactId }: ContactJournalsProps) {
     );
   }
 
-  // Check if there are more journals than displayed
-  const totalJournals = meta?.total as number | undefined;
+  // Check if there are more *directly-related* journals than displayed.
+  // Backend pagination/meta is for directly-related journals, but the response
+  // also includes their descendants.
+  const totalRaw =
+    (meta as Record<string, unknown> | undefined)?.total_count ??
+    (meta as Record<string, unknown> | undefined)?.total;
+  const totalJournals = typeof totalRaw === 'number' ? totalRaw : undefined;
   const hasMoreJournals =
-    totalJournals !== undefined && totalJournals > journals.length;
+    totalJournals !== undefined && totalJournals > directlyRelatedCount;
 
   return (
     <div className='space-y-4'>
@@ -199,7 +368,8 @@ export function ContactJournals({ contactId }: ContactJournalsProps) {
       {hasMoreJournals && (
         <Alert>
           <AlertDescription>
-            Showing {journals.length} of {totalJournals} journals. Visit the{' '}
+            Showing {directlyRelatedCount} of {totalJournals} related journals.
+            Visit the{' '}
             <Link
               href='/journals'
               className='font-medium underline underline-offset-4'

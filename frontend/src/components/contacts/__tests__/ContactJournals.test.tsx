@@ -2,7 +2,8 @@
  * @jest-environment jsdom
  */
 
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ContactJournals } from '../ContactJournals';
 import * as journalsApi from '@/lib/api/journals';
@@ -23,8 +24,10 @@ jest.mock('next/navigation', () => ({
 const createMockJournal = (
   id: string,
   title: string,
-  relationshipType: string,
-  eventDate: string = '2024-01-01'
+  relationshipType: string | null,
+  eventDate: string = '2024-01-01',
+  parentId?: number,
+  order?: number
 ) => ({
   id,
   type: 'journals',
@@ -37,13 +40,17 @@ const createMockJournal = (
     },
     types: [JournalType.NOTE],
     tags: [],
-    contacts: [
-      {
-        id: '123', // Contact IDs are strings in the API
-        name: 'Test Contact',
-        relationship_type: relationshipType,
-      },
-    ],
+    parent_id: parentId ?? null,
+    order: order ?? null,
+    contacts: relationshipType
+      ? [
+          {
+            id: '123', // Contact IDs are strings in the API
+            name: 'Test Contact',
+            relationship_type: relationshipType,
+          },
+        ]
+      : [],
     created_at: '2024-01-01T00:00:00Z',
     updated_at: '2024-01-01T00:00:00Z',
   },
@@ -176,7 +183,7 @@ describe('ContactJournals', () => {
 
     await waitFor(() => {
       expect(
-        screen.getByText(/showing 5 of 150 journals/i)
+        screen.getByText(/showing 5 of 150 related journals/i)
       ).toBeInTheDocument();
       expect(screen.getByText(/journals page/i)).toBeInTheDocument();
     });
@@ -205,7 +212,7 @@ describe('ContactJournals', () => {
 
     // Warning should not be present
     expect(
-      screen.queryByText(/showing.*of.*journals/i)
+      screen.queryByText(/showing.*of.*related journals/i)
     ).not.toBeInTheDocument();
   });
 
@@ -237,5 +244,73 @@ describe('ContactJournals', () => {
       expect(positions[1]).toBe('journal-3');
       expect(positions[2]).toBe('journal-1');
     });
+  });
+
+  it('should nest child journals under their parent within a relationship section', async () => {
+    const mockData = {
+      data: [
+        createMockJournal('1', 'Parent Journal', 'PARTICIPANT', '2024-03-01'),
+        createMockJournal('2', 'Child Journal', null, '2024-03-02', 1),
+        createMockJournal(
+          '3',
+          'Other Root Journal',
+          'PARTICIPANT',
+          '2024-02-01'
+        ),
+      ],
+      meta: { total: 3 },
+    };
+
+    (journalsApi.useContactJournals as jest.Mock).mockReturnValue({
+      data: mockData,
+      isLoading: false,
+      isError: false,
+    });
+
+    render(<ContactJournals contactId='123' />, { wrapper: createWrapper() });
+
+    await waitFor(() => {
+      expect(screen.getByText('Parent Journal')).toBeInTheDocument();
+      expect(screen.getByText('Child Journal')).toBeInTheDocument();
+    });
+
+    const childrenContainer = screen.getByTestId('journalChildrenContainer-1');
+    expect(
+      within(childrenContainer).getByTestId('journal-2')
+    ).toBeInTheDocument();
+    expect(
+      within(childrenContainer).queryByTestId('journal-3')
+    ).not.toBeInTheDocument();
+  });
+
+  it('should allow collapsing and expanding child journals', async () => {
+    const user = userEvent.setup();
+    const mockData = {
+      data: [
+        createMockJournal('1', 'Parent Journal', 'PARTICIPANT', '2024-03-01'),
+        createMockJournal('2', 'Child Journal', null, '2024-03-02', 1),
+      ],
+      meta: { total: 2 },
+    };
+
+    (journalsApi.useContactJournals as jest.Mock).mockReturnValue({
+      data: mockData,
+      isLoading: false,
+      isError: false,
+    });
+
+    render(<ContactJournals contactId='123' />, { wrapper: createWrapper() });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('journal-2')).toBeInTheDocument();
+    });
+
+    const toggle = screen.getByTestId('journalChildrenToggle-1');
+
+    await user.click(toggle);
+    expect(screen.queryByTestId('journal-2')).not.toBeInTheDocument();
+
+    await user.click(toggle);
+    expect(screen.getByTestId('journal-2')).toBeInTheDocument();
   });
 });

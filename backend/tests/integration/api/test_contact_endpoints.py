@@ -680,6 +680,126 @@ class TestContactEndpoints:
         assert data["meta"]["total_count"] == 2
         assert data["meta"]["page_count"] == 2
 
+    async def test_get_contact_journals_includes_hierarchy_fields(
+        self, integration_api_client
+    ):
+        """Test contact journals include parent summary and children_count.
+
+        Also verifies that children of a related journal are returned even if the
+        child journal itself has no direct relationship to the contact.
+        """
+        from datetime import UTC, datetime, timedelta
+
+        # Create a contact
+        contact_data = {
+            "data": {
+                "type": "contacts",
+                "attributes": {
+                    "first_name": "Hierarchy",
+                    "last_name": "Test",
+                    "contact_methods": [],
+                    "addresses": [],
+                    "notes": [],
+                },
+            }
+        }
+        contact_response = await integration_api_client.post(
+            "/api/contacts", json=contact_data
+        )
+        assert contact_response.status_code == 201
+        contact_id = int(contact_response.json()["data"]["id"])
+
+        now = datetime.now(UTC)
+
+        # Create a parent journal
+        parent_journal_data = {
+            "data": {
+                "type": "journals",
+                "attributes": {
+                    "title": "Parent Journal",
+                    "content": "Parent content",
+                    "event_date_range": {
+                        "start": now.isoformat(),
+                        "end": (now + timedelta(hours=1)).isoformat(),
+                    },
+                },
+            }
+        }
+        parent_resp = await integration_api_client.post(
+            "/api/journals", json=parent_journal_data
+        )
+        assert parent_resp.status_code == 201
+        parent_id = int(parent_resp.json()["data"]["id"])
+
+        # Create a child journal linked via parent_id
+        child_journal_data = {
+            "data": {
+                "type": "journals",
+                "attributes": {
+                    "title": "Child Journal",
+                    "content": "Child content",
+                    "event_date_range": {
+                        "start": (now + timedelta(days=1)).isoformat(),
+                        "end": (now + timedelta(days=1, hours=1)).isoformat(),
+                    },
+                    "parent_id": parent_id,
+                },
+            }
+        }
+        child_resp = await integration_api_client.post(
+            "/api/journals", json=child_journal_data
+        )
+        assert child_resp.status_code == 201
+        child_id = int(child_resp.json()["data"]["id"])
+
+        # Add contact as PARTICIPANT to the parent journal ONLY
+        add_contact_data = {
+            "data": {
+                "type": "journal-contact-relationships",
+                "attributes": {
+                    "contact_id": str(contact_id),
+                    "relationship_type": "PARTICIPANT",
+                },
+            }
+        }
+        resp1 = await integration_api_client.post(
+            f"/api/journals/{parent_id}/relationships/contacts",
+            json=add_contact_data,
+        )
+        assert resp1.status_code == 200
+
+        response = await integration_api_client.get(
+            f"/api/contacts/{contact_id}/journals?relationship_type=PARTICIPANT"
+        )
+        assert response.status_code == 200
+        payload = response.json()
+
+        # Only 1 journal is directly related, but we expect the child to be included
+        # as a descendant of the related parent.
+        assert payload["meta"]["total_count"] == 1
+        assert len(payload["data"]) == 2
+
+        # Index returned journals by id for easy assertions
+        by_id = {int(j["id"]): j for j in payload["data"]}
+        assert parent_id in by_id
+        assert child_id in by_id
+
+        parent = by_id[parent_id]
+        child = by_id[child_id]
+
+        # Parent should have children_count=1 and no parent summary
+        assert parent["attributes"].get("parent_id") is None
+        assert parent["attributes"].get("parent") is None
+        assert parent["attributes"].get("children_count") == 1
+
+        # Child should include parent_id and embedded parent summary
+        assert child["attributes"].get("parent_id") == parent_id
+        assert child["attributes"].get("parent") == {
+            "id": str(parent_id),
+            "title": "Parent Journal",
+        }
+        assert child["attributes"].get("children_count") == 0
+
     async def test_get_contact_journals_not_found(self, integration_api_client):
         """Test getting journals for a non-existent contact."""
         response = await integration_api_client.get("/api/contacts/99999/journals")
