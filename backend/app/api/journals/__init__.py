@@ -10,6 +10,7 @@ from app.api.journals.schemas import (
     CalendarResponse,
     CalendarSchema,
     EventDateRangeSchema,
+    FitnessDataSchema,
     JournalAttributes,
     JournalContactRelationshipAddAttributes,
     JournalContactRelationshipAddData,
@@ -55,6 +56,7 @@ __all__ = [
     "TravelAccommodationSchema",
     "TravelTransportationSchema",
     "PhotoAlbumDataSchema",
+    "FitnessDataSchema",
     # Embedded schemas
     "JournalContactRelationshipSchema",
     "JournalTagSchema",

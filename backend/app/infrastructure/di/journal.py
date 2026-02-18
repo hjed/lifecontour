@@ -7,6 +7,9 @@ from app.core.journal.adapters.sql.calendar_info_repository import (
     SqlCalendarInfoRepository,
 )
 from app.core.journal.adapters.sql.calendar_repository import SqlCalendarRepository
+from app.core.journal.adapters.sql.fitness_data_repository import (
+    SqlFitnessDataRepository,
+)
 from app.core.journal.adapters.sql.journal_contact_relationship_repository import (
     SqlJournalContactRelationshipRepository,
 )
@@ -22,6 +25,7 @@ from app.core.journal.adapters.sql.travel_data_repository import SqlTravelDataRe
 from app.core.journal.models.repositories import (
     CalendarInfoRepository,
     CalendarRepository,
+    FitnessDataRepository,
     JournalContactRelationshipRepository,
     JournalRepository,
     JournalTagRepository,
@@ -60,6 +64,13 @@ class JournalProvider(Provider):
     def mood_data_repository(self, connection: AsyncConnection) -> MoodDataRepository:
         """Provide a MoodDataRepository instance."""
         return SqlMoodDataRepository(connection)
+
+    @provide(scope=Scope.REQUEST)
+    def fitness_data_repository(
+        self, connection: AsyncConnection
+    ) -> FitnessDataRepository:
+        """Provide a FitnessDataRepository instance."""
+        return SqlFitnessDataRepository(connection)
 
     @provide(scope=Scope.REQUEST)
     def photo_album_data_repository(

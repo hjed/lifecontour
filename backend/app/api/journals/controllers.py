@@ -58,6 +58,7 @@ from app.core.journal.models.journal_types import JournalType
 from app.core.journal.models.repositories import (
     CalendarInfoRepository,
     CalendarRepository,
+    FitnessDataRepository,
     JournalContactRelationshipRepository,
     JournalTagRepository,
     MoodDataRepository,
@@ -114,6 +115,7 @@ async def _create_type_specific_data(
     mood_data_repo: MoodDataRepository,
     plan_data_repo: PlanDataRepository,
     travel_data_repo: TravelDataRepository,
+    fitness_data_repo: FitnessDataRepository,
 ) -> None:
     """
     Create type-specific data row with default values for the given journal type.
@@ -142,6 +144,11 @@ async def _create_type_specific_data(
 
         travel_data = TravelData(journal_id=journal_id)
         await travel_data_repo.save(travel_data)
+    elif journal_type == JournalType.FITNESS:
+        from app.core.journal.models.fitness_data import FitnessData
+
+        fitness_data = FitnessData(journal_id=journal_id)
+        await fitness_data_repo.save(fitness_data)
     # EVENT and PHOTO_ALBUM types require additional data (calendar_id, immich_album_id)
     # These will be created when the user updates the type data
 
@@ -154,6 +161,7 @@ async def _enrich_journal_data(
     plan_data_repo: PlanDataRepository,
     travel_data_repo: TravelDataRepository,
     photo_album_data_repo: PhotoAlbumDataRepository,
+    fitness_data_repo: "FitnessDataRepository",
     contact_relationship_repo: JournalContactRelationshipRepository,
     tag_repo: JournalTagRepository,
 ) -> tuple[
@@ -211,6 +219,13 @@ async def _enrich_journal_data(
         types.append(JournalType.PHOTO_ALBUM.value)
         type_data[JournalType.PHOTO_ALBUM.value] = (
             TypeDataConverter.photo_album_data_to_schema(photo_album_data)
+        )
+
+    fitness_data = await fitness_data_repo.find_by_journal_id(journal.id)  # type: ignore
+    if fitness_data:
+        types.append(JournalType.FITNESS.value)
+        type_data[JournalType.FITNESS.value] = TypeDataConverter.fitness_data_to_schema(
+            fitness_data
         )
 
     # If no types found, it's a NOTE
@@ -426,6 +441,7 @@ async def list_journals(
     plan_data_repo: FromDishka[PlanDataRepository],
     travel_data_repo: FromDishka[TravelDataRepository],
     photo_album_data_repo: FromDishka[PhotoAlbumDataRepository],
+    fitness_data_repo: FromDishka[FitnessDataRepository],
     contact_relationship_repo: FromDishka[JournalContactRelationshipRepository],
     tag_repo: FromDishka[JournalTagRepository],
     user: FromDishka[SessionUser],  # Require authentication
@@ -493,6 +509,7 @@ async def list_journals(
             plan_data_repo,
             travel_data_repo,
             photo_album_data_repo,
+            fitness_data_repo,
             contact_relationship_repo,
             tag_repo,
         )
@@ -651,6 +668,7 @@ async def get_journal(
     plan_data_repo: FromDishka[PlanDataRepository],
     travel_data_repo: FromDishka[TravelDataRepository],
     photo_album_data_repo: FromDishka[PhotoAlbumDataRepository],
+    fitness_data_repo: FromDishka[FitnessDataRepository],
     contact_relationship_repo: FromDishka[JournalContactRelationshipRepository],
     tag_repo: FromDishka[JournalTagRepository],
     user: FromDishka[SessionUser],  # Require authentication
@@ -675,6 +693,7 @@ async def get_journal(
         plan_data_repo,
         travel_data_repo,
         photo_album_data_repo,
+        fitness_data_repo,
         contact_relationship_repo,
         tag_repo,
     )
@@ -693,6 +712,7 @@ async def _process_journal_types(
     mood_data_repo: MoodDataRepository,
     plan_data_repo: PlanDataRepository,
     travel_data_repo: TravelDataRepository,
+    fitness_data_repo: FitnessDataRepository,
     connection: AsyncConnection,
 ) -> None:
     """
@@ -723,6 +743,7 @@ async def _process_journal_types(
                 mood_data_repo,
                 plan_data_repo,
                 travel_data_repo,
+                fitness_data_repo,
             )
         except (ValueError, KeyError):
             # Invalid type, skip
@@ -842,6 +863,7 @@ async def create_journal(
     plan_data_repo: FromDishka[PlanDataRepository],
     travel_data_repo: FromDishka[TravelDataRepository],
     photo_album_data_repo: FromDishka[PhotoAlbumDataRepository],
+    fitness_data_repo: FromDishka[FitnessDataRepository],
     contact_relationship_repo: FromDishka[JournalContactRelationshipRepository],
     tag_repo: FromDishka[JournalTagRepository],
     connection: FromDishka[AsyncConnection],
@@ -872,6 +894,7 @@ async def create_journal(
             mood_data_repo,
             plan_data_repo,
             travel_data_repo,
+            fitness_data_repo,
             connection,
         )
 
@@ -907,6 +930,7 @@ async def create_journal(
         plan_data_repo,
         travel_data_repo,
         photo_album_data_repo,
+        fitness_data_repo,
         contact_relationship_repo,
         tag_repo,
     )
@@ -931,6 +955,7 @@ async def update_journal(
     plan_data_repo: FromDishka[PlanDataRepository],
     travel_data_repo: FromDishka[TravelDataRepository],
     photo_album_data_repo: FromDishka[PhotoAlbumDataRepository],
+    fitness_data_repo: FromDishka[FitnessDataRepository],
     contact_relationship_repo: FromDishka[JournalContactRelationshipRepository],
     tag_repo: FromDishka[JournalTagRepository],
     connection: FromDishka[AsyncConnection],
@@ -981,6 +1006,7 @@ async def update_journal(
         plan_data_repo,
         travel_data_repo,
         photo_album_data_repo,
+        fitness_data_repo,
         contact_relationship_repo,
         tag_repo,
     )
@@ -1005,6 +1031,7 @@ async def partial_update_journal(
     plan_data_repo: FromDishka[PlanDataRepository],
     travel_data_repo: FromDishka[TravelDataRepository],
     photo_album_data_repo: FromDishka[PhotoAlbumDataRepository],
+    fitness_data_repo: FromDishka[FitnessDataRepository],
     contact_relationship_repo: FromDishka[JournalContactRelationshipRepository],
     tag_repo: FromDishka[JournalTagRepository],
     connection: FromDishka[AsyncConnection],
@@ -1101,6 +1128,7 @@ async def partial_update_journal(
         plan_data_repo,
         travel_data_repo,
         photo_album_data_repo,
+        fitness_data_repo,
         contact_relationship_repo,
         tag_repo,
     )
@@ -1146,6 +1174,7 @@ async def add_type_to_journal(
     plan_data_repo: FromDishka[PlanDataRepository],
     travel_data_repo: FromDishka[TravelDataRepository],
     photo_album_data_repo: FromDishka[PhotoAlbumDataRepository],
+    fitness_data_repo: FromDishka[FitnessDataRepository],
     contact_relationship_repo: FromDishka[JournalContactRelationshipRepository],
     tag_repo: FromDishka[JournalTagRepository],
     connection: FromDishka[AsyncConnection],
@@ -1191,6 +1220,7 @@ async def add_type_to_journal(
         plan_data_repo,
         travel_data_repo,
         photo_album_data_repo,
+        fitness_data_repo,
         contact_relationship_repo,
         tag_repo,
     )
@@ -1215,6 +1245,7 @@ async def remove_type_from_journal(
     plan_data_repo: FromDishka[PlanDataRepository],
     travel_data_repo: FromDishka[TravelDataRepository],
     photo_album_data_repo: FromDishka[PhotoAlbumDataRepository],
+    fitness_data_repo: FromDishka[FitnessDataRepository],
     contact_relationship_repo: FromDishka[JournalContactRelationshipRepository],
     tag_repo: FromDishka[JournalTagRepository],
     connection: FromDishka[AsyncConnection],
@@ -1259,6 +1290,7 @@ async def remove_type_from_journal(
         plan_data_repo,
         travel_data_repo,
         photo_album_data_repo,
+        fitness_data_repo,
         contact_relationship_repo,
         tag_repo,
     )
@@ -1346,6 +1378,42 @@ async def _update_photo_album_type_data(
     await photo_album_data_repo.save(photo_album_data)
 
 
+async def _update_fitness_type_data(
+    journal_id: int,
+    journal_type: str,
+    attrs: dict[str, Any],
+    fitness_data_repo: FitnessDataRepository,
+) -> None:
+    """Update FITNESS type-specific data."""
+    fitness_data = await fitness_data_repo.find_by_journal_id(journal_id)
+    if not fitness_data:
+        raise JournalValidationError(
+            "journal_type", f"Journal does not have type {journal_type}"
+        )
+
+    # Update fields from request
+    if "heart_rate_avg" in attrs:
+        fitness_data.heart_rate_avg = attrs["heart_rate_avg"]
+    if "heart_rate_max" in attrs:
+        fitness_data.heart_rate_max = attrs["heart_rate_max"]
+    if "distance" in attrs:
+        fitness_data.distance = attrs["distance"]
+    if "elevation_gain" in attrs:
+        fitness_data.elevation_gain = attrs["elevation_gain"]
+    if "elevation_loss" in attrs:
+        fitness_data.elevation_loss = attrs["elevation_loss"]
+    if "duration" in attrs:
+        fitness_data.duration = attrs["duration"]
+    if "calories" in attrs:
+        fitness_data.calories = attrs["calories"]
+    if "gpx_track_data" in attrs:
+        fitness_data.gpx_track_data = attrs["gpx_track_data"]
+    if "strava_activity_id" in attrs:
+        fitness_data.strava_activity_id = attrs["strava_activity_id"]
+
+    await fitness_data_repo.save(fitness_data)
+
+
 @router.put("/{journal_id}/types/{journal_type}/data")
 @inject
 async def update_type_data(
@@ -1360,6 +1428,7 @@ async def update_type_data(
     plan_data_repo: FromDishka[PlanDataRepository],
     travel_data_repo: FromDishka[TravelDataRepository],
     photo_album_data_repo: FromDishka[PhotoAlbumDataRepository],
+    fitness_data_repo: FromDishka[FitnessDataRepository],
     contact_relationship_repo: FromDishka[JournalContactRelationshipRepository],
     tag_repo: FromDishka[JournalTagRepository],
     connection: FromDishka[AsyncConnection],
@@ -1399,6 +1468,10 @@ async def update_type_data(
         await _update_photo_album_type_data(
             journal_id, journal_type, attrs, photo_album_data_repo
         )
+    elif jtype == JournalType.FITNESS:
+        await _update_fitness_type_data(
+            journal_id, journal_type, attrs, fitness_data_repo
+        )
     elif jtype in (JournalType.PLAN, JournalType.TRAVEL):
         # PLAN and TRAVEL types have complex nested data structures
         # For now, return an error indicating this is not yet supported
@@ -1427,6 +1500,7 @@ async def update_type_data(
         plan_data_repo,
         travel_data_repo,
         photo_album_data_repo,
+        fitness_data_repo,
         contact_relationship_repo,
         tag_repo,
     )
@@ -1452,6 +1526,7 @@ async def add_contact_to_journal(
     plan_data_repo: FromDishka[PlanDataRepository],
     travel_data_repo: FromDishka[TravelDataRepository],
     photo_album_data_repo: FromDishka[PhotoAlbumDataRepository],
+    fitness_data_repo: FromDishka[FitnessDataRepository],
     contact_relationship_repo: FromDishka[JournalContactRelationshipRepository],
     tag_repo: FromDishka[JournalTagRepository],
     connection: FromDishka[AsyncConnection],
@@ -1512,6 +1587,7 @@ async def add_contact_to_journal(
         plan_data_repo,
         travel_data_repo,
         photo_album_data_repo,
+        fitness_data_repo,
         contact_relationship_repo,
         tag_repo,
     )
@@ -1537,6 +1613,7 @@ async def remove_contact_from_journal(
     plan_data_repo: FromDishka[PlanDataRepository],
     travel_data_repo: FromDishka[TravelDataRepository],
     photo_album_data_repo: FromDishka[PhotoAlbumDataRepository],
+    fitness_data_repo: FromDishka[FitnessDataRepository],
     contact_relationship_repo: FromDishka[JournalContactRelationshipRepository],
     tag_repo: FromDishka[JournalTagRepository],
     connection: FromDishka[AsyncConnection],
@@ -1592,6 +1669,7 @@ async def remove_contact_from_journal(
         plan_data_repo,
         travel_data_repo,
         photo_album_data_repo,
+        fitness_data_repo,
         contact_relationship_repo,
         tag_repo,
     )
@@ -1616,6 +1694,7 @@ async def add_tag_to_journal(
     plan_data_repo: FromDishka[PlanDataRepository],
     travel_data_repo: FromDishka[TravelDataRepository],
     photo_album_data_repo: FromDishka[PhotoAlbumDataRepository],
+    fitness_data_repo: FromDishka[FitnessDataRepository],
     contact_relationship_repo: FromDishka[JournalContactRelationshipRepository],
     tag_repo: FromDishka[JournalTagRepository],
     connection: FromDishka[AsyncConnection],
@@ -1663,6 +1742,7 @@ async def add_tag_to_journal(
         plan_data_repo,
         travel_data_repo,
         photo_album_data_repo,
+        fitness_data_repo,
         contact_relationship_repo,
         tag_repo,
     )
@@ -1687,6 +1767,7 @@ async def remove_tag_from_journal(
     plan_data_repo: FromDishka[PlanDataRepository],
     travel_data_repo: FromDishka[TravelDataRepository],
     photo_album_data_repo: FromDishka[PhotoAlbumDataRepository],
+    fitness_data_repo: FromDishka[FitnessDataRepository],
     contact_relationship_repo: FromDishka[JournalContactRelationshipRepository],
     tag_repo: FromDishka[JournalTagRepository],
     connection: FromDishka[AsyncConnection],
@@ -1729,6 +1810,7 @@ async def remove_tag_from_journal(
         plan_data_repo,
         travel_data_repo,
         photo_album_data_repo,
+        fitness_data_repo,
         contact_relationship_repo,
         tag_repo,
     )

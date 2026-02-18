@@ -33,6 +33,7 @@ from .exceptions import (
     CalendarInfoValidationError,
     CalendarNotFoundError,
     CalendarValidationError,
+    FitnessDataValidationError,
     JournalCycleError,
     JournalError,
     JournalHierarchyError,
@@ -51,6 +52,7 @@ from .exceptions import (
     TravelFlightValidationError,
     TravelTransportationValidationError,
 )
+from .fitness_data import FitnessData
 from .journal_contact_relationship import JournalContactRelationship
 from .journal_relationship_types import JournalContactRelationshipType
 from .journal_tag import JournalTag
@@ -61,6 +63,7 @@ from .plan_data import PlanData, PlanDocument
 from .repositories import (
     CalendarInfoRepository,
     CalendarRepository,
+    FitnessDataRepository,
     JournalContactRelationshipRepository,
     JournalRepository,
     JournalTagRepository,
@@ -97,6 +100,7 @@ __all__ = [
     "Journal",
     "Calendar",
     "CalendarInfo",
+    "FitnessData",
     "MoodData",
     "PhotoAlbumData",
     "PlanData",
@@ -130,6 +134,7 @@ __all__ = [
     "CalendarValidationError",
     "CalendarNotFoundError",
     "CalendarInfoValidationError",
+    "FitnessDataValidationError",
     "MoodDataValidationError",
     "PhotoAlbumDataValidationError",
     "PlanDataValidationError",
@@ -145,6 +150,7 @@ __all__ = [
     "JournalRepository",
     "CalendarRepository",
     "CalendarInfoRepository",
+    "FitnessDataRepository",
     "MoodDataRepository",
     "PhotoAlbumDataRepository",
     "PlanDataRepository",

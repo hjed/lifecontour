@@ -153,6 +153,34 @@ class PhotoAlbumDataSchema(BaseModel):
     )
 
 
+class FitnessDataSchema(BaseModel):
+    """Fitness data for FITNESS type journals."""
+
+    heart_rate_avg: int | None = Field(
+        default=None, description="Average heart rate (bpm)", ge=0
+    )
+    heart_rate_max: int | None = Field(
+        default=None, description="Maximum heart rate (bpm)", ge=0
+    )
+    distance: int | None = Field(default=None, description="Distance (meters)", ge=0)
+    elevation_gain: int | None = Field(
+        default=None, description="Elevation gain (meters)", ge=0
+    )
+    elevation_loss: int | None = Field(
+        default=None, description="Elevation loss (meters)", ge=0
+    )
+    duration: int | None = Field(default=None, description="Duration (seconds)", ge=0)
+    calories: int | None = Field(default=None, description="Calories burned", ge=0)
+    gpx_track_data: str | None = Field(
+        default=None, description="GPX track data (XML format)"
+    )
+    strava_activity_id: str | None = Field(
+        default=None,
+        description="Strava activity ID (external reference)",
+        max_length=255,
+    )
+
+
 # Contact relationship schema
 class JournalContactRelationshipSchema(BaseModel):
     """Journal contact relationship schema."""

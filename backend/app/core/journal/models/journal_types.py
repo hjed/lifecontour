@@ -42,16 +42,16 @@ class JournalType(StrEnum):
     TRAVEL = "travel"
     PHOTO_ALBUM = "photo_album"
 
-    # Activity types (Iteration 4.5) - placeholder for documentation
-    # FITNESS = "fitness"
-    # OUTDOOR_ACTIVITY = "outdoor_activity"
-    # BUSHWALKING = "bushwalking"
-    # ABSEILING_TRIP = "abseiling_trip"
-    # CANYONING = "canyoning"
-    # CLIMBING = "climbing"
-    # KAYAKING = "kayaking"
-    # CROSS_COUNTRY_SKIING = "cross_country_skiing"
-    # JOGGING = "jogging"
+    # Activity types (Iteration 4.5)
+    FITNESS = "fitness"
+    # OUTDOOR_ACTIVITY = "outdoor_activity"  # Future: Iteration 4.5-003
+    # BUSHWALKING = "bushwalking"  # Future: Iteration 4.5-004
+    # ABSEILING_TRIP = "abseiling_trip"  # Future: Iteration 4.5-005
+    # CANYONING = "canyoning"  # Future: Iteration 4.5-006
+    # CLIMBING = "climbing"  # Future: Iteration 4.5-007
+    # KAYAKING = "kayaking"  # Future: Iteration 4.5-008
+    # CROSS_COUNTRY_SKIING = "cross_country_skiing"  # Future: Iteration 4.5-009
+    # JOGGING = "jogging"  # Future: Iteration 4.5-010
 
     def __str__(self) -> str:
         """Return string representation of the type."""
@@ -111,8 +111,8 @@ class JournalType(StrEnum):
             cls.PLAN: [],
             cls.TRAVEL: [],
             cls.PHOTO_ALBUM: [],
-            # Future fitness types will be added here in Iteration 4.5
-            # cls.FITNESS: [],
+            # Fitness types (Iteration 4.5)
+            cls.FITNESS: [],  # Base fitness type - no dependencies
             # cls.OUTDOOR_ACTIVITY: [cls.FITNESS],
             # cls.BUSHWALKING: [cls.OUTDOOR_ACTIVITY, cls.FITNESS],
             # cls.ABSEILING_TRIP: [cls.OUTDOOR_ACTIVITY, cls.FITNESS],
