@@ -46,3 +46,18 @@ MAX_TRANSPORTATION_TYPE_LENGTH: int = 50
 
 # FitnessData constants (FITNESS type)
 MAX_STRAVA_ACTIVITY_ID_LENGTH: int = 255
+
+# OutdoorActivityData constants (OUTDOOR_ACTIVITY type)
+MAX_ACTIVITY_TYPE_LENGTH: int = 100
+MAX_WEATHER_CONDITIONS_LENGTH: int = 200
+MAX_ROLE_LENGTH: int = 100
+MAX_PARTICIPANT_NOTES_LENGTH: int = 2000
+
+# BushwalkingData constants (BUSHWALKING type)
+VALID_TRACK_GRADES: list[str] = [
+    "Grade 1",
+    "Grade 2",
+    "Grade 3",
+    "Grade 4",
+    "Grade 5",
+]

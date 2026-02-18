@@ -44,14 +44,14 @@ class JournalType(StrEnum):
 
     # Activity types (Iteration 4.5)
     FITNESS = "fitness"
-    # OUTDOOR_ACTIVITY = "outdoor_activity"  # Future: Iteration 4.5-003
-    # BUSHWALKING = "bushwalking"  # Future: Iteration 4.5-004
+    OUTDOOR_ACTIVITY = "outdoor_activity"  # Iteration 4.5-003
+    BUSHWALKING = "bushwalking"  # Iteration 4.5-003
+    JOGGING = "jogging"  # Iteration 4.5-003
     # ABSEILING_TRIP = "abseiling_trip"  # Future: Iteration 4.5-005
     # CANYONING = "canyoning"  # Future: Iteration 4.5-006
     # CLIMBING = "climbing"  # Future: Iteration 4.5-007
     # KAYAKING = "kayaking"  # Future: Iteration 4.5-008
     # CROSS_COUNTRY_SKIING = "cross_country_skiing"  # Future: Iteration 4.5-009
-    # JOGGING = "jogging"  # Future: Iteration 4.5-010
 
     def __str__(self) -> str:
         """Return string representation of the type."""
@@ -102,7 +102,7 @@ class JournalType(StrEnum):
         Returns:
             List of journal types that must be added (empty for base types)
         """
-        # Type dependency mapping (will be expanded in Iteration 4.5)
+        # Type dependency mapping
         dependencies: dict[JournalType, list[JournalType]] = {
             # Base types have no dependencies
             cls.NOTE: [],
@@ -111,16 +111,16 @@ class JournalType(StrEnum):
             cls.PLAN: [],
             cls.TRAVEL: [],
             cls.PHOTO_ALBUM: [],
-            # Fitness types (Iteration 4.5)
+            # Fitness types (Iteration 4.5-002/003)
             cls.FITNESS: [],  # Base fitness type - no dependencies
-            # cls.OUTDOOR_ACTIVITY: [cls.FITNESS],
-            # cls.BUSHWALKING: [cls.OUTDOOR_ACTIVITY, cls.FITNESS],
+            cls.OUTDOOR_ACTIVITY: [cls.FITNESS],
+            cls.BUSHWALKING: [cls.OUTDOOR_ACTIVITY, cls.FITNESS],
+            cls.JOGGING: [cls.FITNESS],  # NOT OUTDOOR_ACTIVITY - jogging can be indoors
             # cls.ABSEILING_TRIP: [cls.OUTDOOR_ACTIVITY, cls.FITNESS],
             # cls.CANYONING: [cls.BUSHWALKING, cls.ABSEILING_TRIP, cls.OUTDOOR_ACTIVITY, cls.FITNESS],
             # cls.CLIMBING: [cls.OUTDOOR_ACTIVITY, cls.FITNESS],
             # cls.KAYAKING: [cls.OUTDOOR_ACTIVITY, cls.FITNESS],
             # cls.CROSS_COUNTRY_SKIING: [cls.BUSHWALKING, cls.OUTDOOR_ACTIVITY, cls.FITNESS],
-            # cls.JOGGING: [cls.FITNESS],
         }
 
         return dependencies.get(journal_type, [])

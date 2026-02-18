@@ -20,6 +20,10 @@ describe('Journal Types', () => {
       expect(JournalType.PLAN).toBe('plan');
       expect(JournalType.TRAVEL).toBe('travel');
       expect(JournalType.PHOTO_ALBUM).toBe('photo_album');
+      expect(JournalType.FITNESS).toBe('fitness');
+      expect(JournalType.OUTDOOR_ACTIVITY).toBe('outdoor_activity');
+      expect(JournalType.BUSHWALKING).toBe('bushwalking');
+      expect(JournalType.JOGGING).toBe('jogging');
     });
   });
 

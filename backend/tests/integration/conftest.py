@@ -261,6 +261,10 @@ TEST_DATABASE_SCHEMA_STATEMENTS = [
     "DROP TABLE IF EXISTS journal_photo_album_data CASCADE",
     "DROP TABLE IF EXISTS journal_mood_data CASCADE",
     "DROP TABLE IF EXISTS journal_calendar_info CASCADE",
+    "DROP TABLE IF EXISTS journal_jogging_data CASCADE",
+    "DROP TABLE IF EXISTS journal_bushwalking_data CASCADE",
+    "DROP TABLE IF EXISTS journal_outdoor_activity_data CASCADE",
+    "DROP TABLE IF EXISTS journal_fitness_data CASCADE",
     "DROP TABLE IF EXISTS journals CASCADE",
     "DROP TABLE IF EXISTS routes CASCADE",
     "DROP TABLE IF EXISTS calendars CASCADE",
@@ -415,6 +419,51 @@ TEST_DATABASE_SCHEMA_STATEMENTS = [
     """CREATE INDEX idx_routes_user_id ON routes (user_id)""",
     """CREATE INDEX idx_routes_name ON routes (name)""",
     """CREATE INDEX idx_routes_created_at ON routes (created_at)""",
+    # Journal fitness data table (FITNESS type)
+    """CREATE TABLE journal_fitness_data (
+        journal_id INTEGER PRIMARY KEY REFERENCES journals(id) ON DELETE CASCADE,
+        heart_rate_avg INTEGER CHECK (heart_rate_avg IS NULL OR heart_rate_avg >= 0),
+        heart_rate_max INTEGER CHECK (heart_rate_max IS NULL OR heart_rate_max >= 0),
+        distance INTEGER CHECK (distance IS NULL OR distance >= 0),
+        elevation_gain INTEGER CHECK (elevation_gain IS NULL OR elevation_gain >= 0),
+        elevation_loss INTEGER CHECK (elevation_loss IS NULL OR elevation_loss >= 0),
+        duration INTEGER CHECK (duration IS NULL OR duration >= 0),
+        calories INTEGER CHECK (calories IS NULL OR calories >= 0),
+        gpx_track_data TEXT,
+        strava_activity_id VARCHAR(255),
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL,
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL
+    )""",
+    # Journal outdoor activity data table (OUTDOOR_ACTIVITY type)
+    """CREATE TABLE journal_outdoor_activity_data (
+        journal_id INTEGER PRIMARY KEY REFERENCES journals(id) ON DELETE CASCADE,
+        activity_type VARCHAR(100),
+        weather_conditions VARCHAR(200),
+        role VARCHAR(100),
+        in_leadership_role BOOLEAN,
+        participant_notes VARCHAR(2000),
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL,
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL
+    )""",
+    # Journal bushwalking data table (BUSHWALKING type)
+    """CREATE TABLE journal_bushwalking_data (
+        journal_id INTEGER PRIMARY KEY REFERENCES journals(id) ON DELETE CASCADE,
+        route_id UUID REFERENCES routes(id) ON DELETE SET NULL,
+        track_grading VARCHAR(10) CHECK (
+            track_grading IS NULL OR track_grading IN
+            ('Grade 1', 'Grade 2', 'Grade 3', 'Grade 4', 'Grade 5')
+        ),
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL,
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL
+    )""",
+    # Journal jogging data table (JOGGING type)
+    """CREATE TABLE journal_jogging_data (
+        journal_id INTEGER PRIMARY KEY REFERENCES journals(id) ON DELETE CASCADE,
+        route_id UUID REFERENCES routes(id) ON DELETE SET NULL,
+        pace INTEGER CHECK (pace IS NULL OR pace >= 0),
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL,
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL
+    )""",
     # Calendars table
     """CREATE TABLE calendars (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

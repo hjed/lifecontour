@@ -49,6 +49,10 @@ const typeOptions = [
   { value: JournalType.PLAN, label: 'Plan' },
   { value: JournalType.TRAVEL, label: 'Travel' },
   { value: JournalType.PHOTO_ALBUM, label: 'Photo Album' },
+  { value: JournalType.FITNESS, label: 'Fitness' },
+  { value: JournalType.OUTDOOR_ACTIVITY, label: 'Outdoor Activity' },
+  { value: JournalType.BUSHWALKING, label: 'Bushwalking' },
+  { value: JournalType.JOGGING, label: 'Jogging' },
 ];
 
 interface JournalCreateFormProps {

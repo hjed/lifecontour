@@ -190,3 +190,27 @@ class RouteValidationError(JournalDomainError):
     def __init__(self, field: str, message: str):
         super().__init__(f"{field}: {message}", 400)
         self.field = field
+
+
+class OutdoorActivityDataValidationError(JournalDomainError):
+    """Exception raised when outdoor activity data (OUTDOOR_ACTIVITY type) validation fails."""
+
+    def __init__(self, field: str, message: str):
+        super().__init__(f"{field}: {message}", 400)
+        self.field = field
+
+
+class BushwalkingDataValidationError(JournalDomainError):
+    """Exception raised when bushwalking data (BUSHWALKING type) validation fails."""
+
+    def __init__(self, field: str, message: str):
+        super().__init__(f"{field}: {message}", 400)
+        self.field = field
+
+
+class JoggingDataValidationError(JournalDomainError):
+    """Exception raised when jogging data (JOGGING type) validation fails."""
+
+    def __init__(self, field: str, message: str):
+        super().__init__(f"{field}: {message}", 400)
+        self.field = field

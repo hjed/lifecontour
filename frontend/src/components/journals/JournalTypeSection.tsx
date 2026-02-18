@@ -59,6 +59,10 @@ const TYPE_SECTION_LABELS: Record<JournalType, string> = {
   [JournalType.PLAN]: 'Plan Documents',
   [JournalType.TRAVEL]: 'Travel Itinerary',
   [JournalType.PHOTO_ALBUM]: 'Photo Album',
+  [JournalType.FITNESS]: 'Fitness Activity',
+  [JournalType.OUTDOOR_ACTIVITY]: 'Outdoor Activity',
+  [JournalType.BUSHWALKING]: 'Bushwalking',
+  [JournalType.JOGGING]: 'Jogging',
 };
 
 /**

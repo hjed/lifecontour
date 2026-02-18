@@ -51,6 +51,10 @@ const JOURNAL_TYPE_LABELS: Record<JournalType, string> = {
   [JournalType.PLAN]: 'Plan',
   [JournalType.TRAVEL]: 'Travel',
   [JournalType.PHOTO_ALBUM]: 'Photo Album',
+  [JournalType.FITNESS]: 'Fitness',
+  [JournalType.OUTDOOR_ACTIVITY]: 'Outdoor Activity',
+  [JournalType.BUSHWALKING]: 'Bushwalking',
+  [JournalType.JOGGING]: 'Jogging',
 };
 
 /**

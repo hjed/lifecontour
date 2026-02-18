@@ -830,6 +830,117 @@ class TestJournalTypeManagement:
         assert fitness_data["duration"] == 1800
         assert fitness_data["calories"] == 450
 
+    async def test_update_outdoor_activity_type_data(self, integration_api_client):
+        """Test updating OUTDOOR_ACTIVITY type data."""
+        create_data = create_journal_request_data(
+            title="Outdoor Activity Test",
+            content="Test content",
+            types=["OUTDOOR_ACTIVITY"],
+        )
+
+        create_response = await integration_api_client.post(
+            "/api/journals", json=create_data
+        )
+        assert create_response.status_code == 201
+        journal_id = create_response.json()["data"]["id"]
+
+        update_data = {
+            "data": {
+                "type": "journal-type-data",
+                "attributes": {
+                    "activity_type": "Hiking",
+                    "weather_conditions": "Sunny, 22°C",
+                    "role": "leader",
+                    "in_leadership_role": True,
+                    "participant_notes": "Group of 5",
+                },
+            }
+        }
+
+        response = await integration_api_client.put(
+            f"/api/journals/{journal_id}/types/OUTDOOR_ACTIVITY/data",
+            json=update_data,
+        )
+
+        assert response.status_code == 200
+        response_json = response.json()
+        outdoor_data = response_json["data"]["attributes"]["type_data"][
+            "outdoor_activity"
+        ]
+        assert outdoor_data["activity_type"] == "Hiking"
+        assert outdoor_data["weather_conditions"] == "Sunny, 22°C"
+        assert outdoor_data["role"] == "leader"
+        assert outdoor_data["in_leadership_role"] is True
+        assert outdoor_data["participant_notes"] == "Group of 5"
+
+    async def test_update_bushwalking_type_data(self, integration_api_client):
+        """Test updating BUSHWALKING type data."""
+        create_data = create_journal_request_data(
+            title="Bushwalking Test",
+            content="Test content",
+            types=["BUSHWALKING"],
+        )
+
+        create_response = await integration_api_client.post(
+            "/api/journals", json=create_data
+        )
+        assert create_response.status_code == 201
+        journal_id = create_response.json()["data"]["id"]
+
+        update_data = {
+            "data": {
+                "type": "journal-type-data",
+                "attributes": {
+                    "track_grading": "Grade 3",
+                },
+            }
+        }
+
+        response = await integration_api_client.put(
+            f"/api/journals/{journal_id}/types/BUSHWALKING/data",
+            json=update_data,
+        )
+
+        assert response.status_code == 200
+        response_json = response.json()
+        bushwalking_data = response_json["data"]["attributes"]["type_data"][
+            "bushwalking"
+        ]
+        assert bushwalking_data["track_grading"] == "Grade 3"
+
+    async def test_update_jogging_type_data(self, integration_api_client):
+        """Test updating JOGGING type data."""
+        create_data = create_journal_request_data(
+            title="Jogging Test",
+            content="Test content",
+            types=["JOGGING"],
+        )
+
+        create_response = await integration_api_client.post(
+            "/api/journals", json=create_data
+        )
+        assert create_response.status_code == 201
+        journal_id = create_response.json()["data"]["id"]
+
+        update_data = {
+            "data": {
+                "type": "journal-type-data",
+                "attributes": {
+                    "pace": 360,  # 6 min/km in seconds
+                },
+            }
+        }
+
+        response = await integration_api_client.put(
+            f"/api/journals/{journal_id}/types/JOGGING/data",
+            json=update_data,
+        )
+
+        assert response.status_code == 200
+        response_json = response.json()
+        jogging_data = response_json["data"]["attributes"]["type_data"]["jogging"]
+        assert jogging_data["pace"] == 360
+
 
 @pytest.mark.integration
 class TestJournalHierarchy:
