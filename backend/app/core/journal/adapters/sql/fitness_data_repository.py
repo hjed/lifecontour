@@ -54,16 +54,19 @@ class SqlFitnessDataRepository(FitnessDataRepository):
         return self._row_to_fitness_data(row)
 
     async def save(self, fitness_data: FitnessData) -> FitnessData:
-        """Save fitness data (insert or update)."""
-        # Check if row exists
-        existing = await self.find_by_journal_id(fitness_data.journal_id)
-        if existing is None:
-            return await self._insert(fitness_data)
-        else:
-            return await self._update(fitness_data)
+        """
+        Save fitness data (insert or update) using atomic UPSERT.
 
-    async def _insert(self, fitness_data: FitnessData) -> FitnessData:
-        """Insert new fitness data."""
+        Uses PostgreSQL's INSERT ... ON CONFLICT to avoid race conditions
+        between concurrent requests. This is atomic and handles the case
+        where multiple requests try to create the same journal_id simultaneously.
+
+        Args:
+            fitness_data: The fitness data to save
+
+        Returns:
+            The saved fitness data with updated timestamps
+        """
         query = text(
             """
             INSERT INTO journal_fitness_data (
@@ -76,46 +79,17 @@ class SqlFitnessDataRepository(FitnessDataRepository):
                 :elevation_gain, :elevation_loss, :duration, :calories,
                 :gpx_track_data, :strava_activity_id
             )
-            RETURNING journal_id, heart_rate_avg, heart_rate_max, distance,
-                      elevation_gain, elevation_loss, duration, calories,
-                      gpx_track_data, strava_activity_id,
-                      created_at, updated_at
-            """
-        )
-        result = await self.conn.execute(
-            query,
-            {
-                "journal_id": fitness_data.journal_id,
-                "heart_rate_avg": fitness_data.heart_rate_avg,
-                "heart_rate_max": fitness_data.heart_rate_max,
-                "distance": fitness_data.distance,
-                "elevation_gain": fitness_data.elevation_gain,
-                "elevation_loss": fitness_data.elevation_loss,
-                "duration": fitness_data.duration,
-                "calories": fitness_data.calories,
-                "gpx_track_data": fitness_data.gpx_track_data,
-                "strava_activity_id": fitness_data.strava_activity_id,
-            },
-        )
-        row = result.fetchone()
-        return self._row_to_fitness_data(row)
-
-    async def _update(self, fitness_data: FitnessData) -> FitnessData:
-        """Update existing fitness data."""
-        query = text(
-            """
-            UPDATE journal_fitness_data
-            SET heart_rate_avg = :heart_rate_avg,
-                heart_rate_max = :heart_rate_max,
-                distance = :distance,
-                elevation_gain = :elevation_gain,
-                elevation_loss = :elevation_loss,
-                duration = :duration,
-                calories = :calories,
-                gpx_track_data = :gpx_track_data,
-                strava_activity_id = :strava_activity_id,
+            ON CONFLICT (journal_id) DO UPDATE SET
+                heart_rate_avg = EXCLUDED.heart_rate_avg,
+                heart_rate_max = EXCLUDED.heart_rate_max,
+                distance = EXCLUDED.distance,
+                elevation_gain = EXCLUDED.elevation_gain,
+                elevation_loss = EXCLUDED.elevation_loss,
+                duration = EXCLUDED.duration,
+                calories = EXCLUDED.calories,
+                gpx_track_data = EXCLUDED.gpx_track_data,
+                strava_activity_id = EXCLUDED.strava_activity_id,
                 updated_at = now()
-            WHERE journal_id = :journal_id
             RETURNING journal_id, heart_rate_avg, heart_rate_max, distance,
                       elevation_gain, elevation_loss, duration, calories,
                       gpx_track_data, strava_activity_id,
