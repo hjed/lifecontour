@@ -139,7 +139,7 @@ class TestFitnessDataValidation:
         """Test that negative heart rate average raises error."""
         with pytest.raises(
             FitnessDataValidationError,
-            match="Heart rate average must be positive",
+            match="Heart rate average must be non-negative",
         ):
             FitnessData(journal_id=1, heart_rate_avg=-1)
 
@@ -147,7 +147,7 @@ class TestFitnessDataValidation:
         """Test that negative heart rate max raises error."""
         with pytest.raises(
             FitnessDataValidationError,
-            match="Heart rate max must be positive",
+            match="Heart rate max must be non-negative",
         ):
             FitnessData(journal_id=1, heart_rate_max=-1)
 
@@ -155,7 +155,7 @@ class TestFitnessDataValidation:
         """Test that negative distance raises error."""
         with pytest.raises(
             FitnessDataValidationError,
-            match="Distance must be positive",
+            match="Distance must be non-negative",
         ):
             FitnessData(journal_id=1, distance=-1)
 
@@ -163,7 +163,7 @@ class TestFitnessDataValidation:
         """Test that negative elevation gain raises error."""
         with pytest.raises(
             FitnessDataValidationError,
-            match="Elevation gain must be positive",
+            match="Elevation gain must be non-negative",
         ):
             FitnessData(journal_id=1, elevation_gain=-1)
 
@@ -171,7 +171,7 @@ class TestFitnessDataValidation:
         """Test that negative elevation loss raises error."""
         with pytest.raises(
             FitnessDataValidationError,
-            match="Elevation loss must be positive",
+            match="Elevation loss must be non-negative",
         ):
             FitnessData(journal_id=1, elevation_loss=-1)
 
@@ -179,7 +179,7 @@ class TestFitnessDataValidation:
         """Test that negative duration raises error."""
         with pytest.raises(
             FitnessDataValidationError,
-            match="Duration must be positive",
+            match="Duration must be non-negative",
         ):
             FitnessData(journal_id=1, duration=-1)
 
@@ -187,7 +187,7 @@ class TestFitnessDataValidation:
         """Test that negative calories raises error."""
         with pytest.raises(
             FitnessDataValidationError,
-            match="Calories must be positive",
+            match="Calories must be non-negative",
         ):
             FitnessData(journal_id=1, calories=-1)
 
