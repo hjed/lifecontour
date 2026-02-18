@@ -5,14 +5,17 @@ Tests the real API endpoints with actual services and database connections.
 Uses the established authentication pattern from other integration tests.
 """
 
+from contextlib import suppress
 from unittest.mock import patch
 
+import anyio
 import pytest
 from dishka import Provider, Scope, make_async_container, provide
 from dishka.integrations.fastapi import FastapiProvider, setup_dishka
 from fastapi.testclient import TestClient
 from sqlalchemy.ext.asyncio import AsyncConnection
 
+from app.core.integrations.exceptions import JobNotFoundException
 from app.infrastructure.auth.google_token_service import GoogleTokenService
 from app.infrastructure.auth.models import SessionUser
 from app.infrastructure.auth.oauth_service import OAuthService
@@ -83,22 +86,48 @@ class TestIntegrationsControllers:
             FastapiProvider(),
         )
 
-        try:
-            app.state.dishka_container.close()
-        except (RuntimeError, AttributeError):
-            pass
+        # Ensure any existing Dishka container is closed cleanly (Dishka containers are async).
+        existing_container = getattr(app.state, "dishka_container", None)
+        if existing_container is not None:
+            with suppress(Exception):
+                anyio.run(existing_container.close)
         app.state.dishka_container = test_container
         setup_dishka(test_container, app)
 
-        return TestClient(app)
+        # Use a yield fixture so we can reliably close the async container and avoid
+        # resource warnings about un-awaited coroutines.
+        with TestClient(app) as test_client:
+            yield test_client
+
+        with suppress(Exception):
+            anyio.run(test_container.close)
 
     def test_trigger_google_contacts_sync_success(self, client: TestClient):
         """Test successful Google Contacts sync trigger."""
-        with patch(
-            "app.core.integrations.task_queue_service.TaskQueueService.enqueue_google_contacts_sync"
-        ) as mock_enqueue:
+        with (
+            patch(
+                "app.core.integrations.task_queue_service.TaskQueueService.enqueue_google_contacts_sync"
+            ) as mock_enqueue,
+            patch(
+                "app.core.integrations.task_queue_service.TaskQueueService.get_sync_job_details"
+            ) as mock_get_details,
+        ):
             # Mock successful job enqueueing
             mock_enqueue.return_value = "test-job-123"
+            mock_get_details.return_value = {
+                "job_id": "test-job-123",
+                "status": "queued",
+                "sync_type": "smart",
+                "created_at": "2024-01-01T10:00:00Z",
+                "started_at": None,
+                "completed_at": None,
+                "error_message": None,
+                "contacts_processed": None,
+                "contacts_created": None,
+                "contacts_updated": None,
+                "contacts_deleted": None,
+                "progress": None,
+            }
 
             # Make request with proper body
             response = client.post(
@@ -108,12 +137,21 @@ class TestIntegrationsControllers:
             # Verify response
             assert response.status_code == 200
             data = response.json()
-            assert data["job_id"] == "test-job-123"
-            assert data["status"] == "queued"
-            assert "Google Contacts sync job has been queued" in data["message"]
+            assert data["data"]["id"] == "test-job-123"
+            assert data["data"]["type"] == "sync-job"
+            attributes = data["data"]["attributes"]
+            assert attributes["status"] == "queued"
+            assert attributes["syncType"] == "smart"
 
             # Verify service was called
-            mock_enqueue.assert_called_once()
+            mock_enqueue.assert_called_once_with(
+                google_account_email="test@example.com",
+                user_id="123",
+                sync_type="smart",
+            )
+            mock_get_details.assert_called_once_with(
+                job_id="test-job-123", user_id="123"
+            )
 
     def test_trigger_google_contacts_sync_failure(self, client: TestClient):
         """Test Google Contacts sync trigger failure."""
@@ -141,16 +179,21 @@ class TestIntegrationsControllers:
         job_id = "test-job-456"
 
         with patch(
-            "app.core.integrations.task_queue_service.TaskQueueService.get_job_status"
-        ) as mock_get_status:
-            # Mock successful status retrieval
-            mock_get_status.return_value = {
+            "app.core.integrations.task_queue_service.TaskQueueService.get_sync_job_details"
+        ) as mock_get_details:
+            mock_get_details.return_value = {
                 "job_id": job_id,
                 "status": "completed",
-                "message": "Job completed successfully",
+                "sync_type": "smart",
                 "created_at": "2024-01-01T10:00:00Z",
+                "started_at": "2024-01-01T10:00:10Z",
                 "completed_at": "2024-01-01T10:05:00Z",
-                "result": {"contacts_processed": 5},
+                "error_message": None,
+                "contacts_processed": 5,
+                "contacts_created": 1,
+                "contacts_updated": 2,
+                "contacts_deleted": 0,
+                "progress": 100,
             }
 
             # Make request
@@ -159,22 +202,23 @@ class TestIntegrationsControllers:
             # Verify response
             assert response.status_code == 200
             data = response.json()
-            assert data["job_id"] == job_id
-            assert data["status"] == "completed"
-            assert data["message"] == "Job completed successfully"
+            assert data["data"]["id"] == job_id
+            assert data["data"]["type"] == "sync-job"
+            attributes = data["data"]["attributes"]
+            assert attributes["status"] == "completed"
+            assert attributes["contactsProcessed"] == 5
 
             # Verify service was called with job_id and user_id (user.id is a string)
-            mock_get_status.assert_called_once_with(job_id, "123")
+            mock_get_details.assert_called_once_with(job_id=job_id, user_id="123")
 
     def test_get_sync_job_status_failure(self, client: TestClient):
         """Test job status retrieval failure."""
         job_id = "test-job-789"
 
         with patch(
-            "app.core.integrations.task_queue_service.TaskQueueService.get_job_status"
-        ) as mock_get_status:
-            # Mock status retrieval failure
-            mock_get_status.side_effect = Exception("Job not found")
+            "app.core.integrations.task_queue_service.TaskQueueService.get_sync_job_details"
+        ) as mock_get_details:
+            mock_get_details.side_effect = JobNotFoundException("Job not found")
 
             # Make request
             response = client.get(f"/api/integrations/google/contacts/sync/{job_id}")
@@ -218,11 +262,13 @@ class TestIntegrationsControllers:
             # Verify response
             assert response.status_code == 200
             data = response.json()
-            assert data["status"] == "healthy"
-            assert "services" in data
-            assert data["services"]["redis"]["status"] == "healthy"
-            assert data["services"]["google_contacts_worker"]["status"] == "healthy"
-            assert data["services"]["google_api"]["status"] == "healthy"
+            assert data["data"]["id"] == "health"
+            assert data["data"]["type"] == "integration-health"
+
+            attributes = data["data"]["attributes"]
+            assert attributes["overall"] == "healthy"
+            assert attributes["redis"]["status"] == "healthy"
+            assert attributes["worker"]["status"] == "healthy"
 
             # Verify service was called
             mock_health.assert_called_once()
@@ -259,10 +305,10 @@ class TestIntegrationsControllers:
             # Verify response
             assert response.status_code == 200
             data = response.json()
-            assert data["status"] == "unhealthy"
-            assert data["services"]["redis"]["status"] == "unhealthy"
-            assert data["services"]["google_contacts_worker"]["status"] == "unhealthy"
-            assert data["services"]["google_api"]["status"] == "healthy"
+            attributes = data["data"]["attributes"]
+            assert attributes["overall"] == "unhealthy"
+            assert attributes["redis"]["status"] == "unhealthy"
+            assert attributes["worker"]["status"] == "unhealthy"
 
     def test_get_integrations_health_service_exception(self, client: TestClient):
         """Test health check when health service raises exception."""
@@ -278,10 +324,12 @@ class TestIntegrationsControllers:
             # Verify response
             assert response.status_code == 200
             data = response.json()
-            assert data["status"] == "unhealthy"
-            assert "services" in data
-            assert "error" in data["services"]
-            assert "Health service failed" in data["services"]["error"]["message"]
+            attributes = data["data"]["attributes"]
+            assert attributes["overall"] == "unhealthy"
+            assert attributes["redis"]["status"] == "unhealthy"
+            assert "Health service failed" in (
+                attributes["redis"]["errorMessage"] or ""
+            )
 
     def test_get_google_contacts_status_disconnected(self, client: TestClient):
         """Test Google Contacts status endpoint returns disconnected state."""

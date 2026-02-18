@@ -282,7 +282,7 @@ services:
       context: .
       dockerfile: integration_workers/google_contacts/Dockerfile
     container_name: pms-google-worker
-    profiles: [dev, prod]
+    profiles: [dev, test, prod]
     environment:
       DATABASE_URL: postgresql://${DB_USER:-postgres}:${DB_PASSWORD:-postgres}@database:5432/${DB_NAME:-personal_management}
       REDIS_URL: redis://redis:6379
