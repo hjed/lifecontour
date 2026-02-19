@@ -5,14 +5,17 @@ from uuid import UUID
 
 from core_shared.models.route import Route
 
+from .bushwalking_data import BushwalkingData
 from .calendar import Calendar
 from .calendar_info import CalendarInfo
 from .entities import Journal
 from .fitness_data import FitnessData
+from .jogging_data import JoggingData
 from .journal_contact_relationship import JournalContactRelationship
 from .journal_relationship_types import JournalContactRelationshipType
 from .journal_tag import JournalTag
 from .mood_data import MoodData
+from .outdoor_activity_data import OutdoorActivityData
 from .photo_album_data import PhotoAlbumData
 from .plan_data import PlanData, PlanDocument
 from .travel_data import (
@@ -1089,5 +1092,150 @@ class RouteRepository(ABC):
 
         Returns:
             True if the route is used in any activity-specific journal data, False otherwise
+        """
+        pass
+
+
+class OutdoorActivityDataRepository(ABC):
+    """
+    Repository interface for outdoor activity data (OUTDOOR_ACTIVITY type) operations.
+
+    A journal has the OUTDOOR_ACTIVITY type if an OutdoorActivityData row exists
+    for its journal_id.
+    """
+
+    @abstractmethod
+    async def find_by_journal_id(self, journal_id: int) -> OutdoorActivityData | None:
+        """
+        Find outdoor activity data by journal ID.
+
+        Args:
+            journal_id: The journal ID to look up
+
+        Returns:
+            The OutdoorActivityData if found, None otherwise
+        """
+        pass
+
+    @abstractmethod
+    async def save(self, data: OutdoorActivityData) -> OutdoorActivityData:
+        """
+        Save outdoor activity data (insert or update).
+
+        This effectively adds or updates the OUTDOOR_ACTIVITY type for a journal.
+
+        Args:
+            data: The outdoor activity data to save
+
+        Returns:
+            The saved data with updated timestamps
+        """
+        pass
+
+    @abstractmethod
+    async def delete(self, journal_id: int) -> None:
+        """
+        Delete outdoor activity data by journal ID.
+
+        This effectively removes the OUTDOOR_ACTIVITY type from a journal.
+
+        Args:
+            journal_id: The journal ID to delete outdoor activity data for
+        """
+        pass
+
+
+class BushwalkingDataRepository(ABC):
+    """
+    Repository interface for bushwalking data (BUSHWALKING type) operations.
+
+    A journal has the BUSHWALKING type if a BushwalkingData row exists for its journal_id.
+    """
+
+    @abstractmethod
+    async def find_by_journal_id(self, journal_id: int) -> BushwalkingData | None:
+        """
+        Find bushwalking data by journal ID.
+
+        Args:
+            journal_id: The journal ID to look up
+
+        Returns:
+            The BushwalkingData if found, None otherwise
+        """
+        pass
+
+    @abstractmethod
+    async def save(self, data: BushwalkingData) -> BushwalkingData:
+        """
+        Save bushwalking data (insert or update).
+
+        This effectively adds or updates the BUSHWALKING type for a journal.
+
+        Args:
+            data: The bushwalking data to save
+
+        Returns:
+            The saved data with updated timestamps
+        """
+        pass
+
+    @abstractmethod
+    async def delete(self, journal_id: int) -> None:
+        """
+        Delete bushwalking data by journal ID.
+
+        This effectively removes the BUSHWALKING type from a journal.
+
+        Args:
+            journal_id: The journal ID to delete bushwalking data for
+        """
+        pass
+
+
+class JoggingDataRepository(ABC):
+    """
+    Repository interface for jogging data (JOGGING type) operations.
+
+    A journal has the JOGGING type if a JoggingData row exists for its journal_id.
+    """
+
+    @abstractmethod
+    async def find_by_journal_id(self, journal_id: int) -> JoggingData | None:
+        """
+        Find jogging data by journal ID.
+
+        Args:
+            journal_id: The journal ID to look up
+
+        Returns:
+            The JoggingData if found, None otherwise
+        """
+        pass
+
+    @abstractmethod
+    async def save(self, data: JoggingData) -> JoggingData:
+        """
+        Save jogging data (insert or update).
+
+        This effectively adds or updates the JOGGING type for a journal.
+
+        Args:
+            data: The jogging data to save
+
+        Returns:
+            The saved data with updated timestamps
+        """
+        pass
+
+    @abstractmethod
+    async def delete(self, journal_id: int) -> None:
+        """
+        Delete jogging data by journal ID.
+
+        This effectively removes the JOGGING type from a journal.
+
+        Args:
+            journal_id: The journal ID to delete jogging data for
         """
         pass

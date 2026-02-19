@@ -3,6 +3,9 @@
 from dishka import Provider, Scope, provide
 from sqlalchemy.ext.asyncio import AsyncConnection
 
+from app.core.journal.adapters.sql.bushwalking_data_repository import (
+    SqlBushwalkingDataRepository,
+)
 from app.core.journal.adapters.sql.calendar_info_repository import (
     SqlCalendarInfoRepository,
 )
@@ -10,12 +13,18 @@ from app.core.journal.adapters.sql.calendar_repository import SqlCalendarReposit
 from app.core.journal.adapters.sql.fitness_data_repository import (
     SqlFitnessDataRepository,
 )
+from app.core.journal.adapters.sql.jogging_data_repository import (
+    SqlJoggingDataRepository,
+)
 from app.core.journal.adapters.sql.journal_contact_relationship_repository import (
     SqlJournalContactRelationshipRepository,
 )
 from app.core.journal.adapters.sql.journal_repository import SqlJournalRepository
 from app.core.journal.adapters.sql.journal_tag_repository import SqlJournalTagRepository
 from app.core.journal.adapters.sql.mood_data_repository import SqlMoodDataRepository
+from app.core.journal.adapters.sql.outdoor_activity_data_repository import (
+    SqlOutdoorActivityDataRepository,
+)
 from app.core.journal.adapters.sql.photo_album_data_repository import (
     SqlPhotoAlbumDataRepository,
 )
@@ -23,13 +32,16 @@ from app.core.journal.adapters.sql.plan_data_repository import SqlPlanDataReposi
 from app.core.journal.adapters.sql.route_repository import SqlRouteRepository
 from app.core.journal.adapters.sql.travel_data_repository import SqlTravelDataRepository
 from app.core.journal.models.repositories import (
+    BushwalkingDataRepository,
     CalendarInfoRepository,
     CalendarRepository,
     FitnessDataRepository,
+    JoggingDataRepository,
     JournalContactRelationshipRepository,
     JournalRepository,
     JournalTagRepository,
     MoodDataRepository,
+    OutdoorActivityDataRepository,
     PhotoAlbumDataRepository,
     PlanDataRepository,
     RouteRepository,
@@ -104,6 +116,27 @@ class JournalProvider(Provider):
     ) -> JournalContactRelationshipRepository:
         """Provide a JournalContactRelationshipRepository instance."""
         return SqlJournalContactRelationshipRepository(connection)
+
+    @provide(scope=Scope.REQUEST)
+    def outdoor_activity_data_repository(
+        self, connection: AsyncConnection
+    ) -> OutdoorActivityDataRepository:
+        """Provide an OutdoorActivityDataRepository instance."""
+        return SqlOutdoorActivityDataRepository(connection)
+
+    @provide(scope=Scope.REQUEST)
+    def bushwalking_data_repository(
+        self, connection: AsyncConnection
+    ) -> BushwalkingDataRepository:
+        """Provide a BushwalkingDataRepository instance."""
+        return SqlBushwalkingDataRepository(connection)
+
+    @provide(scope=Scope.REQUEST)
+    def jogging_data_repository(
+        self, connection: AsyncConnection
+    ) -> JoggingDataRepository:
+        """Provide a JoggingDataRepository instance."""
+        return SqlJoggingDataRepository(connection)
 
     @provide(scope=Scope.REQUEST)
     def route_repository(self, connection: AsyncConnection) -> RouteRepository:

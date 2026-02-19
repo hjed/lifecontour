@@ -16,6 +16,11 @@ export enum JournalType {
   PLAN = 'plan',
   TRAVEL = 'travel',
   PHOTO_ALBUM = 'photo_album',
+  // Activity types (Iteration 4.5)
+  FITNESS = 'fitness',
+  OUTDOOR_ACTIVITY = 'outdoor_activity',
+  BUSHWALKING = 'bushwalking',
+  JOGGING = 'jogging',
 }
 
 // Journal Contact Relationship Type Enum

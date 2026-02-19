@@ -51,7 +51,9 @@ class TestJournalType:
     def test_journal_type_can_be_iterated(self):
         """Test that JournalType can be iterated."""
         all_types = list(JournalType)
-        assert len(all_types) == 7  # Updated for FITNESS type
+        assert (
+            len(all_types) == 10
+        )  # Updated for OUTDOOR_ACTIVITY, BUSHWALKING, JOGGING
         assert JournalType.NOTE in all_types
         assert JournalType.EVENT in all_types
         assert JournalType.MOOD_RATING in all_types
@@ -59,3 +61,6 @@ class TestJournalType:
         assert JournalType.TRAVEL in all_types
         assert JournalType.PHOTO_ALBUM in all_types
         assert JournalType.FITNESS in all_types
+        assert JournalType.OUTDOOR_ACTIVITY in all_types
+        assert JournalType.BUSHWALKING in all_types
+        assert JournalType.JOGGING in all_types

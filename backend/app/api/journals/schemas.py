@@ -181,6 +181,62 @@ class FitnessDataSchema(BaseModel):
     )
 
 
+class OutdoorActivityDataSchema(BaseModel):
+    """Outdoor activity data for OUTDOOR_ACTIVITY type journals."""
+
+    activity_type: str | None = Field(
+        default=None,
+        description="Type of outdoor activity (e.g. Hiking, Camping)",
+        max_length=100,
+    )
+    weather_conditions: str | None = Field(
+        default=None,
+        description="Description of weather conditions during the activity",
+        max_length=200,
+    )
+    role: str | None = Field(
+        default=None,
+        description="Participant's role in the activity",
+        max_length=100,
+    )
+    in_leadership_role: bool | None = Field(
+        default=None,
+        description="Whether the participant was in a leadership role",
+    )
+    participant_notes: str | None = Field(
+        default=None,
+        description="Notes about other participants",
+        max_length=2000,
+    )
+
+
+class BushwalkingDataSchema(BaseModel):
+    """Bushwalking data for BUSHWALKING type journals."""
+
+    route_id: str | None = Field(
+        default=None,
+        description="UUID of the associated route",
+    )
+    track_grading: str | None = Field(
+        default=None,
+        description="Australian Track Grading System grade (Grade 1-5)",
+    )
+
+
+class JoggingDataSchema(BaseModel):
+    """Jogging data for JOGGING type journals."""
+
+    route_id: str | None = Field(
+        default=None,
+        description="UUID of the associated route",
+    )
+    pace: int | None = Field(
+        default=None,
+        description="Pace in seconds per kilometre (non-negative)",
+        ge=0,
+    )
+
+
 # Contact relationship schema
 class JournalContactRelationshipSchema(BaseModel):
     """Journal contact relationship schema."""

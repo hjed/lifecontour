@@ -1,6 +1,6 @@
 # Iteration 4.5: Journal System - Fitness & Activity Types
 
-**Status:** 🟡 IN PROGRESS (2/7 tasks complete)
+**Status:** 🟡 IN PROGRESS (3/7 tasks complete)
 **Dependencies:** Iteration 4 (Journal Core & Base Types)
 **Goal:** Add comprehensive fitness and outdoor activity tracking with specialized activity types
 
@@ -198,7 +198,7 @@ This iteration extends the journal system with fitness and outdoor activity type
 - Validated as XML with `<gpx>` root element requirement
 - Ready for future enhancement: extract metrics, compression, download endpoint
 
-### ITER4.5-003: Outdoor Activity Types - Part 1 (OUTDOOR_ACTIVITY, BUSHWALKING, JOGGING) 🟡 PLANNED
+### ITER4.5-003: Outdoor Activity Types - Part 1 (OUTDOOR_ACTIVITY, BUSHWALKING, JOGGING) ✅ COMPLETE
 **Description:** Implement outdoor activity base type and first specialized types
 **Strategy:** Single task for three related types
 **Specification Reference:** [Outdoor Activity Data](../journal-system-specification.md#outdoor-activity-data-outdoor_activity-type), [Bushwalking Data](../journal-system-specification.md#bushwalking-data-bushwalking-type), [Jogging Data](../journal-system-specification.md#jogging-data-jogging-type)
@@ -206,7 +206,7 @@ This iteration extends the journal system with fitness and outdoor activity type
 **PR Size:** ~12 files (3 type tables, dependency logic, API schemas/converters/controllers, tests, migrations)
 
 **Acceptance Criteria:**
-- [ ] Create `journal_outdoor_activity_data` table:
+- [x] Create `journal_outdoor_activity_data` table:
   - `journal_id` (PK, FK to journals)
   - `activity_type` (string, e.g., "hiking", "climbing", "kayaking")
   - `weather_conditions` (text, nullable)
@@ -214,31 +214,87 @@ This iteration extends the journal system with fitness and outdoor activity type
   - `in_leadership_role` (boolean, nullable)
   - `participant_notes` (text, nullable)
   - `created_at`, `updated_at`
-- [ ] Implement OUTDOOR_ACTIVITY type (requires FITNESS, automatically added)
-- [ ] Create `journal_bushwalking_data` table:
+  - Migration: `0018_create_outdoor_activity_data_table.py`
+- [x] Implement OUTDOOR_ACTIVITY type (requires FITNESS, automatically added)
+- [x] Create `journal_bushwalking_data` table:
   - `journal_id` (PK, FK to journals)
   - `route_id` (FK to routes, nullable)
   - `track_grading` (string, nullable, Australian Track Grading System: Grade 1-5)
   - `created_at`, `updated_at`
-- [ ] Implement BUSHWALKING type (requires OUTDOOR_ACTIVITY, FITNESS)
-- [ ] Create `journal_jogging_data` table:
+  - Migration: `0019_create_bushwalking_data_table.py`
+- [x] Implement BUSHWALKING type (requires OUTDOOR_ACTIVITY, FITNESS)
+- [x] Create `journal_jogging_data` table:
   - `journal_id` (PK, FK to journals)
   - `route_id` (FK to routes, nullable)
   - `pace` (integer seconds per km, nullable)
   - `created_at`, `updated_at`
-- [ ] Implement JOGGING type (requires FITNESS, not OUTDOOR_ACTIVITY)
-- [ ] Update type dependency resolution to handle these types
-- [ ] Add database migrations with proper foreign key constraints
-- [ ] **Add API schemas, converters, and controller integration:**
-  - [ ] Add `OutdoorActivityDataSchema`, `BushwalkingDataSchema`, `JoggingDataSchema` to `backend/app/api/journals/schemas.py`
-  - [ ] Add converter functions in `backend/app/api/journals/converters.py`
-  - [ ] Update `_enrich_journal_data()` and `_create_type_specific_data()` in `backend/app/api/journals/controllers.py`
-  - [ ] Add repository parameters to all journal endpoints
-  - [ ] Update `backend/app/api/contacts/controllers.py` if it uses `_enrich_journal_data()`
-- [ ] Write unit tests for type-specific validation and dependencies
-- [ ] Write integration tests for type data persistence
-- [ ] **Write API integration tests for type creation and updates**
-- [ ] Document Australian Track Grading System in code comments
+  - Migration: `0020_create_jogging_data_table.py`
+- [x] Implement JOGGING type (requires FITNESS, not OUTDOOR_ACTIVITY)
+- [x] Update type dependency resolution to handle these types
+- [x] Add database migrations with proper foreign key constraints
+- [x] **Add API schemas, converters, and controller integration:**
+  - [x] Add `OutdoorActivityDataSchema`, `BushwalkingDataSchema`, `JoggingDataSchema` to `backend/app/api/journals/schemas.py`
+  - [x] Add converter functions in `backend/app/api/journals/converters.py`
+  - [x] Update `_enrich_journal_data()` and `_create_type_specific_data()` in `backend/app/api/journals/controllers.py`
+  - [x] Add repository parameters to all journal endpoints
+  - [x] Update `backend/app/api/contacts/controllers.py` (`get_contact_journals` endpoint)
+- [x] Write unit tests for type-specific validation and dependencies
+  - `backend/tests/unit/journal/test_outdoor_activity_data_entity.py` (entity validation)
+  - `backend/tests/unit/journal/test_bushwalking_data_entity.py` (entity validation)
+  - `backend/tests/unit/journal/test_jogging_data_entity.py` (entity validation)
+  - `backend/tests/unit/journal/test_journal_types.py` (updated for new types and dependencies)
+  - 789 unit tests total passing ✅
+- [x] Write integration tests for type data persistence
+  - 7 tests in `backend/tests/integration/journal/test_outdoor_activity_data_repository_integration.py` ✅
+  - 9 tests in `backend/tests/integration/journal/test_bushwalking_data_repository_integration.py` ✅
+  - 9 tests in `backend/tests/integration/journal/test_jogging_data_repository_integration.py` ✅
+- [x] **Write API integration tests for type creation and updates**
+  - `test_update_outdoor_activity_type_data`, `test_update_bushwalking_type_data`, `test_update_jogging_type_data` in `backend/tests/integration/api/test_journal_endpoints.py` ✅
+- [x] Document Australian Track Grading System in code comments
+
+**Implementation Details:**
+- **Database Migrations:**
+  - `backend/app/migrations/versions/0018_create_outdoor_activity_data_table.py`
+  - `backend/app/migrations/versions/0019_create_bushwalking_data_table.py`
+  - `backend/app/migrations/versions/0020_create_jogging_data_table.py`
+- **Domain Constants:** `backend/app/core/journal/models/constants.py` — added `MAX_ACTIVITY_TYPE_LENGTH`, `MAX_WEATHER_CONDITIONS_LENGTH`, `MAX_ROLE_LENGTH`, `MAX_PARTICIPANT_NOTES_LENGTH`, `VALID_TRACK_GRADES`
+- **Domain Exceptions:** `backend/app/core/journal/models/exceptions.py` — added `OutdoorActivityDataValidationError`, `BushwalkingDataValidationError`, `JoggingDataValidationError`
+- **Domain Entities:**
+  - `backend/app/core/journal/models/outdoor_activity_data.py` — `OutdoorActivityData` dataclass
+  - `backend/app/core/journal/models/bushwalking_data.py` — `BushwalkingData` dataclass
+  - `backend/app/core/journal/models/jogging_data.py` — `JoggingData` dataclass
+- **Repository Interfaces:** `backend/app/core/journal/models/repositories.py` — added `OutdoorActivityDataRepository`, `BushwalkingDataRepository`, `JoggingDataRepository`
+- **SQL Repositories:**
+  - `backend/app/core/journal/adapters/sql/outdoor_activity_data_repository.py`
+  - `backend/app/core/journal/adapters/sql/bushwalking_data_repository.py`
+  - `backend/app/core/journal/adapters/sql/jogging_data_repository.py`
+- **Type System:** `backend/app/core/journal/models/journal_types.py` — uncommented OUTDOOR_ACTIVITY, BUSHWALKING, JOGGING; updated dependency map
+- **Journal Repository:** `backend/app/core/journal/adapters/sql/journal_repository.py` — updated `_JOURNAL_TYPE_TABLE_MAP`, NOTE detection JOINs, and `_get_type_table_join`
+- **API Schemas:** `backend/app/api/journals/schemas.py` — added `OutdoorActivityDataSchema`, `BushwalkingDataSchema`, `JoggingDataSchema`
+- **API Converters:** `backend/app/api/journals/converters.py` — added three converter methods
+- **API Controllers:** `backend/app/api/journals/controllers.py` — updated `_enrich_journal_data` (type narrowing assert + `journal_id` local var), `_create_type_specific_data`, `_process_journal_types`, `list_journals`, all CRUD endpoints, and three new `update_*_data` functions
+- **Contacts Controller:** `backend/app/api/contacts/controllers.py` — added three new repo imports and params to `get_contact_journals`
+- **Dependency Injection:** `backend/app/infrastructure/di/journal.py` — added providers for all three new repositories
+- **Frontend:**
+  - `frontend/src/types/journals.ts` — added FITNESS, OUTDOOR_ACTIVITY, BUSHWALKING, JOGGING to `JournalType` enum
+  - `frontend/src/types/__tests__/journals.test.ts` — updated expectations for new types
+  - `frontend/src/components/journals/JournalTypeSection.tsx` — added labels for new types
+  - `frontend/src/components/journals/JournalFilters.tsx` — added labels for new types
+  - `frontend/src/components/journals/JournalCreateForm.tsx` — added new types to `typeOptions`
+  - `frontend/src/components/journals/JournalListItem.tsx` — added icons for new types
+
+**Progress:** 100% complete ✅
+- ✅ Database migrations (0018, 0019, 0020)
+- ✅ Domain entities with validation
+- ✅ Repository interfaces and SQL implementations
+- ✅ Type system integration (enum, dependencies, table mapping, NOTE detection)
+- ✅ Dependency injection setup
+- ✅ API layer (schemas, converters, controllers — all endpoints updated)
+- ✅ Unit tests (789 total passing, includes new entity and type dependency tests)
+- ✅ Frontend type enum and most component updates
+- ✅ Integration tests for repositories (25/25 passing)
+- ✅ API integration tests for type creation and updates (3/3 passing)
+- ✅ All quality gates passing (ruff check, ruff format, mypy, pytest)
 
 **Australian Track Grading System:**
 - Grade 1: Well-formed track, suitable for wheelchairs

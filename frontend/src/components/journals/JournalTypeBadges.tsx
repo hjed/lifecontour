@@ -2,7 +2,8 @@
  * JournalTypeBadges component for displaying journal types as visual badges.
  *
  * Displays journal types with appropriate icons and consistent styling.
- * Supports all base journal types: NOTE, EVENT, MOOD_RATING, PLAN, TRAVEL, PHOTO_ALBUM.
+ * Supports all journal types: NOTE, EVENT, MOOD_RATING, PLAN, TRAVEL,
+ * PHOTO_ALBUM, FITNESS, OUTDOOR_ACTIVITY, BUSHWALKING, JOGGING.
  */
 
 'use client';
@@ -14,6 +15,10 @@ import {
   ClipboardList,
   Plane,
   Image,
+  Activity,
+  Mountain,
+  Trees,
+  Timer,
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { JournalType } from '@/types/journals';
@@ -36,6 +41,10 @@ const TYPE_ICONS: Record<
   [JournalType.PLAN]: ClipboardList,
   [JournalType.TRAVEL]: Plane,
   [JournalType.PHOTO_ALBUM]: Image,
+  [JournalType.FITNESS]: Activity,
+  [JournalType.OUTDOOR_ACTIVITY]: Mountain,
+  [JournalType.BUSHWALKING]: Trees,
+  [JournalType.JOGGING]: Timer,
 };
 
 // Display labels for journal types
@@ -46,6 +55,10 @@ const TYPE_LABELS: Record<JournalType, string> = {
   [JournalType.PLAN]: 'Plan',
   [JournalType.TRAVEL]: 'Travel',
   [JournalType.PHOTO_ALBUM]: 'Photo Album',
+  [JournalType.FITNESS]: 'Fitness',
+  [JournalType.OUTDOOR_ACTIVITY]: 'Outdoor Activity',
+  [JournalType.BUSHWALKING]: 'Bushwalking',
+  [JournalType.JOGGING]: 'Jogging',
 };
 
 // Color variants for different journal types
@@ -57,6 +70,10 @@ const TYPE_VARIANTS: Record<JournalType, 'default' | 'secondary' | 'outline'> =
     [JournalType.PLAN]: 'secondary',
     [JournalType.TRAVEL]: 'default',
     [JournalType.PHOTO_ALBUM]: 'outline',
+    [JournalType.FITNESS]: 'default',
+    [JournalType.OUTDOOR_ACTIVITY]: 'default',
+    [JournalType.BUSHWALKING]: 'secondary',
+    [JournalType.JOGGING]: 'secondary',
   };
 
 /**
@@ -79,7 +96,7 @@ export function JournalTypeBadges({
   return (
     <div
       className={cn('flex flex-wrap gap-2', className)}
-      data-testid={testId || 'journal-type-badges'}
+      data-testid={testId ?? 'journal-type-badges'}
       aria-label='Journal types'
     >
       {types.map(type => {

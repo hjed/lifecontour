@@ -11,16 +11,19 @@ from typing import TYPE_CHECKING, Any
 
 from app.api.common.schemas import JsonApiLinks
 from app.api.journals.schemas import (
+    BushwalkingDataSchema,
     CalendarInfoDataSchema,
     CalendarSchema,
     EventDateRangeSchema,
     FitnessDataSchema,
+    JoggingDataSchema,
     JournalAttributes,
     JournalContactRelationshipSchema,
     JournalRelationships,
     JournalResource,
     JournalTagSchema,
     MoodDataSchema,
+    OutdoorActivityDataSchema,
     PhotoAlbumDataSchema,
     PlanDataSchema,
     PlanDocumentSchema,
@@ -29,15 +32,18 @@ from app.api.journals.schemas import (
     TravelFlightSchema,
     TravelTransportationSchema,
 )
+from app.core.journal.models.bushwalking_data import BushwalkingData
 from app.core.journal.models.calendar import Calendar
 from app.core.journal.models.calendar_info import CalendarInfo
 from app.core.journal.models.entities import Journal
 from app.core.journal.models.fitness_data import FitnessData
+from app.core.journal.models.jogging_data import JoggingData
 from app.core.journal.models.journal_contact_relationship import (
     JournalContactRelationship,
 )
 from app.core.journal.models.journal_tag import JournalTag
 from app.core.journal.models.mood_data import MoodData
+from app.core.journal.models.outdoor_activity_data import OutdoorActivityData
 from app.core.journal.models.photo_album_data import PhotoAlbumData
 from app.core.journal.models.plan_data import PlanData
 from app.core.journal.models.travel_data import TravelData
@@ -341,6 +347,35 @@ class TypeDataConverter:
             calories=fitness_data.calories,
             gpx_track_data=fitness_data.gpx_track_data,
             strava_activity_id=fitness_data.strava_activity_id,
+        ).model_dump(exclude_none=True)
+
+    @staticmethod
+    def outdoor_activity_data_to_schema(
+        data: OutdoorActivityData,
+    ) -> dict[str, Any]:
+        """Convert OutdoorActivityData domain entity to API schema."""
+        return OutdoorActivityDataSchema(
+            activity_type=data.activity_type,
+            weather_conditions=data.weather_conditions,
+            role=data.role,
+            in_leadership_role=data.in_leadership_role,
+            participant_notes=data.participant_notes,
+        ).model_dump(exclude_none=True)
+
+    @staticmethod
+    def bushwalking_data_to_schema(data: BushwalkingData) -> dict[str, Any]:
+        """Convert BushwalkingData domain entity to API schema."""
+        return BushwalkingDataSchema(
+            route_id=str(data.route_id) if data.route_id is not None else None,
+            track_grading=data.track_grading,
+        ).model_dump(exclude_none=True)
+
+    @staticmethod
+    def jogging_data_to_schema(data: JoggingData) -> dict[str, Any]:
+        """Convert JoggingData domain entity to API schema."""
+        return JoggingDataSchema(
+            route_id=str(data.route_id) if data.route_id is not None else None,
+            pace=data.pace,
         ).model_dump(exclude_none=True)
 
 

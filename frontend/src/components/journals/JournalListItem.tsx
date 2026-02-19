@@ -16,6 +16,10 @@ import {
   ClipboardList,
   Plane,
   Image,
+  Activity,
+  Mountain,
+  Trees,
+  Timer,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -31,14 +35,21 @@ interface JournalListItemProps {
 }
 
 // Icon mapping for journal types
-const TYPE_ICONS = {
+const TYPE_ICONS: Record<
+  JournalType,
+  React.ComponentType<{ className?: string }>
+> = {
   [JournalType.NOTE]: FileText,
   [JournalType.EVENT]: Calendar,
   [JournalType.MOOD_RATING]: Heart,
   [JournalType.PLAN]: ClipboardList,
   [JournalType.TRAVEL]: Plane,
   [JournalType.PHOTO_ALBUM]: Image,
-} as const;
+  [JournalType.FITNESS]: Activity,
+  [JournalType.OUTDOOR_ACTIVITY]: Mountain,
+  [JournalType.BUSHWALKING]: Trees,
+  [JournalType.JOGGING]: Timer,
+};
 
 /**
  * Truncate content to specified length

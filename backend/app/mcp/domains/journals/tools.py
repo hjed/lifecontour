@@ -5,8 +5,10 @@ Provides AI access to journal management functionality through MCP tools.
 Each tool is designed to return AI-friendly, contextual information.
 """
 
+import dataclasses
 import json
 from typing import Annotated, Any
+from uuid import UUID
 
 import structlog
 from dishka.integrations.starlette import FromDishka, inject
@@ -16,8 +18,17 @@ from pydantic import Field
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core.contacts.adapters.sql.contact_repository import SqlContactRepository
+from app.core.journal.adapters.sql.bushwalking_data_repository import (
+    SqlBushwalkingDataRepository,
+)
 from app.core.journal.adapters.sql.calendar_info_repository import (
     SqlCalendarInfoRepository,
+)
+from app.core.journal.adapters.sql.fitness_data_repository import (
+    SqlFitnessDataRepository,
+)
+from app.core.journal.adapters.sql.jogging_data_repository import (
+    SqlJoggingDataRepository,
 )
 from app.core.journal.adapters.sql.journal_contact_relationship_repository import (
     SqlJournalContactRelationshipRepository,
@@ -25,13 +36,20 @@ from app.core.journal.adapters.sql.journal_contact_relationship_repository impor
 from app.core.journal.adapters.sql.journal_repository import SqlJournalRepository
 from app.core.journal.adapters.sql.journal_tag_repository import SqlJournalTagRepository
 from app.core.journal.adapters.sql.mood_data_repository import SqlMoodDataRepository
+from app.core.journal.adapters.sql.outdoor_activity_data_repository import (
+    SqlOutdoorActivityDataRepository,
+)
 from app.core.journal.adapters.sql.photo_album_data_repository import (
     SqlPhotoAlbumDataRepository,
 )
 from app.core.journal.adapters.sql.plan_data_repository import SqlPlanDataRepository
 from app.core.journal.adapters.sql.travel_data_repository import SqlTravelDataRepository
+from app.core.journal.models.bushwalking_data import BushwalkingData
 from app.core.journal.models.calendar_info import CalendarInfo
 from app.core.journal.models.entities import Journal
+from app.core.journal.models.exceptions import JournalValidationError
+from app.core.journal.models.fitness_data import FitnessData
+from app.core.journal.models.jogging_data import JoggingData
 from app.core.journal.models.journal_contact_relationship import (
     JournalContactRelationship,
 )
@@ -41,6 +59,7 @@ from app.core.journal.models.journal_relationship_types import (
 from app.core.journal.models.journal_tag import JournalTag
 from app.core.journal.models.journal_types import JournalType
 from app.core.journal.models.mood_data import MoodData
+from app.core.journal.models.outdoor_activity_data import OutdoorActivityData
 from app.core.journal.models.photo_album_data import PhotoAlbumData
 from app.core.journal.models.plan_data import PlanData
 from app.core.journal.models.travel_data import TravelData
@@ -237,6 +256,50 @@ def _build_photo_album_data(photo_album_data: Any) -> dict[str, Any]:
     }
 
 
+def _build_fitness_data(fitness_data: Any) -> dict[str, Any]:
+    """Build fitness data dictionary."""
+    return {
+        "heart_rate_avg": fitness_data.heart_rate_avg,
+        "heart_rate_max": fitness_data.heart_rate_max,
+        "distance": fitness_data.distance,
+        "elevation_gain": fitness_data.elevation_gain,
+        "elevation_loss": fitness_data.elevation_loss,
+        "duration": fitness_data.duration,
+        "calories": fitness_data.calories,
+        "gpx_track_data": fitness_data.gpx_track_data,
+        "strava_activity_id": fitness_data.strava_activity_id,
+    }
+
+
+def _build_outdoor_activity_data(outdoor_activity_data: Any) -> dict[str, Any]:
+    """Build outdoor activity data dictionary."""
+    return {
+        "activity_type": outdoor_activity_data.activity_type,
+        "weather_conditions": outdoor_activity_data.weather_conditions,
+        "role": outdoor_activity_data.role,
+        "in_leadership_role": outdoor_activity_data.in_leadership_role,
+        "participant_notes": outdoor_activity_data.participant_notes,
+    }
+
+
+def _build_bushwalking_data(bushwalking_data: Any) -> dict[str, Any]:
+    """Build bushwalking data dictionary."""
+    return {
+        "route_id": str(bushwalking_data.route_id)
+        if bushwalking_data.route_id
+        else None,
+        "track_grading": bushwalking_data.track_grading,
+    }
+
+
+def _build_jogging_data(jogging_data: Any) -> dict[str, Any]:
+    """Build jogging data dictionary."""
+    return {
+        "route_id": str(jogging_data.route_id) if jogging_data.route_id else None,
+        "pace": jogging_data.pace,
+    }
+
+
 async def _fetch_journal_types_and_data(
     journal_id: int,
     calendar_info_repo: SqlCalendarInfoRepository,
@@ -244,6 +307,10 @@ async def _fetch_journal_types_and_data(
     plan_data_repo: SqlPlanDataRepository,
     travel_data_repo: SqlTravelDataRepository,
     photo_album_data_repo: SqlPhotoAlbumDataRepository,
+    fitness_data_repo: SqlFitnessDataRepository,
+    outdoor_activity_data_repo: SqlOutdoorActivityDataRepository,
+    bushwalking_data_repo: SqlBushwalkingDataRepository,
+    jogging_data_repo: SqlJoggingDataRepository,
 ) -> tuple[list[str], dict[str, Any]]:
     """
     Fetch all type-specific data for a journal.
@@ -255,6 +322,10 @@ async def _fetch_journal_types_and_data(
         plan_data_repo: Plan data repository
         travel_data_repo: Travel data repository
         photo_album_data_repo: Photo album data repository
+        fitness_data_repo: Fitness data repository
+        outdoor_activity_data_repo: Outdoor activity data repository
+        bushwalking_data_repo: Bushwalking data repository
+        jogging_data_repo: Jogging data repository
 
     Returns:
         Tuple of (types list, type_data dict)
@@ -290,6 +361,32 @@ async def _fetch_journal_types_and_data(
             photo_album_data
         )
 
+    fitness_data = await fitness_data_repo.find_by_journal_id(journal_id)
+    if fitness_data:
+        types.append(JournalType.FITNESS.value)
+        type_data[JournalType.FITNESS.value] = _build_fitness_data(fitness_data)
+
+    outdoor_activity_data = await outdoor_activity_data_repo.find_by_journal_id(
+        journal_id
+    )
+    if outdoor_activity_data:
+        types.append(JournalType.OUTDOOR_ACTIVITY.value)
+        type_data[JournalType.OUTDOOR_ACTIVITY.value] = _build_outdoor_activity_data(
+            outdoor_activity_data
+        )
+
+    bushwalking_data = await bushwalking_data_repo.find_by_journal_id(journal_id)
+    if bushwalking_data:
+        types.append(JournalType.BUSHWALKING.value)
+        type_data[JournalType.BUSHWALKING.value] = _build_bushwalking_data(
+            bushwalking_data
+        )
+
+    jogging_data = await jogging_data_repo.find_by_journal_id(journal_id)
+    if jogging_data:
+        types.append(JournalType.JOGGING.value)
+        type_data[JournalType.JOGGING.value] = _build_jogging_data(jogging_data)
+
     # If no types found, it's a NOTE
     if not types:
         types.append(JournalType.NOTE.value)
@@ -303,6 +400,10 @@ async def _create_type_specific_data(
     mood_data_repo: SqlMoodDataRepository,
     plan_data_repo: SqlPlanDataRepository,
     travel_data_repo: SqlTravelDataRepository,
+    fitness_data_repo: SqlFitnessDataRepository,
+    outdoor_activity_data_repo: SqlOutdoorActivityDataRepository,
+    bushwalking_data_repo: SqlBushwalkingDataRepository,
+    jogging_data_repo: SqlJoggingDataRepository,
 ) -> None:
     """
     Create type-specific data row with default values for the given journal type.
@@ -313,6 +414,10 @@ async def _create_type_specific_data(
         mood_data_repo: Repository for mood data
         plan_data_repo: Repository for plan data
         travel_data_repo: Repository for travel data
+        fitness_data_repo: Repository for fitness data
+        outdoor_activity_data_repo: Repository for outdoor activity data
+        bushwalking_data_repo: Repository for bushwalking data
+        jogging_data_repo: Repository for jogging data
     """
     if journal_type == JournalType.MOOD_RATING:
         mood_data = MoodData(journal_id=journal_id)
@@ -323,6 +428,18 @@ async def _create_type_specific_data(
     elif journal_type == JournalType.TRAVEL:
         travel_data = TravelData(journal_id=journal_id)
         await travel_data_repo.save(travel_data)
+    elif journal_type == JournalType.FITNESS:
+        fitness_data = FitnessData(journal_id=journal_id)
+        await fitness_data_repo.save(fitness_data)
+    elif journal_type == JournalType.OUTDOOR_ACTIVITY:
+        outdoor_activity_data = OutdoorActivityData(journal_id=journal_id)
+        await outdoor_activity_data_repo.save(outdoor_activity_data)
+    elif journal_type == JournalType.BUSHWALKING:
+        bushwalking_data = BushwalkingData(journal_id=journal_id)
+        await bushwalking_data_repo.save(bushwalking_data)
+    elif journal_type == JournalType.JOGGING:
+        jogging_data = JoggingData(journal_id=journal_id)
+        await jogging_data_repo.save(jogging_data)
     # EVENT and PHOTO_ALBUM types require additional data (calendar_id, immich_album_id)
     # These will be created when the user provides type_data
 
@@ -334,6 +451,10 @@ async def _update_type_specific_data(
     calendar_info_repo: SqlCalendarInfoRepository,
     mood_data_repo: SqlMoodDataRepository,
     photo_album_data_repo: SqlPhotoAlbumDataRepository,
+    fitness_data_repo: SqlFitnessDataRepository,
+    outdoor_activity_data_repo: SqlOutdoorActivityDataRepository,
+    bushwalking_data_repo: SqlBushwalkingDataRepository,
+    jogging_data_repo: SqlJoggingDataRepository,
 ) -> None:
     """
     Update type-specific data for a journal type.
@@ -345,13 +466,15 @@ async def _update_type_specific_data(
         calendar_info_repo: Repository for calendar info
         mood_data_repo: Repository for mood data
         photo_album_data_repo: Repository for photo album data
+        fitness_data_repo: Repository for fitness data
+        outdoor_activity_data_repo: Repository for outdoor activity data
+        bushwalking_data_repo: Repository for bushwalking data
+        jogging_data_repo: Repository for jogging data
     """
     if journal_type == JournalType.EVENT and type_data_dict:
         # Create or update calendar info (calendar_id is required)
         calendar_id = type_data_dict.get("calendar_id")
         if calendar_id is not None:
-            from uuid import UUID
-
             # Convert string to UUID if needed
             if isinstance(calendar_id, str):
                 calendar_id = UUID(calendar_id)
@@ -386,6 +509,98 @@ async def _update_type_specific_data(
                 immich_album_id=str(immich_album_id),
             )
             await photo_album_data_repo.save(photo_album_data)
+    elif journal_type == JournalType.FITNESS and type_data_dict:
+        existing_fitness = await fitness_data_repo.find_by_journal_id(journal_id)
+        if existing_fitness:
+            if "heart_rate_avg" in type_data_dict:
+                existing_fitness.heart_rate_avg = type_data_dict["heart_rate_avg"]
+            if "heart_rate_max" in type_data_dict:
+                existing_fitness.heart_rate_max = type_data_dict["heart_rate_max"]
+            if "distance" in type_data_dict:
+                existing_fitness.distance = type_data_dict["distance"]
+            if "elevation_gain" in type_data_dict:
+                existing_fitness.elevation_gain = type_data_dict["elevation_gain"]
+            if "elevation_loss" in type_data_dict:
+                existing_fitness.elevation_loss = type_data_dict["elevation_loss"]
+            if "duration" in type_data_dict:
+                existing_fitness.duration = type_data_dict["duration"]
+            if "calories" in type_data_dict:
+                existing_fitness.calories = type_data_dict["calories"]
+            if "gpx_track_data" in type_data_dict:
+                existing_fitness.gpx_track_data = type_data_dict["gpx_track_data"]
+            if "strava_activity_id" in type_data_dict:
+                existing_fitness.strava_activity_id = type_data_dict[
+                    "strava_activity_id"
+                ]
+            await fitness_data_repo.save(existing_fitness)
+    elif journal_type == JournalType.OUTDOOR_ACTIVITY and type_data_dict:
+        existing_outdoor = await outdoor_activity_data_repo.find_by_journal_id(
+            journal_id
+        )
+        if existing_outdoor:
+            # Build updates dict and use dataclasses.replace() to trigger __post_init__
+            # validation, matching the REST API controller pattern.
+            updates: dict[str, Any] = {}
+            if "activity_type" in type_data_dict:
+                updates["activity_type"] = type_data_dict["activity_type"]
+            if "weather_conditions" in type_data_dict:
+                updates["weather_conditions"] = type_data_dict["weather_conditions"]
+            if "role" in type_data_dict:
+                updates["role"] = type_data_dict["role"]
+            if "in_leadership_role" in type_data_dict:
+                updates["in_leadership_role"] = type_data_dict["in_leadership_role"]
+            if "participant_notes" in type_data_dict:
+                updates["participant_notes"] = type_data_dict["participant_notes"]
+            validated_outdoor = dataclasses.replace(existing_outdoor, **updates)
+            await outdoor_activity_data_repo.save(validated_outdoor)
+    elif journal_type == JournalType.BUSHWALKING and type_data_dict:
+        existing_bushwalking = await bushwalking_data_repo.find_by_journal_id(
+            journal_id
+        )
+        if existing_bushwalking:
+            # Build updates dict and use dataclasses.replace() to trigger __post_init__
+            # validation, matching the REST API controller pattern.
+            bw_updates: dict[str, Any] = {}
+            if "track_grading" in type_data_dict:
+                bw_updates["track_grading"] = type_data_dict["track_grading"]
+            if "route_id" in type_data_dict:
+                route_id_val = type_data_dict["route_id"]
+                try:
+                    bw_updates["route_id"] = (
+                        UUID(route_id_val)
+                        if isinstance(route_id_val, str)
+                        else route_id_val
+                    )
+                except ValueError as e:
+                    raise JournalValidationError(
+                        "route_id", f"Invalid UUID format: {route_id_val}"
+                    ) from e
+            validated_bushwalking = dataclasses.replace(
+                existing_bushwalking, **bw_updates
+            )
+            await bushwalking_data_repo.save(validated_bushwalking)
+    elif journal_type == JournalType.JOGGING and type_data_dict:
+        existing_jogging = await jogging_data_repo.find_by_journal_id(journal_id)
+        if existing_jogging:
+            # Build updates dict and use dataclasses.replace() to trigger __post_init__
+            # validation, matching the REST API controller pattern.
+            jog_updates: dict[str, Any] = {}
+            if "pace" in type_data_dict:
+                jog_updates["pace"] = type_data_dict["pace"]
+            if "route_id" in type_data_dict:
+                route_id_val = type_data_dict["route_id"]
+                try:
+                    jog_updates["route_id"] = (
+                        UUID(route_id_val)
+                        if isinstance(route_id_val, str)
+                        else route_id_val
+                    )
+                except ValueError as e:
+                    raise JournalValidationError(
+                        "route_id", f"Invalid UUID format: {route_id_val}"
+                    ) from e
+            validated_jogging = dataclasses.replace(existing_jogging, **jog_updates)
+            await jogging_data_repo.save(validated_jogging)
 
 
 async def _persist_contact_relationships(
@@ -472,6 +687,10 @@ async def _fetch_enrichment_data(
     plan_data_repo: SqlPlanDataRepository,
     travel_data_repo: SqlTravelDataRepository,
     photo_album_data_repo: SqlPhotoAlbumDataRepository,
+    fitness_data_repo: SqlFitnessDataRepository,
+    outdoor_activity_data_repo: SqlOutdoorActivityDataRepository,
+    bushwalking_data_repo: SqlBushwalkingDataRepository,
+    jogging_data_repo: SqlJoggingDataRepository,
     contact_relationship_repo: SqlJournalContactRelationshipRepository,
     contact_repo: SqlContactRepository,
     tag_repo: SqlJournalTagRepository,
@@ -486,6 +705,10 @@ async def _fetch_enrichment_data(
         plan_data_repo: Repository for plan data
         travel_data_repo: Repository for travel data
         photo_album_data_repo: Repository for photo album data
+        fitness_data_repo: Repository for fitness data
+        outdoor_activity_data_repo: Repository for outdoor activity data
+        bushwalking_data_repo: Repository for bushwalking data
+        jogging_data_repo: Repository for jogging data
         contact_relationship_repo: Repository for contact relationships
         contact_repo: Repository for contacts
         tag_repo: Repository for tags
@@ -500,6 +723,10 @@ async def _fetch_enrichment_data(
         plan_data_repo,
         travel_data_repo,
         photo_album_data_repo,
+        fitness_data_repo,
+        outdoor_activity_data_repo,
+        bushwalking_data_repo,
+        jogging_data_repo,
     )
 
     contacts = await _fetch_contact_relationships_with_names(
@@ -530,6 +757,10 @@ def register_journal_tools(mcp: FastMCP[None]) -> None:
         plan_data_repo: FromDishka[SqlPlanDataRepository],
         travel_data_repo: FromDishka[SqlTravelDataRepository],
         photo_album_data_repo: FromDishka[SqlPhotoAlbumDataRepository],
+        fitness_data_repo: FromDishka[SqlFitnessDataRepository],
+        outdoor_activity_data_repo: FromDishka[SqlOutdoorActivityDataRepository],
+        bushwalking_data_repo: FromDishka[SqlBushwalkingDataRepository],
+        jogging_data_repo: FromDishka[SqlJoggingDataRepository],
         contact_relationship_repo: FromDishka[SqlJournalContactRelationshipRepository],
         contact_repo: FromDishka[SqlContactRepository],
         tag_repo: FromDishka[SqlJournalTagRepository],
@@ -611,18 +842,26 @@ def register_journal_tools(mcp: FastMCP[None]) -> None:
                     # Convert type string to enum
                     journal_type = JournalType[type_str.upper()]
 
-                    await journal_service.add_type_to_journal(
+                    # Capture the return value: includes all types added (requested +
+                    # auto-resolved dependencies like FITNESS for OUTDOOR_ACTIVITY).
+                    added_types = await journal_service.add_type_to_journal(
                         journal_id, journal_type, db_connection
                     )
 
-                    # Create type-specific data row with default values
-                    await _create_type_specific_data(
-                        journal_type,
-                        journal_id,
-                        mood_data_repo,
-                        plan_data_repo,
-                        travel_data_repo,
-                    )
+                    # Create type-specific data rows for ALL added types (including
+                    # dependency types like FITNESS). Mirrors REST controller behaviour.
+                    for added_type in added_types:
+                        await _create_type_specific_data(
+                            added_type,
+                            journal_id,
+                            mood_data_repo,
+                            plan_data_repo,
+                            travel_data_repo,
+                            fitness_data_repo,
+                            outdoor_activity_data_repo,
+                            bushwalking_data_repo,
+                            jogging_data_repo,
+                        )
 
                     # Update type-specific data if provided
                     if request.type_data and type_str.upper() in request.type_data:
@@ -633,6 +872,10 @@ def register_journal_tools(mcp: FastMCP[None]) -> None:
                             calendar_info_repo,
                             mood_data_repo,
                             photo_album_data_repo,
+                            fitness_data_repo,
+                            outdoor_activity_data_repo,
+                            bushwalking_data_repo,
+                            jogging_data_repo,
                         )
                 except (ValueError, KeyError):
                     # Invalid type, skip
@@ -656,6 +899,10 @@ def register_journal_tools(mcp: FastMCP[None]) -> None:
             plan_data_repo,
             travel_data_repo,
             photo_album_data_repo,
+            fitness_data_repo,
+            outdoor_activity_data_repo,
+            bushwalking_data_repo,
+            jogging_data_repo,
             contact_relationship_repo,
             contact_repo,
             tag_repo,
@@ -683,6 +930,10 @@ def register_journal_tools(mcp: FastMCP[None]) -> None:
         plan_data_repo: FromDishka[SqlPlanDataRepository],
         travel_data_repo: FromDishka[SqlTravelDataRepository],
         photo_album_data_repo: FromDishka[SqlPhotoAlbumDataRepository],
+        fitness_data_repo: FromDishka[SqlFitnessDataRepository],
+        outdoor_activity_data_repo: FromDishka[SqlOutdoorActivityDataRepository],
+        bushwalking_data_repo: FromDishka[SqlBushwalkingDataRepository],
+        jogging_data_repo: FromDishka[SqlJoggingDataRepository],
         contact_relationship_repo: FromDishka[SqlJournalContactRelationshipRepository],
         contact_repo: FromDishka[SqlContactRepository],
         tag_repo: FromDishka[SqlJournalTagRepository],
@@ -770,6 +1021,10 @@ def register_journal_tools(mcp: FastMCP[None]) -> None:
                 plan_data_repo,
                 travel_data_repo,
                 photo_album_data_repo,
+                fitness_data_repo,
+                outdoor_activity_data_repo,
+                bushwalking_data_repo,
+                jogging_data_repo,
             )
 
             # Remove types that are not in the new list
@@ -790,18 +1045,26 @@ def register_journal_tools(mcp: FastMCP[None]) -> None:
 
                     # Only add if not already present
                     if type_str.upper() not in current_types:
-                        await journal_service.add_type_to_journal(
+                        # Capture the return value: includes all types added (requested +
+                        # auto-resolved dependencies like FITNESS for OUTDOOR_ACTIVITY).
+                        added_types = await journal_service.add_type_to_journal(
                             journal_id, journal_type, db_connection
                         )
 
-                        # Create type-specific data row with default values
-                        await _create_type_specific_data(
-                            journal_type,
-                            journal_id,
-                            mood_data_repo,
-                            plan_data_repo,
-                            travel_data_repo,
-                        )
+                        # Create type-specific data rows for ALL added types (including
+                        # dependency types like FITNESS). Mirrors REST controller behaviour.
+                        for added_type in added_types:
+                            await _create_type_specific_data(
+                                added_type,
+                                journal_id,
+                                mood_data_repo,
+                                plan_data_repo,
+                                travel_data_repo,
+                                fitness_data_repo,
+                                outdoor_activity_data_repo,
+                                bushwalking_data_repo,
+                                jogging_data_repo,
+                            )
 
                     # Update type-specific data if provided
                     if request.type_data and type_str.upper() in request.type_data:
@@ -812,6 +1075,10 @@ def register_journal_tools(mcp: FastMCP[None]) -> None:
                             calendar_info_repo,
                             mood_data_repo,
                             photo_album_data_repo,
+                            fitness_data_repo,
+                            outdoor_activity_data_repo,
+                            bushwalking_data_repo,
+                            jogging_data_repo,
                         )
                 except (ValueError, KeyError):
                     # Invalid type, skip
@@ -829,6 +1096,10 @@ def register_journal_tools(mcp: FastMCP[None]) -> None:
                         calendar_info_repo,
                         mood_data_repo,
                         photo_album_data_repo,
+                        fitness_data_repo,
+                        outdoor_activity_data_repo,
+                        bushwalking_data_repo,
+                        jogging_data_repo,
                     )
                 except (ValueError, KeyError):
                     # Invalid type, skip
@@ -869,6 +1140,10 @@ def register_journal_tools(mcp: FastMCP[None]) -> None:
             plan_data_repo,
             travel_data_repo,
             photo_album_data_repo,
+            fitness_data_repo,
+            outdoor_activity_data_repo,
+            bushwalking_data_repo,
+            jogging_data_repo,
             contact_relationship_repo,
             contact_repo,
             tag_repo,
@@ -931,6 +1206,10 @@ def register_journal_tools(mcp: FastMCP[None]) -> None:
         plan_data_repo = SqlPlanDataRepository(db_connection)
         travel_data_repo = SqlTravelDataRepository(db_connection)
         photo_album_data_repo = SqlPhotoAlbumDataRepository(db_connection)
+        fitness_data_repo = SqlFitnessDataRepository(db_connection)
+        outdoor_activity_data_repo = SqlOutdoorActivityDataRepository(db_connection)
+        bushwalking_data_repo = SqlBushwalkingDataRepository(db_connection)
+        jogging_data_repo = SqlJoggingDataRepository(db_connection)
         contact_relationship_repo = SqlJournalContactRelationshipRepository(
             db_connection
         )
@@ -956,6 +1235,10 @@ def register_journal_tools(mcp: FastMCP[None]) -> None:
             plan_data_repo,
             travel_data_repo,
             photo_album_data_repo,
+            fitness_data_repo,
+            outdoor_activity_data_repo,
+            bushwalking_data_repo,
+            jogging_data_repo,
         )
 
         # Fetch contact relationships and contact details
