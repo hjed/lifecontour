@@ -57,6 +57,13 @@ jest.mock('@/lib/api/journals', () => ({
     mutateAsync: mockUpdateField,
     isPending: false,
   }),
+  useUpdateTypeData: () => ({
+    mutateAsync: jest.fn(),
+    isPending: false,
+  }),
+  useCalendars: () => ({
+    data: { data: [] },
+  }),
 }));
 
 jest.mock('@/lib/api/contacts', () => ({

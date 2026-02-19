@@ -6,6 +6,7 @@
  */
 
 import { test, expect } from './fixtures';
+import { TestDataManager } from './data-management';
 
 test.describe('Journal Detail Page', () => {
   test.describe('Basic Display', () => {
@@ -327,6 +328,289 @@ test.describe('Journal Detail Page', () => {
           .or(page.getByText(/mood/i))
           .first()
       ).toBeVisible();
+    });
+  });
+
+  test.describe('Tag Management', () => {
+    test('should add a tag to a journal', async ({
+      authenticatedPage,
+      testCleanup,
+    }) => {
+      const page = authenticatedPage;
+      const dataManager = new TestDataManager(page);
+
+      // Create a journal and a tag
+      const journal = await dataManager.createJournal({
+        title: 'Tag Add Test',
+        content: 'Testing tag addition.',
+        event_date_range: {
+          start: '2026-01-18T10:00:00Z',
+          end: '2026-01-18T10:30:00Z',
+        },
+        types: ['note'],
+      });
+      const tags = await dataManager.createJournalTags([
+        { name: 'TagAddTest' },
+      ]);
+      const tag = tags[0];
+
+      testCleanup(async () => await dataManager.cleanup());
+
+      await page.goto(`/journals/${journal.id}`);
+      await page.waitForLoadState('networkidle');
+
+      // Add tag button should appear because there are unassigned tags
+      const addTagButton = page.getByTestId('add-tag-button');
+      await expect(addTagButton).toBeVisible();
+      await addTagButton.click();
+
+      // Select the tag from the dropdown
+      const tagSelect = page.getByTestId('tag-select');
+      await tagSelect.click();
+      await page.getByRole('option', { name: tag.name }).click();
+
+      // Confirm addition (exact: true avoids matching the 'Add Tag' trigger button)
+      await page.getByRole('button', { name: 'Add', exact: true }).click();
+
+      // Tag badge should now appear
+      await expect(page.getByTestId(`tag-badge-${tag.id}`)).toBeVisible();
+    });
+
+    test('should remove a tag from a journal', async ({
+      authenticatedPage,
+      testCleanup,
+    }) => {
+      const page = authenticatedPage;
+      const dataManager = new TestDataManager(page);
+
+      // Create a tag and a journal, then assign the tag
+      const tags = await dataManager.createJournalTags([
+        { name: 'TagRemoveTest' },
+      ]);
+      const tag = tags[0];
+
+      const journal = await dataManager.createJournal({
+        title: 'Tag Remove Test',
+        content: 'Testing tag removal.',
+        event_date_range: {
+          start: '2026-01-18T10:00:00Z',
+          end: '2026-01-18T10:30:00Z',
+        },
+        types: ['note'],
+      });
+      await dataManager.assignTagsToJournal(journal.id, [tag.id]);
+
+      testCleanup(async () => await dataManager.cleanup());
+
+      await page.goto(`/journals/${journal.id}`);
+      await page.waitForLoadState('networkidle');
+
+      // Tag badge should be visible before removal
+      const tagBadge = page.getByTestId(`tag-badge-${tag.id}`);
+      await expect(tagBadge).toBeVisible();
+
+      // Click the remove button on the tag badge
+      await page.getByTestId(`remove-tag-${tag.id}`).click();
+
+      // Tag badge should disappear after removal
+      await expect(tagBadge).not.toBeVisible();
+    });
+  });
+
+  test.describe('Contact Management', () => {
+    test('should add a contact to a journal', async ({
+      authenticatedPage,
+      testCleanup,
+    }) => {
+      const page = authenticatedPage;
+      const dataManager = new TestDataManager(page);
+
+      const journal = await dataManager.createJournal({
+        title: 'Contact Add Test',
+        content: 'Testing contact addition.',
+        event_date_range: {
+          start: '2026-01-18T10:00:00Z',
+          end: '2026-01-18T10:30:00Z',
+        },
+        types: ['note'],
+      });
+      const contact = await dataManager.createContact({
+        firstName: 'Alice',
+        lastName: 'ContactTest',
+      });
+
+      testCleanup(async () => await dataManager.cleanup());
+
+      await page.goto(`/journals/${journal.id}`);
+      await page.waitForLoadState('networkidle');
+
+      // Open the add contact popover
+      const addContactButton = page.getByTestId('add-contact-button');
+      await expect(addContactButton).toBeVisible();
+      await addContactButton.click();
+
+      // Select the contact from the dropdown
+      const contactSelect = page.getByTestId('contact-select');
+      await contactSelect.click();
+      const contactName = `${contact.firstName} ${contact.lastName}`;
+      await page.getByRole('option', { name: contactName }).click();
+
+      // Confirm addition (exact: true avoids matching the 'Add Contact' trigger button)
+      await page.getByRole('button', { name: 'Add', exact: true }).click();
+
+      // Contact badge should appear
+      await expect(
+        page.getByTestId(`contact-badge-${contact.id}`)
+      ).toBeVisible();
+    });
+
+    test('should remove a contact from a journal', async ({
+      authenticatedPage,
+      testCleanup,
+    }) => {
+      const page = authenticatedPage;
+      const dataManager = new TestDataManager(page);
+
+      const contact = await dataManager.createContact({
+        firstName: 'Bob',
+        lastName: 'ContactRemoveTest',
+      });
+      const journal = await dataManager.createJournal({
+        title: 'Contact Remove Test',
+        content: 'Testing contact removal.',
+        event_date_range: {
+          start: '2026-01-18T10:00:00Z',
+          end: '2026-01-18T10:30:00Z',
+        },
+        types: ['note'],
+        contacts: [
+          {
+            contact_id: contact.id,
+            relationship_type: 'PARTICIPANT',
+          },
+        ],
+      });
+
+      testCleanup(async () => await dataManager.cleanup());
+
+      await page.goto(`/journals/${journal.id}`);
+      await page.waitForLoadState('networkidle');
+
+      // Contact badge should be visible before removal
+      const contactBadge = page.getByTestId(`contact-badge-${contact.id}`);
+      await expect(contactBadge).toBeVisible();
+
+      // Click the remove button
+      await page.getByTestId(`remove-contact-${contact.id}`).click();
+
+      // Contact badge should disappear after removal
+      await expect(contactBadge).not.toBeVisible();
+    });
+  });
+
+  test.describe('Calendar Assignment', () => {
+    test('should change the calendar on an EVENT journal', async ({
+      authenticatedPage,
+      testCleanup,
+    }) => {
+      const page = authenticatedPage;
+      const dataManager = new TestDataManager(page);
+
+      // Two calendars: the journal starts with the first, we switch to the second
+      const calendars = await dataManager.createCalendars([
+        { name: 'CalendarInitial', color: '#3B82F6' },
+        { name: 'CalendarUpdated', color: '#10B981' },
+      ]);
+      const [calendar1, calendar2] = calendars;
+
+      // EVENT journals require a calendar_id row to be detected as EVENT type.
+      // Pass type_data so the backend creates the journal_calendar_info record.
+      const journal = await dataManager.createJournal({
+        title: 'Calendar Change Test',
+        content: 'Testing calendar change.',
+        event_date_range: {
+          start: '2026-01-18T10:00:00Z',
+          end: '2026-01-18T11:00:00Z',
+        },
+        types: ['event'],
+        type_data: {
+          event: {
+            calendar_id: calendar1.id,
+            is_all_day: false,
+            sync_invitees: false,
+          },
+        },
+      });
+
+      testCleanup(async () => await dataManager.cleanup());
+
+      await page.goto(`/journals/${journal.id}`);
+      await page.waitForLoadState('networkidle');
+
+      // The calendar badge trigger should show the initially assigned calendar
+      const calendarBadgeTrigger = page.getByTestId('calendar-badge-trigger');
+      await expect(calendarBadgeTrigger).toBeVisible();
+      await expect(calendarBadgeTrigger).toContainText(calendar1.name);
+
+      // Click the badge to open the calendar picker
+      await calendarBadgeTrigger.click();
+
+      // Select the second calendar from the dropdown
+      const calendarSelect = page.getByTestId('calendar-select');
+      await calendarSelect.click();
+      await page.getByRole('option', { name: calendar2.name }).click();
+
+      // Calendar badge should update to show the new calendar
+      await expect(calendarBadgeTrigger).toContainText(calendar2.name);
+    });
+  });
+
+  test.describe('Mood Rating Editor', () => {
+    test('should edit mood label and save', async ({
+      authenticatedPage,
+      testCleanup,
+    }) => {
+      const page = authenticatedPage;
+      const dataManager = new TestDataManager(page);
+
+      const journal = await dataManager.createJournal({
+        title: 'Mood Edit Test',
+        content: 'Testing mood editing.',
+        event_date_range: {
+          start: '2026-01-18T10:00:00Z',
+          end: '2026-01-18T10:30:00Z',
+        },
+        types: ['mood_rating'],
+      });
+
+      testCleanup(async () => await dataManager.cleanup());
+
+      await page.goto(`/journals/${journal.id}`);
+      await page.waitForLoadState('networkidle');
+
+      // Expand the Mood & Energy section
+      const moodSection = page.getByTestId('type-section-trigger-mood_rating');
+      await expect(moodSection).toBeVisible();
+      await moodSection.click();
+
+      // Wait for the editor to appear and click Edit
+      const moodEditor = page.getByTestId('mood-rating-type-editor');
+      await expect(moodEditor).toBeVisible();
+      await moodEditor.getByTestId('edit-button').click();
+
+      // Edit the mood label
+      const moodLabelInput = page.getByTestId('mood-label-input');
+      await expect(moodLabelInput).toBeEnabled();
+      await moodLabelInput.fill('Feeling great!');
+
+      // Save changes
+      await moodEditor.getByTestId('save-button').click();
+
+      // After save, we should be back in read mode (edit button visible again)
+      await expect(moodEditor.getByTestId('edit-button')).toBeVisible();
+
+      // The mood label should reflect the saved value
+      await expect(moodLabelInput).toHaveValue('Feeling great!');
     });
   });
 
