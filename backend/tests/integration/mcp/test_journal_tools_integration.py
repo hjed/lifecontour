@@ -6,6 +6,7 @@ using Dishka dependency injection patterns.
 """
 
 from datetime import UTC, datetime, timedelta
+from typing import Any
 from unittest.mock import Mock
 
 import pytest
@@ -391,7 +392,7 @@ class TestFetchJournalTypesAndDataNewActivityTypes:
 
     async def _call_fetch(
         self, journal_id: int, conn: AsyncConnection
-    ) -> tuple[list[str], dict]:
+    ) -> tuple[list[str], dict[str, Any]]:
         """Helper: call _fetch_journal_types_and_data with all repos."""
         from app.core.journal.adapters.sql.calendar_info_repository import (
             SqlCalendarInfoRepository,
