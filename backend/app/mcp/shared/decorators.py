@@ -14,6 +14,7 @@ from app.core.contacts.models.exceptions import (
     ContactNotFoundError,
     ContactValidationError,
 )
+from app.core.journal.models.exceptions import JournalDomainError, JournalNotFoundError
 from app.mcp.shared.response_builders import MCPLogger, MCPResponseBuilder
 
 
@@ -66,6 +67,24 @@ def mcp_unified_error_handler(
             except ContactValidationError as e:
                 MCPLogger.log_validation_error(operation_name, str(e))
                 return MCPResponseBuilder.validation_error_response(e.field, e.message)
+
+            except JournalNotFoundError as e:
+                MCPLogger.log_not_found_error(operation_name, "Journal", str(e))
+                return MCPResponseBuilder.not_found_error_response("Journal", str(e))
+
+            except JournalDomainError as e:
+                # Handles all journal domain errors including validation errors raised
+                # by dataclasses.replace() __post_init__ and UUID parsing errors.
+                MCPLogger.log_validation_error(operation_name, e.message)
+                if e.status_code == 404:
+                    return MCPResponseBuilder.error_response(
+                        error_type="Not found",
+                        message=e.message,
+                    )
+                return MCPResponseBuilder.error_response(
+                    error_type="Journal error",
+                    message=e.message,
+                )
 
             except json.JSONDecodeError as e:
                 MCPLogger.log_validation_error(

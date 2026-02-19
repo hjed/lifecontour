@@ -5,8 +5,10 @@ Provides AI access to journal management functionality through MCP tools.
 Each tool is designed to return AI-friendly, contextual information.
 """
 
+import dataclasses
 import json
 from typing import Annotated, Any
+from uuid import UUID
 
 import structlog
 from dishka.integrations.starlette import FromDishka, inject
@@ -45,6 +47,7 @@ from app.core.journal.adapters.sql.travel_data_repository import SqlTravelDataRe
 from app.core.journal.models.bushwalking_data import BushwalkingData
 from app.core.journal.models.calendar_info import CalendarInfo
 from app.core.journal.models.entities import Journal
+from app.core.journal.models.exceptions import JournalValidationError
 from app.core.journal.models.fitness_data import FitnessData
 from app.core.journal.models.jogging_data import JoggingData
 from app.core.journal.models.journal_contact_relationship import (
@@ -472,8 +475,6 @@ async def _update_type_specific_data(
         # Create or update calendar info (calendar_id is required)
         calendar_id = type_data_dict.get("calendar_id")
         if calendar_id is not None:
-            from uuid import UUID
-
             # Convert string to UUID if needed
             if isinstance(calendar_id, str):
                 calendar_id = UUID(calendar_id)
@@ -537,53 +538,69 @@ async def _update_type_specific_data(
             journal_id
         )
         if existing_outdoor:
+            # Build updates dict and use dataclasses.replace() to trigger __post_init__
+            # validation, matching the REST API controller pattern.
+            updates: dict[str, Any] = {}
             if "activity_type" in type_data_dict:
-                existing_outdoor.activity_type = type_data_dict["activity_type"]
+                updates["activity_type"] = type_data_dict["activity_type"]
             if "weather_conditions" in type_data_dict:
-                existing_outdoor.weather_conditions = type_data_dict[
-                    "weather_conditions"
-                ]
+                updates["weather_conditions"] = type_data_dict["weather_conditions"]
             if "role" in type_data_dict:
-                existing_outdoor.role = type_data_dict["role"]
+                updates["role"] = type_data_dict["role"]
             if "in_leadership_role" in type_data_dict:
-                existing_outdoor.in_leadership_role = type_data_dict[
-                    "in_leadership_role"
-                ]
+                updates["in_leadership_role"] = type_data_dict["in_leadership_role"]
             if "participant_notes" in type_data_dict:
-                existing_outdoor.participant_notes = type_data_dict["participant_notes"]
-            await outdoor_activity_data_repo.save(existing_outdoor)
+                updates["participant_notes"] = type_data_dict["participant_notes"]
+            validated_outdoor = dataclasses.replace(existing_outdoor, **updates)
+            await outdoor_activity_data_repo.save(validated_outdoor)
     elif journal_type == JournalType.BUSHWALKING and type_data_dict:
         existing_bushwalking = await bushwalking_data_repo.find_by_journal_id(
             journal_id
         )
         if existing_bushwalking:
+            # Build updates dict and use dataclasses.replace() to trigger __post_init__
+            # validation, matching the REST API controller pattern.
+            bw_updates: dict[str, Any] = {}
             if "track_grading" in type_data_dict:
-                existing_bushwalking.track_grading = type_data_dict["track_grading"]
+                bw_updates["track_grading"] = type_data_dict["track_grading"]
             if "route_id" in type_data_dict:
-                from uuid import UUID
-
                 route_id_val = type_data_dict["route_id"]
-                existing_bushwalking.route_id = (
-                    UUID(route_id_val)
-                    if isinstance(route_id_val, str)
-                    else route_id_val
-                )
-            await bushwalking_data_repo.save(existing_bushwalking)
+                try:
+                    bw_updates["route_id"] = (
+                        UUID(route_id_val)
+                        if isinstance(route_id_val, str)
+                        else route_id_val
+                    )
+                except ValueError as e:
+                    raise JournalValidationError(
+                        "route_id", f"Invalid UUID format: {route_id_val}"
+                    ) from e
+            validated_bushwalking = dataclasses.replace(
+                existing_bushwalking, **bw_updates
+            )
+            await bushwalking_data_repo.save(validated_bushwalking)
     elif journal_type == JournalType.JOGGING and type_data_dict:
         existing_jogging = await jogging_data_repo.find_by_journal_id(journal_id)
         if existing_jogging:
+            # Build updates dict and use dataclasses.replace() to trigger __post_init__
+            # validation, matching the REST API controller pattern.
+            jog_updates: dict[str, Any] = {}
             if "pace" in type_data_dict:
-                existing_jogging.pace = type_data_dict["pace"]
+                jog_updates["pace"] = type_data_dict["pace"]
             if "route_id" in type_data_dict:
-                from uuid import UUID
-
                 route_id_val = type_data_dict["route_id"]
-                existing_jogging.route_id = (
-                    UUID(route_id_val)
-                    if isinstance(route_id_val, str)
-                    else route_id_val
-                )
-            await jogging_data_repo.save(existing_jogging)
+                try:
+                    jog_updates["route_id"] = (
+                        UUID(route_id_val)
+                        if isinstance(route_id_val, str)
+                        else route_id_val
+                    )
+                except ValueError as e:
+                    raise JournalValidationError(
+                        "route_id", f"Invalid UUID format: {route_id_val}"
+                    ) from e
+            validated_jogging = dataclasses.replace(existing_jogging, **jog_updates)
+            await jogging_data_repo.save(validated_jogging)
 
 
 async def _persist_contact_relationships(
@@ -825,22 +842,26 @@ def register_journal_tools(mcp: FastMCP[None]) -> None:
                     # Convert type string to enum
                     journal_type = JournalType[type_str.upper()]
 
-                    await journal_service.add_type_to_journal(
+                    # Capture the return value: includes all types added (requested +
+                    # auto-resolved dependencies like FITNESS for OUTDOOR_ACTIVITY).
+                    added_types = await journal_service.add_type_to_journal(
                         journal_id, journal_type, db_connection
                     )
 
-                    # Create type-specific data row with default values
-                    await _create_type_specific_data(
-                        journal_type,
-                        journal_id,
-                        mood_data_repo,
-                        plan_data_repo,
-                        travel_data_repo,
-                        fitness_data_repo,
-                        outdoor_activity_data_repo,
-                        bushwalking_data_repo,
-                        jogging_data_repo,
-                    )
+                    # Create type-specific data rows for ALL added types (including
+                    # dependency types like FITNESS). Mirrors REST controller behaviour.
+                    for added_type in added_types:
+                        await _create_type_specific_data(
+                            added_type,
+                            journal_id,
+                            mood_data_repo,
+                            plan_data_repo,
+                            travel_data_repo,
+                            fitness_data_repo,
+                            outdoor_activity_data_repo,
+                            bushwalking_data_repo,
+                            jogging_data_repo,
+                        )
 
                     # Update type-specific data if provided
                     if request.type_data and type_str.upper() in request.type_data:
@@ -1024,22 +1045,26 @@ def register_journal_tools(mcp: FastMCP[None]) -> None:
 
                     # Only add if not already present
                     if type_str.upper() not in current_types:
-                        await journal_service.add_type_to_journal(
+                        # Capture the return value: includes all types added (requested +
+                        # auto-resolved dependencies like FITNESS for OUTDOOR_ACTIVITY).
+                        added_types = await journal_service.add_type_to_journal(
                             journal_id, journal_type, db_connection
                         )
 
-                        # Create type-specific data row with default values
-                        await _create_type_specific_data(
-                            journal_type,
-                            journal_id,
-                            mood_data_repo,
-                            plan_data_repo,
-                            travel_data_repo,
-                            fitness_data_repo,
-                            outdoor_activity_data_repo,
-                            bushwalking_data_repo,
-                            jogging_data_repo,
-                        )
+                        # Create type-specific data rows for ALL added types (including
+                        # dependency types like FITNESS). Mirrors REST controller behaviour.
+                        for added_type in added_types:
+                            await _create_type_specific_data(
+                                added_type,
+                                journal_id,
+                                mood_data_repo,
+                                plan_data_repo,
+                                travel_data_repo,
+                                fitness_data_repo,
+                                outdoor_activity_data_repo,
+                                bushwalking_data_repo,
+                                jogging_data_repo,
+                            )
 
                     # Update type-specific data if provided
                     if request.type_data and type_str.upper() in request.type_data:
