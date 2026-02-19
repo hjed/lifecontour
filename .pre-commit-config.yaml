@@ -8,14 +8,14 @@ repos:
       # Run the formatter
       - id: ruff-format-backend
         name: ruff format (backend)
-        entry: bash -c 'cd backend && uv run ruff format .'
+        entry: uv run --directory backend ruff format .
         language: system
         files: ^backend/.*\.py$
         pass_filenames: false
       # Run the linter
       - id: ruff-backend
         name: ruff check (backend)
-        entry: bash -c 'cd backend && uv run ruff check --fix .'
+        entry: uv run --directory backend ruff check --fix .
         language: system
         files: ^backend/.*\.py$
         pass_filenames: false
@@ -25,7 +25,7 @@ repos:
     hooks:
       - id: mypy-backend
         name: mypy (backend)
-        entry: bash -c 'cd backend && uv run mypy .'
+        entry: uv run --directory backend mypy app/
         language: system
         files: ^backend/.*\.py$
         pass_filenames: false
@@ -36,14 +36,14 @@ repos:
       # Run the formatter
       - id: ruff-format-core-shared
         name: ruff format (core_shared)
-        entry: bash -c 'cd core_shared && uv run ruff format .'
+        entry: uv run --directory core_shared ruff format .
         language: system
         files: ^core_shared/.*\.py$
         pass_filenames: false
       # Run the linter
       - id: ruff-core-shared
         name: ruff check (core_shared)
-        entry: bash -c 'cd core_shared && uv run ruff check --fix .'
+        entry: uv run --directory core_shared ruff check --fix .
         language: system
         files: ^core_shared/.*\.py$
         pass_filenames: false
@@ -53,7 +53,7 @@ repos:
     hooks:
       - id: mypy-core-shared
         name: mypy (core_shared)
-        entry: bash -c 'cd core_shared && uv run mypy .'
+        entry: uv run --directory core_shared mypy .
         language: system
         files: ^core_shared/.*\.py$
         pass_filenames: false
@@ -63,7 +63,7 @@ repos:
     hooks:
       - id: prettier
         name: prettier (frontend)
-        entry: bash -c 'cd frontend && pnpm format'
+        entry: pnpm --dir frontend format
         language: system
         files: ^frontend/.*\.(js|jsx|ts|tsx|json|css|scss|md)$
         pass_filenames: false
@@ -74,7 +74,7 @@ repos:
     hooks:
       - id: eslint
         name: eslint (frontend)
-        entry: bash -c 'cd frontend && pnpm lint:fix'
+        entry: pnpm --dir frontend lint:fix
         language: system
         files: ^frontend/.*\.(js|jsx|ts|tsx)$
         pass_filenames: false
@@ -85,26 +85,15 @@ repos:
     hooks:
       - id: typescript-check
         name: typescript check (frontend)
-        entry: bash -c 'cd frontend && pnpm type-check'
+        entry: pnpm --dir frontend type-check
         language: system
         files: ^frontend/.*\.(ts|tsx)$
         pass_filenames: false
         require_serial: true
 
-  # General hooks (local implementations to avoid Python 3.13 compatibility issues)
+  # General hooks
   - repo: local
     hooks:
-      - id: trailing-whitespace
-        name: trim trailing whitespace
-        entry: bash -c 'git diff --cached --name-only --diff-filter=ACMR | grep -E "\.(py|js|ts|tsx|json|yaml|yml|md)$" | xargs -r sed -i "s/[[:space:]]*$//"'
-        language: system
-        pass_filenames: false
-
-      # - id: check-yaml
-      #   name: check yaml
-      #   entry: uvx python3 -c "import sys, yaml; [yaml.safe_load(open(f)) for f in sys.argv[1:]]"
-      #   language: system
-      #   files: \.(yaml|yml)$
       - id: check-json
         name: check json
         entry: uvx python3 -c "import sys, json; [json.load(open(f)) for f in sys.argv[1:]]"
@@ -115,14 +104,12 @@ repos:
         entry: uvx python3 -c "import sys, tomllib; [tomllib.load(open(f, 'rb')) for f in sys.argv[1:]]"
         language: system
         files: \.toml$
+
+  # Cross-platform hooks from pre-commit-hooks (Python-based, no bash required)
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
       - id: check-merge-conflict
-        name: check for merge conflicts
-        entry: bash -c 'if [ "$#" -gt 0 ]; then for file in "$@"; do if grep -q "^<<<<<<<\|^=======\|^>>>>>>>" "$file" 2>/dev/null; then echo "Merge conflict markers found in $file"; exit 1; fi; done; fi'
-        language: system
-        types: [text]
-        exclude: '^\.pre-commit-config\.yaml$'
       - id: check-added-large-files
-        name: check for added large files
-        entry: bash -c 'git diff --cached --name-only | xargs -r ls -la | awk '\''$5 > 1024000 {print $9 " is " $5 " bytes"; exit 1}'\'''
-        language: system
-        pass_filenames: false
+        args: ['--maxkb=1000']

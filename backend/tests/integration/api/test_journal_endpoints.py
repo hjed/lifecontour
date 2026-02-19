@@ -1290,3 +1290,222 @@ class TestJournalErrorHandling:
         )
 
         assert response.status_code == 404
+
+
+@pytest.mark.integration
+class TestJournalTypeDependencyDataCreation:
+    """Integration tests verifying dependency type data rows are created on type addition."""
+
+    @pytest_asyncio.fixture(autouse=True)
+    async def setup_method(self, clean_database):  # noqa: ARG002
+        """Setup method to ensure clean database for each test."""
+        pass
+
+    async def test_adding_outdoor_activity_creates_fitness_data(
+        self, integration_api_client
+    ):
+        """Adding OUTDOOR_ACTIVITY should also create FITNESS type data row."""
+        create_data = create_journal_request_data(
+            title="Outdoor Activity Dependency Test",
+            content="Test content",
+            types=["OUTDOOR_ACTIVITY"],
+        )
+
+        response = await integration_api_client.post("/api/journals", json=create_data)
+
+        assert response.status_code == 201
+        response_json = response.json()
+        type_data = response_json["data"]["attributes"]["type_data"]
+        # OUTDOOR_ACTIVITY requires FITNESS — FITNESS data row must exist
+        assert "fitness" in type_data, (
+            "FITNESS type data row should be auto-created for OUTDOOR_ACTIVITY"
+        )
+        assert "outdoor_activity" in type_data
+
+    async def test_adding_bushwalking_creates_fitness_and_outdoor_activity_data(
+        self, integration_api_client
+    ):
+        """Adding BUSHWALKING should create FITNESS and OUTDOOR_ACTIVITY data rows."""
+        create_data = create_journal_request_data(
+            title="Bushwalking Dependency Test",
+            content="Test content",
+            types=["BUSHWALKING"],
+        )
+
+        response = await integration_api_client.post("/api/journals", json=create_data)
+
+        assert response.status_code == 201
+        response_json = response.json()
+        type_data = response_json["data"]["attributes"]["type_data"]
+        # BUSHWALKING requires OUTDOOR_ACTIVITY and FITNESS — both rows must exist
+        assert "fitness" in type_data, (
+            "FITNESS type data row should be auto-created for BUSHWALKING"
+        )
+        assert "outdoor_activity" in type_data, (
+            "OUTDOOR_ACTIVITY type data row should be auto-created for BUSHWALKING"
+        )
+        assert "bushwalking" in type_data
+
+    async def test_add_type_endpoint_creates_dependency_data(
+        self, integration_api_client
+    ):
+        """POST /types endpoint should create data rows for all dependency types."""
+        # Create a plain NOTE journal
+        create_data = create_journal_request_data(
+            title="Add Type Dependency Test", content="Test content"
+        )
+        create_response = await integration_api_client.post(
+            "/api/journals", json=create_data
+        )
+        assert create_response.status_code == 201
+        journal_id = create_response.json()["data"]["id"]
+
+        # Add OUTDOOR_ACTIVITY via the types endpoint
+        type_payload = {
+            "data": {
+                "type": "journal-type",
+                "attributes": {"journal_type": "OUTDOOR_ACTIVITY"},
+            }
+        }
+        response = await integration_api_client.post(
+            f"/api/journals/{journal_id}/types", json=type_payload
+        )
+
+        assert response.status_code == 200
+        response_json = response.json()
+        type_data = response_json["data"]["attributes"]["type_data"]
+        # FITNESS data row should have been created as a dependency
+        assert "fitness" in type_data, (
+            "FITNESS type data row should be auto-created when OUTDOOR_ACTIVITY is added via endpoint"
+        )
+        assert "outdoor_activity" in type_data
+
+
+@pytest.mark.integration
+class TestJournalTypeDataValidation:
+    """Integration tests verifying that invalid update data returns 400 not 500."""
+
+    @pytest_asyncio.fixture(autouse=True)
+    async def setup_method(self, clean_database):  # noqa: ARG002
+        """Setup method to ensure clean database for each test."""
+        pass
+
+    async def test_update_outdoor_activity_with_empty_activity_type_returns_400(
+        self, integration_api_client
+    ):
+        """Updating OUTDOOR_ACTIVITY with empty activity_type should return 400."""
+        create_data = create_journal_request_data(
+            title="Validation Test",
+            content="Test content",
+            types=["OUTDOOR_ACTIVITY"],
+        )
+        create_response = await integration_api_client.post(
+            "/api/journals", json=create_data
+        )
+        assert create_response.status_code == 201
+        journal_id = create_response.json()["data"]["id"]
+
+        update_data = {
+            "data": {
+                "type": "journal-type-data",
+                "attributes": {"activity_type": "   "},  # whitespace-only
+            }
+        }
+        response = await integration_api_client.put(
+            f"/api/journals/{journal_id}/types/OUTDOOR_ACTIVITY/data",
+            json=update_data,
+        )
+
+        assert response.status_code == 400, (
+            "Empty/whitespace activity_type should return 400 not 500"
+        )
+
+    async def test_update_bushwalking_with_invalid_uuid_returns_400(
+        self, integration_api_client
+    ):
+        """Updating BUSHWALKING with an invalid route_id UUID should return 400."""
+        create_data = create_journal_request_data(
+            title="UUID Validation Test",
+            content="Test content",
+            types=["BUSHWALKING"],
+        )
+        create_response = await integration_api_client.post(
+            "/api/journals", json=create_data
+        )
+        assert create_response.status_code == 201
+        journal_id = create_response.json()["data"]["id"]
+
+        update_data = {
+            "data": {
+                "type": "journal-type-data",
+                "attributes": {"route_id": "not-a-valid-uuid"},
+            }
+        }
+        response = await integration_api_client.put(
+            f"/api/journals/{journal_id}/types/BUSHWALKING/data",
+            json=update_data,
+        )
+
+        assert response.status_code == 400, (
+            "Invalid UUID route_id should return 400 not 500"
+        )
+
+    async def test_update_bushwalking_with_invalid_track_grading_returns_400(
+        self, integration_api_client
+    ):
+        """Updating BUSHWALKING with an invalid track_grading should return 400."""
+        create_data = create_journal_request_data(
+            title="Track Grading Validation Test",
+            content="Test content",
+            types=["BUSHWALKING"],
+        )
+        create_response = await integration_api_client.post(
+            "/api/journals", json=create_data
+        )
+        assert create_response.status_code == 201
+        journal_id = create_response.json()["data"]["id"]
+
+        update_data = {
+            "data": {
+                "type": "journal-type-data",
+                "attributes": {"track_grading": "Invalid Grade 99"},
+            }
+        }
+        response = await integration_api_client.put(
+            f"/api/journals/{journal_id}/types/BUSHWALKING/data",
+            json=update_data,
+        )
+
+        assert response.status_code == 400, (
+            "Invalid track_grading should return 400 not 500"
+        )
+
+    async def test_update_jogging_with_invalid_uuid_returns_400(
+        self, integration_api_client
+    ):
+        """Updating JOGGING with an invalid route_id UUID should return 400."""
+        create_data = create_journal_request_data(
+            title="Jogging UUID Validation Test",
+            content="Test content",
+            types=["JOGGING"],
+        )
+        create_response = await integration_api_client.post(
+            "/api/journals", json=create_data
+        )
+        assert create_response.status_code == 201
+        journal_id = create_response.json()["data"]["id"]
+
+        update_data = {
+            "data": {
+                "type": "journal-type-data",
+                "attributes": {"route_id": "not-a-valid-uuid"},
+            }
+        }
+        response = await integration_api_client.put(
+            f"/api/journals/{journal_id}/types/JOGGING/data",
+            json=update_data,
+        )
+
+        assert response.status_code == 400, (
+            "Invalid UUID route_id should return 400 not 500"
+        )

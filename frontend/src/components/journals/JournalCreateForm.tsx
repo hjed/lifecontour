@@ -9,7 +9,7 @@
 
 import { useRouter } from 'next/navigation';
 import type { Route } from 'next';
-import { useForm } from 'react-hook-form';
+import { useForm, type Control } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { Button } from '@/components/ui/button';
@@ -54,6 +54,40 @@ const typeOptions = [
   { value: JournalType.BUSHWALKING, label: 'Bushwalking' },
   { value: JournalType.JOGGING, label: 'Jogging' },
 ];
+
+interface TypeCheckboxFieldProps {
+  readonly control: Control<FormValues>;
+  readonly option: { readonly value: JournalType; readonly label: string };
+}
+
+/**
+ * Individual checkbox field for a journal type option.
+ * Extracted to a module-level component to keep function nesting within limits.
+ */
+function TypeCheckboxField({ control, option }: TypeCheckboxFieldProps) {
+  return (
+    <FormField
+      control={control}
+      name='types'
+      render={({ field }) => (
+        <FormItem className='flex flex-row items-start space-y-0 space-x-3'>
+          <FormControl>
+            <Checkbox
+              checked={field.value?.includes(option.value)}
+              onCheckedChange={checked => {
+                const newValue = checked
+                  ? [...field.value, option.value]
+                  : field.value?.filter(v => v !== option.value);
+                field.onChange(newValue);
+              }}
+            />
+          </FormControl>
+          <FormLabel className='font-normal'>{option.label}</FormLabel>
+        </FormItem>
+      )}
+    />
+  );
+}
 
 interface JournalCreateFormProps {
   readonly onCancel?: () => void;
@@ -180,34 +214,10 @@ export function JournalCreateForm({ onCancel }: JournalCreateFormProps = {}) {
               </div>
               <div className='space-y-2'>
                 {typeOptions.map(option => (
-                  <FormField
+                  <TypeCheckboxField
                     key={option.value}
                     control={form.control}
-                    name='types'
-                    render={({ field }) => (
-                      <FormItem
-                        key={option.value}
-                        className='flex flex-row items-start space-y-0 space-x-3'
-                      >
-                        <FormControl>
-                          <Checkbox
-                            checked={field.value?.includes(option.value)}
-                            onCheckedChange={checked => {
-                              return checked
-                                ? field.onChange([...field.value, option.value])
-                                : field.onChange(
-                                    field.value?.filter(
-                                      value => value !== option.value
-                                    )
-                                  );
-                            }}
-                          />
-                        </FormControl>
-                        <FormLabel className='font-normal'>
-                          {option.label}
-                        </FormLabel>
-                      </FormItem>
-                    )}
+                    option={option}
                   />
                 ))}
               </div>

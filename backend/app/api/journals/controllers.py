@@ -5,8 +5,10 @@ Handles journal-related HTTP endpoints following JSON API specification.
 Controllers act as adapters between HTTP and domain services.
 """
 
+import dataclasses
 from datetime import UTC, datetime
 from typing import Any
+from uuid import UUID
 
 import structlog
 from dishka.integrations.fastapi import FromDishka, inject
@@ -806,22 +808,24 @@ async def _process_journal_types(
             # Convert type string to enum
             journal_type = _parse_journal_type(type_str)
 
-            await journal_service.add_type_to_journal(
+            # Returns all types added, including auto-resolved dependencies
+            added_types = await journal_service.add_type_to_journal(
                 journal_id, journal_type, connection
             )
 
-            # Create type-specific data row with default values
-            await _create_type_specific_data(
-                journal_type,
-                journal_id,
-                mood_data_repo,
-                plan_data_repo,
-                travel_data_repo,
-                fitness_data_repo,
-                outdoor_activity_data_repo,
-                bushwalking_data_repo,
-                jogging_data_repo,
-            )
+            # Create type-specific data rows for ALL added types (including dependencies)
+            for added_type in added_types:
+                await _create_type_specific_data(
+                    added_type,
+                    journal_id,
+                    mood_data_repo,
+                    plan_data_repo,
+                    travel_data_repo,
+                    fitness_data_repo,
+                    outdoor_activity_data_repo,
+                    bushwalking_data_repo,
+                    jogging_data_repo,
+                )
         except (ValueError, KeyError):
             # Invalid type, skip
             pass
@@ -1304,8 +1308,25 @@ async def add_type_to_journal(
             f"Invalid journal type: {type_request.data.attributes.journal_type}",
         ) from e
 
-    # Add type with automatic dependency resolution
-    await journal_service.add_type_to_journal(journal_id, journal_type, connection)
+    # Add type with automatic dependency resolution.
+    # Returns all types actually added (requested type + auto-resolved dependencies).
+    added_types = await journal_service.add_type_to_journal(
+        journal_id, journal_type, connection
+    )
+
+    # Create type-specific data rows for ALL added types (including dependencies)
+    for added_type in added_types:
+        await _create_type_specific_data(
+            added_type,
+            journal_id,
+            mood_data_repo,
+            plan_data_repo,
+            travel_data_repo,
+            fitness_data_repo,
+            outdoor_activity_data_repo,
+            bushwalking_data_repo,
+            jogging_data_repo,
+        )
 
     # Get updated journal
     updated_journal = await journal_service.get_journal(journal_id)
@@ -1539,19 +1560,22 @@ async def _update_outdoor_activity_type_data(
             "journal_type", f"Journal does not have type {journal_type}"
         )
 
-    # Update fields from request
+    # Build update kwargs and use dataclasses.replace() to trigger __post_init__ validation.
+    # This ensures domain validation (e.g. no empty/whitespace strings) is enforced.
+    updates: dict[str, Any] = {}
     if "activity_type" in attrs:
-        outdoor_activity_data.activity_type = attrs["activity_type"]
+        updates["activity_type"] = attrs["activity_type"]
     if "weather_conditions" in attrs:
-        outdoor_activity_data.weather_conditions = attrs["weather_conditions"]
+        updates["weather_conditions"] = attrs["weather_conditions"]
     if "role" in attrs:
-        outdoor_activity_data.role = attrs["role"]
+        updates["role"] = attrs["role"]
     if "in_leadership_role" in attrs:
-        outdoor_activity_data.in_leadership_role = attrs["in_leadership_role"]
+        updates["in_leadership_role"] = attrs["in_leadership_role"]
     if "participant_notes" in attrs:
-        outdoor_activity_data.participant_notes = attrs["participant_notes"]
+        updates["participant_notes"] = attrs["participant_notes"]
 
-    await outdoor_activity_data_repo.save(outdoor_activity_data)
+    validated_data = dataclasses.replace(outdoor_activity_data, **updates)
+    await outdoor_activity_data_repo.save(validated_data)
 
 
 async def _update_bushwalking_type_data(
@@ -1561,23 +1585,31 @@ async def _update_bushwalking_type_data(
     bushwalking_data_repo: BushwalkingDataRepository,
 ) -> None:
     """Update BUSHWALKING type-specific data."""
-    from uuid import UUID
-
     bushwalking_data = await bushwalking_data_repo.find_by_journal_id(journal_id)
     if not bushwalking_data:
         raise JournalValidationError(
             "journal_type", f"Journal does not have type {journal_type}"
         )
 
-    # Update fields from request
+    # Build update kwargs and use dataclasses.replace() to trigger __post_init__ validation.
+    # This ensures domain validation (e.g. valid track_grading) is enforced.
+    updates: dict[str, Any] = {}
     if "route_id" in attrs:
-        bushwalking_data.route_id = (
-            UUID(attrs["route_id"]) if attrs["route_id"] is not None else None
-        )
+        raw_route_id = attrs["route_id"]
+        if raw_route_id is not None:
+            try:
+                updates["route_id"] = UUID(str(raw_route_id))
+            except ValueError as e:
+                raise JournalValidationError(
+                    "route_id", f"Invalid UUID format: {raw_route_id}"
+                ) from e
+        else:
+            updates["route_id"] = None
     if "track_grading" in attrs:
-        bushwalking_data.track_grading = attrs["track_grading"]
+        updates["track_grading"] = attrs["track_grading"]
 
-    await bushwalking_data_repo.save(bushwalking_data)
+    validated_data = dataclasses.replace(bushwalking_data, **updates)
+    await bushwalking_data_repo.save(validated_data)
 
 
 async def _update_jogging_type_data(
@@ -1587,23 +1619,30 @@ async def _update_jogging_type_data(
     jogging_data_repo: JoggingDataRepository,
 ) -> None:
     """Update JOGGING type-specific data."""
-    from uuid import UUID
-
     jogging_data = await jogging_data_repo.find_by_journal_id(journal_id)
     if not jogging_data:
         raise JournalValidationError(
             "journal_type", f"Journal does not have type {journal_type}"
         )
 
-    # Update fields from request
+    # Build update kwargs and use dataclasses.replace() to trigger __post_init__ validation.
+    updates: dict[str, Any] = {}
     if "route_id" in attrs:
-        jogging_data.route_id = (
-            UUID(attrs["route_id"]) if attrs["route_id"] is not None else None
-        )
+        raw_route_id = attrs["route_id"]
+        if raw_route_id is not None:
+            try:
+                updates["route_id"] = UUID(str(raw_route_id))
+            except ValueError as e:
+                raise JournalValidationError(
+                    "route_id", f"Invalid UUID format: {raw_route_id}"
+                ) from e
+        else:
+            updates["route_id"] = None
     if "pace" in attrs:
-        jogging_data.pace = attrs["pace"]
+        updates["pace"] = attrs["pace"]
 
-    await jogging_data_repo.save(jogging_data)
+    validated_data = dataclasses.replace(jogging_data, **updates)
+    await jogging_data_repo.save(validated_data)
 
 
 @router.put("/{journal_id}/types/{journal_type}/data")

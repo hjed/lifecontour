@@ -13,8 +13,21 @@ import pytest_asyncio
 from dishka import Provider, Scope, make_async_container, provide
 from fastmcp import FastMCP
 from fastmcp.client import Client
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
+from app.core.journal.adapters.sql.bushwalking_data_repository import (
+    SqlBushwalkingDataRepository,
+)
+from app.core.journal.adapters.sql.fitness_data_repository import (
+    SqlFitnessDataRepository,
+)
+from app.core.journal.adapters.sql.jogging_data_repository import (
+    SqlJoggingDataRepository,
+)
+from app.core.journal.adapters.sql.outdoor_activity_data_repository import (
+    SqlOutdoorActivityDataRepository,
+)
 from app.core.journal.models.entities import Journal
 from app.core.journal.models.journal_contact_relationship import (
     JournalContactRelationship,
@@ -25,7 +38,10 @@ from app.core.journal.models.journal_relationship_types import (
 from app.core.journal.models.value_objects import EventDateRange
 from app.core.journal.services.journal_service import JournalService
 from app.infrastructure.events.outbox_event_publisher import OutboxEventPublisher
-from app.mcp.domains.journals.tools import register_journal_tools
+from app.mcp.domains.journals.tools import (
+    _fetch_journal_types_and_data,
+    register_journal_tools,
+)
 
 
 class JournalTestProvider(Provider):
@@ -342,3 +358,180 @@ class TestJournalToolsIntegration:
         # Verify the relationships were retrieved
         assert len(relationships) >= 1
         assert any(r.journal_id == sample_journal_id for r in relationships)
+
+
+class TestFetchJournalTypesAndDataNewActivityTypes:
+    """
+    Integration tests verifying _fetch_journal_types_and_data detects
+    FITNESS, OUTDOOR_ACTIVITY, BUSHWALKING, and JOGGING types.
+    """
+
+    @pytest_asyncio.fixture
+    async def journal_id(self, clean_database: AsyncConnection) -> int:
+        """Create a base journal and return its ID."""
+        now = datetime.now(UTC)
+        result = await clean_database.execute(
+            text("""
+                INSERT INTO journals
+                    (user_id, title, content, event_date_range_start, event_date_range_end)
+                VALUES (:user_id, :title, :content, :start, :end)
+                RETURNING id
+            """),
+            {
+                "user_id": "test_user",
+                "title": "Activity Test Journal",
+                "content": "Integration test content",
+                "start": now,
+                "end": now + timedelta(hours=1),
+            },
+        )
+        row = result.fetchone()
+        assert row is not None
+        return int(row[0])
+
+    async def _call_fetch(
+        self, journal_id: int, conn: AsyncConnection
+    ) -> tuple[list[str], dict]:
+        """Helper: call _fetch_journal_types_and_data with all repos."""
+        from app.core.journal.adapters.sql.calendar_info_repository import (
+            SqlCalendarInfoRepository,
+        )
+        from app.core.journal.adapters.sql.mood_data_repository import (
+            SqlMoodDataRepository,
+        )
+        from app.core.journal.adapters.sql.photo_album_data_repository import (
+            SqlPhotoAlbumDataRepository,
+        )
+        from app.core.journal.adapters.sql.plan_data_repository import (
+            SqlPlanDataRepository,
+        )
+        from app.core.journal.adapters.sql.travel_data_repository import (
+            SqlTravelDataRepository,
+        )
+
+        return await _fetch_journal_types_and_data(
+            journal_id,
+            SqlCalendarInfoRepository(conn),
+            SqlMoodDataRepository(conn),
+            SqlPlanDataRepository(conn),
+            SqlTravelDataRepository(conn),
+            SqlPhotoAlbumDataRepository(conn),
+            SqlFitnessDataRepository(conn),
+            SqlOutdoorActivityDataRepository(conn),
+            SqlBushwalkingDataRepository(conn),
+            SqlJoggingDataRepository(conn),
+        )
+
+    @pytest.mark.asyncio
+    async def test_fetch_detects_fitness_type(
+        self, journal_id: int, clean_database: AsyncConnection
+    ) -> None:
+        """FITNESS type is detected when journal_fitness_data row exists."""
+        await clean_database.execute(
+            text("""
+                INSERT INTO journal_fitness_data (journal_id)
+                VALUES (:journal_id)
+            """),
+            {"journal_id": journal_id},
+        )
+
+        types, type_data = await self._call_fetch(journal_id, clean_database)
+
+        assert "fitness" in types
+        assert "fitness" in type_data
+
+    @pytest.mark.asyncio
+    async def test_fetch_fitness_data_fields(
+        self, journal_id: int, clean_database: AsyncConnection
+    ) -> None:
+        """FITNESS type_data contains expected fields."""
+        await clean_database.execute(
+            text("""
+                INSERT INTO journal_fitness_data
+                    (journal_id, heart_rate_avg, heart_rate_max, distance, duration, calories)
+                VALUES (:journal_id, 145, 175, 10000, 3600, 550)
+            """),
+            {"journal_id": journal_id},
+        )
+
+        types, type_data = await self._call_fetch(journal_id, clean_database)
+
+        fitness = type_data["fitness"]
+        assert fitness["heart_rate_avg"] == 145
+        assert fitness["heart_rate_max"] == 175
+        assert fitness["distance"] == 10000
+        assert fitness["duration"] == 3600
+        assert fitness["calories"] == 550
+
+    @pytest.mark.asyncio
+    async def test_fetch_detects_outdoor_activity_type(
+        self, journal_id: int, clean_database: AsyncConnection
+    ) -> None:
+        """OUTDOOR_ACTIVITY type is detected when journal_outdoor_activity_data row exists."""
+        await clean_database.execute(
+            text("""
+                INSERT INTO journal_outdoor_activity_data
+                    (journal_id, activity_type, weather_conditions, role, in_leadership_role)
+                VALUES (:journal_id, 'Hiking', 'Sunny, 22°C', 'leader', true)
+            """),
+            {"journal_id": journal_id},
+        )
+
+        types, type_data = await self._call_fetch(journal_id, clean_database)
+
+        assert "outdoor_activity" in types
+        outdoor = type_data["outdoor_activity"]
+        assert outdoor["activity_type"] == "Hiking"
+        assert outdoor["weather_conditions"] == "Sunny, 22°C"
+        assert outdoor["role"] == "leader"
+        assert outdoor["in_leadership_role"] is True
+
+    @pytest.mark.asyncio
+    async def test_fetch_detects_bushwalking_type(
+        self, journal_id: int, clean_database: AsyncConnection
+    ) -> None:
+        """BUSHWALKING type is detected when journal_bushwalking_data row exists."""
+        await clean_database.execute(
+            text("""
+                INSERT INTO journal_bushwalking_data (journal_id, track_grading)
+                VALUES (:journal_id, 'Grade 3')
+            """),
+            {"journal_id": journal_id},
+        )
+
+        types, type_data = await self._call_fetch(journal_id, clean_database)
+
+        assert "bushwalking" in types
+        bushwalking = type_data["bushwalking"]
+        assert bushwalking["track_grading"] == "Grade 3"
+        assert bushwalking["route_id"] is None
+
+    @pytest.mark.asyncio
+    async def test_fetch_detects_jogging_type(
+        self, journal_id: int, clean_database: AsyncConnection
+    ) -> None:
+        """JOGGING type is detected when journal_jogging_data row exists."""
+        await clean_database.execute(
+            text("""
+                INSERT INTO journal_jogging_data (journal_id, pace)
+                VALUES (:journal_id, 360)
+            """),
+            {"journal_id": journal_id},
+        )
+
+        types, type_data = await self._call_fetch(journal_id, clean_database)
+
+        assert "jogging" in types
+        jogging = type_data["jogging"]
+        assert jogging["pace"] == 360
+        assert jogging["route_id"] is None
+
+    @pytest.mark.asyncio
+    async def test_journal_with_no_activity_data_is_note(
+        self, journal_id: int, clean_database: AsyncConnection
+    ) -> None:
+        """A journal with no type-specific data is detected as NOTE."""
+        types, type_data = await self._call_fetch(journal_id, clean_database)
+
+        assert types == ["note"]
+        assert type_data == {}
