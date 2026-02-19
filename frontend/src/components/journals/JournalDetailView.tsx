@@ -8,7 +8,7 @@
 
 'use client';
 
-import { useState, useCallback } from 'react';
+import { useCallback } from 'react';
 import { Trash2 } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -46,6 +46,8 @@ import {
   useAddJournalTag,
   useRemoveJournalTag,
   useJournalTags,
+  useCalendars,
+  useUpdateTypeData,
 } from '@/lib/api/journals';
 import { useContacts } from '@/lib/api/contacts';
 import { useRouter } from 'next/navigation';
@@ -64,11 +66,10 @@ export function JournalDetailView({
   className,
 }: JournalDetailViewProps) {
   const router = useRouter();
-  // Note: Calendar fetching will be implemented when calendar API is available
-  const [availableCalendars] = useState<JournalCalendar[]>([]);
 
   // Mutations
   const updateJournal = useUpdateJournal();
+  const updateTypeData = useUpdateTypeData();
   const deleteJournal = useDeleteJournal();
   const addContact = useAddContactRelationship();
   const removeContact = useRemoveContactRelationship();
@@ -78,8 +79,15 @@ export function JournalDetailView({
   // Data fetching
   const { data: tagsResponse } = useJournalTags();
   const { data: contactsResponse } = useContacts({}, { enabled: true });
+  const { data: calendarsData } = useCalendars();
 
   const availableTags = tagsResponse?.data || [];
+  const availableCalendars: JournalCalendar[] =
+    calendarsData?.data.map(c => ({
+      id: c.id,
+      name: c.attributes.name,
+      color: c.attributes.color,
+    })) || [];
   const availableContacts =
     contactsResponse?.data.map(c => ({
       id: Number.parseInt(c.id, 10),
@@ -88,17 +96,13 @@ export function JournalDetailView({
 
   // Handlers
   const handleCalendarChange = async (calendarId: string) => {
-    await updateJournal.mutateAsync({
-      id: journal.id,
-      data: {
-        type_data: {
-          ...journal.type_data,
-          CALENDAR_INFO: {
-            calendar_id: calendarId,
-            is_all_day: false,
-            sync_invitees: false,
-          },
-        },
+    await updateTypeData.mutateAsync({
+      journalId: journal.id,
+      journalType: JournalType.EVENT,
+      typeData: {
+        calendar_id: calendarId,
+        is_all_day: false,
+        sync_invitees: false,
       },
     });
   };
@@ -154,18 +158,13 @@ export function JournalDetailView({
       type: JournalType,
       data: CalendarInfoData | MoodData | PhotoAlbumData | PlanData | TravelData
     ) => {
-      // Update the journal with the new type data
-      await updateJournal.mutateAsync({
-        id: journal.id,
-        data: {
-          type_data: {
-            ...journal.type_data,
-            [type]: data,
-          },
-        },
+      await updateTypeData.mutateAsync({
+        journalId: journal.id,
+        journalType: type,
+        typeData: data as Record<string, unknown>,
       });
     },
-    [journal.id, journal.type_data, updateJournal]
+    [journal.id, updateTypeData]
   );
 
   // Handle title update

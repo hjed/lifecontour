@@ -333,6 +333,38 @@ async function removeJournalType(
   return response.json();
 }
 
+async function updateTypeData(
+  journalId: string,
+  journalType: JournalType,
+  typeData: Record<string, unknown>
+): Promise<JournalResponse> {
+  const requestData = {
+    type: 'journal-type-data' as const,
+    attributes: typeData,
+  };
+
+  const response = await fetch(
+    `${API_ENDPOINTS.JOURNALS.BY_ID(journalId)}/types/${journalType}/data`,
+    {
+      method: 'PUT',
+      credentials: 'include',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ data: requestData }),
+    }
+  );
+
+  if (!response.ok) {
+    const errorData: JsonApiErrorResponse = await response.json();
+    throw new Error(
+      errorData.errors?.[0]?.detail || ERROR_MESSAGES.UPDATE_FAILED
+    );
+  }
+
+  return response.json();
+}
+
 // Contact Relationship Management Functions
 async function addContactRelationship(
   journalId: string,
@@ -685,6 +717,32 @@ export function useRemoveJournalType() {
       });
       queryClient.invalidateQueries({ queryKey: journalKeys.lists() });
       toast.success('Journal type removed successfully');
+    },
+    onError: (error: Error) => {
+      toast.error(error.message);
+    },
+  });
+}
+
+export function useUpdateTypeData() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({
+      journalId,
+      journalType,
+      typeData,
+    }: {
+      journalId: string;
+      journalType: JournalType;
+      typeData: Record<string, unknown>;
+    }) => updateTypeData(journalId, journalType, typeData),
+    onSuccess: (_, { journalId }) => {
+      queryClient.invalidateQueries({
+        queryKey: journalKeys.detail(journalId),
+      });
+      queryClient.invalidateQueries({ queryKey: journalKeys.lists() });
+      toast.success('Type data updated successfully');
     },
     onError: (error: Error) => {
       toast.error(error.message);
