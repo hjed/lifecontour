@@ -614,7 +614,12 @@ def get_test_database_url() -> str:
     """Get test database URL from environment variables or use defaults."""
     # Use development database if available
     if _is_dev_database_available():
-        return "postgresql+asyncpg://dev_user:dev_password@localhost:5432/personal_management_dev"
+        user = os.getenv("DEV_DB_USER", "dev_user")
+        password = os.getenv("DEV_DB_PASSWORD", "")
+        host = os.getenv("DEV_DB_HOST", "localhost")
+        port = os.getenv("DEV_DB_PORT", "5432")
+        name = os.getenv("DEV_DB_NAME", "personal_management_dev")
+        return f"postgresql+asyncpg://{user}:{password}@{host}:{port}/{name}"
 
     return _db_config.get_async_url()
 
@@ -648,17 +653,25 @@ def stop_test_database():
 
 
 def _is_dev_database_available() -> bool:
-    """Check if development database is available."""
+    """Check if development database is available.
+
+    Reads credentials from environment variables (DEV_DB_HOST, DEV_DB_PORT,
+    DEV_DB_NAME, DEV_DB_USER, DEV_DB_PASSWORD). Returns False if DEV_DB_PASSWORD
+    is not set to avoid accidental connections to unintended databases.
+    """
+    dev_password = os.getenv("DEV_DB_PASSWORD")
+    if not dev_password:
+        return False
     try:
         import psycopg2
 
         # Try to connect to development database
         conn = psycopg2.connect(
-            host="localhost",
-            port=5432,
-            database="personal_management_dev",
-            user="dev_user",
-            password="dev_password",
+            host=os.getenv("DEV_DB_HOST", "localhost"),
+            port=int(os.getenv("DEV_DB_PORT", "5432")),
+            database=os.getenv("DEV_DB_NAME", "personal_management_dev"),
+            user=os.getenv("DEV_DB_USER", "dev_user"),
+            password=dev_password,
         )
         conn.close()
         return True
