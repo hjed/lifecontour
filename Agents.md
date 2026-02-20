@@ -679,21 +679,22 @@ cd frontend && pnpm exec playwright show-report
 
 ## Library Documentation
 
-Your knowledge of the current versions of libraries may be out of date - refer to their documentation for best practises.
+Your knowledge of the current versions of libraries may be out of date - refer to their documentation for best practises. Use context 7 where possible
 
 ### Python Backend
 
-- **FastAPI**: https://fastapi.tiangolo.com/
+- **FastAPI**: https://fastapi.tiangolo.com/ - context 7 library fastapi/fastapi
 - **SQLAlchemy**: https://docs.sqlalchemy.org/en/20/
 - **Dishka**: https://dishka.readthedocs.io/en/stable/_sources/index.rst.txt
 - **pytest**: https://docs.pytest.org/en/7.4.x/
-- **FastMCP**: https://gofastmcp.com/llms.txt
+- **FastMCP**: https://gofastmcp.com/llms.txt - context 7 library id websites/gofastmcp
+- **Alembic**: https://alembic.sqlalchemy.org/en/latest/ - context7 library id sqlalchemy/alembic
 
 ### TypeScript Frontend
 
 - **Next.js**: https://raw.githubusercontent.com/nextjsargentina/next.js-docs/refs/heads/main/src/docs/index.mdx
-- **shadcn/ui**: https://ui.shadcn.com/docs
-- **Tailwind CSS**: https://tailwindcss.com/docs
+- **shadcn/ui**: https://ui.shadcn.com/docs - context 7 websites/ui_shadcn
+- **Tailwind CSS**: https://tailwindcss.com/docs - context 7 library websites/tailwindcss
 - **Jest**: https://jestjs.io/docs/getting-started
 - **React Testing Library**: https://testing-library.com/docs/react-testing-library/intro
 - **Playwright**: https://playwright.dev/docs/intro
