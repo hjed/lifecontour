@@ -25,7 +25,7 @@ test.describe('Sync History - Authenticated User', () => {
     expect(Array.isArray(data.data)).toBeTruthy();
     expect(data.meta).toHaveProperty('total');
     expect(data.meta).toHaveProperty('page');
-    expect(data.meta).toHaveProperty('page_size');
+    expect(data.meta).toHaveProperty('pageSize');
   });
 
   test('should filter sync history by status', async ({
@@ -65,7 +65,7 @@ test.describe('Sync History - Authenticated User', () => {
     // If there are results, verify they match the filter
     if (data.data.length > 0) {
       data.data.forEach((job: any) => {
-        expect(job.attributes.sync_type).toBe('smart');
+        expect(job.attributes.syncType).toBe('smart');
       });
     }
   });
@@ -89,7 +89,7 @@ test.describe('Sync History - Authenticated User', () => {
     // If there are results, verify they are within the date range
     if (data.data.length > 0) {
       data.data.forEach((job: any) => {
-        const createdAt = new Date(job.attributes.created_at);
+        const createdAt = new Date(job.attributes.createdAt);
         expect(createdAt >= new Date(dateFrom)).toBeTruthy();
         expect(createdAt <= new Date(dateTo)).toBeTruthy();
       });
@@ -106,7 +106,7 @@ test.describe('Sync History - Authenticated User', () => {
 
     const data1 = await response1.json();
     expect(data1.meta.page).toBe(1);
-    expect(data1.meta.page_size).toBe(2);
+    expect(data1.meta.pageSize).toBe(2);
 
     // Get second page
     const response2 = await authenticatedPage.request.get(
@@ -117,7 +117,7 @@ test.describe('Sync History - Authenticated User', () => {
 
     const data2 = await response2.json();
     expect(data2.meta.page).toBe(2);
-    expect(data2.meta.page_size).toBe(2);
+    expect(data2.meta.pageSize).toBe(2);
   });
 
   test('should return 400 for invalid date format', async ({

@@ -9,6 +9,7 @@ This module provides REST API endpoints for:
 
 import urllib.parse
 from datetime import UTC, datetime
+from typing import Any
 
 import structlog
 from core_shared.repositories.sync_job_repository import SyncJobRepository
@@ -17,10 +18,13 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel
 
 from app.api.integrations.schemas import (
+    ComponentHealthAttributes,
     GoogleContactsStatusAttributes,
     GoogleContactsStatusData,
     GoogleContactsStatusJsonApiResponse,
-    HealthResponse,
+    IntegrationHealthAttributes,
+    IntegrationHealthData,
+    IntegrationHealthJsonApiResponse,
     OAuthAuthorizeRequest,
     OAuthAuthorizeResponse,
     OAuthCallbackRequest,
@@ -28,6 +32,7 @@ from app.api.integrations.schemas import (
     OAuthDisconnectResponse,
     SyncJobAttributes,
     SyncJobData,
+    SyncJobJsonApiResponse,
     SyncJobListMeta,
     SyncJobListResponse,
     SyncJobRequest,
@@ -48,12 +53,25 @@ logger = structlog.get_logger()
 ERROR_INVALID_JOB_ID_FORMAT = "Invalid job ID format"
 
 
-class SyncJobResponse(BaseModel):
-    """Response model for sync job operations."""
-
-    job_id: str
-    status: str
-    message: str
+def _build_sync_job_data(job: dict[str, Any]) -> SyncJobData:
+    """Build a SyncJobData instance from a raw job dictionary."""
+    return SyncJobData(
+        id=job["job_id"],
+        type="sync-job",
+        attributes=SyncJobAttributes(
+            status=job["status"],
+            sync_type=job["sync_type"],
+            created_at=job["created_at"],
+            started_at=job["started_at"],
+            completed_at=job["completed_at"],
+            error_message=job["error_message"],
+            contacts_processed=job["contacts_processed"],
+            contacts_created=job["contacts_created"],
+            contacts_updated=job["contacts_updated"],
+            contacts_deleted=job["contacts_deleted"],
+            progress=job["progress"],
+        ),
+    )
 
 
 class IntegrationStatusResponse(BaseModel):
@@ -65,13 +83,20 @@ class IntegrationStatusResponse(BaseModel):
     next_sync: str | None = None
 
 
-@router.post("/google/contacts/sync", response_model=SyncJobResponse)
+@router.post(
+    "/google/contacts/sync",
+    responses={
+        400: {"description": "Invalid sync parameters"},
+        503: {"description": "Task queue service unavailable"},
+        500: {"description": "An unexpected error occurred"},
+    },
+)
 @inject
 async def trigger_google_contacts_sync(
     request: SyncJobRequest,
     user: FromDishka[SessionUser],
     task_queue_service: FromDishka[TaskQueueService],
-) -> SyncJobResponse:
+) -> SyncJobJsonApiResponse:
     """
     Trigger a Google Contacts synchronization job.
 
@@ -95,11 +120,11 @@ async def trigger_google_contacts_sync(
             sync_type=sync_type,
         )
 
-        return SyncJobResponse(
-            job_id=job_id,
-            status="queued",
-            message="Google Contacts sync job has been queued",
+        job = await task_queue_service.get_sync_job_details(
+            job_id=job_id, user_id=user.id
         )
+
+        return SyncJobJsonApiResponse(data=_build_sync_job_data(job))
 
     except ValueError as e:
         logger.error("Invalid sync parameters", error=str(e), exc_info=True)
@@ -121,7 +146,13 @@ async def trigger_google_contacts_sync(
         ) from e
 
 
-@router.get("/google/contacts/sync-history", response_model=SyncJobListResponse)
+@router.get(
+    "/google/contacts/sync-history",
+    responses={
+        400: {"description": "Invalid date filter format"},
+        500: {"description": "An unexpected error occurred"},
+    },
+)
 @inject
 async def list_sync_jobs(
     user: FromDishka[SessionUser],
@@ -195,25 +226,7 @@ async def list_sync_jobs(
                     detail="Sync job has missing created_at; data integrity issue detected.",
                 )
 
-            data.append(
-                SyncJobData(
-                    id=job["job_id"],
-                    type="sync-job",
-                    attributes=SyncJobAttributes(
-                        status=job["status"],
-                        sync_type=job["sync_type"],
-                        created_at=job["created_at"],
-                        started_at=job["started_at"],
-                        completed_at=job["completed_at"],
-                        error_message=job["error_message"],
-                        contacts_processed=job["contacts_processed"],
-                        contacts_created=job["contacts_created"],
-                        contacts_updated=job["contacts_updated"],
-                        contacts_deleted=job["contacts_deleted"],
-                        progress=job["progress"],
-                    ),
-                )
-            )
+            data.append(_build_sync_job_data(job))
 
         # Calculate page number
         page = (offset // limit) + 1 if limit > 0 else 1
@@ -243,33 +256,48 @@ async def list_sync_jobs(
         ) from e
 
 
-@router.get("/google/contacts/sync/{job_id}", response_model=SyncJobResponse)
+@router.get(
+    "/google/contacts/sync/{job_id}",
+    responses={
+        400: {"description": "Invalid job ID format"},
+        403: {"description": "Access denied"},
+        404: {"description": "Job not found"},
+        503: {"description": "Task queue service unavailable"},
+        500: {"description": "An unexpected error occurred"},
+    },
+)
 @inject
 async def get_sync_job_status(
     job_id: str,
     user: FromDishka[SessionUser],
     task_queue_service: FromDishka[TaskQueueService],
-) -> SyncJobResponse:
+) -> SyncJobJsonApiResponse:
     """
     Get the status of a specific sync job.
 
     Returns the current status and progress of a sync job.
     """
     try:
-        # Get job status from the task queue
-        job_status = await task_queue_service.get_job_status(job_id, user.id)
-
-        return SyncJobResponse(
-            job_id=job_id,
-            status=job_status["status"],
-            message=job_status["message"],
+        job = await task_queue_service.get_sync_job_details(
+            job_id=job_id, user_id=user.id
         )
+
+        return SyncJobJsonApiResponse(data=_build_sync_job_data(job))
 
     except ValueError as e:
         logger.error(
             ERROR_INVALID_JOB_ID_FORMAT, job_id=job_id, error=str(e), exc_info=True
         )
         raise HTTPException(status_code=400, detail=ERROR_INVALID_JOB_ID_FORMAT) from e
+    except JobNotFoundException as e:
+        logger.error(
+            "Sync job not found",
+            job_id=job_id,
+            user_id=user.id,
+            error=str(e),
+            exc_info=True,
+        )
+        raise HTTPException(status_code=404, detail="Job not found") from e
     except PermissionError as e:
         logger.error(
             "Job access denied",
@@ -291,23 +319,26 @@ async def get_sync_job_status(
         logger.error(
             "Failed to get job status", job_id=job_id, error=str(e), exc_info=True
         )
-        # Check if it's an access denied error
-        if "access denied" in str(e).lower() or "not found" in str(e).lower():
-            raise HTTPException(status_code=404, detail="Job not found") from e
-        else:
-            raise HTTPException(
-                status_code=500,
-                detail="An unexpected error occurred while retrieving job status",
-            ) from e
+        raise HTTPException(
+            status_code=500,
+            detail="An unexpected error occurred while retrieving job status",
+        ) from e
 
 
-@router.post("/google/contacts/sync/{job_id}/cancel", response_model=SyncJobResponse)
+@router.post(
+    "/google/contacts/sync/{job_id}/cancel",
+    responses={
+        403: {"description": "Access denied"},
+        404: {"description": "Job not found"},
+        500: {"description": "An unexpected error occurred"},
+    },
+)
 @inject
 async def cancel_sync_job(
     job_id: str,
     user: FromDishka[SessionUser],
     task_queue_service: FromDishka[TaskQueueService],
-) -> SyncJobResponse:
+) -> SyncJobJsonApiResponse:
     """
     Cancel a running or queued sync job.
 
@@ -315,14 +346,12 @@ async def cancel_sync_job(
     and stop processing at the next opportunity.
     """
     try:
-        # Cancel the job
-        result = await task_queue_service.cancel_job(job_id, user.id)
-
-        return SyncJobResponse(
-            job_id=job_id,
-            status=result["status"],
-            message=result["message"],
+        await task_queue_service.cancel_job(job_id, user.id)
+        job = await task_queue_service.get_sync_job_details(
+            job_id=job_id, user_id=user.id
         )
+
+        return SyncJobJsonApiResponse(data=_build_sync_job_data(job))
 
     except JobNotFoundException as e:
         logger.error(
@@ -358,9 +387,7 @@ async def cancel_sync_job(
         ) from e
 
 
-@router.get(
-    "/google/contacts/status", response_model=GoogleContactsStatusJsonApiResponse
-)
+@router.get("/google/contacts/status")
 @inject
 async def get_google_contacts_status(
     user: FromDishka[SessionUser],
@@ -443,11 +470,11 @@ async def get_google_contacts_status(
         )
 
 
-@router.get("/health", response_model=HealthResponse)
+@router.get("/health")
 @inject
 async def get_integrations_health(
     health_service: FromDishka[IntegrationHealthService],
-) -> HealthResponse:
+) -> IntegrationHealthJsonApiResponse:
     """
     Get the health status of all integration services.
 
@@ -463,32 +490,62 @@ async def get_integrations_health(
         # Get comprehensive health status
         health_status = await health_service.get_overall_health()
 
-        return HealthResponse(
-            status=health_status["status"],
-            timestamp=health_status["timestamp"],
-            services=health_status["services"],
-            queue_metrics=health_status.get("queue_metrics", {}),
-            job_statistics=health_status.get("job_statistics", {}),
-            recent_failures=health_status.get("recent_failures", []),
-            version=health_status.get("version", "1.0.0"),
+        services = health_status.get("services", {})
+        redis_service = services.get("redis", {})
+        worker_service = services.get("google_contacts_worker", {})
+
+        return IntegrationHealthJsonApiResponse(
+            data=IntegrationHealthData(
+                attributes=IntegrationHealthAttributes(
+                    overall=health_status["status"],
+                    last_checked=health_status["timestamp"],
+                    redis=ComponentHealthAttributes(
+                        status=redis_service.get("status", "unknown"),
+                        latency=redis_service.get("response_time_ms"),
+                        last_seen=redis_service.get("last_checked"),
+                        error_message=redis_service.get("error"),
+                    ),
+                    worker=ComponentHealthAttributes(
+                        status=worker_service.get("status", "unknown"),
+                        latency=None,
+                        last_seen=worker_service.get("last_checked"),
+                        error_message=worker_service.get("error"),
+                    ),
+                ),
+            )
         )
 
     except Exception as e:
         logger.error("Health check failed", error=str(e), exc_info=True)
         # Return unhealthy status if health check fails
-        return HealthResponse(
+        now = datetime.now(UTC).isoformat()
+        unhealthy_component = ComponentHealthAttributes(
             status="unhealthy",
-            timestamp=datetime.now(UTC).isoformat(),
-            services={
-                "error": {"status": "unhealthy", "message": str(e)},
-            },
+            latency=None,
+            last_seen=now,
+            error_message=str(e),
+        )
+        return IntegrationHealthJsonApiResponse(
+            data=IntegrationHealthData(
+                attributes=IntegrationHealthAttributes(
+                    overall="unhealthy",
+                    last_checked=now,
+                    redis=unhealthy_component,
+                    worker=unhealthy_component,
+                ),
+            )
         )
 
 
 # OAuth Integration Endpoints
 
 
-@router.post("/google/contacts/oauth/authorize", response_model=OAuthAuthorizeResponse)
+@router.post(
+    "/google/contacts/oauth/authorize",
+    responses={
+        500: {"description": "Failed to initiate OAuth authorization"},
+    },
+)
 @inject
 async def google_contacts_oauth_authorize(
     request_data: OAuthAuthorizeRequest,
@@ -562,7 +619,13 @@ async def google_contacts_oauth_authorize(
         ) from e
 
 
-@router.post("/google/contacts/oauth/callback", response_model=OAuthCallbackResponse)
+@router.post(
+    "/google/contacts/oauth/callback",
+    responses={
+        400: {"description": "Invalid OAuth callback data"},
+        500: {"description": "Failed to complete OAuth authorization"},
+    },
+)
 @inject
 async def google_contacts_oauth_callback(
     callback_data: OAuthCallbackRequest,
@@ -651,7 +714,11 @@ async def google_contacts_oauth_callback(
 
 
 @router.delete(
-    "/google/contacts/oauth/disconnect", response_model=OAuthDisconnectResponse
+    "/google/contacts/oauth/disconnect",
+    responses={
+        400: {"description": "Validation error"},
+        500: {"description": "Failed to disconnect"},
+    },
 )
 @inject
 async def google_contacts_oauth_disconnect(

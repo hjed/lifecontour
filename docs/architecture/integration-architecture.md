@@ -280,12 +280,19 @@ async def trigger_sync(
     task_queue_service: TaskQueueService
 ):
     """Manually trigger Google Contacts sync."""
-    job = await task_queue_service.enqueue_google_contacts_sync(
+    job_id = await task_queue_service.enqueue_google_contacts_sync(
         google_account_email=user.email,
         user_id=user.id,
         sync_type="smart"
     )
-    return {"job_id": job.job_id}
+    # JSON:API response (camelCase attributes)
+    return {
+        "data": {
+            "id": job_id,
+            "type": "sync-job",
+            "attributes": {"status": "queued", "syncType": "smart"},
+        }
+    }
 ```
 
 ### 3. Integration Services

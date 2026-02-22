@@ -25,7 +25,11 @@ import {
   useGoogleContactsOAuthAuthorize,
   useGoogleContactsOAuthDisconnect,
 } from '@/lib/api/integrations';
-import { SyncType } from '@/types/integrations';
+import {
+  SyncType,
+  SyncJobListResponse,
+  IntegrationHealthAttributes,
+} from '@/types/integrations';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -59,6 +63,285 @@ function formatDateSafely(dateString: string | null): string {
 // Helper function for safe time formatting
 function formatTimeSafely(dateString: string | null): string {
   return formatDateGenericSafely(dateString, 'p', 'Invalid time');
+}
+
+// Helper function to get badge variant for sync status
+function getSyncStatusVariant(
+  status: string
+): 'default' | 'destructive' | 'secondary' {
+  if (status === 'completed') return 'default';
+  if (status === 'failed') return 'destructive';
+  return 'secondary';
+}
+
+// Sync Controls Component
+interface SyncControlsProps {
+  readonly connected: boolean;
+  readonly syncLoading: boolean;
+  readonly oauthLoading: boolean;
+  readonly disconnectLoading: boolean;
+  readonly onSync: (syncType: SyncType) => void;
+  readonly onConnect: () => void;
+  readonly onDisconnect: () => void;
+  readonly syncError: Error | null;
+}
+
+function SyncControls({
+  connected,
+  syncLoading,
+  oauthLoading,
+  disconnectLoading,
+  onSync,
+  onConnect,
+  onDisconnect,
+  syncError,
+}: SyncControlsProps) {
+  return (
+    <>
+      <div className='flex gap-2'>
+        {connected ? (
+          <>
+            <Button
+              onClick={() => onSync('smart')}
+              disabled={syncLoading}
+              data-testid='trigger-google-sync'
+            >
+              {syncLoading ? (
+                <RefreshCw className='mr-2 h-4 w-4 animate-spin' />
+              ) : (
+                <RefreshCw className='mr-2 h-4 w-4' />
+              )}
+              Smart Sync
+            </Button>
+            <Button
+              variant='outline'
+              onClick={() => onSync('full')}
+              disabled={syncLoading}
+            >
+              Full Sync
+            </Button>
+            <Button
+              variant='outline'
+              onClick={onDisconnect}
+              disabled={disconnectLoading}
+              data-testid='disconnect-google'
+            >
+              {disconnectLoading ? (
+                <RefreshCw className='mr-2 h-4 w-4 animate-spin' />
+              ) : (
+                <Settings className='mr-2 h-4 w-4' />
+              )}
+              Disconnect
+            </Button>
+          </>
+        ) : (
+          <Button
+            onClick={onConnect}
+            disabled={oauthLoading}
+            data-testid='connect-google'
+          >
+            {oauthLoading ? (
+              <RefreshCw className='mr-2 h-4 w-4 animate-spin' />
+            ) : (
+              <Users className='mr-2 h-4 w-4' />
+            )}
+            Connect Google Account
+          </Button>
+        )}
+      </div>
+
+      {syncLoading && (
+        <div data-testid='sync-progress'>
+          <LoadingSpinner size='sm' text='Sync in progress...' />
+        </div>
+      )}
+
+      {syncError && (
+        <Alert>
+          <AlertCircle className='h-4 w-4' />
+          <AlertDescription>{syncError.message}</AlertDescription>
+        </Alert>
+      )}
+    </>
+  );
+}
+
+// Sync History Section Component
+interface SyncHistorySectionProps {
+  readonly historyData: SyncJobListResponse | undefined;
+  readonly historyLoading: boolean;
+  readonly historyError: Error | null;
+}
+
+function SyncHistorySection({
+  historyData,
+  historyLoading,
+  historyError,
+}: SyncHistorySectionProps) {
+  const recentJobs = historyData?.data || [];
+
+  // Determine content to render
+  let content: React.ReactNode;
+
+  if (historyLoading) {
+    content = (
+      <div className='space-y-2'>
+        {new Array(3).fill(null).map((_, i) => (
+          <Skeleton key={`skeleton-${i}`} className='h-16 w-full' />
+        ))}
+      </div>
+    );
+  } else if (historyError) {
+    content = (
+      <Alert>
+        <AlertCircle className='h-4 w-4' />
+        <AlertDescription>
+          Failed to load sync history: {historyError.message}
+        </AlertDescription>
+      </Alert>
+    );
+  } else if (recentJobs.length > 0) {
+    content = (
+      <div className='space-y-3'>
+        {recentJobs.map(job => (
+          <div
+            key={job.id}
+            className='flex items-center justify-between rounded-lg border p-3'
+            data-testid='sync-job-item'
+          >
+            <div className='space-y-1'>
+              <div className='flex items-center gap-2'>
+                <Badge variant={getSyncStatusVariant(job.attributes.status)}>
+                  {job.attributes.status}
+                </Badge>
+                <span className='text-sm font-medium'>
+                  {job.attributes.syncType} sync
+                </span>
+              </div>
+              <p className='text-muted-foreground text-sm'>
+                {formatDateSafely(job.attributes.createdAt)}
+              </p>
+            </div>
+            {job.attributes.contactsProcessed != null && (
+              <div className='text-right text-sm'>
+                <p>{job.attributes.contactsProcessed} processed</p>
+                {job.attributes.contactsCreated != null && (
+                  <p className='text-muted-foreground'>
+                    {job.attributes.contactsCreated} created
+                  </p>
+                )}
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+    );
+  } else {
+    content = (
+      <p className='text-muted-foreground py-4 text-center'>
+        No sync jobs found
+      </p>
+    );
+  }
+
+  return (
+    <Card className='mt-6' data-testid='sync-history'>
+      <CardHeader>
+        <CardTitle className='flex items-center gap-2'>
+          <Clock className='h-5 w-5 text-green-500' />
+          Recent Sync Jobs
+        </CardTitle>
+      </CardHeader>
+      <CardContent>{content}</CardContent>
+    </Card>
+  );
+}
+
+// Health Section Component
+interface HealthSectionProps {
+  readonly healthData:
+    | { data: { attributes: IntegrationHealthAttributes } }
+    | undefined;
+  readonly healthLoading: boolean;
+  readonly healthError: Error | null;
+}
+
+function HealthSection({
+  healthData,
+  healthLoading,
+  healthError,
+}: HealthSectionProps) {
+  const health = healthData?.data?.attributes;
+
+  // Determine content to render
+  let content: React.ReactNode;
+
+  if (healthLoading) {
+    content = (
+      <div className='space-y-2'>
+        <Skeleton className='h-4 w-full' />
+        <Skeleton className='h-4 w-3/4' />
+        <Skeleton className='h-4 w-1/2' />
+      </div>
+    );
+  } else if (healthError) {
+    content = (
+      <Alert>
+        <AlertCircle className='h-4 w-4' />
+        <AlertDescription>
+          Failed to load health status: {healthError.message}
+        </AlertDescription>
+      </Alert>
+    );
+  } else if (health) {
+    content = (
+      <div className='space-y-3'>
+        <div className='flex items-center justify-between'>
+          <span className='text-sm'>Overall</span>
+          <Badge
+            variant={health.overall === 'healthy' ? 'default' : 'destructive'}
+          >
+            {health.overall}
+          </Badge>
+        </div>
+        <div className='flex items-center justify-between'>
+          <span className='text-sm'>Redis: {health.redis.status}</span>
+          <Badge
+            variant={
+              health.redis.status === 'healthy' ? 'default' : 'destructive'
+            }
+          >
+            {health.redis.latency}ms
+          </Badge>
+        </div>
+        <div className='flex items-center justify-between'>
+          <span className='text-sm'>Worker: {health.worker.status}</span>
+          {health.worker.lastSeen && (
+            <span className='text-muted-foreground text-xs'>
+              {formatTimeSafely(health.worker.lastSeen)}
+            </span>
+          )}
+        </div>
+        <p className='text-muted-foreground text-xs'>
+          Last checked: {formatTimeSafely(health.lastChecked)}
+        </p>
+      </div>
+    );
+  } else {
+    content = null;
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className='flex items-center gap-2'>
+          <Activity className='h-5 w-5 text-green-500' />
+          System Health
+        </CardTitle>
+      </CardHeader>
+      <CardContent>{content}</CardContent>
+    </Card>
+  );
 }
 
 export default function IntegrationsPage() {
@@ -101,8 +384,6 @@ function IntegrationsPageContent() {
     useGoogleContactsOAuthDisconnect();
 
   const status = statusData?.data?.attributes;
-  const health = healthData?.data?.attributes;
-  const recentJobs = historyData?.data || [];
 
   const handleSync = (syncType: SyncType) => {
     triggerSync(syncType);
@@ -187,215 +468,36 @@ function IntegrationsPageContent() {
                   </div>
 
                   {/* Sync Controls */}
-                  <div className='flex gap-2'>
-                    {status.connected ? (
-                      <>
-                        <Button
-                          onClick={() => handleSync('smart')}
-                          disabled={syncLoading}
-                          data-testid='trigger-google-sync'
-                        >
-                          {syncLoading ? (
-                            <RefreshCw className='mr-2 h-4 w-4 animate-spin' />
-                          ) : (
-                            <RefreshCw className='mr-2 h-4 w-4' />
-                          )}
-                          Smart Sync
-                        </Button>
-                        <Button
-                          variant='outline'
-                          onClick={() => handleSync('full')}
-                          disabled={syncLoading}
-                        >
-                          Full Sync
-                        </Button>
-                        <Button
-                          variant='outline'
-                          onClick={handleDisconnectGoogle}
-                          disabled={disconnectLoading}
-                          data-testid='disconnect-google'
-                        >
-                          {disconnectLoading ? (
-                            <RefreshCw className='mr-2 h-4 w-4 animate-spin' />
-                          ) : (
-                            <Settings className='mr-2 h-4 w-4' />
-                          )}
-                          Disconnect
-                        </Button>
-                      </>
-                    ) : (
-                      <Button
-                        onClick={handleConnectGoogle}
-                        disabled={oauthLoading}
-                        data-testid='connect-google'
-                      >
-                        {oauthLoading ? (
-                          <RefreshCw className='mr-2 h-4 w-4 animate-spin' />
-                        ) : (
-                          <Users className='mr-2 h-4 w-4' />
-                        )}
-                        Connect Google Account
-                      </Button>
-                    )}
-                  </div>
-
-                  {/* Sync Progress */}
-                  {syncLoading && (
-                    <div data-testid='sync-progress'>
-                      <LoadingSpinner size='sm' text='Sync in progress...' />
-                    </div>
-                  )}
-
-                  {syncError && (
-                    <Alert>
-                      <AlertCircle className='h-4 w-4' />
-                      <AlertDescription>{syncError.message}</AlertDescription>
-                    </Alert>
-                  )}
+                  <SyncControls
+                    connected={status.connected}
+                    syncLoading={syncLoading}
+                    oauthLoading={oauthLoading}
+                    disconnectLoading={disconnectLoading}
+                    onSync={handleSync}
+                    onConnect={handleConnectGoogle}
+                    onDisconnect={handleDisconnectGoogle}
+                    syncError={syncError}
+                  />
                 </>
               )}
             </CardContent>
           </Card>
 
           {/* Sync History */}
-          <Card className='mt-6' data-testid='sync-history'>
-            <CardHeader>
-              <CardTitle className='flex items-center gap-2'>
-                <Clock className='h-5 w-5 text-green-500' />
-                Recent Sync Jobs
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              {historyLoading ? (
-                <div className='space-y-2'>
-                  {[...Array(3)].map((_, i) => (
-                    <Skeleton key={i} className='h-16 w-full' />
-                  ))}
-                </div>
-              ) : historyError ? (
-                <Alert>
-                  <AlertCircle className='h-4 w-4' />
-                  <AlertDescription>
-                    Failed to load sync history: {historyError.message}
-                  </AlertDescription>
-                </Alert>
-              ) : recentJobs.length > 0 ? (
-                <div className='space-y-3'>
-                  {recentJobs.map(job => (
-                    <div
-                      key={job.id}
-                      className='flex items-center justify-between rounded-lg border p-3'
-                      data-testid='sync-job-item'
-                    >
-                      <div className='space-y-1'>
-                        <div className='flex items-center gap-2'>
-                          <Badge
-                            variant={
-                              job.attributes.status === 'completed'
-                                ? 'default'
-                                : job.attributes.status === 'failed'
-                                  ? 'destructive'
-                                  : 'secondary'
-                            }
-                          >
-                            {job.attributes.status}
-                          </Badge>
-                          <span className='text-sm font-medium'>
-                            {job.attributes.syncType} sync
-                          </span>
-                        </div>
-                        <p className='text-muted-foreground text-sm'>
-                          {formatDateSafely(job.attributes.createdAt)}
-                        </p>
-                      </div>
-                      {job.attributes.contactsProcessed && (
-                        <div className='text-right text-sm'>
-                          <p>{job.attributes.contactsProcessed} processed</p>
-                          {job.attributes.contactsCreated && (
-                            <p className='text-muted-foreground'>
-                              {job.attributes.contactsCreated} created
-                            </p>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <p className='text-muted-foreground py-4 text-center'>
-                  No sync jobs found
-                </p>
-              )}
-            </CardContent>
-          </Card>
+          <SyncHistorySection
+            historyData={historyData}
+            historyLoading={historyLoading}
+            historyError={historyError}
+          />
         </div>
 
         {/* System Health */}
         <div>
-          <Card>
-            <CardHeader>
-              <CardTitle className='flex items-center gap-2'>
-                <Activity className='h-5 w-5 text-green-500' />
-                System Health
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              {healthLoading ? (
-                <div className='space-y-2'>
-                  <Skeleton className='h-4 w-full' />
-                  <Skeleton className='h-4 w-3/4' />
-                  <Skeleton className='h-4 w-1/2' />
-                </div>
-              ) : healthError ? (
-                <Alert>
-                  <AlertCircle className='h-4 w-4' />
-                  <AlertDescription>
-                    Failed to load health status: {healthError.message}
-                  </AlertDescription>
-                </Alert>
-              ) : health ? (
-                <div className='space-y-3'>
-                  <div className='flex items-center justify-between'>
-                    <span className='text-sm'>Overall</span>
-                    <Badge
-                      variant={
-                        health.overall === 'healthy' ? 'default' : 'destructive'
-                      }
-                    >
-                      {health.overall}
-                    </Badge>
-                  </div>
-                  <div className='flex items-center justify-between'>
-                    <span className='text-sm'>
-                      Redis: {health.redis.status}
-                    </span>
-                    <Badge
-                      variant={
-                        health.redis.status === 'healthy'
-                          ? 'default'
-                          : 'destructive'
-                      }
-                    >
-                      {health.redis.latency}ms
-                    </Badge>
-                  </div>
-                  <div className='flex items-center justify-between'>
-                    <span className='text-sm'>
-                      Worker: {health.worker.status}
-                    </span>
-                    {health.worker.lastSeen && (
-                      <span className='text-muted-foreground text-xs'>
-                        {formatTimeSafely(health.worker.lastSeen)}
-                      </span>
-                    )}
-                  </div>
-                  <p className='text-muted-foreground text-xs'>
-                    Last checked: {formatTimeSafely(health.lastChecked)}
-                  </p>
-                </div>
-              ) : null}
-            </CardContent>
-          </Card>
+          <HealthSection
+            healthData={healthData}
+            healthLoading={healthLoading}
+            healthError={healthError}
+          />
 
           {/* Settings */}
           <Card className='mt-6'>

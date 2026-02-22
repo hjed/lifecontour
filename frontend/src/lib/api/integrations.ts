@@ -15,8 +15,6 @@ import {
   SyncType,
   SyncTriggerRequest,
   SyncHistoryFilters,
-  OAuthConnectionRequest,
-  OAuthConnectionResponse,
   OAuthAuthorizeRequest,
   OAuthAuthorizeResponse,
   OAuthCallbackRequest,
@@ -125,7 +123,9 @@ export async function fetchSyncHistory(
   if (filters.offset) params.append('offset', filters.offset.toString());
 
   const queryString = params.toString();
-  const url = `/api/integrations/google/contacts/sync${queryString ? `?${queryString}` : ''}`;
+  const url = `/api/integrations/google/contacts/sync-history${
+    queryString ? `?${queryString}` : ''
+  }`;
 
   const response = await fetch(url, {
     credentials: 'include',
@@ -145,38 +145,6 @@ export async function fetchIntegrationStats(): Promise<IntegrationStatsResponse>
     credentials: 'include',
   });
   return handleApiResponse<IntegrationStatsResponse>(response);
-}
-
-export async function initiateOAuthConnection(
-  request: OAuthConnectionRequest
-): Promise<OAuthConnectionResponse> {
-  const response = await fetch('/api/integrations/oauth/connect', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    credentials: 'include',
-    body: JSON.stringify(request),
-  });
-  return handleApiResponse<OAuthConnectionResponse>(response);
-}
-
-export async function disconnectGoogleContacts(): Promise<void> {
-  const response = await fetch('/api/integrations/google/contacts/disconnect', {
-    method: 'POST',
-    credentials: 'include',
-  });
-
-  if (!response.ok) {
-    try {
-      const errorData: JsonApiErrorResponse = await response.json();
-      const errorMessage =
-        errorData.errors?.[0]?.detail || 'Failed to disconnect';
-      throw new Error(errorMessage);
-    } catch {
-      throw new Error(`HTTP ${response.status}: Failed to disconnect`);
-    }
-  }
 }
 
 export async function cancelSyncJob(jobId: string): Promise<void> {
@@ -281,51 +249,6 @@ export function useIntegrationStats() {
   });
 }
 
-/**
- * Hook to initiate OAuth connection.
- * @param redirect Optional function to handle redirect (e.g., for testing or SSR).
- */
-export function useOAuthConnection(redirect?: (url: string) => void) {
-  return useMutation({
-    mutationFn: initiateOAuthConnection,
-    onSuccess: data => {
-      // Redirect to OAuth URL using provided function or default to window.location.href
-      const url = data.data.attributes.authUrl;
-      if (redirect) {
-        redirect(url);
-      } else if (typeof window !== 'undefined') {
-        window.location.href = url;
-      } else {
-        toast.error(
-          'OAuth redirect failed: no redirect function provided and window is undefined.'
-        );
-        throw new Error(
-          'OAuth redirect failed: no redirect function provided and window is undefined.'
-        );
-      }
-    },
-    onError: (error: Error) => {
-      toast.error(`Failed to initiate OAuth: ${error.message}`);
-    },
-  });
-}
-
-export function useDisconnectGoogleContacts() {
-  const queryClient = useQueryClient();
-
-  return useMutation({
-    mutationFn: disconnectGoogleContacts,
-    onSuccess: () => {
-      // Invalidate all integration queries
-      queryClient.invalidateQueries({ queryKey: integrationKeys.all });
-      toast.success('Google Contacts disconnected successfully');
-    },
-    onError: (error: Error) => {
-      toast.error(`Failed to disconnect: ${error.message}`);
-    },
-  });
-}
-
 export function useCancelSyncJob() {
   const queryClient = useQueryClient();
 
@@ -369,7 +292,7 @@ export function useGoogleContactsOAuthAuthorize() {
     },
     onSuccess: (data: OAuthAuthorizeResponse) => {
       // Redirect to Google OAuth authorization URL
-      window.location.href = data.authorization_url;
+      globalThis.location.href = data.authorization_url;
     },
     onError: (error: Error) => {
       toast.error(`Failed to initiate OAuth: ${error.message}`);
@@ -409,7 +332,7 @@ export function useGoogleContactsOAuthCallback() {
 
       // Redirect to the specified URL
       if (data.redirect_url) {
-        window.location.href = data.redirect_url;
+        globalThis.location.href = data.redirect_url;
       }
     },
     onError: (error: Error) => {

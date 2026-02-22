@@ -158,25 +158,6 @@ export interface OAuthDisconnectResponse {
   message: string;
 }
 
-// Legacy OAuth types (for backward compatibility)
-export interface OAuthConnectionRequest {
-  provider: 'google';
-  scopes: string[];
-  redirectUrl?: string;
-}
-
-export interface OAuthConnectionResponse {
-  data: {
-    id: string;
-    type: 'oauth-connection';
-    attributes: {
-      authUrl: string;
-      state: string;
-      expiresAt: string;
-    };
-  };
-}
-
 // Integration Statistics
 export interface IntegrationStats {
   totalContacts: number;

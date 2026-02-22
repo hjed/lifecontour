@@ -18,9 +18,12 @@ test.describe('Integration Management - Authenticated User', () => {
     expect(response.ok()).toBeTruthy();
 
     const healthData = await response.json();
-    // Backend returns plain JSON, not JSON API format
-    expect(healthData).toHaveProperty('status');
-    expect(healthData).toHaveProperty('services');
+    // JSON API format
+    expect(healthData).toHaveProperty('data');
+    expect(healthData.data).toHaveProperty('attributes');
+    expect(healthData.data.attributes).toHaveProperty('overall');
+    expect(healthData.data.attributes).toHaveProperty('redis');
+    expect(healthData.data.attributes).toHaveProperty('worker');
   });
 
   test('should trigger Google Contacts sync via API', async ({
@@ -48,9 +51,10 @@ test.describe('Integration Management - Authenticated User', () => {
 
     if (response.ok()) {
       const jobData = await response.json();
-      expect(jobData).toHaveProperty('job_id');
-      expect(jobData).toHaveProperty('status');
-      expect(jobData).toHaveProperty('message');
+      expect(jobData).toHaveProperty('data');
+      expect(jobData.data).toHaveProperty('id');
+      expect(jobData.data).toHaveProperty('attributes');
+      expect(jobData.data.attributes).toHaveProperty('status');
     }
   });
 
@@ -71,7 +75,8 @@ test.describe('Integration Management - Authenticated User', () => {
     expect(statusData.data.attributes).toHaveProperty('status');
     expect(statusData.data.attributes).toHaveProperty('connected');
     // Verify status is one of the expected values
-    expect(['connected', 'disconnected', 'error', 'inactive']).toContain(
+    // ("connected" is a boolean field; the status field is an IntegrationStatus)
+    expect(['active', 'disconnected', 'error', 'inactive']).toContain(
       statusData.data.attributes.status
     );
   });

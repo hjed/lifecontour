@@ -10,6 +10,9 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+# Shared field description constants (avoids literal duplication)
+STATUS_MESSAGE_DESCRIPTION = "Human-readable status message"
+
 
 class SyncType(StrEnum):
     """Enumeration of available sync types."""
@@ -38,7 +41,7 @@ class SyncJobResponse(BaseModel):
 
     job_id: str = Field(description="Unique identifier for the sync job")
     status: str = Field(description="Current status of the job")
-    message: str = Field(description="Human-readable status message")
+    message: str = Field(description=STATUS_MESSAGE_DESCRIPTION)
     created_at: str | None = Field(
         default=None, description="ISO timestamp when the job was created"
     )
@@ -137,6 +140,59 @@ class HealthResponse(BaseModel):
     version: str = Field(default="1.0.0", description="API version")
 
 
+# Integration Health Response Models (JSON API format)
+class ComponentHealthAttributes(BaseModel):
+    """Health attributes for a single component (JSON API format)."""
+
+    status: str = Field(description="Component health status")
+    latency: float | None = Field(
+        default=None,
+        description="Component latency in milliseconds",
+    )
+    last_seen: str | None = Field(
+        default=None,
+        description="ISO timestamp when the component was last checked/seen",
+        serialization_alias="lastSeen",
+    )
+    error_message: str | None = Field(
+        default=None,
+        description="Error message if the component is unhealthy",
+        serialization_alias="errorMessage",
+    )
+
+    model_config = {"populate_by_name": True}
+
+
+class IntegrationHealthAttributes(BaseModel):
+    """Integration health attributes returned to the frontend (JSON API format)."""
+
+    redis: ComponentHealthAttributes = Field(description="Redis component health")
+    worker: ComponentHealthAttributes = Field(description="Worker component health")
+    overall: str = Field(description="Overall health status")
+    last_checked: str = Field(
+        description="ISO timestamp of the health check",
+        serialization_alias="lastChecked",
+    )
+
+    model_config = {"populate_by_name": True}
+
+
+class IntegrationHealthData(BaseModel):
+    """JSON API data wrapper for integration health."""
+
+    id: str = Field(default="health", description="Resource identifier")
+    type: str = Field(default="integration-health", description="Resource type")
+    attributes: IntegrationHealthAttributes = Field(
+        description="Integration health attributes"
+    )
+
+
+class IntegrationHealthJsonApiResponse(BaseModel):
+    """JSON API response for integration health."""
+
+    data: IntegrationHealthData = Field(description="JSON API data object")
+
+
 class OAuthAuthorizeRequest(BaseModel):
     """Request model for OAuth authorization."""
 
@@ -163,7 +219,7 @@ class OAuthCallbackResponse(BaseModel):
     """Response model for OAuth callback."""
 
     success: bool = Field(description="Whether OAuth was successful")
-    message: str = Field(description="Human-readable status message")
+    message: str = Field(description=STATUS_MESSAGE_DESCRIPTION)
     redirect_url: str = Field(description="URL to redirect to after completion")
 
 
@@ -171,7 +227,7 @@ class OAuthDisconnectResponse(BaseModel):
     """Response model for OAuth disconnect."""
 
     success: bool = Field(description="Whether disconnect was successful")
-    message: str = Field(description="Human-readable status message")
+    message: str = Field(description=STATUS_MESSAGE_DESCRIPTION)
 
 
 class ErrorResponse(BaseModel):
@@ -190,32 +246,51 @@ class SyncJobAttributes(BaseModel):
     """Attributes for a sync job (JSON API format)."""
 
     status: str = Field(description="Job status")
-    sync_type: str = Field(description="Type of sync")
-    created_at: str = Field(description="ISO timestamp when job was created")
+    sync_type: str = Field(description="Type of sync", serialization_alias="syncType")
+    created_at: str = Field(
+        description="ISO timestamp when job was created",
+        serialization_alias="createdAt",
+    )
     started_at: str | None = Field(
-        default=None, description="ISO timestamp when job started"
+        default=None,
+        description="ISO timestamp when job started",
+        serialization_alias="startedAt",
     )
     completed_at: str | None = Field(
-        default=None, description="ISO timestamp when job completed"
+        default=None,
+        description="ISO timestamp when job completed",
+        serialization_alias="completedAt",
     )
     error_message: str | None = Field(
-        default=None, description="Error message if failed"
+        default=None,
+        description="Error message if failed",
+        serialization_alias="errorMessage",
     )
     contacts_processed: int | None = Field(
-        default=None, description="Number of contacts processed"
+        default=None,
+        description="Number of contacts processed",
+        serialization_alias="contactsProcessed",
     )
     contacts_created: int | None = Field(
-        default=None, description="Number of contacts created"
+        default=None,
+        description="Number of contacts created",
+        serialization_alias="contactsCreated",
     )
     contacts_updated: int | None = Field(
-        default=None, description="Number of contacts updated"
+        default=None,
+        description="Number of contacts updated",
+        serialization_alias="contactsUpdated",
     )
     contacts_deleted: int | None = Field(
-        default=None, description="Number of contacts deleted"
+        default=None,
+        description="Number of contacts deleted",
+        serialization_alias="contactsDeleted",
     )
     progress: int | None = Field(
         default=None, description="Progress percentage (0-100)"
     )
+
+    model_config = {"populate_by_name": True}
 
 
 class SyncJobData(BaseModel):
@@ -231,7 +306,12 @@ class SyncJobListMeta(BaseModel):
 
     total: int = Field(description="Total number of jobs matching filters")
     page: int = Field(description="Current page number")
-    page_size: int = Field(description="Number of items per page")
+    page_size: int = Field(
+        description="Number of items per page",
+        serialization_alias="pageSize",
+    )
+
+    model_config = {"populate_by_name": True}
 
 
 class SyncJobListResponse(BaseModel):
@@ -239,3 +319,9 @@ class SyncJobListResponse(BaseModel):
 
     data: list[SyncJobData] = Field(description="List of sync jobs")
     meta: SyncJobListMeta = Field(description="Response metadata")
+
+
+class SyncJobJsonApiResponse(BaseModel):
+    """Response model for a single sync job (JSON API format)."""
+
+    data: SyncJobData = Field(description="Sync job resource")

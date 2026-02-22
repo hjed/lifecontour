@@ -108,6 +108,37 @@ function execCommand(
 }
 
 /**
+ * Force-remove any existing containers that share names with the test-profile
+ * containers.  This prevents "name already in use" errors when switching from
+ * the dev profile to the test profile (or vice versa).
+ */
+function removeExistingContainers(): void {
+  // All container_name values used by test-profile services in docker-compose.yml
+  const containerNames = [
+    'pms-postgres',
+    'pms-redis',
+    'pms-meilisearch',
+    'pms-oauth',
+    'pms-oauth-login-consent',
+    'pms-oauth-init',
+    'pms-backend',
+    'pms-google-worker',
+  ];
+
+  console.log(
+    '🧹 Force-removing any pre-existing containers with test names...'
+  );
+  for (const name of containerNames) {
+    try {
+      execSync(`docker rm -f ${name}`, { stdio: 'pipe' });
+      console.log(`  ✅ Removed container: ${name}`);
+    } catch {
+      // Container didn't exist — that's fine, ignore the error
+    }
+  }
+}
+
+/**
  * Check if Docker services are already running
  */
 function areServicesRunning(): boolean {
@@ -123,12 +154,14 @@ function areServicesRunning(): boolean {
     );
 
     const runningServices = new Set(result.trim().split('\n').filter(Boolean));
+
     const expectedServices = [
       'database',
       'oauth-provider',
       'backend',
       'meilisearch',
       'redis',
+      'google-contacts-worker',
     ];
 
     return expectedServices.every(service => runningServices.has(service));
@@ -168,6 +201,10 @@ async function globalSetup(_config: FullConfig) {
       if (areServicesRunning()) {
         console.log('📋 Docker services already running, skipping startup...');
       } else {
+        // Force-remove any pre-existing containers whose names overlap with the
+        // test profile (e.g. leftover containers from the dev profile).
+        removeExistingContainers();
+
         // Stop any existing containers to ensure clean state
         execCommand(
           `${dockerComposeCmd} --profile test --env-file .env.test down --remove-orphans`,

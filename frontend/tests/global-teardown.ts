@@ -36,7 +36,8 @@ function execCommand(command: string, description: string): void {
   try {
     execSync(command, {
       stdio: 'inherit',
-      cwd: process.cwd().replace('/frontend', ''), // Ensure we're in project root
+      // globalTeardown() chdir's to project root; keep exec cwd consistent
+      cwd: process.cwd(),
     });
     console.log(`✅ ${description} completed`);
   } catch (error) {
@@ -49,7 +50,7 @@ async function globalTeardown() {
   console.log('🧹 Starting Playwright Global Teardown...');
 
   // Change to project root directory
-  const projectRoot = process.cwd().replace('/frontend', '');
+  const projectRoot = process.cwd().replace(/[/\\]frontend$/, '');
   process.chdir(projectRoot);
 
   // Only cleanup in CI or when CLEANUP_AFTER_TESTS is set
@@ -73,7 +74,7 @@ async function globalTeardown() {
 
     // Stop and remove containers, networks, and volumes
     execCommand(
-      `${dockerComposeCmd} -f docker-compose.test.yml down --volumes --remove-orphans`,
+      `${dockerComposeCmd} --profile test --env-file .env.test down --volumes --remove-orphans`,
       'Stopping and cleaning up Docker services'
     );
 

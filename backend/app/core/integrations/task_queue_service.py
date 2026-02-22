@@ -318,6 +318,44 @@ class TaskQueueService:
             logger.error("Failed to cancel job", job_id=job_id, error=str(e))
             raise
 
+    async def get_sync_job_details(
+        self, job_id: str, user_id: str | int
+    ) -> dict[str, Any]:
+        """Get a sync job's details from the database (source of truth).
+
+        This is used by API endpoints that need to return JSON:API job resources
+        (trigger/status/cancel) in a consistent shape.
+
+        Raises:
+            JobNotFoundException: If job doesn't exist or doesn't belong to user.
+        """
+
+        async with self.db_manager.get_session() as session:
+            conn = await session.connection()
+            repo = SyncJobRepository(conn)
+            job = await repo.get_by_job_id(job_id)
+
+            # Treat ownership mismatch as not-found to avoid leaking existence.
+            if not job or str(job.user_id) != str(user_id):
+                raise JobNotFoundException(job_id=job_id, message="Job not found")
+
+            return {
+                "job_id": job.job_id,
+                "status": job.status,
+                "sync_type": job.sync_type,
+                "created_at": job.created_at.isoformat() if job.created_at else None,
+                "started_at": job.started_at.isoformat() if job.started_at else None,
+                "completed_at": job.completed_at.isoformat()
+                if job.completed_at
+                else None,
+                "error_message": job.error_message,
+                "contacts_processed": job.contacts_processed,
+                "contacts_created": job.contacts_created,
+                "contacts_updated": job.contacts_updated,
+                "contacts_deleted": job.contacts_deleted,
+                "progress": job.progress,
+            }
+
     async def get_queue_health(self) -> dict[str, Any]:
         """
         Get the health status of the task queue.

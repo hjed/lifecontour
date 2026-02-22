@@ -57,6 +57,81 @@ class DockerManager:
         self.backend_dir = self._get_backend_directory()
         self.project_root = self._get_project_root()
         self.docker_compose_cmd = self._get_docker_compose_cmd()
+        # Keep a local copy so Docker/migration helpers don't rely on module globals.
+        self.db_config = DatabaseConfig.from_environment()
+
+    def _run_psql_in_container(
+        self, container_name: str, database: str, sql: str
+    ) -> None:
+        """Execute a SQL statement via psql inside the Postgres container.
+
+        This is used to reset the test database deterministically between runs.
+        """
+        subprocess.run(
+            [
+                "docker",
+                "exec",
+                container_name,
+                "psql",
+                "-U",
+                "postgres",
+                "-d",
+                database,
+                "-v",
+                "ON_ERROR_STOP=1",
+                "-c",
+                sql,
+            ],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+
+    def _reset_test_database(self, container_name: str) -> None:
+        """Drop + recreate the integration test database.
+
+        We do this before running Alembic migrations because local runs can leave
+        the test database in a partially-migrated state (e.g. if a previous test
+        session crashed before teardown). That makes migrations non-deterministic
+        and can cause failures like DuplicateTable.
+        """
+        db_name = self.db_config.name
+
+        print(f"Resetting test database: {db_name}")
+
+        # WITH (FORCE) terminates any remaining sessions atomically before
+        # dropping the database, preventing the "being accessed by other users"
+        # race condition that occurs when a dev backend container reconnects
+        # immediately after a separate pg_terminate_backend call.
+        # Requires PostgreSQL 13+ (we use postgres:15-alpine).
+        self._run_psql_in_container(
+            container_name,
+            "postgres",
+            f"DROP DATABASE IF EXISTS {db_name} WITH (FORCE);",
+        )
+        self._run_psql_in_container(
+            container_name,
+            "postgres",
+            f"CREATE DATABASE {db_name};",
+        )
+
+        # Ensure required extensions exist for migrations (many migrations use gen_random_uuid()).
+        # NOTE: gen_random_uuid() is provided by pgcrypto.
+        self._run_psql_in_container(
+            container_name,
+            db_name,
+            'CREATE EXTENSION IF NOT EXISTS "uuid-ossp";',
+        )
+        self._run_psql_in_container(
+            container_name,
+            db_name,
+            'CREATE EXTENSION IF NOT EXISTS "pg_trgm";',
+        )
+        self._run_psql_in_container(
+            container_name,
+            db_name,
+            "CREATE EXTENSION IF NOT EXISTS pgcrypto;",
+        )
 
     def _get_backend_directory(self) -> str:
         """Get the backend directory path."""
@@ -133,30 +208,38 @@ class DockerManager:
     def start_database(self) -> None:
         """Start Docker PostgreSQL container for testing."""
         try:
-            # Check if container is already running
-            if self.is_container_running(f"name={BACKEND_POSTGRES_CONTAINER}"):
+            # If the container isn't running yet, bring up the test-backend profile.
+            # If it's already running, we keep it (to avoid disrupting dev workflows),
+            # but we still reset the *test database* so migrations are deterministic.
+            if not self.is_container_running(f"name={BACKEND_POSTGRES_CONTAINER}"):
+                subprocess.run(
+                    self.docker_compose_cmd
+                    + [
+                        "-f",
+                        DOCKER_COMPOSE_FILE,
+                        "--profile",
+                        "test-backend",
+                        "--env-file",
+                        ".env.test",
+                        "up",
+                        "-d",
+                    ],
+                    cwd=self.project_root,
+                    check=True,
+                )
+            else:
                 print("Test database container already running")
-                return
-
-            # Start the container using unified docker-compose with test-backend profile
-            subprocess.run(
-                self.docker_compose_cmd
-                + [
-                    "-f",
-                    DOCKER_COMPOSE_FILE,
-                    "--profile",
-                    "test-backend",
-                    "--env-file",
-                    ".env.test",
-                    "up",
-                    "-d",
-                ],
-                cwd=self.project_root,
-                check=True,
-            )
 
             # Wait for database to be ready
             self._wait_for_database_ready()
+
+            container_name = (
+                self.get_container_name(CONTAINER_NAME_FILTER)
+                or BACKEND_POSTGRES_CONTAINER
+            )
+
+            # Reset the test DB to avoid partially-migrated state from previous runs.
+            self._reset_test_database(container_name)
 
             # Run database migrations
             print("Running database migrations...")
