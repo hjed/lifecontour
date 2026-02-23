@@ -9,16 +9,16 @@ from datetime import UTC, datetime
 from typing import Any
 
 import aiohttp
+from arq.connections import ArqRedis
 from core_shared.logging import get_logger
 from core_shared.repositories import SyncJobRepository
-from redis.asyncio import Redis
 
 from app.core.integrations.database import IntegrationDatabaseManager
 
 logger = get_logger(__name__)
 
-# ARQ queue key constant
-ARQ_QUEUE_KEY = "arq:queue"
+# ARQ queue name for Google Contacts worker
+ARQ_QUEUE_NAME = "google_contacts"
 
 
 class IntegrationHealthService:
@@ -29,12 +29,12 @@ class IntegrationHealthService:
     components including Redis, workers, and external APIs.
     """
 
-    def __init__(self, redis_pool: Redis, db_manager: IntegrationDatabaseManager):
+    def __init__(self, redis_pool: ArqRedis, db_manager: IntegrationDatabaseManager):
         """
         Initialize the health service.
 
         Args:
-            redis_pool: Redis connection pool for health checks
+            redis_pool: ARQ Redis connection pool for health checks
             db_manager: Database manager for job statistics
         """
         self.redis_pool = redis_pool
@@ -119,11 +119,9 @@ class IntegrationHealthService:
             memory_usage = info.get("used_memory_human", "unknown")
             connected_clients = info.get("connected_clients", 0)
 
-            # Check queue length
-            queue_length_result = await self.redis_pool.llen(ARQ_QUEUE_KEY)  # type: ignore
-            queue_length = (
-                int(queue_length_result) if queue_length_result is not None else 0
-            )
+            # Check queue length using ARQ's API
+            queued_jobs = await self.redis_pool.queued_jobs(queue_name=ARQ_QUEUE_NAME)
+            queue_length = len(queued_jobs)
 
             return {
                 "status": "healthy",
@@ -151,10 +149,9 @@ class IntegrationHealthService:
 
             # Check if there are any recent jobs in the queue or completed
             # This will raise an exception if Redis is not accessible
-            recent_jobs_result = await self.redis_pool.llen(ARQ_QUEUE_KEY)  # type: ignore
-            recent_jobs = (
-                int(recent_jobs_result) if recent_jobs_result is not None else 0
-            )
+            # Use ARQ's API to get queued jobs
+            queued_jobs = await self.redis_pool.queued_jobs(queue_name=ARQ_QUEUE_NAME)
+            recent_jobs = len(queued_jobs)
 
             # For now, assume worker is healthy if Redis is accessible
             # In a real implementation, you might check:
@@ -244,8 +241,9 @@ class IntegrationHealthService:
             # or use ARQ's built-in job tracking
 
             # For now, just return the current queue length as a proxy
-            queue_length_result = await self.redis_pool.llen(ARQ_QUEUE_KEY)  # type: ignore
-            return int(queue_length_result) if queue_length_result is not None else 0
+            # Use ARQ's API to get queued jobs
+            queued_jobs = await self.redis_pool.queued_jobs(queue_name=ARQ_QUEUE_NAME)
+            return len(queued_jobs)
 
         except Exception:
             return 0

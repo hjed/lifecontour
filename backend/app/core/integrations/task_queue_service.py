@@ -14,13 +14,15 @@ from arq.jobs import Job, JobDef, JobStatus
 from core_shared.logging import get_logger
 from core_shared.metrics import queue_depth
 from core_shared.repositories import SyncJobRepository
-from redis.asyncio import Redis
 
 from app.core.integrations.database import IntegrationDatabaseManager
 from app.core.integrations.exceptions import JobEnqueueError, JobNotFoundException
 from app.infrastructure.config import Settings
 
 logger = get_logger(__name__)
+
+# ARQ queue name for Google Contacts worker
+ARQ_QUEUE_NAME = "google_contacts"
 
 
 class TaskQueueService:
@@ -33,7 +35,7 @@ class TaskQueueService:
 
     def __init__(
         self,
-        redis_pool: Redis,
+        redis_pool: ArqRedis,
         redis_settings: RedisSettings,
         settings: Settings,
         db_manager: IntegrationDatabaseManager,
@@ -43,7 +45,7 @@ class TaskQueueService:
         Initialize the task queue service.
 
         Args:
-            redis_pool: Redis connection pool
+            redis_pool: ARQ Redis connection pool
             redis_settings: Redis settings for ARQ
             settings: Application settings
             db_manager: Database manager for persisting sync jobs
@@ -369,11 +371,9 @@ class TaskQueueService:
             # Check Redis connectivity
             await self.redis_pool.ping()
 
-            # Get queue statistics
-            queue_length_result = await self.redis_pool.llen("arq:queue")  # type: ignore
-            queue_length = (
-                int(queue_length_result) if queue_length_result is not None else 0
-            )
+            # Get queue statistics using ARQ's API
+            queued_jobs = await self.redis_pool.queued_jobs(queue_name=ARQ_QUEUE_NAME)
+            queue_length = len(queued_jobs)
 
             # Update queue depth metric
             queue_depth.labels(worker_type=self.worker_type).set(queue_length)
