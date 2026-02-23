@@ -48,7 +48,9 @@ class TestIntegrationHealthService:
                 "connected_clients": 3,
             }
         )
-        mock_redis_pool.llen = AsyncMock(return_value=2)
+        # Mock ARQ's queued_jobs method
+        mock_jobs = [MagicMock(), MagicMock()]
+        mock_redis_pool.queued_jobs = AsyncMock(return_value=mock_jobs)
 
         # Mock aiohttp.ClientSession for external API check
         mock_response = AsyncMock()
@@ -109,7 +111,13 @@ class TestIntegrationHealthService:
                 "connected_clients": 5,
             }
         )
-        mock_redis_pool.llen = AsyncMock(return_value=3)
+        # Mock ARQ's queued_jobs method
+        mock_job1 = MagicMock()
+        mock_job2 = MagicMock()
+        mock_job3 = MagicMock()
+        mock_redis_pool.queued_jobs = AsyncMock(
+            return_value=[mock_job1, mock_job2, mock_job3]
+        )
 
         # Check Redis health
         health = await service._check_redis_health()
@@ -125,7 +133,9 @@ class TestIntegrationHealthService:
         # Verify Redis calls
         mock_redis_pool.ping.assert_called_once()
         mock_redis_pool.info.assert_called_once()
-        mock_redis_pool.llen.assert_called_once_with("arq:queue")
+        mock_redis_pool.queued_jobs.assert_called_once_with(
+            queue_name="google_contacts"
+        )
 
     @pytest.mark.asyncio
     async def test_check_redis_health_failure(
@@ -148,8 +158,9 @@ class TestIntegrationHealthService:
         self, service: IntegrationHealthService, mock_redis_pool: AsyncMock
     ):
         """Test worker health check when healthy."""
-        # Mock Redis for recent job count
-        mock_redis_pool.llen = AsyncMock(return_value=1)
+        # Mock ARQ's queued_jobs method
+        mock_job = MagicMock()
+        mock_redis_pool.queued_jobs = AsyncMock(return_value=[mock_job])
 
         # Check worker health
         health = await service._check_worker_health()
@@ -165,8 +176,8 @@ class TestIntegrationHealthService:
         self, service: IntegrationHealthService, mock_redis_pool: AsyncMock
     ):
         """Test worker health check when unhealthy."""
-        # Mock Redis to fail
-        mock_redis_pool.llen = AsyncMock(
+        # Mock ARQ's queued_jobs to fail
+        mock_redis_pool.queued_jobs = AsyncMock(
             side_effect=Exception("Redis connection failed")
         )
 
@@ -213,7 +224,7 @@ class TestIntegrationHealthService:
         # Mock Redis responses
         mock_redis_pool.ping = AsyncMock(return_value=True)
         mock_redis_pool.info = AsyncMock(return_value={})
-        mock_redis_pool.llen = AsyncMock(return_value=0)
+        mock_redis_pool.queued_jobs = AsyncMock(return_value=[])
 
         # Check Redis connectivity
         health = await service.check_service_connectivity("redis")
@@ -227,8 +238,8 @@ class TestIntegrationHealthService:
         self, service: IntegrationHealthService, mock_redis_pool: AsyncMock
     ):
         """Test service connectivity check for worker."""
-        # Mock Redis for worker health
-        mock_redis_pool.llen = AsyncMock(return_value=0)
+        # Mock ARQ's queued_jobs for worker health
+        mock_redis_pool.queued_jobs = AsyncMock(return_value=[])
 
         # Check worker connectivity
         health = await service.check_service_connectivity("worker")
@@ -278,15 +289,18 @@ class TestIntegrationHealthService:
         self, service: IntegrationHealthService, mock_redis_pool: AsyncMock
     ):
         """Test getting recent job count when successful."""
-        # Mock Redis response
-        mock_redis_pool.llen = AsyncMock(return_value=5)
+        # Mock ARQ's queued_jobs method
+        mock_jobs = [MagicMock() for _ in range(5)]
+        mock_redis_pool.queued_jobs = AsyncMock(return_value=mock_jobs)
 
         # Get recent job count
         count = await service._get_recent_job_count()
 
         # Verify count
         assert count == 5
-        mock_redis_pool.llen.assert_called_once_with("arq:queue")
+        mock_redis_pool.queued_jobs.assert_called_once_with(
+            queue_name="google_contacts"
+        )
 
     @pytest.mark.asyncio
     async def test_get_recent_job_count_failure(
@@ -315,7 +329,9 @@ class TestIntegrationHealthService:
                 "connected_clients": 5,
             }
         )
-        mock_redis_pool.llen = AsyncMock(return_value=10)
+        # Mock ARQ's queued_jobs method
+        mock_jobs = [MagicMock() for _ in range(10)]
+        mock_redis_pool.queued_jobs = AsyncMock(return_value=mock_jobs)
 
         # Mock job statistics and failures
         with (

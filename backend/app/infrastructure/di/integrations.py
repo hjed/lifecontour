@@ -5,9 +5,8 @@ Provides integration-related dependencies including task queue configuration,
 database managers, and base integration services.
 """
 
-from arq.connections import RedisSettings
+from arq.connections import ArqRedis, RedisSettings
 from dishka import Provider, Scope, provide
-from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core.contacts.services.contact_service import ContactService
@@ -28,7 +27,7 @@ class IntegrationProvider(Provider):
     scope = Scope.APP
 
     @provide
-    async def provide_redis_pool(self, settings: Settings) -> Redis:
+    async def provide_redis_pool(self, settings: Settings) -> ArqRedis:
         """
         Provide Redis connection pool for ARQ tasks.
 
@@ -36,7 +35,7 @@ class IntegrationProvider(Provider):
             settings: Application settings
 
         Returns:
-            Redis: Redis connection pool
+            ArqRedis: ARQ Redis connection pool
         """
         return await get_redis_pool(settings)
 
@@ -115,7 +114,7 @@ class IntegrationProvider(Provider):
     @provide(scope=Scope.REQUEST)
     async def provide_task_queue_service(
         self,
-        redis_pool: Redis,
+        redis_pool: ArqRedis,
         settings: Settings,
         db_manager: IntegrationDatabaseManager,
     ) -> TaskQueueService:
@@ -123,7 +122,7 @@ class IntegrationProvider(Provider):
         Provide task queue service for request scope.
 
         Args:
-            redis_pool: Redis connection pool
+            redis_pool: ARQ Redis connection pool
             settings: Application settings
             db_manager: Database manager for persisting sync jobs
 
@@ -140,13 +139,13 @@ class IntegrationProvider(Provider):
 
     @provide(scope=Scope.REQUEST)
     def provide_health_service(
-        self, redis_pool: Redis, db_manager: IntegrationDatabaseManager
+        self, redis_pool: ArqRedis, db_manager: IntegrationDatabaseManager
     ) -> IntegrationHealthService:
         """
         Provide integration health service for request scope.
 
         Args:
-            redis_pool: Redis connection pool
+            redis_pool: ARQ Redis connection pool
             db_manager: Database manager for job statistics
 
         Returns:

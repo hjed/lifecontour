@@ -277,7 +277,9 @@ class TestTaskQueueService:
         """Test queue health check when healthy."""
         # Mock Redis responses
         mock_redis_pool.ping = AsyncMock(return_value=True)
-        mock_redis_pool.llen = AsyncMock(return_value=5)
+        # Mock ARQ's queued_jobs method
+        mock_jobs = [MagicMock() for _ in range(5)]
+        mock_redis_pool.queued_jobs = AsyncMock(return_value=mock_jobs)
 
         # Get queue health
         health = await service.get_queue_health()
@@ -286,7 +288,9 @@ class TestTaskQueueService:
         assert (
             mock_redis_pool.ping.call_count == 2
         )  # Called twice for connectivity and response time
-        mock_redis_pool.llen.assert_called_once_with("arq:queue")
+        mock_redis_pool.queued_jobs.assert_called_once_with(
+            queue_name="google_contacts"
+        )
 
         # Verify health response
         assert health["status"] == "healthy"

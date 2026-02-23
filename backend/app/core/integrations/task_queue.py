@@ -9,8 +9,7 @@ import logging
 from typing import Any
 
 from arq import create_pool
-from arq.connections import RedisSettings
-from redis.asyncio import Redis
+from arq.connections import ArqRedis, RedisSettings
 
 from app.infrastructure.config import Settings
 
@@ -46,7 +45,7 @@ def get_redis_settings(settings: Settings | None = None) -> RedisSettings:
     )
 
 
-async def get_redis_pool(settings: Settings | None = None) -> Redis:
+async def get_redis_pool(settings: Settings | None = None) -> ArqRedis:
     """
     Create a Redis connection pool for ARQ tasks.
 
@@ -54,7 +53,7 @@ async def get_redis_pool(settings: Settings | None = None) -> Redis:
         settings: Application settings (will load from env if None)
 
     Returns:
-        Redis: Redis connection pool
+        ArqRedis: ARQ Redis connection pool
     """
     redis_settings = get_redis_settings(settings)
     return await create_pool(redis_settings)
