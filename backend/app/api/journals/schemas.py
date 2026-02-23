@@ -237,6 +237,77 @@ class JoggingDataSchema(BaseModel):
     )
 
 
+class AbseilingDataSchema(BaseModel):
+    """Abseiling data for ABSEILING_TRIP type journals."""
+
+    number_of_abseils: int | None = Field(
+        default=None,
+        description="Number of abseils (non-negative)",
+        ge=0,
+    )
+    total_length: int | None = Field(
+        default=None,
+        description="Total length in metres (non-negative)",
+        ge=0,
+    )
+
+
+class CanyoningDataSchema(BaseModel):
+    """Canyoning data for CANYONING type journals."""
+
+    route_id: str | None = Field(
+        default=None,
+        description="UUID of the associated route",
+    )
+    french_grade: str | None = Field(
+        default=None,
+        description="French canyoning grade (e.g. v3a2IV**)",
+    )
+    water_guage_name: str | None = Field(
+        default=None,
+        description="Name of the water gauge",
+    )
+    water_guage_level: int | None = Field(
+        default=None,
+        description="Water gauge level reading",
+    )
+    is_vertical: bool | None = Field(
+        default=None,
+        description="Whether the canyon is primarily vertical",
+    )
+    is_night_canyon: bool | None = Field(
+        default=None,
+        description="Whether the activity was a night canyon",
+    )
+    is_white_water: bool | None = Field(
+        default=None,
+        description="Whether the activity involved white water",
+    )
+
+
+class ClimbingDataSchema(BaseModel):
+    """Climbing data for CLIMBING type journals."""
+
+    route_id: str | None = Field(
+        default=None,
+        description="UUID of the associated route",
+    )
+    climbing_type: str | None = Field(
+        default=None,
+        description="Type of climbing (sport, trad, bouldering)",
+    )
+    grade: int | None = Field(
+        default=None,
+        description="Climb grade (non-negative)",
+        ge=0,
+    )
+    length: int | None = Field(
+        default=None,
+        description="Climb length in metres (non-negative)",
+        ge=0,
+    )
+
+
 # Contact relationship schema
 class JournalContactRelationshipSchema(BaseModel):
     """Journal contact relationship schema."""

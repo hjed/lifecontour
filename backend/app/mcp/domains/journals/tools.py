@@ -18,11 +18,20 @@ from pydantic import Field
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core.contacts.adapters.sql.contact_repository import SqlContactRepository
+from app.core.journal.adapters.sql.abseiling_data_repository import (
+    SqlAbseilingDataRepository,
+)
 from app.core.journal.adapters.sql.bushwalking_data_repository import (
     SqlBushwalkingDataRepository,
 )
 from app.core.journal.adapters.sql.calendar_info_repository import (
     SqlCalendarInfoRepository,
+)
+from app.core.journal.adapters.sql.canyoning_data_repository import (
+    SqlCanyoningDataRepository,
+)
+from app.core.journal.adapters.sql.climbing_data_repository import (
+    SqlClimbingDataRepository,
 )
 from app.core.journal.adapters.sql.fitness_data_repository import (
     SqlFitnessDataRepository,
@@ -44,8 +53,11 @@ from app.core.journal.adapters.sql.photo_album_data_repository import (
 )
 from app.core.journal.adapters.sql.plan_data_repository import SqlPlanDataRepository
 from app.core.journal.adapters.sql.travel_data_repository import SqlTravelDataRepository
+from app.core.journal.models.abseiling_data import AbseilingData
 from app.core.journal.models.bushwalking_data import BushwalkingData
 from app.core.journal.models.calendar_info import CalendarInfo
+from app.core.journal.models.canyoning_data import CanyoningData
+from app.core.journal.models.climbing_data import ClimbingData
 from app.core.journal.models.entities import Journal
 from app.core.journal.models.exceptions import JournalValidationError
 from app.core.journal.models.fitness_data import FitnessData
@@ -300,6 +312,37 @@ def _build_jogging_data(jogging_data: Any) -> dict[str, Any]:
     }
 
 
+def _build_abseiling_data(abseiling_data: Any) -> dict[str, Any]:
+    """Build abseiling data dictionary."""
+    return {
+        "number_of_abseils": abseiling_data.number_of_abseils,
+        "total_length": abseiling_data.total_length,
+    }
+
+
+def _build_canyoning_data(canyoning_data: Any) -> dict[str, Any]:
+    """Build canyoning data dictionary."""
+    return {
+        "route_id": str(canyoning_data.route_id) if canyoning_data.route_id else None,
+        "french_grade": canyoning_data.french_grade,
+        "water_guage_name": canyoning_data.water_guage_name,
+        "water_guage_level": canyoning_data.water_guage_level,
+        "is_vertical": canyoning_data.is_vertical,
+        "is_night_canyon": canyoning_data.is_night_canyon,
+        "is_white_water": canyoning_data.is_white_water,
+    }
+
+
+def _build_climbing_data(climbing_data: Any) -> dict[str, Any]:
+    """Build climbing data dictionary."""
+    return {
+        "route_id": str(climbing_data.route_id) if climbing_data.route_id else None,
+        "climbing_type": climbing_data.climbing_type,
+        "grade": climbing_data.grade,
+        "length": climbing_data.length,
+    }
+
+
 async def _fetch_journal_types_and_data(
     journal_id: int,
     calendar_info_repo: SqlCalendarInfoRepository,
@@ -311,6 +354,9 @@ async def _fetch_journal_types_and_data(
     outdoor_activity_data_repo: SqlOutdoorActivityDataRepository,
     bushwalking_data_repo: SqlBushwalkingDataRepository,
     jogging_data_repo: SqlJoggingDataRepository,
+    abseiling_data_repo: SqlAbseilingDataRepository,
+    canyoning_data_repo: SqlCanyoningDataRepository,
+    climbing_data_repo: SqlClimbingDataRepository,
 ) -> tuple[list[str], dict[str, Any]]:
     """
     Fetch all type-specific data for a journal.
@@ -326,6 +372,9 @@ async def _fetch_journal_types_and_data(
         outdoor_activity_data_repo: Outdoor activity data repository
         bushwalking_data_repo: Bushwalking data repository
         jogging_data_repo: Jogging data repository
+        abseiling_data_repo: Abseiling data repository
+        canyoning_data_repo: Canyoning data repository
+        climbing_data_repo: Climbing data repository
 
     Returns:
         Tuple of (types list, type_data dict)
@@ -387,6 +436,23 @@ async def _fetch_journal_types_and_data(
         types.append(JournalType.JOGGING.value)
         type_data[JournalType.JOGGING.value] = _build_jogging_data(jogging_data)
 
+    abseiling_data = await abseiling_data_repo.find_by_journal_id(journal_id)
+    if abseiling_data:
+        types.append(JournalType.ABSEILING_TRIP.value)
+        type_data[JournalType.ABSEILING_TRIP.value] = _build_abseiling_data(
+            abseiling_data
+        )
+
+    canyoning_data = await canyoning_data_repo.find_by_journal_id(journal_id)
+    if canyoning_data:
+        types.append(JournalType.CANYONING.value)
+        type_data[JournalType.CANYONING.value] = _build_canyoning_data(canyoning_data)
+
+    climbing_data = await climbing_data_repo.find_by_journal_id(journal_id)
+    if climbing_data:
+        types.append(JournalType.CLIMBING.value)
+        type_data[JournalType.CLIMBING.value] = _build_climbing_data(climbing_data)
+
     # If no types found, it's a NOTE
     if not types:
         types.append(JournalType.NOTE.value)
@@ -404,6 +470,9 @@ async def _create_type_specific_data(
     outdoor_activity_data_repo: SqlOutdoorActivityDataRepository,
     bushwalking_data_repo: SqlBushwalkingDataRepository,
     jogging_data_repo: SqlJoggingDataRepository,
+    abseiling_data_repo: SqlAbseilingDataRepository,
+    canyoning_data_repo: SqlCanyoningDataRepository,
+    climbing_data_repo: SqlClimbingDataRepository,
 ) -> None:
     """
     Create type-specific data row with default values for the given journal type.
@@ -418,6 +487,9 @@ async def _create_type_specific_data(
         outdoor_activity_data_repo: Repository for outdoor activity data
         bushwalking_data_repo: Repository for bushwalking data
         jogging_data_repo: Repository for jogging data
+        abseiling_data_repo: Repository for abseiling data
+        canyoning_data_repo: Repository for canyoning data
+        climbing_data_repo: Repository for climbing data
     """
     if journal_type == JournalType.MOOD_RATING:
         mood_data = MoodData(journal_id=journal_id)
@@ -440,6 +512,15 @@ async def _create_type_specific_data(
     elif journal_type == JournalType.JOGGING:
         jogging_data = JoggingData(journal_id=journal_id)
         await jogging_data_repo.save(jogging_data)
+    elif journal_type == JournalType.ABSEILING_TRIP:
+        abseiling_data = AbseilingData(journal_id=journal_id)
+        await abseiling_data_repo.save(abseiling_data)
+    elif journal_type == JournalType.CANYONING:
+        canyoning_data = CanyoningData(journal_id=journal_id)
+        await canyoning_data_repo.save(canyoning_data)
+    elif journal_type == JournalType.CLIMBING:
+        climbing_data = ClimbingData(journal_id=journal_id)
+        await climbing_data_repo.save(climbing_data)
     # EVENT and PHOTO_ALBUM types require additional data (calendar_id, immich_album_id)
     # These will be created when the user provides type_data
 
@@ -455,6 +536,9 @@ async def _update_type_specific_data(
     outdoor_activity_data_repo: SqlOutdoorActivityDataRepository,
     bushwalking_data_repo: SqlBushwalkingDataRepository,
     jogging_data_repo: SqlJoggingDataRepository,
+    abseiling_data_repo: SqlAbseilingDataRepository,
+    canyoning_data_repo: SqlCanyoningDataRepository,
+    climbing_data_repo: SqlClimbingDataRepository,
 ) -> None:
     """
     Update type-specific data for a journal type.
@@ -470,6 +554,9 @@ async def _update_type_specific_data(
         outdoor_activity_data_repo: Repository for outdoor activity data
         bushwalking_data_repo: Repository for bushwalking data
         jogging_data_repo: Repository for jogging data
+        abseiling_data_repo: Repository for abseiling data
+        canyoning_data_repo: Repository for canyoning data
+        climbing_data_repo: Repository for climbing data
     """
     if journal_type == JournalType.EVENT and type_data_dict:
         # Create or update calendar info (calendar_id is required)
@@ -601,6 +688,70 @@ async def _update_type_specific_data(
                     ) from e
             validated_jogging = dataclasses.replace(existing_jogging, **jog_updates)
             await jogging_data_repo.save(validated_jogging)
+    elif journal_type == JournalType.ABSEILING_TRIP and type_data_dict:
+        existing_abseiling = await abseiling_data_repo.find_by_journal_id(journal_id)
+        if existing_abseiling:
+            abs_updates: dict[str, Any] = {}
+            if "number_of_abseils" in type_data_dict:
+                abs_updates["number_of_abseils"] = type_data_dict["number_of_abseils"]
+            if "total_length" in type_data_dict:
+                abs_updates["total_length"] = type_data_dict["total_length"]
+            validated_abseiling = dataclasses.replace(existing_abseiling, **abs_updates)
+            await abseiling_data_repo.save(validated_abseiling)
+    elif journal_type == JournalType.CANYONING and type_data_dict:
+        existing_canyoning = await canyoning_data_repo.find_by_journal_id(journal_id)
+        if existing_canyoning:
+            can_updates: dict[str, Any] = {}
+            if "route_id" in type_data_dict:
+                route_id_val = type_data_dict["route_id"]
+                try:
+                    can_updates["route_id"] = (
+                        UUID(route_id_val)
+                        if isinstance(route_id_val, str)
+                        else route_id_val
+                    )
+                except ValueError as e:
+                    raise JournalValidationError(
+                        "route_id", f"Invalid UUID format: {route_id_val}"
+                    ) from e
+            if "french_grade" in type_data_dict:
+                can_updates["french_grade"] = type_data_dict["french_grade"]
+            if "water_guage_name" in type_data_dict:
+                can_updates["water_guage_name"] = type_data_dict["water_guage_name"]
+            if "water_guage_level" in type_data_dict:
+                can_updates["water_guage_level"] = type_data_dict["water_guage_level"]
+            if "is_vertical" in type_data_dict:
+                can_updates["is_vertical"] = type_data_dict["is_vertical"]
+            if "is_night_canyon" in type_data_dict:
+                can_updates["is_night_canyon"] = type_data_dict["is_night_canyon"]
+            if "is_white_water" in type_data_dict:
+                can_updates["is_white_water"] = type_data_dict["is_white_water"]
+            validated_canyoning = dataclasses.replace(existing_canyoning, **can_updates)
+            await canyoning_data_repo.save(validated_canyoning)
+    elif journal_type == JournalType.CLIMBING and type_data_dict:
+        existing_climbing = await climbing_data_repo.find_by_journal_id(journal_id)
+        if existing_climbing:
+            clb_updates: dict[str, Any] = {}
+            if "route_id" in type_data_dict:
+                route_id_val = type_data_dict["route_id"]
+                try:
+                    clb_updates["route_id"] = (
+                        UUID(route_id_val)
+                        if isinstance(route_id_val, str)
+                        else route_id_val
+                    )
+                except ValueError as e:
+                    raise JournalValidationError(
+                        "route_id", f"Invalid UUID format: {route_id_val}"
+                    ) from e
+            if "climbing_type" in type_data_dict:
+                clb_updates["climbing_type"] = type_data_dict["climbing_type"]
+            if "grade" in type_data_dict:
+                clb_updates["grade"] = type_data_dict["grade"]
+            if "length" in type_data_dict:
+                clb_updates["length"] = type_data_dict["length"]
+            validated_climbing = dataclasses.replace(existing_climbing, **clb_updates)
+            await climbing_data_repo.save(validated_climbing)
 
 
 async def _persist_contact_relationships(
@@ -691,6 +842,9 @@ async def _fetch_enrichment_data(
     outdoor_activity_data_repo: SqlOutdoorActivityDataRepository,
     bushwalking_data_repo: SqlBushwalkingDataRepository,
     jogging_data_repo: SqlJoggingDataRepository,
+    abseiling_data_repo: SqlAbseilingDataRepository,
+    canyoning_data_repo: SqlCanyoningDataRepository,
+    climbing_data_repo: SqlClimbingDataRepository,
     contact_relationship_repo: SqlJournalContactRelationshipRepository,
     contact_repo: SqlContactRepository,
     tag_repo: SqlJournalTagRepository,
@@ -709,6 +863,9 @@ async def _fetch_enrichment_data(
         outdoor_activity_data_repo: Repository for outdoor activity data
         bushwalking_data_repo: Repository for bushwalking data
         jogging_data_repo: Repository for jogging data
+        abseiling_data_repo: Repository for abseiling data
+        canyoning_data_repo: Repository for canyoning data
+        climbing_data_repo: Repository for climbing data
         contact_relationship_repo: Repository for contact relationships
         contact_repo: Repository for contacts
         tag_repo: Repository for tags
@@ -727,6 +884,9 @@ async def _fetch_enrichment_data(
         outdoor_activity_data_repo,
         bushwalking_data_repo,
         jogging_data_repo,
+        abseiling_data_repo,
+        canyoning_data_repo,
+        climbing_data_repo,
     )
 
     contacts = await _fetch_contact_relationships_with_names(
@@ -761,6 +921,9 @@ def register_journal_tools(mcp: FastMCP[None]) -> None:
         outdoor_activity_data_repo: FromDishka[SqlOutdoorActivityDataRepository],
         bushwalking_data_repo: FromDishka[SqlBushwalkingDataRepository],
         jogging_data_repo: FromDishka[SqlJoggingDataRepository],
+        abseiling_data_repo: FromDishka[SqlAbseilingDataRepository],
+        canyoning_data_repo: FromDishka[SqlCanyoningDataRepository],
+        climbing_data_repo: FromDishka[SqlClimbingDataRepository],
         contact_relationship_repo: FromDishka[SqlJournalContactRelationshipRepository],
         contact_repo: FromDishka[SqlContactRepository],
         tag_repo: FromDishka[SqlJournalTagRepository],
@@ -861,6 +1024,9 @@ def register_journal_tools(mcp: FastMCP[None]) -> None:
                             outdoor_activity_data_repo,
                             bushwalking_data_repo,
                             jogging_data_repo,
+                            abseiling_data_repo,
+                            canyoning_data_repo,
+                            climbing_data_repo,
                         )
 
                     # Update type-specific data if provided
@@ -876,6 +1042,9 @@ def register_journal_tools(mcp: FastMCP[None]) -> None:
                             outdoor_activity_data_repo,
                             bushwalking_data_repo,
                             jogging_data_repo,
+                            abseiling_data_repo,
+                            canyoning_data_repo,
+                            climbing_data_repo,
                         )
                 except (ValueError, KeyError):
                     # Invalid type, skip
@@ -903,6 +1072,9 @@ def register_journal_tools(mcp: FastMCP[None]) -> None:
             outdoor_activity_data_repo,
             bushwalking_data_repo,
             jogging_data_repo,
+            abseiling_data_repo,
+            canyoning_data_repo,
+            climbing_data_repo,
             contact_relationship_repo,
             contact_repo,
             tag_repo,
@@ -934,6 +1106,9 @@ def register_journal_tools(mcp: FastMCP[None]) -> None:
         outdoor_activity_data_repo: FromDishka[SqlOutdoorActivityDataRepository],
         bushwalking_data_repo: FromDishka[SqlBushwalkingDataRepository],
         jogging_data_repo: FromDishka[SqlJoggingDataRepository],
+        abseiling_data_repo: FromDishka[SqlAbseilingDataRepository],
+        canyoning_data_repo: FromDishka[SqlCanyoningDataRepository],
+        climbing_data_repo: FromDishka[SqlClimbingDataRepository],
         contact_relationship_repo: FromDishka[SqlJournalContactRelationshipRepository],
         contact_repo: FromDishka[SqlContactRepository],
         tag_repo: FromDishka[SqlJournalTagRepository],
@@ -1025,6 +1200,9 @@ def register_journal_tools(mcp: FastMCP[None]) -> None:
                 outdoor_activity_data_repo,
                 bushwalking_data_repo,
                 jogging_data_repo,
+                abseiling_data_repo,
+                canyoning_data_repo,
+                climbing_data_repo,
             )
 
             # Remove types that are not in the new list
@@ -1064,6 +1242,9 @@ def register_journal_tools(mcp: FastMCP[None]) -> None:
                                 outdoor_activity_data_repo,
                                 bushwalking_data_repo,
                                 jogging_data_repo,
+                                abseiling_data_repo,
+                                canyoning_data_repo,
+                                climbing_data_repo,
                             )
 
                     # Update type-specific data if provided
@@ -1079,6 +1260,9 @@ def register_journal_tools(mcp: FastMCP[None]) -> None:
                             outdoor_activity_data_repo,
                             bushwalking_data_repo,
                             jogging_data_repo,
+                            abseiling_data_repo,
+                            canyoning_data_repo,
+                            climbing_data_repo,
                         )
                 except (ValueError, KeyError):
                     # Invalid type, skip
@@ -1100,6 +1284,9 @@ def register_journal_tools(mcp: FastMCP[None]) -> None:
                         outdoor_activity_data_repo,
                         bushwalking_data_repo,
                         jogging_data_repo,
+                        abseiling_data_repo,
+                        canyoning_data_repo,
+                        climbing_data_repo,
                     )
                 except (ValueError, KeyError):
                     # Invalid type, skip
@@ -1144,6 +1331,9 @@ def register_journal_tools(mcp: FastMCP[None]) -> None:
             outdoor_activity_data_repo,
             bushwalking_data_repo,
             jogging_data_repo,
+            abseiling_data_repo,
+            canyoning_data_repo,
+            climbing_data_repo,
             contact_relationship_repo,
             contact_repo,
             tag_repo,
@@ -1210,6 +1400,9 @@ def register_journal_tools(mcp: FastMCP[None]) -> None:
         outdoor_activity_data_repo = SqlOutdoorActivityDataRepository(db_connection)
         bushwalking_data_repo = SqlBushwalkingDataRepository(db_connection)
         jogging_data_repo = SqlJoggingDataRepository(db_connection)
+        abseiling_data_repo = SqlAbseilingDataRepository(db_connection)
+        canyoning_data_repo = SqlCanyoningDataRepository(db_connection)
+        climbing_data_repo = SqlClimbingDataRepository(db_connection)
         contact_relationship_repo = SqlJournalContactRelationshipRepository(
             db_connection
         )
@@ -1239,6 +1432,9 @@ def register_journal_tools(mcp: FastMCP[None]) -> None:
             outdoor_activity_data_repo,
             bushwalking_data_repo,
             jogging_data_repo,
+            abseiling_data_repo,
+            canyoning_data_repo,
+            climbing_data_repo,
         )
 
         # Fetch contact relationships and contact details

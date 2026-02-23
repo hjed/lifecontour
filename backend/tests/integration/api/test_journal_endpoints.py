@@ -321,7 +321,7 @@ class TestJournalTypeManagementEndpoints:
 
         assert response.status_code == 200
         data = response.json()
-        assert "MOOD_RATING" not in data["data"]["attributes"]["types"]
+        assert "mood_rating" not in data["data"]["attributes"]["types"]
 
     async def test_update_type_data_mood_rating(self, integration_api_client):
         """Test updating type-specific data for MOOD_RATING."""
@@ -941,6 +941,192 @@ class TestJournalTypeManagement:
         jogging_data = response_json["data"]["attributes"]["type_data"]["jogging"]
         assert jogging_data["pace"] == 360
 
+    async def test_update_abseiling_trip_type_data(self, integration_api_client):
+        """Test updating ABSEILING_TRIP type data."""
+        create_data = create_journal_request_data(
+            title="Abseiling Test",
+            content="Test content",
+            types=["ABSEILING_TRIP"],
+        )
+
+        create_response = await integration_api_client.post(
+            "/api/journals", json=create_data
+        )
+        assert create_response.status_code == 201
+        journal_id = create_response.json()["data"]["id"]
+
+        update_data = {
+            "data": {
+                "type": "journal-type-data",
+                "attributes": {
+                    "number_of_abseils": 5,
+                    "total_length": 120,
+                },
+            }
+        }
+
+        response = await integration_api_client.put(
+            f"/api/journals/{journal_id}/types/ABSEILING_TRIP/data",
+            json=update_data,
+        )
+
+        assert response.status_code == 200
+        response_json = response.json()
+        abseiling_data = response_json["data"]["attributes"]["type_data"][
+            "abseiling_trip"
+        ]
+        assert abseiling_data["number_of_abseils"] == 5
+        assert abseiling_data["total_length"] == 120
+
+    async def test_update_canyoning_type_data(self, integration_api_client):
+        """Test updating CANYONING type data."""
+        create_data = create_journal_request_data(
+            title="Canyoning Test",
+            content="Test content",
+            types=["CANYONING"],
+        )
+
+        create_response = await integration_api_client.post(
+            "/api/journals", json=create_data
+        )
+        assert create_response.status_code == 201
+        journal_id = create_response.json()["data"]["id"]
+
+        update_data = {
+            "data": {
+                "type": "journal-type-data",
+                "attributes": {
+                    "french_grade": "v3a2IV**",
+                    "water_guage_name": "Slot Canyon Gauge",
+                    "water_guage_level": 45,
+                    "is_vertical": True,
+                    "is_night_canyon": False,
+                    "is_white_water": True,
+                },
+            }
+        }
+
+        response = await integration_api_client.put(
+            f"/api/journals/{journal_id}/types/CANYONING/data",
+            json=update_data,
+        )
+
+        assert response.status_code == 200
+        response_json = response.json()
+        canyoning_data = response_json["data"]["attributes"]["type_data"]["canyoning"]
+        assert canyoning_data["french_grade"] == "v3a2IV**"
+        assert canyoning_data["water_guage_name"] == "Slot Canyon Gauge"
+        assert canyoning_data["water_guage_level"] == 45
+        assert canyoning_data["is_vertical"] is True
+        assert canyoning_data["is_night_canyon"] is False
+        assert canyoning_data["is_white_water"] is True
+
+    async def test_update_climbing_type_data(self, integration_api_client):
+        """Test updating CLIMBING type data."""
+        create_data = create_journal_request_data(
+            title="Climbing Test",
+            content="Test content",
+            types=["CLIMBING"],
+        )
+
+        create_response = await integration_api_client.post(
+            "/api/journals", json=create_data
+        )
+        assert create_response.status_code == 201
+        journal_id = create_response.json()["data"]["id"]
+
+        update_data = {
+            "data": {
+                "type": "journal-type-data",
+                "attributes": {
+                    "climbing_type": "sport",
+                    "grade": 18,
+                    "length": 25,
+                },
+            }
+        }
+
+        response = await integration_api_client.put(
+            f"/api/journals/{journal_id}/types/CLIMBING/data",
+            json=update_data,
+        )
+
+        assert response.status_code == 200
+        response_json = response.json()
+        climbing_data = response_json["data"]["attributes"]["type_data"]["climbing"]
+        assert climbing_data["climbing_type"] == "sport"
+        assert climbing_data["grade"] == 18
+        assert climbing_data["length"] == 25
+
+    async def test_remove_abseiling_trip_type_removes_from_response(
+        self, integration_api_client
+    ):
+        """Removing ABSEILING_TRIP should remove the type from the response."""
+        create_data = create_journal_request_data(
+            title="Abseiling Remove Test",
+            content="Test content",
+            types=["ABSEILING_TRIP"],
+        )
+        create_response = await integration_api_client.post(
+            "/api/journals", json=create_data
+        )
+        assert create_response.status_code == 201
+        journal_id = create_response.json()["data"]["id"]
+
+        response = await integration_api_client.delete(
+            f"/api/journals/{journal_id}/types/ABSEILING_TRIP"
+        )
+
+        assert response.status_code == 200
+        types = response.json()["data"]["attributes"]["types"]
+        assert "abseiling_trip" not in types
+
+    async def test_remove_canyoning_type_removes_from_response(
+        self, integration_api_client
+    ):
+        """Removing CANYONING should remove the type from the response."""
+        create_data = create_journal_request_data(
+            title="Canyoning Remove Test",
+            content="Test content",
+            types=["CANYONING"],
+        )
+        create_response = await integration_api_client.post(
+            "/api/journals", json=create_data
+        )
+        assert create_response.status_code == 201
+        journal_id = create_response.json()["data"]["id"]
+
+        response = await integration_api_client.delete(
+            f"/api/journals/{journal_id}/types/CANYONING"
+        )
+
+        assert response.status_code == 200
+        types = response.json()["data"]["attributes"]["types"]
+        assert "canyoning" not in types
+
+    async def test_remove_climbing_type_removes_from_response(
+        self, integration_api_client
+    ):
+        """Removing CLIMBING should remove the type from the response."""
+        create_data = create_journal_request_data(
+            title="Climbing Remove Test",
+            content="Test content",
+            types=["CLIMBING"],
+        )
+        create_response = await integration_api_client.post(
+            "/api/journals", json=create_data
+        )
+        assert create_response.status_code == 201
+        journal_id = create_response.json()["data"]["id"]
+
+        response = await integration_api_client.delete(
+            f"/api/journals/{journal_id}/types/CLIMBING"
+        )
+
+        assert response.status_code == 200
+        types = response.json()["data"]["attributes"]["types"]
+        assert "climbing" not in types
+
 
 @pytest.mark.integration
 class TestJournalHierarchy:
@@ -1380,6 +1566,84 @@ class TestJournalTypeDependencyDataCreation:
         )
         assert "outdoor_activity" in type_data
 
+    async def test_adding_abseiling_trip_creates_fitness_and_outdoor_activity_data(
+        self, integration_api_client
+    ):
+        """Adding ABSEILING_TRIP should create FITNESS and OUTDOOR_ACTIVITY data rows."""
+        create_data = create_journal_request_data(
+            title="Abseiling Dependency Test",
+            content="Test content",
+            types=["ABSEILING_TRIP"],
+        )
+
+        response = await integration_api_client.post("/api/journals", json=create_data)
+
+        assert response.status_code == 201
+        response_json = response.json()
+        type_data = response_json["data"]["attributes"]["type_data"]
+        # ABSEILING_TRIP requires OUTDOOR_ACTIVITY and FITNESS
+        assert "fitness" in type_data, (
+            "FITNESS type data row should be auto-created for ABSEILING_TRIP"
+        )
+        assert "outdoor_activity" in type_data, (
+            "OUTDOOR_ACTIVITY type data row should be auto-created for ABSEILING_TRIP"
+        )
+        assert "abseiling_trip" in type_data
+
+    async def test_adding_canyoning_creates_all_dependency_data(
+        self, integration_api_client
+    ):
+        """Adding CANYONING should create BUSHWALKING, ABSEILING_TRIP, OUTDOOR_ACTIVITY, and FITNESS data rows."""
+        create_data = create_journal_request_data(
+            title="Canyoning Dependency Test",
+            content="Test content",
+            types=["CANYONING"],
+        )
+
+        response = await integration_api_client.post("/api/journals", json=create_data)
+
+        assert response.status_code == 201
+        response_json = response.json()
+        type_data = response_json["data"]["attributes"]["type_data"]
+        # CANYONING requires BUSHWALKING, ABSEILING_TRIP, OUTDOOR_ACTIVITY, and FITNESS
+        assert "fitness" in type_data, (
+            "FITNESS type data row should be auto-created for CANYONING"
+        )
+        assert "outdoor_activity" in type_data, (
+            "OUTDOOR_ACTIVITY type data row should be auto-created for CANYONING"
+        )
+        assert "bushwalking" in type_data, (
+            "BUSHWALKING type data row should be auto-created for CANYONING"
+        )
+        assert "abseiling_trip" in type_data, (
+            "ABSEILING_TRIP type data row should be auto-created for CANYONING"
+        )
+        assert "canyoning" in type_data
+
+    async def test_adding_climbing_creates_fitness_and_outdoor_activity_data(
+        self, integration_api_client
+    ):
+        """Adding CLIMBING should create FITNESS and OUTDOOR_ACTIVITY data rows."""
+        create_data = create_journal_request_data(
+            title="Climbing Dependency Test",
+            content="Test content",
+            types=["CLIMBING"],
+        )
+
+        response = await integration_api_client.post("/api/journals", json=create_data)
+
+        assert response.status_code == 201
+        response_json = response.json()
+        type_data = response_json["data"]["attributes"]["type_data"]
+        # CLIMBING requires OUTDOOR_ACTIVITY and FITNESS
+        assert "fitness" in type_data, (
+            "FITNESS type data row should be auto-created for CLIMBING"
+        )
+        assert "outdoor_activity" in type_data, (
+            "OUTDOOR_ACTIVITY type data row should be auto-created for CLIMBING"
+        )
+        assert "climbing" in type_data
+
 
 @pytest.mark.integration
 class TestJournalTypeDataValidation:
@@ -1508,4 +1772,270 @@ class TestJournalTypeDataValidation:
 
         assert response.status_code == 400, (
             "Invalid UUID route_id should return 400 not 500"
+        )
+
+    async def test_update_abseiling_trip_with_negative_number_of_abseils_returns_400(
+        self, integration_api_client
+    ):
+        """Updating ABSEILING_TRIP with a negative number_of_abseils should return 400."""
+        create_data = create_journal_request_data(
+            title="Abseiling Validation Test",
+            content="Test content",
+            types=["ABSEILING_TRIP"],
+        )
+        create_response = await integration_api_client.post(
+            "/api/journals", json=create_data
+        )
+        assert create_response.status_code == 201
+        journal_id = create_response.json()["data"]["id"]
+
+        update_data = {
+            "data": {
+                "type": "journal-type-data",
+                "attributes": {"number_of_abseils": -1},
+            }
+        }
+        response = await integration_api_client.put(
+            f"/api/journals/{journal_id}/types/ABSEILING_TRIP/data",
+            json=update_data,
+        )
+
+        assert response.status_code == 400, (
+            "Negative number_of_abseils should return 400 not 500"
+        )
+
+    async def test_update_canyoning_with_invalid_french_grade_returns_400(
+        self, integration_api_client
+    ):
+        """Updating CANYONING with an invalid French grade should return 400."""
+        create_data = create_journal_request_data(
+            title="Canyoning Grade Validation Test",
+            content="Test content",
+            types=["CANYONING"],
+        )
+        create_response = await integration_api_client.post(
+            "/api/journals", json=create_data
+        )
+        assert create_response.status_code == 201
+        journal_id = create_response.json()["data"]["id"]
+
+        update_data = {
+            "data": {
+                "type": "journal-type-data",
+                "attributes": {"french_grade": "not-a-valid-grade"},
+            }
+        }
+        response = await integration_api_client.put(
+            f"/api/journals/{journal_id}/types/CANYONING/data",
+            json=update_data,
+        )
+
+        assert response.status_code == 400, (
+            "Invalid French canyon grade should return 400 not 500"
+        )
+
+    async def test_update_canyoning_with_invalid_uuid_returns_400(
+        self, integration_api_client
+    ):
+        """Updating CANYONING with an invalid route_id UUID should return 400."""
+        create_data = create_journal_request_data(
+            title="Canyoning UUID Validation Test",
+            content="Test content",
+            types=["CANYONING"],
+        )
+        create_response = await integration_api_client.post(
+            "/api/journals", json=create_data
+        )
+        assert create_response.status_code == 201
+        journal_id = create_response.json()["data"]["id"]
+
+        update_data = {
+            "data": {
+                "type": "journal-type-data",
+                "attributes": {"route_id": "not-a-valid-uuid"},
+            }
+        }
+        response = await integration_api_client.put(
+            f"/api/journals/{journal_id}/types/CANYONING/data",
+            json=update_data,
+        )
+
+        assert response.status_code == 400, (
+            "Invalid UUID route_id should return 400 not 500"
+        )
+
+    async def test_update_climbing_with_invalid_climbing_type_returns_400(
+        self, integration_api_client
+    ):
+        """Updating CLIMBING with an invalid climbing_type should return 400."""
+        create_data = create_journal_request_data(
+            title="Climbing Type Validation Test",
+            content="Test content",
+            types=["CLIMBING"],
+        )
+        create_response = await integration_api_client.post(
+            "/api/journals", json=create_data
+        )
+        assert create_response.status_code == 201
+        journal_id = create_response.json()["data"]["id"]
+
+        update_data = {
+            "data": {
+                "type": "journal-type-data",
+                "attributes": {"climbing_type": "invalid_type"},
+            }
+        }
+        response = await integration_api_client.put(
+            f"/api/journals/{journal_id}/types/CLIMBING/data",
+            json=update_data,
+        )
+
+        assert response.status_code == 400, (
+            "Invalid climbing_type should return 400 not 500"
+        )
+
+    async def test_update_climbing_with_invalid_uuid_returns_400(
+        self, integration_api_client
+    ):
+        """Updating CLIMBING with an invalid route_id UUID should return 400."""
+        create_data = create_journal_request_data(
+            title="Climbing UUID Validation Test",
+            content="Test content",
+            types=["CLIMBING"],
+        )
+        create_response = await integration_api_client.post(
+            "/api/journals", json=create_data
+        )
+        assert create_response.status_code == 201
+        journal_id = create_response.json()["data"]["id"]
+
+        update_data = {
+            "data": {
+                "type": "journal-type-data",
+                "attributes": {"route_id": "not-a-valid-uuid"},
+            }
+        }
+        response = await integration_api_client.put(
+            f"/api/journals/{journal_id}/types/CLIMBING/data",
+            json=update_data,
+        )
+
+        assert response.status_code == 400, (
+            "Invalid UUID route_id should return 400 not 500"
+        )
+
+    async def test_update_climbing_with_negative_grade_returns_400(
+        self, integration_api_client
+    ):
+        """Updating CLIMBING with a negative grade should return 400."""
+        create_data = create_journal_request_data(
+            title="Climbing Grade Validation Test",
+            content="Test content",
+            types=["CLIMBING"],
+        )
+        create_response = await integration_api_client.post(
+            "/api/journals", json=create_data
+        )
+        assert create_response.status_code == 201
+        journal_id = create_response.json()["data"]["id"]
+
+        update_data = {
+            "data": {
+                "type": "journal-type-data",
+                "attributes": {"grade": -1},
+            }
+        }
+        response = await integration_api_client.put(
+            f"/api/journals/{journal_id}/types/CLIMBING/data",
+            json=update_data,
+        )
+
+        assert response.status_code == 400, "Negative grade should return 400 not 500"
+
+    async def test_update_abseiling_with_string_number_of_abseils_returns_400(
+        self, integration_api_client
+    ):
+        """Sending a string for number_of_abseils (expects int) should return 400 not 500."""
+        create_data = create_journal_request_data(
+            title="Abseiling Type Check Test",
+            content="Test content",
+            types=["ABSEILING_TRIP"],
+        )
+        create_response = await integration_api_client.post(
+            "/api/journals", json=create_data
+        )
+        assert create_response.status_code == 201
+        journal_id = create_response.json()["data"]["id"]
+
+        update_data = {
+            "data": {
+                "type": "journal-type-data",
+                "attributes": {"number_of_abseils": "five"},
+            }
+        }
+        response = await integration_api_client.put(
+            f"/api/journals/{journal_id}/types/ABSEILING_TRIP/data",
+            json=update_data,
+        )
+
+        assert response.status_code == 400, (
+            "String for number_of_abseils should return 400 not 500"
+        )
+
+    async def test_update_climbing_with_string_grade_returns_400(
+        self, integration_api_client
+    ):
+        """Sending a string for grade (expects int) should return 400 not 500."""
+        create_data = create_journal_request_data(
+            title="Climbing Grade Type Check Test",
+            content="Test content",
+            types=["CLIMBING"],
+        )
+        create_response = await integration_api_client.post(
+            "/api/journals", json=create_data
+        )
+        assert create_response.status_code == 201
+        journal_id = create_response.json()["data"]["id"]
+
+        update_data = {
+            "data": {
+                "type": "journal-type-data",
+                "attributes": {"grade": "eighteen"},
+            }
+        }
+        response = await integration_api_client.put(
+            f"/api/journals/{journal_id}/types/CLIMBING/data",
+            json=update_data,
+        )
+
+        assert response.status_code == 400, "String for grade should return 400 not 500"
+
+    async def test_update_canyoning_with_int_french_grade_returns_400(
+        self, integration_api_client
+    ):
+        """Sending an int for french_grade (expects str) should return 400 not 500."""
+        create_data = create_journal_request_data(
+            title="Canyoning Grade Type Check Test",
+            content="Test content",
+            types=["CANYONING"],
+        )
+        create_response = await integration_api_client.post(
+            "/api/journals", json=create_data
+        )
+        assert create_response.status_code == 201
+        journal_id = create_response.json()["data"]["id"]
+
+        update_data = {
+            "data": {
+                "type": "journal-type-data",
+                "attributes": {"french_grade": 123},
+            }
+        }
+        response = await integration_api_client.put(
+            f"/api/journals/{journal_id}/types/CANYONING/data",
+            json=update_data,
+        )
+
+        assert response.status_code == 400, (
+            "Integer for french_grade should return 400 not 500"
         )

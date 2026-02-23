@@ -344,6 +344,9 @@ TEST_DATABASE_SCHEMA_STATEMENTS = [
     "DROP TABLE IF EXISTS journal_photo_album_data CASCADE",
     "DROP TABLE IF EXISTS journal_mood_data CASCADE",
     "DROP TABLE IF EXISTS journal_calendar_info CASCADE",
+    "DROP TABLE IF EXISTS journal_canyoning_data CASCADE",
+    "DROP TABLE IF EXISTS journal_climbing_data CASCADE",
+    "DROP TABLE IF EXISTS journal_abseiling_data CASCADE",
     "DROP TABLE IF EXISTS journal_jogging_data CASCADE",
     "DROP TABLE IF EXISTS journal_bushwalking_data CASCADE",
     "DROP TABLE IF EXISTS journal_outdoor_activity_data CASCADE",
@@ -544,6 +547,39 @@ TEST_DATABASE_SCHEMA_STATEMENTS = [
         journal_id INTEGER PRIMARY KEY REFERENCES journals(id) ON DELETE CASCADE,
         route_id UUID REFERENCES routes(id) ON DELETE SET NULL,
         pace INTEGER CHECK (pace IS NULL OR pace >= 0),
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL,
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL
+    )""",
+    # Journal abseiling data table (ABSEILING_TRIP type)
+    """CREATE TABLE journal_abseiling_data (
+        journal_id INTEGER PRIMARY KEY REFERENCES journals(id) ON DELETE CASCADE,
+        number_of_abseils INTEGER CHECK (number_of_abseils IS NULL OR number_of_abseils >= 0),
+        total_length INTEGER CHECK (total_length IS NULL OR total_length >= 0),
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL,
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL
+    )""",
+    # Journal canyoning data table (CANYONING type)
+    """CREATE TABLE journal_canyoning_data (
+        journal_id INTEGER PRIMARY KEY REFERENCES journals(id) ON DELETE CASCADE,
+        route_id UUID REFERENCES routes(id) ON DELETE SET NULL,
+        french_grade VARCHAR(20),
+        water_guage_name VARCHAR(200),
+        water_guage_level INTEGER,
+        is_vertical BOOLEAN,
+        is_night_canyon BOOLEAN,
+        is_white_water BOOLEAN,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL,
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL
+    )""",
+    # Journal climbing data table (CLIMBING type)
+    """CREATE TABLE journal_climbing_data (
+        journal_id INTEGER PRIMARY KEY REFERENCES journals(id) ON DELETE CASCADE,
+        route_id UUID REFERENCES routes(id) ON DELETE SET NULL,
+        climbing_type VARCHAR(20) CHECK (
+            climbing_type IS NULL OR climbing_type IN ('sport', 'trad', 'bouldering')
+        ),
+        grade INTEGER CHECK (grade IS NULL OR grade >= 0),
+        length INTEGER CHECK (length IS NULL OR length >= 0),
         created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL,
         updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL
     )""",

@@ -364,7 +364,8 @@ class TestJournalToolsIntegration:
 class TestFetchJournalTypesAndDataNewActivityTypes:
     """
     Integration tests verifying _fetch_journal_types_and_data detects
-    FITNESS, OUTDOOR_ACTIVITY, BUSHWALKING, and JOGGING types.
+    FITNESS, OUTDOOR_ACTIVITY, BUSHWALKING, JOGGING, ABSEILING_TRIP,
+    CANYONING, and CLIMBING types.
     """
 
     @pytest_asyncio.fixture
@@ -394,8 +395,17 @@ class TestFetchJournalTypesAndDataNewActivityTypes:
         self, journal_id: int, conn: AsyncConnection
     ) -> tuple[list[str], dict[str, Any]]:
         """Helper: call _fetch_journal_types_and_data with all repos."""
+        from app.core.journal.adapters.sql.abseiling_data_repository import (
+            SqlAbseilingDataRepository,
+        )
         from app.core.journal.adapters.sql.calendar_info_repository import (
             SqlCalendarInfoRepository,
+        )
+        from app.core.journal.adapters.sql.canyoning_data_repository import (
+            SqlCanyoningDataRepository,
+        )
+        from app.core.journal.adapters.sql.climbing_data_repository import (
+            SqlClimbingDataRepository,
         )
         from app.core.journal.adapters.sql.mood_data_repository import (
             SqlMoodDataRepository,
@@ -421,6 +431,9 @@ class TestFetchJournalTypesAndDataNewActivityTypes:
             SqlOutdoorActivityDataRepository(conn),
             SqlBushwalkingDataRepository(conn),
             SqlJoggingDataRepository(conn),
+            SqlAbseilingDataRepository(conn),
+            SqlCanyoningDataRepository(conn),
+            SqlClimbingDataRepository(conn),
         )
 
     @pytest.mark.asyncio
@@ -525,7 +538,76 @@ class TestFetchJournalTypesAndDataNewActivityTypes:
         assert "jogging" in types
         jogging = type_data["jogging"]
         assert jogging["pace"] == 360
-        assert jogging["route_id"] is None
+
+    @pytest.mark.asyncio
+    async def test_fetch_detects_abseiling_trip_type(
+        self, journal_id: int, clean_database: AsyncConnection
+    ) -> None:
+        """ABSEILING_TRIP type is detected when journal_abseiling_data row exists."""
+        await clean_database.execute(
+            text("""
+                INSERT INTO journal_abseiling_data (journal_id, number_of_abseils, total_length)
+                VALUES (:journal_id, 5, 120)
+            """),
+            {"journal_id": journal_id},
+        )
+
+        types, type_data = await self._call_fetch(journal_id, clean_database)
+
+        assert "abseiling_trip" in types
+        abseiling = type_data["abseiling_trip"]
+        assert abseiling["number_of_abseils"] == 5
+        assert abseiling["total_length"] == 120
+
+    @pytest.mark.asyncio
+    async def test_fetch_detects_canyoning_type(
+        self, journal_id: int, clean_database: AsyncConnection
+    ) -> None:
+        """CANYONING type is detected when journal_canyoning_data row exists."""
+        await clean_database.execute(
+            text("""
+                INSERT INTO journal_canyoning_data
+                    (journal_id, french_grade, water_guage_name, water_guage_level,
+                     is_vertical, is_night_canyon, is_white_water)
+                VALUES (:journal_id, 'v3a2IV**', 'Slot Creek Gauge', 42,
+                        true, false, true)
+            """),
+            {"journal_id": journal_id},
+        )
+
+        types, type_data = await self._call_fetch(journal_id, clean_database)
+
+        assert "canyoning" in types
+        canyoning = type_data["canyoning"]
+        assert canyoning["french_grade"] == "v3a2IV**"
+        assert canyoning["water_guage_name"] == "Slot Creek Gauge"
+        assert canyoning["water_guage_level"] == 42
+        assert canyoning["is_vertical"] is True
+        assert canyoning["is_night_canyon"] is False
+        assert canyoning["is_white_water"] is True
+        assert canyoning["route_id"] is None
+
+    @pytest.mark.asyncio
+    async def test_fetch_detects_climbing_type(
+        self, journal_id: int, clean_database: AsyncConnection
+    ) -> None:
+        """CLIMBING type is detected when journal_climbing_data row exists."""
+        await clean_database.execute(
+            text("""
+                INSERT INTO journal_climbing_data (journal_id, climbing_type, grade, length)
+                VALUES (:journal_id, 'sport', 18, 25)
+            """),
+            {"journal_id": journal_id},
+        )
+
+        types, type_data = await self._call_fetch(journal_id, clean_database)
+
+        assert "climbing" in types
+        climbing = type_data["climbing"]
+        assert climbing["climbing_type"] == "sport"
+        assert climbing["grade"] == 18
+        assert climbing["length"] == 25
+        assert climbing["route_id"] is None
 
     @pytest.mark.asyncio
     async def test_journal_with_no_activity_data_is_note(
