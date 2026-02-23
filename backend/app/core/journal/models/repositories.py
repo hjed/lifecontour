@@ -5,9 +5,12 @@ from uuid import UUID
 
 from core_shared.models.route import Route
 
+from .abseiling_data import AbseilingData
 from .bushwalking_data import BushwalkingData
 from .calendar import Calendar
 from .calendar_info import CalendarInfo
+from .canyoning_data import CanyoningData
+from .climbing_data import ClimbingData
 from .entities import Journal
 from .fitness_data import FitnessData
 from .jogging_data import JoggingData
@@ -1237,5 +1240,149 @@ class JoggingDataRepository(ABC):
 
         Args:
             journal_id: The journal ID to delete jogging data for
+        """
+        pass
+
+
+class AbseilingDataRepository(ABC):
+    """
+    Repository interface for abseiling data (ABSEILING_TRIP type) operations.
+
+    A journal has the ABSEILING_TRIP type if an AbseilingData row exists for its journal_id.
+    """
+
+    @abstractmethod
+    async def find_by_journal_id(self, journal_id: int) -> AbseilingData | None:
+        """
+        Find abseiling data by journal ID.
+
+        Args:
+            journal_id: The journal ID to look up
+
+        Returns:
+            The AbseilingData if found, None otherwise
+        """
+        pass
+
+    @abstractmethod
+    async def save(self, data: AbseilingData) -> AbseilingData:
+        """
+        Save abseiling data (insert or update).
+
+        This effectively adds or updates the ABSEILING_TRIP type for a journal.
+
+        Args:
+            data: The abseiling data to save
+
+        Returns:
+            The saved data with updated timestamps
+        """
+        pass
+
+    @abstractmethod
+    async def delete(self, journal_id: int) -> None:
+        """
+        Delete abseiling data by journal ID.
+
+        This effectively removes the ABSEILING_TRIP type from a journal.
+
+        Args:
+            journal_id: The journal ID to delete abseiling data for
+        """
+        pass
+
+
+class CanyoningDataRepository(ABC):
+    """
+    Repository interface for canyoning data (CANYONING type) operations.
+
+    A journal has the CANYONING type if a CanyoningData row exists for its journal_id.
+    """
+
+    @abstractmethod
+    async def find_by_journal_id(self, journal_id: int) -> CanyoningData | None:
+        """
+        Find canyoning data by journal ID.
+
+        Args:
+            journal_id: The journal ID to look up
+
+        Returns:
+            The CanyoningData if found, None otherwise
+        """
+        pass
+
+    @abstractmethod
+    async def save(self, data: CanyoningData) -> CanyoningData:
+        """
+        Save canyoning data (insert or update).
+
+        This effectively adds or updates the CANYONING type for a journal.
+
+        Args:
+            data: The canyoning data to save
+
+        Returns:
+            The saved data with updated timestamps
+        """
+        pass
+
+    @abstractmethod
+    async def delete(self, journal_id: int) -> None:
+        """
+        Delete canyoning data by journal ID.
+
+        This effectively removes the CANYONING type from a journal.
+
+        Args:
+            journal_id: The journal ID to delete canyoning data for
+        """
+        pass
+
+
+class ClimbingDataRepository(ABC):
+    """
+    Repository interface for climbing data (CLIMBING type) operations.
+
+    A journal has the CLIMBING type if a ClimbingData row exists for its journal_id.
+    """
+
+    @abstractmethod
+    async def find_by_journal_id(self, journal_id: int) -> ClimbingData | None:
+        """
+        Find climbing data by journal ID.
+
+        Args:
+            journal_id: The journal ID to look up
+
+        Returns:
+            The ClimbingData if found, None otherwise
+        """
+        pass
+
+    @abstractmethod
+    async def save(self, data: ClimbingData) -> ClimbingData:
+        """
+        Save climbing data (insert or update).
+
+        This effectively adds or updates the CLIMBING type for a journal.
+
+        Args:
+            data: The climbing data to save
+
+        Returns:
+            The saved data with updated timestamps
+        """
+        pass
+
+    @abstractmethod
+    async def delete(self, journal_id: int) -> None:
+        """
+        Delete climbing data by journal ID.
+
+        This effectively removes the CLIMBING type from a journal.
+
+        Args:
+            journal_id: The journal ID to delete climbing data for
         """
         pass

@@ -3,6 +3,9 @@
 from dishka import Provider, Scope, provide
 from sqlalchemy.ext.asyncio import AsyncConnection
 
+from app.core.journal.adapters.sql.abseiling_data_repository import (
+    SqlAbseilingDataRepository,
+)
 from app.core.journal.adapters.sql.bushwalking_data_repository import (
     SqlBushwalkingDataRepository,
 )
@@ -10,6 +13,12 @@ from app.core.journal.adapters.sql.calendar_info_repository import (
     SqlCalendarInfoRepository,
 )
 from app.core.journal.adapters.sql.calendar_repository import SqlCalendarRepository
+from app.core.journal.adapters.sql.canyoning_data_repository import (
+    SqlCanyoningDataRepository,
+)
+from app.core.journal.adapters.sql.climbing_data_repository import (
+    SqlClimbingDataRepository,
+)
 from app.core.journal.adapters.sql.fitness_data_repository import (
     SqlFitnessDataRepository,
 )
@@ -32,9 +41,12 @@ from app.core.journal.adapters.sql.plan_data_repository import SqlPlanDataReposi
 from app.core.journal.adapters.sql.route_repository import SqlRouteRepository
 from app.core.journal.adapters.sql.travel_data_repository import SqlTravelDataRepository
 from app.core.journal.models.repositories import (
+    AbseilingDataRepository,
     BushwalkingDataRepository,
     CalendarInfoRepository,
     CalendarRepository,
+    CanyoningDataRepository,
+    ClimbingDataRepository,
     FitnessDataRepository,
     JoggingDataRepository,
     JournalContactRelationshipRepository,
@@ -137,6 +149,27 @@ class JournalProvider(Provider):
     ) -> JoggingDataRepository:
         """Provide a JoggingDataRepository instance."""
         return SqlJoggingDataRepository(connection)
+
+    @provide(scope=Scope.REQUEST)
+    def abseiling_data_repository(
+        self, connection: AsyncConnection
+    ) -> AbseilingDataRepository:
+        """Provide an AbseilingDataRepository instance."""
+        return SqlAbseilingDataRepository(connection)
+
+    @provide(scope=Scope.REQUEST)
+    def canyoning_data_repository(
+        self, connection: AsyncConnection
+    ) -> CanyoningDataRepository:
+        """Provide a CanyoningDataRepository instance."""
+        return SqlCanyoningDataRepository(connection)
+
+    @provide(scope=Scope.REQUEST)
+    def climbing_data_repository(
+        self, connection: AsyncConnection
+    ) -> ClimbingDataRepository:
+        """Provide a ClimbingDataRepository instance."""
+        return SqlClimbingDataRepository(connection)
 
     @provide(scope=Scope.REQUEST)
     def route_repository(self, connection: AsyncConnection) -> RouteRepository:

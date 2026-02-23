@@ -303,7 +303,7 @@ This iteration extends the journal system with fitness and outdoor activity type
 - Grade 4: Rough track, very steep sections
 - Grade 5: Route only, very rough, very steep
 
-### ITER4.5-004: Outdoor Activity Types - Part 2 (ABSEILING_TRIP, CANYONING, CLIMBING) 🟡 PLANNED
+### ITER4.5-004: Outdoor Activity Types - Part 2 (ABSEILING_TRIP, CANYONING, CLIMBING) ✅ COMPLETE
 **Description:** Implement abseiling, canyoning, and climbing types
 **Strategy:** Single task for three complex types
 **Specification Reference:** [Abseiling Data](../journal-system-specification.md#abseiling-data-abseiling_trip-type), [Canyoning Data](../journal-system-specification.md#canyoning-data-canyoning-type), [Climbing Data](../journal-system-specification.md#climbing-data-climbing-type)
@@ -311,14 +311,14 @@ This iteration extends the journal system with fitness and outdoor activity type
 **PR Size:** ~12 files (3 type tables, dependency logic, API schemas/converters/controllers, tests, migrations)
 
 **Acceptance Criteria:**
-- [ ] Create `journal_abseiling_data` table:
+- [x] Create `journal_abseiling_data` table:
   - `journal_id` (PK, FK to journals)
   - `number_of_abseils` (integer, nullable)
   - `total_length` (integer meters, nullable)
   - `created_at`, `updated_at`
   - **Note:** Individual abseils are child journals with their own abseiling data
-- [ ] Implement ABSEILING_TRIP type (requires OUTDOOR_ACTIVITY, FITNESS)
-- [ ] Create `journal_canyoning_data` table:
+- [x] Implement ABSEILING_TRIP type (requires OUTDOOR_ACTIVITY, FITNESS)
+- [x] Create `journal_canyoning_data` table:
   - `journal_id` (PK, FK to journals)
   - `route_id` (FK to routes, nullable)
   - `french_grade` (string, nullable, e.g., "v3a2IV**")
@@ -328,27 +328,31 @@ This iteration extends the journal system with fitness and outdoor activity type
   - `is_night_canyon` (boolean, nullable)
   - `is_white_water` (boolean, nullable)
   - `created_at`, `updated_at`
-- [ ] Implement CANYONING type (requires BUSHWALKING, ABSEILING_TRIP, OUTDOOR_ACTIVITY, FITNESS)
-- [ ] Create `journal_climbing_data` table:
+- [x] Implement CANYONING type (requires BUSHWALKING, ABSEILING_TRIP, OUTDOOR_ACTIVITY, FITNESS)
+- [x] Create `journal_climbing_data` table:
   - `journal_id` (PK, FK to journals)
   - `route_id` (FK to routes, nullable)
   - `climbing_type` (enum: "sport", "trad", "bouldering", nullable)
   - `grade` (integer, nullable)
   - `length` (integer meters, nullable)
   - `created_at`, `updated_at`
-- [ ] Implement CLIMBING type (requires OUTDOOR_ACTIVITY, FITNESS)
-- [ ] Update type dependency resolution for complex dependencies (CANYONING)
-- [ ] Add database migrations with proper constraints
-- [ ] **Add API schemas, converters, and controller integration:**
-  - [ ] Add `AbseilingDataSchema`, `CanyoningDataSchema`, `ClimbingDataSchema` to `backend/app/api/journals/schemas.py`
-  - [ ] Add converter functions in `backend/app/api/journals/converters.py`
-  - [ ] Update `_enrich_journal_data()` and `_create_type_specific_data()` in `backend/app/api/journals/controllers.py`
-  - [ ] Add repository parameters to all journal endpoints
-  - [ ] Update `backend/app/api/contacts/controllers.py` if it uses `_enrich_journal_data()`
-- [ ] Write unit tests for type-specific validation and complex dependencies
-- [ ] Write integration tests for type data persistence
-- [ ] **Write API integration tests for type creation and updates**
-- [ ] Document French grading system for canyoning in code comments
+- [x] Implement CLIMBING type (requires OUTDOOR_ACTIVITY, FITNESS)
+- [x] Update type dependency resolution for complex dependencies (CANYONING)
+- [x] Add database migrations with proper constraints
+- [x] **Add API schemas, converters, and controller integration:**
+  - [x] Add `AbseilingDataSchema`, `CanyoningDataSchema`, `ClimbingDataSchema` to `backend/app/api/journals/schemas.py`
+  - [x] Add converter functions in `backend/app/api/journals/converters.py`
+  - [x] Update `_enrich_journal_data()` and `_create_type_specific_data()` in `backend/app/api/journals/controllers.py`
+  - [x] Add repository parameters to all journal endpoints
+  - [x] Update `backend/app/api/contacts/controllers.py` if it uses `_enrich_journal_data()`
+- [x] Write unit tests for type-specific validation and complex dependencies
+- [x] Write integration tests for type data persistence (26/26 passing)
+- [x] **Write API integration tests for type creation and updates**
+  - 3 tests in `TestJournalTypeManagement` (update data for each new type) ✅
+  - 3 tests in `TestJournalTypeDependencyDataCreation` (dependency auto-creation) ✅
+  - 6 tests in `TestJournalTypeDataValidation` (validation errors return 400) ✅
+- [x] Document French grading system for canyoning in code comments
+- [x] **Write MCP scheme updates and integration tests for new types**
 
 **French Canyoning Grading System:**
 - Format: v[vertical]a[aquatic][engagement][duration][stars]

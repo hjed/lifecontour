@@ -32,6 +32,12 @@ _JOURNAL_TYPE_TABLE_MAP = {
     "bushwalking": "journal_bushwalking_data",
     "JOGGING": "journal_jogging_data",
     "jogging": "journal_jogging_data",
+    "ABSEILING_TRIP": "journal_abseiling_data",
+    "abseiling_trip": "journal_abseiling_data",
+    "CANYONING": "journal_canyoning_data",
+    "canyoning": "journal_canyoning_data",
+    "CLIMBING": "journal_climbing_data",
+    "climbing": "journal_climbing_data",
 }
 
 
@@ -89,6 +95,9 @@ class SqlJournalRepository(JournalRepository):
                     "LEFT JOIN journal_outdoor_activity_data joad ON j.id = joad.journal_id",
                     "LEFT JOIN journal_bushwalking_data jbwd ON j.id = jbwd.journal_id",
                     "LEFT JOIN journal_jogging_data jjd ON j.id = jjd.journal_id",
+                    "LEFT JOIN journal_abseiling_data jabd ON j.id = jabd.journal_id",
+                    "LEFT JOIN journal_canyoning_data jcyd ON j.id = jcyd.journal_id",
+                    "LEFT JOIN journal_climbing_data jcld ON j.id = jcld.journal_id",
                 ]
             )
             where_clauses.extend(
@@ -102,6 +111,9 @@ class SqlJournalRepository(JournalRepository):
                     "joad.journal_id IS NULL",
                     "jbwd.journal_id IS NULL",
                     "jjd.journal_id IS NULL",
+                    "jabd.journal_id IS NULL",
+                    "jcyd.journal_id IS NULL",
+                    "jcld.journal_id IS NULL",
                 ]
             )
             return joins, where_clauses
@@ -139,6 +151,9 @@ class SqlJournalRepository(JournalRepository):
             "journal_outdoor_activity_data": "INNER JOIN journal_outdoor_activity_data t ON j.id = t.journal_id",
             "journal_bushwalking_data": "INNER JOIN journal_bushwalking_data t ON j.id = t.journal_id",
             "journal_jogging_data": "INNER JOIN journal_jogging_data t ON j.id = t.journal_id",
+            "journal_abseiling_data": "INNER JOIN journal_abseiling_data t ON j.id = t.journal_id",
+            "journal_canyoning_data": "INNER JOIN journal_canyoning_data t ON j.id = t.journal_id",
+            "journal_climbing_data": "INNER JOIN journal_climbing_data t ON j.id = t.journal_id",
         }
 
         if type_table not in table_joins:

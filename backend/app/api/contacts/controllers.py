@@ -55,9 +55,12 @@ from app.core.contacts.services import ContactService
 from app.core.contacts.services.contact_history_service import ContactHistoryService
 from app.core.journal.models.entities import Journal
 from app.core.journal.models.repositories import (
+    AbseilingDataRepository,
     BushwalkingDataRepository,
     CalendarInfoRepository,
     CalendarRepository,
+    CanyoningDataRepository,
+    ClimbingDataRepository,
     FitnessDataRepository,
     JoggingDataRepository,
     JournalContactRelationshipRepository,
@@ -772,6 +775,9 @@ async def get_contact_journals(
     outdoor_activity_data_repo: FromDishka[OutdoorActivityDataRepository],
     bushwalking_data_repo: FromDishka[BushwalkingDataRepository],
     jogging_data_repo: FromDishka[JoggingDataRepository],
+    abseiling_data_repo: FromDishka[AbseilingDataRepository],
+    canyoning_data_repo: FromDishka[CanyoningDataRepository],
+    climbing_data_repo: FromDishka[ClimbingDataRepository],
     tag_repo: FromDishka[JournalTagRepository],
     _user: FromDishka[SessionUser],  # Require authentication
     page: int = Query(default=1, description=PAGE_NUMBER_DESCRIPTION, ge=1),
@@ -884,6 +890,9 @@ async def get_contact_journals(
             outdoor_activity_data_repo,
             bushwalking_data_repo,
             jogging_data_repo,
+            abseiling_data_repo,
+            canyoning_data_repo,
+            climbing_data_repo,
         )
         parent = parent_by_id.get(journal.parent_id) if journal.parent_id else None
         children_count = (

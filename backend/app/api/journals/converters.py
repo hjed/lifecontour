@@ -11,9 +11,12 @@ from typing import TYPE_CHECKING, Any
 
 from app.api.common.schemas import JsonApiLinks
 from app.api.journals.schemas import (
+    AbseilingDataSchema,
     BushwalkingDataSchema,
     CalendarInfoDataSchema,
     CalendarSchema,
+    CanyoningDataSchema,
+    ClimbingDataSchema,
     EventDateRangeSchema,
     FitnessDataSchema,
     JoggingDataSchema,
@@ -32,9 +35,12 @@ from app.api.journals.schemas import (
     TravelFlightSchema,
     TravelTransportationSchema,
 )
+from app.core.journal.models.abseiling_data import AbseilingData
 from app.core.journal.models.bushwalking_data import BushwalkingData
 from app.core.journal.models.calendar import Calendar
 from app.core.journal.models.calendar_info import CalendarInfo
+from app.core.journal.models.canyoning_data import CanyoningData
+from app.core.journal.models.climbing_data import ClimbingData
 from app.core.journal.models.entities import Journal
 from app.core.journal.models.fitness_data import FitnessData
 from app.core.journal.models.jogging_data import JoggingData
@@ -376,6 +382,37 @@ class TypeDataConverter:
         return JoggingDataSchema(
             route_id=str(data.route_id) if data.route_id is not None else None,
             pace=data.pace,
+        ).model_dump(exclude_none=True)
+
+    @staticmethod
+    def abseiling_data_to_schema(data: AbseilingData) -> dict[str, Any]:
+        """Convert AbseilingData domain entity to API schema."""
+        return AbseilingDataSchema(
+            number_of_abseils=data.number_of_abseils,
+            total_length=data.total_length,
+        ).model_dump(exclude_none=True)
+
+    @staticmethod
+    def canyoning_data_to_schema(data: CanyoningData) -> dict[str, Any]:
+        """Convert CanyoningData domain entity to API schema."""
+        return CanyoningDataSchema(
+            route_id=str(data.route_id) if data.route_id is not None else None,
+            french_grade=data.french_grade,
+            water_guage_name=data.water_guage_name,
+            water_guage_level=data.water_guage_level,
+            is_vertical=data.is_vertical,
+            is_night_canyon=data.is_night_canyon,
+            is_white_water=data.is_white_water,
+        ).model_dump(exclude_none=True)
+
+    @staticmethod
+    def climbing_data_to_schema(data: ClimbingData) -> dict[str, Any]:
+        """Convert ClimbingData domain entity to API schema."""
+        return ClimbingDataSchema(
+            route_id=str(data.route_id) if data.route_id is not None else None,
+            climbing_type=data.climbing_type,
+            grade=data.grade,
+            length=data.length,
         ).model_dump(exclude_none=True)
 
 

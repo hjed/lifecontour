@@ -58,9 +58,12 @@ from app.core.journal.models.journal_relationship_types import (
 )
 from app.core.journal.models.journal_types import JournalType
 from app.core.journal.models.repositories import (
+    AbseilingDataRepository,
     BushwalkingDataRepository,
     CalendarInfoRepository,
     CalendarRepository,
+    CanyoningDataRepository,
+    ClimbingDataRepository,
     FitnessDataRepository,
     JoggingDataRepository,
     JournalContactRelationshipRepository,
@@ -124,6 +127,9 @@ async def _create_type_specific_data(
     outdoor_activity_data_repo: OutdoorActivityDataRepository,
     bushwalking_data_repo: BushwalkingDataRepository,
     jogging_data_repo: JoggingDataRepository,
+    abseiling_data_repo: AbseilingDataRepository,
+    canyoning_data_repo: CanyoningDataRepository,
+    climbing_data_repo: ClimbingDataRepository,
 ) -> None:
     """
     Create type-specific data row with default values for the given journal type.
@@ -138,6 +144,9 @@ async def _create_type_specific_data(
         outdoor_activity_data_repo: Repository for outdoor activity data
         bushwalking_data_repo: Repository for bushwalking data
         jogging_data_repo: Repository for jogging data
+        abseiling_data_repo: Repository for abseiling data
+        canyoning_data_repo: Repository for canyoning data
+        climbing_data_repo: Repository for climbing data
     """
     from app.core.journal.models.journal_types import JournalType
 
@@ -176,8 +185,87 @@ async def _create_type_specific_data(
 
         jogging_data = JoggingData(journal_id=journal_id)
         await jogging_data_repo.save(jogging_data)
+    elif journal_type == JournalType.ABSEILING_TRIP:
+        from app.core.journal.models.abseiling_data import AbseilingData
+
+        abseiling_data = AbseilingData(journal_id=journal_id)
+        await abseiling_data_repo.save(abseiling_data)
+    elif journal_type == JournalType.CANYONING:
+        from app.core.journal.models.canyoning_data import CanyoningData
+
+        canyoning_data = CanyoningData(journal_id=journal_id)
+        await canyoning_data_repo.save(canyoning_data)
+    elif journal_type == JournalType.CLIMBING:
+        from app.core.journal.models.climbing_data import ClimbingData
+
+        climbing_data = ClimbingData(journal_id=journal_id)
+        await climbing_data_repo.save(climbing_data)
     # EVENT and PHOTO_ALBUM types require additional data (calendar_id, immich_album_id)
     # These will be created when the user updates the type data
+
+
+async def _delete_type_specific_data(
+    journal_type: "JournalType",
+    journal_id: int,
+    mood_data_repo: MoodDataRepository,
+    plan_data_repo: PlanDataRepository,
+    travel_data_repo: TravelDataRepository,
+    photo_album_data_repo: PhotoAlbumDataRepository,
+    fitness_data_repo: FitnessDataRepository,
+    outdoor_activity_data_repo: OutdoorActivityDataRepository,
+    bushwalking_data_repo: BushwalkingDataRepository,
+    jogging_data_repo: JoggingDataRepository,
+    abseiling_data_repo: AbseilingDataRepository,
+    canyoning_data_repo: CanyoningDataRepository,
+    climbing_data_repo: ClimbingDataRepository,
+) -> None:
+    """
+    Delete the type-specific data row for the given journal type.
+
+    Called when a type is removed from a journal so that the type row is cleaned
+    up and the type no longer appears in _enrich_journal_data() responses.
+
+    Args:
+        journal_type: The type of journal being removed
+        journal_id: The ID of the journal
+        mood_data_repo: Repository for mood data
+        plan_data_repo: Repository for plan data
+        travel_data_repo: Repository for travel data
+        photo_album_data_repo: Repository for photo album data
+        fitness_data_repo: Repository for fitness data
+        outdoor_activity_data_repo: Repository for outdoor activity data
+        bushwalking_data_repo: Repository for bushwalking data
+        jogging_data_repo: Repository for jogging data
+        abseiling_data_repo: Repository for abseiling data
+        canyoning_data_repo: Repository for canyoning data
+        climbing_data_repo: Repository for climbing data
+    """
+    from app.core.journal.models.journal_types import JournalType
+
+    if journal_type == JournalType.MOOD_RATING:
+        await mood_data_repo.delete(journal_id)
+    elif journal_type == JournalType.PLAN:
+        await plan_data_repo.delete(journal_id)
+    elif journal_type == JournalType.TRAVEL:
+        await travel_data_repo.delete(journal_id)
+    elif journal_type == JournalType.PHOTO_ALBUM:
+        await photo_album_data_repo.delete(journal_id)
+    elif journal_type == JournalType.FITNESS:
+        await fitness_data_repo.delete(journal_id)
+    elif journal_type == JournalType.OUTDOOR_ACTIVITY:
+        await outdoor_activity_data_repo.delete(journal_id)
+    elif journal_type == JournalType.BUSHWALKING:
+        await bushwalking_data_repo.delete(journal_id)
+    elif journal_type == JournalType.JOGGING:
+        await jogging_data_repo.delete(journal_id)
+    elif journal_type == JournalType.ABSEILING_TRIP:
+        await abseiling_data_repo.delete(journal_id)
+    elif journal_type == JournalType.CANYONING:
+        await canyoning_data_repo.delete(journal_id)
+    elif journal_type == JournalType.CLIMBING:
+        await climbing_data_repo.delete(journal_id)
+    # EVENT has no dedicated type-specific table (uses calendar_info via CalendarInfo)
+    # and is handled by the service layer
 
 
 async def _enrich_journal_data(
@@ -194,6 +282,9 @@ async def _enrich_journal_data(
     outdoor_activity_data_repo: OutdoorActivityDataRepository,
     bushwalking_data_repo: BushwalkingDataRepository,
     jogging_data_repo: JoggingDataRepository,
+    abseiling_data_repo: AbseilingDataRepository,
+    canyoning_data_repo: CanyoningDataRepository,
+    climbing_data_repo: ClimbingDataRepository,
 ) -> tuple[
     list[str],
     dict[str, Any],
@@ -283,6 +374,27 @@ async def _enrich_journal_data(
         types.append(JournalType.JOGGING.value)
         type_data[JournalType.JOGGING.value] = TypeDataConverter.jogging_data_to_schema(
             jogging_data
+        )
+
+    abseiling_data = await abseiling_data_repo.find_by_journal_id(journal_id)
+    if abseiling_data:
+        types.append(JournalType.ABSEILING_TRIP.value)
+        type_data[JournalType.ABSEILING_TRIP.value] = (
+            TypeDataConverter.abseiling_data_to_schema(abseiling_data)
+        )
+
+    canyoning_data = await canyoning_data_repo.find_by_journal_id(journal_id)
+    if canyoning_data:
+        types.append(JournalType.CANYONING.value)
+        type_data[JournalType.CANYONING.value] = (
+            TypeDataConverter.canyoning_data_to_schema(canyoning_data)
+        )
+
+    climbing_data = await climbing_data_repo.find_by_journal_id(journal_id)
+    if climbing_data:
+        types.append(JournalType.CLIMBING.value)
+        type_data[JournalType.CLIMBING.value] = (
+            TypeDataConverter.climbing_data_to_schema(climbing_data)
         )
 
     # If no types found, it's a NOTE
@@ -502,6 +614,9 @@ async def list_journals(
     outdoor_activity_data_repo: FromDishka[OutdoorActivityDataRepository],
     bushwalking_data_repo: FromDishka[BushwalkingDataRepository],
     jogging_data_repo: FromDishka[JoggingDataRepository],
+    abseiling_data_repo: FromDishka[AbseilingDataRepository],
+    canyoning_data_repo: FromDishka[CanyoningDataRepository],
+    climbing_data_repo: FromDishka[ClimbingDataRepository],
     contact_relationship_repo: FromDishka[JournalContactRelationshipRepository],
     tag_repo: FromDishka[JournalTagRepository],
     user: FromDishka[SessionUser],  # Require authentication
@@ -575,6 +690,9 @@ async def list_journals(
             outdoor_activity_data_repo,
             bushwalking_data_repo,
             jogging_data_repo,
+            abseiling_data_repo,
+            canyoning_data_repo,
+            climbing_data_repo,
         )
 
         resource = JournalConverter.to_resource(
@@ -735,6 +853,9 @@ async def get_journal(
     outdoor_activity_data_repo: FromDishka[OutdoorActivityDataRepository],
     bushwalking_data_repo: FromDishka[BushwalkingDataRepository],
     jogging_data_repo: FromDishka[JoggingDataRepository],
+    abseiling_data_repo: FromDishka[AbseilingDataRepository],
+    canyoning_data_repo: FromDishka[CanyoningDataRepository],
+    climbing_data_repo: FromDishka[ClimbingDataRepository],
     contact_relationship_repo: FromDishka[JournalContactRelationshipRepository],
     tag_repo: FromDishka[JournalTagRepository],
     user: FromDishka[SessionUser],  # Require authentication
@@ -765,6 +886,9 @@ async def get_journal(
         outdoor_activity_data_repo,
         bushwalking_data_repo,
         jogging_data_repo,
+        abseiling_data_repo,
+        canyoning_data_repo,
+        climbing_data_repo,
     )
 
     journal_resource = JournalConverter.to_resource(
@@ -785,6 +909,9 @@ async def _process_journal_types(
     outdoor_activity_data_repo: OutdoorActivityDataRepository,
     bushwalking_data_repo: BushwalkingDataRepository,
     jogging_data_repo: JoggingDataRepository,
+    abseiling_data_repo: AbseilingDataRepository,
+    canyoning_data_repo: CanyoningDataRepository,
+    climbing_data_repo: ClimbingDataRepository,
     connection: AsyncConnection,
 ) -> None:
     """
@@ -801,6 +928,9 @@ async def _process_journal_types(
         outdoor_activity_data_repo: Repository for outdoor activity data
         bushwalking_data_repo: Repository for bushwalking data
         jogging_data_repo: Repository for jogging data
+        abseiling_data_repo: Repository for abseiling data
+        canyoning_data_repo: Repository for canyoning data
+        climbing_data_repo: Repository for climbing data
         connection: Database connection
     """
     for type_str in types:
@@ -825,6 +955,9 @@ async def _process_journal_types(
                     outdoor_activity_data_repo,
                     bushwalking_data_repo,
                     jogging_data_repo,
+                    abseiling_data_repo,
+                    canyoning_data_repo,
+                    climbing_data_repo,
                 )
         except (ValueError, KeyError):
             # Invalid type, skip
@@ -948,6 +1081,9 @@ async def create_journal(
     outdoor_activity_data_repo: FromDishka[OutdoorActivityDataRepository],
     bushwalking_data_repo: FromDishka[BushwalkingDataRepository],
     jogging_data_repo: FromDishka[JoggingDataRepository],
+    abseiling_data_repo: FromDishka[AbseilingDataRepository],
+    canyoning_data_repo: FromDishka[CanyoningDataRepository],
+    climbing_data_repo: FromDishka[ClimbingDataRepository],
     contact_relationship_repo: FromDishka[JournalContactRelationshipRepository],
     tag_repo: FromDishka[JournalTagRepository],
     connection: FromDishka[AsyncConnection],
@@ -982,6 +1118,9 @@ async def create_journal(
             outdoor_activity_data_repo,
             bushwalking_data_repo,
             jogging_data_repo,
+            abseiling_data_repo,
+            canyoning_data_repo,
+            climbing_data_repo,
             connection,
         )
 
@@ -1023,6 +1162,9 @@ async def create_journal(
         outdoor_activity_data_repo,
         bushwalking_data_repo,
         jogging_data_repo,
+        abseiling_data_repo,
+        canyoning_data_repo,
+        climbing_data_repo,
     )
 
     journal_resource = JournalConverter.to_resource(
@@ -1049,6 +1191,9 @@ async def update_journal(
     outdoor_activity_data_repo: FromDishka[OutdoorActivityDataRepository],
     bushwalking_data_repo: FromDishka[BushwalkingDataRepository],
     jogging_data_repo: FromDishka[JoggingDataRepository],
+    abseiling_data_repo: FromDishka[AbseilingDataRepository],
+    canyoning_data_repo: FromDishka[CanyoningDataRepository],
+    climbing_data_repo: FromDishka[ClimbingDataRepository],
     contact_relationship_repo: FromDishka[JournalContactRelationshipRepository],
     tag_repo: FromDishka[JournalTagRepository],
     connection: FromDishka[AsyncConnection],
@@ -1105,6 +1250,9 @@ async def update_journal(
         outdoor_activity_data_repo,
         bushwalking_data_repo,
         jogging_data_repo,
+        abseiling_data_repo,
+        canyoning_data_repo,
+        climbing_data_repo,
     )
 
     journal_resource = JournalConverter.to_resource(
@@ -1131,6 +1279,9 @@ async def partial_update_journal(
     outdoor_activity_data_repo: FromDishka[OutdoorActivityDataRepository],
     bushwalking_data_repo: FromDishka[BushwalkingDataRepository],
     jogging_data_repo: FromDishka[JoggingDataRepository],
+    abseiling_data_repo: FromDishka[AbseilingDataRepository],
+    canyoning_data_repo: FromDishka[CanyoningDataRepository],
+    climbing_data_repo: FromDishka[ClimbingDataRepository],
     contact_relationship_repo: FromDishka[JournalContactRelationshipRepository],
     tag_repo: FromDishka[JournalTagRepository],
     connection: FromDishka[AsyncConnection],
@@ -1233,6 +1384,9 @@ async def partial_update_journal(
         outdoor_activity_data_repo,
         bushwalking_data_repo,
         jogging_data_repo,
+        abseiling_data_repo,
+        canyoning_data_repo,
+        climbing_data_repo,
     )
 
     journal_resource = JournalConverter.to_resource(
@@ -1280,6 +1434,9 @@ async def add_type_to_journal(
     outdoor_activity_data_repo: FromDishka[OutdoorActivityDataRepository],
     bushwalking_data_repo: FromDishka[BushwalkingDataRepository],
     jogging_data_repo: FromDishka[JoggingDataRepository],
+    abseiling_data_repo: FromDishka[AbseilingDataRepository],
+    canyoning_data_repo: FromDishka[CanyoningDataRepository],
+    climbing_data_repo: FromDishka[ClimbingDataRepository],
     contact_relationship_repo: FromDishka[JournalContactRelationshipRepository],
     tag_repo: FromDishka[JournalTagRepository],
     connection: FromDishka[AsyncConnection],
@@ -1326,6 +1483,9 @@ async def add_type_to_journal(
             outdoor_activity_data_repo,
             bushwalking_data_repo,
             jogging_data_repo,
+            abseiling_data_repo,
+            canyoning_data_repo,
+            climbing_data_repo,
         )
 
     # Get updated journal
@@ -1348,6 +1508,9 @@ async def add_type_to_journal(
         outdoor_activity_data_repo,
         bushwalking_data_repo,
         jogging_data_repo,
+        abseiling_data_repo,
+        canyoning_data_repo,
+        climbing_data_repo,
     )
 
     journal_resource = JournalConverter.to_resource(
@@ -1374,6 +1537,9 @@ async def remove_type_from_journal(
     outdoor_activity_data_repo: FromDishka[OutdoorActivityDataRepository],
     bushwalking_data_repo: FromDishka[BushwalkingDataRepository],
     jogging_data_repo: FromDishka[JoggingDataRepository],
+    abseiling_data_repo: FromDishka[AbseilingDataRepository],
+    canyoning_data_repo: FromDishka[CanyoningDataRepository],
+    climbing_data_repo: FromDishka[ClimbingDataRepository],
     contact_relationship_repo: FromDishka[JournalContactRelationshipRepository],
     tag_repo: FromDishka[JournalTagRepository],
     connection: FromDishka[AsyncConnection],
@@ -1401,8 +1567,26 @@ async def remove_type_from_journal(
             "journal_type", f"Invalid journal type: {journal_type}"
         ) from e
 
-    # Remove type
+    # Remove type (publish event)
     await journal_service.remove_type_from_journal(journal_id, jtype, connection)
+
+    # Delete the type-specific data row so it no longer appears in the response.
+    # (CASCADE only fires when the whole journal is deleted, not on type removal.)
+    await _delete_type_specific_data(
+        jtype,
+        journal_id,
+        mood_data_repo,
+        plan_data_repo,
+        travel_data_repo,
+        photo_album_data_repo,
+        fitness_data_repo,
+        outdoor_activity_data_repo,
+        bushwalking_data_repo,
+        jogging_data_repo,
+        abseiling_data_repo,
+        canyoning_data_repo,
+        climbing_data_repo,
+    )
 
     # Get updated journal
     updated_journal = await journal_service.get_journal(journal_id)
@@ -1424,6 +1608,9 @@ async def remove_type_from_journal(
         outdoor_activity_data_repo,
         bushwalking_data_repo,
         jogging_data_repo,
+        abseiling_data_repo,
+        canyoning_data_repo,
+        climbing_data_repo,
     )
 
     journal_resource = JournalConverter.to_resource(
@@ -1645,6 +1832,131 @@ async def _update_jogging_type_data(
     await jogging_data_repo.save(validated_data)
 
 
+async def _update_abseiling_type_data(
+    journal_id: int,
+    journal_type: str,
+    attrs: dict[str, Any],
+    abseiling_data_repo: AbseilingDataRepository,
+) -> None:
+    """Update ABSEILING_TRIP type-specific data."""
+    abseiling_data = await abseiling_data_repo.find_by_journal_id(journal_id)
+    if not abseiling_data:
+        raise JournalValidationError(
+            "journal_type", f"Journal does not have type {journal_type}"
+        )
+
+    # Build update kwargs and use dataclasses.replace() to trigger __post_init__ validation.
+    # Validate types eagerly so mismatches return 400 rather than an unhandled TypeError.
+    updates: dict[str, Any] = {}
+    if "number_of_abseils" in attrs:
+        if not isinstance(attrs["number_of_abseils"], int) or isinstance(
+            attrs["number_of_abseils"], bool
+        ):
+            raise JournalValidationError("number_of_abseils", "Must be an integer")
+        updates["number_of_abseils"] = attrs["number_of_abseils"]
+    if "total_length" in attrs:
+        if not isinstance(attrs["total_length"], int) or isinstance(
+            attrs["total_length"], bool
+        ):
+            raise JournalValidationError("total_length", "Must be an integer")
+        updates["total_length"] = attrs["total_length"]
+
+    validated_data = dataclasses.replace(abseiling_data, **updates)
+    await abseiling_data_repo.save(validated_data)
+
+
+async def _update_canyoning_type_data(
+    journal_id: int,
+    journal_type: str,
+    attrs: dict[str, Any],
+    canyoning_data_repo: CanyoningDataRepository,
+) -> None:
+    """Update CANYONING type-specific data."""
+    canyoning_data = await canyoning_data_repo.find_by_journal_id(journal_id)
+    if not canyoning_data:
+        raise JournalValidationError(
+            "journal_type", f"Journal does not have type {journal_type}"
+        )
+
+    # Build update kwargs and use dataclasses.replace() to trigger __post_init__ validation.
+    updates: dict[str, Any] = {}
+    if "route_id" in attrs:
+        raw_route_id = attrs["route_id"]
+        if raw_route_id is not None:
+            try:
+                updates["route_id"] = UUID(str(raw_route_id))
+            except ValueError as e:
+                raise JournalValidationError(
+                    "route_id", f"Invalid UUID format: {raw_route_id}"
+                ) from e
+        else:
+            updates["route_id"] = None
+    if "french_grade" in attrs:
+        if not isinstance(attrs["french_grade"], str):
+            raise JournalValidationError("french_grade", "Must be a string")
+        updates["french_grade"] = attrs["french_grade"]
+    if "water_guage_name" in attrs:
+        updates["water_guage_name"] = attrs["water_guage_name"]
+    if "water_guage_level" in attrs:
+        if not isinstance(attrs["water_guage_level"], int) or isinstance(
+            attrs["water_guage_level"], bool
+        ):
+            raise JournalValidationError("water_guage_level", "Must be an integer")
+        updates["water_guage_level"] = attrs["water_guage_level"]
+    if "is_vertical" in attrs:
+        updates["is_vertical"] = attrs["is_vertical"]
+    if "is_night_canyon" in attrs:
+        updates["is_night_canyon"] = attrs["is_night_canyon"]
+    if "is_white_water" in attrs:
+        updates["is_white_water"] = attrs["is_white_water"]
+
+    validated_data = dataclasses.replace(canyoning_data, **updates)
+    await canyoning_data_repo.save(validated_data)
+
+
+async def _update_climbing_type_data(
+    journal_id: int,
+    journal_type: str,
+    attrs: dict[str, Any],
+    climbing_data_repo: ClimbingDataRepository,
+) -> None:
+    """Update CLIMBING type-specific data."""
+    climbing_data = await climbing_data_repo.find_by_journal_id(journal_id)
+    if not climbing_data:
+        raise JournalValidationError(
+            "journal_type", f"Journal does not have type {journal_type}"
+        )
+
+    # Build update kwargs and use dataclasses.replace() to trigger __post_init__ validation.
+    updates: dict[str, Any] = {}
+    if "route_id" in attrs:
+        raw_route_id = attrs["route_id"]
+        if raw_route_id is not None:
+            try:
+                updates["route_id"] = UUID(str(raw_route_id))
+            except ValueError as e:
+                raise JournalValidationError(
+                    "route_id", f"Invalid UUID format: {raw_route_id}"
+                ) from e
+        else:
+            updates["route_id"] = None
+    if "climbing_type" in attrs:
+        if not isinstance(attrs["climbing_type"], str):
+            raise JournalValidationError("climbing_type", "Must be a string")
+        updates["climbing_type"] = attrs["climbing_type"]
+    if "grade" in attrs:
+        if not isinstance(attrs["grade"], int) or isinstance(attrs["grade"], bool):
+            raise JournalValidationError("grade", "Must be an integer")
+        updates["grade"] = attrs["grade"]
+    if "length" in attrs:
+        if not isinstance(attrs["length"], int) or isinstance(attrs["length"], bool):
+            raise JournalValidationError("length", "Must be an integer")
+        updates["length"] = attrs["length"]
+
+    validated_data = dataclasses.replace(climbing_data, **updates)
+    await climbing_data_repo.save(validated_data)
+
+
 @router.put("/{journal_id}/types/{journal_type}/data")
 @inject
 async def update_type_data(
@@ -1663,6 +1975,9 @@ async def update_type_data(
     outdoor_activity_data_repo: FromDishka[OutdoorActivityDataRepository],
     bushwalking_data_repo: FromDishka[BushwalkingDataRepository],
     jogging_data_repo: FromDishka[JoggingDataRepository],
+    abseiling_data_repo: FromDishka[AbseilingDataRepository],
+    canyoning_data_repo: FromDishka[CanyoningDataRepository],
+    climbing_data_repo: FromDishka[ClimbingDataRepository],
     contact_relationship_repo: FromDishka[JournalContactRelationshipRepository],
     tag_repo: FromDishka[JournalTagRepository],
     connection: FromDishka[AsyncConnection],
@@ -1718,6 +2033,18 @@ async def update_type_data(
         await _update_jogging_type_data(
             journal_id, journal_type, attrs, jogging_data_repo
         )
+    elif jtype == JournalType.ABSEILING_TRIP:
+        await _update_abseiling_type_data(
+            journal_id, journal_type, attrs, abseiling_data_repo
+        )
+    elif jtype == JournalType.CANYONING:
+        await _update_canyoning_type_data(
+            journal_id, journal_type, attrs, canyoning_data_repo
+        )
+    elif jtype == JournalType.CLIMBING:
+        await _update_climbing_type_data(
+            journal_id, journal_type, attrs, climbing_data_repo
+        )
     elif jtype in (JournalType.PLAN, JournalType.TRAVEL):
         # PLAN and TRAVEL types have complex nested data structures
         # For now, return an error indicating this is not yet supported
@@ -1752,6 +2079,9 @@ async def update_type_data(
         outdoor_activity_data_repo,
         bushwalking_data_repo,
         jogging_data_repo,
+        abseiling_data_repo,
+        canyoning_data_repo,
+        climbing_data_repo,
     )
 
     journal_resource = JournalConverter.to_resource(
@@ -1779,6 +2109,9 @@ async def add_contact_to_journal(
     outdoor_activity_data_repo: FromDishka[OutdoorActivityDataRepository],
     bushwalking_data_repo: FromDishka[BushwalkingDataRepository],
     jogging_data_repo: FromDishka[JoggingDataRepository],
+    abseiling_data_repo: FromDishka[AbseilingDataRepository],
+    canyoning_data_repo: FromDishka[CanyoningDataRepository],
+    climbing_data_repo: FromDishka[ClimbingDataRepository],
     contact_relationship_repo: FromDishka[JournalContactRelationshipRepository],
     tag_repo: FromDishka[JournalTagRepository],
     connection: FromDishka[AsyncConnection],
@@ -1845,6 +2178,9 @@ async def add_contact_to_journal(
         outdoor_activity_data_repo,
         bushwalking_data_repo,
         jogging_data_repo,
+        abseiling_data_repo,
+        canyoning_data_repo,
+        climbing_data_repo,
     )
 
     journal_resource = JournalConverter.to_resource(
@@ -1872,6 +2208,9 @@ async def remove_contact_from_journal(
     outdoor_activity_data_repo: FromDishka[OutdoorActivityDataRepository],
     bushwalking_data_repo: FromDishka[BushwalkingDataRepository],
     jogging_data_repo: FromDishka[JoggingDataRepository],
+    abseiling_data_repo: FromDishka[AbseilingDataRepository],
+    canyoning_data_repo: FromDishka[CanyoningDataRepository],
+    climbing_data_repo: FromDishka[ClimbingDataRepository],
     contact_relationship_repo: FromDishka[JournalContactRelationshipRepository],
     tag_repo: FromDishka[JournalTagRepository],
     connection: FromDishka[AsyncConnection],
@@ -1933,6 +2272,9 @@ async def remove_contact_from_journal(
         outdoor_activity_data_repo,
         bushwalking_data_repo,
         jogging_data_repo,
+        abseiling_data_repo,
+        canyoning_data_repo,
+        climbing_data_repo,
     )
 
     journal_resource = JournalConverter.to_resource(
@@ -1959,6 +2301,9 @@ async def add_tag_to_journal(
     outdoor_activity_data_repo: FromDishka[OutdoorActivityDataRepository],
     bushwalking_data_repo: FromDishka[BushwalkingDataRepository],
     jogging_data_repo: FromDishka[JoggingDataRepository],
+    abseiling_data_repo: FromDishka[AbseilingDataRepository],
+    canyoning_data_repo: FromDishka[CanyoningDataRepository],
+    climbing_data_repo: FromDishka[ClimbingDataRepository],
     contact_relationship_repo: FromDishka[JournalContactRelationshipRepository],
     tag_repo: FromDishka[JournalTagRepository],
     connection: FromDishka[AsyncConnection],
@@ -2012,6 +2357,9 @@ async def add_tag_to_journal(
         outdoor_activity_data_repo,
         bushwalking_data_repo,
         jogging_data_repo,
+        abseiling_data_repo,
+        canyoning_data_repo,
+        climbing_data_repo,
     )
 
     journal_resource = JournalConverter.to_resource(
@@ -2038,6 +2386,9 @@ async def remove_tag_from_journal(
     outdoor_activity_data_repo: FromDishka[OutdoorActivityDataRepository],
     bushwalking_data_repo: FromDishka[BushwalkingDataRepository],
     jogging_data_repo: FromDishka[JoggingDataRepository],
+    abseiling_data_repo: FromDishka[AbseilingDataRepository],
+    canyoning_data_repo: FromDishka[CanyoningDataRepository],
+    climbing_data_repo: FromDishka[ClimbingDataRepository],
     contact_relationship_repo: FromDishka[JournalContactRelationshipRepository],
     tag_repo: FromDishka[JournalTagRepository],
     connection: FromDishka[AsyncConnection],
@@ -2086,6 +2437,9 @@ async def remove_tag_from_journal(
         outdoor_activity_data_repo,
         bushwalking_data_repo,
         jogging_data_repo,
+        abseiling_data_repo,
+        canyoning_data_repo,
+        climbing_data_repo,
     )
 
     journal_resource = JournalConverter.to_resource(

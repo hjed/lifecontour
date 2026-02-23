@@ -47,11 +47,11 @@ class JournalType(StrEnum):
     OUTDOOR_ACTIVITY = "outdoor_activity"  # Iteration 4.5-003
     BUSHWALKING = "bushwalking"  # Iteration 4.5-003
     JOGGING = "jogging"  # Iteration 4.5-003
-    # ABSEILING_TRIP = "abseiling_trip"  # Future: Iteration 4.5-005
-    # CANYONING = "canyoning"  # Future: Iteration 4.5-006
-    # CLIMBING = "climbing"  # Future: Iteration 4.5-007
-    # KAYAKING = "kayaking"  # Future: Iteration 4.5-008
-    # CROSS_COUNTRY_SKIING = "cross_country_skiing"  # Future: Iteration 4.5-009
+    ABSEILING_TRIP = "abseiling_trip"  # Iteration 4.5-004
+    CANYONING = "canyoning"  # Iteration 4.5-004
+    CLIMBING = "climbing"  # Iteration 4.5-004
+    # KAYAKING = "kayaking"  # Future: Iteration 4.5-005
+    # CROSS_COUNTRY_SKIING = "cross_country_skiing"  # Future: Iteration 4.5-005
 
     def __str__(self) -> str:
         """Return string representation of the type."""
@@ -116,9 +116,15 @@ class JournalType(StrEnum):
             cls.OUTDOOR_ACTIVITY: [cls.FITNESS],
             cls.BUSHWALKING: [cls.OUTDOOR_ACTIVITY, cls.FITNESS],
             cls.JOGGING: [cls.FITNESS],  # NOT OUTDOOR_ACTIVITY - jogging can be indoors
-            # cls.ABSEILING_TRIP: [cls.OUTDOOR_ACTIVITY, cls.FITNESS],
-            # cls.CANYONING: [cls.BUSHWALKING, cls.ABSEILING_TRIP, cls.OUTDOOR_ACTIVITY, cls.FITNESS],
-            # cls.CLIMBING: [cls.OUTDOOR_ACTIVITY, cls.FITNESS],
+            # Activity types (Iteration 4.5-004)
+            cls.ABSEILING_TRIP: [cls.OUTDOOR_ACTIVITY, cls.FITNESS],
+            cls.CANYONING: [
+                cls.BUSHWALKING,
+                cls.ABSEILING_TRIP,
+                cls.OUTDOOR_ACTIVITY,
+                cls.FITNESS,
+            ],
+            cls.CLIMBING: [cls.OUTDOOR_ACTIVITY, cls.FITNESS],
             # cls.KAYAKING: [cls.OUTDOOR_ACTIVITY, cls.FITNESS],
             # cls.CROSS_COUNTRY_SKIING: [cls.BUSHWALKING, cls.OUTDOOR_ACTIVITY, cls.FITNESS],
         }

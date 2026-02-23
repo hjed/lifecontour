@@ -61,3 +61,16 @@ VALID_TRACK_GRADES: list[str] = [
     "Grade 4",
     "Grade 5",
 ]
+
+# CanyoningData constants (CANYONING type)
+# French canyon grading format: v[vertical]a[aquatic][engagement][stars]
+# Example: v3a2IV** = vertical 3, aquatic 2, engagement IV, 2 stars
+# Vertical: 1-7, Aquatic: 1-7, Engagement: I-VI (optional), Stars: *-*** (optional)
+FRENCH_CANYON_GRADE_PATTERN: str = r"^v[1-7]a[1-7](I{1,3}|IV|V|VI)?(\*{1,3})?$"
+
+# ClimbingData constants (CLIMBING type)
+VALID_CLIMBING_TYPES: list[str] = [
+    "sport",
+    "trad",
+    "bouldering",
+]
