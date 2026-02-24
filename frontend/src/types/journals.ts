@@ -21,6 +21,11 @@ export enum JournalType {
   OUTDOOR_ACTIVITY = 'outdoor_activity',
   BUSHWALKING = 'bushwalking',
   JOGGING = 'jogging',
+  ABSEILING_TRIP = 'abseiling_trip',
+  CANYONING = 'canyoning',
+  CLIMBING = 'climbing',
+  KAYAKING = 'kayaking',
+  CROSS_COUNTRY_SKIING = 'cross_country_skiing',
 }
 
 // Journal Contact Relationship Type Enum
@@ -108,13 +113,50 @@ export interface PhotoAlbumData {
   immich_album_id?: string | null;
 }
 
+export interface AbseilingData {
+  number_of_abseils?: number | null;
+  total_length?: number | null; // total length in metres
+}
+
+export interface CanyoningData {
+  route_id?: string | null; // UUID of associated route
+  french_grade?: string | null; // French canyoning grade
+  water_guage_name?: string | null; // Name of the water gauge
+  water_guage_level?: number | null; // Water gauge reading
+  is_vertical?: boolean | null;
+  is_night_canyon?: boolean | null;
+  is_white_water?: boolean | null;
+}
+
+export interface ClimbingData {
+  route_id?: string | null; // UUID of associated route
+  climbing_type?: string | null; // e.g. sport, trad, bouldering
+  grade?: number | null;
+  length?: number | null; // length in metres
+}
+
+export interface KayakingData {
+  route_id?: string | null; // UUID of associated route
+  water_type?: string | null; // Type of water (e.g. river, lake, sea)
+}
+
+export interface CrossCountrySkiingData {
+  route_id?: string | null; // UUID of associated route
+  snow_conditions?: string | null; // Description of snow conditions
+}
+
 // Type data union type
 export type JournalTypeData =
   | CalendarInfoData
   | MoodData
   | PlanData
   | TravelData
-  | PhotoAlbumData;
+  | PhotoAlbumData
+  | AbseilingData
+  | CanyoningData
+  | ClimbingData
+  | KayakingData
+  | CrossCountrySkiingData;
 
 // Contact Relationship
 export interface JournalContactRelationship {

@@ -51,7 +51,7 @@ class TestJournalType:
     def test_journal_type_can_be_iterated(self):
         """Test that JournalType can be iterated."""
         all_types = list(JournalType)
-        assert len(all_types) == 13  # Updated for ABSEILING_TRIP, CANYONING, CLIMBING
+        assert len(all_types) == 15  # Updated for KAYAKING, CROSS_COUNTRY_SKIING
         assert JournalType.NOTE in all_types
         assert JournalType.EVENT in all_types
         assert JournalType.MOOD_RATING in all_types
@@ -65,6 +65,8 @@ class TestJournalType:
         assert JournalType.ABSEILING_TRIP in all_types
         assert JournalType.CANYONING in all_types
         assert JournalType.CLIMBING in all_types
+        assert JournalType.KAYAKING in all_types
+        assert JournalType.CROSS_COUNTRY_SKIING in all_types
 
     def test_abseiling_trip_dependencies(self):
         """Test ABSEILING_TRIP depends on OUTDOOR_ACTIVITY and FITNESS."""
@@ -87,3 +89,17 @@ class TestJournalType:
         assert JournalType.OUTDOOR_ACTIVITY in deps
         assert JournalType.FITNESS in deps
         assert JournalType.BUSHWALKING not in deps
+
+    def test_kayaking_dependencies(self):
+        """Test KAYAKING depends on OUTDOOR_ACTIVITY and FITNESS."""
+        deps = JournalType.get_dependencies(JournalType.KAYAKING)
+        assert JournalType.OUTDOOR_ACTIVITY in deps
+        assert JournalType.FITNESS in deps
+        assert JournalType.BUSHWALKING not in deps
+
+    def test_cross_country_skiing_dependencies(self):
+        """Test CROSS_COUNTRY_SKIING depends on BUSHWALKING, OUTDOOR_ACTIVITY, and FITNESS."""
+        deps = JournalType.get_dependencies(JournalType.CROSS_COUNTRY_SKIING)
+        assert JournalType.BUSHWALKING in deps
+        assert JournalType.OUTDOOR_ACTIVITY in deps
+        assert JournalType.FITNESS in deps

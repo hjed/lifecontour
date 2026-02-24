@@ -9,6 +9,8 @@ import {
   JournalResource,
   JournalFilters,
   JournalFormData,
+  KayakingData,
+  CrossCountrySkiingData,
 } from '../journals';
 
 describe('Journal Types', () => {
@@ -24,6 +26,49 @@ describe('Journal Types', () => {
       expect(JournalType.OUTDOOR_ACTIVITY).toBe('outdoor_activity');
       expect(JournalType.BUSHWALKING).toBe('bushwalking');
       expect(JournalType.JOGGING).toBe('jogging');
+      expect(JournalType.ABSEILING_TRIP).toBe('abseiling_trip');
+      expect(JournalType.CANYONING).toBe('canyoning');
+      expect(JournalType.CLIMBING).toBe('climbing');
+      expect(JournalType.KAYAKING).toBe('kayaking');
+      expect(JournalType.CROSS_COUNTRY_SKIING).toBe('cross_country_skiing');
+    });
+  });
+
+  describe('KayakingData interface', () => {
+    it('should create valid kayaking data', () => {
+      const data: KayakingData = {
+        route_id: 'some-uuid',
+        water_type: 'river',
+      };
+
+      expect(data.route_id).toBe('some-uuid');
+      expect(data.water_type).toBe('river');
+    });
+
+    it('should allow optional fields', () => {
+      const data: KayakingData = {};
+
+      expect(data.route_id).toBeUndefined();
+      expect(data.water_type).toBeUndefined();
+    });
+  });
+
+  describe('CrossCountrySkiingData interface', () => {
+    it('should create valid cross-country skiing data', () => {
+      const data: CrossCountrySkiingData = {
+        route_id: 'some-uuid',
+        snow_conditions: 'packed powder',
+      };
+
+      expect(data.route_id).toBe('some-uuid');
+      expect(data.snow_conditions).toBe('packed powder');
+    });
+
+    it('should allow optional fields', () => {
+      const data: CrossCountrySkiingData = {};
+
+      expect(data.route_id).toBeUndefined();
+      expect(data.snow_conditions).toBeUndefined();
     });
   });
 

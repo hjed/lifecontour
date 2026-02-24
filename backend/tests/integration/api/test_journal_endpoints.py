@@ -1058,6 +1058,72 @@ class TestJournalTypeManagement:
         assert climbing_data["grade"] == 18
         assert climbing_data["length"] == 25
 
+    async def test_update_kayaking_type_data(self, integration_api_client):
+        """Test updating KAYAKING type data."""
+        create_data = create_journal_request_data(
+            title="Kayaking Test",
+            content="Test content",
+            types=["KAYAKING"],
+        )
+
+        create_response = await integration_api_client.post(
+            "/api/journals", json=create_data
+        )
+        assert create_response.status_code == 201
+        journal_id = create_response.json()["data"]["id"]
+
+        update_data = {
+            "data": {
+                "type": "journal-type-data",
+                "attributes": {
+                    "water_type": "river",
+                },
+            }
+        }
+        response = await integration_api_client.put(
+            f"/api/journals/{journal_id}/types/KAYAKING/data",
+            json=update_data,
+        )
+
+        assert response.status_code == 200
+        response_json = response.json()
+        kayaking_data = response_json["data"]["attributes"]["type_data"]["kayaking"]
+        assert kayaking_data["water_type"] == "river"
+
+    async def test_update_cross_country_skiing_type_data(self, integration_api_client):
+        """Test updating CROSS_COUNTRY_SKIING type data."""
+        create_data = create_journal_request_data(
+            title="Cross Country Skiing Test",
+            content="Test content",
+            types=["CROSS_COUNTRY_SKIING"],
+        )
+
+        create_response = await integration_api_client.post(
+            "/api/journals", json=create_data
+        )
+        assert create_response.status_code == 201
+        journal_id = create_response.json()["data"]["id"]
+
+        update_data = {
+            "data": {
+                "type": "journal-type-data",
+                "attributes": {
+                    "snow_conditions": "packed powder",
+                },
+            }
+        }
+        response = await integration_api_client.put(
+            f"/api/journals/{journal_id}/types/CROSS_COUNTRY_SKIING/data",
+            json=update_data,
+        )
+
+        assert response.status_code == 200
+        response_json = response.json()
+        skiing_data = response_json["data"]["attributes"]["type_data"][
+            "cross_country_skiing"
+        ]
+        assert skiing_data["snow_conditions"] == "packed powder"
+
     async def test_remove_abseiling_trip_type_removes_from_response(
         self, integration_api_client
     ):
@@ -1126,6 +1192,52 @@ class TestJournalTypeManagement:
         assert response.status_code == 200
         types = response.json()["data"]["attributes"]["types"]
         assert "climbing" not in types
+
+    async def test_remove_kayaking_type_removes_from_response(
+        self, integration_api_client
+    ):
+        """Removing KAYAKING should remove the type from the response."""
+        create_data = create_journal_request_data(
+            title="Kayaking Remove Test",
+            content="Test content",
+            types=["KAYAKING"],
+        )
+        create_response = await integration_api_client.post(
+            "/api/journals", json=create_data
+        )
+        assert create_response.status_code == 201
+        journal_id = create_response.json()["data"]["id"]
+
+        response = await integration_api_client.delete(
+            f"/api/journals/{journal_id}/types/KAYAKING"
+        )
+
+        assert response.status_code == 200
+        types = response.json()["data"]["attributes"]["types"]
+        assert "kayaking" not in types
+
+    async def test_remove_cross_country_skiing_type_removes_from_response(
+        self, integration_api_client
+    ):
+        """Removing CROSS_COUNTRY_SKIING should remove the type from the response."""
+        create_data = create_journal_request_data(
+            title="Cross Country Skiing Remove Test",
+            content="Test content",
+            types=["CROSS_COUNTRY_SKIING"],
+        )
+        create_response = await integration_api_client.post(
+            "/api/journals", json=create_data
+        )
+        assert create_response.status_code == 201
+        journal_id = create_response.json()["data"]["id"]
+
+        response = await integration_api_client.delete(
+            f"/api/journals/{journal_id}/types/CROSS_COUNTRY_SKIING"
+        )
+
+        assert response.status_code == 200
+        types = response.json()["data"]["attributes"]["types"]
+        assert "cross_country_skiing" not in types
 
 
 @pytest.mark.integration
@@ -1644,6 +1756,57 @@ class TestJournalTypeDependencyDataCreation:
         )
         assert "climbing" in type_data
 
+    async def test_adding_kayaking_creates_fitness_and_outdoor_activity_data(
+        self, integration_api_client
+    ):
+        """Adding KAYAKING should create FITNESS and OUTDOOR_ACTIVITY data rows."""
+        create_data = create_journal_request_data(
+            title="Kayaking Dependency Test",
+            content="Test content",
+            types=["KAYAKING"],
+        )
+
+        response = await integration_api_client.post("/api/journals", json=create_data)
+
+        assert response.status_code == 201
+        response_json = response.json()
+        type_data = response_json["data"]["attributes"]["type_data"]
+        # KAYAKING requires OUTDOOR_ACTIVITY and FITNESS
+        assert "fitness" in type_data, (
+            "FITNESS type data row should be auto-created for KAYAKING"
+        )
+        assert "outdoor_activity" in type_data, (
+            "OUTDOOR_ACTIVITY type data row should be auto-created for KAYAKING"
+        )
+        assert "kayaking" in type_data
+
+    async def test_adding_cross_country_skiing_creates_all_dependency_data(
+        self, integration_api_client
+    ):
+        """Adding CROSS_COUNTRY_SKIING should create BUSHWALKING, OUTDOOR_ACTIVITY, and FITNESS data rows."""
+        create_data = create_journal_request_data(
+            title="Cross Country Skiing Dependency Test",
+            content="Test content",
+            types=["CROSS_COUNTRY_SKIING"],
+        )
+
+        response = await integration_api_client.post("/api/journals", json=create_data)
+
+        assert response.status_code == 201
+        response_json = response.json()
+        type_data = response_json["data"]["attributes"]["type_data"]
+        # CROSS_COUNTRY_SKIING requires BUSHWALKING, OUTDOOR_ACTIVITY, and FITNESS
+        assert "fitness" in type_data, (
+            "FITNESS type data row should be auto-created for CROSS_COUNTRY_SKIING"
+        )
+        assert "outdoor_activity" in type_data, (
+            "OUTDOOR_ACTIVITY type data row should be auto-created for CROSS_COUNTRY_SKIING"
+        )
+        assert "bushwalking" in type_data, (
+            "BUSHWALKING type data row should be auto-created for CROSS_COUNTRY_SKIING"
+        )
+        assert "cross_country_skiing" in type_data
+
 
 @pytest.mark.integration
 class TestJournalTypeDataValidation:
@@ -2038,4 +2201,124 @@ class TestJournalTypeDataValidation:
 
         assert response.status_code == 400, (
             "Integer for french_grade should return 400 not 500"
+        )
+
+    async def test_update_kayaking_with_invalid_uuid_returns_400(
+        self, integration_api_client
+    ):
+        """Updating KAYAKING with an invalid route_id UUID should return 400."""
+        create_data = create_journal_request_data(
+            title="Kayaking UUID Validation Test",
+            content="Test content",
+            types=["KAYAKING"],
+        )
+        create_response = await integration_api_client.post(
+            "/api/journals", json=create_data
+        )
+        assert create_response.status_code == 201
+        journal_id = create_response.json()["data"]["id"]
+
+        update_data = {
+            "data": {
+                "type": "journal-type-data",
+                "attributes": {"route_id": "not-a-valid-uuid"},
+            }
+        }
+        response = await integration_api_client.put(
+            f"/api/journals/{journal_id}/types/KAYAKING/data",
+            json=update_data,
+        )
+
+        assert response.status_code == 400, (
+            "Invalid UUID route_id should return 400 not 500"
+        )
+
+    async def test_update_cross_country_skiing_with_invalid_uuid_returns_400(
+        self, integration_api_client
+    ):
+        """Updating CROSS_COUNTRY_SKIING with an invalid route_id UUID should return 400."""
+        create_data = create_journal_request_data(
+            title="Cross Country Skiing UUID Validation Test",
+            content="Test content",
+            types=["CROSS_COUNTRY_SKIING"],
+        )
+        create_response = await integration_api_client.post(
+            "/api/journals", json=create_data
+        )
+        assert create_response.status_code == 201
+        journal_id = create_response.json()["data"]["id"]
+
+        update_data = {
+            "data": {
+                "type": "journal-type-data",
+                "attributes": {"route_id": "not-a-valid-uuid"},
+            }
+        }
+        response = await integration_api_client.put(
+            f"/api/journals/{journal_id}/types/CROSS_COUNTRY_SKIING/data",
+            json=update_data,
+        )
+
+        assert response.status_code == 400, (
+            "Invalid UUID route_id should return 400 not 500"
+        )
+
+    async def test_update_kayaking_with_invalid_water_type_returns_400(
+        self, integration_api_client
+    ):
+        """Updating KAYAKING with a non-string water_type should return 400."""
+        create_data = create_journal_request_data(
+            title="Kayaking Water Type Validation Test",
+            content="Test content",
+            types=["KAYAKING"],
+        )
+        create_response = await integration_api_client.post(
+            "/api/journals", json=create_data
+        )
+        assert create_response.status_code == 201
+        journal_id = create_response.json()["data"]["id"]
+
+        update_data = {
+            "data": {
+                "type": "journal-type-data",
+                "attributes": {"water_type": 42},
+            }
+        }
+        response = await integration_api_client.put(
+            f"/api/journals/{journal_id}/types/KAYAKING/data",
+            json=update_data,
+        )
+
+        assert response.status_code == 400, (
+            "Integer water_type should return 400 not 500"
+        )
+
+    async def test_update_cross_country_skiing_with_invalid_snow_conditions_returns_400(
+        self, integration_api_client
+    ):
+        """Updating CROSS_COUNTRY_SKIING with a non-string snow_conditions should return 400."""
+        create_data = create_journal_request_data(
+            title="Cross Country Skiing Snow Conditions Validation Test",
+            content="Test content",
+            types=["CROSS_COUNTRY_SKIING"],
+        )
+        create_response = await integration_api_client.post(
+            "/api/journals", json=create_data
+        )
+        assert create_response.status_code == 201
+        journal_id = create_response.json()["data"]["id"]
+
+        update_data = {
+            "data": {
+                "type": "journal-type-data",
+                "attributes": {"snow_conditions": 99},
+            }
+        }
+        response = await integration_api_client.put(
+            f"/api/journals/{journal_id}/types/CROSS_COUNTRY_SKIING/data",
+            json=update_data,
+        )
+
+        assert response.status_code == 400, (
+            "Integer snow_conditions should return 400 not 500"
         )

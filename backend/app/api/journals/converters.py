@@ -17,6 +17,7 @@ from app.api.journals.schemas import (
     CalendarSchema,
     CanyoningDataSchema,
     ClimbingDataSchema,
+    CrossCountrySkiingDataSchema,
     EventDateRangeSchema,
     FitnessDataSchema,
     JoggingDataSchema,
@@ -25,6 +26,7 @@ from app.api.journals.schemas import (
     JournalRelationships,
     JournalResource,
     JournalTagSchema,
+    KayakingDataSchema,
     MoodDataSchema,
     OutdoorActivityDataSchema,
     PhotoAlbumDataSchema,
@@ -41,6 +43,7 @@ from app.core.journal.models.calendar import Calendar
 from app.core.journal.models.calendar_info import CalendarInfo
 from app.core.journal.models.canyoning_data import CanyoningData
 from app.core.journal.models.climbing_data import ClimbingData
+from app.core.journal.models.cross_country_skiing_data import CrossCountrySkiingData
 from app.core.journal.models.entities import Journal
 from app.core.journal.models.fitness_data import FitnessData
 from app.core.journal.models.jogging_data import JoggingData
@@ -48,6 +51,7 @@ from app.core.journal.models.journal_contact_relationship import (
     JournalContactRelationship,
 )
 from app.core.journal.models.journal_tag import JournalTag
+from app.core.journal.models.kayaking_data import KayakingData
 from app.core.journal.models.mood_data import MoodData
 from app.core.journal.models.outdoor_activity_data import OutdoorActivityData
 from app.core.journal.models.photo_album_data import PhotoAlbumData
@@ -413,6 +417,24 @@ class TypeDataConverter:
             climbing_type=data.climbing_type,
             grade=data.grade,
             length=data.length,
+        ).model_dump(exclude_none=True)
+
+    @staticmethod
+    def kayaking_data_to_schema(data: KayakingData) -> dict[str, Any]:
+        """Convert KayakingData domain entity to API schema."""
+        return KayakingDataSchema(
+            route_id=str(data.route_id) if data.route_id is not None else None,
+            water_type=data.water_type,
+        ).model_dump(exclude_none=True)
+
+    @staticmethod
+    def cross_country_skiing_data_to_schema(
+        data: CrossCountrySkiingData,
+    ) -> dict[str, Any]:
+        """Convert CrossCountrySkiingData domain entity to API schema."""
+        return CrossCountrySkiingDataSchema(
+            route_id=str(data.route_id) if data.route_id is not None else None,
+            snow_conditions=data.snow_conditions,
         ).model_dump(exclude_none=True)
 
 

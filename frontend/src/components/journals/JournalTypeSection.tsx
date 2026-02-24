@@ -18,7 +18,12 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { JournalType } from '@/types/journals';
 import type {
+  AbseilingData,
   CalendarInfoData,
+  CanyoningData,
+  ClimbingData,
+  CrossCountrySkiingData,
+  KayakingData,
   MoodData,
   PhotoAlbumData,
   PlanData,
@@ -39,7 +44,12 @@ type TypeSectionData =
   | MoodData
   | PhotoAlbumData
   | PlanData
-  | TravelData;
+  | TravelData
+  | AbseilingData
+  | CanyoningData
+  | ClimbingData
+  | KayakingData
+  | CrossCountrySkiingData;
 
 /** Callback invoked when the user saves type-specific data. */
 type OnSaveFn = (type: JournalType, data: TypeSectionData) => Promise<void>;
@@ -66,6 +76,11 @@ const TYPE_SECTION_LABELS: Record<JournalType, string> = {
   [JournalType.OUTDOOR_ACTIVITY]: 'Outdoor Activity',
   [JournalType.BUSHWALKING]: 'Bushwalking',
   [JournalType.JOGGING]: 'Jogging',
+  [JournalType.ABSEILING_TRIP]: 'Abseiling Trip',
+  [JournalType.CANYONING]: 'Canyoning',
+  [JournalType.CLIMBING]: 'Climbing',
+  [JournalType.KAYAKING]: 'Kayaking',
+  [JournalType.CROSS_COUNTRY_SKIING]: 'Cross-Country Skiing',
 };
 
 /**

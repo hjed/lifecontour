@@ -19,7 +19,12 @@ import type {
   JournalCalendar,
   JournalContactRelationship,
   EventDateRange,
+  AbseilingData,
   CalendarInfoData,
+  CanyoningData,
+  ClimbingData,
+  CrossCountrySkiingData,
+  KayakingData,
   MoodData,
   PhotoAlbumData,
   PlanData,
@@ -156,7 +161,17 @@ export function JournalDetailView({
   const handleTypeDataSave = useCallback(
     async (
       type: JournalType,
-      data: CalendarInfoData | MoodData | PhotoAlbumData | PlanData | TravelData
+      data:
+        | CalendarInfoData
+        | MoodData
+        | PhotoAlbumData
+        | PlanData
+        | TravelData
+        | AbseilingData
+        | CanyoningData
+        | ClimbingData
+        | KayakingData
+        | CrossCountrySkiingData
     ) => {
       await updateTypeData.mutateAsync({
         journalId: journal.id,

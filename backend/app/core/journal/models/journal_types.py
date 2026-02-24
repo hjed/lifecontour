@@ -50,8 +50,8 @@ class JournalType(StrEnum):
     ABSEILING_TRIP = "abseiling_trip"  # Iteration 4.5-004
     CANYONING = "canyoning"  # Iteration 4.5-004
     CLIMBING = "climbing"  # Iteration 4.5-004
-    # KAYAKING = "kayaking"  # Future: Iteration 4.5-005
-    # CROSS_COUNTRY_SKIING = "cross_country_skiing"  # Future: Iteration 4.5-005
+    KAYAKING = "kayaking"  # Iteration 4.5-005
+    CROSS_COUNTRY_SKIING = "cross_country_skiing"  # Iteration 4.5-005
 
     def __str__(self) -> str:
         """Return string representation of the type."""
@@ -125,8 +125,12 @@ class JournalType(StrEnum):
                 cls.FITNESS,
             ],
             cls.CLIMBING: [cls.OUTDOOR_ACTIVITY, cls.FITNESS],
-            # cls.KAYAKING: [cls.OUTDOOR_ACTIVITY, cls.FITNESS],
-            # cls.CROSS_COUNTRY_SKIING: [cls.BUSHWALKING, cls.OUTDOOR_ACTIVITY, cls.FITNESS],
+            cls.KAYAKING: [cls.OUTDOOR_ACTIVITY, cls.FITNESS],
+            cls.CROSS_COUNTRY_SKIING: [
+                cls.BUSHWALKING,
+                cls.OUTDOOR_ACTIVITY,
+                cls.FITNESS,
+            ],
         }
 
         return dependencies.get(journal_type, [])
