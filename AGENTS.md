@@ -2,15 +2,11 @@
 
 ## Project Context
 
-This document provides essential guidelines for AI assistants working on the
-Personal CRM & Journal System. The system uses a Python FastAPI backend with
-PostgreSQL database and TypeScript/React frontend, integrating personal data
-from multiple sources with both MCP (Model Context Protocol) and web interfaces.
+This document provides essential guidelines for AI assistants working on the Personal CRM & Journal System. The system uses a Python FastAPI backend with PostgreSQL database and TypeScript/React frontend, integrating personal data from multiple sources with both MCP (Model Context Protocol) and web interfaces.
 
-Refer to the [architecture document](./architecture.md) for a high-level
-overview of the system architecture and navigation.
+Refer to the [architecture document](docs/architecture.md) for a high-level overview of the system architecture and navigation.
 
-Tasks can be found in the [tasks document](./tasks.md).
+Tasks can be found in the [tasks document](docs/tasks.md).
 
 ### Key Technologies
 
@@ -72,20 +68,6 @@ Files to include:
 - core_shared/models/ (relevant models only)
 - docs/architecture/integration-architecture.md
 ```
-
-This provides complete, isolated context without noise from other integrations.
-
-### Test-Driven Development Sequence
-
-1. **Documentation** - Document planned changes and confirm design decisions
-2. **Write Tests** - Unit tests for domain logic, integration tests for database operations
-3. **Backend Domain Logic** - Python business logic guided by failing tests
-4. **Database Operations** - SQL queries with SQLAlchemy Core, tested with real PostgreSQL
-5. **API Endpoints** - FastAPI controllers with JSON API compliance, API tests included
-6. **Frontend UI** - Next.js interface using shadcn/ui, component tests included
-7. **MCP Tools** - AI integration via Model Context Protocol, integration tests included
-8. **End-to-End Tests** - Full user workflows with Playwright
-9. **Deploy and Validate** - Ensure feature works in real environment
 
 ### ⚠️ CRITICAL: Test Data Setup Requirements
 
@@ -172,8 +154,6 @@ test('should display empty state when no contacts exist', async ({ page }) => {
 
 ## Testing Strategy
 
-### Multi-Language Testing Approach
-
 1. **Backend Tests (pytest)** - Domain logic, database operations, API endpoints
    - **Unit Tests**: Fast, isolated tests for business logic
    - **Integration Tests**: Real database operations with Docker PostgreSQL
@@ -186,9 +166,7 @@ test('should display empty state when no contacts exist', async ({ page }) => {
 - **Test-Driven Development**: Write tests first, then implement functionality
 - **Real Database Testing**: Use Docker PostgreSQL for integration tests
 - **Accessibility**: ARIA attributes, keyboard navigation, screen reader support
-- **Clear Separation**: Independent test suites for backend and frontend
-
-### Code Quality Checks
+## Code Quality Checks
 
 **Always run quality checks before completing any task:**
 
@@ -207,37 +185,9 @@ pnpm type-check       # TypeScript type checking
 
 **Quality check failures must be fixed before task completion.**
 
-### Pre-commit Hook Setup and Troubleshooting
-
-**NEVER use `git commit --no-verify` to bypass pre-commit hooks.**
-
-All commits must pass the full verification pipeline. If pre-commit hooks fail, fix the underlying issues rather than bypassing them.
-
-#### Pre-commit Hook Installation and Fixes
-
-If pre-commit hooks are failing with Python environment issues:
-
-```bash
-# Install pre-commit using uv (fixes Python version issues)
-uv tool install pre-commit --force
-
-# Install hooks in the repository
-pre-commit install
-
-# Test all hooks
-pre-commit run --all-files
-```
-
-**Common Issue**: If you see `/usr/bin/env: 'python': No such file or found` or similar Python path errors, it means pre-commit was installed with an incompatible Python version (e.g., Python 2). The solution is to reinstall pre-commit using uv as shown above.
-
-**Verification Process**:
-- All backend Python code must pass: `ruff format`, `ruff check`, `mypy`
-- All frontend code must pass: `prettier`, `eslint`, `typescript check`
-- All general checks must pass: trailing whitespace, YAML/JSON/TOML validation, merge conflict detection
-
 ### Integration Testing Patterns
 
-- **Docker PostgreSQL**: Use `docker-compose.test.yml` for real database testing
+- **Docker PostgreSQL**: Use `docker-compose.yml` for real database testing (with the correct profile e.g. "test")
 - **Transaction Isolation**: Each test runs in isolated transaction with rollback
 - **Schema Recreation**: Fresh database schema for each test session
 - **Real Constraints**: Test actual database constraints and SQL behavior
@@ -264,22 +214,6 @@ pre-commit run --all-files
 - ✅ **Always** use the existing `async_connection` and `clean_database` fixtures from `tests/integration/conftest.py`
 - ✅ **Always** place API integration tests in the correct directory structure to inherit proper fixtures
 
-**Example Correct Structure:**
-(In the backend folder)
-```
-tests/
-├── conftest.py                           # Unit test fixtures (fast, mocked)
-├── unit/
-│   ├── api/test_contact_schemas.py       # Uses unit test fixtures
-│   └── contacts/test_contact_service.py  # Uses mocked dependencies
-└── integration/
-    ├── conftest.py                       # Integration fixtures (Docker DB)
-    ├── contacts/test_contact_service_integration.py  # Uses real DB
-    └── api/test_contact_endpoints.py     # Uses real DB via integration fixtures
-```
-
-_See [Testing Strategy](./architecture/testing-strategy.md) for detailed testing patterns and examples._
-
 ## Frontend Development Standards
 
 ### shadcn/ui Component Guidelines
@@ -292,36 +226,6 @@ _See [Testing Strategy](./architecture/testing-strategy.md) for detailed testing
   `text-foreground`, `border-border`
 - Structure files with exported components, subcomponents, helpers, static content, and types.
 
-### Key Patterns
-
-- **Cards**: Use `Card`, `CardHeader`, `CardContent` for consistent layouts
-- **Forms**: Use `Form`, `FormField`, `FormControl`, `FormLabel`, `FormMessage` with react-hook-form and Zod validation for proper accessibility
-- **Dropdowns**: Include keyboard navigation and proper ARIA attributes
-- **Badges**: Use for tags with custom colors via style prop
-
-### Form Accessibility Guidelines
-
-- **Use Form system for validation**: Use `Form`, `FormField`, `FormControl`, `FormLabel`, `FormMessage` components for forms with validation and error handling
-- **Use standalone Input/Textarea for simple cases**: Use standalone `Input`/`Textarea` components for search fields, filters, and non-validated inputs
-- **Automatic ARIA attributes**: Form system automatically provides `aria-describedby`, `aria-invalid`, and proper ID linking
-- **Error message accessibility**: `FormMessage` components automatically have proper IDs and are linked to form controls
-- **Screen reader support**: Error messages are announced immediately when validation fails
-
-### Component Usage Patterns
-
-- **Forms with validation**: Always use the Form system (`FormField` + `FormControl` + `Input`)
-- **Search inputs**: Use standalone `Input` component
-- **Filter inputs**: Use standalone `Input` component
-- **Simple inputs without validation**: Use standalone `Input`/`Textarea` components
-
-_See [Frontend Design](./architecture/frontend-design.md) for detailed
-shadcn/ui implementation patterns._
-
-### Tailwind CSS Guidelines
-
-- Use semantic color classes for dark mode support: `bg-background`,
-  `text-foreground`, `border-border`
-- Follow mobile-first responsive design with `sm:`, `lg:`, `xl:` prefixes
 - Leverage shadcn/ui's CSS custom properties for theming
 
 ## Development Standards
@@ -337,57 +241,18 @@ shadcn/ui implementation patterns._
 
 #### Project Structure (Clear Language Separation)
 
-```
+```text
 personal-management-system/
 ├── backend/                      # Python FastAPI application
 │   ├── app/
 |   |   |── core/                 # Core Domain Logic
-|   |   |   |── contacts/        # Contact Domain Logic
-|   |   |   |   |── adapters/    # Interfaces with apis, sql, events, etc
-|   |   |   |   |   |── api/     # External API clients
-|   |   |   |   |   |── sql/     # Database repositories
-|   |   |   |   |   |── events/  # Event publishing and receiving adapters
-|   |   |   |   |── models/      # Domain models
-|   |   |   |── calendar/        # Calendar Domain Logic
-|   |   |   |── journal/         # Journal Domain Logic
-|   |   |── infrastructure/      # Common code for Database, Events, etc.
-|   |   |   |── search/          # MeiliSearch integration
-|   |   |   |── events/          # Outbox pattern implementation
-|   |   |   |── auth/            # Session management
-│   │   ├── api/                 # FastAPI route handlers
-│   │   |   ├── auth/            # Authentication endpoints
-│   │   |   ├── contacts/        # Contact CRUD endpoints
-│   │   |   ├── search/          # Search endpoints
-│   │   |   ├── dependencies.py  # Service factories and DI
-│   │   |   └── schemas/         # Pydantic request/response models
-│   │   ├── migrations/          # SQL queries and migrations
-│   │   └── mcp/                 # MCP server implementation
-│   ├── core_shared/             # Shared models, schemas, db logic (private package)
-│   │   ├── pyproject.toml
-│   │   └── core_shared/
-│   │       ├── models/          # SQLAlchemy models
-│   │       ├── database/        # Database session management
-│   │       └── exceptions/      # Shared exception classes
-│   ├── integration_workers/     # Isolated workers for each integration
-│   │   ├── google_contacts/
-│   │   │   ├── Dockerfile
-│   │   │   ├── requirements.txt
-│   │   │   ├── worker.py
-│   │   │   └── .env.example
-│   │   ├── immich/
-│   │   │   ├── Dockerfile
-│   │   │   ├── requirements.txt
-│   │   │   ├── worker.py
-│   │   │   └── .env.example
-│   │   └── strava/
-│   │       ├── Dockerfile
-│   │       ├── requirements.txt
-│   │       ├── worker.py
-│   │       └── .env.example
+|   |   |── infrastructure/       # Common code for Database, Events, etc.
+│   │   ├── api/                  # FastAPI route handlers
+│   │   ├── migrations/           # SQL queries and migrations
+│   │   └── mcp/                  # MCP server implementation
+│   ├── core_shared/              # Shared models, schemas, db logic (private package)
+│   ├── integration_workers/      # Isolated workers for each integration
 │   ├── tests/                    # pytest test suite
-│   |   ├── unit/                 # Unit tests
-│   │   ├── integration/          # Integration tests
-│   │   └── e2e/                  # End-to-end tests
 │   └── pyproject.toml            # UV dependencies
 ├── frontend/                     # Next.js TypeScript application
 │   ├── src/
@@ -399,24 +264,7 @@ personal-management-system/
 │   └── package.json              # pnpm dependencies
 |── docker-compose.yml            # Multi-container setup
 |── docs/                         # All documentation
-|   ├── architecture/             # Detailed architecture documentation
-|   |   ├── domain-architecture.md    # Domain patterns and implementation
-|   |   ├── testing-strategy.md       # Testing patterns and guidelines
-|   |   ├── api-design.md             # REST and MCP API patterns
-|   |   ├── frontend-design.md        # Component and UI patterns
-|   |   └── ...                       # Other architecture docs
-|   ├── ai-guidelines.md          # AI assistant guidelines
-|   ├── tasks.md                  # Task tracking and agile development
-|   └── ...                       # Other documentation
 ```
-
-#### Naming Conventions
-
-- **Python Files**: snake_case (`fetch_contacts.py`)
-- **TypeScript Files**: kebab-case (`contact-service.ts`)
-- **Classes**: PascalCase (`FetchContactComponent`)
-- **Functions/Variables**: camelCase (TS), snake_case (Python)
-- **Constants**: UPPER_SNAKE_CASE
 
 ### Backend Development (Python)
 
@@ -429,245 +277,54 @@ personal-management-system/
 - **Clear Separation**: Keep domain logic separate from API and database concerns
 - **Python Enums**: Use enums for domain values (e.g., `MethodType.EMAIL`) for type safety
 
-#### Database & Error Handling
-
-- **Database Operations**: Explicit SQL with SQLAlchemy text(), parameterized queries for security
-- **Transaction Management**: Handle at domain/business layer, pass connections to repositories
-- **Constraint Validation**: Use database constraints, catch `IntegrityError` and convert to domain exceptions
-- **Error Handling**: Custom exceptions with HTTP status codes, exception chaining with `from e`
-- **Integration Testing**: Test real database operations with Docker PostgreSQL
-
 #### Business Logic Patterns
 
-- **Changed Fields Calculation**: Always calculate within service layer transactions for accuracy
-  - ❌ **Wrong**: Calculate in controllers outside transaction
-  - ✅ **Correct**: Service fetches current state and calculates changes within transaction
-  - Use tuple format `(old_value, new_value)` for history service compatibility
-  - Handle None values properly: `(field or "", updated_field or "")` for optional fields
+- **Changed Fields Calculation**: Always calculate within service layer transactions for accuracy. Use tuple format `(old_value, new_value)` for history service compatibility.
+- **Service Method Signatures**: Keep business logic parameters minimal. E.g., `update_contact(contact, transaction)` where the service calculates changes internally.
 
-- **Service Method Signatures**: Keep business logic parameters minimal
-  - ❌ **Wrong**: `update_contact(contact, changed_fields, transaction)`
-  - ✅ **Correct**: `update_contact(contact, transaction)` - service calculates changes internally
+#### Dependency Injection with Dishka
 
-#### Type Checking & Validation
-
-- **Function Signatures**: Always include return type annotations for all parameters
-- **Generic Types**: Use `Union[T, U]` for multiple types, `Optional[T]` for nullable
-- **Type Ignores**: Use `# type: ignore[specific-error]` sparingly with specific error codes
-- **Pydantic Models**: Use for input validation, `str` instead of `PostgresDsn` for database URLs
-- **Mypy Compliance**: All code must pass mypy type checking without any errors after every change
-
-_See [Domain Architecture](./architecture/domain-architecture.md) for detailed implementation patterns._
-
-### Dependency Injection with Dishka
- for clean, framework-agnostic dependency injection
 - **Framework**: Use Dishka DI framework
 - **Pattern**: Constructor injection with typed interfaces and automatic resolution
-- **Domain-Based Providers**: Organize providers by domain (ContactProvider, CalendarProvider, etc.)
-- **Scopes**: Use APP scope for singletons, REQUEST scope for per-request objects, SESSION for websockets
-- **Type Safety**: All dependencies typed with interfaces, use `FromDishka[Type]` for injection
-- **Finalization**: Proper cleanup of resources like database connections using `yield` providers
-- **Testing**: Use Dishka's testing utilities for dependency overrides in tests
+- **Scopes**: Use APP scope for singletons, REQUEST scope for per-request objects
+- **FastAPI Integration**: Use `FromDishka[Type]` for dependency injection in endpoints
 
-#### Dishka Best Practices
-
-**Provider Organization:**
-- Create domain-specific providers: `ContactProvider`, `CalendarProvider`, `JournalProvider`
-- Use `Provider(scope=Scope.REQUEST)` for most business logic components
-- Use `Provider(scope=Scope.APP)` for configuration, singletons, and stateless services
-- Group related dependencies in the same provider class
-
-**Database Connection Management:**
-```python
-class DatabaseProvider(Provider):
-    @provide(scope=Scope.REQUEST)
-    def get_connection(self, engine: AsyncEngine) -> AsyncIterable[AsyncConnection]:
-        async with engine.begin() as conn:
-            yield conn
-```
-
-**Service and Repository Providers:**
-```python
-class ContactProvider(Provider):
-    scope = Scope.REQUEST
-
-    def __init__(self):
-        self.provide(SqlContactRepository, provides=ContactRepository)
-        self.provide(SqlTagRepository, provides=TagRepository)
-        self.provide(ContactService)
-        self.provide(ContactValidationService)
-```
-
-**FastAPI Integration:**
-- Use `FromDishka[Type]` for dependency injection in endpoints
-- Use `@inject` decorator when auto-injection is not available
-- Set up Dishka with `setup_dishka(container, app)` in app factory
-- Use proper lifespan management for container cleanup
-
-**Testing with Dishka:**
-- Override providers in tests using container's override mechanisms
-- Use separate test providers for mock dependencies
-- Maintain proper scope isolation in test fixtures
-
-### API Design
-
-- **JSON API Compliance**: Follow JSON API specification for REST endpoints
-- **Authentication**: Session-based authentication with Starlette SessionMiddleware
-- **Input Validation**: Use Pydantic models for all request validation
-- **Error Responses**: Return structured JSON API error format
-- **Pagination**: Implement simple pagination for large datasets
-- **Search Endpoints**: Domain-specific search endpoints (e.g., `/api/contacts/search`)
-- **Global Search**: Cross-domain search endpoint (`/api/search`) designed for future expansion
-
-### Search and Event Processing
-
-- **Search Engine**: MeiliSearch with event-driven indexing
-- **Outbox Pattern**: Transactional outbox for reliable event publishing
-- **Event Flow**: Domain Service → OutboxEventPublisher → Outbox Table → Background Task → MeiliSearch
-
-### MCP Implementation
+#### MCP Implementation
 
 - **FastMCP v2**: Use FastMCP v2 (jlowin/fastmcp) for MCP server implementation instead of official MCP SDK
-- **Domain-Based Architecture**: Organize MCP tools by domain (contacts, journal, calendar, photos) to allow future expansion
-- **Dishka Integration**: Use Dishka dependency injection in MCP tools for consistency with REST API
-- **Session Authentication**: Share OAuth authentication with REST API using session middleware
-- **Clear Interfaces**: Structure MCP tools with consistent, simple interfaces
+- **Dishka Integration**: Use Dishka dependency injection in MCP tools (`FromDishka[Type]`) for consistency with REST API
 
-#### MCP with Dishka Patterns
+### Frontend Standards
 
-**MCP Tool Dependency Injection:**
-```python
-@mcp.tool
-async def get_contact(
-    contact_id: Annotated[int, Field(description="Contact ID")],
-    contact_service: FromDishka[ContactService],
-) -> str:
-    """Get contact details by ID for AI analysis."""
-    # Use injected service
-```
+- **React Server Components**: Minimize the use of `'use client'`, `useEffect`, and `setState`; favor React Server Components (RSC) and Next.js SSR features.
+- **Forms**: Always use `Form`, `FormField`, `FormControl`, `FormLabel`, `FormMessage` components for forms with react-hook-form and Zod validation, guaranteeing proper accessibility linking automatically.
 
-**MCP Provider Setup:**
-- Share the same Dishka container between REST API and MCP server
-- Use REQUEST scope for MCP tool dependencies
-- Ensure proper cleanup of resources after tool execution
+## Detailed Architecture & Development Guidelines
 
-### Security & Performance
+To avoid repetition, detailed guidelines are maintained in specialized documents in the `docs/` directory. **You must refer to these documents for specific implementation details, patterns, and rules.**
 
-- **Logging**: Use Python standard library logging with clear levels
-- **Security**: Never log sensitive data, validate inputs, use environment variables
-- **Performance**: Focus on readability over optimization
-- **Testing**: Focus on critical business logic, mock external integrations
+### Testing & Quality Assurance
+- **[Testing Strategy](docs/architecture/testing-strategy.md)**: Comprehensive guidelines for Worker Unit Tests, Backend Tests, Frontend Tests, Testing Organization (conftest usage), E2E fixtures, and Database Integration.
+- **[Code Quality Standards](docs/code-quality-standards.md)**: Strict rules for linting, formatting, type checking, Python Language Rules (ruff, mypy requirements) and pre-commit hooks. *Quality check failures must be fixed before task completion.*
 
-## Reference Documentation
+### Architecture & Design
+- **[Domain Architecture](docs/architecture/domain-architecture.md)**: Domain-driven design patterns, Domain Enum Patterns, Ports & Adapters implementation, business logic validation, and component structure.
+- **[API Design](docs/architecture/api-design.md)**: REST and FastMCP API patterns, JSON API compliance, validation, and error handling.
+- **[Integration Architecture](docs/architecture/integration-architecture.md)**: Patterns for isolated integration workers (e.g. Google, Strava).
+- **[Frontend Design](docs/architecture/frontend-design.md)**: Next.js, shadcn/ui, Tailwind CSS patterns, forms, and responsive design guidelines.
+- **[Database Design](docs/architecture/database-design.md)**: Database schema definitions and data layer standards.
+- **[Technology Stack](docs/architecture/technology-stack.md)**: Technology choices and configuration.
+- **[Deployment Guide](docs/architecture/deployment-guide.md)**: Docker and deployment configuration.
 
-For detailed implementation patterns and examples, see:
+### CI/CD & Operations
+- **[CI/CD Setup](docs/ci-cd-setup.md)**: Continuous integration and deployment configuration.
+- **[MCP Setup](docs/mcp-setup.md)**: Model Context Protocol integration guide.
 
-### Architecture and Design
-- **[Testing Strategy](./architecture/testing-strategy.md)** - Comprehensive testing patterns for PyTest, Jest, and Playwright
-- **[Frontend Design](./architecture/frontend-design.md)** - shadcn/ui component patterns and responsive design
-- **[Domain Architecture](./architecture/domain-architecture.md)** - Domain-driven design patterns and implementation
-- **[API Design](./architecture/api-design.md)** - REST and MCP API implementation patterns
-- **[Technology Stack](./architecture/technology-stack.md)** - Technology choices and configuration
-- **[Deployment Guide](./architecture/deployment-guide.md)** - Docker and deployment configuration
-
-### Development and Operations
-- **[Code Quality Standards](./code-quality-standards.md)** - Linting, formatting, and testing standards
-- **[CI/CD Setup](./ci-cd-setup.md)** - Continuous integration and deployment configuration
-- **[MCP Setup](./mcp-setup.md)** - Model Context Protocol integration guide
-
-### Troubleshooting Guides
-- **[Docker Development](./troubleshooting/docker-development.md)** - Complete Docker setup and development environment
-- **[Docker Fixes](./troubleshooting/docker-fixes.md)** - Common Docker issues and solutions
-- **[CI Integration Tests](./troubleshooting/ci-integration-tests-fix.md)** - Backend CI test configuration fixes
-- **[Frontend CI Fixes](./troubleshooting/frontend-ci-fixes.md)** - Frontend CI and testing issue solutions
-
-## Test-First Quality Assurance
-
-### Mandatory Pre-Implementation Workflow
-
-**BEFORE writing any implementation code:**
-
-1. **Write Tests First** - Define expected behavior through tests
-2. **Run Tests** - Verify they fail appropriately (red phase)
-3. **Write Minimum Implementation** - Make tests pass (green phase)
-4. **Refactor** - Improve code while keeping tests passing
-5. **Run All Quality Checks** - Ensure no regressions
-
-### Mandatory Quality Checks
-
-**Run these checks after every code change - no failures acceptable:**
-
-Use `./scripts/dev.sh lint` to run all checks at once.
-
-**Note:** These are the same checks run by CI and the local dev script (`./scripts/dev.sh lint`). Pre-commit hooks auto-fix these issues before commit, while these commands verify the fixes were applied correctly.
-
-### Common Integration Test Pitfalls
-
-**Service Layer Changes:**
-
-- When modifying service method signatures, update ALL calling tests (unit AND integration)
-
-**Type Safety in Tests:**
-
-- Use `# type: ignore` only in test files for intentional validation failures
-- Never use `type: ignore` in production code - fix the underlying type issue
-- Ensure service method return types match what tests expect
-
-**Database Connection Issues:**
-- Integration tests failing with "connection refused" usually means wrong fixtures
-- Check that Docker containers are using correct ports (5433 for test DB, not 5432)
-- Verify test files are in correct directory structure to inherit proper fixtures
-
-**CI Integration Test Configuration:**
-- CI uses GitHub Actions services instead of Docker Compose for databases
-- Integration test fixtures detect CI environment via `CI` or `GITHUB_ACTIONS` env vars
-- Use environment variables for database connection: `TEST_DB_HOST`, `TEST_DB_PORT`, etc.
-- Local development uses Docker Compose, CI uses GitHub Actions services on different ports
-
-### Unit Tests
-
-**Run unit tests after writing tests and before implementation**
-
-Run after every changes
-
-### Integration Testing
-
-**Run integration tests separately after quality checks pass:**
-
-### End-to-End Testing (Playwright)
-
-**Running E2E tests:**
-
-```bash
-# Run all E2E tests
-cd frontend && pnpm test:e2e
-
-# Run specific test file
-cd frontend && pnpm test:e2e tests/e2e/journals-types.spec.ts
-
-# Run tests for specific browser
-cd frontend && pnpm test:e2e --project=chromium
-
-# View HTML report after tests complete
-cd frontend && pnpm exec playwright show-report
-```
-
-**Important Notes:**
-- E2E tests automatically start Docker services (backend, database, OAuth, etc.) via global setup
-- The dev server (`pnpm dev`) is automatically started by Playwright's `webServer` configuration
-- Tests use the `list` reporter locally (prints to console) and `html` reporter in CI
-- The `webServer.reuseExistingServer` is set to `!process.env.CI`, meaning:
-  - **Locally**: Reuses existing dev server if running, starts new one if not
-  - **In CI**: Always starts a fresh dev server
-- Dev server runs in background during tests and is automatically terminated when tests complete
-- HTML reports are saved to `frontend/playwright-report/` but don't auto-open a server locally
-
-### CI/CD Compliance
-
-- **All tests must pass** before considering any change complete
-- **Type errors are blocking** - all mypy and TypeScript errors must be resolved
-- **Fix linting errors immediately** - no suppressions without justification
-- **Integration tests required** for database schema or API changes
+### Troubleshooting
+- **[Docker Development](docs/troubleshooting/docker-development.md)**
+- **[Docker Fixes](docs/troubleshooting/docker-fixes.md)**
+- **[CI Integration Tests](docs/troubleshooting/ci-integration-tests-fix.md)**
+- **[Frontend CI Fixes](docs/troubleshooting/frontend-ci-fixes.md)**
 
 ## Essential Reminders
 
@@ -679,7 +336,7 @@ cd frontend && pnpm exec playwright show-report
 
 ## Library Documentation
 
-Your knowledge of the current versions of libraries may be out of date - refer to their documentation for best practises. Use context 7 where possible
+Your knowledge of the current versions of libraries may be out of date - refer to their documentation for best practises. Use context 7 where possible.
 
 ### Python Backend
 
