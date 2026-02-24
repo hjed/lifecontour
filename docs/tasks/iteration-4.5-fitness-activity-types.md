@@ -362,38 +362,46 @@ This iteration extends the journal system with fitness and outdoor activity type
 - Engagement: I-VI (commitment level)
 - Stars: * to *** (quality/beauty)
 
-### ITER4.5-005: Outdoor Activity Types - Part 3 (KAYAKING, CROSS_COUNTRY_SKIING) 🟡 PLANNED
+### ITER4.5-005: Outdoor Activity Types - Part 3 (KAYAKING, CROSS_COUNTRY_SKIING) ✅ COMPLETED
 **Description:** Implement remaining outdoor activity types
 **Strategy:** Single task for two types
 **Specification Reference:** [Kayaking Data](../journal-system-specification.md#kayaking-data-kayaking-type), [Cross-Country Skiing Data](../journal-system-specification.md#cross-country-skiing-data-cross_country_skiing-type)
+**Completed:** 2026-02-24
 
-**PR Size:** ~10 files (2 type tables, dependency logic, API schemas/converters/controllers, tests, migrations)
+**PR Size:** ~10 files (2 type tables, dependency logic, API schemas/converters/controllers, mcp tool and schema updates, tests, migrations)
 
 **Acceptance Criteria:**
-- [ ] Create `journal_kayaking_data` table:
+- [x] Create `journal_kayaking_data` table:
   - `journal_id` (PK, FK to journals)
   - `route_id` (FK to routes, nullable)
   - `water_type` (string, nullable, e.g., "river", "sea", "lake")
   - `created_at`, `updated_at`
-- [ ] Implement KAYAKING type (requires OUTDOOR_ACTIVITY, FITNESS)
-- [ ] Create `journal_skiing_data` table:
+- [x] Implement KAYAKING type (requires OUTDOOR_ACTIVITY, FITNESS)
+- [x] Create `journal_skiing_data` table:
   - `journal_id` (PK, FK to journals)
   - `route_id` (FK to routes, nullable)
   - `snow_conditions` (text, nullable)
   - `created_at`, `updated_at`
-- [ ] Implement CROSS_COUNTRY_SKIING type (requires BUSHWALKING, OUTDOOR_ACTIVITY, FITNESS)
-- [ ] Update type dependency resolution for these types
-- [ ] Add database migrations with proper constraints
-- [ ] **Add API schemas, converters, and controller integration:**
-  - [ ] Add `KayakingDataSchema`, `CrossCountrySkiingDataSchema` to `backend/app/api/journals/schemas.py`
-  - [ ] Add converter functions in `backend/app/api/journals/converters.py`
-  - [ ] Update `_enrich_journal_data()` and `_create_type_specific_data()` in `backend/app/api/journals/controllers.py`
-  - [ ] Add repository parameters to all journal endpoints
-  - [ ] Update `backend/app/api/contacts/controllers.py` if it uses `_enrich_journal_data()`
-- [ ] Write unit tests for type-specific validation and dependencies
-- [ ] Write integration tests for type data persistence
-- [ ] **Write API integration tests for type creation and updates**
-- [ ] Document activity types in code comments
+- [x] Implement CROSS_COUNTRY_SKIING type (requires BUSHWALKING, OUTDOOR_ACTIVITY, FITNESS)
+- [x] Update type dependency resolution for these types
+- [x] Add database migrations with proper constraints (migration 0024)
+- [x] **Add API schemas, converters, and controller integration:**
+  - [x] Add `KayakingDataSchema`, `CrossCountrySkiingDataSchema` to `backend/app/api/journals/schemas.py`
+  - [x] Add converter functions in `backend/app/api/journals/converters.py`
+  - [x] Update `_enrich_journal_data()` and `_create_type_specific_data()` in `backend/app/api/journals/controllers.py`
+  - [x] Add repository parameters to all journal endpoints
+  - [x] Update `backend/app/api/contacts/controllers.py` with new repos in `_enrich_journal_data()` call
+- [x] Write unit tests for type-specific validation and dependencies
+- [x] Write integration tests for type data persistence
+- [x] **Write API integration tests for type creation, updates, removal and validation**
+- [x] Update frontend TypeScript types (`frontend/src/types/journals.ts`)
+- [ ] **Write MCP scheme updates and integration tests for new types** (deferred to ITER4.5-007)
+
+**Implementation Notes:**
+- KAYAKING: `journal_kayaking_data` table with `route_id` (UUID FK) and `water_type` (string)
+- CROSS_COUNTRY_SKIING: `journal_skiing_data` table with `route_id` (UUID FK) and `snow_conditions` (text)
+- Both types validated via `__post_init__` with `KayakingDataValidationError` / `CrossCountrySkiingDataValidationError`
+- All quality gates passed: ruff, mypy, 1402 backend tests, 842 frontend tests
 
 ### ITER4.5-006: Activity UI Components 🟡 PLANNED
 **Description:** Build UI components for activity display and GPX visualization

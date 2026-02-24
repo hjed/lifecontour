@@ -20,6 +20,11 @@ import {
   Mountain,
   Trees,
   Timer,
+  ArrowDownToLine,
+  Droplets,
+  TrendingUp,
+  Waves,
+  Snowflake,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -49,6 +54,11 @@ const TYPE_ICONS: Record<
   [JournalType.OUTDOOR_ACTIVITY]: Mountain,
   [JournalType.BUSHWALKING]: Trees,
   [JournalType.JOGGING]: Timer,
+  [JournalType.ABSEILING_TRIP]: ArrowDownToLine,
+  [JournalType.CANYONING]: Droplets,
+  [JournalType.CLIMBING]: TrendingUp,
+  [JournalType.KAYAKING]: Waves,
+  [JournalType.CROSS_COUNTRY_SKIING]: Snowflake,
 };
 
 /**

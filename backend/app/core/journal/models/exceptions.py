@@ -238,3 +238,19 @@ class ClimbingDataValidationError(JournalDomainError):
     def __init__(self, field: str, message: str):
         super().__init__(f"{field}: {message}", 400)
         self.field = field
+
+
+class KayakingDataValidationError(JournalDomainError):
+    """Exception raised when kayaking data (KAYAKING type) validation fails."""
+
+    def __init__(self, field: str, message: str):
+        super().__init__(f"{field}: {message}", 400)
+        self.field = field
+
+
+class CrossCountrySkiingDataValidationError(JournalDomainError):
+    """Exception raised when cross-country skiing data (CROSS_COUNTRY_SKIING type) validation fails."""
+
+    def __init__(self, field: str, message: str):
+        super().__init__(f"{field}: {message}", 400)
+        self.field = field

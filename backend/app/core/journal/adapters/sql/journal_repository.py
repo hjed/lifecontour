@@ -38,6 +38,10 @@ _JOURNAL_TYPE_TABLE_MAP = {
     "canyoning": "journal_canyoning_data",
     "CLIMBING": "journal_climbing_data",
     "climbing": "journal_climbing_data",
+    "KAYAKING": "journal_kayaking_data",
+    "kayaking": "journal_kayaking_data",
+    "CROSS_COUNTRY_SKIING": "journal_skiing_data",
+    "cross_country_skiing": "journal_skiing_data",
 }
 
 
@@ -98,6 +102,8 @@ class SqlJournalRepository(JournalRepository):
                     "LEFT JOIN journal_abseiling_data jabd ON j.id = jabd.journal_id",
                     "LEFT JOIN journal_canyoning_data jcyd ON j.id = jcyd.journal_id",
                     "LEFT JOIN journal_climbing_data jcld ON j.id = jcld.journal_id",
+                    "LEFT JOIN journal_kayaking_data jkyd ON j.id = jkyd.journal_id",
+                    "LEFT JOIN journal_skiing_data jskid ON j.id = jskid.journal_id",
                 ]
             )
             where_clauses.extend(
@@ -114,6 +120,8 @@ class SqlJournalRepository(JournalRepository):
                     "jabd.journal_id IS NULL",
                     "jcyd.journal_id IS NULL",
                     "jcld.journal_id IS NULL",
+                    "jkyd.journal_id IS NULL",
+                    "jskid.journal_id IS NULL",
                 ]
             )
             return joins, where_clauses
@@ -154,6 +162,8 @@ class SqlJournalRepository(JournalRepository):
             "journal_abseiling_data": "INNER JOIN journal_abseiling_data t ON j.id = t.journal_id",
             "journal_canyoning_data": "INNER JOIN journal_canyoning_data t ON j.id = t.journal_id",
             "journal_climbing_data": "INNER JOIN journal_climbing_data t ON j.id = t.journal_id",
+            "journal_kayaking_data": "INNER JOIN journal_kayaking_data t ON j.id = t.journal_id",
+            "journal_skiing_data": "INNER JOIN journal_skiing_data t ON j.id = t.journal_id",
         }
 
         if type_table not in table_joins:

@@ -308,6 +308,32 @@ class ClimbingDataSchema(BaseModel):
     )
 
 
+class KayakingDataSchema(BaseModel):
+    """Kayaking data for KAYAKING type journals."""
+
+    route_id: str | None = Field(
+        default=None,
+        description="UUID of the associated route",
+    )
+    water_type: str | None = Field(
+        default=None,
+        description="Type of water (e.g. river, lake, sea)",
+    )
+
+
+class CrossCountrySkiingDataSchema(BaseModel):
+    """Cross-country skiing data for CROSS_COUNTRY_SKIING type journals."""
+
+    route_id: str | None = Field(
+        default=None,
+        description="UUID of the associated route",
+    )
+    snow_conditions: str | None = Field(
+        default=None,
+        description="Description of snow conditions",
+    )
+
+
 # Contact relationship schema
 class JournalContactRelationshipSchema(BaseModel):
     """Journal contact relationship schema."""

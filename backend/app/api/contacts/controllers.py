@@ -61,10 +61,12 @@ from app.core.journal.models.repositories import (
     CalendarRepository,
     CanyoningDataRepository,
     ClimbingDataRepository,
+    CrossCountrySkiingDataRepository,
     FitnessDataRepository,
     JoggingDataRepository,
     JournalContactRelationshipRepository,
     JournalTagRepository,
+    KayakingDataRepository,
     MoodDataRepository,
     OutdoorActivityDataRepository,
     PhotoAlbumDataRepository,
@@ -778,6 +780,8 @@ async def get_contact_journals(
     abseiling_data_repo: FromDishka[AbseilingDataRepository],
     canyoning_data_repo: FromDishka[CanyoningDataRepository],
     climbing_data_repo: FromDishka[ClimbingDataRepository],
+    kayaking_data_repo: FromDishka[KayakingDataRepository],
+    skiing_data_repo: FromDishka[CrossCountrySkiingDataRepository],
     tag_repo: FromDishka[JournalTagRepository],
     _user: FromDishka[SessionUser],  # Require authentication
     page: int = Query(default=1, description=PAGE_NUMBER_DESCRIPTION, ge=1),
@@ -893,6 +897,8 @@ async def get_contact_journals(
             abseiling_data_repo,
             canyoning_data_repo,
             climbing_data_repo,
+            kayaking_data_repo,
+            skiing_data_repo,
         )
         parent = parent_by_id.get(journal.parent_id) if journal.parent_id else None
         children_count = (

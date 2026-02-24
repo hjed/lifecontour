@@ -3,7 +3,8 @@
  *
  * Displays journal types with appropriate icons and consistent styling.
  * Supports all journal types: NOTE, EVENT, MOOD_RATING, PLAN, TRAVEL,
- * PHOTO_ALBUM, FITNESS, OUTDOOR_ACTIVITY, BUSHWALKING, JOGGING.
+ * PHOTO_ALBUM, FITNESS, OUTDOOR_ACTIVITY, BUSHWALKING, JOGGING,
+ * ABSEILING_TRIP, CANYONING, CLIMBING, KAYAKING, CROSS_COUNTRY_SKIING.
  */
 
 'use client';
@@ -19,6 +20,11 @@ import {
   Mountain,
   Trees,
   Timer,
+  ArrowDownToLine,
+  Droplets,
+  TrendingUp,
+  Waves,
+  Snowflake,
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { JournalType } from '@/types/journals';
@@ -45,6 +51,11 @@ const TYPE_ICONS: Record<
   [JournalType.OUTDOOR_ACTIVITY]: Mountain,
   [JournalType.BUSHWALKING]: Trees,
   [JournalType.JOGGING]: Timer,
+  [JournalType.ABSEILING_TRIP]: ArrowDownToLine,
+  [JournalType.CANYONING]: Droplets,
+  [JournalType.CLIMBING]: TrendingUp,
+  [JournalType.KAYAKING]: Waves,
+  [JournalType.CROSS_COUNTRY_SKIING]: Snowflake,
 };
 
 // Display labels for journal types
@@ -59,6 +70,11 @@ const TYPE_LABELS: Record<JournalType, string> = {
   [JournalType.OUTDOOR_ACTIVITY]: 'Outdoor Activity',
   [JournalType.BUSHWALKING]: 'Bushwalking',
   [JournalType.JOGGING]: 'Jogging',
+  [JournalType.ABSEILING_TRIP]: 'Abseiling Trip',
+  [JournalType.CANYONING]: 'Canyoning',
+  [JournalType.CLIMBING]: 'Climbing',
+  [JournalType.KAYAKING]: 'Kayaking',
+  [JournalType.CROSS_COUNTRY_SKIING]: 'Cross-Country Skiing',
 };
 
 // Color variants for different journal types
@@ -74,6 +90,11 @@ const TYPE_VARIANTS: Record<JournalType, 'default' | 'secondary' | 'outline'> =
     [JournalType.OUTDOOR_ACTIVITY]: 'default',
     [JournalType.BUSHWALKING]: 'secondary',
     [JournalType.JOGGING]: 'secondary',
+    [JournalType.ABSEILING_TRIP]: 'default',
+    [JournalType.CANYONING]: 'default',
+    [JournalType.CLIMBING]: 'default',
+    [JournalType.KAYAKING]: 'secondary',
+    [JournalType.CROSS_COUNTRY_SKIING]: 'secondary',
   };
 
 /**

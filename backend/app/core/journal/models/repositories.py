@@ -11,12 +11,14 @@ from .calendar import Calendar
 from .calendar_info import CalendarInfo
 from .canyoning_data import CanyoningData
 from .climbing_data import ClimbingData
+from .cross_country_skiing_data import CrossCountrySkiingData
 from .entities import Journal
 from .fitness_data import FitnessData
 from .jogging_data import JoggingData
 from .journal_contact_relationship import JournalContactRelationship
 from .journal_relationship_types import JournalContactRelationshipType
 from .journal_tag import JournalTag
+from .kayaking_data import KayakingData
 from .mood_data import MoodData
 from .outdoor_activity_data import OutdoorActivityData
 from .photo_album_data import PhotoAlbumData
@@ -1384,5 +1386,104 @@ class ClimbingDataRepository(ABC):
 
         Args:
             journal_id: The journal ID to delete climbing data for
+        """
+        pass
+
+
+class KayakingDataRepository(ABC):
+    """
+    Repository interface for kayaking data (KAYAKING type) operations.
+
+    A journal has the KAYAKING type if a KayakingData row exists for its journal_id.
+    """
+
+    @abstractmethod
+    async def find_by_journal_id(self, journal_id: int) -> KayakingData | None:
+        """
+        Find kayaking data by journal ID.
+
+        Args:
+            journal_id: The journal ID to look up
+
+        Returns:
+            The KayakingData if found, None otherwise
+        """
+        pass
+
+    @abstractmethod
+    async def save(self, data: KayakingData) -> KayakingData:
+        """
+        Save kayaking data (insert or update).
+
+        This effectively adds or updates the KAYAKING type for a journal.
+
+        Args:
+            data: The kayaking data to save
+
+        Returns:
+            The saved data with updated timestamps
+        """
+        pass
+
+    @abstractmethod
+    async def delete(self, journal_id: int) -> None:
+        """
+        Delete kayaking data by journal ID.
+
+        This effectively removes the KAYAKING type from a journal.
+
+        Args:
+            journal_id: The journal ID to delete kayaking data for
+        """
+        pass
+
+
+class CrossCountrySkiingDataRepository(ABC):
+    """
+    Repository interface for cross-country skiing data (CROSS_COUNTRY_SKIING type) operations.
+
+    A journal has the CROSS_COUNTRY_SKIING type if a CrossCountrySkiingData row
+    exists for its journal_id.
+    """
+
+    @abstractmethod
+    async def find_by_journal_id(
+        self, journal_id: int
+    ) -> CrossCountrySkiingData | None:
+        """
+        Find cross-country skiing data by journal ID.
+
+        Args:
+            journal_id: The journal ID to look up
+
+        Returns:
+            The CrossCountrySkiingData if found, None otherwise
+        """
+        pass
+
+    @abstractmethod
+    async def save(self, data: CrossCountrySkiingData) -> CrossCountrySkiingData:
+        """
+        Save cross-country skiing data (insert or update).
+
+        This effectively adds or updates the CROSS_COUNTRY_SKIING type for a journal.
+
+        Args:
+            data: The cross-country skiing data to save
+
+        Returns:
+            The saved data with updated timestamps
+        """
+        pass
+
+    @abstractmethod
+    async def delete(self, journal_id: int) -> None:
+        """
+        Delete cross-country skiing data by journal ID.
+
+        This effectively removes the CROSS_COUNTRY_SKIING type from a journal.
+
+        Args:
+            journal_id: The journal ID to delete cross-country skiing data for
         """
         pass

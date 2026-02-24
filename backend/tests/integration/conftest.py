@@ -346,6 +346,8 @@ TEST_DATABASE_SCHEMA_STATEMENTS = [
     "DROP TABLE IF EXISTS journal_calendar_info CASCADE",
     "DROP TABLE IF EXISTS journal_canyoning_data CASCADE",
     "DROP TABLE IF EXISTS journal_climbing_data CASCADE",
+    "DROP TABLE IF EXISTS journal_kayaking_data CASCADE",
+    "DROP TABLE IF EXISTS journal_skiing_data CASCADE",
     "DROP TABLE IF EXISTS journal_abseiling_data CASCADE",
     "DROP TABLE IF EXISTS journal_jogging_data CASCADE",
     "DROP TABLE IF EXISTS journal_bushwalking_data CASCADE",
@@ -580,6 +582,22 @@ TEST_DATABASE_SCHEMA_STATEMENTS = [
         ),
         grade INTEGER CHECK (grade IS NULL OR grade >= 0),
         length INTEGER CHECK (length IS NULL OR length >= 0),
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL,
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL
+    )""",
+    # Journal kayaking data table (KAYAKING type)
+    """CREATE TABLE journal_kayaking_data (
+        journal_id INTEGER PRIMARY KEY REFERENCES journals(id) ON DELETE CASCADE,
+        route_id UUID REFERENCES routes(id) ON DELETE SET NULL,
+        water_type TEXT,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL,
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL
+    )""",
+    # Journal skiing data table (CROSS_COUNTRY_SKIING type)
+    """CREATE TABLE journal_skiing_data (
+        journal_id INTEGER PRIMARY KEY REFERENCES journals(id) ON DELETE CASCADE,
+        route_id UUID REFERENCES routes(id) ON DELETE SET NULL,
+        snow_conditions TEXT,
         created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL,
         updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL
     )""",
