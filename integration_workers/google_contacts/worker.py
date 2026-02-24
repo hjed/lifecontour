@@ -1236,6 +1236,7 @@ async def sync_google_contacts(
     google_account_email: str,
     user_id: str | int,
     sync_type: str = "smart",
+    **kwargs: Any,
 ) -> dict[str, Any]:
     """
     Sync Google Contacts for a specific Google account.
