@@ -1049,31 +1049,39 @@ async def _process_journal_type_data(
 
         event_data = normalized_type_data["event"]
 
-        # Convert string times to time objects if provided
-        start_time = None
-        if event_data.get("start_time"):
-            start_time_str = event_data["start_time"]
-            # Parse HH:MM:SS format
-            hours, minutes, seconds = map(int, start_time_str.split(":"))
-            start_time = dt_time(hours, minutes, seconds)
+        try:
+            # Convert string times to time objects if provided
+            start_time = None
+            if event_data.get("start_time"):
+                start_time_str = event_data["start_time"]
+                # Parse HH:MM:SS format
+                hours, minutes, seconds = map(int, start_time_str.split(":"))
+                start_time = dt_time(hours, minutes, seconds)
 
-        end_time = None
-        if event_data.get("end_time"):
-            end_time_str = event_data["end_time"]
-            # Parse HH:MM:SS format
-            hours, minutes, seconds = map(int, end_time_str.split(":"))
-            end_time = dt_time(hours, minutes, seconds)
+            end_time = None
+            if event_data.get("end_time"):
+                end_time_str = event_data["end_time"]
+                # Parse HH:MM:SS format
+                hours, minutes, seconds = map(int, end_time_str.split(":"))
+                end_time = dt_time(hours, minutes, seconds)
 
-        calendar_info = CalendarInfo(
-            journal_id=journal_id,
-            calendar_id=UUID(event_data["calendar_id"]),
-            start_time=start_time,
-            end_time=end_time,
-            is_all_day=event_data.get("is_all_day", False),
-            location=event_data.get("location"),
-            sync_invitees=event_data.get("sync_invitees", False),
-        )
-        await calendar_info_repo.save(calendar_info)
+            calendar_info = CalendarInfo(
+                journal_id=journal_id,
+                calendar_id=UUID(event_data["calendar_id"]),
+                start_time=start_time,
+                end_time=end_time,
+                is_all_day=event_data.get("is_all_day", False),
+                location=event_data.get("location"),
+                sync_invitees=event_data.get("sync_invitees", False),
+            )
+            await calendar_info_repo.save(calendar_info)
+        except (ValueError, KeyError) as exc:
+            from fastapi import HTTPException
+
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid EVENT type_data: {exc}",
+            ) from exc
 
     # Process PHOTO_ALBUM type data
     if "photo_album" in normalized_type_data:
@@ -1101,19 +1109,35 @@ async def _process_journal_type_data(
             documents: list[PlanDocument] = []
             for doc in plan_payload["documents"]:
                 doc_id = uuid.uuid4()
+                # Coerce null/blank title to "Untitled"
+                title_raw = doc.get("title")
+                if not title_raw or (
+                    isinstance(title_raw, str) and not title_raw.strip()
+                ):
+                    title = "Untitled"
+                else:
+                    title = title_raw
+                # Coerce null order to sequential index
+                order_raw = doc.get("order")
+                order = order_raw if isinstance(order_raw, int) else len(documents)
                 documents.append(
                     PlanDocument(
                         id=doc_id,
                         journal_id=journal_id,
                         url=doc["url"],
-                        title=doc.get("title", "Untitled"),
+                        title=title,
                         description=doc.get("description"),
-                        order=doc.get("order", len(documents)),
+                        order=order,
                     )
                 )
             plan_data.documents = documents
 
+        # Persist PlanData itself
         await plan_data_repo.save(plan_data)
+
+        # Persist each PlanDocument explicitly (save() does not cascade documents)
+        for document in plan_data.documents:
+            await plan_data_repo.save_document(document)
 
     # Process TRAVEL type data
     if "travel" in normalized_type_data and travel_data_repo:

@@ -58,6 +58,8 @@ test.describe('Journal Creation UI Flow', () => {
 
     // Verify type badge and mood data exist in the UI
     await expect(page.getByTestId('type-badge-mood_rating')).toBeVisible();
+    // Verify the persisted mood value (default 5) is shown on the detail page
+    await expect(page.getByTestId('mood-value-display')).toHaveText('5');
   });
 
   test('should create a PLAN journal', async ({ authenticatedPage }) => {
@@ -93,6 +95,11 @@ test.describe('Journal Creation UI Flow', () => {
 
     await page.waitForURL(/\/journals\/\d+/);
     await expect(page.getByTestId('type-badge-plan')).toBeVisible();
+    // Verify the document was persisted and rendered on the detail page
+    await expect(page.getByTestId('document-url-0')).toHaveValue(
+      'https://example.com/plan'
+    );
+    await expect(page.getByTestId('document-title-0')).toHaveValue('Itinerary');
   });
 
   test('should create an EVENT journal with calendar info', async ({
