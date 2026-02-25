@@ -47,17 +47,25 @@ async function awaitCreationAndAssertBadge(page: Page, badgeTestId: string) {
 
 test.describe('Journal Creation UI Flow', () => {
   test.beforeEach(async ({ authenticatedPage }) => {
+    const debugE2E = !!process.env.DEBUG_E2E;
+
     authenticatedPage.on('console', msg => {
-      console.log(`[Browser Console] ${msg.type()}: ${msg.text()}`);
+      const type = msg.type();
+      // In normal runs, only log browser console errors/warnings to keep CI output manageable.
+      // Set DEBUG_E2E=1 to log all console messages for deeper debugging.
+      if (!debugE2E && type !== 'error' && type !== 'warning') {
+        return;
+      }
+      console.log(`[Browser Console] ${type}: ${msg.text()}`);
     });
-    // Log API responses for journals to see backend validation errors
+    // Log API errors for journals to surface backend validation failures
     authenticatedPage.on('response', async response => {
       if (
         response.url().includes('/api/journals') &&
         response.request().method() === 'POST'
       ) {
-        console.log(`[API Response] ${response.status()}`);
         if (!response.ok()) {
+          console.log(`[API Response] ${response.status()}`);
           try {
             const data = await response.json();
             console.log('[API JSON Body Error]', JSON.stringify(data, null, 2));
@@ -142,7 +150,10 @@ test.describe('Journal Creation UI Flow', () => {
         },
       },
     });
+    expect(calendarRes.ok()).toBeTruthy();
     const calendarJson = await calendarRes.json();
+    expect(calendarJson.data).toBeDefined();
+    expect(calendarJson.data.id).toBeDefined();
     const calendarId = calendarJson.data.id;
 
     await navigateToNewJournal(page);

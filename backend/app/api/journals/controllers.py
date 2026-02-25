@@ -1054,20 +1054,27 @@ async def _process_journal_type_data(
         event_data = normalized_type_data["event"]
 
         try:
+
+            def _parse_time_str(time_str: str) -> dt_time:
+                """Parse HH:MM or HH:MM:SS time strings from HTML time inputs."""
+                parts = time_str.split(":")
+                if len(parts) == 2:  # noqa: PLR2004
+                    hours, minutes = map(int, parts)
+                    seconds = 0
+                elif len(parts) == 3:  # noqa: PLR2004
+                    hours, minutes, seconds = map(int, parts)
+                else:
+                    raise ValueError(f"Invalid time format: {time_str!r}")
+                return dt_time(hours, minutes, seconds)
+
             # Convert string times to time objects if provided
             start_time = None
             if event_data.get("start_time"):
-                start_time_str = event_data["start_time"]
-                # Parse HH:MM:SS format
-                hours, minutes, seconds = map(int, start_time_str.split(":"))
-                start_time = dt_time(hours, minutes, seconds)
+                start_time = _parse_time_str(event_data["start_time"])
 
             end_time = None
             if event_data.get("end_time"):
-                end_time_str = event_data["end_time"]
-                # Parse HH:MM:SS format
-                hours, minutes, seconds = map(int, end_time_str.split(":"))
-                end_time = dt_time(hours, minutes, seconds)
+                end_time = _parse_time_str(event_data["end_time"])
 
             calendar_info = CalendarInfo(
                 journal_id=journal_id,
