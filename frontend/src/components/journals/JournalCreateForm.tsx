@@ -248,13 +248,31 @@ export function JournalCreateForm({ onCancel }: JournalCreateFormProps = {}) {
     try {
       const endDate = values.dateRange.to || values.dateRange.from;
 
-      // Build type_data from collected editor data for selected types
+      // Build type_data from collected editor data for selected types.
+      // Sanitise each type before including it to avoid backend validation errors
+      // when the editor mounts and emits its initial (empty) state.
       const submittedTypeData: Record<string, JournalTypeData> = {};
       for (const type of values.types) {
         const data = typeData[type as keyof TypeDataState];
-        if (data !== undefined) {
-          submittedTypeData[type] = data;
+        if (data === undefined) continue;
+
+        // EVENT: only include if a calendar_id has been filled in.
+        if (type === JournalType.EVENT) {
+          const eventData = data as CalendarInfoData;
+          if (!eventData.calendar_id) continue;
         }
+
+        // PLAN: filter out document rows where the required `url` field is empty.
+        if (type === JournalType.PLAN) {
+          const planData = data as PlanData;
+          const validDocuments = planData.documents.filter(
+            doc => doc.url && doc.url.trim() !== ''
+          );
+          submittedTypeData[type] = { ...planData, documents: validDocuments };
+          continue;
+        }
+
+        submittedTypeData[type] = data;
       }
 
       const result = await createJournal({

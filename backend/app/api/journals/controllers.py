@@ -1173,9 +1173,25 @@ async def _process_journal_type_data(
         energy_level_raw = mood_payload.get("energy_level")
 
         if mood_value_raw is not None:
-            mood_data.mood_value = int(mood_value_raw)
+            try:
+                mood_data.mood_value = int(mood_value_raw)
+            except (TypeError, ValueError) as exc:
+                from fastapi import HTTPException
+
+                raise HTTPException(
+                    status_code=400,
+                    detail="mood_value must be an integer",
+                ) from exc
         if energy_level_raw is not None:
-            mood_data.energy_level = int(energy_level_raw)
+            try:
+                mood_data.energy_level = int(energy_level_raw)
+            except (TypeError, ValueError) as exc:
+                from fastapi import HTTPException
+
+                raise HTTPException(
+                    status_code=400,
+                    detail="energy_level must be an integer",
+                ) from exc
         mood_data.mood_label = mood_payload.get("mood_label") or mood_data.mood_label
 
         await mood_data_repo.save(mood_data)

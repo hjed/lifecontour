@@ -36,9 +36,13 @@ async function fillAndSubmitJournal(
  * Wait for redirect to a journal detail page and assert the given type badge is visible.
  * Returns the final URL so callers can extract the journal ID if needed.
  */
-async function awaitCreationAndAssertBadge(page: Page, badgeTestId: string) {
+async function awaitCreationAndAssertBadge(
+  page: Page,
+  badgeTestId: string
+): Promise<string> {
   await page.waitForURL(/\/journals\/\d+/);
   await expect(page.getByTestId(badgeTestId)).toBeVisible();
+  return page.url();
 }
 
 // ---------------------------------------------------------------------------
@@ -84,16 +88,16 @@ test.describe('Journal Creation UI Flow', () => {
     await navigateToNewJournal(page);
 
     const title = `Mood Check ${Date.now()}`;
-    await fillAndSubmitJournal(page, {
-      title,
-      content: 'Feeling neutral today.',
-      typeLabelRegex: /^mood rating$/i,
-    });
+    await page.getByLabel(/title/i).fill(title);
+    await page.getByLabel(/content/i).fill('Feeling neutral today.');
+    await page.getByLabel(/^mood rating$/i).check();
 
-    // Verify editors appear and default to 5 before submitting
-    // (checked during fill; editors shown synchronously after type selection)
+    // Assert the editor is visible and defaults to 5 BEFORE submitting,
+    // so navigation cannot race with these assertions.
     await expect(page.getByTestId('mood-rating-type-editor')).toBeVisible();
     await expect(page.getByTestId('mood-value-display')).toHaveText('5');
+
+    await page.getByRole('button', { name: /create journal/i }).click();
 
     await awaitCreationAndAssertBadge(page, 'type-badge-mood_rating');
     // Verify the persisted mood value (default 5) is shown on the detail page
@@ -187,9 +191,8 @@ test.describe('Journal Creation UI Flow', () => {
       typeLabelRegex: /^travel$/i,
     });
 
-    // Wait for travel editor to be visible before the form is submitted
-    // (the editor appears synchronously — the form was already submitted above,
-    // but the check happens on the pre-submit state so we use the badge assertion)
+    // fillAndSubmitJournal already clicked Create Journal; wait for the redirect
+    // and verify the travel type badge appears on the detail page.
     await awaitCreationAndAssertBadge(page, 'type-badge-travel');
   });
 
