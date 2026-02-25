@@ -2322,3 +2322,147 @@ class TestJournalTypeDataValidation:
         assert response.status_code == 400, (
             "Integer snow_conditions should return 400 not 500"
         )
+
+
+@pytest.mark.integration
+class TestJournalTypeCreationWithDependencies:
+    """Integration tests for journal creation with type dependency resolution.
+
+    Tests that type dependencies are correctly resolved and that duplicate
+    type data rows are NOT created when multiple requested types share deps.
+    """
+
+    @pytest_asyncio.fixture(autouse=True)
+    async def setup_method(self, clean_database):  # noqa: ARG002
+        """Setup method to ensure clean database for each test."""
+        pass
+
+    async def test_create_journal_with_canyoning_type_creates_all_dependent_types(
+        self, integration_api_client
+    ):
+        """Creating a journal with CANYONING type resolves all 5 dependent types."""
+        create_data = create_journal_request_data(
+            title="Canyoning Adventure",
+            content="Amazing canyon descent",
+            types=["CANYONING"],
+        )
+
+        response = await integration_api_client.post("/api/journals", json=create_data)
+
+        assert response.status_code == 201, response.text
+        data = response.json()
+        types = data["data"]["attributes"]["types"]
+
+        # CANYONING resolves: FITNESS, OUTDOOR_ACTIVITY, ABSEILING_TRIP, BUSHWALKING, CANYONING
+        assert "canyoning" in types, f"Expected canyoning in {types}"
+        assert "bushwalking" in types, f"Expected bushwalking in {types}"
+        assert "abseiling_trip" in types, f"Expected abseiling_trip in {types}"
+        assert "outdoor_activity" in types, f"Expected outdoor_activity in {types}"
+        assert "fitness" in types, f"Expected fitness in {types}"
+
+    async def test_create_journal_with_overlapping_dependencies_does_not_fail(
+        self, integration_api_client
+    ):
+        """Creating a journal with CANYONING + BUSHWALKING (shared deps) succeeds.
+
+        This is the regression test for the bug where overlapping dependencies
+        caused IntegrityError when trying to insert duplicate type data rows.
+        """
+        create_data = create_journal_request_data(
+            title="Canyoning and Bushwalking",
+            content="Combined adventure",
+            types=["CANYONING", "BUSHWALKING"],
+        )
+
+        response = await integration_api_client.post("/api/journals", json=create_data)
+
+        assert response.status_code == 201, (
+            f"Expected 201 but got {response.status_code}: {response.text}"
+        )
+        data = response.json()
+        types = data["data"]["attributes"]["types"]
+
+        # All 5 types should be present exactly once each
+        assert "canyoning" in types, f"Expected canyoning in {types}"
+        assert "bushwalking" in types, f"Expected bushwalking in {types}"
+        assert "abseiling_trip" in types, f"Expected abseiling_trip in {types}"
+        assert "outdoor_activity" in types, f"Expected outdoor_activity in {types}"
+        assert "fitness" in types, f"Expected fitness in {types}"
+
+        # Each type should appear exactly once (no duplicates)
+        assert types.count("fitness") == 1, (
+            f"fitness appeared {types.count('fitness')} times"
+        )
+        assert types.count("outdoor_activity") == 1
+        assert types.count("bushwalking") == 1
+
+    async def test_create_journal_with_jogging_creates_fitness_dependency(
+        self, integration_api_client
+    ):
+        """Creating a journal with JOGGING type also creates FITNESS dependency."""
+        create_data = create_journal_request_data(
+            title="Morning Jog",
+            content="5km run",
+            types=["JOGGING"],
+        )
+
+        response = await integration_api_client.post("/api/journals", json=create_data)
+
+        assert response.status_code == 201, response.text
+        data = response.json()
+        types = data["data"]["attributes"]["types"]
+
+        assert "jogging" in types, f"Expected jogging in {types}"
+        assert "fitness" in types, f"Expected fitness in {types}"
+
+    async def test_create_journal_with_mood_rating_type_creates_mood_data(
+        self, integration_api_client
+    ):
+        """Creating a journal with MOOD_RATING type creates the mood data row."""
+        create_data = create_journal_request_data(
+            title="Mood Check-in",
+            content="Feeling good today",
+            types=["MOOD_RATING"],
+        )
+
+        response = await integration_api_client.post("/api/journals", json=create_data)
+
+        assert response.status_code == 201, response.text
+        data = response.json()
+        attrs = data["data"]["attributes"]
+
+        assert "mood_rating" in attrs["types"], (
+            f"Expected mood_rating in {attrs['types']}"
+        )
+        assert "mood_rating" in attrs.get("type_data", {}), (
+            "Expected mood_rating data in type_data"
+        )
+
+    async def test_create_journal_with_multiple_overlapping_activity_types_succeeds(
+        self, integration_api_client
+    ):
+        """Creating a journal with CLIMBING + ABSEILING_TRIP (shared deps) succeeds."""
+        create_data = create_journal_request_data(
+            title="Climbing and Abseiling",
+            content="Multi-discipline day",
+            types=["CLIMBING", "ABSEILING_TRIP"],
+        )
+
+        response = await integration_api_client.post("/api/journals", json=create_data)
+
+        assert response.status_code == 201, (
+            f"Expected 201 but got {response.status_code}: {response.text}"
+        )
+        data = response.json()
+        types = data["data"]["attributes"]["types"]
+
+        # Both types plus their shared dependencies
+        assert "climbing" in types, f"Expected climbing in {types}"
+        assert "abseiling_trip" in types, f"Expected abseiling_trip in {types}"
+        assert "outdoor_activity" in types, f"Expected outdoor_activity in {types}"
+        assert "fitness" in types, f"Expected fitness in {types}"
+
+        # No duplicate fitness
+        assert types.count("fitness") == 1, (
+            f"fitness appeared {types.count('fitness')} times (expected 1)"
+        )

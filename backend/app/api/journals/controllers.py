@@ -1025,6 +1025,8 @@ async def _process_journal_type_data(
     type_data: dict[str, Any],
     calendar_info_repo: CalendarInfoRepository,
     photo_album_data_repo: PhotoAlbumDataRepository,
+    plan_data_repo: PlanDataRepository | None = None,
+    travel_data_repo: TravelDataRepository | None = None,
 ) -> None:
     """
     Process and save type-specific data for a journal.
@@ -1083,6 +1085,45 @@ async def _process_journal_type_data(
             immich_album_id=photo_data["immich_album_id"],
         )
         await photo_album_data_repo.save(photo_album_data)
+
+    # Process PLAN type data
+    if "plan" in normalized_type_data and plan_data_repo:
+        import uuid
+
+        from app.core.journal.models.plan_data import PlanData, PlanDocument
+
+        plan_payload = normalized_type_data["plan"]
+        plan_data = await plan_data_repo.find_by_journal_id(journal_id)
+        if not plan_data:
+            plan_data = PlanData(journal_id=journal_id)
+
+        if "documents" in plan_payload:
+            documents: list[PlanDocument] = []
+            for doc in plan_payload["documents"]:
+                doc_id = uuid.uuid4()
+                documents.append(
+                    PlanDocument(
+                        id=doc_id,
+                        journal_id=journal_id,
+                        url=doc["url"],
+                        title=doc.get("title", "Untitled"),
+                        description=doc.get("description"),
+                        order=doc.get("order", len(documents)),
+                    )
+                )
+            plan_data.documents = documents
+
+        await plan_data_repo.save(plan_data)
+
+    # Process TRAVEL type data
+    if "travel" in normalized_type_data and travel_data_repo:
+        from app.core.journal.models.travel_data import TravelData
+
+        # Payload for travel currently empty in UI, but create data if valid
+        travel_data = await travel_data_repo.find_by_journal_id(journal_id)
+        if not travel_data:
+            travel_data = TravelData(journal_id=journal_id)
+        await travel_data_repo.save(travel_data)
 
 
 async def _process_journal_contact_relationships(
@@ -1191,6 +1232,8 @@ async def create_journal(
             journal_request.data.attributes.type_data,
             calendar_info_repo,
             photo_album_data_repo,
+            plan_data_repo,
+            travel_data_repo,
         )
 
     # Add contact relationships if provided in the request (via relationships field)
