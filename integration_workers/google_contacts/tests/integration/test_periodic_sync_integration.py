@@ -6,42 +6,15 @@ These tests verify the end-to-end periodic sync flow with real database and Redi
 import os
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, patch
+from contextlib import asynccontextmanager
 
 import pytest
 import pytest_asyncio
 from arq import create_pool
 from arq.connections import RedisSettings
 from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
-from sqlalchemy.orm import sessionmaker
 
 from worker import periodic_sync_all_accounts
-
-
-def get_async_database_url() -> str:
-    """Get the database URL and ensure it uses asyncpg driver."""
-    database_url = os.getenv(
-        "DATABASE_URL", "postgresql://postgres:postgres@localhost:5432/test_db"
-    )
-    # Convert to asyncpg URL if needed
-    if database_url.startswith("postgresql://") and "+asyncpg" not in database_url:
-        database_url = database_url.replace("postgresql://", "postgresql+asyncpg://", 1)
-    return database_url
-
-
-def create_session_factory(database_url: str):
-    """Create a session factory for the given database URL."""
-    engine = create_async_engine(database_url, echo=False)
-    return sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
-
-
-@pytest_asyncio.fixture
-async def db_session():
-    """Create database session for tests."""
-    database_url = get_async_database_url()
-    session_factory = create_session_factory(database_url)
-    async with session_factory() as session:
-        yield session
 
 
 @pytest_asyncio.fixture
@@ -87,10 +60,11 @@ class TestPeriodicSyncIntegration:
         )
         await db_session.commit()
 
-        # Create context with session_factory and redis pool
-        database_url = get_async_database_url()
-        session_factory = create_session_factory(database_url)
-        ctx = {"session_factory": session_factory, "redis": redis_pool}
+        @asynccontextmanager
+        async def mock_session_factory():
+            yield db_session
+
+        ctx = {"session_factory": mock_session_factory, "redis": redis_pool}
 
         # Mock the sync_google_contacts function to track calls
         with patch("worker.sync_google_contacts", new_callable=AsyncMock) as mock_sync:
@@ -132,10 +106,11 @@ class TestPeriodicSyncIntegration:
         )
         await db_session.commit()
 
-        # Create context
-        database_url = get_async_database_url()
-        session_factory = create_session_factory(database_url)
-        ctx = {"session_factory": session_factory, "redis": redis_pool}
+        @asynccontextmanager
+        async def mock_session_factory():
+            yield db_session
+
+        ctx = {"session_factory": mock_session_factory, "redis": redis_pool}
 
         # Call periodic_sync_all_accounts
         await periodic_sync_all_accounts(ctx)
@@ -150,10 +125,11 @@ class TestPeriodicSyncIntegration:
         """Test that periodic sync handles no active accounts gracefully."""
         # Don't insert any test data - no active accounts
 
-        # Create context
-        database_url = get_async_database_url()
-        session_factory = create_session_factory(database_url)
-        ctx = {"session_factory": session_factory, "redis": redis_pool}
+        @asynccontextmanager
+        async def mock_session_factory():
+            yield db_session
+
+        ctx = {"session_factory": mock_session_factory, "redis": redis_pool}
 
         # Call periodic_sync_all_accounts - should not raise any errors
         await periodic_sync_all_accounts(ctx)
