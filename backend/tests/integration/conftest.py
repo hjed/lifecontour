@@ -329,413 +329,6 @@ class DockerManager:
         raise RuntimeError("Test database failed to start within timeout")
 
 
-# SQL DDL statements for test database schema (each statement executed separately)
-TEST_DATABASE_SCHEMA_STATEMENTS = [
-    # Drop tables if they exist (in reverse dependency order)
-    "DROP TABLE IF EXISTS journal_contact_relationships CASCADE",
-    "DROP TABLE IF EXISTS journal_tag_assignments CASCADE",
-    "DROP TABLE IF EXISTS journal_tags CASCADE",
-    "DROP TABLE IF EXISTS journal_travel_transportation CASCADE",
-    "DROP TABLE IF EXISTS journal_travel_accommodations CASCADE",
-    "DROP TABLE IF EXISTS journal_travel_flights CASCADE",
-    "DROP TABLE IF EXISTS journal_travel_data CASCADE",
-    "DROP TABLE IF EXISTS journal_plan_documents CASCADE",
-    "DROP TABLE IF EXISTS journal_plan_data CASCADE",
-    "DROP TABLE IF EXISTS journal_photo_album_data CASCADE",
-    "DROP TABLE IF EXISTS journal_mood_data CASCADE",
-    "DROP TABLE IF EXISTS journal_calendar_info CASCADE",
-    "DROP TABLE IF EXISTS journal_canyoning_data CASCADE",
-    "DROP TABLE IF EXISTS journal_climbing_data CASCADE",
-    "DROP TABLE IF EXISTS journal_kayaking_data CASCADE",
-    "DROP TABLE IF EXISTS journal_skiing_data CASCADE",
-    "DROP TABLE IF EXISTS journal_abseiling_data CASCADE",
-    "DROP TABLE IF EXISTS journal_jogging_data CASCADE",
-    "DROP TABLE IF EXISTS journal_bushwalking_data CASCADE",
-    "DROP TABLE IF EXISTS journal_outdoor_activity_data CASCADE",
-    "DROP TABLE IF EXISTS journal_fitness_data CASCADE",
-    "DROP TABLE IF EXISTS journals CASCADE",
-    "DROP TABLE IF EXISTS routes CASCADE",
-    "DROP TABLE IF EXISTS calendars CASCADE",
-    "DROP TABLE IF EXISTS contact_relationships CASCADE",
-    "DROP TABLE IF EXISTS contact_tags CASCADE",
-    "DROP TABLE IF EXISTS contact_notes CASCADE",
-    "DROP TABLE IF EXISTS contact_addresses CASCADE",
-    "DROP TABLE IF EXISTS contact_methods CASCADE",
-    "DROP TABLE IF EXISTS contact_field_history CASCADE",
-    "DROP TABLE IF EXISTS contact_edit_event CASCADE",
-    "DROP TABLE IF EXISTS contacts CASCADE",
-    "DROP TABLE IF EXISTS tags CASCADE",
-    "DROP TABLE IF EXISTS user_google_auth CASCADE",
-    # Create tables
-    """CREATE TABLE contacts (
-        id SERIAL PRIMARY KEY,
-        first_name VARCHAR(100) NOT NULL,
-        last_name VARCHAR(100),
-        middle_name VARCHAR(100),
-        nick_name VARCHAR(100),
-        company VARCHAR(200),
-        job_title VARCHAR(200),
-        is_favourite BOOLEAN DEFAULT FALSE NOT NULL,
-        created_at TIMESTAMP DEFAULT NOW(),
-        updated_at TIMESTAMP DEFAULT NOW()
-    )""",
-    """CREATE TABLE contact_methods (
-        id SERIAL PRIMARY KEY,
-        contact_id INTEGER NOT NULL REFERENCES contacts(id) ON DELETE CASCADE,
-        method_type VARCHAR(50) NOT NULL,
-        value VARCHAR(255) NOT NULL,
-        label VARCHAR(100),
-        is_primary BOOLEAN DEFAULT FALSE,
-        created_at TIMESTAMP DEFAULT NOW(),
-        updated_at TIMESTAMP DEFAULT NOW()
-    )""",
-    """CREATE UNIQUE INDEX contact_methods_primary_unique
-    ON contact_methods (contact_id, method_type)
-    WHERE is_primary = true""",
-    """CREATE UNIQUE INDEX contact_methods_email_unique
-    ON contact_methods (value)
-    WHERE method_type = 'email'""",
-    """CREATE TABLE contact_addresses (
-        id SERIAL PRIMARY KEY,
-        contact_id INTEGER NOT NULL REFERENCES contacts(id) ON DELETE CASCADE,
-        label VARCHAR(100),
-        street_line_1 VARCHAR(255) NOT NULL,
-        street_line_2 VARCHAR(255),
-        locality VARCHAR(100),
-        region VARCHAR(100),
-        postal_code VARCHAR(20),
-        country_code VARCHAR(2) NOT NULL,
-        is_primary BOOLEAN DEFAULT FALSE,
-        created_at TIMESTAMP DEFAULT NOW(),
-        updated_at TIMESTAMP DEFAULT NOW()
-    )""",
-    """CREATE UNIQUE INDEX contact_addresses_primary_unique
-    ON contact_addresses (contact_id)
-    WHERE is_primary = true""",
-    """CREATE TABLE contact_notes (
-        id SERIAL PRIMARY KEY,
-        contact_id INTEGER NOT NULL REFERENCES contacts(id) ON DELETE CASCADE,
-        content TEXT NOT NULL,
-        created_at TIMESTAMP DEFAULT NOW(),
-        updated_at TIMESTAMP DEFAULT NOW()
-    )""",
-    """CREATE TABLE tags (
-        id SERIAL PRIMARY KEY,
-        name VARCHAR(100) NOT NULL UNIQUE,
-        parent_id INTEGER REFERENCES tags(id) ON DELETE SET NULL,
-        color VARCHAR(7),
-        description TEXT,
-        created_at TIMESTAMP DEFAULT NOW(),
-        updated_at TIMESTAMP DEFAULT NOW()
-    )""",
-    """CREATE TABLE contact_tags (
-        contact_id INTEGER NOT NULL REFERENCES contacts(id) ON DELETE CASCADE,
-        tag_id INTEGER NOT NULL REFERENCES tags(id) ON DELETE CASCADE,
-        PRIMARY KEY (contact_id, tag_id)
-    )""",
-    """CREATE TABLE contact_field_history (
-        id SERIAL PRIMARY KEY,
-        entity_type VARCHAR(50) NOT NULL,
-        entity_id INTEGER NOT NULL,
-        field_name VARCHAR(100) NOT NULL,
-        old_value TEXT,
-        new_value TEXT,
-        changed_by VARCHAR(100) DEFAULT 'system',
-        created_at TIMESTAMP DEFAULT NOW()
-    )""",
-    """CREATE TABLE contact_edit_event (
-        id SERIAL PRIMARY KEY,
-        event_id VARCHAR(255) NOT NULL UNIQUE,
-        event_type VARCHAR(100) NOT NULL,
-        aggregate_id INTEGER NOT NULL,
-        event_data JSONB NOT NULL,
-        occurred_at TIMESTAMP NOT NULL,
-        correlation_id VARCHAR(255)
-    )""",
-    """CREATE TABLE contact_relationships (
-        id SERIAL PRIMARY KEY,
-        from_contact_id INTEGER NOT NULL REFERENCES contacts(id) ON DELETE CASCADE,
-        to_contact_id INTEGER NOT NULL REFERENCES contacts(id) ON DELETE CASCADE,
-        relationship_type VARCHAR(50) NOT NULL CHECK (relationship_type IN ('partner', 'child', 'parent', 'sibling', 'friend', 'colleague', 'family', 'other')),
-        created_at TIMESTAMP DEFAULT NOW() NOT NULL,
-        updated_at TIMESTAMP DEFAULT NOW() NOT NULL,
-        CONSTRAINT ck_contact_relationships_no_self_reference CHECK (from_contact_id != to_contact_id),
-        CONSTRAINT uq_contact_relationships_unique_relationship UNIQUE (from_contact_id, to_contact_id, relationship_type)
-    )""",
-    """CREATE TABLE user_google_auth (
-        id SERIAL PRIMARY KEY,
-        user_id VARCHAR(50) NOT NULL,
-        google_account_email VARCHAR(255) NOT NULL,
-        encrypted_access_token BYTEA NOT NULL,
-        encrypted_refresh_token BYTEA,
-        expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
-        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL,
-        updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL,
-        CONSTRAINT uq_user_google_account UNIQUE (user_id, google_account_email)
-    )""",
-    """CREATE INDEX idx_user_google_auth_user_id ON user_google_auth (user_id)""",
-    """CREATE INDEX idx_user_google_auth_email ON user_google_auth (google_account_email)""",
-    # Journals table
-    """CREATE TABLE journals (
-        id SERIAL PRIMARY KEY,
-        user_id VARCHAR(50) NOT NULL,
-        title VARCHAR(500) NOT NULL,
-        content TEXT NOT NULL,
-        event_date_range_start TIMESTAMP WITH TIME ZONE NOT NULL,
-        event_date_range_end TIMESTAMP WITH TIME ZONE NOT NULL,
-        parent_id INTEGER REFERENCES journals(id) ON DELETE SET NULL,
-        "order" INTEGER,
-        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL,
-        updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL,
-        CONSTRAINT ck_journals_event_date_range_valid CHECK (event_date_range_start <= event_date_range_end)
-    )""",
-    """CREATE INDEX idx_journals_user_id ON journals (user_id)""",
-    """CREATE INDEX idx_journals_parent_id ON journals (parent_id)""",
-    """CREATE INDEX idx_journals_event_date_range ON journals (event_date_range_start, event_date_range_end)""",
-    """CREATE INDEX idx_journals_child_ordering ON journals (parent_id, event_date_range_start, "order")""",
-    """CREATE INDEX idx_journals_created_at ON journals (created_at)""",
-    # Routes table
-    """CREATE TABLE routes (
-        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-        user_id VARCHAR(50) NOT NULL,
-        name VARCHAR(200) NOT NULL,
-        description TEXT,
-        gpx_data TEXT,
-        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL,
-        updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL
-    )""",
-    """CREATE INDEX idx_routes_user_id ON routes (user_id)""",
-    """CREATE INDEX idx_routes_name ON routes (name)""",
-    """CREATE INDEX idx_routes_created_at ON routes (created_at)""",
-    # Journal fitness data table (FITNESS type)
-    """CREATE TABLE journal_fitness_data (
-        journal_id INTEGER PRIMARY KEY REFERENCES journals(id) ON DELETE CASCADE,
-        heart_rate_avg INTEGER CHECK (heart_rate_avg IS NULL OR heart_rate_avg >= 0),
-        heart_rate_max INTEGER CHECK (heart_rate_max IS NULL OR heart_rate_max >= 0),
-        distance INTEGER CHECK (distance IS NULL OR distance >= 0),
-        elevation_gain INTEGER CHECK (elevation_gain IS NULL OR elevation_gain >= 0),
-        elevation_loss INTEGER CHECK (elevation_loss IS NULL OR elevation_loss >= 0),
-        duration INTEGER CHECK (duration IS NULL OR duration >= 0),
-        calories INTEGER CHECK (calories IS NULL OR calories >= 0),
-        gpx_track_data TEXT,
-        strava_activity_id VARCHAR(255),
-        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL,
-        updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL
-    )""",
-    # Journal outdoor activity data table (OUTDOOR_ACTIVITY type)
-    """CREATE TABLE journal_outdoor_activity_data (
-        journal_id INTEGER PRIMARY KEY REFERENCES journals(id) ON DELETE CASCADE,
-        activity_type VARCHAR(100),
-        weather_conditions VARCHAR(200),
-        role VARCHAR(100),
-        in_leadership_role BOOLEAN,
-        participant_notes VARCHAR(2000),
-        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL,
-        updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL
-    )""",
-    # Journal bushwalking data table (BUSHWALKING type)
-    """CREATE TABLE journal_bushwalking_data (
-        journal_id INTEGER PRIMARY KEY REFERENCES journals(id) ON DELETE CASCADE,
-        route_id UUID REFERENCES routes(id) ON DELETE SET NULL,
-        track_grading VARCHAR(10) CHECK (
-            track_grading IS NULL OR track_grading IN
-            ('Grade 1', 'Grade 2', 'Grade 3', 'Grade 4', 'Grade 5')
-        ),
-        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL,
-        updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL
-    )""",
-    # Journal jogging data table (JOGGING type)
-    """CREATE TABLE journal_jogging_data (
-        journal_id INTEGER PRIMARY KEY REFERENCES journals(id) ON DELETE CASCADE,
-        route_id UUID REFERENCES routes(id) ON DELETE SET NULL,
-        pace INTEGER CHECK (pace IS NULL OR pace >= 0),
-        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL,
-        updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL
-    )""",
-    # Journal abseiling data table (ABSEILING_TRIP type)
-    """CREATE TABLE journal_abseiling_data (
-        journal_id INTEGER PRIMARY KEY REFERENCES journals(id) ON DELETE CASCADE,
-        number_of_abseils INTEGER CHECK (number_of_abseils IS NULL OR number_of_abseils >= 0),
-        total_length INTEGER CHECK (total_length IS NULL OR total_length >= 0),
-        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL,
-        updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL
-    )""",
-    # Journal canyoning data table (CANYONING type)
-    """CREATE TABLE journal_canyoning_data (
-        journal_id INTEGER PRIMARY KEY REFERENCES journals(id) ON DELETE CASCADE,
-        route_id UUID REFERENCES routes(id) ON DELETE SET NULL,
-        french_grade VARCHAR(20),
-        water_guage_name VARCHAR(200),
-        water_guage_level INTEGER,
-        is_vertical BOOLEAN,
-        is_night_canyon BOOLEAN,
-        is_white_water BOOLEAN,
-        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL,
-        updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL
-    )""",
-    # Journal climbing data table (CLIMBING type)
-    """CREATE TABLE journal_climbing_data (
-        journal_id INTEGER PRIMARY KEY REFERENCES journals(id) ON DELETE CASCADE,
-        route_id UUID REFERENCES routes(id) ON DELETE SET NULL,
-        climbing_type VARCHAR(20) CHECK (
-            climbing_type IS NULL OR climbing_type IN ('sport', 'trad', 'bouldering')
-        ),
-        grade INTEGER CHECK (grade IS NULL OR grade >= 0),
-        length INTEGER CHECK (length IS NULL OR length >= 0),
-        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL,
-        updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL
-    )""",
-    # Journal kayaking data table (KAYAKING type)
-    """CREATE TABLE journal_kayaking_data (
-        journal_id INTEGER PRIMARY KEY REFERENCES journals(id) ON DELETE CASCADE,
-        route_id UUID REFERENCES routes(id) ON DELETE SET NULL,
-        water_type TEXT,
-        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL,
-        updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL
-    )""",
-    # Journal skiing data table (CROSS_COUNTRY_SKIING type)
-    """CREATE TABLE journal_skiing_data (
-        journal_id INTEGER PRIMARY KEY REFERENCES journals(id) ON DELETE CASCADE,
-        route_id UUID REFERENCES routes(id) ON DELETE SET NULL,
-        snow_conditions TEXT,
-        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL,
-        updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL
-    )""",
-    # Calendars table
-    """CREATE TABLE calendars (
-        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-        user_id VARCHAR(50) NOT NULL,
-        name VARCHAR(100) NOT NULL,
-        color VARCHAR(7) NOT NULL,
-        description TEXT,
-        is_synced_to_google BOOLEAN DEFAULT FALSE NOT NULL,
-        google_calendar_id VARCHAR(255),
-        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL,
-        updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL
-    )""",
-    """CREATE INDEX idx_calendars_user_id ON calendars (user_id)""",
-    # Journal calendar info table (EVENT type)
-    """CREATE TABLE journal_calendar_info (
-        journal_id INTEGER PRIMARY KEY REFERENCES journals(id) ON DELETE CASCADE,
-        calendar_id UUID NOT NULL REFERENCES calendars(id) ON DELETE CASCADE,
-        start_time TIME,
-        end_time TIME,
-        is_all_day BOOLEAN DEFAULT FALSE NOT NULL,
-        location VARCHAR(500),
-        sync_invitees BOOLEAN DEFAULT FALSE NOT NULL,
-        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL,
-        updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL
-    )""",
-    """CREATE INDEX idx_journal_calendar_info_calendar_id ON journal_calendar_info (calendar_id)""",
-    # Journal mood data table (MOOD_RATING type)
-    """CREATE TABLE journal_mood_data (
-        journal_id INTEGER PRIMARY KEY REFERENCES journals(id) ON DELETE CASCADE,
-        mood_value INTEGER CHECK (mood_value IS NULL OR (mood_value >= 1 AND mood_value <= 10)),
-        mood_label VARCHAR(50),
-        energy_level INTEGER CHECK (energy_level IS NULL OR (energy_level >= 1 AND energy_level <= 10)),
-        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL,
-        updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL
-    )""",
-    # Journal photo album data table (PHOTO_ALBUM type)
-    """CREATE TABLE journal_photo_album_data (
-        journal_id INTEGER PRIMARY KEY REFERENCES journals(id) ON DELETE CASCADE,
-        immich_album_id VARCHAR(255) NOT NULL,
-        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL,
-        updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL
-    )""",
-    # Journal plan data table (PLAN type)
-    """CREATE TABLE journal_plan_data (
-        journal_id INTEGER PRIMARY KEY REFERENCES journals(id) ON DELETE CASCADE,
-        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL,
-        updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL
-    )""",
-    # Journal plan documents table
-    """CREATE TABLE journal_plan_documents (
-        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-        journal_id INTEGER NOT NULL REFERENCES journal_plan_data(journal_id) ON DELETE CASCADE,
-        url VARCHAR(2000) NOT NULL,
-        title VARCHAR(500) NOT NULL,
-        description TEXT,
-        "order" INTEGER NOT NULL,
-        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL
-    )""",
-    # Journal travel data table (TRAVEL type)
-    """CREATE TABLE journal_travel_data (
-        journal_id INTEGER PRIMARY KEY REFERENCES journals(id) ON DELETE CASCADE,
-        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL,
-        updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL
-    )""",
-    # Journal travel flights table
-    """CREATE TABLE journal_travel_flights (
-        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-        journal_id INTEGER NOT NULL REFERENCES journal_travel_data(journal_id) ON DELETE CASCADE,
-        flight_number VARCHAR(20) NOT NULL,
-        airline VARCHAR(100),
-        departure_airport VARCHAR(10) NOT NULL,
-        arrival_airport VARCHAR(10) NOT NULL,
-        departure_time TIMESTAMP WITH TIME ZONE NOT NULL,
-        arrival_time TIMESTAMP WITH TIME ZONE NOT NULL,
-        booking_reference VARCHAR(100),
-        seat_number VARCHAR(20),
-        confirmation_number VARCHAR(100),
-        "order" INTEGER NOT NULL,
-        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL
-    )""",
-    # Journal travel accommodations table
-    """CREATE TABLE journal_travel_accommodations (
-        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-        journal_id INTEGER NOT NULL REFERENCES journal_travel_data(journal_id) ON DELETE CASCADE,
-        name VARCHAR(200) NOT NULL,
-        address TEXT,
-        check_in_date DATE NOT NULL,
-        check_out_date DATE NOT NULL,
-        booking_reference VARCHAR(100),
-        confirmation_number VARCHAR(100),
-        "order" INTEGER NOT NULL,
-        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL,
-        CHECK (check_in_date < check_out_date)
-    )""",
-    # Journal travel transportation table
-    """CREATE TABLE journal_travel_transportation (
-        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-        journal_id INTEGER NOT NULL REFERENCES journal_travel_data(journal_id) ON DELETE CASCADE,
-        type VARCHAR(50) NOT NULL,
-        details TEXT NOT NULL,
-        booking_reference VARCHAR(100),
-        "order" INTEGER NOT NULL,
-        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL
-    )""",
-    # Journal tags table (hierarchical)
-    """CREATE TABLE journal_tags (
-        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-        name VARCHAR(100) NOT NULL UNIQUE,
-        parent_id UUID REFERENCES journal_tags(id) ON DELETE SET NULL,
-        color VARCHAR(7),
-        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL,
-        updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL
-    )""",
-    """CREATE INDEX idx_journal_tags_parent_id ON journal_tags (parent_id)""",
-    # Journal tag assignments table
-    """CREATE TABLE journal_tag_assignments (
-        journal_id INTEGER NOT NULL REFERENCES journals(id) ON DELETE CASCADE,
-        tag_id UUID NOT NULL REFERENCES journal_tags(id) ON DELETE CASCADE,
-        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL,
-        PRIMARY KEY (journal_id, tag_id)
-    )""",
-    """CREATE INDEX idx_journal_tag_assignments_tag_id ON journal_tag_assignments (tag_id)""",
-    # Journal contact relationships table
-    """CREATE TABLE journal_contact_relationships (
-        journal_id INTEGER NOT NULL REFERENCES journals(id) ON DELETE CASCADE,
-        contact_id INTEGER NOT NULL REFERENCES contacts(id) ON DELETE CASCADE,
-        relationship_type VARCHAR(20) NOT NULL CHECK (relationship_type IN ('PARTICIPANT', 'INVITEE', 'MENTION', 'ABOUT')),
-        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL,
-        PRIMARY KEY (journal_id, contact_id, relationship_type)
-    )""",
-    """CREATE INDEX idx_journal_contact_relationships_contact_id ON journal_contact_relationships (contact_id)""",
-    """CREATE INDEX idx_journal_contact_relationships_type ON journal_contact_relationships (relationship_type)""",
-]
-
-
 # Global instances
 _db_config = DatabaseConfig.from_environment()
 _docker_manager = DockerManager()
@@ -850,18 +443,20 @@ async def async_engine(setup_test_database) -> AsyncGenerator[AsyncEngine, None]
 async def async_connection(
     async_engine: AsyncEngine,
 ) -> AsyncGenerator[AsyncConnection, None]:
-    """Create async database connection with transaction rollback."""
-    async with async_engine.begin() as conn:
-        # Execute each schema statement separately (asyncpg doesn't support multiple commands in one statement)
-        for statement in TEST_DATABASE_SCHEMA_STATEMENTS:
-            await conn.execute(text(statement))
+    """Create async database connection with transaction rollback.
 
-        # Start a nested transaction for the test
+    Database schema is expected to be prepared (migrated) before tests run.
+    In local development this is typically done when starting the test
+    database (e.g. via setup_test_database / DockerManager.start_database()).
+    In CI, migrations are applied by the workflow before pytest is invoked.
+    Each test gets its own savepoint so writes are rolled back without
+    touching DDL.
+    """
+    async with async_engine.begin() as conn:
         nested_trans = await conn.begin_nested()
         try:
             yield conn
         finally:
-            # Always rollback the nested transaction
             await nested_trans.rollback()
 
 
@@ -1058,8 +653,15 @@ def authenticated_search_client(test_settings, mock_search_service, test_user):
 
 
 @pytest_asyncio.fixture
-async def authenticated_client(test_settings, test_user):
-    """Create an authenticated test client for integration tests."""
+async def authenticated_client(
+    async_connection: AsyncConnection, test_settings, test_user
+):
+    """Create an authenticated test client for integration tests.
+
+    Uses the test savepoint connection (async_connection) so that all DB writes
+    during a test are rolled back when the savepoint is released, preventing
+    state leakage between tests.
+    """
     from dishka import Provider, Scope, make_async_container, provide
     from dishka.integrations.fastapi import setup_dishka
     from httpx import ASGITransport, AsyncClient
@@ -1071,6 +673,17 @@ async def authenticated_client(test_settings, test_user):
     from app.infrastructure.events.outbox_event_publisher import OutboxEventPublisher
     from app.infrastructure.search.search_service import SearchService
     from app.main import create_app
+
+    class TestDatabaseProvider(Provider):
+        """Provides the test savepoint connection to the DI container."""
+
+        def __init__(self, connection: AsyncConnection):
+            super().__init__()
+            self.connection = connection
+
+        @provide(scope=Scope.REQUEST)
+        def get_connection(self) -> AsyncConnection:
+            return self.connection
 
     class TestAuthProvider(Provider):
         """Test provider for authenticated client."""
@@ -1091,43 +704,29 @@ async def authenticated_client(test_settings, test_user):
 
         @provide(scope=Scope.APP)
         def get_search_service(self) -> SearchService:
-            """
-            Get search service (singleton for app lifetime).
-
-            Required for full app initialization even if not directly used in OAuth tests.
-            Some routes depend on SearchService being available in the DI container.
-
-            Note: This is a mock/stub instance created without dependencies or configuration,
-            and is intended for testing purposes only.
-            """
+            """Get search service (test stub)."""
             return SearchService()
 
         @provide(scope=Scope.REQUEST)
         def get_outbox_event_publisher(
             self, connection: AsyncConnection
         ) -> OutboxEventPublisher:
-            """
-            Get outbox event publisher for request scope.
-
-            Required for full app initialization even if not directly used in OAuth tests.
-            Some routes depend on OutboxEventPublisher being available in the DI container.
-            """
+            """Get outbox event publisher for request scope."""
             return OutboxEventPublisher(connection)
 
     # Create app with test settings
     app = create_app(settings=test_settings)
 
-    # Replace container with test container that includes all providers
+    # Replace container with test container that uses the savepoint connection
     from dishka.integrations.fastapi import FastapiProvider
 
     from app.infrastructure.di.contacts import ContactProvider
-    from app.infrastructure.di.database import DatabaseProvider
     from app.infrastructure.di.infrastructure import InfrastructureProvider
     from app.infrastructure.di.integrations import IntegrationProvider
     from app.infrastructure.di.journal import JournalProvider
 
     test_container = make_async_container(
-        DatabaseProvider(test_settings),
+        TestDatabaseProvider(async_connection),  # <-- use savepoint connection
         InfrastructureProvider(),
         TestAuthProvider(),
         ContactProvider(),
@@ -1145,6 +744,8 @@ async def authenticated_client(test_settings, test_user):
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         yield client
+
+    await test_container.close()
 
 
 @pytest.fixture
@@ -1238,8 +839,6 @@ async def db_connection(async_connection: AsyncConnection) -> AsyncConnection:
 async def sample_journal_id(async_connection: AsyncConnection) -> int:
     """Create a sample journal for testing and return its ID."""
     from datetime import UTC, datetime, timedelta
-
-    from sqlalchemy import text
 
     now = datetime.now(UTC)
     query = text("""

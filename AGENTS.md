@@ -211,8 +211,10 @@ pnpm type-check       # TypeScript type checking
 **Common Mistake to Avoid:**
 - ❌ **Never** create custom fixtures in integration test files that duplicate conftest.py functionality
 - ❌ **Never** put integration tests that need real database in `tests/integration/**` without using proper fixtures
+- ❌ **Never** use `DatabaseProvider(test_settings)` in test clients — this creates independent connections that bypass the savepoint and **commit data to the database**, causing state to leak between tests
 - ✅ **Always** use the existing `async_connection` and `clean_database` fixtures from `tests/integration/conftest.py`
 - ✅ **Always** place API integration tests in the correct directory structure to inherit proper fixtures
+- ✅ **Always** inject `async_connection` into API test clients via a `TestDatabaseProvider` (see `authenticated_client` fixture in `tests/integration/conftest.py` for the correct pattern)
 
 ## Frontend Development Standards
 

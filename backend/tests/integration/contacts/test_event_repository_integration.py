@@ -1,9 +1,11 @@
 """Integration tests for ContactEditEventRepository with real database."""
 
 import pytest
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core.contacts.adapters.sql import SqlContactEditEventRepository
+from app.core.contacts.models.entities import Contact
 from app.core.contacts.models.repositories import ContactEditEvent
 
 
@@ -17,9 +19,24 @@ class TestContactEditEventRepositoryIntegration:
         return SqlContactEditEventRepository(clean_database)
 
     @pytest.mark.asyncio
-    async def test_store_event(self, event_repo):
+    async def test_store_event(self, event_repo, clean_database: AsyncConnection):
         """Test storing a domain event."""
         # Arrange
+        contact = Contact(id=1, first_name="John", last_name="Doe")
+        await clean_database.execute(
+            text(
+                """
+                INSERT INTO contacts (id, first_name, last_name)
+                VALUES (:id, :first_name, :last_name)
+                """
+            ),
+            {
+                "id": contact.id,
+                "first_name": contact.first_name,
+                "last_name": contact.last_name,
+            },
+        )
+
         event = ContactEditEvent(
             event_id="contact_created_1_2024-01-01T00:00:00",
             event_type="ContactCreated",
@@ -49,9 +66,20 @@ class TestContactEditEventRepositoryIntegration:
         assert saved_event.correlation_id == "correlation-123"
 
     @pytest.mark.asyncio
-    async def test_store_event_without_correlation_id(self, event_repo):
+    async def test_store_event_without_correlation_id(
+        self, event_repo, clean_database: AsyncConnection
+    ):
         """Test storing event without correlation ID."""
         # Arrange
+        await clean_database.execute(
+            text(
+                """
+                INSERT INTO contacts (id, first_name, last_name)
+                VALUES (2, 'Jane', 'Doe')
+                """
+            )
+        )
+
         event = ContactEditEvent(
             event_id="contact_updated_2_2024-01-02T00:00:00",
             event_type="ContactUpdated",
@@ -76,9 +104,20 @@ class TestContactEditEventRepositoryIntegration:
         ]
 
     @pytest.mark.asyncio
-    async def test_store_event_complex_data(self, event_repo):
+    async def test_store_event_complex_data(
+        self, event_repo, clean_database: AsyncConnection
+    ):
         """Test storing event with complex JSON data."""
         # Arrange
+        await clean_database.execute(
+            text(
+                """
+                INSERT INTO contacts (id, first_name, last_name)
+                VALUES (1, 'John', 'Doe')
+                """
+            )
+        )
+
         complex_data = {
             "contact_id": 1,
             "method_details": {
@@ -110,9 +149,20 @@ class TestContactEditEventRepositoryIntegration:
         assert saved_event.event_data["numbers"] == [1, 2, 3.14, -5]
 
     @pytest.mark.asyncio
-    async def test_get_events_for_contact(self, event_repo):
+    async def test_get_events_for_contact(
+        self, event_repo, clean_database: AsyncConnection
+    ):
         """Test getting events for a specific contact."""
-        # Arrange - Create events for multiple contacts
+        # Arrange - Create contacts for events
+        await clean_database.execute(
+            text(
+                """
+                INSERT INTO contacts (id, first_name, last_name)
+                VALUES (1, 'John', 'Doe'), (2, 'Jane', 'Smith')
+                """
+            )
+        )
+
         events = [
             ContactEditEvent(
                 event_id="contact_created_1_2024-01-01T00:00:00",
@@ -156,9 +206,20 @@ class TestContactEditEventRepositoryIntegration:
         assert "ContactUpdated" in event_types
 
     @pytest.mark.asyncio
-    async def test_get_events_for_contact_with_limit(self, event_repo):
+    async def test_get_events_for_contact_with_limit(
+        self, event_repo, clean_database: AsyncConnection
+    ):
         """Test getting events for contact with limit."""
         # Arrange - Create multiple events for same contact
+        await clean_database.execute(
+            text(
+                """
+                INSERT INTO contacts (id, first_name, last_name)
+                VALUES (1, 'John', 'Doe')
+                """
+            )
+        )
+
         for i in range(10):
             day = f"{i + 1:02d}" if i < 9 else "10"
             event = ContactEditEvent(
@@ -180,9 +241,20 @@ class TestContactEditEventRepositoryIntegration:
             assert limited_events[i].occurred_at >= limited_events[i + 1].occurred_at
 
     @pytest.mark.asyncio
-    async def test_get_events_by_type(self, event_repo):
+    async def test_get_events_by_type(
+        self, event_repo, clean_database: AsyncConnection
+    ):
         """Test getting events by type."""
         # Arrange - Create events of different types
+        await clean_database.execute(
+            text(
+                """
+                INSERT INTO contacts (id, first_name, last_name)
+                VALUES (1, 'John', 'Doe'), (2, 'Jane', 'Smith')
+                """
+            )
+        )
+
         events = [
             ContactEditEvent(
                 event_id="contact_created_1_2024-01-01T00:00:00",
@@ -230,9 +302,22 @@ class TestContactEditEventRepositoryIntegration:
         assert 2 in aggregate_ids
 
     @pytest.mark.asyncio
-    async def test_get_events_by_type_with_limit(self, event_repo):
+    async def test_get_events_by_type_with_limit(
+        self, event_repo, clean_database: AsyncConnection
+    ):
         """Test getting events by type with limit."""
         # Arrange - Create multiple events of same type
+        await clean_database.execute(
+            text(
+                """
+                INSERT INTO contacts (id, first_name, last_name)
+                VALUES (1, 'John', 'Doe'), (2, 'Jane', 'Smith'), (3, 'Bob', 'Johnson'),
+                       (4, 'Alice', 'Williams'), (5, 'Charlie', 'Brown'), (6, 'David', 'Davis'),
+                       (7, 'Eve', 'Evans'), (8, 'Frank', 'Franklin')
+                """
+            )
+        )
+
         for i in range(8):
             day = f"{i + 1:02d}"
             event = ContactEditEvent(
@@ -253,9 +338,20 @@ class TestContactEditEventRepositoryIntegration:
             assert event.event_type == "ContactUpdated"
 
     @pytest.mark.asyncio
-    async def test_get_events_by_correlation_id(self, event_repo):
+    async def test_get_events_by_correlation_id(
+        self, event_repo, clean_database: AsyncConnection
+    ):
         """Test getting events by correlation ID."""
         # Arrange - Create events with same correlation ID
+        await clean_database.execute(
+            text(
+                """
+                INSERT INTO contacts (id, first_name, last_name)
+                VALUES (1, 'John', 'Doe'), (2, 'Jane', 'Smith'), (3, 'Bob', 'Johnson')
+                """
+            )
+        )
+
         correlation_id = "batch-operation-123"
         events = [
             ContactEditEvent(
@@ -303,9 +399,18 @@ class TestContactEditEventRepositoryIntegration:
         assert 3 not in aggregate_ids
 
     @pytest.mark.asyncio
-    async def test_event_ordering(self, event_repo):
+    async def test_event_ordering(self, event_repo, clean_database: AsyncConnection):
         """Test that events are returned in correct order (most recent first)."""
         # Arrange - Create events with different timestamps
+        await clean_database.execute(
+            text(
+                """
+                INSERT INTO contacts (id, first_name, last_name)
+                VALUES (1, 'John', 'Doe')
+                """
+            )
+        )
+
         events = [
             ContactEditEvent(
                 event_id="event_1",

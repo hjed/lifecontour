@@ -299,29 +299,66 @@ export class TestDataHelpers {
 
 #### Test Isolation Patterns
 
-- **Transaction Rollback**: Each test runs in isolated transaction
-- **Schema Recreation**: Fresh database schema for each test session
-- **Data Cleanup**: Automatic cleanup between tests
-- **Connection Management**: Proper connection pooling and cleanup
+- **Transaction Rollback**: Each test runs in an outer transaction with a **nested savepoint**. The savepoint is rolled back after each test, restoring the database to a clean state.
+- **Schema Recreation**: Fresh database schema for each test session.
+- **Data Cleanup**: Automatic cleanup between tests via savepoint rollback.
+- **Connection Management**: Proper connection pooling and cleanup.
+
+> [!IMPORTANT]
+> **All database access during a test — including access via API test clients — must use the same `async_connection` savepoint fixture.** If a test client creates its own connection (e.g. via `DatabaseProvider`), data it writes will be committed to the real database and will leak into subsequent tests.
 
 #### Integration Test Structure
 
+The actual isolation is implemented using SQLAlchemy nested savepoints (`begin_nested`):
+
 ```python
 @pytest.fixture(scope="session")
-async def test_database():
-    """Start test database container and create schema."""
-    # Start Docker container
-    # Wait for database readiness
-    # Create schema
-    yield connection
-    # Cleanup and stop container
+async def async_connection(...):
+    """Session-scoped outer transaction; never committed."""
+    async with engine.connect() as conn:
+        await conn.begin()   # outer transaction — never committed
+        yield conn
+        await conn.rollback()
 
 @pytest.fixture
-async def clean_database(test_database):
-    """Provide clean database for each test."""
-    async with test_database.begin() as transaction:
-        yield transaction
-        await transaction.rollback()
+async def clean_database(async_connection):
+    """Per-test savepoint. Rolls back after each test."""
+    nested = await async_connection.begin_nested()
+    yield async_connection
+    await nested.rollback()  # restores pre-test state
+```
+
+#### API Test Clients Must Use the Savepoint Connection
+
+When writing API integration tests that use HTTP test clients (e.g. `AsyncClient`), you **must** inject `async_connection` via a custom provider — **do not** use `DatabaseProvider(test_settings)` which creates independent connections outside the savepoint:
+
+```python
+# ✅ CORRECT: inject the savepoint connection so writes are rolled back
+class TestDatabaseProvider(Provider):
+    def __init__(self, connection: AsyncConnection):
+        super().__init__()
+        self.connection = connection
+
+    @provide(scope=Scope.REQUEST)
+    def get_connection(self) -> AsyncConnection:
+        return self.connection
+
+@pytest_asyncio.fixture
+async def my_api_client(async_connection: AsyncConnection, ...):
+    test_container = make_async_container(
+        TestDatabaseProvider(async_connection),  # ← savepoint connection
+        ContactProvider(),
+        ...
+    )
+    async with AsyncClient(transport=ASGITransport(app=app)) as client:
+        yield client
+    await test_container.close()
+
+# ❌ WRONG: creates fresh connections that bypass the savepoint
+test_container = make_async_container(
+    DatabaseProvider(test_settings),  # ← commits to real DB — data leaks!
+    ...
+)
 ```
 
 #### Real Database Benefits
