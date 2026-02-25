@@ -181,13 +181,23 @@ class ContactService:
         self.history_service = history_service or ContactHistoryService(history_repo)
         self.tag_hierarchy = tag_hierarchy_service or TagHierarchyService(tag_repo)
 
-    async def _execute_with_retry(self, operation: Any, max_retries: int = 3) -> Any:
-        """Execute operation with retry logic for transaction conflicts."""
+    async def _execute_with_retry(
+        self, operation: Any, transaction: AsyncConnection, max_retries: int = 3
+    ) -> Any:
+        """Execute operation with retry logic for transaction conflicts using savepoints."""
         last_exception = None
 
         for attempt in range(max_retries):
             try:
-                return await operation()
+                # Use a savepoint to prevent IntegrityError from aborting the entire transaction
+                nested = await transaction.begin_nested()
+                try:
+                    result = await operation()
+                    await nested.commit()
+                    return result
+                except Exception:
+                    await nested.rollback()
+                    raise
             except IntegrityError as e:
                 last_exception = e
                 if attempt < max_retries - 1:
@@ -293,7 +303,9 @@ class ContactService:
 
             return complete_contact
 
-        return cast(Contact, await self._execute_with_retry(_create_operation))
+        return cast(
+            Contact, await self._execute_with_retry(_create_operation, transaction)
+        )
 
     async def update_contact(
         self,
@@ -365,7 +377,9 @@ class ContactService:
 
             return complete_contact
 
-        return cast(Contact, await self._execute_with_retry(_update_operation))
+        return cast(
+            Contact, await self._execute_with_retry(_update_operation, transaction)
+        )
 
     async def update_contact_field(
         self,
@@ -454,7 +468,7 @@ class ContactService:
 
         return cast(
             tuple[str | None, str | None],
-            await self._execute_with_retry(_update_field_operation),
+            await self._execute_with_retry(_update_field_operation, transaction),
         )
 
     async def update_contact_method_field(
@@ -545,7 +559,7 @@ class ContactService:
 
         return cast(
             tuple[str | None, str | None],
-            await self._execute_with_retry(_update_method_field_operation),
+            await self._execute_with_retry(_update_method_field_operation, transaction),
         )
 
     async def update_contact_address_field(
@@ -631,7 +645,9 @@ class ContactService:
 
         return cast(
             tuple[str | None, str | None],
-            await self._execute_with_retry(_update_address_field_operation),
+            await self._execute_with_retry(
+                _update_address_field_operation, transaction
+            ),
         )
 
     async def update_contact_note_field(
@@ -715,7 +731,7 @@ class ContactService:
 
         return cast(
             tuple[str | None, str | None],
-            await self._execute_with_retry(_update_note_field_operation),
+            await self._execute_with_retry(_update_note_field_operation, transaction),
         )
 
     def _calculate_changed_fields(
@@ -1135,7 +1151,9 @@ class ContactService:
             event = ContactDeleted(contact_id, transaction=transaction)
             await self.event_publisher.publish(event)
 
-        return cast(None, await self._execute_with_retry(_delete_operation))
+        return cast(
+            None, await self._execute_with_retry(_delete_operation, transaction)
+        )
 
     async def bulk_delete_all_contacts(self, transaction: AsyncConnection) -> None:
         """
@@ -1187,7 +1205,9 @@ class ContactService:
             )
             await self.event_publisher.publish(event)
 
-        return cast(None, await self._execute_with_retry(_assign_operation))
+        return cast(
+            None, await self._execute_with_retry(_assign_operation, transaction)
+        )
 
     async def remove_tag_from_contact(
         self, contact_id: int, tag_id: int, transaction: AsyncConnection
@@ -1221,7 +1241,9 @@ class ContactService:
             )
             await self.event_publisher.publish(event)
 
-        return cast(None, await self._execute_with_retry(_remove_operation))
+        return cast(
+            None, await self._execute_with_retry(_remove_operation, transaction)
+        )
 
     async def add_contact_method(
         self, contact_id: int, method: ContactMethod, transaction: AsyncConnection
@@ -1288,7 +1310,8 @@ class ContactService:
             return saved_method
 
         return cast(
-            ContactMethod, await self._execute_with_retry(_add_method_operation)
+            ContactMethod,
+            await self._execute_with_retry(_add_method_operation, transaction),
         )
 
     async def add_contact_address(
@@ -1354,7 +1377,8 @@ class ContactService:
             return saved_address
 
         return cast(
-            ContactAddress, await self._execute_with_retry(_add_address_operation)
+            ContactAddress,
+            await self._execute_with_retry(_add_address_operation, transaction),
         )
 
     async def add_contact_note(
@@ -1403,7 +1427,10 @@ class ContactService:
 
             return saved_note
 
-        return cast(ContactNote, await self._execute_with_retry(_add_note_operation))
+        return cast(
+            ContactNote,
+            await self._execute_with_retry(_add_note_operation, transaction),
+        )
 
     async def delete_contact_method(
         self, contact_id: int, method_id: int, transaction: AsyncConnection
@@ -1444,7 +1471,9 @@ class ContactService:
             )
             await self.event_publisher.publish(event)
 
-        return cast(None, await self._execute_with_retry(_delete_method_operation))
+        return cast(
+            None, await self._execute_with_retry(_delete_method_operation, transaction)
+        )
 
     async def delete_contact_address(
         self, contact_id: int, address_id: int, transaction: AsyncConnection
@@ -1481,7 +1510,9 @@ class ContactService:
             )
             await self.event_publisher.publish(event)
 
-        return cast(None, await self._execute_with_retry(_delete_address_operation))
+        return cast(
+            None, await self._execute_with_retry(_delete_address_operation, transaction)
+        )
 
     # Read operations (no transaction management needed)
     async def get_contact_by_id(self, contact_id: int) -> Contact | None:
@@ -1604,7 +1635,9 @@ class ContactService:
 
             return updated_contact
 
-        return cast(Contact, await self._execute_with_retry(_toggle_operation))
+        return cast(
+            Contact, await self._execute_with_retry(_toggle_operation, transaction)
+        )
 
     async def get_favourite_contacts(
         self, limit: int = 100, offset: int = 0
