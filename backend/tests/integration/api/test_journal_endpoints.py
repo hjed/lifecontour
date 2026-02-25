@@ -2466,3 +2466,42 @@ class TestJournalTypeCreationWithDependencies:
         assert types.count("fitness") == 1, (
             f"fitness appeared {types.count('fitness')} times (expected 1)"
         )
+
+    async def test_create_journal_with_mood_rating_persists_submitted_values(
+        self, integration_api_client
+    ):
+        """Creating a MOOD_RATING journal with type_data persists submitted mood_value and energy_level."""
+        mood_value = 8
+        energy_level = 6
+        create_data = create_journal_request_data(
+            title="Mood With Custom Values",
+            content="Feeling great today",
+            types=["MOOD_RATING"],
+            type_data={
+                "MOOD_RATING": {
+                    "mood_value": mood_value,
+                    "energy_level": energy_level,
+                    "mood_label": "Great",
+                }
+            },
+        )
+
+        response = await integration_api_client.post("/api/journals", json=create_data)
+
+        assert response.status_code == 201, response.text
+        data = response.json()
+        attrs = data["data"]["attributes"]
+
+        assert "mood_rating" in attrs.get("type_data", {}), (
+            "Expected mood_rating data in type_data"
+        )
+        mood_data = attrs["type_data"]["mood_rating"]
+        assert mood_data["mood_value"] == mood_value, (
+            f"Expected mood_value={mood_value} but got {mood_data['mood_value']}"
+        )
+        assert mood_data["energy_level"] == energy_level, (
+            f"Expected energy_level={energy_level} but got {mood_data['energy_level']}"
+        )
+        assert mood_data["mood_label"] == "Great", (
+            f"Expected mood_label='Great' but got {mood_data['mood_label']}"
+        )

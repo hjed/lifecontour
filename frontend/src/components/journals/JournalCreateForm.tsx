@@ -9,6 +9,7 @@
 'use client';
 
 import { useCallback, useState } from 'react';
+import React from 'react';
 import { useRouter } from 'next/navigation';
 import type { Route } from 'next';
 import { useForm, type Control } from 'react-hook-form';
@@ -44,6 +45,49 @@ import {
   TravelTypeEditor,
   PhotoAlbumTypeEditor,
 } from './type-editors';
+
+/**
+ * Map of journal types that have inline editors to their editor components.
+ * Each entry renders the appropriate editor in create mode, calling onChange
+ * with updated type-specific data whenever the editor state changes.
+ */
+const TYPE_EDITOR_MAP: Partial<
+  Record<
+    JournalType,
+    React.ComponentType<{ onChange: (data: JournalTypeData) => void }>
+  >
+> = {
+  [JournalType.EVENT]: ({ onChange }) => (
+    <EventTypeEditor
+      createMode
+      onChange={onChange as (data: CalendarInfoData) => void}
+    />
+  ),
+  [JournalType.MOOD_RATING]: ({ onChange }) => (
+    <MoodRatingTypeEditor
+      createMode
+      onChange={onChange as (data: MoodData) => void}
+    />
+  ),
+  [JournalType.PLAN]: ({ onChange }) => (
+    <PlanTypeEditor
+      createMode
+      onChange={onChange as (data: PlanData) => void}
+    />
+  ),
+  [JournalType.TRAVEL]: ({ onChange }) => (
+    <TravelTypeEditor
+      createMode
+      onChange={onChange as (data: TravelData) => void}
+    />
+  ),
+  [JournalType.PHOTO_ALBUM]: ({ onChange }) => (
+    <PhotoAlbumTypeEditor
+      createMode
+      onChange={onChange as (data: PhotoAlbumData) => void}
+    />
+  ),
+};
 
 // Form validation schema
 const formSchema = z.object({
@@ -332,6 +376,7 @@ export function JournalCreateForm({ onCancel }: JournalCreateFormProps = {}) {
           <div className='space-y-4'>
             {selectedTypes.map(type => {
               const deps = TYPE_DEPENDENCIES[type];
+              const TypeEditor = TYPE_EDITOR_MAP[type];
               return (
                 <div key={type} className='space-y-3 rounded-md border p-4'>
                   <p className='text-sm font-medium'>{TYPE_LABELS[type]}</p>
@@ -343,43 +388,13 @@ export function JournalCreateForm({ onCancel }: JournalCreateFormProps = {}) {
                     </p>
                   )}
 
-                  {type === JournalType.EVENT && (
-                    <EventTypeEditor
-                      createMode
+                  {TypeEditor && (
+                    <TypeEditor
                       onChange={data =>
-                        handleTypeDataChange(JournalType.EVENT, data)
-                      }
-                    />
-                  )}
-                  {type === JournalType.MOOD_RATING && (
-                    <MoodRatingTypeEditor
-                      createMode
-                      onChange={data =>
-                        handleTypeDataChange(JournalType.MOOD_RATING, data)
-                      }
-                    />
-                  )}
-                  {type === JournalType.PLAN && (
-                    <PlanTypeEditor
-                      createMode
-                      onChange={data =>
-                        handleTypeDataChange(JournalType.PLAN, data)
-                      }
-                    />
-                  )}
-                  {type === JournalType.TRAVEL && (
-                    <TravelTypeEditor
-                      createMode
-                      onChange={data =>
-                        handleTypeDataChange(JournalType.TRAVEL, data)
-                      }
-                    />
-                  )}
-                  {type === JournalType.PHOTO_ALBUM && (
-                    <PhotoAlbumTypeEditor
-                      createMode
-                      onChange={data =>
-                        handleTypeDataChange(JournalType.PHOTO_ALBUM, data)
+                        handleTypeDataChange(
+                          type as keyof TypeDataState,
+                          data as TypeDataState[keyof TypeDataState]
+                        )
                       }
                     />
                   )}

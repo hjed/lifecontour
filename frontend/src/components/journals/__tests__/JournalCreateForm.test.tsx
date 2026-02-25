@@ -390,5 +390,80 @@ describe('JournalCreateForm', () => {
         );
       });
     });
+
+    it('includes event data in type_data when EVENT is selected', async () => {
+      const user = userEvent.setup();
+      mockMutateAsync.mockResolvedValueOnce({
+        data: { id: '2', type: 'journals', attributes: {} },
+      });
+
+      render(<JournalCreateForm />);
+
+      await user.type(screen.getByLabelText(/title/i), 'Event Journal');
+
+      const eventCheckbox = screen.getByLabelText(/^event$/i);
+      await user.click(eventCheckbox);
+
+      const calendarIdInput = screen.getByTestId('calendar-id-input');
+      await user.type(calendarIdInput, 'calendar-uuid-123');
+
+      await user.click(screen.getByRole('button', { name: /create journal/i }));
+
+      await waitFor(() => {
+        expect(mockMutateAsync).toHaveBeenCalledWith(
+          expect.objectContaining({
+            types: [JournalType.EVENT],
+            type_data: expect.objectContaining({
+              [JournalType.EVENT]: expect.objectContaining({
+                calendar_id: 'calendar-uuid-123',
+              }),
+            }),
+          })
+        );
+      });
+    });
+
+    it('includes plan documents in type_data when PLAN is selected', async () => {
+      const user = userEvent.setup();
+      mockMutateAsync.mockResolvedValueOnce({
+        data: { id: '3', type: 'journals', attributes: {} },
+      });
+
+      render(<JournalCreateForm />);
+
+      await user.type(screen.getByLabelText(/title/i), 'Plan Journal');
+
+      const planCheckbox = screen.getByLabelText(/^plan$/i);
+      await user.click(planCheckbox);
+
+      // Add a document via the plan editor
+      const addDocButton = screen.getByTestId('add-document-button');
+      await user.click(addDocButton);
+
+      const urlInput = screen.getByTestId('document-url-0');
+      const titleInput = screen.getByTestId('document-title-0');
+      await user.type(urlInput, 'https://example.com/doc');
+      await user.type(titleInput, 'Example Doc');
+
+      await user.click(screen.getByRole('button', { name: /create journal/i }));
+
+      await waitFor(() => {
+        expect(mockMutateAsync).toHaveBeenCalledWith(
+          expect.objectContaining({
+            types: [JournalType.PLAN],
+            type_data: expect.objectContaining({
+              [JournalType.PLAN]: expect.objectContaining({
+                documents: expect.arrayContaining([
+                  expect.objectContaining({
+                    url: 'https://example.com/doc',
+                    title: 'Example Doc',
+                  }),
+                ]),
+              }),
+            }),
+          })
+        );
+      });
+    });
   });
 });

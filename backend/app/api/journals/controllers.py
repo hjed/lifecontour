@@ -1027,6 +1027,7 @@ async def _process_journal_type_data(
     photo_album_data_repo: PhotoAlbumDataRepository,
     plan_data_repo: PlanDataRepository | None = None,
     travel_data_repo: TravelDataRepository | None = None,
+    mood_data_repo: MoodDataRepository | None = None,
 ) -> None:
     """
     Process and save type-specific data for a journal.
@@ -1036,6 +1037,9 @@ async def _process_journal_type_data(
         type_data: Dictionary of type-specific data (keys are case-insensitive)
         calendar_info_repo: Repository for calendar info
         photo_album_data_repo: Repository for photo album data
+        plan_data_repo: Optional repository for plan data
+        travel_data_repo: Optional repository for travel data
+        mood_data_repo: Optional repository for mood data
     """
     # Normalize type_data keys to lowercase for case-insensitive matching
     normalized_type_data = {k.lower(): v for k, v in type_data.items()}
@@ -1149,6 +1153,26 @@ async def _process_journal_type_data(
             travel_data = TravelData(journal_id=journal_id)
         await travel_data_repo.save(travel_data)
 
+    # Process MOOD_RATING type data
+    if "mood_rating" in normalized_type_data and mood_data_repo:
+        from app.core.journal.models.mood_data import MoodData
+
+        mood_payload = normalized_type_data["mood_rating"]
+        mood_data = await mood_data_repo.find_by_journal_id(journal_id)
+        if mood_data is None:
+            mood_data = MoodData(journal_id=journal_id)
+
+        mood_value_raw = mood_payload.get("mood_value")
+        energy_level_raw = mood_payload.get("energy_level")
+
+        if mood_value_raw is not None:
+            mood_data.mood_value = int(mood_value_raw)
+        if energy_level_raw is not None:
+            mood_data.energy_level = int(energy_level_raw)
+        mood_data.mood_label = mood_payload.get("mood_label") or mood_data.mood_label
+
+        await mood_data_repo.save(mood_data)
+
 
 async def _process_journal_contact_relationships(
     journal_id: int,
@@ -1258,6 +1282,7 @@ async def create_journal(
             photo_album_data_repo,
             plan_data_repo,
             travel_data_repo,
+            mood_data_repo,
         )
 
     # Add contact relationships if provided in the request (via relationships field)
