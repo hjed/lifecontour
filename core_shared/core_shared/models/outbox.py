@@ -9,9 +9,8 @@ from datetime import UTC, datetime
 from typing import Any
 from uuid import uuid4
 
-from sqlalchemy import Column, DateTime, Integer, String, Text, text
+from sqlalchemy import Column, DateTime, Integer, String, text
 from sqlalchemy.dialects.postgresql import JSONB
-from sqlalchemy.dialects.postgresql import UUID as PostgresUUID
 
 from .base import Base
 
@@ -26,8 +25,14 @@ class OutboxEvent(Base):
 
     __tablename__ = "outbox_events"
 
-    id = Column(
-        PostgresUUID(as_uuid=True), primary_key=True, default=uuid4, nullable=False
+    id = Column(Integer, primary_key=True, autoincrement=True, nullable=False)
+
+    event_id = Column(
+        String(255),
+        nullable=False,
+        unique=True,
+        default=lambda: str(uuid4()),
+        comment="Unique identifier for the event",
     )
 
     event_type = Column(
@@ -37,8 +42,9 @@ class OutboxEvent(Base):
     )
 
     aggregate_id = Column(
-        PostgresUUID(as_uuid=True),
-        nullable=True,
+        Integer,
+        nullable=False,
+        default=0,
         comment="ID of the entity that changed",
     )
 
@@ -46,9 +52,18 @@ class OutboxEvent(Base):
         JSONB, nullable=False, comment="JSON payload with event details"
     )
 
+    occurred_at = Column(
+        DateTime(timezone=True),
+        server_default=text("now()"),
+        default=lambda: datetime.now(UTC),
+        nullable=False,
+        comment="When the event occurred",
+    )
+
     created_at = Column(
         DateTime(timezone=True),
         server_default=text("now()"),
+        default=lambda: datetime.now(UTC),
         nullable=False,
         comment="When the event was created",
     )
@@ -62,19 +77,9 @@ class OutboxEvent(Base):
     retry_count = Column(
         Integer,
         server_default=text("0"),
+        default=0,
         nullable=False,
         comment="Number of processing attempts",
-    )
-
-    max_retries = Column(
-        Integer,
-        server_default=text("3"),
-        nullable=False,
-        comment="Maximum number of retry attempts",
-    )
-
-    error_message = Column(
-        Text, nullable=True, comment="Last error message if processing failed"
     )
 
     def __repr__(self) -> str:
@@ -113,6 +118,7 @@ class OutboxEvent(Base):
                 "sync_timestamp": datetime.now(UTC).isoformat(),
                 "sync_type": sync_type,
             },
+            aggregate_id=0,
         )
 
     @classmethod
@@ -138,12 +144,13 @@ class OutboxEvent(Base):
                 "metrics": metrics,
                 "completed_at": datetime.now(UTC).isoformat(),
             },
+            aggregate_id=0,
         )
 
     def is_failed(self) -> bool:
         """Check if the event has failed processing."""
-        return bool(self.retry_count >= self.max_retries and self.processed_at is None)
+        return bool(self.retry_count >= 3 and self.processed_at is None)
 
     def can_retry(self) -> bool:
         """Check if the event can be retried."""
-        return bool(self.retry_count < self.max_retries and self.processed_at is None)
+        return bool(self.retry_count < 3 and self.processed_at is None)

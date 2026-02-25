@@ -747,7 +747,7 @@ async def _upsert_sync_metadata(
 
 
 async def _determine_smart_sync_type(
-    session: AsyncSession, google_account_email: str
+    session: AsyncSession, google_account_email: str, user_id: str | int
 ) -> str:
     """
     Determine whether to use full or incremental sync based on existing sync metadata.
@@ -761,13 +761,13 @@ async def _determine_smart_sync_type(
     """
     # Check if we have a sync token for this account
     stmt = text("""
-        SELECT sync_token
-        FROM user_google_auth
+        SELECT contacts_sync_token
+        FROM user_google_integration
         WHERE user_id = :user_id AND google_account_email = :email
-        AND sync_token IS NOT NULL
+        AND contacts_sync_token IS NOT NULL
     """)
     result = await session.execute(
-        stmt, {"user_id": SITE_USER_ID, "email": google_account_email}
+        stmt, {"user_id": str(user_id), "email": google_account_email}
     )
     sync_token = result.scalar()
 
@@ -790,6 +790,7 @@ async def _perform_full_sync(
     client: GoogleContactsAPIClient,
     google_account_email: str,
     metrics: dict[str, Any],
+    user_id: str | int,
     job_id: str | None = None,
 ) -> dict[str, Any]:
     """
@@ -880,7 +881,7 @@ async def _perform_full_sync(
     # Save sync token if available
     if contacts_response.next_sync_token:
         await _save_sync_token(
-            session, google_account_email, contacts_response.next_sync_token
+            session, google_account_email, contacts_response.next_sync_token, user_id
         )
 
     logger.info(
@@ -897,6 +898,7 @@ async def _perform_incremental_sync(
     client: GoogleContactsAPIClient,
     google_account_email: str,
     metrics: dict[str, Any],
+    user_id: str | int,
     job_id: str | None = None,
 ) -> dict[str, Any]:
     """
@@ -923,12 +925,12 @@ async def _perform_incremental_sync(
 
     # Get existing sync token
     stmt = text("""
-        SELECT sync_token
-        FROM user_google_auth
+        SELECT contacts_sync_token
+        FROM user_google_integration
         WHERE user_id = :user_id AND google_account_email = :email
     """)
     result = await session.execute(
-        stmt, {"user_id": SITE_USER_ID, "email": google_account_email}
+        stmt, {"user_id": str(user_id), "email": google_account_email}
     )
     sync_token = result.scalar()
 
@@ -938,7 +940,7 @@ async def _perform_incremental_sync(
             google_account_email=google_account_email,
         )
         return await _perform_full_sync(
-            session, client, google_account_email, metrics, job_id
+            session, client, google_account_email, metrics, user_id, job_id
         )
 
     # Fetch changes since last sync
@@ -991,7 +993,7 @@ async def _perform_incremental_sync(
     # Save new sync token
     if contacts_response.next_sync_token:
         await _save_sync_token(
-            session, google_account_email, contacts_response.next_sync_token
+            session, google_account_email, contacts_response.next_sync_token, user_id
         )
 
     logger.info(
@@ -1004,7 +1006,7 @@ async def _perform_incremental_sync(
 
 
 async def _save_sync_token(
-    session: AsyncSession, google_account_email: str, sync_token: str
+    session: AsyncSession, google_account_email: str, sync_token: str, user_id: str | int
 ) -> None:
     """
     Save sync token for future incremental syncs.
@@ -1015,9 +1017,14 @@ async def _save_sync_token(
         sync_token: Sync token from Google API
     """
     stmt = text("""
-        UPDATE user_google_auth
-        SET sync_token = :sync_token, updated_at = :updated_at
-        WHERE user_id = :user_id AND google_account_email = :email
+        INSERT INTO user_google_integration
+            (user_id, google_account_email, contacts_sync_token, created_at, updated_at)
+        VALUES
+            (:user_id, :email, :sync_token, :updated_at, :updated_at)
+        ON CONFLICT (user_id, google_account_email)
+        DO UPDATE SET
+            contacts_sync_token = EXCLUDED.contacts_sync_token,
+            updated_at = EXCLUDED.updated_at
     """)
 
     await session.execute(
@@ -1025,7 +1032,7 @@ async def _save_sync_token(
         {
             "sync_token": sync_token,
             "updated_at": datetime.now(UTC),
-            "user_id": SITE_USER_ID,
+            "user_id": str(user_id),
             "email": google_account_email,
         },
     )
@@ -1046,6 +1053,7 @@ async def _update_sync_job_status(
     started_at: datetime | None = None,
     completed_at: datetime | None = None,
     error_message: str | None = None,
+
     contacts_processed: int | None = None,
     contacts_created: int | None = None,
     contacts_updated: int | None = None,
@@ -1062,6 +1070,7 @@ async def _update_sync_job_status(
         started_at: When the job started (optional)
         completed_at: When the job completed (optional)
         error_message: Error message if failed (optional)
+
         contacts_processed: Number of contacts processed (optional)
         contacts_created: Number of contacts created (optional)
         contacts_updated: Number of contacts updated (optional)
@@ -1314,7 +1323,7 @@ async def sync_google_contacts(
             # Determine sync strategy
             if sync_type == "smart":
                 sync_type = await _determine_smart_sync_type(
-                    session, google_account_email
+                    session, google_account_email, user_id
                 )
                 logger.info(
                     "Smart sync determined sync type",
@@ -1325,11 +1334,11 @@ async def sync_google_contacts(
             # Perform sync based on type
             if sync_type == "full":
                 result = await _perform_full_sync(
-                    session, client, google_account_email, metrics, job_id
+                    session, client, google_account_email, metrics, user_id, job_id
                 )
             elif sync_type == "incremental":
                 result = await _perform_incremental_sync(
-                    session, client, google_account_email, metrics, job_id
+                    session, client, google_account_email, metrics, user_id, job_id
                 )
             else:
                 raise ValueError(f"Unknown sync type: {sync_type}")
