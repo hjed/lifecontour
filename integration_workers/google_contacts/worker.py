@@ -1318,6 +1318,7 @@ async def sync_google_contacts(
                 google_account_email=google_account_email,
                 google_client_id=settings.google_client_id,
                 google_client_secret=settings.google_client_secret.get_secret_value(),
+                user_id=user_id,
             )
 
             # Determine sync strategy
@@ -1548,6 +1549,7 @@ async def push_local_contacts_to_google(
                 google_account_email=google_account_email,
                 google_client_id=settings.google_client_id,
                 google_client_secret=settings.google_client_secret.get_secret_value(),
+                user_id=SITE_USER_ID,
             )
 
             # Find contacts that need to be pushed

@@ -26,6 +26,7 @@ class GoogleContactsAPIClient:
         google_account_email: str,
         google_client_id: str,
         google_client_secret: str,
+        user_id: str | int,
     ) -> None:
         """
         Initialize the Google Contacts API client.
@@ -35,11 +36,13 @@ class GoogleContactsAPIClient:
             google_account_email: Google account email to use for API calls
             google_client_id: Google OAuth client ID
             google_client_secret: Google OAuth client secret
+            user_id: User ID in the system
         """
         self.auth_service = auth_service
         self.google_account_email = google_account_email
         self.google_client_id = google_client_id
         self.google_client_secret = google_client_secret
+        self.user_id = user_id
         self._service = None
 
     async def _get_service(self):
@@ -48,7 +51,7 @@ class GoogleContactsAPIClient:
             try:
                 # Get access token
                 access_token = await self.auth_service.get_access_token(
-                    self.google_account_email
+                    self.user_id, self.google_account_email
                 )
 
                 # Create credentials

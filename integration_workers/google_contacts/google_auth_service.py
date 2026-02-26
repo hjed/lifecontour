@@ -16,7 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 logger = structlog.get_logger()
 
 # Site user ID constant (single-user system)
-SITE_USER_ID = 1
+# Removed SITE_USER_ID to allow passing actual user_id
 
 
 class GoogleAuthTokensNotFoundError(Exception):
@@ -62,19 +62,22 @@ class GoogleAuthService:
         self.google_client_secret = google_client_secret
         self._fernet = Fernet(encryption_key.encode())
 
-    def encrypt(self, value: str) -> str:
+    def encrypt(self, value: str) -> bytes:
         """Encrypt a string value."""
-        return self._fernet.encrypt(value.encode()).decode()
+        return self._fernet.encrypt(value.encode())
 
-    def decrypt(self, encrypted_value: str) -> str:
-        """Decrypt an encrypted string value."""
-        return self._fernet.decrypt(encrypted_value.encode()).decode()
+    def decrypt(self, encrypted_value: str | bytes) -> str:
+        """Decrypt an encrypted value."""
+        if isinstance(encrypted_value, str):
+            encrypted_value = encrypted_value.encode()
+        return self._fernet.decrypt(encrypted_value).decode()
 
-    async def get_access_token(self, google_account_email: str) -> str:
+    async def get_access_token(self, user_id: str | int, google_account_email: str) -> str:
         """
         Get decrypted access token for a Google account.
 
         Args:
+            user_id: User ID in the system
             google_account_email: Google account email address
 
         Returns:
@@ -89,7 +92,7 @@ class GoogleAuthService:
             WHERE user_id = :user_id AND google_account_email = :email
         """)
         result = await self.session.execute(
-            stmt, {"user_id": SITE_USER_ID, "email": google_account_email}
+            stmt, {"user_id": str(user_id), "email": google_account_email}
         )
         auth_record = result.fetchone()
 
@@ -104,15 +107,16 @@ class GoogleAuthService:
                 "Access token expired, refreshing",
                 google_account_email=google_account_email,
             )
-            return await self.refresh_access_token(google_account_email)
+            return await self.refresh_access_token(user_id, google_account_email)
 
         return self.decrypt(auth_record.encrypted_access_token)
 
-    async def refresh_access_token(self, google_account_email: str) -> str:
+    async def refresh_access_token(self, user_id: str | int, google_account_email: str) -> str:
         """
         Refresh Google access token using refresh token.
 
         Args:
+            user_id: User ID in the system
             google_account_email: Google account email address
 
         Returns:
@@ -132,7 +136,7 @@ class GoogleAuthService:
         """)
 
         result = await self.session.execute(
-            stmt, {"user_id": SITE_USER_ID, "email": google_account_email}
+            stmt, {"user_id": str(user_id), "email": google_account_email}
         )
         auth_record = result.fetchone()
 
@@ -200,7 +204,7 @@ class GoogleAuthService:
                     "access_token": encrypted_access_token,
                     "expires_at": new_expires_at,
                     "updated_at": datetime.now(UTC),
-                    "user_id": SITE_USER_ID,
+                    "user_id": str(user_id),
                     "email": google_account_email,
                 },
             )

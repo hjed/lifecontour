@@ -313,6 +313,7 @@ class TestGoogleContactsAPIClient:
             google_account_email="test@example.com",
             google_client_id="client_id",
             google_client_secret="client_secret",
+            user_id=1,
         )
 
         # Mock the service
@@ -365,6 +366,7 @@ class TestGoogleContactsAPIClient:
             google_account_email="test@example.com",
             google_client_id="client_id",
             google_client_secret="client_secret",
+            user_id=1,
         )
 
         # Mock the service
@@ -424,6 +426,7 @@ class TestGoogleContactsAPIClient:
             google_account_email="test@example.com",
             google_client_id="client_id",
             google_client_secret="client_secret",
+            user_id=1,
         )
 
         # Mock the service
@@ -457,6 +460,7 @@ class TestGoogleContactsAPIClient:
             google_account_email="test@example.com",
             google_client_id="client_id",
             google_client_secret="client_secret",
+            user_id=1,
         )
 
         # Mock the service

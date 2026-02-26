@@ -2,15 +2,16 @@
 
 import os
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
-from unittest.mock import AsyncMock, patch
+from datetime import datetime, timedelta, timezone
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from arq import create_pool
 from arq.connections import RedisSettings
+from cryptography.fernet import Fernet
 from sqlalchemy import text
 
-from worker import sync_google_contacts
+from worker import settings, sync_google_contacts
 
 
 @pytest.mark.asyncio
@@ -22,8 +23,15 @@ class TestIncrementalSyncIntegration:
     ):
         """Test that sync_google_contacts picks up contacts_sync_token and performs incremental sync."""
         now = datetime.now(timezone.utc)
+        future_expiry = now + timedelta(hours=1)
         test_email = 'incremental_test@example.com'
         test_user = '1'
+
+        # Encrypt the dummy tokens so GoogleAuthService can decrypt them
+        fernet_key = Fernet.generate_key()
+        fernet = Fernet(fernet_key)
+        encrypted_token = fernet.encrypt(b"access_token")
+        encrypted_refresh = fernet.encrypt(b"refresh_token")
 
         # Insert user authentication data (so auth works or bypasses)
         await db_session.execute(
@@ -41,9 +49,9 @@ class TestIncrementalSyncIntegration:
             {
                 "user_id": test_user,
                 "email": test_email,
-                "token": b"encrypted_token",
-                "refresh": b"encrypted_refresh",
-                "expiry": now,
+                "token": encrypted_token,
+                "refresh": encrypted_refresh,
+                "expiry": future_expiry,
                 "now": now,
             },
         )
@@ -77,14 +85,11 @@ class TestIncrementalSyncIntegration:
 
         ctx = {"session_factory": mock_session_factory, "redis": None, "job_id": "test_job_456"}
 
-        mock_auth_service = AsyncMock()
-        mock_auth_service.get_access_token.return_value = "access_token"
-
-        mock_contacts_client = AsyncMock()
-
-        # We need the client to mock list_connections and handle multiple pages logic for robustness,
-        # but incremental usually just returns one page of updates:
-        mock_contacts_client.list_connections.return_value = {
+        # We mock googleapiclient.discovery.build instead of GoogleContactsAPIClient
+        # so that GoogleAuthService.get_access_token() is actually called and tested.
+        mock_connections = MagicMock()
+        mock_list = MagicMock()
+        mock_list.execute.return_value = {
             "connections": [
                 {
                     "resourceName": "people/updated123",
@@ -94,9 +99,16 @@ class TestIncrementalSyncIntegration:
             "nextSyncToken": "new_sync_token_after_incremental",
             "nextPageToken": None
         }
+        mock_connections.list.return_value = mock_list
 
-        with patch("worker.GoogleAuthService", return_value=mock_auth_service), \
-             patch("worker.GoogleContactsAPIClient", return_value=mock_contacts_client):
+        mock_people = MagicMock()
+        mock_people.connections.return_value = mock_connections
+
+        mock_service = MagicMock()
+        mock_service.people.return_value = mock_people
+
+        with patch("worker.settings.encryption_key.get_secret_value", return_value=fernet_key.decode()), \
+             patch("google_contacts_client.build", return_value=mock_service):
 
             result = await sync_google_contacts(
                 ctx=ctx,
@@ -107,7 +119,7 @@ class TestIncrementalSyncIntegration:
 
             # Since sync_type is 'smart' and we supplied a valid sync_token
             # it should have called list_connections with that specific sync_token
-            mock_contacts_client.list_connections.assert_called_with(sync_token="valid_incremental_sync_token")
+            mock_connections.list.assert_called_with(resourceName='people/me', pageSize=100, personFields='names,emailAddresses,phoneNumbers,addresses,organizations,birthdays,metadata', syncToken='valid_incremental_sync_token')
             # Result should show at least some metrics
             assert result is not None
             assert result.get("contacts_updated") == 1
