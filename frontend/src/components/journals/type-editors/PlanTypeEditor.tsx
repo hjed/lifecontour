@@ -137,7 +137,7 @@ export function PlanTypeEditor({
           <div className='space-y-3'>
             {editData.documents.map((doc, index) => (
               <div
-                key={`${doc.url}-${doc.order}`}
+                key={index}
                 className='space-y-2 rounded-md border p-3'
                 data-testid={`document-${index}`}
               >
@@ -178,6 +178,7 @@ export function PlanTypeEditor({
                   </div>
                   {isEditing && (
                     <Button
+                      type='button'
                       variant='ghost'
                       size='sm'
                       onClick={() => handleRemoveDocument(index)}
@@ -195,6 +196,7 @@ export function PlanTypeEditor({
 
         {isEditing && (
           <Button
+            type='button'
             variant='outline'
             size='sm'
             onClick={handleAddDocument}

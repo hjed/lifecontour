@@ -98,6 +98,44 @@ describe('JournalCreateForm', () => {
         expect(mockMutateAsync).toHaveBeenCalled();
       });
     });
+
+    it('prevents submission when EVENT is selected but calendar ID is missing', async () => {
+      const user = userEvent.setup();
+      render(<JournalCreateForm />);
+
+      await user.type(screen.getByLabelText(/title/i), 'Event Journal');
+      await user.click(screen.getByLabelText(/^event$/i));
+
+      // Do NOT fill in calendar ID
+
+      await user.click(screen.getByRole('button', { name: /create journal/i }));
+
+      await waitFor(() => {
+        expect(
+          screen.getByText(/Event requires a valid Calendar ID/i)
+        ).toBeInTheDocument();
+        expect(mockMutateAsync).not.toHaveBeenCalled();
+      });
+    });
+
+    it('prevents submission when PHOTO_ALBUM is selected but Immich Album ID is missing', async () => {
+      const user = userEvent.setup();
+      render(<JournalCreateForm />);
+
+      await user.type(screen.getByLabelText(/title/i), 'Photo Journal');
+      await user.click(screen.getByLabelText(/^photo album$/i));
+
+      // Do NOT fill in photo URL / album ID
+
+      await user.click(screen.getByRole('button', { name: /create journal/i }));
+
+      await waitFor(() => {
+        expect(
+          screen.getByText(/Photo Album requires an Immich Album ID/i)
+        ).toBeInTheDocument();
+        expect(mockMutateAsync).not.toHaveBeenCalled();
+      });
+    });
   });
 
   describe('Type Selection', () => {

@@ -184,35 +184,12 @@ class ContactService:
     async def _execute_with_retry(
         self, operation: Any, transaction: AsyncConnection, max_retries: int = 3
     ) -> Any:
-        """Execute operation with retry logic for transaction conflicts using savepoints."""
-        last_exception = None
-
-        for attempt in range(max_retries):
-            try:
-                # Use a savepoint to prevent IntegrityError from aborting the entire transaction
-                nested = await transaction.begin_nested()
-                try:
-                    result = await operation()
-                    await nested.commit()
-                    return result
-                except Exception:
-                    await nested.rollback()
-                    raise
-            except IntegrityError as e:
-                last_exception = e
-                if attempt < max_retries - 1:
-                    await self._wait_before_retry(attempt)
-                    continue
-                else:
-                    self._convert_integrity_error_to_domain_exception(e)
-            except Exception as e:
-                # Don't retry for non-transient errors - re-raise immediately
-                logger.error("Non-transient error in operation", error=str(e))
-                raise
-
-        # Should never reach here, but just in case
-        if last_exception:
-            raise last_exception
+        """Execute operation without internal retries (delegated to outer transaction manager)."""
+        try:
+            return await operation()
+        except IntegrityError as e:
+            self._convert_integrity_error_to_domain_exception(e)
+            raise
 
     async def _wait_before_retry(self, attempt: int) -> None:
         """Wait before retry with exponential backoff."""

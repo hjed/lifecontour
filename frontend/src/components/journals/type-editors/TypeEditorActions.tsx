@@ -41,6 +41,7 @@ export function TypeEditorActions({
       {isEditing ? (
         <>
           <Button
+            type='button'
             variant='default'
             size='sm'
             onClick={onSave}
@@ -49,6 +50,7 @@ export function TypeEditorActions({
             Save
           </Button>
           <Button
+            type='button'
             variant='outline'
             size='sm'
             onClick={onCancel}
@@ -59,6 +61,7 @@ export function TypeEditorActions({
         </>
       ) : (
         <Button
+          type='button'
           variant='outline'
           size='sm'
           onClick={onEdit}

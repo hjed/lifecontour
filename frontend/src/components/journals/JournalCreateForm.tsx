@@ -12,7 +12,7 @@ import { useCallback, useState } from 'react';
 import React from 'react';
 import { useRouter } from 'next/navigation';
 import type { Route } from 'next';
-import { useForm, type Control } from 'react-hook-form';
+import { useForm, useWatch, type Control } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { Button } from '@/components/ui/button';
@@ -45,49 +45,6 @@ import {
   TravelTypeEditor,
   PhotoAlbumTypeEditor,
 } from './type-editors';
-
-/**
- * Map of journal types that have inline editors to their editor components.
- * Each entry renders the appropriate editor in create mode, calling onChange
- * with updated type-specific data whenever the editor state changes.
- */
-const TYPE_EDITOR_MAP: Partial<
-  Record<
-    JournalType,
-    React.ComponentType<{ onChange: (data: JournalTypeData) => void }>
-  >
-> = {
-  [JournalType.EVENT]: ({ onChange }) => (
-    <EventTypeEditor
-      createMode
-      onChange={onChange as (data: CalendarInfoData) => void}
-    />
-  ),
-  [JournalType.MOOD_RATING]: ({ onChange }) => (
-    <MoodRatingTypeEditor
-      createMode
-      onChange={onChange as (data: MoodData) => void}
-    />
-  ),
-  [JournalType.PLAN]: ({ onChange }) => (
-    <PlanTypeEditor
-      createMode
-      onChange={onChange as (data: PlanData) => void}
-    />
-  ),
-  [JournalType.TRAVEL]: ({ onChange }) => (
-    <TravelTypeEditor
-      createMode
-      onChange={onChange as (data: TravelData) => void}
-    />
-  ),
-  [JournalType.PHOTO_ALBUM]: ({ onChange }) => (
-    <PhotoAlbumTypeEditor
-      createMode
-      onChange={onChange as (data: PhotoAlbumData) => void}
-    />
-  ),
-};
 
 // Form validation schema
 const formSchema = z.object({
@@ -235,13 +192,46 @@ export function JournalCreateForm({ onCancel }: JournalCreateFormProps = {}) {
     },
   });
 
-  const selectedTypes = form.watch('types');
+  const selectedTypes =
+    useWatch({
+      control: form.control,
+      name: 'types',
+    }) || [];
 
   const handleTypeDataChange = useCallback(
     <K extends keyof TypeDataState>(type: K, data: TypeDataState[K]) => {
       setTypeData(prev => ({ ...prev, [type]: data }));
     },
     []
+  );
+
+  const handleEventChange = useCallback(
+    (data: unknown) =>
+      handleTypeDataChange(JournalType.EVENT, data as CalendarInfoData),
+    [handleTypeDataChange]
+  );
+
+  const handleMoodRatingChange = useCallback(
+    (data: unknown) =>
+      handleTypeDataChange(JournalType.MOOD_RATING, data as MoodData),
+    [handleTypeDataChange]
+  );
+
+  const handlePlanChange = useCallback(
+    (data: unknown) => handleTypeDataChange(JournalType.PLAN, data as PlanData),
+    [handleTypeDataChange]
+  );
+
+  const handleTravelChange = useCallback(
+    (data: unknown) =>
+      handleTypeDataChange(JournalType.TRAVEL, data as TravelData),
+    [handleTypeDataChange]
+  );
+
+  const handlePhotoAlbumChange = useCallback(
+    (data: unknown) =>
+      handleTypeDataChange(JournalType.PHOTO_ALBUM, data as PhotoAlbumData),
+    [handleTypeDataChange]
   );
 
   const onSubmit = async (values: FormValues) => {
@@ -254,13 +244,39 @@ export function JournalCreateForm({ onCancel }: JournalCreateFormProps = {}) {
       const submittedTypeData: Record<string, JournalTypeData> = {};
       for (const type of values.types) {
         const data = typeData[type as keyof TypeDataState];
-        if (data === undefined) continue;
 
-        // EVENT: only include if a calendar_id has been filled in.
+        // Client-side validation for required type-specific fields
         if (type === JournalType.EVENT) {
-          const eventData = data as CalendarInfoData;
-          if (!eventData.calendar_id) continue;
+          const eventData = data as CalendarInfoData | undefined;
+          if (
+            !eventData ||
+            !eventData.calendar_id ||
+            eventData.calendar_id.trim() === ''
+          ) {
+            form.setError('types', {
+              type: 'manual',
+              message: 'Event requires a valid Calendar ID.',
+            });
+            return;
+          }
         }
+
+        if (type === JournalType.PHOTO_ALBUM) {
+          const albumData = data as PhotoAlbumData | undefined;
+          if (
+            !albumData ||
+            !albumData.immich_album_id ||
+            albumData.immich_album_id.trim() === ''
+          ) {
+            form.setError('types', {
+              type: 'manual',
+              message: 'Photo Album requires an Immich Album ID.',
+            });
+            return;
+          }
+        }
+
+        if (data === undefined) continue;
 
         // PLAN: filter out document rows where the required `url` field is empty.
         if (type === JournalType.PLAN) {
@@ -394,7 +410,6 @@ export function JournalCreateForm({ onCancel }: JournalCreateFormProps = {}) {
           <div className='space-y-4'>
             {selectedTypes.map(type => {
               const deps = TYPE_DEPENDENCIES[type];
-              const TypeEditor = TYPE_EDITOR_MAP[type];
               return (
                 <div key={type} className='space-y-3 rounded-md border p-4'>
                   <p className='text-sm font-medium'>{TYPE_LABELS[type]}</p>
@@ -406,14 +421,28 @@ export function JournalCreateForm({ onCancel }: JournalCreateFormProps = {}) {
                     </p>
                   )}
 
-                  {TypeEditor && (
-                    <TypeEditor
-                      onChange={data =>
-                        handleTypeDataChange(
-                          type as keyof TypeDataState,
-                          data as TypeDataState[keyof TypeDataState]
-                        )
-                      }
+                  {type === JournalType.EVENT && (
+                    <EventTypeEditor createMode onChange={handleEventChange} />
+                  )}
+                  {type === JournalType.MOOD_RATING && (
+                    <MoodRatingTypeEditor
+                      createMode
+                      onChange={handleMoodRatingChange}
+                    />
+                  )}
+                  {type === JournalType.PLAN && (
+                    <PlanTypeEditor createMode onChange={handlePlanChange} />
+                  )}
+                  {type === JournalType.TRAVEL && (
+                    <TravelTypeEditor
+                      createMode
+                      onChange={handleTravelChange}
+                    />
+                  )}
+                  {type === JournalType.PHOTO_ALBUM && (
+                    <PhotoAlbumTypeEditor
+                      createMode
+                      onChange={handlePhotoAlbumChange}
                     />
                   )}
                 </div>

@@ -24,6 +24,8 @@ interface UseTypeEditorStateOptions<T> {
   /**
    * Called whenever the edit data changes (for parent form integration).
    * Useful in create mode to propagate changes to a parent form.
+   * IMPORTANT: Parent components MUST memoize this callback (e.g., with useCallback)
+   * to prevent infinite re-render loops in child effects.
    */
   readonly onChange?: (data: T) => void;
 }

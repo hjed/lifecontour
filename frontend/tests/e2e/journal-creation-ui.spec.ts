@@ -100,6 +100,11 @@ test.describe('Journal Creation UI Flow', () => {
     await page.getByRole('button', { name: /create journal/i }).click();
 
     await awaitCreationAndAssertBadge(page, 'type-badge-mood_rating');
+
+    // The type section is collapsed by default on the detail page.
+    // We must expand it to assert on the type editors/displays inside it.
+    await page.getByTestId('type-section-trigger-mood_rating').click();
+
     // Verify the persisted mood value (default 5) is shown on the detail page
     await expect(page.getByTestId('mood-value-display')).toHaveText('5');
   });
@@ -130,6 +135,10 @@ test.describe('Journal Creation UI Flow', () => {
     await page.getByRole('button', { name: /create journal/i }).click();
 
     await awaitCreationAndAssertBadge(page, 'type-badge-plan');
+
+    // The type section is collapsed by default on the detail page.
+    await page.getByTestId('type-section-trigger-plan').click();
+
     // Verify the document was persisted and rendered on the detail page
     await expect(page.getByTestId('document-url-0')).toHaveValue(
       'https://example.com/plan'
