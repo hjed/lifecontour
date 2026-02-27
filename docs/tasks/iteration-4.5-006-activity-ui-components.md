@@ -13,12 +13,12 @@ It also shifts GPX track processing to the backend using `gpxpy` and renders on 
 **Objective:** Handle the Routes domain first, establishing a pattern for linking a journal to a database route. This lays the groundwork for activities that require a route.
 
 **Tasks:**
-- [ ] Create `RouteSelector` combo-box component:
+- [x] Create `RouteSelector` combo-box component:
   - Fetch existing routes from Backend API `GET /api/routes`.
   - Provide auto-complete/search support to select a `route_id`.
   - Provide a way to link to the route creation flow if a desired route doesn't exist.
-- [ ] React Testing Library tests for RouteSelector.
-- [ ] Playwright E2E Test covering the basic route selection behavior.
+- [x] React Testing Library tests for RouteSelector.
+- [x] Playwright E2E Test covering the basic route selection behavior.
 
 ## PR 2: Backend GPX Processing & API Updates
 **Objective:** Implement the backend logic to parse GPX XML and extract map-ready geometries and statistics.

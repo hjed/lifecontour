@@ -24,6 +24,10 @@ export const API_ENDPOINTS = {
     BY_ID: (id: string) => `/api/journals/${id}`,
     SEARCH: '/api/journals/search',
   },
+  ROUTES: {
+    BASE: '/api/routes',
+    BY_ID: (id: string) => `/api/routes/${id}`,
+  },
   SEARCH: {
     CONTACTS: '/api/search/contacts',
     GLOBAL: '/api/search/global',
