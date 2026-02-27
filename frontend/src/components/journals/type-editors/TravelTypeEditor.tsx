@@ -15,11 +15,21 @@ import { useTypeEditorState } from './useTypeEditorState';
 import { TypeEditorActions } from './TypeEditorActions';
 
 interface TravelTypeEditorProps {
-  readonly journalId: string;
+  readonly journalId?: string;
   readonly data?: TravelData;
   readonly onSave?: (data: TravelData) => Promise<void>;
   readonly className?: string;
   readonly 'data-testid'?: string;
+  /**
+   * When true, the editor is always in edit mode (for use in create forms).
+   * The TypeEditorActions (Edit/Save/Cancel) buttons are hidden.
+   */
+  readonly createMode?: boolean;
+  /**
+   * Called whenever the data changes in create mode.
+   * Used by parent create forms to collect type-specific data.
+   */
+  readonly onChange?: (data: TravelData) => void;
 }
 
 const DEFAULT_DATA: TravelData = {
@@ -46,6 +56,8 @@ export function TravelTypeEditor({
   onSave,
   className,
   'data-testid': testId,
+  createMode = false,
+  onChange,
 }: TravelTypeEditorProps) {
   const initialData = useMemo(() => data ?? DEFAULT_DATA, [data]);
 
@@ -53,6 +65,8 @@ export function TravelTypeEditor({
     useTypeEditorState({
       initialData,
       onSave,
+      createMode,
+      onChange,
     });
 
   return (
@@ -98,13 +112,15 @@ export function TravelTypeEditor({
         </p>
       </div>
 
-      {/* Edit/Save/Cancel buttons */}
-      <TypeEditorActions
-        isEditing={isEditing}
-        onEdit={handleEdit}
-        onSave={handleSave}
-        onCancel={handleCancel}
-      />
+      {/* Edit/Save/Cancel buttons (hidden in create mode) */}
+      {!createMode && (
+        <TypeEditorActions
+          isEditing={isEditing}
+          onEdit={handleEdit}
+          onSave={handleSave}
+          onCancel={handleCancel}
+        />
+      )}
     </div>
   );
 }

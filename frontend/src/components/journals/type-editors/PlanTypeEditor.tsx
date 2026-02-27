@@ -18,11 +18,21 @@ import { useTypeEditorState } from './useTypeEditorState';
 import { TypeEditorActions } from './TypeEditorActions';
 
 interface PlanTypeEditorProps {
-  readonly journalId: string;
+  readonly journalId?: string;
   readonly data?: PlanData;
   readonly onSave?: (data: PlanData) => Promise<void>;
   readonly className?: string;
   readonly 'data-testid'?: string;
+  /**
+   * When true, the editor is always in edit mode (for use in create forms).
+   * The TypeEditorActions (Edit/Save/Cancel) buttons are hidden.
+   */
+  readonly createMode?: boolean;
+  /**
+   * Called whenever the data changes in create mode.
+   * Used by parent create forms to collect type-specific data.
+   */
+  readonly onChange?: (data: PlanData) => void;
 }
 
 const DEFAULT_DATA: PlanData = {
@@ -47,6 +57,8 @@ export function PlanTypeEditor({
   onSave,
   className,
   'data-testid': testId,
+  createMode = false,
+  onChange,
 }: PlanTypeEditorProps) {
   const initialData = useMemo(() => data ?? DEFAULT_DATA, [data]);
 
@@ -60,6 +72,8 @@ export function PlanTypeEditor({
   } = useTypeEditorState({
     initialData,
     onSave,
+    createMode,
+    onChange,
   });
 
   const handleAddDocument = useCallback(() => {
@@ -123,7 +137,7 @@ export function PlanTypeEditor({
           <div className='space-y-3'>
             {editData.documents.map((doc, index) => (
               <div
-                key={`${doc.url}-${doc.order}`}
+                key={index}
                 className='space-y-2 rounded-md border p-3'
                 data-testid={`document-${index}`}
               >
@@ -164,6 +178,7 @@ export function PlanTypeEditor({
                   </div>
                   {isEditing && (
                     <Button
+                      type='button'
                       variant='ghost'
                       size='sm'
                       onClick={() => handleRemoveDocument(index)}
@@ -181,6 +196,7 @@ export function PlanTypeEditor({
 
         {isEditing && (
           <Button
+            type='button'
             variant='outline'
             size='sm'
             onClick={handleAddDocument}
@@ -193,13 +209,15 @@ export function PlanTypeEditor({
         )}
       </div>
 
-      {/* Edit/Save/Cancel buttons */}
-      <TypeEditorActions
-        isEditing={isEditing}
-        onEdit={handleEdit}
-        onSave={handleSave}
-        onCancel={handleCancel}
-      />
+      {/* Edit/Save/Cancel buttons (hidden in create mode) */}
+      {!createMode && (
+        <TypeEditorActions
+          isEditing={isEditing}
+          onEdit={handleEdit}
+          onSave={handleSave}
+          onCancel={handleCancel}
+        />
+      )}
     </div>
   );
 }

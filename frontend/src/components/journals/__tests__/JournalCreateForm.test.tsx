@@ -4,7 +4,7 @@
  * Tests form rendering, validation, submission, and type selection.
  */
 
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { JournalCreateForm } from '../JournalCreateForm';
 import { JournalType } from '@/types/journals';
@@ -98,6 +98,44 @@ describe('JournalCreateForm', () => {
         expect(mockMutateAsync).toHaveBeenCalled();
       });
     });
+
+    it('prevents submission when EVENT is selected but calendar ID is missing', async () => {
+      const user = userEvent.setup();
+      render(<JournalCreateForm />);
+
+      await user.type(screen.getByLabelText(/title/i), 'Event Journal');
+      await user.click(screen.getByLabelText(/^event$/i));
+
+      // Do NOT fill in calendar ID
+
+      await user.click(screen.getByRole('button', { name: /create journal/i }));
+
+      await waitFor(() => {
+        expect(
+          screen.getByText(/Event requires a valid Calendar ID/i)
+        ).toBeInTheDocument();
+        expect(mockMutateAsync).not.toHaveBeenCalled();
+      });
+    });
+
+    it('prevents submission when PHOTO_ALBUM is selected but Immich Album ID is missing', async () => {
+      const user = userEvent.setup();
+      render(<JournalCreateForm />);
+
+      await user.type(screen.getByLabelText(/title/i), 'Photo Journal');
+      await user.click(screen.getByLabelText(/^photo album$/i));
+
+      // Do NOT fill in photo URL / album ID
+
+      await user.click(screen.getByRole('button', { name: /create journal/i }));
+
+      await waitFor(() => {
+        expect(
+          screen.getByText(/Photo Album requires an Immich Album ID/i)
+        ).toBeInTheDocument();
+        expect(mockMutateAsync).not.toHaveBeenCalled();
+      });
+    });
   });
 
   describe('Type Selection', () => {
@@ -105,8 +143,8 @@ describe('JournalCreateForm', () => {
       const user = userEvent.setup();
       render(<JournalCreateForm />);
 
-      const noteCheckbox = screen.getByLabelText(/note/i);
-      const eventCheckbox = screen.getByLabelText(/event/i);
+      const noteCheckbox = screen.getByLabelText(/^note$/i);
+      const eventCheckbox = screen.getByLabelText(/^event$/i);
 
       await user.click(noteCheckbox);
       await user.click(eventCheckbox);
@@ -119,13 +157,183 @@ describe('JournalCreateForm', () => {
       const user = userEvent.setup();
       render(<JournalCreateForm />);
 
-      const noteCheckbox = screen.getByLabelText(/note/i);
+      const noteCheckbox = screen.getByLabelText(/^note$/i);
 
       await user.click(noteCheckbox);
       expect(noteCheckbox).toBeChecked();
 
       await user.click(noteCheckbox);
       expect(noteCheckbox).not.toBeChecked();
+    });
+  });
+
+  describe('All Journal Type Options', () => {
+    it('renders all 15 journal type checkboxes', () => {
+      render(<JournalCreateForm />);
+
+      // Base types
+      expect(screen.getByLabelText(/^note$/i)).toBeInTheDocument();
+      expect(screen.getByLabelText(/^event$/i)).toBeInTheDocument();
+      expect(screen.getByLabelText(/^mood rating$/i)).toBeInTheDocument();
+      expect(screen.getByLabelText(/^plan$/i)).toBeInTheDocument();
+      expect(screen.getByLabelText(/^travel$/i)).toBeInTheDocument();
+      expect(screen.getByLabelText(/^photo album$/i)).toBeInTheDocument();
+
+      // Activity types
+      expect(screen.getByLabelText(/^fitness$/i)).toBeInTheDocument();
+      expect(screen.getByLabelText(/^outdoor activity$/i)).toBeInTheDocument();
+      expect(screen.getByLabelText(/^bushwalking$/i)).toBeInTheDocument();
+      expect(screen.getByLabelText(/^jogging$/i)).toBeInTheDocument();
+      expect(screen.getByLabelText(/^abseiling trip$/i)).toBeInTheDocument();
+      expect(screen.getByLabelText(/^canyoning$/i)).toBeInTheDocument();
+      expect(screen.getByLabelText(/^climbing$/i)).toBeInTheDocument();
+      expect(screen.getByLabelText(/^kayaking$/i)).toBeInTheDocument();
+      expect(
+        screen.getByLabelText(/^cross.country skiing$/i)
+      ).toBeInTheDocument();
+    });
+  });
+
+  describe('Inline Editors in Create Mode', () => {
+    it('shows event type editor when EVENT is selected', async () => {
+      const user = userEvent.setup();
+      render(<JournalCreateForm />);
+
+      const eventCheckbox = screen.getByLabelText(/^event$/i);
+      await user.click(eventCheckbox);
+
+      expect(screen.getByTestId('event-type-editor')).toBeInTheDocument();
+    });
+
+    it('shows mood rating type editor when MOOD_RATING is selected', async () => {
+      const user = userEvent.setup();
+      render(<JournalCreateForm />);
+
+      const moodCheckbox = screen.getByLabelText(/^mood rating$/i);
+      await user.click(moodCheckbox);
+
+      expect(screen.getByTestId('mood-rating-type-editor')).toBeInTheDocument();
+    });
+
+    it('shows photo album type editor when PHOTO_ALBUM is selected', async () => {
+      const user = userEvent.setup();
+      render(<JournalCreateForm />);
+
+      const photoCheckbox = screen.getByLabelText(/^photo album$/i);
+      await user.click(photoCheckbox);
+
+      expect(screen.getByTestId('photo-album-type-editor')).toBeInTheDocument();
+    });
+
+    it('shows plan type editor when PLAN is selected', async () => {
+      const user = userEvent.setup();
+      render(<JournalCreateForm />);
+
+      const planCheckbox = screen.getByLabelText(/^plan$/i);
+      await user.click(planCheckbox);
+
+      expect(screen.getByTestId('plan-type-editor')).toBeInTheDocument();
+    });
+
+    it('shows travel type editor when TRAVEL is selected', async () => {
+      const user = userEvent.setup();
+      render(<JournalCreateForm />);
+
+      const travelCheckbox = screen.getByLabelText(/^travel$/i);
+      await user.click(travelCheckbox);
+
+      expect(screen.getByTestId('travel-type-editor')).toBeInTheDocument();
+    });
+
+    it('hides editor when type is deselected', async () => {
+      const user = userEvent.setup();
+      render(<JournalCreateForm />);
+
+      const eventCheckbox = screen.getByLabelText(/^event$/i);
+      await user.click(eventCheckbox);
+      expect(screen.getByTestId('event-type-editor')).toBeInTheDocument();
+
+      await user.click(eventCheckbox);
+      expect(screen.queryByTestId('event-type-editor')).not.toBeInTheDocument();
+    });
+
+    it('editor inputs are enabled in create mode (no Edit button required)', async () => {
+      const user = userEvent.setup();
+      render(<JournalCreateForm />);
+
+      const eventCheckbox = screen.getByLabelText(/^event$/i);
+      await user.click(eventCheckbox);
+
+      const editorContainer = screen.getByTestId('event-type-editor');
+
+      // In create mode, the calendar ID input should be enabled
+      const calendarIdInput =
+        within(editorContainer).getByTestId('calendar-id-input');
+      expect(calendarIdInput).not.toBeDisabled();
+
+      // In create mode, the Edit button should NOT be present
+      expect(
+        within(editorContainer).queryByRole('button', { name: /edit/i })
+      ).not.toBeInTheDocument();
+    });
+
+    it('mood rating editor initialises with default values in create mode', async () => {
+      const user = userEvent.setup();
+      render(<JournalCreateForm />);
+
+      const moodCheckbox = screen.getByLabelText(/^mood rating$/i);
+      await user.click(moodCheckbox);
+
+      const moodEditor = screen.getByTestId('mood-rating-type-editor');
+
+      // In create mode, sliders should be initialised to 5 (default value)
+      const moodValueDisplay =
+        within(moodEditor).getByTestId('mood-value-display');
+      expect(moodValueDisplay).toHaveTextContent('5');
+    });
+  });
+
+  describe('Type Dependency Information', () => {
+    it('shows dependency info when CANYONING is selected', async () => {
+      const user = userEvent.setup();
+      render(<JournalCreateForm />);
+
+      const canyoningCheckbox = screen.getByLabelText(/^canyoning$/i);
+      await user.click(canyoningCheckbox);
+
+      expect(screen.getByText(/automatically adds/i)).toBeInTheDocument();
+    });
+
+    it('shows dependency info when BUSHWALKING is selected', async () => {
+      const user = userEvent.setup();
+      render(<JournalCreateForm />);
+
+      const bushwalkingCheckbox = screen.getByLabelText(/^bushwalking$/i);
+      await user.click(bushwalkingCheckbox);
+
+      expect(screen.getByText(/automatically adds/i)).toBeInTheDocument();
+    });
+
+    it('does not show dependency info for NOTE which has no dependencies', async () => {
+      const user = userEvent.setup();
+      render(<JournalCreateForm />);
+
+      const noteCheckbox = screen.getByLabelText(/^note$/i);
+      await user.click(noteCheckbox);
+
+      expect(screen.queryByText(/automatically adds/i)).not.toBeInTheDocument();
+    });
+
+    it('hides dependency info when type is deselected', async () => {
+      const user = userEvent.setup();
+      render(<JournalCreateForm />);
+
+      const canyoningCheckbox = screen.getByLabelText(/^canyoning$/i);
+      await user.click(canyoningCheckbox);
+      expect(screen.getByText(/automatically adds/i)).toBeInTheDocument();
+
+      await user.click(canyoningCheckbox);
+      expect(screen.queryByText(/automatically adds/i)).not.toBeInTheDocument();
     });
   });
 
@@ -140,7 +348,7 @@ describe('JournalCreateForm', () => {
 
       const titleInput = screen.getByLabelText(/title/i);
       const contentInput = screen.getByLabelText(/content/i);
-      const noteCheckbox = screen.getByLabelText(/note/i);
+      const noteCheckbox = screen.getByLabelText(/^note$/i);
 
       await user.type(titleInput, 'Test Journal');
       await user.type(contentInput, 'Test content');
@@ -157,6 +365,130 @@ describe('JournalCreateForm', () => {
             title: 'Test Journal',
             content: 'Test content',
             types: [JournalType.NOTE],
+          })
+        );
+      });
+    });
+
+    it('includes mood data in type_data when MOOD_RATING is selected', async () => {
+      const user = userEvent.setup();
+      mockMutateAsync.mockResolvedValueOnce({
+        data: { id: '1', type: 'journals', attributes: {} },
+      });
+
+      render(<JournalCreateForm />);
+
+      await user.type(screen.getByLabelText(/title/i), 'Mood Journal');
+
+      const moodCheckbox = screen.getByLabelText(/^mood rating$/i);
+      await user.click(moodCheckbox);
+
+      await user.click(screen.getByRole('button', { name: /create journal/i }));
+
+      await waitFor(() => {
+        expect(mockMutateAsync).toHaveBeenCalledWith(
+          expect.objectContaining({
+            types: [JournalType.MOOD_RATING],
+            type_data: expect.objectContaining({
+              [JournalType.MOOD_RATING]: expect.any(Object),
+            }),
+          })
+        );
+      });
+    });
+
+    it('includes photo album data in type_data when PHOTO_ALBUM is selected', async () => {
+      const user = userEvent.setup();
+      mockMutateAsync.mockResolvedValueOnce({
+        data: { id: '1', type: 'journals', attributes: {} },
+      });
+
+      render(<JournalCreateForm />);
+
+      await user.type(screen.getByLabelText(/title/i), 'Photo Journal');
+
+      const photoCheckbox = screen.getByLabelText(/^photo album$/i);
+      await user.click(photoCheckbox);
+
+      const albumInput = screen.getByTestId('immich-album-id-input');
+      await user.type(albumInput, 'album-uuid-123');
+
+      await user.click(screen.getByRole('button', { name: /create journal/i }));
+
+      await waitFor(() => {
+        expect(mockMutateAsync).toHaveBeenCalledWith(
+          expect.objectContaining({
+            types: [JournalType.PHOTO_ALBUM],
+            type_data: expect.objectContaining({
+              [JournalType.PHOTO_ALBUM]: expect.objectContaining({
+                immich_album_id: 'album-uuid-123',
+              }),
+            }),
+          })
+        );
+      });
+    });
+
+    it('includes event data in type_data when EVENT is selected', async () => {
+      const user = userEvent.setup();
+      mockMutateAsync.mockResolvedValueOnce({
+        data: { id: '2', type: 'journals', attributes: {} },
+      });
+
+      render(<JournalCreateForm />);
+
+      await user.type(screen.getByLabelText(/title/i), 'Event Journal');
+
+      const eventCheckbox = screen.getByLabelText(/^event$/i);
+      await user.click(eventCheckbox);
+
+      const calendarIdInput = screen.getByTestId('calendar-id-input');
+      await user.type(calendarIdInput, 'calendar-uuid-123');
+
+      await user.click(screen.getByRole('button', { name: /create journal/i }));
+
+      await waitFor(() => {
+        expect(mockMutateAsync).toHaveBeenCalledWith(
+          expect.objectContaining({
+            types: [JournalType.EVENT],
+            type_data: expect.objectContaining({
+              [JournalType.EVENT]: expect.objectContaining({
+                calendar_id: 'calendar-uuid-123',
+              }),
+            }),
+          })
+        );
+      });
+    });
+
+    it('includes plan type_data key when PLAN is selected', async () => {
+      const user = userEvent.setup();
+      mockMutateAsync.mockResolvedValueOnce({
+        data: { id: '3', type: 'journals', attributes: {} },
+      });
+
+      render(<JournalCreateForm />);
+
+      await user.type(screen.getByLabelText(/title/i), 'Plan Journal');
+
+      const planCheckbox = screen.getByLabelText(/^plan$/i);
+      await user.click(planCheckbox);
+
+      // Verify the plan editor rendered (confirming type selection worked)
+      expect(await screen.findByTestId('plan-type-editor')).toBeInTheDocument();
+
+      await user.click(screen.getByRole('button', { name: /create journal/i }));
+
+      await waitFor(() => {
+        expect(mockMutateAsync).toHaveBeenCalledWith(
+          expect.objectContaining({
+            types: [JournalType.PLAN],
+            type_data: expect.objectContaining({
+              [JournalType.PLAN]: expect.objectContaining({
+                // Initial empty state: the plan editor always emits documents: [] on mount
+                documents: expect.any(Array),
+              }),
+            }),
           })
         );
       });

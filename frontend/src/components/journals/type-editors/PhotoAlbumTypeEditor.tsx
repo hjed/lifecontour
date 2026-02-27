@@ -17,11 +17,21 @@ import { useTypeEditorState } from './useTypeEditorState';
 import { TypeEditorActions } from './TypeEditorActions';
 
 interface PhotoAlbumTypeEditorProps {
-  readonly journalId: string;
+  readonly journalId?: string;
   readonly data?: PhotoAlbumData;
   readonly onSave?: (data: PhotoAlbumData) => Promise<void>;
   readonly className?: string;
   readonly 'data-testid'?: string;
+  /**
+   * When true, the editor is always in edit mode (for use in create forms).
+   * The TypeEditorActions (Edit/Save/Cancel) buttons are hidden.
+   */
+  readonly createMode?: boolean;
+  /**
+   * Called whenever the data changes in create mode.
+   * Used by parent create forms to collect type-specific data.
+   */
+  readonly onChange?: (data: PhotoAlbumData) => void;
 }
 
 const DEFAULT_DATA: PhotoAlbumData = {
@@ -46,6 +56,8 @@ export function PhotoAlbumTypeEditor({
   onSave,
   className,
   'data-testid': testId,
+  createMode = false,
+  onChange,
 }: PhotoAlbumTypeEditorProps) {
   const initialData = useMemo(() => data ?? DEFAULT_DATA, [data]);
 
@@ -59,6 +71,8 @@ export function PhotoAlbumTypeEditor({
   } = useTypeEditorState({
     initialData,
     onSave,
+    createMode,
+    onChange,
   });
 
   return (
@@ -90,13 +104,15 @@ export function PhotoAlbumTypeEditor({
         </p>
       </div>
 
-      {/* Edit/Save/Cancel buttons */}
-      <TypeEditorActions
-        isEditing={isEditing}
-        onEdit={handleEdit}
-        onSave={handleSave}
-        onCancel={handleCancel}
-      />
+      {/* Edit/Save/Cancel buttons (hidden in create mode) */}
+      {!createMode && (
+        <TypeEditorActions
+          isEditing={isEditing}
+          onEdit={handleEdit}
+          onSave={handleSave}
+          onCancel={handleCancel}
+        />
+      )}
     </div>
   );
 }

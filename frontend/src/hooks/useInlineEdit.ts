@@ -9,7 +9,7 @@
  * - Loading states and error handling
  */
 
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback, useRef, useMemo } from 'react';
 import { toast } from 'sonner';
 
 export interface UseInlineEditOptions {
@@ -172,16 +172,30 @@ export function useInlineEdit(
     [saveEdit, cancelEdit]
   );
 
-  return {
-    value,
-    displayValue,
-    isEditing,
-    isLoading,
-    error,
-    startEdit,
-    cancelEdit,
-    saveEdit,
-    setValue: handleSetValue,
-    handleKeyDown,
-  };
+  return useMemo(
+    () => ({
+      value,
+      displayValue,
+      isEditing,
+      isLoading,
+      error,
+      startEdit,
+      cancelEdit,
+      saveEdit,
+      setValue: handleSetValue,
+      handleKeyDown,
+    }),
+    [
+      value,
+      displayValue,
+      isEditing,
+      isLoading,
+      error,
+      startEdit,
+      cancelEdit,
+      saveEdit,
+      handleSetValue,
+      handleKeyDown,
+    ]
+  );
 }

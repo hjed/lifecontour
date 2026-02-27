@@ -1,6 +1,6 @@
 # Iteration 4.7 – Journal Creation, Types & Calendar Management
 
-**Status:** 🟡 PLANNED
+**Status:** 🔵 IN PROGRESS
 **Dependencies:** Iteration 4 (Journal Core & Base Types), Iteration 4.5 (Fitness & Activity Types), Iteration 4.6 (Filtering, Hierarchy & E2E Coverage); prepares groundwork for Iteration 7 (Google Calendar Integration)
 **Goal:** Make journal creation and editing robust and spec-compliant for types and calendars, with clear UI flows, full test coverage, and MCP parity.
 
@@ -26,7 +26,7 @@
 
 ## 3. Tasks
 
-### ITER4.7-001: Journal Creation Flow & Type Attachment Reliability
+### ITER4.7-001: Journal Creation Flow & Type Attachment Reliability ✅ COMPLETE
 **Description:** Make the Create Journal flow spec-compliant for types by reusing inline editors and ensuring type dependencies and type_data are created correctly.
 **Strategy:** Single PR focused on creation flow plus small backend bug fixes, forming a complete vertical slice.
 **Specification Reference:** [Journal Types](../journal-system-specification.md#journal-types), [Type Dependency Rules](../journal-system-specification.md#type-dependency-rules), [API & MCP Tools](../journal-system-specification.md#api-and-mcp-tools)
@@ -34,14 +34,14 @@
 **PR Size:** ~10–14 files (frontend Create Journal components/tests, small backend fixes/tests, Playwright E2E).
 
 **Acceptance Criteria:**
-- [ ] Audit existing Create Journal UI and inline editors (e.g. journal detail type editors) and document current gaps in a short section in this file.
-- [ ] Refactor Create Journal UI to compose the same inline editing components used on the detail page for each supported type (NOTE, EVENT, MOOD_RATING, PLAN, TRAVEL, PHOTO_ALBUM, FITNESS/OUTDOOR_ACTIVITY and activity subtypes as appropriate).
-- [ ] Ensure type dependency rules are enforced on creation (for example, creating CANYONING also creates required OUTDOOR_ACTIVITY, FITNESS, and other dependent types) and that empty type_data rows are created for dependent types as per the spec.
-- [ ] Fix any backend/service/repository bugs that cause missing or partially-attached types when required type_data is absent; cover this with targeted unit and integration tests.
-- [ ] For every journal type that appears in the Create Journal UI, add a deterministic Playwright E2E test that (a) creates the journal via the UI, (b) asserts the expected set of types is attached (including dependencies), and (c) verifies key type-specific fields are persisted.
-- [ ] Ensure tests are written first (or extended) before implementation changes (`pytest` unit plus integration, Playwright E2E).
-- [ ] Run and fix all quality gates for the PR: `uv run pytest` (backend), `pnpm quality:check` (frontend), plus any pre-commit hooks.
-- [ ] If `POST /api/journals` or the journals MCP `create_journal_entry` interface is changed (fields, required/optional semantics, or type handling), update MCP schemas, docs, and tests in lockstep.
+- [x] Audit existing Create Journal UI and inline editors (e.g. journal detail type editors) and document current gaps in a short section in this file.
+- [x] Refactor Create Journal UI to compose the same inline editing components used on the detail page for each supported type (NOTE, EVENT, MOOD_RATING, PLAN, TRAVEL, PHOTO_ALBUM, FITNESS/OUTDOOR_ACTIVITY and activity subtypes as appropriate).
+- [x] Ensure type dependency rules are enforced on creation (for example, creating CANYONING also creates required OUTDOOR_ACTIVITY, FITNESS, and other dependent types) and that empty type_data rows are created for dependent types as per the spec.
+- [x] Fix any backend/service/repository bugs that cause missing or partially-attached types when required type_data is absent; cover this with targeted unit and integration tests.
+- [x] For every journal type that appears in the Create Journal UI, add a deterministic Playwright E2E test that (a) creates the journal via the UI, (b) asserts the expected set of types is attached (including dependencies), and (c) verifies key type-specific fields are persisted.
+- [x] Ensure tests are written first (or extended) before implementation changes (`pytest` unit plus integration, Playwright E2E).
+- [x] Run and fix all quality gates for the PR: `uv run pytest` (backend), `pnpm quality:check` (frontend), plus any pre-commit hooks.
+- [x] If `POST /api/journals` or the journals MCP `create_journal_entry` interface is changed (fields, required/optional semantics, or type handling), update MCP schemas, docs, and tests in lockstep.
 
 ### ITER4.7-002: Journal Type Management UI (Add/Remove Types with Inline Editing)
 **Description:** Allow users to add and remove types from an existing journal in the UI, editing type-specific data inline while respecting dependency rules.
