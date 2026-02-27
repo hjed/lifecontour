@@ -92,10 +92,6 @@ logger = get_logger(__name__)
 # Initialize metrics collector for this worker
 metrics_collector = MetricsCollector(worker_type="google_contacts")
 
-# Constants
-SITE_USER_ID = 1  # Single-user system assumption - change if multi-user support needed
-
-
 async def startup(ctx: dict[str, Any]) -> None:
     """
     Worker startup function.
@@ -1318,6 +1314,7 @@ async def sync_google_contacts(
                 google_account_email=google_account_email,
                 google_client_id=settings.google_client_id,
                 google_client_secret=settings.google_client_secret.get_secret_value(),
+                user_id=user_id,
             )
 
             # Determine sync strategy
@@ -1488,7 +1485,7 @@ async def sync_google_contacts(
 
 
 async def push_local_contacts_to_google(
-    ctx: dict[str, Any], google_account_email: str
+    ctx: dict[str, Any], google_account_email: str, user_id: str | int = 1
 ) -> dict[str, Any]:
     """
     Push locally created/updated contacts to Google (two-way sync).
@@ -1499,6 +1496,7 @@ async def push_local_contacts_to_google(
     Args:
         ctx: ARQ context dictionary
         google_account_email: Google account email to sync
+        user_id: User identifier
 
     Returns:
         Task result dictionary with push status and metrics
@@ -1548,6 +1546,7 @@ async def push_local_contacts_to_google(
                 google_account_email=google_account_email,
                 google_client_id=settings.google_client_id,
                 google_client_secret=settings.google_client_secret.get_secret_value(),
+                user_id=user_id,
             )
 
             # Find contacts that need to be pushed
