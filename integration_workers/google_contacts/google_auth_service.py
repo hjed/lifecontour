@@ -15,9 +15,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = structlog.get_logger()
 
-# Site user ID constant (single-user system)
-# Removed SITE_USER_ID to allow passing actual user_id
-
 
 class GoogleAuthTokensNotFoundError(Exception):
     """Raised when no Google OAuth tokens are found for the user."""
