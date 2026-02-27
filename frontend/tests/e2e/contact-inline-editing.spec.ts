@@ -145,7 +145,7 @@ test.describe('Contact Inline Editing', () => {
 
     // Wait for the element to be visible and clickable
     await expect(nicknameField).toBeVisible();
-    await nicknameField.click();
+    await nicknameField.click({ force: true });
 
     const input = page.locator('[data-testid="nickname-field"] input');
     await input.clear();

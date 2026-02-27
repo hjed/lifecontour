@@ -80,13 +80,11 @@ export function RouteSelector({
       }
       // If we have a selected value but can't resolve its name from the current
       // results, keep showing a generic "Selected route" label instead of the placeholder.
-      if (!selectedRouteName) {
-        setSelectedRouteName('Selected route');
-      }
+      setSelectedRouteName(prev => prev || 'Selected route');
     } else {
       setSelectedRouteName(null);
     }
-  }, [value, routes, selectedRouteName]);
+  }, [value, routes]);
 
   const handleCreateNewRoute = () => {
     // In a real implementation this would navigate to a route creation modal or page
