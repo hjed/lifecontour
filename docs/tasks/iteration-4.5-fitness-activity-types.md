@@ -408,7 +408,7 @@ This iteration extends the journal system with fitness and outdoor activity type
 **Strategy:** Single task for activity-specific UI
 **Specification Reference:** [Frontend Components](../journal-system-specification.md#frontend-components)
 
-**PR Size:** ~7 files (GPX component, stats component, forms, tests)
+**PR Size:** ~7 files (GPX component, stats component, forms, tests, e2e tests)
 
 **Acceptance Criteria:**
 - [ ] Create `GPXTrackDisplay` component using Google Maps API:
