@@ -404,8 +404,17 @@ test.describe('Journal List Page', () => {
       // Wait for calendar to be visible
       await page.waitForSelector('[role="grid"]', { state: 'visible' });
 
-      // Select dates within the February grid to avoid ambiguity with overflow dates
+      // Navigate to February 2026 grid if not currently visible
       const februaryGrid = page.getByRole('grid', { name: 'February 2026' });
+      for (let i = 0; i < 12; i++) {
+        if (await februaryGrid.isVisible()) break;
+        await page
+          .getByRole('button', { name: 'Go to previous month' })
+          .click();
+        await page.waitForTimeout(250);
+      }
+
+      // Select dates within the February grid to avoid ambiguity with overflow dates
 
       // Select start date (February 1, 2026)
       await februaryGrid
@@ -787,8 +796,17 @@ test.describe('Journal List Page', () => {
       // Wait for calendar to be visible
       await page.waitForSelector('[role="grid"]', { state: 'visible' });
 
-      // Select dates within the February grid to avoid ambiguity
+      // Navigate to February 2026 grid if not currently visible
       const februaryGrid = page.getByRole('grid', { name: 'February 2026' });
+      for (let i = 0; i < 12; i++) {
+        if (await februaryGrid.isVisible()) break;
+        await page
+          .getByRole('button', { name: 'Go to previous month' })
+          .click();
+        await page.waitForTimeout(250);
+      }
+
+      // Select dates within the February grid to avoid ambiguity
       await februaryGrid
         .getByRole('button', { name: /\b1 February 2026\b/ })
         .click();

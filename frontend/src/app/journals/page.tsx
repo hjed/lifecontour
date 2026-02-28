@@ -153,10 +153,10 @@ export default function JournalsPage() {
         </span>
       </div>
 
-      <div className='flex gap-6'>
+      <div className='flex flex-col gap-6 md:flex-row'>
         {/* Filters Sidebar */}
         {showFilters && (
-          <aside className='w-64 flex-shrink-0'>
+          <aside className='w-full flex-shrink-0 md:w-64'>
             <Card>
               <CardContent className='pt-6'>
                 <JournalFilters

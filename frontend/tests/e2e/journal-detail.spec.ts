@@ -211,9 +211,7 @@ test.describe('Journal Detail Page', () => {
 
         // Verify type badges are displayed
         for (const type of journal.types || []) {
-          await expect(
-            page.getByTestId(`type-badge-${type.toLowerCase()}`)
-          ).toBeVisible();
+          await expect(page.getByTestId(`manage-type-${type}`)).toBeVisible();
         }
       }
     });

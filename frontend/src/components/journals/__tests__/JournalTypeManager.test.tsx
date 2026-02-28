@@ -9,8 +9,8 @@ describe('JournalTypeManager', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
-    // Use window.confirm instead of global.confirm, and cast to any to mock it
-    (window as any).confirm = jest.fn(() => true);
+    // Use globalThis.confirm instead of global.confirm, and cast to any to mock it
+    (globalThis as any).confirm = jest.fn(() => true);
   });
 
   const renderComponent = (currentTypes: JournalType[] = []) => {
@@ -78,7 +78,7 @@ describe('JournalTypeManager', () => {
 
       await user.click(removeBtn);
 
-      expect(window.confirm).toHaveBeenCalled();
+      expect(globalThis.confirm).toHaveBeenCalled();
       expect(mockOnTypeRemove).toHaveBeenCalledWith(JournalType.NOTE);
     });
 
@@ -94,7 +94,7 @@ describe('JournalTypeManager', () => {
 
       await user.click(removeBtn);
 
-      expect(window.confirm).toHaveBeenCalled();
+      expect(globalThis.confirm).toHaveBeenCalled();
       expect(mockOnTypeRemove).not.toHaveBeenCalled();
     });
   });
@@ -159,7 +159,7 @@ describe('JournalTypeManager', () => {
 
       await user.click(removeBtn);
 
-      expect(window.confirm).toHaveBeenCalled();
+      expect(globalThis.confirm).toHaveBeenCalled();
 
       await waitFor(() => {
         expect(
