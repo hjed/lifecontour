@@ -254,3 +254,10 @@ class CrossCountrySkiingDataValidationError(JournalDomainError):
     def __init__(self, field: str, message: str):
         super().__init__(f"{field}: {message}", 400)
         self.field = field
+
+
+class GPXParsingError(JournalDomainError):
+    """Exception raised when GPX data cannot be parsed or contains no tracks."""
+
+    def __init__(self, message: str):
+        super().__init__(message, 422)

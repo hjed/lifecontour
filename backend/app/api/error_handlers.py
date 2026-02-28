@@ -40,6 +40,7 @@ from app.core.journal.models.exceptions import (
     CalendarInfoValidationError,
     CalendarNotFoundError,
     CalendarValidationError,
+    GPXParsingError,
     JournalCycleError,
     JournalDomainError,
     JournalMaxDepthExceededError,
@@ -145,6 +146,8 @@ def create_domain_error_response(domain_error: DomainError) -> JsonApiErrorRespo
         RouteNotFoundError: "ROUTE_NOT_FOUND",
         RouteValidationError: "ROUTE_VALIDATION_ERROR",
         RouteInUseError: "ROUTE_IN_USE",
+        # GPX errors
+        GPXParsingError: "GPX_PARSING_ERROR",
     }
 
     error_code = error_code_map.get(type(domain_error), "DOMAIN_ERROR")

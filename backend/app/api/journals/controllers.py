@@ -29,6 +29,13 @@ from app.api.journals.converters import (
     JournalRequestConverter,
     TypeDataConverter,
 )
+from app.api.journals.gpx_schemas import (
+    GPXCoordinateSchema,
+    GPXStatisticsSchema,
+    GPXTrackDataAttributes,
+    GPXTrackDataResource,
+    GPXTrackDataResponse,
+)
 from app.api.journals.schemas import (
     JournalAttributes,
     JournalContactAddRequest,
@@ -77,6 +84,7 @@ from app.core.journal.models.repositories import (
     TravelDataRepository,
 )
 from app.core.journal.services.journal_service import JournalService
+from app.core.journal.utils.gpx_parser import parse_gpx_track
 from app.core.search.exceptions import SearchServiceUnavailableError
 from app.infrastructure.auth.models import SessionUser
 from app.infrastructure.search.search_service import SearchService
@@ -2742,3 +2750,63 @@ async def remove_tag_from_journal(
     )
 
     return JournalResponse(data=journal_resource)
+
+
+@router.get("/{journal_id}/gpx")
+@inject
+async def get_journal_gpx(
+    journal_id: int,
+    journal_service: FromDishka[JournalService],
+    fitness_data_repo: FromDishka[FitnessDataRepository],
+    user: FromDishka[SessionUser],  # Require authentication
+) -> GPXTrackDataResponse:
+    """
+    Get parsed GPX track data for a journal.
+
+    Parses the raw GPX XML stored in the journal's fitness data and returns
+    extracted coordinates and computed statistics ready for map rendering.
+
+    Returns 404 if the journal doesn't exist, has no FITNESS type, or has
+    no GPX track data.
+    """
+    journal = await journal_service.get_journal(journal_id)
+    if not journal or journal.user_id != user.id:
+        raise JournalNotFoundError(journal_id)
+
+    fitness_data = await fitness_data_repo.find_by_journal_id(journal_id)
+    if not fitness_data or not fitness_data.gpx_track_data:
+        from fastapi import HTTPException
+
+        raise HTTPException(
+            status_code=404,
+            detail=f"GPX track data not found for journal with ID {journal_id}",
+        )
+
+    result = parse_gpx_track(fitness_data.gpx_track_data)
+
+    coordinate_schemas = [
+        GPXCoordinateSchema(
+            latitude=coord.latitude,
+            longitude=coord.longitude,
+            elevation=coord.elevation,
+        )
+        for coord in result.coordinates
+    ]
+
+    statistics_schema = GPXStatisticsSchema(
+        distance_2d=result.statistics.distance_2d,
+        distance_3d=result.statistics.distance_3d,
+        elevation_gain=result.statistics.elevation_gain,
+        elevation_loss=result.statistics.elevation_loss,
+        duration_seconds=result.statistics.duration_seconds,
+    )
+
+    return GPXTrackDataResponse(
+        data=GPXTrackDataResource(
+            id=str(journal_id),
+            attributes=GPXTrackDataAttributes(
+                coordinates=coordinate_schemas,
+                statistics=statistics_schema,
+            ),
+        )
+    )

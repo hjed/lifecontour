@@ -1,6 +1,6 @@
 # Iteration 4.5 Task 006: Activity UI Components (Breakdown)
 
-**Status:** 🟡 PLANNED
+**Status:** 🟡 IN PROGRESS (PR 1 ✅, PR 2 ✅)
 **Goal:** Build UI components for activity display and GPX visualization in manageable, PR-sized increments.
 **Parent Task:** [Iteration 4.5: Fitness & Activity Types](./iteration-4.5-fitness-activity-types.md)
 
@@ -24,14 +24,16 @@ It also shifts GPX track processing to the backend using `gpxpy` and renders on 
 **Objective:** Implement the backend logic to parse GPX XML and extract map-ready geometries and statistics.
 
 **Tasks:**
-- [ ] Add `gpxpy` library to `backend/pyproject.toml`.
-- [ ] Create a GPX utilities module (`backend/app/core/journal/utils/gpx_parser.py`):
+- [x] Add `gpxpy` library to `backend/pyproject.toml`.
+- [x] Create a GPX utilities module (`backend/app/core/journal/utils/gpx_parser.py`):
   - Parse GPX string using `gpxpy.parse()`.
   - Extract list of coordinates (latitude, longitude) for map polylines.
   - Calculate statistics: distance (2D and 3D), elevation gain/loss, duration.
-- [ ] Update `FitnessData` schemas and endpoints or create a dedicated GPX endpoint:
-  - Serve the parsed track points and calculated metrics to the frontend so the UI doesn't have to parse raw XML.
-- [ ] Write pytest unit tests covering the `gpxpy` parsing logic and metric calculations.
+- [x] Create dedicated GPX endpoint (`GET /api/journals/{id}/gpx`):
+  - Serves parsed track points and calculated metrics to the frontend (no raw XML parsing needed client-side).
+  - JSON API response with `GPXCoordinateSchema` and `GPXStatisticsSchema`.
+- [x] Write pytest unit tests covering the `gpxpy` parsing logic and metric calculations (16 tests).
+- [x] Write integration tests for the GPX endpoint (5 tests).
 
 ## PR 3: Map Display & Fitness Base UI
 **Objective:** Establish the foundation for fitness entries, rendering the map and the base statistics component.
