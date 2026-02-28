@@ -12,7 +12,7 @@ from uuid import UUID
 
 import structlog
 from dishka.integrations.fastapi import FromDishka, inject
-from fastapi import APIRouter, Query, Request, status
+from fastapi import APIRouter, HTTPException, Query, Request, status
 from meilisearch.errors import MeilisearchError
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncConnection
@@ -2907,10 +2907,8 @@ async def get_journal_gpx(
 
     fitness_data = await fitness_data_repo.find_by_journal_id(journal_id)
     if not fitness_data or not fitness_data.gpx_track_data:
-        from fastapi import HTTPException
-
         raise HTTPException(
-            status_code=404,
+            status_code=status.HTTP_404_NOT_FOUND,
             detail=f"GPX track data not found for journal with ID {journal_id}",
         )
 
