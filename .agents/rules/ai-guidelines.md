@@ -2,4 +2,4 @@
 trigger: always_on
 ---
 
-Always load ./Agents.md into context
+Always load @../../AGENTS.md into context
