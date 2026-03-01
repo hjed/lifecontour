@@ -15,7 +15,7 @@ class GoogleFieldMetadata(BaseModel):
 
     primary: bool = False
     source_primary: bool = Field(default=False, alias="sourcePrimary")
-    verified: bool = False
+    verified: bool = Field(default=False)
     source: dict[str, Any] = Field(default_factory=dict)
 
 
