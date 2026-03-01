@@ -193,6 +193,10 @@ export type JournalTypeData =
   | OutdoorActivityData
   | BushwalkingData
   | JoggingData
+  | FitnessData
+  | OutdoorActivityData
+  | BushwalkingData
+  | JoggingData
   | AbseilingData
   | CanyoningData
   | ClimbingData

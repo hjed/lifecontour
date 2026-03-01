@@ -32,6 +32,7 @@ import type {
   PlanData,
   TravelData,
   FitnessData,
+  FitnessData,
 } from '@/types/journals';
 import { cn } from '@/lib/utils';
 import {

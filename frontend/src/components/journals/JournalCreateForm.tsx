@@ -44,6 +44,7 @@ import {
 import {
   EventTypeEditor,
   FitnessTypeEditor,
+  FitnessTypeEditor,
   MoodRatingTypeEditor,
   PlanTypeEditor,
   TravelTypeEditor,
@@ -287,6 +288,7 @@ export function JournalCreateForm({ onCancel }: JournalCreateFormProps = {}) {
         if (type === JournalType.EVENT) {
           const eventData = data as CalendarInfoData | undefined;
           if (!eventData?.calendar_id?.trim()) {
+          if (!eventData?.calendar_id?.trim()) {
             form.setError('types', {
               type: 'manual',
               message: 'Event requires a valid Calendar ID.',
@@ -294,7 +296,9 @@ export function JournalCreateForm({ onCancel }: JournalCreateFormProps = {}) {
             return;
           }
         } else if (type === JournalType.PHOTO_ALBUM) {
+        } else if (type === JournalType.PHOTO_ALBUM) {
           const albumData = data as PhotoAlbumData | undefined;
+          if (!albumData?.immich_album_id?.trim()) {
           if (!albumData?.immich_album_id?.trim()) {
             form.setError('types', {
               type: 'manual',
