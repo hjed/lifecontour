@@ -1036,6 +1036,7 @@ async def _process_journal_type_data(
     plan_data_repo: PlanDataRepository | None = None,
     travel_data_repo: TravelDataRepository | None = None,
     mood_data_repo: MoodDataRepository | None = None,
+    fitness_data_repo: FitnessDataRepository | None = None,
 ) -> None:
     """
     Process and save type-specific data for a journal.
@@ -1048,6 +1049,7 @@ async def _process_journal_type_data(
         plan_data_repo: Optional repository for plan data
         travel_data_repo: Optional repository for travel data
         mood_data_repo: Optional repository for mood data
+        fitness_data_repo: Optional repository for fitness data
     """
     # Normalize type_data keys to lowercase for case-insensitive matching
     normalized_type_data = {k.lower(): v for k, v in type_data.items()}
@@ -1204,6 +1206,48 @@ async def _process_journal_type_data(
 
         await mood_data_repo.save(mood_data)
 
+    # Process FITNESS type data
+    if "fitness" in normalized_type_data and fitness_data_repo:
+        from app.core.journal.models.fitness_data import FitnessData
+
+        fitness_payload = normalized_type_data["fitness"]
+        fitness_data = await fitness_data_repo.find_by_journal_id(journal_id)
+        if fitness_data is None:
+            fitness_data = FitnessData(journal_id=journal_id)
+
+        numeric_fields = (
+            "distance",
+            "duration",
+            "heart_rate_avg",
+            "heart_rate_max",
+            "elevation_gain",
+            "elevation_loss",
+            "calories",
+        )
+        for field in numeric_fields:
+            if field in fitness_payload:
+                value = fitness_payload[field]
+                if value is None:
+                    setattr(fitness_data, field, None)
+                else:
+                    try:
+                        setattr(fitness_data, field, int(value))
+                    except (TypeError, ValueError) as exc:
+                        from fastapi import HTTPException
+
+                        raise HTTPException(
+                            status_code=400,
+                            detail=f"{field} must be an integer",
+                        ) from exc
+
+        if "gpx_track_data" in fitness_payload:
+            fitness_data.gpx_track_data = fitness_payload["gpx_track_data"]
+
+        if "strava_activity_id" in fitness_payload:
+            fitness_data.strava_activity_id = fitness_payload["strava_activity_id"]
+
+        await fitness_data_repo.save(fitness_data)
+
 
 async def _process_journal_contact_relationships(
     journal_id: int,
@@ -1314,6 +1358,7 @@ async def create_journal(
             plan_data_repo,
             travel_data_repo,
             mood_data_repo,
+            fitness_data_repo,
         )
 
     # Add contact relationships if provided in the request (via relationships field)

@@ -113,6 +113,32 @@ export interface PhotoAlbumData {
   immich_album_id?: string | null;
 }
 
+export interface FitnessData {
+  heart_rate_avg?: number | null;
+  heart_rate_max?: number | null;
+  distance?: number | null;
+  elevation_gain?: number | null;
+  elevation_loss?: number | null;
+  duration?: number | null;
+  calories?: number | null;
+  gpx_track_data?: string | null;
+  strava_activity_id?: string | null;
+}
+
+export interface OutdoorActivityData {
+  route_id?: string | null;
+  conditions?: string | null;
+}
+
+export interface BushwalkingData extends OutdoorActivityData {
+  track_condition?: string | null;
+}
+
+export interface JoggingData {
+  route_id?: string | null;
+  surface_type?: string | null;
+}
+
 export interface AbseilingData {
   number_of_abseils?: number | null;
   total_length?: number | null; // total length in metres
@@ -152,6 +178,10 @@ export type JournalTypeData =
   | PlanData
   | TravelData
   | PhotoAlbumData
+  | FitnessData
+  | OutdoorActivityData
+  | BushwalkingData
+  | JoggingData
   | AbseilingData
   | CanyoningData
   | ClimbingData

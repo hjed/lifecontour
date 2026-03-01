@@ -9,7 +9,6 @@
 'use client';
 
 import { useCallback, useState } from 'react';
-import React from 'react';
 import { useRouter } from 'next/navigation';
 import type { Route } from 'next';
 import { useForm, useWatch, type Control } from 'react-hook-form';
@@ -37,9 +36,11 @@ import {
   type PlanData,
   type TravelData,
   type PhotoAlbumData,
+  type FitnessData,
 } from '@/types/journals';
 import {
   EventTypeEditor,
+  FitnessTypeEditor,
   MoodRatingTypeEditor,
   PlanTypeEditor,
   TravelTypeEditor,
@@ -66,6 +67,7 @@ interface TypeDataState {
   [JournalType.PLAN]?: PlanData;
   [JournalType.TRAVEL]?: TravelData;
   [JournalType.PHOTO_ALBUM]?: PhotoAlbumData;
+  [JournalType.FITNESS]?: FitnessData;
 }
 
 // All 15 journal type options for checkboxes
@@ -234,6 +236,12 @@ export function JournalCreateForm({ onCancel }: JournalCreateFormProps = {}) {
     [handleTypeDataChange]
   );
 
+  const handleFitnessChange = useCallback(
+    (data: unknown) =>
+      handleTypeDataChange(JournalType.FITNESS, data as FitnessData),
+    [handleTypeDataChange]
+  );
+
   const onSubmit = async (values: FormValues) => {
     try {
       const endDate = values.dateRange.to || values.dateRange.from;
@@ -248,26 +256,16 @@ export function JournalCreateForm({ onCancel }: JournalCreateFormProps = {}) {
         // Client-side validation for required type-specific fields
         if (type === JournalType.EVENT) {
           const eventData = data as CalendarInfoData | undefined;
-          if (
-            !eventData ||
-            !eventData.calendar_id ||
-            eventData.calendar_id.trim() === ''
-          ) {
+          if (!eventData?.calendar_id?.trim()) {
             form.setError('types', {
               type: 'manual',
               message: 'Event requires a valid Calendar ID.',
             });
             return;
           }
-        }
-
-        if (type === JournalType.PHOTO_ALBUM) {
+        } else if (type === JournalType.PHOTO_ALBUM) {
           const albumData = data as PhotoAlbumData | undefined;
-          if (
-            !albumData ||
-            !albumData.immich_album_id ||
-            albumData.immich_album_id.trim() === ''
-          ) {
+          if (!albumData?.immich_album_id?.trim()) {
             form.setError('types', {
               type: 'manual',
               message: 'Photo Album requires an Immich Album ID.',
@@ -443,6 +441,12 @@ export function JournalCreateForm({ onCancel }: JournalCreateFormProps = {}) {
                     <PhotoAlbumTypeEditor
                       createMode
                       onChange={handlePhotoAlbumChange}
+                    />
+                  )}
+                  {type === JournalType.FITNESS && (
+                    <FitnessTypeEditor
+                      createMode
+                      onChange={handleFitnessChange}
                     />
                   )}
                 </div>
