@@ -70,6 +70,13 @@ export interface PlanData {
   documents: PlanDocument[];
 }
 
+export interface Coordinate {
+  latitude: number;
+  longitude: number;
+  elevation?: number;
+  timestamp?: string;
+}
+
 export interface TravelFlight {
   id?: string | null;
   flight_number?: string | null;
@@ -113,6 +120,36 @@ export interface PhotoAlbumData {
   immich_album_id?: string | null;
 }
 
+export interface FitnessData {
+  heart_rate_avg?: number | null;
+  heart_rate_max?: number | null;
+  distance?: number | null;
+  elevation_gain?: number | null;
+  elevation_loss?: number | null;
+  duration?: number | null;
+  calories?: number | null;
+  gpx_track_data?: string | null;
+  strava_activity_id?: string | null;
+}
+
+export interface OutdoorActivityData {
+  activity_type?: string | null;
+  weather_conditions?: string | null;
+  role?: string | null;
+  in_leadership_role?: boolean | null;
+  participant_notes?: string | null;
+}
+
+export interface BushwalkingData {
+  route_id?: string | null;
+  track_grading?: string | null;
+}
+
+export interface JoggingData {
+  route_id?: string | null;
+  pace?: number | null; // seconds per kilometre
+}
+
 export interface AbseilingData {
   number_of_abseils?: number | null;
   total_length?: number | null; // total length in metres
@@ -152,6 +189,10 @@ export type JournalTypeData =
   | PlanData
   | TravelData
   | PhotoAlbumData
+  | FitnessData
+  | OutdoorActivityData
+  | BushwalkingData
+  | JoggingData
   | AbseilingData
   | CanyoningData
   | ClimbingData

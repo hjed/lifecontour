@@ -228,4 +228,61 @@ test.describe('Journal Creation UI Flow', () => {
     await page.getByRole('button', { name: /create journal/i }).click();
     await awaitCreationAndAssertBadge(page, 'manage-type-photo_album');
   });
+
+  test('should create a FITNESS journal and verify ActivityStats render', async ({
+    authenticatedPage,
+  }) => {
+    const page = authenticatedPage;
+    await navigateToNewJournal(page);
+
+    await page.getByLabel(/title/i).fill(`Run ${Date.now()}`);
+    await page.getByLabel(/content/i).fill('Morning 5k run.');
+
+    // Select the FITNESS type
+    await page.getByLabel(/^fitness$/i).check();
+
+    // Verify editor is visible
+    await expect(page.getByTestId('fitness-type-editor')).toBeVisible();
+
+    // Fill fitness stats
+    await page.getByTestId('distance-input').fill('5000');
+    await page.getByTestId('duration-input').fill('1500'); // 25 minutes
+    await page.getByTestId('hr-avg-input').fill('155');
+
+    // Upload a mock GPX file to trigger Map rendering
+    const gpxContent = `<?xml version="1.0" encoding="UTF-8"?>
+<gpx version="1.1" creator="Test">
+  <trk>
+    <trkseg>
+      <trkpt lat="-33.8688" lon="151.2093"><ele>10</ele><time>2026-01-01T00:00:00Z</time></trkpt>
+      <trkpt lat="-33.8690" lon="151.2095"><ele>12</ele><time>2026-01-01T00:00:10Z</time></trkpt>
+    </trkseg>
+  </trk>
+</gpx>`;
+
+    await page.getByTestId('gpx-file-input').setInputFiles({
+      name: 'test-track.gpx',
+      mimeType: 'application/gpx+xml',
+      buffer: Buffer.from(gpxContent),
+    });
+
+    await page.getByRole('button', { name: /create journal/i }).click();
+
+    // Verify redirect and badge
+    await awaitCreationAndAssertBadge(page, 'type-badge-fitness');
+
+    // Expand type section
+    await page.getByTestId('type-section-trigger-fitness').click();
+
+    // Verify stats are rendered in read-only mode by ActivityStats
+    await expect(page.getByTestId('activity-stats-grid')).toBeVisible();
+    await expect(page.getByTestId('stat-distance')).toHaveText('5.00 km');
+    await expect(page.getByTestId('stat-duration')).toHaveText('25:00');
+    await expect(page.getByTestId('stat-pace')).toHaveText('5:00 /km');
+    await expect(page.getByTestId('stat-hr')).toHaveText('155 bpm');
+
+    // Verify map is rendered
+    await expect(page.getByTestId('gpx-track-display')).toBeVisible();
+    await expect(page.locator('.leaflet-container')).toBeVisible();
+  });
 });

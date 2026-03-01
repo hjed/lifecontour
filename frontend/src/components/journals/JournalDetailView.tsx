@@ -29,6 +29,10 @@ import type {
   PhotoAlbumData,
   PlanData,
   TravelData,
+  FitnessData,
+  OutdoorActivityData,
+  BushwalkingData,
+  JoggingData,
   JournalTypeData,
 } from '@/types/journals';
 import { JournalContactRelationshipType, JournalType } from '@/types/journals';
@@ -190,6 +194,10 @@ export function JournalDetailView({
         | ClimbingData
         | KayakingData
         | CrossCountrySkiingData
+        | FitnessData
+        | OutdoorActivityData
+        | BushwalkingData
+        | JoggingData
     ) => {
       await updateTypeData.mutateAsync({
         journalId: journal.id,

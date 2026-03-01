@@ -39,20 +39,20 @@ It also shifts GPX track processing to the backend using `gpxpy` and renders on 
 **Objective:** Establish the foundation for fitness entries, rendering the map and the base statistics component.
 
 **Tasks:**
-- [ ] Install `shadcn-map` and `leaflet`/`react-leaflet` in `frontend/`.
-- [ ] Create `GPXTrackDisplay` component:
-  - Use `shadcn-map` components (`Map`, `MapTileLayer`, `MapPolyline`).
+- [x] Install `shadcn-map` and `leaflet`/`react-leaflet` in `frontend/`.
+- [x] Create `GPXTrackDisplay` component:
+  - Use `react-leaflet` (`MapContainer`, `TileLayer`, `Polyline`, `Marker`) to render the GPX track.
   - Render the track using the coordinates array provided by the backend.
-  - Add start/end markers.
-- [ ] Create `ActivityStats` component:
+  - Add start/end markers (with loop detection to avoid duplicates).
+- [x] Create `ActivityStats` component:
   - Design a flexible, reusable component to display metrics in a visually appealing way using `shadcn/ui` Cards or Badges.
   - Base display for fitness metrics (duration, distance, heart rate, elevation, calories).
-- [ ] Create `FitnessTypeEditor` (`frontend/src/components/journals/type-editors/FitnessTypeEditor.tsx`):
+- [x] Create `FitnessTypeEditor` (`frontend/src/components/journals/type-editors/FitnessTypeEditor.tsx`):
   - Sub-form for heart rate, distance, elevation, duration, and calories.
   - Implement GPX file upload.
-- [ ] Update `JournalTypeSection.tsx`.
-- [ ] Unit tests for the UI components.
-- [ ] E2E Test (Playwright) covering the creation of a `FITNESS` journal entry and map rendering.
+- [x] Update `JournalTypeSection.tsx`.
+- [x] Unit tests for the UI components.
+- [x] E2E Test (Playwright) covering the creation of a `FITNESS` journal entry and map rendering.
 
 ## PR 4: Base Outdoor, Jogging & Bushwalking UI
 **Objective:** Add UI forms for the remaining common outdoor activities and integrate the route selector.

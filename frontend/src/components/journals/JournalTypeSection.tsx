@@ -19,15 +19,19 @@ import { Button } from '@/components/ui/button';
 import { JournalType } from '@/types/journals';
 import type {
   AbseilingData,
+  BushwalkingData,
   CalendarInfoData,
   CanyoningData,
   ClimbingData,
   CrossCountrySkiingData,
   KayakingData,
+  JoggingData,
   MoodData,
+  OutdoorActivityData,
   PhotoAlbumData,
   PlanData,
   TravelData,
+  FitnessData,
 } from '@/types/journals';
 import { cn } from '@/lib/utils';
 import {
@@ -36,6 +40,7 @@ import {
   PhotoAlbumTypeEditor,
   PlanTypeEditor,
   TravelTypeEditor,
+  FitnessTypeEditor,
 } from './type-editors';
 
 /** Union of all type-specific data shapes supported by JournalTypeSection. */
@@ -45,6 +50,10 @@ type TypeSectionData =
   | PhotoAlbumData
   | PlanData
   | TravelData
+  | FitnessData
+  | OutdoorActivityData
+  | BushwalkingData
+  | JoggingData
   | AbseilingData
   | CanyoningData
   | ClimbingData
@@ -217,6 +226,14 @@ function TypeSpecificContent({
           journalId={journalId}
           data={typeData as TravelData | undefined}
           onSave={makeEditorSave<TravelData>(onSave, type)}
+        />
+      );
+    case JournalType.FITNESS:
+      return (
+        <FitnessTypeEditor
+          journalId={journalId}
+          data={typeData as FitnessData | undefined}
+          onSave={makeEditorSave<FitnessData>(onSave, type)}
         />
       );
     case JournalType.NOTE:
