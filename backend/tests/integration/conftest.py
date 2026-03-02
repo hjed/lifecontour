@@ -796,7 +796,7 @@ class ContactFactory:
         self, from_contact_id: int, to_contact_id: int, relationship_type: Any
     ) -> dict[str, Any]:
         """Create a relationship via API and return the response data."""
-        from app.core.contacts.models.entities import RelationshipType
+        from core_shared.models.contacts.entities import RelationshipType
 
         # Convert enum to string if needed
         if isinstance(relationship_type, RelationshipType):

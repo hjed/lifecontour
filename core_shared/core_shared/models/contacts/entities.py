@@ -4,7 +4,12 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 
-from .value_objects import Address, Email, PhoneNumber, TagName
+from core_shared.models.contacts.value_objects import (
+    Address,
+    Email,
+    PhoneNumber,
+    TagName,
+)
 
 
 class MethodType(Enum):
@@ -16,37 +21,6 @@ class MethodType(Enum):
     def __str__(self) -> str:
         """Return the string value of the enum."""
         return self.value
-
-
-class RelationshipType(Enum):
-    """Enumeration for contact relationship types."""
-
-    PARTNER = "partner"
-    CHILD = "child"
-    PARENT = "parent"
-    SIBLING = "sibling"
-    FRIEND = "friend"
-    COLLEAGUE = "colleague"
-    FAMILY = "family"
-    OTHER = "other"
-
-    def __str__(self) -> str:
-        """Return the string value of the enum."""
-        return self.value
-
-    def get_inverse_type(self) -> "RelationshipType":
-        """Get the inverse relationship type for bidirectional relationships."""
-        inverse_map = {
-            RelationshipType.PARENT: RelationshipType.CHILD,
-            RelationshipType.CHILD: RelationshipType.PARENT,
-            RelationshipType.PARTNER: RelationshipType.PARTNER,
-            RelationshipType.SIBLING: RelationshipType.SIBLING,
-            RelationshipType.FRIEND: RelationshipType.FRIEND,
-            RelationshipType.COLLEAGUE: RelationshipType.COLLEAGUE,
-            RelationshipType.FAMILY: RelationshipType.FAMILY,
-            RelationshipType.OTHER: RelationshipType.OTHER,
-        }
-        return inverse_map[self]
 
 
 @dataclass
@@ -275,6 +249,37 @@ class Contact:
         self.is_favourite = is_favourite
 
 
+class RelationshipType(Enum):
+    """Enumeration for contact relationship types."""
+
+    PARTNER = "partner"
+    CHILD = "child"
+    PARENT = "parent"
+    SIBLING = "sibling"
+    FRIEND = "friend"
+    COLLEAGUE = "colleague"
+    FAMILY = "family"
+    OTHER = "other"
+
+    def __str__(self) -> str:
+        """Return the string value of the enum."""
+        return self.value
+
+    def get_inverse_type(self) -> "RelationshipType":
+        """Get the inverse relationship type for bidirectional relationships."""
+        inverse_map = {
+            RelationshipType.PARENT: RelationshipType.CHILD,
+            RelationshipType.CHILD: RelationshipType.PARENT,
+            RelationshipType.PARTNER: RelationshipType.PARTNER,
+            RelationshipType.SIBLING: RelationshipType.SIBLING,
+            RelationshipType.FRIEND: RelationshipType.FRIEND,
+            RelationshipType.COLLEAGUE: RelationshipType.COLLEAGUE,
+            RelationshipType.FAMILY: RelationshipType.FAMILY,
+            RelationshipType.OTHER: RelationshipType.OTHER,
+        }
+        return inverse_map[self]
+
+
 @dataclass
 class ContactRelationship:
     """Contact relationship entity representing relationships between contacts."""
@@ -288,7 +293,7 @@ class ContactRelationship:
 
     def __post_init__(self) -> None:
         """Validate contact relationship."""
-        from app.core.contacts.models.exceptions import ContactValidationError
+        from core_shared.models.contacts.exceptions import ContactValidationError
 
         # Prevent self-relationships
         if self.from_contact_id == self.to_contact_id:

@@ -1,9 +1,10 @@
 """Contact relationship service with business logic for managing relationships."""
 
-from app.core.contacts.models.entities import ContactRelationship, RelationshipType
+from core_shared.models.contacts.entities import ContactRelationship, RelationshipType
+from core_shared.models.contacts.exceptions import ContactValidationError
+
 from app.core.contacts.models.exceptions import (
     ContactNotFoundError,
-    ContactValidationError,
 )
 from app.core.contacts.models.repositories import (
     ContactRelationshipRepository,

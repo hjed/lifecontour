@@ -7,10 +7,10 @@ Tests the error handling decorators for MCP tools.
 import json
 
 import pytest
+from core_shared.models.contacts.exceptions import ContactValidationError
 
 from app.core.contacts.models.exceptions import (
     ContactNotFoundError,
-    ContactValidationError,
 )
 from app.mcp.shared.decorators import mcp_unified_error_handler
 

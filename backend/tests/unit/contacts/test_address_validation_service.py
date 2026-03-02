@@ -1,9 +1,9 @@
 """Tests for AddressValidationService."""
 
 import pytest
+from core_shared.models.contacts.entities import ContactAddress
+from core_shared.models.contacts.exceptions import ContactValidationError
 
-from app.core.contacts.models.entities import ContactAddress
-from app.core.contacts.models.exceptions import ContactValidationError
 from app.core.contacts.services.address_validation_service import (
     AddressValidationService,
 )

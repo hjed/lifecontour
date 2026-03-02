@@ -5,10 +5,9 @@ Provides API endpoints for retrieving enum values with their display names
 to ensure consistency between frontend and backend.
 """
 
+from core_shared.models.contacts.entities import RelationshipType
 from fastapi import APIRouter
 from pydantic import BaseModel
-
-from app.core.contacts.models.entities import RelationshipType
 
 router = APIRouter()
 

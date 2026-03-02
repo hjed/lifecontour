@@ -20,6 +20,16 @@ if TYPE_CHECKING:
         ContactUpdateData,
     )
 
+from core_shared.models.contacts.entities import (
+    Contact,
+    ContactAddress,
+    ContactMethod,
+    ContactNote,
+    ContactRelationship,
+    RelationshipType,
+    Tag,
+)
+
 from app.api.contacts.schemas import (
     ContactAddressAttributes,
     ContactAddressResource,
@@ -36,14 +46,6 @@ from app.api.contacts.schemas import (
     ContactResource,
     TagAttributes,
     TagResource,
-)
-from app.core.contacts.models.entities import (
-    Contact,
-    ContactAddress,
-    ContactMethod,
-    ContactNote,
-    ContactRelationship,
-    Tag,
 )
 from app.core.contacts.models.repositories import ContactFieldHistoryEntry
 
@@ -199,7 +201,7 @@ class ContactRequestConverter:
         method_resource: ContactMethodResource, contact_id: int
     ) -> ContactMethod:
         """Convert API method resource to domain entity."""
-        from app.core.contacts.models.entities import MethodType
+        from core_shared.models.contacts.entities import MethodType
 
         return ContactMethod(
             id=method_resource.id,
@@ -367,7 +369,6 @@ class ContactRelationshipRequestConverter:
         request_data: ContactRelationshipCreateData,
     ) -> ContactRelationship:
         """Convert API create request to domain entity."""
-        from app.core.contacts.models.entities import RelationshipType
 
         attrs = request_data.attributes
         return ContactRelationship(
@@ -382,7 +383,7 @@ class ContactRelationshipRequestConverter:
         existing_relationship: ContactRelationship,
     ) -> ContactRelationship:
         """Convert API update request to domain entity."""
-        from app.core.contacts.models.entities import RelationshipType
+        from core_shared.models.contacts.entities import RelationshipType
 
         attrs = request_data.attributes
         return ContactRelationship(

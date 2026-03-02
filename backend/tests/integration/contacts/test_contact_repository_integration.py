@@ -1,16 +1,16 @@
 """Integration tests for ContactRepository with real database."""
 
 import pytest
-from sqlalchemy.ext.asyncio import AsyncConnection
-
-from app.core.contacts.adapters.sql import SqlContactRepository
-from app.core.contacts.models.entities import (
+from core_shared.models.contacts.entities import (
     Contact,
     ContactAddress,
     ContactMethod,
     ContactNote,
     MethodType,
 )
+from sqlalchemy.ext.asyncio import AsyncConnection
+
+from app.core.contacts.adapters.sql import SqlContactRepository
 from app.core.contacts.models.exceptions import (
     DuplicateEmailError,
 )

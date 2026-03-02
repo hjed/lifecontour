@@ -3,8 +3,7 @@
 from datetime import datetime
 
 import pytest
-
-from app.core.contacts.models.entities import (
+from core_shared.models.contacts.entities import (
     Contact,
     ContactAddress,
     ContactMethod,
@@ -12,7 +11,7 @@ from app.core.contacts.models.entities import (
     MethodType,
     Tag,
 )
-from app.core.contacts.models.value_objects import TagName
+from core_shared.models.contacts.value_objects import TagName
 
 
 @pytest.mark.unit

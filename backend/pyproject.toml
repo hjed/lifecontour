@@ -123,7 +123,6 @@ module = [
     "psycopg2.*",
     "stdnum.*",
     "pycountry.*",
-    "core_shared.*",
     "authlib.integrations.starlette_client",
     "googleapiclient.*",
     "arq.*",

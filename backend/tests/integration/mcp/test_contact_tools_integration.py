@@ -9,13 +9,19 @@ from unittest.mock import Mock
 
 import pytest
 import pytest_asyncio
+from core_shared.models.contacts.entities import (
+    Contact,
+    ContactMethod,
+    ContactNote,
+    MethodType,
+    Tag,
+)
+from core_shared.models.contacts.value_objects import TagName
 from dishka import Provider, Scope, make_async_container, provide
 from fastmcp import FastMCP
 from fastmcp.client import Client
 from sqlalchemy.ext.asyncio import AsyncConnection
 
-from app.core.contacts.models.entities import Contact, ContactMethod, MethodType, Tag
-from app.core.contacts.models.value_objects import TagName
 from app.core.contacts.services import ContactService
 from app.infrastructure.search.search_service import SearchService
 from app.mcp.domains.contacts.tools import register_contact_tools
@@ -255,9 +261,6 @@ class TestContactToolsIntegration:
     ):
         """Test creating a contact with phone and notes using real database with single transaction."""
         # Test creating a contact with additional data using the new single-call approach
-        from app.core.contacts.models.entities import (
-            ContactNote,
-        )
 
         # Create a test contact with attached methods and notes
         contact = Contact(
@@ -400,7 +403,7 @@ class TestContactToolsIntegration:
         # creates contacts with methods and notes in a single service call
 
         # Create a contact with methods and notes using the same pattern as the MCP tool
-        from app.core.contacts.models.entities import (
+        from core_shared.models.contacts.entities import (
             ContactNote,
         )
 
@@ -463,7 +466,7 @@ class TestContactToolsIntegration:
         saved_existing_tag = await tag_repo.save(existing_tag)
 
         # Now test the MCP tool pattern with both existing and new tags
-        from app.core.contacts.models.entities import (
+        from core_shared.models.contacts.entities import (
             Contact,
             ContactMethod,
             MethodType,

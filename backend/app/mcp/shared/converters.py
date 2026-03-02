@@ -7,7 +7,8 @@ reducing duplication and ensuring consistent response structures.
 
 from typing import Any
 
-from app.core.contacts.models.entities import Contact
+from core_shared.models.contacts.entities import Contact
+
 from app.mcp.domains.contacts.schemas import (
     ContactResponse,
     ContactSearchResult,

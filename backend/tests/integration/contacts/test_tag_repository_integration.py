@@ -1,12 +1,12 @@
 """Integration tests for TagRepository with real database."""
 
 import pytest
+from core_shared.models.contacts.entities import Tag
+from core_shared.models.contacts.value_objects import TagName
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core.contacts.adapters.sql import SqlTagRepository
-from app.core.contacts.models.entities import Tag
 from app.core.contacts.models.exceptions import DuplicateTagNameError, TagNotFoundError
-from app.core.contacts.models.value_objects import TagName
 
 
 @pytest.mark.integration

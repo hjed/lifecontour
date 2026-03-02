@@ -4,9 +4,7 @@ from abc import ABC, abstractmethod
 from collections.abc import Sequence
 from typing import Any, Protocol, Union
 
-from sqlalchemy.ext.asyncio import AsyncConnection
-
-from .entities import (
+from core_shared.models.contacts.entities import (
     Contact,
     ContactAddress,
     ContactMethod,
@@ -14,6 +12,7 @@ from .entities import (
     ContactRelationship,
     Tag,
 )
+from sqlalchemy.ext.asyncio import AsyncConnection
 
 
 class DomainEventProtocol(Protocol):

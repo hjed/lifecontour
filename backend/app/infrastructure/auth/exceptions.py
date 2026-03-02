@@ -4,7 +4,7 @@ Authentication exceptions.
 Defines custom exceptions for authentication and authorization errors.
 """
 
-from app.core.exceptions import DomainError
+from core_shared.exceptions import DomainError
 
 
 class AuthenticationError(DomainError):

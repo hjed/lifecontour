@@ -1,10 +1,9 @@
 """Address validation service using pycountry and python-stdnum."""
 
 import pycountry
+from core_shared.models.contacts.entities import ContactAddress
+from core_shared.models.contacts.exceptions import ContactValidationError
 from sqlalchemy.ext.asyncio import AsyncConnection
-
-from app.core.contacts.models.entities import ContactAddress
-from app.core.contacts.models.exceptions import ContactValidationError
 
 
 class AddressValidationService:

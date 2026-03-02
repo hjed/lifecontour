@@ -6,8 +6,8 @@ responses to internal Contact entities.
 """
 
 import pytest
+from core_shared.models.contacts.entities import Contact, MethodType
 
-from app.core.contacts.models.entities import Contact, MethodType
 from app.core.integrations.google_contacts.api_models import (
     GoogleAddress,
     GoogleBiography,

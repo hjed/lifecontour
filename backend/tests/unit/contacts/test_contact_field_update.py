@@ -3,8 +3,8 @@
 from unittest.mock import AsyncMock
 
 import pytest
+from core_shared.models.contacts.exceptions import ContactValidationError
 
-from app.core.contacts.models.exceptions import ContactValidationError
 from app.core.contacts.services.contact_service import ContactService
 
 # Import shared fixtures and factory functions

@@ -1,10 +1,10 @@
 """Tag hierarchy and validation service."""
 
+from core_shared.models.contacts.entities import Tag
+from core_shared.models.contacts.exceptions import ContactValidationError
 from sqlalchemy.ext.asyncio import AsyncConnection
 
-from app.core.contacts.models.entities import Tag
 from app.core.contacts.models.exceptions import (
-    ContactValidationError,
     DuplicateTagNameError,
     TagNotFoundError,
 )

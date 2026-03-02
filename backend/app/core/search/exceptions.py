@@ -1,6 +1,6 @@
 """Custom exceptions for the search domain."""
 
-from app.core.exceptions import DomainError
+from core_shared.exceptions import DomainError
 
 
 class SearchDomainError(DomainError):

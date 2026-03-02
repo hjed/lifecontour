@@ -9,6 +9,11 @@ from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING
 
 import structlog
+from core_shared.exceptions import DomainError
+from core_shared.models.contacts.exceptions import (
+    ContactDomainError,
+    ContactValidationError,
+)
 from fastapi import HTTPException, Request, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, Response
@@ -20,9 +25,7 @@ from app.api.common.schemas import (
     JsonApiErrorSource,
 )
 from app.core.contacts.models.exceptions import (
-    ContactDomainError,
     ContactNotFoundError,
-    ContactValidationError,
     DuplicateEmailError,
     DuplicateTagNameError,
     InvalidAddressError,
@@ -35,7 +38,6 @@ from app.core.contacts.models.exceptions import (
     TagNotFoundError,
     TooManyTagsError,
 )
-from app.core.exceptions import DomainError
 from app.core.journal.models.exceptions import (
     CalendarInfoValidationError,
     CalendarNotFoundError,

@@ -2,18 +2,18 @@
 
 import pytest
 import pytest_asyncio
+from core_shared.models.contacts.entities import (
+    Contact,
+    ContactRelationship,
+    RelationshipType,
+)
+from core_shared.models.contacts.exceptions import ContactValidationError
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core.contacts.adapters.sql import (
     SqlContactRelationshipRepository,
     SqlContactRepository,
 )
-from app.core.contacts.models.entities import (
-    Contact,
-    ContactRelationship,
-    RelationshipType,
-)
-from app.core.contacts.models.exceptions import ContactValidationError
 
 
 @pytest_asyncio.fixture

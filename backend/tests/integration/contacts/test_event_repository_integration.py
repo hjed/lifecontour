@@ -1,11 +1,11 @@
 """Integration tests for ContactEditEventRepository with real database."""
 
 import pytest
+from core_shared.models.contacts.entities import Contact
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core.contacts.adapters.sql import SqlContactEditEventRepository
-from app.core.contacts.models.entities import Contact
 from app.core.contacts.models.repositories import ContactEditEvent
 
 

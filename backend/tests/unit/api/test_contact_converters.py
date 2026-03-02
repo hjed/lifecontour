@@ -2,6 +2,18 @@
 
 from datetime import UTC, datetime
 
+from core_shared.models.contacts.entities import (
+    Contact,
+    ContactAddress,
+    ContactMethod,
+    ContactNote,
+    ContactRelationship,
+    MethodType,
+    RelationshipType,
+    Tag,
+)
+from core_shared.models.contacts.value_objects import TagName
+
 from app.api.contacts.converters import (
     ContactConverter,
     ContactRequestConverter,
@@ -17,17 +29,6 @@ from app.api.contacts.schemas import (
     ContactNoteAttributes,
     ContactNoteResource,
 )
-from app.core.contacts.models.entities import (
-    Contact,
-    ContactAddress,
-    ContactMethod,
-    ContactNote,
-    ContactRelationship,
-    MethodType,
-    RelationshipType,
-    Tag,
-)
-from app.core.contacts.models.value_objects import TagName
 
 
 class TestContactConverter:
