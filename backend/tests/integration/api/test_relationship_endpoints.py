@@ -1,8 +1,8 @@
 """Integration tests for contact relationship API endpoints."""
 
 import pytest
+from core_shared.models.contacts.entities import RelationshipType
 
-from app.core.contacts.models.entities import RelationshipType
 from tests.integration.conftest import ContactFactory
 
 

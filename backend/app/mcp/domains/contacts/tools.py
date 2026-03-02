@@ -9,24 +9,24 @@ import json
 from typing import Annotated
 
 import structlog
-from dishka.integrations.starlette import FromDishka, inject
-from fastmcp import FastMCP
-from pydantic import BaseModel, Field
-from sqlalchemy.ext.asyncio import AsyncConnection
-
-from app.core.contacts.models.entities import (
+from core_shared.models.contacts.entities import (
     Contact,
     ContactMethod,
     ContactNote,
     MethodType,
     Tag,
 )
+from core_shared.models.contacts.exceptions import ContactValidationError
+from core_shared.models.contacts.value_objects import TagName
+from dishka.integrations.starlette import FromDishka, inject
+from fastmcp import FastMCP
+from pydantic import BaseModel, Field
+from sqlalchemy.ext.asyncio import AsyncConnection
+
 from app.core.contacts.models.exceptions import (
     ContactNotFoundError,
-    ContactValidationError,
 )
 from app.core.contacts.models.repositories import TagRepository
-from app.core.contacts.models.value_objects import TagName
 from app.core.contacts.services import ContactService
 from app.infrastructure.search.search_service import SearchService
 from app.mcp.domains.contacts.schemas import (

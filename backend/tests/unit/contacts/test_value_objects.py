@@ -1,8 +1,7 @@
 """Unit tests for contacts domain value objects."""
 
 import pytest
-
-from app.core.contacts.models.value_objects import (
+from core_shared.models.contacts.value_objects import (
     Address,
     CountryCode,
     Email,

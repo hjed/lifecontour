@@ -4,8 +4,9 @@ Unit tests for MCP shared converters.
 Tests the converter utilities for transforming domain entities to AI-friendly formats.
 """
 
-from app.core.contacts.models.entities import Contact, Tag
-from app.core.contacts.models.value_objects import TagName
+from core_shared.models.contacts.entities import Contact, Tag
+from core_shared.models.contacts.value_objects import TagName
+
 from app.mcp.domains.contacts.schemas import ContactResponse, ContactSearchResult
 from app.mcp.shared.converters import (
     ContactConverter,

@@ -1,6 +1,16 @@
 """Integration tests for ContactService with real database connections."""
 
 import pytest
+from core_shared.models.contacts.entities import (
+    Contact,
+    ContactAddress,
+    ContactMethod,
+    ContactNote,
+    MethodType,
+    Tag,
+)
+from core_shared.models.contacts.exceptions import ContactValidationError
+from core_shared.models.contacts.value_objects import TagName
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core.contacts.adapters.sql import (
@@ -10,20 +20,10 @@ from app.core.contacts.adapters.sql import (
     SqlContactRepository,
     SqlTagRepository,
 )
-from app.core.contacts.models.entities import (
-    Contact,
-    ContactAddress,
-    ContactMethod,
-    ContactNote,
-    MethodType,
-    Tag,
-)
 from app.core.contacts.models.exceptions import (
     ContactNotFoundError,
-    ContactValidationError,
     DuplicateEmailError,
 )
-from app.core.contacts.models.value_objects import TagName
 from app.core.contacts.services import ContactService
 
 

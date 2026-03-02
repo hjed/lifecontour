@@ -1,11 +1,11 @@
 """SQL implementation of ContactRelationshipRepository."""
 
+from core_shared.models.contacts.entities import ContactRelationship, RelationshipType
+from core_shared.models.contacts.exceptions import ContactValidationError
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncConnection
 
-from app.core.contacts.models.entities import ContactRelationship, RelationshipType
-from app.core.contacts.models.exceptions import ContactValidationError
 from app.core.contacts.models.repositories import ContactRelationshipRepository
 
 

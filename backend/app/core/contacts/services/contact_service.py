@@ -4,10 +4,7 @@ import asyncio
 from typing import Any, cast
 
 import structlog
-from sqlalchemy.exc import IntegrityError
-from sqlalchemy.ext.asyncio import AsyncConnection
-
-from app.core.contacts.models.entities import (
+from core_shared.models.contacts.entities import (
     Contact,
     ContactAddress,
     ContactMethod,
@@ -15,6 +12,10 @@ from app.core.contacts.models.entities import (
     MethodType,
     Tag,
 )
+from core_shared.models.contacts.exceptions import ContactValidationError
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncConnection
+
 from app.core.contacts.models.events import (
     ContactAddressAdded,
     ContactAddressDeleted,
@@ -28,7 +29,6 @@ from app.core.contacts.models.events import (
     TagRemoved,
 )
 from app.core.contacts.models.exceptions import (
-    ContactValidationError,
     DuplicateEmailError,
     PrimaryAddressConflictError,
     PrimaryMethodConflictError,

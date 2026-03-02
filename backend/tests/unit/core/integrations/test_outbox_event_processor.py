@@ -11,10 +11,10 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
 import pytest
+from core_shared.models.contacts.entities import Contact, ContactMethod, MethodType
 from core_shared.models.outbox import OutboxEvent
 from sqlalchemy.ext.asyncio import AsyncConnection
 
-from app.core.contacts.models.entities import Contact, ContactMethod, MethodType
 from app.core.contacts.services.contact_service import ContactService
 from app.core.integrations.outbox_event_processor import (
     OutboxEventProcessingError,

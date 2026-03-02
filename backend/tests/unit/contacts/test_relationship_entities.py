@@ -3,8 +3,7 @@
 from datetime import datetime
 
 import pytest
-
-from app.core.contacts.models.entities import ContactRelationship, RelationshipType
+from core_shared.models.contacts.entities import ContactRelationship, RelationshipType
 
 
 class TestRelationshipType:
@@ -67,7 +66,7 @@ class TestContactRelationship:
 
     def test_self_relationship_validation(self):
         """Test that self-relationships are not allowed."""
-        from app.core.contacts.models.exceptions import ContactValidationError
+        from core_shared.models.contacts.exceptions import ContactValidationError
 
         with pytest.raises(
             ContactValidationError,
@@ -81,7 +80,7 @@ class TestContactRelationship:
 
     def test_negative_contact_id_validation(self):
         """Test that negative contact IDs are not allowed."""
-        from app.core.contacts.models.exceptions import ContactValidationError
+        from core_shared.models.contacts.exceptions import ContactValidationError
 
         with pytest.raises(
             ContactValidationError, match="Contact IDs must be positive"
@@ -103,7 +102,7 @@ class TestContactRelationship:
 
     def test_zero_contact_id_validation(self):
         """Test that zero contact IDs are not allowed."""
-        from app.core.contacts.models.exceptions import ContactValidationError
+        from core_shared.models.contacts.exceptions import ContactValidationError
 
         with pytest.raises(
             ContactValidationError, match="Contact IDs must be positive"

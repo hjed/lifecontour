@@ -1,10 +1,6 @@
 """SQL implementation of ContactRepository."""
 
-from sqlalchemy import text
-from sqlalchemy.exc import IntegrityError
-from sqlalchemy.ext.asyncio import AsyncConnection
-
-from app.core.contacts.models.entities import (
+from core_shared.models.contacts.entities import (
     Contact,
     ContactAddress,
     ContactMethod,
@@ -14,6 +10,11 @@ from app.core.contacts.models.entities import (
     RelationshipType,
     Tag,
 )
+from core_shared.models.contacts.value_objects import TagName
+from sqlalchemy import text
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncConnection
+
 from app.core.contacts.models.exceptions import (
     ContactNotFoundError,
     DuplicateEmailError,
@@ -21,7 +22,6 @@ from app.core.contacts.models.exceptions import (
     PrimaryMethodConflictError,
 )
 from app.core.contacts.models.repositories import ContactRepository
-from app.core.contacts.models.value_objects import TagName
 
 
 class SqlContactRepository(ContactRepository):

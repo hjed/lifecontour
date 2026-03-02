@@ -10,9 +10,10 @@ from collections.abc import Awaitable, Callable
 from functools import wraps
 from typing import Any
 
+from core_shared.models.contacts.exceptions import ContactValidationError
+
 from app.core.contacts.models.exceptions import (
     ContactNotFoundError,
-    ContactValidationError,
 )
 from app.core.journal.models.exceptions import JournalDomainError, JournalNotFoundError
 from app.mcp.shared.response_builders import MCPLogger, MCPResponseBuilder

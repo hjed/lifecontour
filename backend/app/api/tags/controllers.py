@@ -6,6 +6,8 @@ Controllers act as adapters between HTTP and domain services.
 """
 
 import structlog
+from core_shared.models.contacts.entities import Tag
+from core_shared.models.contacts.value_objects import TagName
 from dishka.integrations.fastapi import FromDishka, inject
 from fastapi import APIRouter, Query, Request, status
 from sqlalchemy.ext.asyncio import AsyncConnection
@@ -14,9 +16,7 @@ from app.api.common.schemas import get_request_base_url
 from app.api.contacts.converters import TagConverter
 from app.api.contacts.schemas import TagListResponse
 from app.api.tags.schemas import TagCreateRequest, TagResponse
-from app.core.contacts.models.entities import Tag
 from app.core.contacts.models.repositories import TagRepository
-from app.core.contacts.models.value_objects import TagName
 from app.infrastructure.auth.models import SessionUser
 
 logger = structlog.get_logger()

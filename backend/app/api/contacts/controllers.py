@@ -8,6 +8,7 @@ Controllers act as adapters between HTTP and domain services.
 from datetime import datetime
 
 import structlog
+from core_shared.models.contacts.exceptions import ContactValidationError
 from dishka.integrations.fastapi import FromDishka, inject
 from fastapi import APIRouter, Query, Request, status
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
@@ -49,7 +50,6 @@ from app.api.journals.converters import JournalConverter
 from app.api.journals.schemas import JournalListResponse
 from app.core.contacts.models.exceptions import (
     ContactNotFoundError,
-    ContactValidationError,
 )
 from app.core.contacts.services import ContactService
 from app.core.contacts.services.contact_history_service import ContactHistoryService

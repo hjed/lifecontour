@@ -6,6 +6,7 @@ Controllers act as adapters between HTTP and domain services.
 """
 
 import structlog
+from core_shared.models.contacts.exceptions import ContactValidationError
 from dishka.integrations.fastapi import FromDishka, inject
 from fastapi import APIRouter, Request, status
 
@@ -19,9 +20,6 @@ from app.api.contacts.schemas import (
     ContactRelationshipListResponse,
     ContactRelationshipResponse,
     ContactRelationshipUpdateRequest,
-)
-from app.core.contacts.models.exceptions import (
-    ContactValidationError,
 )
 from app.core.contacts.services import ContactRelationshipService
 from app.infrastructure.auth.models import SessionUser
@@ -193,7 +191,7 @@ async def update_contact_relationship(
             f"Relationship {relationship_id} does not belong to contact {contact_id}",
         )
 
-    from app.core.contacts.models.entities import RelationshipType
+    from core_shared.models.contacts.entities import RelationshipType
 
     updated_relationship = await relationship_service.update_relationship(
         relationship_id=relationship_id,

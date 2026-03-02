@@ -3,18 +3,15 @@
 from unittest.mock import AsyncMock
 
 import pytest
+from core_shared.models.contacts.entities import Contact, Tag
+from core_shared.models.contacts.exceptions import ContactValidationError
+from core_shared.models.contacts.value_objects import TagName
 
-from app.core.contacts.models.entities import (
-    Contact,
-    Tag,
-)
 from app.core.contacts.models.exceptions import (
     ContactNotFoundError,
-    ContactValidationError,
     DuplicateEmailError,
     TooManyTagsError,
 )
-from app.core.contacts.models.value_objects import TagName
 from app.core.contacts.services.contact_validation_service import (
     ContactValidationService,
 )

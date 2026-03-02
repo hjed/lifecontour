@@ -1,12 +1,6 @@
 """Custom exceptions for the contacts domain."""
 
-from app.core.exceptions import DomainError
-
-
-class ContactDomainError(DomainError):
-    """Base exception for contact domain errors."""
-
-    pass
+from core_shared.models.contacts.exceptions import ContactDomainError
 
 
 class ContactNotFoundError(ContactDomainError):
@@ -65,14 +59,6 @@ class TooManyTagsError(ContactDomainError):
         )
         self.current_count = current_count
         self.contact_id = contact_id
-
-
-class ContactValidationError(ContactDomainError):
-    """Contact data validation failed."""
-
-    def __init__(self, field: str, message: str):
-        super().__init__(f"Validation error for {field}: {message}", 422)
-        self.field = field
 
 
 class InvalidEmailError(ContactDomainError):

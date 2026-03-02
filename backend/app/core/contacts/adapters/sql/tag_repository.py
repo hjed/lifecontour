@@ -1,13 +1,13 @@
 """SQL implementation of TagRepository."""
 
+from core_shared.models.contacts.entities import Tag
+from core_shared.models.contacts.value_objects import TagName
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncConnection
 
-from app.core.contacts.models.entities import Tag
 from app.core.contacts.models.exceptions import DuplicateTagNameError, TagNotFoundError
 from app.core.contacts.models.repositories import TagRepository
-from app.core.contacts.models.value_objects import TagName
 
 
 class SqlTagRepository(TagRepository):

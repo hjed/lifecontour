@@ -1,6 +1,6 @@
 """Exceptions for the journal domain."""
 
-from app.core.exceptions import DomainError
+from core_shared.exceptions import DomainError
 
 
 class JournalDomainError(DomainError):

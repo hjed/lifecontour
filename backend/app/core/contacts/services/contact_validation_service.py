@@ -1,11 +1,11 @@
 """Contact validation service with transaction support."""
 
+from core_shared.models.contacts.entities import Contact, MethodType
+from core_shared.models.contacts.exceptions import ContactValidationError
 from sqlalchemy.ext.asyncio import AsyncConnection
 
-from app.core.contacts.models.entities import Contact, MethodType
 from app.core.contacts.models.exceptions import (
     ContactNotFoundError,
-    ContactValidationError,
     DuplicateEmailError,
 )
 from app.core.contacts.models.repositories import ContactRepository

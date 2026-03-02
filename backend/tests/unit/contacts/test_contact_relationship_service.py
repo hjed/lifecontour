@@ -3,15 +3,15 @@
 from unittest.mock import AsyncMock
 
 import pytest
-
-from app.core.contacts.models.entities import (
+from core_shared.models.contacts.entities import (
     Contact,
     ContactRelationship,
     RelationshipType,
 )
+from core_shared.models.contacts.exceptions import ContactValidationError
+
 from app.core.contacts.models.exceptions import (
     ContactNotFoundError,
-    ContactValidationError,
 )
 from app.core.contacts.services.contact_relationship_service import (
     ContactRelationshipService,

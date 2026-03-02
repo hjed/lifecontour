@@ -1,10 +1,13 @@
 """Unit tests for contacts domain exceptions."""
 
-from app.core.contacts.models.exceptions import (
+from core_shared.models.contacts.exceptions import (
     ContactDomainError,
+    ContactValidationError,
+)
+
+from app.core.contacts.models.exceptions import (
     ContactHistoryError,
     ContactNotFoundError,
-    ContactValidationError,
     DuplicateEmailError,
     DuplicateTagNameError,
     InvalidAddressError,
