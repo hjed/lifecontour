@@ -25,6 +25,7 @@ from core_shared.logging import (
     set_worker_id,
 )
 from core_shared.metrics import MetricsCollector
+from core_shared.models.contacts.serialization import serialize_contact
 
 # Import outbox models from core_shared
 from core_shared.models.outbox import OutboxEvent
@@ -43,6 +44,7 @@ from api_models import ListConnectionsResponse
 # Import worker-specific services
 from google_auth_service import GoogleAuthService
 from google_contacts_client import GoogleContactsAPIClient
+from transformer import GoogleContactTransformer
 
 
 class WorkerSettings(BaseSettings):
@@ -91,6 +93,7 @@ logger = get_logger(__name__)
 
 # Initialize metrics collector for this worker
 metrics_collector = MetricsCollector(worker_type="google_contacts")
+
 
 async def startup(ctx: dict[str, Any]) -> None:
     """
@@ -809,6 +812,7 @@ async def _perform_full_sync(
 
     page_token = None
     total_processed = 0
+    transformer = GoogleContactTransformer()
 
     while True:
         # Check if job has been cancelled
@@ -824,11 +828,10 @@ async def _perform_full_sync(
         if not contacts_response.connections:
             break
 
-        # Batch serialize contacts for better performance
+        # Batch transform and serialize contacts for better performance
         try:
-            # Pre-serialize all contacts in batch to avoid repeated model_dump() calls
             serialized_contacts = [
-                (person, person.model_dump())
+                (person, serialize_contact(transformer.transform_person(person)))
                 for person in contacts_response.connections
             ]
         except Exception as e:
@@ -852,6 +855,7 @@ async def _perform_full_sync(
                     integration_source="google_contacts",
                     external_id=google_person.resource_name,
                     sync_type="created",
+                    etag=google_person.etag,
                 )
 
                 # Add to session (will be committed with transaction)
@@ -945,11 +949,12 @@ async def _perform_incremental_sync(
 
     total_processed = 0
 
-    # Batch serialize contacts for better performance
+    # Batch transform and serialize contacts for better performance
+    transformer = GoogleContactTransformer()
     try:
-        # Pre-serialize all contacts in batch to avoid repeated model_dump() calls
         serialized_contacts = [
-            (person, person.model_dump()) for person in contacts_response.connections
+            (person, serialize_contact(transformer.transform_person(person)))
+            for person in contacts_response.connections
         ]
     except Exception as e:
         logger.error(
@@ -969,6 +974,7 @@ async def _perform_incremental_sync(
                 integration_source="google_contacts",
                 external_id=google_person.resource_name,
                 sync_type="updated",
+                etag=google_person.etag,
             )
 
             # Add to session (will be committed with transaction)
@@ -1002,7 +1008,10 @@ async def _perform_incremental_sync(
 
 
 async def _save_sync_token(
-    session: AsyncSession, google_account_email: str, sync_token: str, user_id: str | int
+    session: AsyncSession,
+    google_account_email: str,
+    sync_token: str,
+    user_id: str | int,
 ) -> None:
     """
     Save sync token for future incremental syncs.
@@ -1049,7 +1058,6 @@ async def _update_sync_job_status(
     started_at: datetime | None = None,
     completed_at: datetime | None = None,
     error_message: str | None = None,
-
     contacts_processed: int | None = None,
     contacts_created: int | None = None,
     contacts_updated: int | None = None,

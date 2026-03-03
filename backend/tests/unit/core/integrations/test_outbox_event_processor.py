@@ -45,38 +45,38 @@ class TestOutboxEventProcessor:
         )
 
     @pytest.fixture
-    def sample_google_contact_data(self) -> dict[str, Any]:
-        """Sample Google contact data from outbox event."""
+    def sample_contact_event_data(self) -> dict[str, Any]:
+        """Sample contact data in internal format (as stored in outbox events after transformation)."""
         return {
-            "resourceName": "people/c123456789",
-            "etag": "abc123",
-            "names": [
+            "first_name": "John",
+            "last_name": "Doe",
+            "middle_name": None,
+            "nick_name": None,
+            "company": None,
+            "job_title": None,
+            "is_favourite": False,
+            "methods": [
                 {
-                    "displayName": "John Doe",
-                    "familyName": "Doe",
-                    "givenName": "John",
-                    "metadata": {"primary": True, "source": {"type": "CONTACT"}},
-                }
-            ],
-            "emailAddresses": [
-                {
+                    "method_type": "email",
                     "value": "john.doe@example.com",
-                    "type": "work",
-                    "metadata": {"primary": True, "source": {"type": "CONTACT"}},
-                }
-            ],
-            "phoneNumbers": [
+                    "label": "Work",
+                    "is_primary": True,
+                },
                 {
+                    "method_type": "phone",
                     "value": "+1-555-123-4567",
-                    "type": "mobile",
-                    "metadata": {"primary": True, "source": {"type": "CONTACT"}},
-                }
+                    "label": "Mobile",
+                    "is_primary": True,
+                },
             ],
+            "addresses": [],
+            "notes": [],
+            "tags": [],
         }
 
     @pytest.fixture
     def contact_created_event(
-        self, sample_google_contact_data: dict[str, Any]
+        self, sample_contact_event_data: dict[str, Any]
     ) -> OutboxEvent:
         """Create a contact.created outbox event."""
         return OutboxEvent(
@@ -85,7 +85,7 @@ class TestOutboxEventProcessor:
             event_data={
                 "integration_source": "google_contacts",
                 "external_id": "people/c123456789",
-                "contact_data": sample_google_contact_data,
+                "contact_data": sample_contact_event_data,
                 "sync_timestamp": datetime.now(UTC).isoformat(),
                 "sync_type": "created",
             },
@@ -96,11 +96,11 @@ class TestOutboxEventProcessor:
 
     @pytest.fixture
     def contact_updated_event(
-        self, sample_google_contact_data: dict[str, Any]
+        self, sample_contact_event_data: dict[str, Any]
     ) -> OutboxEvent:
         """Create a contact.updated outbox event."""
-        updated_data = sample_google_contact_data.copy()
-        updated_data["names"][0]["givenName"] = "Johnny"  # Updated name
+        updated_data = sample_contact_event_data.copy()
+        updated_data["first_name"] = "Johnny"  # Updated name
 
         return OutboxEvent(
             id=uuid4(),
@@ -392,4 +392,4 @@ class TestOutboxEventProcessor:
             with pytest.raises(OutboxEventProcessingError) as exc_info:
                 await processor.process_event(invalid_event)
 
-        assert "Failed to transform Google contact data" in str(exc_info.value)
+        assert "Failed to deserialize contact data" in str(exc_info.value)

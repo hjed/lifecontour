@@ -4,9 +4,9 @@ These tests verify the end-to-end periodic sync flow with real database and Redi
 """
 
 import os
-from datetime import datetime, timezone
-from unittest.mock import AsyncMock, patch
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime
+from unittest.mock import AsyncMock, patch
 
 import pytest
 import pytest_asyncio
@@ -54,8 +54,8 @@ class TestPeriodicSyncIntegration:
             {
                 "token": b"encrypted_token_data",  # Dummy encrypted token
                 "refresh": b"encrypted_refresh_data",  # Dummy encrypted refresh token
-                "expiry": datetime.now(timezone.utc),
-                "now": datetime.now(timezone.utc),
+                "expiry": datetime.now(UTC),
+                "now": datetime.now(UTC),
             },
         )
         await db_session.commit()
@@ -100,8 +100,8 @@ class TestPeriodicSyncIntegration:
             {
                 "token": b"encrypted_token_data",
                 "refresh": b"encrypted_refresh_data",
-                "expiry": datetime.now(timezone.utc),
-                "now": datetime.now(timezone.utc),
+                "expiry": datetime.now(UTC),
+                "now": datetime.now(UTC),
             },
         )
         await db_session.commit()
@@ -135,4 +135,3 @@ class TestPeriodicSyncIntegration:
         await periodic_sync_all_accounts(ctx)
 
         # Verify function completed successfully with no errors
-

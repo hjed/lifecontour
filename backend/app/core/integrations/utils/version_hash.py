@@ -44,44 +44,39 @@ def calculate_contact_version_hash(contact_data: dict[str, Any]) -> str:
     """
     Calculate version hash specifically for contact data.
 
-    This extracts the relevant fields from Google Contacts API response
-    and calculates a hash. Fields like metadata timestamps are excluded
-    to avoid false positives.
+    This extracts the relevant fields from the internal Contact dict
+    representation and calculates a hash. Internal fields like id,
+    contact_id, created_at, updated_at are excluded.
 
     Args:
-        contact_data: Contact data from Google Contacts API
+        contact_data: Contact data dict (internal format from serialize_contact)
 
     Returns:
         SHA-256 hash as hex string
 
     Example:
-        >>> google_person = {
-        ...     "resourceName": "people/c123",
-        ...     "etag": "abc123",
-        ...     "names": [{"givenName": "John", "familyName": "Doe"}],
-        ...     "emailAddresses": [{"value": "john@example.com"}],
-        ...     "metadata": {"updateTime": "2024-01-01T00:00:00Z"}  # Excluded
+        >>> contact = {
+        ...     "first_name": "John",
+        ...     "last_name": "Doe",
+        ...     "methods": [{"method_type": "email", "value": "john@example.com"}],
         ... }
-        >>> hash_value = calculate_contact_version_hash(google_person)
+        >>> hash_value = calculate_contact_version_hash(contact)
         >>> len(hash_value)
         64
     """
     # Extract fields that matter for change detection
-    # Exclude metadata timestamps and other fields that change without user action
     relevant_fields = {
-        "names": contact_data.get("names", []),
-        "emailAddresses": contact_data.get("emailAddresses", []),
-        "phoneNumbers": contact_data.get("phoneNumbers", []),
+        "first_name": contact_data.get("first_name"),
+        "last_name": contact_data.get("last_name"),
+        "middle_name": contact_data.get("middle_name"),
+        "nick_name": contact_data.get("nick_name"),
+        "company": contact_data.get("company"),
+        "job_title": contact_data.get("job_title"),
+        "is_favourite": contact_data.get("is_favourite", False),
+        "methods": contact_data.get("methods", []),
         "addresses": contact_data.get("addresses", []),
-        "organizations": contact_data.get("organizations", []),
-        "biographies": contact_data.get("biographies", []),
-        "birthdays": contact_data.get("birthdays", []),
-        "urls": contact_data.get("urls", []),
-        "relations": contact_data.get("relations", []),
-        "nicknames": contact_data.get("nicknames", []),
-        "photos": contact_data.get("photos", []),
-        # Include etag if available (Google's version identifier)
-        "etag": contact_data.get("etag"),
+        "notes": contact_data.get("notes", []),
+        "tags": contact_data.get("tags", []),
     }
 
     return calculate_version_hash(relevant_fields)

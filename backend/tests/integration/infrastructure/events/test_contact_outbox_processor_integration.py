@@ -22,37 +22,40 @@ class TestContactOutboxProcessorIntegration:
     """Integration tests for contact outbox event processing."""
 
     @pytest.fixture
-    def sample_google_contact_data(self) -> dict[str, Any]:
-        """Create sample Google contact data for testing."""
+    def sample_contact_data(self) -> dict[str, Any]:
+        """Create sample internal contact data for testing."""
         return {
-            "resourceName": "people/c123456789",
-            "etag": "etag123",
-            "names": [
+            "first_name": "John",
+            "last_name": "Doe",
+            "middle_name": None,
+            "nick_name": None,
+            "company": None,
+            "job_title": None,
+            "is_favourite": False,
+            "methods": [
                 {
-                    "givenName": "John",
-                    "familyName": "Doe",
-                    "displayName": "John Doe",
-                }
-            ],
-            "emailAddresses": [
-                {
+                    "method_type": "email",
                     "value": "john.doe@example.com",
-                    "type": "work",
-                }
-            ],
-            "phoneNumbers": [
+                    "label": "work",
+                    "is_primary": True,
+                },
                 {
+                    "method_type": "phone",
                     "value": "+1-555-123-4567",
-                    "type": "mobile",
-                }
+                    "label": "mobile",
+                    "is_primary": True,
+                },
             ],
+            "addresses": [],
+            "notes": [],
+            "tags": [],
         }
 
     @pytest.mark.asyncio
     async def test_process_contact_created_event_creates_contact(
         self,
         clean_database: AsyncConnection,
-        sample_google_contact_data: dict[str, Any],
+        sample_contact_data: dict[str, Any],
     ):
         """Test that processing a contact.created event creates a contact in the database."""
         # Step 1: Create a contact.created outbox event
@@ -61,9 +64,10 @@ class TestContactOutboxProcessorIntegration:
         event_data = {
             "integration_source": "google_contacts",
             "external_id": "people/c123456789",
-            "contact_data": sample_google_contact_data,
+            "contact_data": sample_contact_data,
             "sync_timestamp": datetime.now(UTC).isoformat(),
             "sync_type": "created",
+            "etag": "etag123",
         }
 
         # Insert the event using the same pattern as OutboxEventPublisher

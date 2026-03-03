@@ -69,7 +69,9 @@ class GoogleAuthService:
             encrypted_value = encrypted_value.encode()
         return self._fernet.decrypt(encrypted_value).decode()
 
-    async def get_access_token(self, user_id: str | int, google_account_email: str) -> str:
+    async def get_access_token(
+        self, user_id: str | int, google_account_email: str
+    ) -> str:
         """
         Get decrypted access token for a Google account.
 
@@ -108,7 +110,9 @@ class GoogleAuthService:
 
         return self.decrypt(auth_record.encrypted_access_token)
 
-    async def refresh_access_token(self, user_id: str | int, google_account_email: str) -> str:
+    async def refresh_access_token(
+        self, user_id: str | int, google_account_email: str
+    ) -> str:
         """
         Refresh Google access token using refresh token.
 

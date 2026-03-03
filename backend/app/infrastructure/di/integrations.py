@@ -13,7 +13,6 @@ from app.core.contacts.services.contact_service import ContactService
 from app.core.integrations.database import IntegrationDatabaseManager
 from app.core.integrations.encryption import EncryptionService
 from app.core.integrations.external_reference_service import ExternalReferenceService
-from app.core.integrations.google_contacts.transformer import GoogleContactTransformer
 from app.core.integrations.health_service import IntegrationHealthService
 from app.core.integrations.outbox_event_processor import OutboxEventProcessor
 from app.core.integrations.task_queue import get_redis_pool, get_redis_settings
@@ -67,16 +66,6 @@ class IntegrationProvider(Provider):
             EncryptionService: Encryption service instance
         """
         return EncryptionService(settings)
-
-    @provide(scope=Scope.APP)
-    def provide_google_contact_transformer(self) -> GoogleContactTransformer:
-        """
-        Provide Google Contact transformer as singleton.
-
-        Returns:
-            GoogleContactTransformer: Transformer instance
-        """
-        return GoogleContactTransformer()
 
     @provide(scope=Scope.REQUEST)
     def provide_external_reference_service(
