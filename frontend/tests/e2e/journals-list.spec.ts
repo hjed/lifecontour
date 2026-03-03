@@ -409,7 +409,7 @@ test.describe('Journal List Page', () => {
       for (let i = 0; i < 12; i++) {
         if (await februaryGrid.isVisible()) break;
         await page
-          .getByRole('button', { name: 'Go to previous month' })
+          .getByRole('button', { name: 'Go to the Previous Month' })
           .click();
         await page.waitForTimeout(250);
       }
@@ -801,7 +801,7 @@ test.describe('Journal List Page', () => {
       for (let i = 0; i < 12; i++) {
         if (await februaryGrid.isVisible()) break;
         await page
-          .getByRole('button', { name: 'Go to previous month' })
+          .getByRole('button', { name: 'Go to the Previous Month' })
           .click();
         await page.waitForTimeout(250);
       }
