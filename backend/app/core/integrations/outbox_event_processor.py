@@ -13,6 +13,7 @@ This processor implements production-grade resilience patterns:
 from typing import Any
 
 import structlog
+from core_shared.models.contacts.serialization import deserialize_contact
 from core_shared.models.outbox import OutboxEvent
 from core_shared.models.sync_metadata import SyncStatus
 from sqlalchemy.ext.asyncio import AsyncConnection
@@ -22,8 +23,6 @@ from app.core.integrations.adapters.sql.sync_metadata_repository import (
     SyncMetadataRepository,
 )
 from app.core.integrations.external_reference_service import ExternalReferenceService
-from app.core.integrations.google_contacts.api_models import GooglePerson
-from app.core.integrations.google_contacts.transformer import GoogleContactTransformer
 from app.core.integrations.utils.version_hash import calculate_contact_version_hash
 
 logger = structlog.get_logger()
@@ -62,7 +61,6 @@ class OutboxEventProcessor:
         """
         self.contact_service = contact_service
         self.connection = connection
-        self.google_transformer = GoogleContactTransformer()
         self.external_reference_service = ExternalReferenceService(connection)
         self.sync_metadata_repo = SyncMetadataRepository(connection)
 
@@ -154,13 +152,12 @@ class OutboxEventProcessor:
             external_id=external_id,
         )
 
-        # Transform Google contact data to our Contact entity
+        # Deserialize contact data from outbox event
         try:
-            google_person = GooglePerson.model_validate(contact_data)
-            contact = self.google_transformer.transform_person(google_person)
+            contact = deserialize_contact(contact_data)
         except Exception as e:
             raise OutboxEventProcessingError(
-                f"Failed to transform Google contact data: {str(e)}"
+                f"Failed to deserialize contact data: {str(e)}"
             ) from e
 
         # Create the contact using the contact service
@@ -186,7 +183,7 @@ class OutboxEventProcessor:
                 external_entity_id=external_id,
                 reference_data={
                     "resource_name": external_id,
-                    "etag": contact_data.get("etag"),
+                    "etag": event_data.get("etag"),
                     "sync_timestamp": event_data["sync_timestamp"],
                 },
             )
@@ -316,18 +313,15 @@ class OutboxEventProcessor:
                 f"Contact not found for update: {external_id} from {integration_source}"
             )
 
-        # Transform Google contact data to our Contact entity
+        # Deserialize contact data from outbox event
         try:
-            google_person = GooglePerson.model_validate(contact_data)
-            updated_contact_data = self.google_transformer.transform_person(
-                google_person
-            )
+            updated_contact_data = deserialize_contact(contact_data)
 
             # Preserve the existing contact ID
             updated_contact_data.id = existing_contact.id
         except Exception as e:
             raise OutboxEventProcessingError(
-                f"Failed to transform Google contact data: {str(e)}"
+                f"Failed to deserialize contact data: {str(e)}"
             ) from e
 
         # Update the contact using the contact service
