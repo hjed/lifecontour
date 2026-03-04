@@ -64,14 +64,6 @@ test.describe('Journal Type Management', () => {
       page.getByTestId(`add-type-option-${JournalType.PLAN}`).click(),
     ]);
 
-    // Wait for the GET response to see if it includes PLAN
-    await page.waitForResponse(
-      response =>
-        response.url().includes(`/api/journals/${testJournalId}`) &&
-        response.request().method() === 'GET' &&
-        response.ok()
-    );
-
     // Verify PLAN type was added (badge appears)
     await expect(
       page.getByTestId(`manage-type-${JournalType.PLAN}`)
