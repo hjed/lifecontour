@@ -784,6 +784,33 @@ async def _determine_smart_sync_type(
         return "full"
 
 
+def _process_contacts_batch(
+    connections: list[Any],
+    transformer: GoogleContactTransformer,
+    google_account_email: str,
+    metrics: dict[str, Any],
+) -> list[tuple[Any, dict[str, Any]]]:
+    """Process a batch of contacts, handling per-item failures gracefully."""
+
+    serialized_contacts: list[tuple[Any, dict[str, Any]]] = []
+
+    for person in connections:
+        try:
+            contact = transformer.transform_person(person)
+            serialized = serialize_contact(contact)
+            serialized_contacts.append((person, serialized))
+        except Exception as e:
+            logger.error(
+                "Failed to transform/serialize contact in batch",
+                google_account_email=google_account_email,
+                resource_name=getattr(person, "resource_name", "unknown"),
+                error=str(e),
+            )
+            metrics["errors"] = metrics.get("errors", 0) + 1
+
+    return serialized_contacts
+
+
 async def _perform_full_sync(
     session: AsyncSession,
     client: GoogleContactsAPIClient,
@@ -828,23 +855,13 @@ async def _perform_full_sync(
         if not contacts_response.connections:
             break
 
-        # Batch transform and serialize contacts for better performance
-        try:
-            serialized_contacts = [
-                (person, serialize_contact(transformer.transform_person(person)))
-                for person in contacts_response.connections
-            ]
-        except Exception as e:
-            logger.error(
-                "Failed to serialize contacts batch",
-                google_account_email=google_account_email,
-                batch_size=len(contacts_response.connections),
-                error=str(e),
-            )
-            metrics["errors"] = metrics.get("errors", 0) + len(
-                contacts_response.connections
-            )
-            continue
+        # Transform and serialize contacts, handling per-item failures
+        serialized_contacts = _process_contacts_batch(
+            contacts_response.connections,
+            transformer,
+            google_account_email,
+            metrics,
+        )
 
         # Process each contact using outbox pattern
         for google_person, contact_data in serialized_contacts:
@@ -949,21 +966,14 @@ async def _perform_incremental_sync(
 
     total_processed = 0
 
-    # Batch transform and serialize contacts for better performance
+    # Transform and serialize contacts, handling per-item failures
     transformer = GoogleContactTransformer()
-    try:
-        serialized_contacts = [
-            (person, serialize_contact(transformer.transform_person(person)))
-            for person in contacts_response.connections
-        ]
-    except Exception as e:
-        logger.error(
-            "Failed to serialize contacts batch",
-            google_account_email=google_account_email,
-            batch_size=len(contacts_response.connections),
-            error=str(e),
-        )
-        return {"contacts_updated": 0, "errors": len(contacts_response.connections)}
+    serialized_contacts = _process_contacts_batch(
+        contacts_response.connections,
+        transformer,
+        google_account_email,
+        metrics,
+    )
 
     # Process changed contacts using outbox pattern
     for google_person, contact_data in serialized_contacts:
