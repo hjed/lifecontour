@@ -8,6 +8,13 @@
 import { test, expect } from './fixtures';
 import { TestDataManager } from './data-management';
 
+/** Returns the ordinal suffix for a day number, e.g. 1 → 'st', 2 → 'nd'. */
+function getOrdinal(n: number): string {
+  const s = ['th', 'st', 'nd', 'rd'],
+    v = n % 100;
+  return s[(v - 20) % 10] || s[v] || s[0];
+}
+
 test.describe('Journal Detail Page', () => {
   test.describe('Basic Display', () => {
     test('should display journal details', async ({ journalsWithData }) => {
@@ -151,11 +158,6 @@ test.describe('Journal Detail Page', () => {
       endDate.setDate(today.getDate() + 3);
 
       // Helper to format date as 'Wednesday, February 4th, 2026' (with ordinal suffix)
-      function getOrdinal(n: number) {
-        const s = ['th', 'st', 'nd', 'rd'],
-          v = n % 100;
-        return s[(v - 20) % 10] || s[v] || s[0];
-      }
       function formatAriaLabel(date: Date) {
         const weekday = date.toLocaleDateString('en-US', { weekday: 'long' });
         const month = date.toLocaleDateString('en-US', { month: 'long' });
@@ -211,9 +213,7 @@ test.describe('Journal Detail Page', () => {
 
         // Verify type badges are displayed
         for (const type of journal.types || []) {
-          await expect(
-            page.getByTestId(`type-badge-${type.toLowerCase()}`)
-          ).toBeVisible();
+          await expect(page.getByTestId(`manage-type-${type}`)).toBeVisible();
         }
       }
     });

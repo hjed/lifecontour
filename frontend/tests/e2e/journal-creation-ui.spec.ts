@@ -99,7 +99,7 @@ test.describe('Journal Creation UI Flow', () => {
 
     await page.getByRole('button', { name: /create journal/i }).click();
 
-    await awaitCreationAndAssertBadge(page, 'type-badge-mood_rating');
+    await awaitCreationAndAssertBadge(page, 'manage-type-mood_rating');
 
     // The type section is collapsed by default on the detail page.
     // We must expand it to assert on the type editors/displays inside it.
@@ -134,7 +134,7 @@ test.describe('Journal Creation UI Flow', () => {
 
     await page.getByRole('button', { name: /create journal/i }).click();
 
-    await awaitCreationAndAssertBadge(page, 'type-badge-plan');
+    await awaitCreationAndAssertBadge(page, 'manage-type-plan');
 
     // The type section is collapsed by default on the detail page.
     await page.getByTestId('type-section-trigger-plan').click();
@@ -185,7 +185,7 @@ test.describe('Journal Creation UI Flow', () => {
     await page.getByRole('checkbox', { name: /all-day event/i }).check();
 
     await page.getByRole('button', { name: /create journal/i }).click();
-    await awaitCreationAndAssertBadge(page, 'type-badge-event');
+    await awaitCreationAndAssertBadge(page, 'manage-type-event');
   });
 
   test('should create a TRAVEL journal with locations', async ({
@@ -202,7 +202,7 @@ test.describe('Journal Creation UI Flow', () => {
 
     // fillAndSubmitJournal already clicked Create Journal; wait for the redirect
     // and verify the travel type badge appears on the detail page.
-    await awaitCreationAndAssertBadge(page, 'type-badge-travel');
+    await awaitCreationAndAssertBadge(page, 'manage-type-travel');
   });
 
   test('should create a PHOTO_ALBUM journal with immich ID', async ({
@@ -226,6 +226,6 @@ test.describe('Journal Creation UI Flow', () => {
       .fill('223e4567-e89b-12d3-a456-426614174001');
 
     await page.getByRole('button', { name: /create journal/i }).click();
-    await awaitCreationAndAssertBadge(page, 'type-badge-photo_album');
+    await awaitCreationAndAssertBadge(page, 'manage-type-photo_album');
   });
 });

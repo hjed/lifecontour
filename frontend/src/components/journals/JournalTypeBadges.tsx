@@ -37,7 +37,7 @@ interface JournalTypeBadgesProps {
 }
 
 // Icon mapping for journal types
-const TYPE_ICONS: Record<
+export const TYPE_ICONS: Record<
   JournalType,
   React.ComponentType<{ className?: string }>
 > = {
@@ -59,7 +59,7 @@ const TYPE_ICONS: Record<
 };
 
 // Display labels for journal types
-const TYPE_LABELS: Record<JournalType, string> = {
+export const TYPE_LABELS: Record<JournalType, string> = {
   [JournalType.NOTE]: 'Note',
   [JournalType.EVENT]: 'Event',
   [JournalType.MOOD_RATING]: 'Mood Rating',
@@ -78,24 +78,26 @@ const TYPE_LABELS: Record<JournalType, string> = {
 };
 
 // Color variants for different journal types
-const TYPE_VARIANTS: Record<JournalType, 'default' | 'secondary' | 'outline'> =
-  {
-    [JournalType.NOTE]: 'secondary',
-    [JournalType.EVENT]: 'default',
-    [JournalType.MOOD_RATING]: 'outline',
-    [JournalType.PLAN]: 'secondary',
-    [JournalType.TRAVEL]: 'default',
-    [JournalType.PHOTO_ALBUM]: 'outline',
-    [JournalType.FITNESS]: 'default',
-    [JournalType.OUTDOOR_ACTIVITY]: 'default',
-    [JournalType.BUSHWALKING]: 'secondary',
-    [JournalType.JOGGING]: 'secondary',
-    [JournalType.ABSEILING_TRIP]: 'default',
-    [JournalType.CANYONING]: 'default',
-    [JournalType.CLIMBING]: 'default',
-    [JournalType.KAYAKING]: 'secondary',
-    [JournalType.CROSS_COUNTRY_SKIING]: 'secondary',
-  };
+export const TYPE_VARIANTS: Record<
+  JournalType,
+  'default' | 'secondary' | 'outline'
+> = {
+  [JournalType.NOTE]: 'secondary',
+  [JournalType.EVENT]: 'default',
+  [JournalType.MOOD_RATING]: 'outline',
+  [JournalType.PLAN]: 'secondary',
+  [JournalType.TRAVEL]: 'default',
+  [JournalType.PHOTO_ALBUM]: 'outline',
+  [JournalType.FITNESS]: 'default',
+  [JournalType.OUTDOOR_ACTIVITY]: 'default',
+  [JournalType.BUSHWALKING]: 'secondary',
+  [JournalType.JOGGING]: 'secondary',
+  [JournalType.ABSEILING_TRIP]: 'default',
+  [JournalType.CANYONING]: 'default',
+  [JournalType.CLIMBING]: 'default',
+  [JournalType.KAYAKING]: 'secondary',
+  [JournalType.CROSS_COUNTRY_SKIING]: 'secondary',
+};
 
 /**
  * JournalTypeBadges component displays journal types as visual badges with icons.

@@ -33,12 +33,12 @@ import type {
 } from '@/types/journals';
 import { JournalContactRelationshipType, JournalType } from '@/types/journals';
 import { JournalBreadcrumb } from './JournalBreadcrumb';
-import { JournalTypeBadges } from './JournalTypeBadges';
 import { JournalCalendarBadge } from './JournalCalendarBadge';
 import { JournalContactBadge } from './JournalContactBadge';
 import { JournalTagBadge } from './JournalTagBadge';
 import { JournalChildrenList } from './JournalChildrenList';
 import { JournalTypeSection } from './JournalTypeSection';
+import { JournalTypeManager } from './JournalTypeManager';
 import { InlineEditHeading } from './InlineEditHeading';
 import { JournalContentInline } from './JournalContentInline';
 import { InlineEditDateRange } from './InlineEditDateRange';
@@ -53,6 +53,8 @@ import {
   useJournalTags,
   useCalendars,
   useUpdateTypeData,
+  useAddJournalType,
+  useRemoveJournalType,
 } from '@/lib/api/journals';
 import { useContacts } from '@/lib/api/contacts';
 import { useRouter } from 'next/navigation';
@@ -80,6 +82,8 @@ export function JournalDetailView({
   const removeContact = useRemoveContactRelationship();
   const addTag = useAddJournalTag();
   const removeTag = useRemoveJournalTag();
+  const addType = useAddJournalType();
+  const removeType = useRemoveJournalType();
 
   // Data fetching
   const { data: tagsResponse } = useJournalTags();
@@ -155,6 +159,20 @@ export function JournalDetailView({
 
     await deleteJournal.mutateAsync(journal.id);
     router.push('/journals');
+  };
+
+  const handleTypeAdd = async (type: JournalType) => {
+    await addType.mutateAsync({
+      journalId: journal.id,
+      journalType: type,
+    });
+  };
+
+  const handleTypeRemove = async (type: JournalType) => {
+    await removeType.mutateAsync({
+      journalId: journal.id,
+      journalType: type,
+    });
   };
 
   // Handle type-specific data update
@@ -274,11 +292,18 @@ export function JournalDetailView({
         </CardHeader>
 
         <CardContent className='space-y-6'>
-          {/* Type Badges */}
-          <JournalTypeBadges types={journal.types} />
-
           {/* Metadata Section */}
           <div className='space-y-4'>
+            {/* Types */}
+            <div className='space-y-2'>
+              <div className='text-sm font-medium'>Types</div>
+              <JournalTypeManager
+                currentTypes={journal.types || []}
+                onTypeAdd={handleTypeAdd}
+                onTypeRemove={handleTypeRemove}
+              />
+            </div>
+
             {/* Calendar */}
             <div className='space-y-2'>
               <div className='text-sm font-medium'>Calendar</div>

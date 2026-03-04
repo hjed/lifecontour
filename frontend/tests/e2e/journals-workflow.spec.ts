@@ -209,7 +209,7 @@ test.describe('Journal Complete Workflows', () => {
       await expect(page.getByText(testContent)).toBeVisible();
 
       // Step 8: Verify the type badge is displayed
-      await expect(page.getByTestId('type-badge-note')).toBeVisible();
+      await expect(page.getByTestId('manage-type-note')).toBeVisible();
     });
 
     test('should show validation errors for empty title', async ({

@@ -51,13 +51,13 @@
 **PR Size:** ~10–15 files (frontend type management components/tests, backend tests and minor API adjustments if needed, Playwright E2E).
 
 **Acceptance Criteria:**
-- [ ] Implement a dedicated UI component on the journal detail page to manage types: list current types, add new types, and remove existing types.
-- [ ] When adding a type, enforce dependency rules and automatically attach required dependent types; when removing a type, enforce safe behaviour (for example, preventing removal that would violate dependency consistency).
-- [ ] Reuse type-specific inline editors for editing type_data when adding a new type or updating an existing type’s data; avoid duplicating form logic.
-- [ ] Wire the UI to backend update capabilities (for example, `update_journal_entry` and/or type-specific data endpoints) with clear JSON API contracts.
-- [ ] Add backend unit and integration tests that cover adding/removing types via the API, including complex activity-type dependency scenarios and error cases.
-- [ ] Add focused Playwright E2E tests that (a) start from an existing journal, (b) add at least one additional type and verify persistence, and (c) remove a type where allowed and verify database state and UI update.
-- [ ] Ensure tests are written or extended before implementation (`pytest` unit plus integration, Playwright E2E).
+- [x] Implement a dedicated UI component on the journal detail page to manage types: list current types, add new types, and remove existing types.
+- [x] When adding a type, enforce dependency rules and automatically attach required dependent types; when removing a type, enforce safe behaviour (for example, preventing removal that would violate dependency consistency).
+- [x] Reuse type-specific inline editors for editing type_data when adding a new type or updating an existing type’s data; avoid duplicating form logic.
+- [x] Wire the UI to backend update capabilities (for example, `update_journal_entry` and/or type-specific data endpoints) with clear JSON API contracts.
+- [x] Add backend unit and integration tests that cover adding/removing types via the API, including complex activity-type dependency scenarios and error cases.
+- [x] Add focused Playwright E2E tests that (a) start from an existing journal, (b) add at least one additional type and verify persistence, and (c) remove a type where allowed and verify database state and UI update.
+- [x] Ensure tests are written or extended before implementation (`pytest` unit plus integration, Playwright E2E).
 - [ ] Run and fix all quality gates for the PR (same as above).
 - [ ] If `PATCH/PUT /api/journals/{id}` or related MCP tools (`update_journal_entry`, search filters by type) change in shape or semantics, update MCP tools, schemas, and tests accordingly.
 

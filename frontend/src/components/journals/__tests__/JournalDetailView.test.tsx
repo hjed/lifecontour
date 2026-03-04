@@ -61,6 +61,14 @@ jest.mock('@/lib/api/journals', () => ({
     mutateAsync: jest.fn(),
     isPending: false,
   }),
+  useAddJournalType: () => ({
+    mutateAsync: jest.fn(),
+    isPending: false,
+  }),
+  useRemoveJournalType: () => ({
+    mutateAsync: jest.fn(),
+    isPending: false,
+  }),
   useCalendars: () => ({
     data: { data: [] },
   }),
@@ -98,6 +106,14 @@ jest.mock('../JournalChildrenList', () => ({
 jest.mock('../JournalTypeSection', () => ({
   JournalTypeSection: ({ type }: any) => (
     <div data-testid={`type-section-${type}`}>Type Section: {type}</div>
+  ),
+}));
+
+jest.mock('../JournalTypeManager', () => ({
+  JournalTypeManager: ({ currentTypes }: any) => (
+    <div data-testid='type-manager'>
+      Type Manager: {currentTypes.join(', ')}
+    </div>
   ),
 }));
 
@@ -165,10 +181,11 @@ describe('JournalDetailView', () => {
       expect(screen.getByTestId('tag-badge')).toBeInTheDocument();
     });
 
-    it('renders type badges', () => {
+    it('renders type manager', () => {
       renderWithQueryClient(<JournalDetailView journal={mockJournal} />);
 
-      expect(screen.getByText('Note')).toBeInTheDocument();
+      expect(screen.getByTestId('type-manager')).toBeInTheDocument();
+      expect(screen.getByText('Type Manager: note')).toBeInTheDocument();
     });
 
     it('renders date range field', () => {

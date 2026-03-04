@@ -404,8 +404,17 @@ test.describe('Journal List Page', () => {
       // Wait for calendar to be visible
       await page.waitForSelector('[role="grid"]', { state: 'visible' });
 
-      // Select dates within the February grid to avoid ambiguity with overflow dates
+      // Navigate to February 2026 grid if not currently visible
       const februaryGrid = page.getByRole('grid', { name: 'February 2026' });
+      while (!(await februaryGrid.isVisible())) {
+        await page
+          .getByRole('button', { name: 'Go to the Previous Month' })
+          .click();
+        // Wait for the calendar to update before checking visibility again
+        await expect(page.getByRole('status').first()).toBeVisible();
+      }
+
+      // Select dates within the February grid to avoid ambiguity with overflow dates
 
       // Select start date (February 1, 2026)
       await februaryGrid
@@ -787,8 +796,17 @@ test.describe('Journal List Page', () => {
       // Wait for calendar to be visible
       await page.waitForSelector('[role="grid"]', { state: 'visible' });
 
-      // Select dates within the February grid to avoid ambiguity
+      // Navigate to February 2026 grid if not currently visible
       const februaryGrid = page.getByRole('grid', { name: 'February 2026' });
+      while (!(await februaryGrid.isVisible())) {
+        await page
+          .getByRole('button', { name: 'Go to the Previous Month' })
+          .click();
+        // Wait for the calendar to update before checking visibility again
+        await expect(page.getByRole('status').first()).toBeVisible();
+      }
+
+      // Select dates within the February grid to avoid ambiguity
       await februaryGrid
         .getByRole('button', { name: /\b1 February 2026\b/ })
         .click();
@@ -1032,7 +1050,7 @@ test.describe('Journal List Page', () => {
         },
       ]);
 
-      const parentId = parseInt(parentJournals[0].id, 10);
+      const parentId = Number.parseInt(parentJournals[0].id, 10);
 
       // Create child journals
       await dataManager.createJournals([
