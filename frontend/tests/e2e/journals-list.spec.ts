@@ -1050,7 +1050,7 @@ test.describe('Journal List Page', () => {
         },
       ]);
 
-      const parentId = parseInt(parentJournals[0].id, 10);
+      const parentId = Number.parseInt(parentJournals[0].id, 10);
 
       // Create child journals
       await dataManager.createJournals([

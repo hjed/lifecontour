@@ -78,7 +78,7 @@ export default function JournalsPage() {
       return 'Loading journals...';
     }
 
-    const journalCount = `${totalJournals} journal${totalJournals !== 1 ? 's' : ''}`;
+    const journalCount = `${totalJournals} journal${totalJournals === 1 ? '' : 's'}`;
 
     if (shouldUseSearch) {
       const processingTime = data?.meta?.processing_time_ms
@@ -195,11 +195,13 @@ export default function JournalsPage() {
                       No journals found
                     </h3>
                     <p className='text-muted-foreground mt-2 text-sm'>
-                      {searchQuery
-                        ? `No journals match "${searchQuery}"`
-                        : Object.keys(filters).length > 0
-                          ? 'Try adjusting your filters or create a new journal.'
-                          : 'Get started by creating your first journal entry.'}
+                      {(() => {
+                        if (searchQuery)
+                          return `No journals match "${searchQuery}"`;
+                        if (Object.keys(filters).length > 0)
+                          return 'Try adjusting your filters or create a new journal.';
+                        return 'Get started by creating your first journal entry.';
+                      })()}
                     </p>
                     <Button asChild className='mt-4 gap-2'>
                       <Link href={'/journals/new' as Route}>
