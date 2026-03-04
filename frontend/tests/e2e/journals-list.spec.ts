@@ -406,12 +406,12 @@ test.describe('Journal List Page', () => {
 
       // Navigate to February 2026 grid if not currently visible
       const februaryGrid = page.getByRole('grid', { name: 'February 2026' });
-      for (let i = 0; i < 12; i++) {
-        if (await februaryGrid.isVisible()) break;
+      while (!(await februaryGrid.isVisible())) {
         await page
           .getByRole('button', { name: 'Go to the Previous Month' })
           .click();
-        await page.waitForTimeout(250);
+        // Wait for the calendar to update before checking visibility again
+        await expect(page.getByRole('status').first()).toBeVisible();
       }
 
       // Select dates within the February grid to avoid ambiguity with overflow dates
@@ -798,12 +798,12 @@ test.describe('Journal List Page', () => {
 
       // Navigate to February 2026 grid if not currently visible
       const februaryGrid = page.getByRole('grid', { name: 'February 2026' });
-      for (let i = 0; i < 12; i++) {
-        if (await februaryGrid.isVisible()) break;
+      while (!(await februaryGrid.isVisible())) {
         await page
           .getByRole('button', { name: 'Go to the Previous Month' })
           .click();
-        await page.waitForTimeout(250);
+        // Wait for the calendar to update before checking visibility again
+        await expect(page.getByRole('status').first()).toBeVisible();
       }
 
       // Select dates within the February grid to avoid ambiguity

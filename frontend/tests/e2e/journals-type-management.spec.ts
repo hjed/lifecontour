@@ -85,6 +85,11 @@ test.describe('Journal Type Management', () => {
     // Wait for tooltip/hovercard
     await page.getByTestId(`manage-type-${JournalType.PLAN}`).hover();
 
+    // Wait for the HoverCard to fully appear before clicking
+    await expect(
+      page.getByTestId(`remove-type-${JournalType.PLAN}`)
+    ).toBeVisible();
+
     // Click remove inside the hovercard
     await Promise.all([
       page.waitForResponse(

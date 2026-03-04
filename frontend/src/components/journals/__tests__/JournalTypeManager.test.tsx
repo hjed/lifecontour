@@ -84,7 +84,7 @@ describe('JournalTypeManager', () => {
 
     it('does not remove type if confirm is cancelled', async () => {
       const user = userEvent.setup();
-      (window as any).confirm = jest.fn(() => false);
+      (globalThis as any).confirm = jest.fn(() => false);
       renderComponent([JournalType.NOTE]);
 
       await user.hover(screen.getByTestId(`manage-type-${JournalType.NOTE}`));
@@ -109,11 +109,6 @@ describe('JournalTypeManager', () => {
 
       renderComponent();
 
-      // Let's suppress the unhandled promise rejection warning for this specific test
-      const originalListeners = process.listeners('unhandledRejection');
-      process.removeAllListeners('unhandledRejection');
-      process.on('unhandledRejection', () => {});
-
       await user.click(screen.getByTestId('add-type-button'));
 
       const option = await screen.findByTestId(
@@ -131,11 +126,6 @@ describe('JournalTypeManager', () => {
         expect.any(Error)
       );
 
-      // Restore listeners
-      process.removeAllListeners('unhandledRejection');
-      for (const listener of originalListeners) {
-        process.on('unhandledRejection', listener);
-      }
       consoleSpy.mockRestore();
     });
 
@@ -147,10 +137,6 @@ describe('JournalTypeManager', () => {
       mockOnTypeRemove.mockRejectedValueOnce(new Error('API Error'));
 
       renderComponent([JournalType.NOTE]);
-
-      const originalListeners = process.listeners('unhandledRejection');
-      process.removeAllListeners('unhandledRejection');
-      process.on('unhandledRejection', () => {});
 
       await user.hover(screen.getByTestId(`manage-type-${JournalType.NOTE}`));
       const removeBtn = await screen.findByTestId(
@@ -172,10 +158,6 @@ describe('JournalTypeManager', () => {
         expect.any(Error)
       );
 
-      process.removeAllListeners('unhandledRejection');
-      for (const listener of originalListeners) {
-        process.on('unhandledRejection', listener);
-      }
       consoleSpy.mockRestore();
     });
   });

@@ -54,7 +54,6 @@ export function JournalTypeManager({
       await onTypeAdd(type);
     } catch (error) {
       console.error('Failed to add type:', error);
-      throw error;
     } finally {
       setIsAdding(false);
     }
@@ -74,7 +73,6 @@ export function JournalTypeManager({
       await onTypeRemove(type);
     } catch (error) {
       console.error('Failed to remove type:', error);
-      throw error;
     } finally {
       setIsRemovingType(null);
     }
@@ -126,41 +124,43 @@ export function JournalTypeManager({
         );
       })}
 
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <Button
-            variant='ghost'
-            size='sm'
-            className='text-muted-foreground hover:text-foreground h-7 gap-1.5 rounded-full border border-dashed px-3 text-xs'
-            data-testid='add-type-button'
-            aria-label='Add journal type'
-            disabled={isAdding || availableTypes.length === 0}
+      {availableTypes.length > 0 && (
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button
+              variant='ghost'
+              size='sm'
+              className='text-muted-foreground hover:text-foreground h-7 gap-1.5 rounded-full border border-dashed px-3 text-xs'
+              data-testid='add-type-button'
+              aria-label='Add journal type'
+              disabled={isAdding}
+            >
+              <Plus className='h-3.5 w-3.5' />
+              Add Type
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent
+            align='start'
+            className='h-[300px] w-[200px] overflow-y-auto'
           >
-            <Plus className='h-3.5 w-3.5' />
-            Add Type
-          </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent
-          align='start'
-          className='h-[300px] w-[200px] overflow-y-auto'
-        >
-          {availableTypes.map(type => {
-            const Icon = TYPE_ICONS[type];
-            const label = TYPE_LABELS[type];
-            return (
-              <DropdownMenuItem
-                key={type}
-                onClick={() => handleAdd(type)}
-                className='cursor-pointer gap-2'
-                data-testid={`add-type-option-${type}`}
-              >
-                {Icon && <Icon className='text-muted-foreground h-4 w-4' />}
-                {label}
-              </DropdownMenuItem>
-            );
-          })}
-        </DropdownMenuContent>
-      </DropdownMenu>
+            {availableTypes.map(type => {
+              const Icon = TYPE_ICONS[type];
+              const label = TYPE_LABELS[type];
+              return (
+                <DropdownMenuItem
+                  key={type}
+                  onClick={() => handleAdd(type)}
+                  className='cursor-pointer gap-2'
+                  data-testid={`add-type-option-${type}`}
+                >
+                  {Icon && <Icon className='text-muted-foreground h-4 w-4' />}
+                  {label}
+                </DropdownMenuItem>
+              );
+            })}
+          </DropdownMenuContent>
+        </DropdownMenu>
+      )}
     </div>
   );
 }
