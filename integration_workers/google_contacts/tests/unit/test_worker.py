@@ -271,6 +271,39 @@ class TestGoogleContactsWorker:
             assert result["status"] == "error"
             assert "API error" in result["error"]
 
+    def test_process_contacts_batch_partial_failure(self):
+        """Test that a single invalid contact does not fail the entire batch."""
+        from worker import _process_contacts_batch
+
+        # Mock transformer
+        mock_transformer = MagicMock()
+        mock_transformer.transform_person.side_effect = [
+            MagicMock(id=1),
+            Exception("Invalid contact data"),
+            MagicMock(id=3),
+        ]
+
+        # Mock connections
+        connections = [
+            MagicMock(resource_name="people/1"),
+            MagicMock(resource_name="people/2"),
+            MagicMock(resource_name="people/3"),
+        ]
+
+        metrics = {"errors": 0}
+
+        with patch("worker.serialize_contact", side_effect=[{"id": 1}, {"id": 3}]):
+            result = _process_contacts_batch(
+                connections, mock_transformer, "test@example.com", metrics
+            )
+
+            assert len(result) == 2
+            assert result[0][0] == connections[0]
+            assert result[0][1] == {"id": 1}
+            assert result[1][0] == connections[2]
+            assert result[1][1] == {"id": 3}
+            assert metrics["errors"] == 1
+
 
 class TestGoogleContactsAPIClient:
     """Test cases for Google Contacts API client create/update methods."""
