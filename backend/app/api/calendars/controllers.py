@@ -15,6 +15,7 @@ from app.api.journals.schemas import (
     CalendarCreateRequest,
     CalendarListResponse,
     CalendarResponse,
+    CalendarUpdateRequest,
 )
 from app.core.journal.adapters.sql.calendar_repository import CalendarRepository
 from app.core.journal.models.calendar import Calendar
@@ -119,6 +120,84 @@ async def create_calendar(
         id=str(created_calendar.id),
         attributes=calendar_attributes,
         links=JsonApiLinks(self=f"{base_url}/api/calendars/{created_calendar.id}"),
+    )
+
+    return CalendarResponse(data=calendar_resource)
+
+
+@router.put("/{calendar_id}", status_code=status.HTTP_200_OK)
+@inject
+async def update_calendar(
+    calendar_id: str,
+    request: Request,
+    calendar_request: CalendarUpdateRequest,
+    calendar_repo: FromDishka[CalendarRepository],
+    user: FromDishka[SessionUser],  # Require authentication
+) -> CalendarResponse:
+    """
+    Update an existing calendar.
+    """
+    from uuid import UUID
+
+    from fastapi import HTTPException
+
+    from app.api.common.schemas import JsonApiLinks
+    from app.api.journals.schemas import CalendarAttributes, CalendarResource
+
+    base_url = get_request_base_url(request)
+
+    try:
+        calendar_uuid = UUID(calendar_id)
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid calendar ID format",
+        ) from e
+
+    # Get the calendar to verify ownership
+    calendar = await calendar_repo.find_by_id(calendar_uuid)
+    if not calendar:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Calendar not found",
+        )
+
+    # Verify the calendar belongs to the user
+    if calendar.user_id != user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You don't have permission to modify this calendar",
+        )
+
+    # Update attributes
+    attrs = calendar_request.data.attributes
+    if attrs.name is not None:
+        calendar.name = attrs.name
+    if attrs.description is not None:
+        calendar.description = attrs.description
+    if attrs.color is not None:
+        calendar.color = attrs.color
+    if attrs.is_synced_to_google is not None:
+        calendar.is_synced_to_google = attrs.is_synced_to_google
+    if attrs.google_calendar_id is not None:
+        calendar.google_calendar_id = attrs.google_calendar_id
+
+    # Save changes
+    updated_calendar = await calendar_repo.save(calendar)
+
+    # Convert to resource
+    calendar_attributes = CalendarAttributes(
+        name=updated_calendar.name,
+        description=updated_calendar.description,
+        color=updated_calendar.color,
+        is_synced_to_google=updated_calendar.is_synced_to_google,
+        google_calendar_id=updated_calendar.google_calendar_id,
+    )
+
+    calendar_resource = CalendarResource(
+        id=str(updated_calendar.id),
+        attributes=calendar_attributes,
+        links=JsonApiLinks(self=f"{base_url}/api/calendars/{updated_calendar.id}"),
     )
 
     return CalendarResponse(data=calendar_resource)

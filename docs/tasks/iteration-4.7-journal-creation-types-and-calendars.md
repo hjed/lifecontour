@@ -61,7 +61,7 @@
 - [ ] Run and fix all quality gates for the PR (same as above).
 - [ ] If `PATCH/PUT /api/journals/{id}` or related MCP tools (`update_journal_entry`, search filters by type) change in shape or semantics, update MCP tools, schemas, and tests accordingly.
 
-### ITER4.7-003: Calendar Management UI & Metadata (Future‑Proofed for Google Sync)
+### ITER4.7-003: Calendar Management UI & Metadata (Future‑Proofed for Google Sync) ✅ COMPLETE
 **Description:** Expose calendar management in the UI (create/update/delete calendars and basic sync metadata) so EVENT journals can reliably reference calendars, without yet implementing Google sync.
 **Strategy:** Single PR that introduces a simple calendar settings UI and any missing backend endpoints, designed to align with Iteration 7 expectations.
 **Specification Reference:** [Calendars](../journal-system-specification.md#calendars), [Google Calendar Integration](../journal-system-specification.md#google-calendar-integration), [Iteration 7 – Google Calendar Integration](./iteration-7-calendar-integration.md)
@@ -69,15 +69,15 @@
 **PR Size:** ~10–14 files (backend calendar API plus tests, frontend calendar management UI plus tests, Playwright E2E).
 
 **Acceptance Criteria:**
-- [ ] Confirm or introduce a `calendars` table and domain model consistent with the spec (`id`, `user_id`, `name`, `description`, `color`, `is_synced_to_google`, `google_calendar_id`, timestamps).
-- [ ] Implement JSON API-compliant endpoints for listing, creating, updating, and soft-deleting calendars, with appropriate validation and authorization.
-- [ ] Add backend unit and integration tests for these calendar endpoints, including constraints relevant to EVENT journals (for example, preventing deletion of a calendar that still has EVENT journals unless a clear migration path is implemented).
-- [ ] Implement a Calendar Settings UI (for example, under journal or global settings) that allows adding/removing calendars, editing name and color, and toggling sync-related flags without triggering actual Google sync.
-- [ ] Ensure the EVENT journal type UI (creation and inline editors) consumes the calendar list from these APIs and handles calendar deletion or renaming gracefully.
-- [ ] Add Playwright E2E tests that cover (a) creating a new calendar and using it when creating an EVENT journal, and (b) editing/removing calendars with expected constraints and error handling.
-- [ ] Ensure tests are written or extended before implementation (`pytest` unit plus integration, Playwright E2E).
-- [ ] Run and fix all quality gates for the PR (same as above).
-- [ ] If calendar-related REST endpoints or MCP tools (for example, journal search filters by `calendar_id` or any future calendar MCP tools) are introduced or changed, update their MCP definitions and tests in the same PR.
+- [x] Confirm or introduce a `calendars` table and domain model consistent with the spec (`id`, `user_id`, `name`, `description`, `color`, `is_synced_to_google`, `google_calendar_id`, timestamps).
+- [x] Implement JSON API-compliant endpoints for listing, creating, updating, and soft-deleting calendars, with appropriate validation and authorization.
+- [x] Add backend unit and integration tests for these calendar endpoints, including constraints relevant to EVENT journals (for example, preventing deletion of a calendar that still has EVENT journals unless a clear migration path is implemented).
+- [x] Implement a Calendar Settings UI (for example, under journal or global settings) that allows adding/removing calendars, editing name and color, and toggling sync-related flags without triggering actual Google sync.
+- [x] Ensure the EVENT journal type UI (creation and inline editors) consumes the calendar list from these APIs and handles calendar deletion or renaming gracefully.
+- [x] Add Playwright E2E tests that cover (a) creating a new calendar and using it when creating an EVENT journal, and (b) editing/removing calendars with expected constraints and error handling.
+- [x] Ensure tests are written or extended before implementation (`pytest` unit plus integration, Playwright E2E).
+- [x] Run and fix all quality gates for the PR (same as above).
+- [x] If calendar-related REST endpoints or MCP tools (for example, journal search filters by `calendar_id` or any future calendar MCP tools) are introduced or changed, update their MCP definitions and tests in the same PR.
 
 ## 4. Testing & Quality Expectations for Iteration 4.7
 - All tasks follow strict test‑first development: write or extend unit, integration, and E2E tests before implementing behaviour.

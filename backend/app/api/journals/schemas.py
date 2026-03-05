@@ -692,6 +692,36 @@ class CalendarCreateRequest(JsonApiCreateRequest[CalendarCreateData]):
     pass
 
 
+class CalendarUpdateAttributes(BaseModel):
+    """Calendar attributes for updates."""
+
+    name: str | None = Field(default=None, description="Calendar name")
+    description: str | None = Field(default=None, description="Calendar description")
+    color: str | None = Field(default=None, description="Calendar color (hex code)")
+    is_synced_to_google: bool | None = Field(
+        default=None, description="Whether calendar is synced to Google Calendar"
+    )
+    google_calendar_id: str | None = Field(
+        default=None, description="Google Calendar ID"
+    )
+
+
+class CalendarUpdateData(BaseModel):
+    """Data for updating a calendar."""
+
+    type: str = Field(default="calendars", description=RESOURCE_TYPE_DESC)
+    id: str = Field(..., description="Calendar ID to update")
+    attributes: CalendarUpdateAttributes = Field(
+        ..., description="Calendar attributes to update"
+    )
+
+
+class CalendarUpdateRequest(JsonApiUpdateRequest[CalendarUpdateData]):
+    """Request model for updating a calendar."""
+
+    pass
+
+
 class CalendarResponse(JsonApiResponse[CalendarResource]):
     """Response model for a single calendar."""
 

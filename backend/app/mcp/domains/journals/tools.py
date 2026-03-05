@@ -1752,3 +1752,210 @@ def register_journal_tools(mcp: FastMCP[None]) -> None:
         )
 
         return MCPResponseBuilder.success_response(response)
+
+    @mcp.tool
+    @mcp_unified_error_handler("list_calendars", "journal")
+    @inject
+    async def list_calendars(
+        db_connection: FromDishka[AsyncConnection],
+    ) -> str:
+        """
+        List all calendars available for EVENT journeys.
+        """
+        from app.core.journal.adapters.sql.calendar_repository import (
+            SqlCalendarRepository,
+        )
+
+        user_id = _get_current_user_id()
+        calendar_repo = SqlCalendarRepository(db_connection)
+
+        calendars = await calendar_repo.get_all(user_id=user_id)
+
+        from pydantic import BaseModel
+
+        class CalendarListItem(BaseModel):
+            id: str
+            name: str
+            description: str | None
+            color: str | None
+
+        class CalendarListResponse(BaseModel):
+            calendars: list[CalendarListItem]
+
+        response = CalendarListResponse(
+            calendars=[
+                CalendarListItem(
+                    id=str(c.id),
+                    name=c.name,
+                    description=c.description,
+                    color=c.color,
+                )
+                for c in calendars
+            ]
+        )
+
+        return MCPResponseBuilder.success_response(response)
+
+    @mcp.tool
+    @mcp_unified_error_handler("create_calendar", "journal")
+    @inject
+    async def create_calendar(
+        db_connection: FromDishka[AsyncConnection],
+        name: Annotated[str, Field(description="Calendar name")],
+        description: Annotated[
+            str | None, Field(description="Calendar description", default=None)
+        ] = None,
+        color: Annotated[
+            str | None, Field(description="Calendar color hex code", default=None)
+        ] = None,
+    ) -> str:
+        """
+        Create a new calendar to be used with EVENT journals.
+        """
+        from app.core.journal.adapters.sql.calendar_repository import (
+            SqlCalendarRepository,
+        )
+        from app.core.journal.models.calendar import Calendar
+
+        user_id = _get_current_user_id()
+        calendar_repo = SqlCalendarRepository(db_connection)
+
+        new_calendar = Calendar(
+            user_id=user_id,
+            name=name,
+            description=description,
+            color=color or "#3B82F6",
+            is_synced_to_google=False,
+            google_calendar_id=None,
+        )
+
+        saved_calendar = await calendar_repo.save(new_calendar)
+
+        from pydantic import BaseModel
+
+        class CalendarResponse(BaseModel):
+            id: str
+            name: str
+            summary: str
+
+        return MCPResponseBuilder.success_response(
+            CalendarResponse(
+                id=str(saved_calendar.id),
+                name=saved_calendar.name,
+                summary=f"Created calendar '{saved_calendar.name}'",
+            )
+        )
+
+    @mcp.tool
+    @mcp_unified_error_handler("update_calendar", "journal")
+    @inject
+    async def update_calendar(
+        db_connection: FromDishka[AsyncConnection],
+        calendar_id: Annotated[str, Field(description="Calendar UUID")],
+        name: Annotated[
+            str | None, Field(description="Calendar name", default=None)
+        ] = None,
+        description: Annotated[
+            str | None, Field(description="Calendar description", default=None)
+        ] = None,
+        color: Annotated[
+            str | None, Field(description="Calendar color hex code", default=None)
+        ] = None,
+    ) -> str:
+        """
+        Update an existing calendar.
+        """
+        import uuid
+
+        from fastapi import HTTPException
+
+        from app.core.journal.adapters.sql.calendar_repository import (
+            SqlCalendarRepository,
+        )
+
+        user_id = _get_current_user_id()
+        calendar_repo = SqlCalendarRepository(db_connection)
+
+        calendar = await calendar_repo.find_by_id(uuid.UUID(calendar_id))
+        if not calendar or calendar.user_id != user_id:
+            raise HTTPException(status_code=404, detail="Calendar not found")
+
+        if name is not None:
+            calendar.name = name
+        if description is not None:
+            calendar.description = description
+        if color is not None:
+            calendar.color = color
+
+        saved_calendar = await calendar_repo.save(calendar)
+
+        from pydantic import BaseModel
+
+        class CalendarResponse(BaseModel):
+            id: str
+            name: str
+            summary: str
+
+        return MCPResponseBuilder.success_response(
+            CalendarResponse(
+                id=str(saved_calendar.id),
+                name=saved_calendar.name,
+                summary=f"Updated calendar '{saved_calendar.name}'",
+            )
+        )
+
+    @mcp.tool
+    @mcp_unified_error_handler("delete_calendar", "journal")
+    @inject
+    async def delete_calendar(
+        db_connection: FromDishka[AsyncConnection],
+        calendar_id: Annotated[str, Field(description="Calendar UUID")],
+    ) -> str:
+        """
+        Delete a calendar. Will fail if the calendar is in use.
+        """
+        import uuid
+
+        from fastapi import HTTPException
+
+        from app.core.journal.adapters.sql.calendar_repository import (
+            SqlCalendarRepository,
+        )
+
+        user_id = _get_current_user_id()
+        calendar_repo = SqlCalendarRepository(db_connection)
+
+        calendar = await calendar_repo.find_by_id(uuid.UUID(calendar_id))
+        if not calendar or calendar.user_id != user_id:
+            raise HTTPException(status_code=404, detail="Calendar not found")
+
+        from sqlalchemy import text
+
+        check_query = text(
+            """
+            SELECT COUNT(*) as count
+            FROM journal_calendar_info
+            WHERE calendar_id = :calendar_id
+            """
+        )
+        result = await db_connection.execute(check_query, {"calendar_id": calendar.id})
+        row = result.fetchone()
+        usage_count: int = row[0] if row else 0
+
+        if usage_count > 0:
+            raise HTTPException(
+                status_code=409,
+                detail=f"Calendar is in use by {usage_count} journal(s)",
+            )
+
+        if calendar.id is not None:
+            await calendar_repo.delete(calendar.id)
+
+        from pydantic import BaseModel
+
+        class DeleteCalendarResponse(BaseModel):
+            summary: str
+
+        return MCPResponseBuilder.success_response(
+            DeleteCalendarResponse(summary=f"Deleted calendar '{calendar.name}'")
+        )

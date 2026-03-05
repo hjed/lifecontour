@@ -221,6 +221,9 @@ export interface JournalCalendar {
   id: string;
   name: string;
   color?: string | null;
+  description?: string | null;
+  is_synced_to_google?: boolean;
+  google_calendar_id?: string | null;
 }
 
 // Parent Journal Summary

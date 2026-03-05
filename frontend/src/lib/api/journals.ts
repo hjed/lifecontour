@@ -15,6 +15,7 @@ import {
   JournalType,
   JournalContactRelationshipType,
   JournalTag,
+  JournalCalendar,
 } from '@/types/journals';
 import { JsonApiErrorResponse } from '@/types/api';
 import {
@@ -540,6 +541,76 @@ async function fetchCalendars(): Promise<{
   return response.json();
 }
 
+async function createCalendar(
+  data: Omit<JournalCalendar, 'id'>
+): Promise<{ data: { id: string; attributes: any } }> {
+  const requestData = {
+    type: 'calendars' as const,
+    attributes: data,
+  };
+
+  const response = await fetch('/api/calendars', {
+    method: 'POST',
+    credentials: 'include',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ data: requestData }),
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json();
+    throw new Error(
+      errorData.errors?.[0]?.detail || 'Failed to create calendar'
+    );
+  }
+
+  return response.json();
+}
+
+async function updateCalendar(
+  id: string,
+  data: Partial<Omit<JournalCalendar, 'id'>>
+): Promise<{ data: { id: string; attributes: any } }> {
+  const requestData = {
+    type: 'calendars' as const,
+    id,
+    attributes: data,
+  };
+
+  const response = await fetch(`/api/calendars/${id}`, {
+    method: 'PUT',
+    credentials: 'include',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ data: requestData }),
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json();
+    throw new Error(
+      errorData.errors?.[0]?.detail || 'Failed to update calendar'
+    );
+  }
+
+  return response.json();
+}
+
+async function deleteCalendar(id: string): Promise<void> {
+  const response = await fetch(`/api/calendars/${id}`, {
+    method: 'DELETE',
+    credentials: 'include',
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json();
+    throw new Error(
+      errorData.errors?.[0]?.detail || 'Failed to delete calendar'
+    );
+  }
+}
+
 // React Query Hooks
 export function useJournals(
   filters: JournalFilters = {},
@@ -592,6 +663,57 @@ export function useCalendars() {
     queryKey: calendarKeys.lists(),
     queryFn: fetchCalendars,
     staleTime: 10 * 60 * 1000, // 10 minutes
+  });
+}
+
+export function useCreateCalendar() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: createCalendar,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: calendarKeys.lists() });
+      toast.success('Calendar created successfully');
+    },
+    onError: (error: Error) => {
+      toast.error(error.message);
+    },
+  });
+}
+
+export function useUpdateCalendar() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({
+      id,
+      data,
+    }: {
+      id: string;
+      data: Partial<Omit<JournalCalendar, 'id'>>;
+    }) => updateCalendar(id, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: calendarKeys.lists() });
+      toast.success('Calendar updated successfully');
+    },
+    onError: (error: Error) => {
+      toast.error(error.message);
+    },
+  });
+}
+
+export function useDeleteCalendar() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: deleteCalendar,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: calendarKeys.lists() });
+      toast.success('Calendar deleted successfully');
+    },
+    onError: (error: Error) => {
+      toast.error(error.message);
+    },
   });
 }
 

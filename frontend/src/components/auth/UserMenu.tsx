@@ -8,6 +8,8 @@
 
 import { useState } from 'react';
 import { LogOut, User, Settings } from 'lucide-react';
+import Link from 'next/link';
+import type { Route } from 'next';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -82,9 +84,11 @@ export function UserMenu() {
           <User className='mr-2 h-4 w-4' />
           <span>Profile</span>
         </DropdownMenuItem>
-        <DropdownMenuItem>
-          <Settings className='mr-2 h-4 w-4' />
-          <span>Settings</span>
+        <DropdownMenuItem asChild>
+          <Link href={'/settings' as Route} className='w-full cursor-pointer'>
+            <Settings className='mr-2 h-4 w-4' />
+            <span>Settings</span>
+          </Link>
         </DropdownMenuItem>
         <DropdownMenuSeparator />
         <DropdownMenuItem
