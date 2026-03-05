@@ -543,7 +543,7 @@ async function fetchCalendars(): Promise<{
 
 async function createCalendar(
   data: Omit<JournalCalendar, 'id'>
-): Promise<{ data: { id: string; attributes: any } }> {
+): Promise<{ data: { id: string; attributes: Omit<JournalCalendar, 'id'> } }> {
   const requestData = {
     type: 'calendars' as const,
     attributes: data,
@@ -559,9 +559,9 @@ async function createCalendar(
   });
 
   if (!response.ok) {
-    const errorData = await response.json();
+    const errorData: JsonApiErrorResponse = await response.json();
     throw new Error(
-      errorData.errors?.[0]?.detail || 'Failed to create calendar'
+      errorData.errors?.[0]?.detail || ERROR_MESSAGES.FETCH_FAILED
     );
   }
 
@@ -571,7 +571,7 @@ async function createCalendar(
 async function updateCalendar(
   id: string,
   data: Partial<Omit<JournalCalendar, 'id'>>
-): Promise<{ data: { id: string; attributes: any } }> {
+): Promise<{ data: { id: string; attributes: Omit<JournalCalendar, 'id'> } }> {
   const requestData = {
     type: 'calendars' as const,
     id,
@@ -588,9 +588,9 @@ async function updateCalendar(
   });
 
   if (!response.ok) {
-    const errorData = await response.json();
+    const errorData: JsonApiErrorResponse = await response.json();
     throw new Error(
-      errorData.errors?.[0]?.detail || 'Failed to update calendar'
+      errorData.errors?.[0]?.detail || ERROR_MESSAGES.FETCH_FAILED
     );
   }
 

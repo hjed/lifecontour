@@ -41,9 +41,9 @@ const calendarFormSchema = z.object({
 type CalendarFormValues = z.infer<typeof calendarFormSchema>;
 
 interface CalendarSettingsDialogProps {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  calendar?: JournalCalendar;
+  readonly open: boolean;
+  readonly onOpenChange: (open: boolean) => void;
+  readonly calendar?: JournalCalendar;
 }
 
 export function CalendarSettingsDialog({

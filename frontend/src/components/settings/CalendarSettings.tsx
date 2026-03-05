@@ -38,7 +38,7 @@ export function CalendarSettings() {
   };
 
   const handleDelete = (id: string) => {
-    if (window.confirm('Are you sure you want to delete this calendar?')) {
+    if (globalThis.confirm('Are you sure you want to delete this calendar?')) {
       deleteCalendar(id);
     }
   };
@@ -130,6 +130,7 @@ export function CalendarSettings() {
                         variant='ghost'
                         size='sm'
                         onClick={() => handleEdit(calendarData)}
+                        aria-label={`Edit calendar ${calendarData.name}`}
                       >
                         <Edit2 className='text-muted-foreground h-4 w-4' />
                       </Button>
@@ -138,6 +139,7 @@ export function CalendarSettings() {
                         size='sm'
                         onClick={() => handleDelete(cal.id)}
                         disabled={isDeleting}
+                        aria-label={`Delete calendar ${calendarData.name}`}
                       >
                         <Trash2 className='text-destructive h-4 w-4' />
                       </Button>

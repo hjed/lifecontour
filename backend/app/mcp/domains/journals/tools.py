@@ -525,6 +525,199 @@ async def _create_type_specific_data(
     # These will be created when the user provides type_data
 
 
+async def _update_event_data(
+    journal_id: int,
+    type_data_dict: dict[str, Any],
+    calendar_info_repo: SqlCalendarInfoRepository,
+) -> None:
+    calendar_id = type_data_dict.get("calendar_id")
+    if calendar_id is not None:
+        if isinstance(calendar_id, str):
+            calendar_id = UUID(calendar_id)
+        calendar_info = CalendarInfo(
+            journal_id=journal_id,
+            calendar_id=calendar_id,
+            start_time=type_data_dict.get("start_time"),
+            end_time=type_data_dict.get("end_time"),
+            is_all_day=type_data_dict.get("is_all_day", False),
+            location=type_data_dict.get("location"),
+            sync_invitees=type_data_dict.get("sync_invitees", False),
+        )
+        await calendar_info_repo.save(calendar_info)
+
+
+async def _update_mood_data(
+    journal_id: int,
+    type_data_dict: dict[str, Any],
+    mood_data_repo: SqlMoodDataRepository,
+) -> None:
+    existing_mood = await mood_data_repo.find_by_journal_id(journal_id)
+    if existing_mood:
+        if "mood_value" in type_data_dict:
+            existing_mood.mood_value = type_data_dict["mood_value"]
+        if "mood_label" in type_data_dict:
+            existing_mood.mood_label = type_data_dict["mood_label"]
+        if "energy_level" in type_data_dict:
+            existing_mood.energy_level = type_data_dict["energy_level"]
+        await mood_data_repo.save(existing_mood)
+
+
+async def _update_photo_album_data(
+    journal_id: int,
+    type_data_dict: dict[str, Any],
+    photo_album_data_repo: SqlPhotoAlbumDataRepository,
+) -> None:
+    immich_album_id = type_data_dict.get("immich_album_id")
+    if immich_album_id is not None:
+        photo_album_data = PhotoAlbumData(
+            journal_id=journal_id,
+            immich_album_id=str(immich_album_id),
+        )
+        await photo_album_data_repo.save(photo_album_data)
+
+
+async def _update_fitness_data(
+    journal_id: int,
+    type_data_dict: dict[str, Any],
+    fitness_data_repo: SqlFitnessDataRepository,
+) -> None:
+    existing_fitness = await fitness_data_repo.find_by_journal_id(journal_id)
+    if existing_fitness:
+        for field in [
+            "heart_rate_avg",
+            "heart_rate_max",
+            "distance",
+            "elevation_gain",
+            "elevation_loss",
+            "duration",
+            "calories",
+            "gpx_track_data",
+            "strava_activity_id",
+        ]:
+            if field in type_data_dict:
+                setattr(existing_fitness, field, type_data_dict[field])
+        await fitness_data_repo.save(existing_fitness)
+
+
+async def _update_outdoor_activity_data(
+    journal_id: int,
+    type_data_dict: dict[str, Any],
+    outdoor_activity_data_repo: SqlOutdoorActivityDataRepository,
+) -> None:
+    existing_outdoor = await outdoor_activity_data_repo.find_by_journal_id(journal_id)
+    if existing_outdoor:
+        updates: dict[str, Any] = {}
+        for field in [
+            "activity_type",
+            "weather_conditions",
+            "role",
+            "in_leadership_role",
+            "participant_notes",
+        ]:
+            if field in type_data_dict:
+                updates[field] = type_data_dict[field]
+        validated_outdoor = dataclasses.replace(existing_outdoor, **updates)
+        await outdoor_activity_data_repo.save(validated_outdoor)
+
+
+def _parse_route_id(type_data_dict: dict[str, Any], updates: dict[str, Any]) -> None:
+    if "route_id" in type_data_dict:
+        route_id_val = type_data_dict["route_id"]
+        try:
+            updates["route_id"] = (
+                UUID(route_id_val) if isinstance(route_id_val, str) else route_id_val
+            )
+        except ValueError as e:
+            raise JournalValidationError(
+                "route_id", f"Invalid UUID format: {route_id_val}"
+            ) from e
+
+
+async def _update_bushwalking_data(
+    journal_id: int,
+    type_data_dict: dict[str, Any],
+    bushwalking_data_repo: SqlBushwalkingDataRepository,
+) -> None:
+    existing_bushwalking = await bushwalking_data_repo.find_by_journal_id(journal_id)
+    if existing_bushwalking:
+        bw_updates: dict[str, Any] = {}
+        if "track_grading" in type_data_dict:
+            bw_updates["track_grading"] = type_data_dict["track_grading"]
+        _parse_route_id(type_data_dict, bw_updates)
+        validated_bushwalking = dataclasses.replace(existing_bushwalking, **bw_updates)
+        await bushwalking_data_repo.save(validated_bushwalking)
+
+
+async def _update_jogging_data(
+    journal_id: int,
+    type_data_dict: dict[str, Any],
+    jogging_data_repo: SqlJoggingDataRepository,
+) -> None:
+    existing_jogging = await jogging_data_repo.find_by_journal_id(journal_id)
+    if existing_jogging:
+        jog_updates: dict[str, Any] = {}
+        if "pace" in type_data_dict:
+            jog_updates["pace"] = type_data_dict["pace"]
+        _parse_route_id(type_data_dict, jog_updates)
+        validated_jogging = dataclasses.replace(existing_jogging, **jog_updates)
+        await jogging_data_repo.save(validated_jogging)
+
+
+async def _update_abseiling_data(
+    journal_id: int,
+    type_data_dict: dict[str, Any],
+    abseiling_data_repo: SqlAbseilingDataRepository,
+) -> None:
+    existing_abseiling = await abseiling_data_repo.find_by_journal_id(journal_id)
+    if existing_abseiling:
+        abs_updates: dict[str, Any] = {}
+        if "number_of_abseils" in type_data_dict:
+            abs_updates["number_of_abseils"] = type_data_dict["number_of_abseils"]
+        if "total_length" in type_data_dict:
+            abs_updates["total_length"] = type_data_dict["total_length"]
+        validated_abseiling = dataclasses.replace(existing_abseiling, **abs_updates)
+        await abseiling_data_repo.save(validated_abseiling)
+
+
+async def _update_canyoning_data(
+    journal_id: int,
+    type_data_dict: dict[str, Any],
+    canyoning_data_repo: SqlCanyoningDataRepository,
+) -> None:
+    existing_canyoning = await canyoning_data_repo.find_by_journal_id(journal_id)
+    if existing_canyoning:
+        can_updates: dict[str, Any] = {}
+        _parse_route_id(type_data_dict, can_updates)
+        for field in [
+            "french_grade",
+            "water_guage_name",
+            "water_guage_level",
+            "is_vertical",
+            "is_night_canyon",
+            "is_white_water",
+        ]:
+            if field in type_data_dict:
+                can_updates[field] = type_data_dict[field]
+        validated_canyoning = dataclasses.replace(existing_canyoning, **can_updates)
+        await canyoning_data_repo.save(validated_canyoning)
+
+
+async def _update_climbing_data(
+    journal_id: int,
+    type_data_dict: dict[str, Any],
+    climbing_data_repo: SqlClimbingDataRepository,
+) -> None:
+    existing_climbing = await climbing_data_repo.find_by_journal_id(journal_id)
+    if existing_climbing:
+        clb_updates: dict[str, Any] = {}
+        _parse_route_id(type_data_dict, clb_updates)
+        for field in ["climbing_type", "grade", "length"]:
+            if field in type_data_dict:
+                clb_updates[field] = type_data_dict[field]
+        validated_climbing = dataclasses.replace(existing_climbing, **clb_updates)
+        await climbing_data_repo.save(validated_climbing)
+
+
 async def _update_type_specific_data(
     journal_type: JournalType,
     journal_id: int,
@@ -558,200 +751,35 @@ async def _update_type_specific_data(
         canyoning_data_repo: Repository for canyoning data
         climbing_data_repo: Repository for climbing data
     """
-    if journal_type == JournalType.EVENT and type_data_dict:
-        # Create or update calendar info (calendar_id is required)
-        calendar_id = type_data_dict.get("calendar_id")
-        if calendar_id is not None:
-            # Convert string to UUID if needed
-            if isinstance(calendar_id, str):
-                calendar_id = UUID(calendar_id)
+    if not type_data_dict:
+        return
 
-            calendar_info = CalendarInfo(
-                journal_id=journal_id,
-                calendar_id=calendar_id,
-                start_time=type_data_dict.get("start_time"),
-                end_time=type_data_dict.get("end_time"),
-                is_all_day=type_data_dict.get("is_all_day", False),
-                location=type_data_dict.get("location"),
-                sync_invitees=type_data_dict.get("sync_invitees", False),
-            )
-            await calendar_info_repo.save(calendar_info)
-    elif journal_type == JournalType.MOOD_RATING and type_data_dict:
-        # Update mood data
-        existing_mood = await mood_data_repo.find_by_journal_id(journal_id)
-        if existing_mood:
-            if "mood_value" in type_data_dict:
-                existing_mood.mood_value = type_data_dict["mood_value"]
-            if "mood_label" in type_data_dict:
-                existing_mood.mood_label = type_data_dict["mood_label"]
-            if "energy_level" in type_data_dict:
-                existing_mood.energy_level = type_data_dict["energy_level"]
-            await mood_data_repo.save(existing_mood)
-    elif journal_type == JournalType.PHOTO_ALBUM and type_data_dict:
-        # Create or update photo album data (immich_album_id is required)
-        immich_album_id = type_data_dict.get("immich_album_id")
-        if immich_album_id is not None:
-            photo_album_data = PhotoAlbumData(
-                journal_id=journal_id,
-                immich_album_id=str(immich_album_id),
-            )
-            await photo_album_data_repo.save(photo_album_data)
-    elif journal_type == JournalType.FITNESS and type_data_dict:
-        existing_fitness = await fitness_data_repo.find_by_journal_id(journal_id)
-        if existing_fitness:
-            if "heart_rate_avg" in type_data_dict:
-                existing_fitness.heart_rate_avg = type_data_dict["heart_rate_avg"]
-            if "heart_rate_max" in type_data_dict:
-                existing_fitness.heart_rate_max = type_data_dict["heart_rate_max"]
-            if "distance" in type_data_dict:
-                existing_fitness.distance = type_data_dict["distance"]
-            if "elevation_gain" in type_data_dict:
-                existing_fitness.elevation_gain = type_data_dict["elevation_gain"]
-            if "elevation_loss" in type_data_dict:
-                existing_fitness.elevation_loss = type_data_dict["elevation_loss"]
-            if "duration" in type_data_dict:
-                existing_fitness.duration = type_data_dict["duration"]
-            if "calories" in type_data_dict:
-                existing_fitness.calories = type_data_dict["calories"]
-            if "gpx_track_data" in type_data_dict:
-                existing_fitness.gpx_track_data = type_data_dict["gpx_track_data"]
-            if "strava_activity_id" in type_data_dict:
-                existing_fitness.strava_activity_id = type_data_dict[
-                    "strava_activity_id"
-                ]
-            await fitness_data_repo.save(existing_fitness)
-    elif journal_type == JournalType.OUTDOOR_ACTIVITY and type_data_dict:
-        existing_outdoor = await outdoor_activity_data_repo.find_by_journal_id(
-            journal_id
+    if journal_type == JournalType.EVENT:
+        await _update_event_data(journal_id, type_data_dict, calendar_info_repo)
+    elif journal_type == JournalType.MOOD_RATING:
+        await _update_mood_data(journal_id, type_data_dict, mood_data_repo)
+    elif journal_type == JournalType.PHOTO_ALBUM:
+        await _update_photo_album_data(
+            journal_id, type_data_dict, photo_album_data_repo
         )
-        if existing_outdoor:
-            # Build updates dict and use dataclasses.replace() to trigger __post_init__
-            # validation, matching the REST API controller pattern.
-            updates: dict[str, Any] = {}
-            if "activity_type" in type_data_dict:
-                updates["activity_type"] = type_data_dict["activity_type"]
-            if "weather_conditions" in type_data_dict:
-                updates["weather_conditions"] = type_data_dict["weather_conditions"]
-            if "role" in type_data_dict:
-                updates["role"] = type_data_dict["role"]
-            if "in_leadership_role" in type_data_dict:
-                updates["in_leadership_role"] = type_data_dict["in_leadership_role"]
-            if "participant_notes" in type_data_dict:
-                updates["participant_notes"] = type_data_dict["participant_notes"]
-            validated_outdoor = dataclasses.replace(existing_outdoor, **updates)
-            await outdoor_activity_data_repo.save(validated_outdoor)
-    elif journal_type == JournalType.BUSHWALKING and type_data_dict:
-        existing_bushwalking = await bushwalking_data_repo.find_by_journal_id(
-            journal_id
+    elif journal_type == JournalType.FITNESS:
+        await _update_fitness_data(journal_id, type_data_dict, fitness_data_repo)
+    elif journal_type == JournalType.OUTDOOR_ACTIVITY:
+        await _update_outdoor_activity_data(
+            journal_id, type_data_dict, outdoor_activity_data_repo
         )
-        if existing_bushwalking:
-            # Build updates dict and use dataclasses.replace() to trigger __post_init__
-            # validation, matching the REST API controller pattern.
-            bw_updates: dict[str, Any] = {}
-            if "track_grading" in type_data_dict:
-                bw_updates["track_grading"] = type_data_dict["track_grading"]
-            if "route_id" in type_data_dict:
-                route_id_val = type_data_dict["route_id"]
-                try:
-                    bw_updates["route_id"] = (
-                        UUID(route_id_val)
-                        if isinstance(route_id_val, str)
-                        else route_id_val
-                    )
-                except ValueError as e:
-                    raise JournalValidationError(
-                        "route_id", f"Invalid UUID format: {route_id_val}"
-                    ) from e
-            validated_bushwalking = dataclasses.replace(
-                existing_bushwalking, **bw_updates
-            )
-            await bushwalking_data_repo.save(validated_bushwalking)
-    elif journal_type == JournalType.JOGGING and type_data_dict:
-        existing_jogging = await jogging_data_repo.find_by_journal_id(journal_id)
-        if existing_jogging:
-            # Build updates dict and use dataclasses.replace() to trigger __post_init__
-            # validation, matching the REST API controller pattern.
-            jog_updates: dict[str, Any] = {}
-            if "pace" in type_data_dict:
-                jog_updates["pace"] = type_data_dict["pace"]
-            if "route_id" in type_data_dict:
-                route_id_val = type_data_dict["route_id"]
-                try:
-                    jog_updates["route_id"] = (
-                        UUID(route_id_val)
-                        if isinstance(route_id_val, str)
-                        else route_id_val
-                    )
-                except ValueError as e:
-                    raise JournalValidationError(
-                        "route_id", f"Invalid UUID format: {route_id_val}"
-                    ) from e
-            validated_jogging = dataclasses.replace(existing_jogging, **jog_updates)
-            await jogging_data_repo.save(validated_jogging)
-    elif journal_type == JournalType.ABSEILING_TRIP and type_data_dict:
-        existing_abseiling = await abseiling_data_repo.find_by_journal_id(journal_id)
-        if existing_abseiling:
-            abs_updates: dict[str, Any] = {}
-            if "number_of_abseils" in type_data_dict:
-                abs_updates["number_of_abseils"] = type_data_dict["number_of_abseils"]
-            if "total_length" in type_data_dict:
-                abs_updates["total_length"] = type_data_dict["total_length"]
-            validated_abseiling = dataclasses.replace(existing_abseiling, **abs_updates)
-            await abseiling_data_repo.save(validated_abseiling)
-    elif journal_type == JournalType.CANYONING and type_data_dict:
-        existing_canyoning = await canyoning_data_repo.find_by_journal_id(journal_id)
-        if existing_canyoning:
-            can_updates: dict[str, Any] = {}
-            if "route_id" in type_data_dict:
-                route_id_val = type_data_dict["route_id"]
-                try:
-                    can_updates["route_id"] = (
-                        UUID(route_id_val)
-                        if isinstance(route_id_val, str)
-                        else route_id_val
-                    )
-                except ValueError as e:
-                    raise JournalValidationError(
-                        "route_id", f"Invalid UUID format: {route_id_val}"
-                    ) from e
-            if "french_grade" in type_data_dict:
-                can_updates["french_grade"] = type_data_dict["french_grade"]
-            if "water_guage_name" in type_data_dict:
-                can_updates["water_guage_name"] = type_data_dict["water_guage_name"]
-            if "water_guage_level" in type_data_dict:
-                can_updates["water_guage_level"] = type_data_dict["water_guage_level"]
-            if "is_vertical" in type_data_dict:
-                can_updates["is_vertical"] = type_data_dict["is_vertical"]
-            if "is_night_canyon" in type_data_dict:
-                can_updates["is_night_canyon"] = type_data_dict["is_night_canyon"]
-            if "is_white_water" in type_data_dict:
-                can_updates["is_white_water"] = type_data_dict["is_white_water"]
-            validated_canyoning = dataclasses.replace(existing_canyoning, **can_updates)
-            await canyoning_data_repo.save(validated_canyoning)
-    elif journal_type == JournalType.CLIMBING and type_data_dict:
-        existing_climbing = await climbing_data_repo.find_by_journal_id(journal_id)
-        if existing_climbing:
-            clb_updates: dict[str, Any] = {}
-            if "route_id" in type_data_dict:
-                route_id_val = type_data_dict["route_id"]
-                try:
-                    clb_updates["route_id"] = (
-                        UUID(route_id_val)
-                        if isinstance(route_id_val, str)
-                        else route_id_val
-                    )
-                except ValueError as e:
-                    raise JournalValidationError(
-                        "route_id", f"Invalid UUID format: {route_id_val}"
-                    ) from e
-            if "climbing_type" in type_data_dict:
-                clb_updates["climbing_type"] = type_data_dict["climbing_type"]
-            if "grade" in type_data_dict:
-                clb_updates["grade"] = type_data_dict["grade"]
-            if "length" in type_data_dict:
-                clb_updates["length"] = type_data_dict["length"]
-            validated_climbing = dataclasses.replace(existing_climbing, **clb_updates)
-            await climbing_data_repo.save(validated_climbing)
+    elif journal_type == JournalType.BUSHWALKING:
+        await _update_bushwalking_data(
+            journal_id, type_data_dict, bushwalking_data_repo
+        )
+    elif journal_type == JournalType.JOGGING:
+        await _update_jogging_data(journal_id, type_data_dict, jogging_data_repo)
+    elif journal_type == JournalType.ABSEILING_TRIP:
+        await _update_abseiling_data(journal_id, type_data_dict, abseiling_data_repo)
+    elif journal_type == JournalType.CANYONING:
+        await _update_canyoning_data(journal_id, type_data_dict, canyoning_data_repo)
+    elif journal_type == JournalType.CLIMBING:
+        await _update_climbing_data(journal_id, type_data_dict, climbing_data_repo)
 
 
 async def _persist_contact_relationships(
@@ -1760,7 +1788,7 @@ def register_journal_tools(mcp: FastMCP[None]) -> None:
         db_connection: FromDishka[AsyncConnection],
     ) -> str:
         """
-        List all calendars available for EVENT journeys.
+        List all calendars available for EVENT journals.
         """
         from app.core.journal.adapters.sql.calendar_repository import (
             SqlCalendarRepository,

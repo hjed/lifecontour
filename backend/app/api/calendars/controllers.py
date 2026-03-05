@@ -154,6 +154,13 @@ async def update_calendar(
             detail="Invalid calendar ID format",
         ) from e
 
+    # Validate that path ID matches body ID if body ID is provided
+    if calendar_request.data.id and calendar_request.data.id != calendar_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Path ID does not match body ID",
+        )
+
     # Get the calendar to verify ownership
     calendar = await calendar_repo.find_by_id(calendar_uuid)
     if not calendar:

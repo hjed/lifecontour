@@ -8,7 +8,7 @@
 'use client';
 
 import { useState } from 'react';
-import { Calendar as CalendarIcon } from 'lucide-react';
+import { Calendar as CalendarIcon, Settings } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
@@ -23,7 +23,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { Settings } from 'lucide-react';
 import Link from 'next/link';
 import type { Route } from 'next';
 import { cn } from '@/lib/utils';

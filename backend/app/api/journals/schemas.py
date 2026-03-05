@@ -23,6 +23,9 @@ DISPLAY_ORDER_DESC = "Display order"
 BOOKING_REFERENCE_DESC = "Booking reference"
 RESOURCE_TYPE_DESC = "Resource type"
 RESOURCE_LINKS_DESC = "Resource links"
+ROUTE_ID_DESC = "UUID of the associated route"
+CALENDAR_NAME_DESC = "Calendar name"
+CALENDAR_COLOR_DESC = "Calendar color (hex code)"
 
 
 # Event Date Range Schema
@@ -215,7 +218,7 @@ class BushwalkingDataSchema(BaseModel):
 
     route_id: str | None = Field(
         default=None,
-        description="UUID of the associated route",
+        description=ROUTE_ID_DESC,
     )
     track_grading: str | None = Field(
         default=None,
@@ -228,7 +231,7 @@ class JoggingDataSchema(BaseModel):
 
     route_id: str | None = Field(
         default=None,
-        description="UUID of the associated route",
+        description=ROUTE_ID_DESC,
     )
     pace: int | None = Field(
         default=None,
@@ -257,7 +260,7 @@ class CanyoningDataSchema(BaseModel):
 
     route_id: str | None = Field(
         default=None,
-        description="UUID of the associated route",
+        description=ROUTE_ID_DESC,
     )
     french_grade: str | None = Field(
         default=None,
@@ -290,7 +293,7 @@ class ClimbingDataSchema(BaseModel):
 
     route_id: str | None = Field(
         default=None,
-        description="UUID of the associated route",
+        description=ROUTE_ID_DESC,
     )
     climbing_type: str | None = Field(
         default=None,
@@ -313,7 +316,7 @@ class KayakingDataSchema(BaseModel):
 
     route_id: str | None = Field(
         default=None,
-        description="UUID of the associated route",
+        description=ROUTE_ID_DESC,
     )
     water_type: str | None = Field(
         default=None,
@@ -326,7 +329,7 @@ class CrossCountrySkiingDataSchema(BaseModel):
 
     route_id: str | None = Field(
         default=None,
-        description="UUID of the associated route",
+        description=ROUTE_ID_DESC,
     )
     snow_conditions: str | None = Field(
         default=None,
@@ -405,8 +408,8 @@ class CalendarSchema(BaseModel):
     """Calendar schema for journal responses."""
 
     id: str = Field(..., description="Calendar ID")
-    name: str = Field(..., description="Calendar name")
-    color: str | None = Field(default=None, description="Calendar color (hex code)")
+    name: str = Field(..., description=CALENDAR_NAME_DESC)
+    color: str | None = Field(default=None, description=CALENDAR_COLOR_DESC)
 
 
 # Journal Attributes
@@ -656,9 +659,9 @@ class JournalTagAddRequest(JsonApiCreateRequest[JournalTagAddData]):
 class CalendarAttributes(BaseModel):
     """Calendar attributes."""
 
-    name: str = Field(..., description="Calendar name")
+    name: str = Field(..., description=CALENDAR_NAME_DESC)
     description: str | None = Field(default=None, description="Calendar description")
-    color: str | None = Field(default=None, description="Calendar color (hex code)")
+    color: str | None = Field(default=None, description=CALENDAR_COLOR_DESC)
     is_synced_to_google: bool = Field(
         default=False, description="Whether calendar is synced to Google Calendar"
     )
@@ -695,9 +698,9 @@ class CalendarCreateRequest(JsonApiCreateRequest[CalendarCreateData]):
 class CalendarUpdateAttributes(BaseModel):
     """Calendar attributes for updates."""
 
-    name: str | None = Field(default=None, description="Calendar name")
+    name: str | None = Field(default=None, description=CALENDAR_NAME_DESC)
     description: str | None = Field(default=None, description="Calendar description")
-    color: str | None = Field(default=None, description="Calendar color (hex code)")
+    color: str | None = Field(default=None, description=CALENDAR_COLOR_DESC)
     is_synced_to_google: bool | None = Field(
         default=None, description="Whether calendar is synced to Google Calendar"
     )
