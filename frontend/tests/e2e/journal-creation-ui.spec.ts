@@ -53,6 +53,12 @@ test.describe('Journal Creation UI Flow', () => {
   test.beforeEach(async ({ authenticatedPage }) => {
     const debugE2E = !!process.env.DEBUG_E2E;
 
+    authenticatedPage.on('pageerror', exception => {
+      console.log(
+        `[Browser pageerror] ${exception.message} \n ${exception.stack}`
+      );
+    });
+
     authenticatedPage.on('console', msg => {
       const type = msg.type();
       // In normal runs, only log browser console errors/warnings to keep CI output manageable.
@@ -269,7 +275,7 @@ test.describe('Journal Creation UI Flow', () => {
     await page.getByRole('button', { name: /create journal/i }).click();
 
     // Verify redirect and badge
-    await awaitCreationAndAssertBadge(page, 'type-badge-fitness');
+    await awaitCreationAndAssertBadge(page, 'manage-type-fitness');
 
     // Expand type section
     await page.getByTestId('type-section-trigger-fitness').click();

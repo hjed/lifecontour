@@ -1,26 +1,15 @@
 'use client';
 
-import { useEffect } from 'react';
-import markerIcon2x from 'leaflet/dist/images/marker-icon-2x.png';
-import markerIcon from 'leaflet/dist/images/marker-icon.png';
-import markerShadow from 'leaflet/dist/images/marker-shadow.png';
+import { useEffect, useMemo } from 'react';
+
 import {
   MapContainer,
   TileLayer,
   Polyline,
-  Marker,
+  CircleMarker,
   useMap,
 } from 'react-leaflet';
 import L from 'leaflet';
-
-// Fix for default marker icons in Leaflet with webpack/Next.js
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-delete (L.Icon.Default.prototype as any)._getIconUrl;
-L.Icon.Default.mergeOptions({
-  iconRetinaUrl: markerIcon2x.src,
-  iconUrl: markerIcon.src,
-  shadowUrl: markerShadow.src,
-});
 
 import { Coordinate } from '@/types/journals';
 
@@ -44,12 +33,12 @@ function MapBounds({ coordinates }: { readonly coordinates: Coordinate[] }) {
 }
 
 export default function GPXTrackMap({ coordinates }: GPXTrackMapProps) {
-  if (!coordinates || coordinates.length === 0) return null;
+  const positions: [number, number][] = useMemo(
+    () => (coordinates || []).map(c => [c.latitude, c.longitude]),
+    [coordinates]
+  );
 
-  const positions: [number, number][] = coordinates.map(c => [
-    c.latitude,
-    c.longitude,
-  ]);
+  if (!coordinates || coordinates.length === 0) return null;
   const startPoint = positions[0];
   const endPoint = positions[positions.length - 1];
 
@@ -74,8 +63,30 @@ export default function GPXTrackMap({ coordinates }: GPXTrackMapProps) {
         positions={positions}
         pathOptions={{ color: 'hsl(var(--primary))', weight: 4 }}
       />
-      {startPoint && <Marker position={startPoint} />}
-      {endPoint && !isLoop && <Marker position={endPoint} />}
+      {startPoint && (
+        <CircleMarker
+          center={startPoint}
+          radius={6}
+          pathOptions={{
+            color: 'white',
+            fillColor: 'hsl(var(--primary))',
+            fillOpacity: 1,
+            weight: 2,
+          }}
+        />
+      )}
+      {endPoint && !isLoop && (
+        <CircleMarker
+          center={endPoint}
+          radius={6}
+          pathOptions={{
+            color: 'white',
+            fillColor: 'hsl(var(--destructive))',
+            fillOpacity: 1,
+            weight: 2,
+          }}
+        />
+      )}
       <MapBounds coordinates={coordinates} />
     </MapContainer>
   );
