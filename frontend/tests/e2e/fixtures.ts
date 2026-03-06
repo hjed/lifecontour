@@ -178,7 +178,6 @@ async function completeWorkerOAuthFlow(browser: any): Promise<AuthState> {
 
   try {
     // Step 1: Navigate to login page and wait for OAuth button to be ready
-    console.log('🔐 [Worker Auth] Navigating to login page...');
     await page.goto('http://localhost:3000/auth/login');
 
     // Wait for OAuth button to be visible and enabled (web-first assertion)
@@ -187,10 +186,6 @@ async function completeWorkerOAuthFlow(browser: any): Promise<AuthState> {
       .first();
     await playwrightExpect(oauthButton).toBeVisible({ timeout: 15000 });
     await playwrightExpect(oauthButton).toBeEnabled({ timeout: 5000 });
-
-    console.log(
-      '🔐 [Worker Auth] Clicking OAuth button to start real OAuth flow...'
-    );
 
     // Step 2: Click OAuth button and wait for navigation away from login page
     // Use waitForURL to wait for redirect - more reliable than waitForNavigation
@@ -202,11 +197,14 @@ async function completeWorkerOAuthFlow(browser: any): Promise<AuthState> {
     ]);
 
     const currentUrl = page.url();
-    console.log('🔐 [Worker Auth] Current URL after OAuth click:', currentUrl);
+    console.debug(
+      '🔐 [Worker Auth] Current URL after OAuth click:',
+      currentUrl
+    );
 
     // Step 3: Handle OAuth provider interaction
     if (currentUrl.includes('localhost:4646') || currentUrl.includes('hydra')) {
-      console.log(
+      console.debug(
         '🔐 [Worker Auth] Successfully redirected to Hydra OAuth provider'
       );
 
@@ -220,10 +218,15 @@ async function completeWorkerOAuthFlow(browser: any): Promise<AuthState> {
       );
 
       const callbackUrl = page.url();
-      console.log('🔐 [Worker Auth] URL after Hydra processing:', callbackUrl);
+      console.debug(
+        '🔐 [Worker Auth] URL after Hydra processing:',
+        callbackUrl
+      );
 
       if (callbackUrl.includes('/auth/callback')) {
-        console.log('🔐 [Worker Auth] OAuth callback received, processing...');
+        console.debug(
+          '🔐 [Worker Auth] OAuth callback received, processing...'
+        );
 
         // Wait for callback to complete by watching for the final redirect
         // The callback page should redirect to /contacts or another authenticated route
@@ -232,11 +235,14 @@ async function completeWorkerOAuthFlow(browser: any): Promise<AuthState> {
             (url: URL) => !url.toString().includes('/auth/callback'),
             { timeout: 15000 }
           );
-          console.log('🔐 [Worker Auth] Final URL after callback:', page.url());
+          console.debug(
+            '🔐 [Worker Auth] Final URL after callback:',
+            page.url()
+          );
         } catch {
           // If redirect times out, we might still be on the callback page
           // This can happen if the callback page is still processing
-          console.log(
+          console.warn(
             '🔐 [Worker Auth] Callback redirect timeout, checking if still on callback page'
           );
           const stillOnCallback = page.url().includes('/auth/callback');
@@ -258,7 +264,7 @@ async function completeWorkerOAuthFlow(browser: any): Promise<AuthState> {
         'OAuth provider not responding - cannot complete real OAuth flow'
       );
     } else {
-      console.log(
+      console.debug(
         '🔐 [Worker Auth] Already redirected past OAuth provider:',
         currentUrl
       );
@@ -266,7 +272,7 @@ async function completeWorkerOAuthFlow(browser: any): Promise<AuthState> {
 
     // Step 4: Verify authentication using web-first assertion pattern
     // Uses toPass for automatic retry instead of manual loops
-    console.log('🔐 [Worker Auth] Verifying authentication...');
+    console.debug('🔐 [Worker Auth] Verifying authentication...');
 
     // Wait a moment for session to be persisted
     await page.waitForTimeout(500);
@@ -278,19 +284,12 @@ async function completeWorkerOAuthFlow(browser: any): Promise<AuthState> {
     // but we allow up to 10s to avoid flaky failures when the provider is slow.
     await playwrightExpect(async () => {
       // Log cookies before making the request
-      const contextCookies = await page.context().cookies();
-      console.log(
-        '🔐 [Worker Auth] Cookies in context before status check:',
-        contextCookies
-          .map((c: any) => `${c.name}(domain=${c.domain},path=${c.path})`)
-          .join(', ')
-      );
 
       const statusResponse = await page.request.get('/api/auth/status');
       playwrightExpect(statusResponse.ok()).toBe(true);
 
       const authStatus = await statusResponse.json();
-      console.log('🔐 [Worker Auth] Auth status response:', authStatus);
+      console.debug('🔐 [Worker Auth] Auth status response:', authStatus);
       playwrightExpect(authStatus.authenticated).toBe(true);
       authUser = authStatus.user?.email;
     }).toPass({ timeout: 10000 });
@@ -302,16 +301,6 @@ async function completeWorkerOAuthFlow(browser: any): Promise<AuthState> {
 
     // Step 5: Extract authentication cookies from browser context
     const cookies = await context.cookies();
-    console.log(
-      '🔐 [Worker Auth] All cookies from context:',
-      cookies.map((c: any) => ({
-        name: c.name,
-        domain: c.domain,
-        path: c.path,
-        httpOnly: c.httpOnly,
-        secure: c.secure,
-      }))
-    );
 
     const validCookies = cookies
       .filter((cookie: any) => cookie.name && cookie.value)
@@ -325,10 +314,6 @@ async function completeWorkerOAuthFlow(browser: any): Promise<AuthState> {
         // For localhost testing, we need to set secure: false to allow cookies
         secure: false,
       }));
-
-    console.log(
-      '🔐 [Worker Auth] Real authentication state captured successfully'
-    );
 
     return {
       storageState: {
@@ -381,12 +366,6 @@ async function applyAuthState(page: Page, authState: AuthState): Promise<void> {
   // Add real authentication cookies to the page context
   if (validCookies.length > 0) {
     await page.context().addCookies(validCookies);
-    console.log(
-      `🔐 [Auth State] Applied ${validCookies.length} authentication cookies to page context:`,
-      validCookies
-        .map((c: any) => `${c.name}=${c.value.substring(0, 20)}...`)
-        .join(', ')
-    );
 
     // Verify cookies were applied by checking them
     const appliedCookies = await page.context().cookies();
@@ -453,7 +432,7 @@ export const test = base.extend<TestFixtures, WorkerFixtures>({
             localStorage.clear();
           } catch (e) {
             // Ignore SecurityError when storage is not accessible
-            console.log(
+            console.warn(
               'Storage clearing failed (likely SecurityError):',
               (e as Error).message
             );
@@ -461,14 +440,14 @@ export const test = base.extend<TestFixtures, WorkerFixtures>({
         });
       } catch (e) {
         // Ignore SecurityError from page.evaluate itself
-        console.log(
+        console.warn(
           'Page evaluate failed (likely SecurityError):',
           (e as Error).message
         );
       }
     } catch (e) {
       // Ignore any other errors during cleanup
-      console.log('Context cleanup failed:', (e as Error).message);
+      console.warn('Context cleanup failed:', (e as Error).message);
     }
 
     await use(page);

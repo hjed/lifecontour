@@ -1,10 +1,27 @@
-import { Activity, Clock, Flame, Heart, Mountain, Ruler } from 'lucide-react';
+import {
+  Activity,
+  Clock,
+  Flame,
+  Heart,
+  Mountain,
+  Ruler,
+  Cloud,
+  Compass,
+} from 'lucide-react';
 import { Card } from '@/components/ui/card';
 import { cn } from '@/lib/utils';
-import type { FitnessData } from '@/types/journals';
+import type {
+  FitnessData,
+  OutdoorActivityData,
+  JoggingData,
+  BushwalkingData,
+} from '@/types/journals';
 
 interface ActivityStatsProps {
-  readonly data: FitnessData;
+  readonly data?: FitnessData;
+  readonly outdoorData?: OutdoorActivityData;
+  readonly joggingData?: JoggingData;
+  readonly bushwalkingData?: BushwalkingData;
   readonly className?: string;
 }
 
@@ -58,15 +75,41 @@ function StatItem({ icon, label, value, testId }: StatItemProps) {
   );
 }
 
-export function ActivityStats({ data, className }: ActivityStatsProps) {
-  const hasDistance = data.distance != null && data.distance > 0;
-  const hasDuration = data.duration != null && data.duration > 0;
-  const showPace = hasDistance && hasDuration;
-  const hasElevation = data.elevation_gain != null && data.elevation_gain > 0;
-  const hasHr = data.heart_rate_avg != null && data.heart_rate_avg > 0;
-  const hasCalories = data.calories != null && data.calories > 0;
+export function ActivityStats({
+  data,
+  outdoorData,
+  joggingData,
+  bushwalkingData,
+  className,
+}: ActivityStatsProps) {
+  const fitness = data ?? {};
+  const hasDistance = fitness.distance != null && fitness.distance > 0;
+  const hasDuration = fitness.duration != null && fitness.duration > 0;
+  const hasElevation =
+    fitness.elevation_gain != null && fitness.elevation_gain > 0;
+  const hasHr = fitness.heart_rate_avg != null && fitness.heart_rate_avg > 0;
+  const hasCalories = fitness.calories != null && fitness.calories > 0;
 
-  if (!hasDistance && !hasDuration && !hasElevation && !hasHr && !hasCalories) {
+  const hasWeather =
+    outdoorData?.weather_conditions != null &&
+    outdoorData.weather_conditions !== '';
+  const hasGrading =
+    bushwalkingData?.track_grading != null &&
+    bushwalkingData.track_grading !== '';
+
+  const showCalculatedPace = hasDistance && hasDuration && !joggingData?.pace;
+  const showJoggingPace = joggingData?.pace != null && joggingData.pace > 0;
+
+  if (
+    !hasDistance &&
+    !hasDuration &&
+    !hasElevation &&
+    !hasHr &&
+    !hasCalories &&
+    !hasWeather &&
+    !hasGrading &&
+    !showJoggingPace
+  ) {
     return null; // Don't render empty card
   }
 
@@ -77,7 +120,7 @@ export function ActivityStats({ data, className }: ActivityStatsProps) {
           <StatItem
             icon={<Ruler className='h-4 w-4' />}
             label='Distance'
-            value={formatDistance(data.distance!)}
+            value={formatDistance(fitness.distance!)}
             testId='stat-distance'
           />
         )}
@@ -86,16 +129,25 @@ export function ActivityStats({ data, className }: ActivityStatsProps) {
           <StatItem
             icon={<Clock className='h-4 w-4' />}
             label='Duration'
-            value={formatDuration(data.duration!)}
+            value={formatDuration(fitness.duration!)}
             testId='stat-duration'
           />
         )}
 
-        {showPace && (
+        {showJoggingPace && (
           <StatItem
             icon={<Activity className='h-4 w-4' />}
             label='Pace'
-            value={formatPace(data.duration!, data.distance!)}
+            value={formatPace(joggingData!.pace!, 1000)}
+            testId='stat-pace-jogging'
+          />
+        )}
+
+        {showCalculatedPace && (
+          <StatItem
+            icon={<Activity className='h-4 w-4' />}
+            label='Pace'
+            value={formatPace(fitness.duration!, fitness.distance!)}
             testId='stat-pace'
           />
         )}
@@ -104,7 +156,7 @@ export function ActivityStats({ data, className }: ActivityStatsProps) {
           <StatItem
             icon={<Mountain className='h-4 w-4' />}
             label='Elevation Gain'
-            value={`${data.elevation_gain} m`}
+            value={`${fitness.elevation_gain} m`}
             testId='stat-elevation'
           />
         )}
@@ -113,7 +165,7 @@ export function ActivityStats({ data, className }: ActivityStatsProps) {
           <StatItem
             icon={<Heart className='h-4 w-4' />}
             label='Avg HR'
-            value={`${data.heart_rate_avg} bpm`}
+            value={`${fitness.heart_rate_avg} bpm`}
             testId='stat-hr'
           />
         )}
@@ -122,8 +174,26 @@ export function ActivityStats({ data, className }: ActivityStatsProps) {
           <StatItem
             icon={<Flame className='h-4 w-4' />}
             label='Calories'
-            value={`${data.calories} kcal`}
+            value={`${fitness.calories} kcal`}
             testId='stat-calories'
+          />
+        )}
+
+        {hasWeather && (
+          <StatItem
+            icon={<Cloud className='h-4 w-4' />}
+            label='Weather'
+            value={outdoorData!.weather_conditions}
+            testId='stat-weather'
+          />
+        )}
+
+        {hasGrading && (
+          <StatItem
+            icon={<Compass className='h-4 w-4' />}
+            label='Track Grade'
+            value={`Grade ${bushwalkingData!.track_grading}`}
+            testId='stat-grading'
           />
         )}
       </div>

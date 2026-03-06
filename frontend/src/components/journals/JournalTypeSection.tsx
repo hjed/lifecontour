@@ -41,6 +41,9 @@ import {
   PlanTypeEditor,
   TravelTypeEditor,
   FitnessTypeEditor,
+  OutdoorActivityTypeEditor,
+  JoggingTypeEditor,
+  BushwalkingTypeEditor,
 } from './type-editors';
 
 /** Union of all type-specific data shapes supported by JournalTypeSection. */
@@ -234,6 +237,30 @@ function TypeSpecificContent({
           journalId={journalId}
           data={typeData as FitnessData | undefined}
           onSave={makeEditorSave<FitnessData>(onSave, type)}
+        />
+      );
+    case JournalType.OUTDOOR_ACTIVITY:
+      return (
+        <OutdoorActivityTypeEditor
+          journalId={journalId}
+          data={typeData as OutdoorActivityData | undefined}
+          onSave={makeEditorSave<OutdoorActivityData>(onSave, type)}
+        />
+      );
+    case JournalType.JOGGING:
+      return (
+        <JoggingTypeEditor
+          journalId={journalId}
+          data={typeData as JoggingData | undefined}
+          onSave={makeEditorSave<JoggingData>(onSave, type)}
+        />
+      );
+    case JournalType.BUSHWALKING:
+      return (
+        <BushwalkingTypeEditor
+          journalId={journalId}
+          data={typeData as BushwalkingData | undefined}
+          onSave={makeEditorSave<BushwalkingData>(onSave, type)}
         />
       );
     case JournalType.NOTE:

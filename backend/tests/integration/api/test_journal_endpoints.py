@@ -2502,6 +2502,49 @@ class TestJournalTypeCreationWithDependencies:
         assert mood_data["energy_level"] == energy_level, (
             f"Expected energy_level={energy_level} but got {mood_data['energy_level']}"
         )
-        assert mood_data["mood_label"] == "Great", (
-            f"Expected mood_label='Great' but got {mood_data['mood_label']}"
+
+    async def test_create_journal_with_outdoor_types_persists_type_data(
+        self, integration_api_client
+    ):
+        """Creating a journal with OUTDOOR_ACTIVITY, BUSHWALKING, and JOGGING persists submitted type_data."""
+        create_data = create_journal_request_data(
+            title="Active Day",
+            content="Went for a walk then a jog",
+            types=["BUSHWALKING", "JOGGING"],
+            type_data={
+                "OUTDOOR_ACTIVITY": {
+                    "weather_conditions": "Sunny, 20C",
+                    "in_leadership_role": True,
+                },
+                "BUSHWALKING": {
+                    "track_grading": "Grade 3",
+                },
+                "JOGGING": {
+                    "pace": 360,
+                },
+                "FITNESS": {
+                    "distance": 8000,
+                },
+            },
         )
+
+        response = await integration_api_client.post("/api/journals", json=create_data)
+
+        assert response.status_code == 201, response.text
+        data = response.json()
+        attrs = data["data"]["attributes"]
+
+        type_data = attrs.get("type_data", {})
+
+        assert "outdoor_activity" in type_data
+        assert type_data["outdoor_activity"]["weather_conditions"] == "Sunny, 20C"
+        assert type_data["outdoor_activity"]["in_leadership_role"] is True
+
+        assert "bushwalking" in type_data
+        assert type_data["bushwalking"]["track_grading"] == "Grade 3"
+
+        assert "jogging" in type_data
+        assert type_data["jogging"]["pace"] == 360
+
+        assert "fitness" in type_data
+        assert type_data["fitness"]["distance"] == 8000

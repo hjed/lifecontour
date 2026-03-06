@@ -59,4 +59,24 @@ describe('ActivityStats', () => {
 
     expect(screen.getByTestId('stat-duration')).toHaveTextContent('1:05:30');
   });
+
+  it('renders outdoor, jogging, and bushwalking data correctly', () => {
+    const outdoorData = { weather_conditions: 'Sunny, 22°C' };
+    const joggingData = { pace: 330 }; // 5:30 /km
+    const bushwalkingData = { track_grading: '4' };
+
+    render(
+      <ActivityStats
+        outdoorData={outdoorData}
+        joggingData={joggingData}
+        bushwalkingData={bushwalkingData}
+      />
+    );
+
+    expect(screen.getByTestId('stat-weather')).toHaveTextContent('Sunny, 22°C');
+    expect(screen.getByTestId('stat-pace-jogging')).toHaveTextContent(
+      '5:30 /km'
+    );
+    expect(screen.getByTestId('stat-grading')).toHaveTextContent('Grade 4');
+  });
 });

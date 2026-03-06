@@ -291,4 +291,88 @@ test.describe('Journal Creation UI Flow', () => {
     await expect(page.getByTestId('gpx-track-display')).toBeVisible();
     await expect(page.locator('.leaflet-container')).toBeVisible();
   });
+
+  test('should create an OUTDOOR_ACTIVITY journal and verify fields', async ({
+    authenticatedPage,
+  }) => {
+    const page = authenticatedPage;
+    await navigateToNewJournal(page);
+
+    await page.getByLabel(/title/i).fill(`Outdoor Trip ${Date.now()}`);
+    await page.getByLabel(/content/i).fill('Great outdoor trip.');
+    await page.getByLabel(/^outdoor activity$/i).check();
+
+    await expect(page.getByTestId('outdoor-type-editor')).toBeVisible();
+
+    await page.getByTestId('activity-type-input').fill('Rock Climbing');
+    await page.getByTestId('weather-conditions-input').fill('Sunny, 25C');
+    await page.getByTestId('role-input').fill('Lead Climber');
+    await page.getByTestId('leadership-role-switch').click();
+    await page
+      .getByTestId('participant-notes-input')
+      .fill('Everyone did well.');
+
+    await page.getByRole('button', { name: /create journal/i }).click();
+
+    await awaitCreationAndAssertBadge(page, 'manage-type-outdoor_activity');
+    await page.getByTestId('type-section-trigger-outdoor_activity').click();
+
+    // Verify fields are rendered
+    await expect(page.getByText('Rock Climbing')).toBeVisible();
+    await expect(page.getByText('Sunny, 25C')).toBeVisible();
+    await expect(page.getByText(/Lead Climber/)).toBeVisible();
+    await expect(page.getByText('Everyone did well.')).toBeVisible();
+  });
+
+  test('should create a JOGGING journal and verify fields', async ({
+    authenticatedPage,
+  }) => {
+    const page = authenticatedPage;
+    await navigateToNewJournal(page);
+
+    await page.getByLabel(/title/i).fill(`Morning Jog ${Date.now()}`);
+    await page.getByLabel(/content/i).fill('Good morning run.');
+    await page.getByLabel(/^jogging$/i).check();
+
+    await expect(page.getByTestId('jogging-type-editor')).toBeVisible();
+
+    // Fill pace as 5:30
+    await page.getByTestId('pace-input').fill('5:30');
+
+    await page.getByRole('button', { name: /create journal/i }).click();
+
+    await awaitCreationAndAssertBadge(page, 'manage-type-jogging');
+    await page.getByTestId('type-section-trigger-jogging').click();
+
+    // Verify pace is rendered
+    await expect(page.getByText('5:30 /km')).toBeVisible();
+  });
+
+  test('should create a BUSHWALKING journal and verify fields', async ({
+    authenticatedPage,
+  }) => {
+    const page = authenticatedPage;
+    await navigateToNewJournal(page);
+
+    await page.getByLabel(/title/i).fill(`Bushwalk ${Date.now()}`);
+    await page.getByLabel(/content/i).fill('Nice walk in the bush.');
+    await page.getByLabel(/^bushwalking$/i).check();
+
+    await expect(page.getByTestId('bushwalking-type-editor')).toBeVisible();
+
+    // Use select for track grading
+    await page
+      .getByRole('combobox', { name: /Australian Track Grading/i })
+      .click();
+    await page.getByRole('option', { name: /Grade 3/i }).click();
+
+    await page.getByRole('button', { name: /create journal/i }).click();
+
+    await awaitCreationAndAssertBadge(page, 'manage-type-bushwalking');
+    await page.getByTestId('type-section-trigger-bushwalking').click();
+
+    // Verify track grading is rendered
+    await expect(page.getByText('Grade 3')).toBeVisible();
+    await expect(page.getByText(/Suitable for most ages/)).toBeVisible();
+  });
 });
