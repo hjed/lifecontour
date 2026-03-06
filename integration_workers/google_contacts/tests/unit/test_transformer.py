@@ -6,6 +6,7 @@ responses to internal Contact entities.
 """
 
 import sys
+from types import SimpleNamespace
 
 import pytest
 
@@ -375,6 +376,25 @@ class TestGoogleContactTransformer:
         assert len(contact.addresses) == 1
         assert contact.addresses[0].street_line_1 == "123 Main St"
         assert contact.addresses[0].country_code == "AU"
+
+    def test_transform_addresses_with_none_metadata_not_primary(
+        self, transformer: GoogleContactTransformer
+    ) -> None:
+        """Test address transformation treats None metadata as non-primary."""
+        address = SimpleNamespace(
+            metadata=None,
+            street_address="123 Main St",
+            country_code="AU",
+            extended_address=None,
+            city="Sydney",
+            region="NSW",
+            postal_code="2000",
+        )
+
+        contact_addresses = transformer._transform_addresses([address])
+
+        assert len(contact_addresses) == 1
+        assert contact_addresses[0].is_primary is False
 
     def test_transform_person_blank_biographies_skipped(
         self, transformer: GoogleContactTransformer

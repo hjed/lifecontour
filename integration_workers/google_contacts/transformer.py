@@ -200,7 +200,7 @@ class GoogleContactTransformer:
         contact_addresses = []
 
         for address in addresses:
-            is_primary = hasattr(address, "metadata") and address.metadata.primary
+            is_primary = self._is_primary_field(address)
 
             street_line_1 = getattr(address, "street_address", None)
             if not street_line_1 and hasattr(address, "formatted_value"):
