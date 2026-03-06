@@ -82,16 +82,7 @@ class OutboxProcessor:
                             error=str(e),
                         )
 
-                        # Increment retry count if under max retries
-                        if event.retry_count < self.max_retries:
-                            await repository.increment_retry_count(event.event_id)
-                        else:
-                            logger.error(
-                                "Event exceeded max retries, giving up",
-                                event_id=event.event_id,
-                                event_type=event.event_type,
-                                retry_count=event.retry_count,
-                            )
+                        await repository.increment_retry_count(event.event_id)
 
                 # Commit the transaction
                 await conn.commit()
@@ -143,6 +134,8 @@ class OutboxProcessor:
                 event_type=event.event_type,
             )
 
+        except PermanentOutboxEventProcessingError:
+            raise
         except Exception as e:
             logger.error(
                 "Failed to process single outbox event",

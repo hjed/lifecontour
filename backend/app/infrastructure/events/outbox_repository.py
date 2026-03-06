@@ -164,11 +164,11 @@ class OutboxRepository:
 
     async def mark_as_failed(self, event_id: str, retry_count: int) -> None:
         """
-        Mark an event as failed by setting its retry count to the terminal threshold.
+        Mark an event as failed by setting its retry count to a terminal value.
 
         Args:
             event_id: ID of the event to mark as failed
-            retry_count: Retry count threshold representing a terminal failure
+            retry_count: Exact retry count value to persist for the terminal failure
         """
         try:
             query = text(

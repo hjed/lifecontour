@@ -80,7 +80,9 @@ class OutboxEventProcessor:
             Processing result dictionary
 
         Raises:
-            OutboxEventProcessingError: If event processing fails
+            PermanentOutboxEventProcessingError: If the event payload is invalid
+                and retrying will never succeed
+            OutboxEventProcessingError: If event processing fails transiently
         """
         logger.info(
             "Processing outbox event",
@@ -100,18 +102,26 @@ class OutboxEventProcessor:
             raise OutboxEventProcessingError(f"Unknown event type: {event.event_type}")
 
         except PermanentOutboxEventProcessingError as e:
-            self._log_processing_failure(event, e)
+            self._log_processing_failure(
+                event,
+                e,
+                message="Outbox event has permanent invalid payload",
+            )
             raise
         except Exception as e:
-            self._log_processing_failure(event, e)
+            self._log_processing_failure(
+                event, e, message="Failed to process outbox event"
+            )
             raise OutboxEventProcessingError(
                 f"Failed to process {event.event_type} event: {str(e)}"
             ) from e
 
-    def _log_processing_failure(self, event: OutboxEvent, error: Exception) -> None:
+    def _log_processing_failure(
+        self, event: OutboxEvent, error: Exception, message: str
+    ) -> None:
         """Log a failed outbox event processing attempt."""
         logger.error(
-            "Failed to process outbox event",
+            message,
             event_id=event.id,
             event_type=event.event_type,
             error=str(error),

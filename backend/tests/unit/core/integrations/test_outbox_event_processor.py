@@ -428,3 +428,45 @@ class TestOutboxEventProcessor:
 
         assert "Missing required contact field 'first_name'" in str(exc_info.value)
         mock_contact_service.update_contact.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_process_event_logs_permanent_failures_distinctly(
+        self,
+        processor: OutboxEventProcessor,
+        mock_contact_service: AsyncMock,
+    ):
+        """Test permanent payload failures use a distinct log message."""
+        invalid_event = OutboxEvent(
+            id=uuid4(),
+            event_type="contact.created",
+            event_data={
+                "integration_source": "google_contacts",
+                "external_id": "people/invalid",
+                "contact_data": {"invalid": "data"},
+                "sync_timestamp": datetime.now(UTC).isoformat(),
+                "sync_type": "created",
+            },
+            created_at=datetime.now(UTC),
+            processed_at=None,
+            retry_count=0,
+        )
+
+        mock_external_ref_service = AsyncMock()
+        mock_external_ref_service.find_by_external_id.return_value = None
+
+        with (
+            patch.object(
+                processor, "external_reference_service", mock_external_ref_service
+            ),
+            patch(
+                "app.core.integrations.outbox_event_processor.logger.error"
+            ) as mock_log_error,
+        ):
+            with pytest.raises(PermanentOutboxEventProcessingError):
+                await processor.process_event(invalid_event)
+
+        mock_log_error.assert_called_once()
+        assert mock_log_error.call_args.args[0] == (
+            "Outbox event has permanent invalid payload"
+        )
+        mock_contact_service.create_contact.assert_not_called()
