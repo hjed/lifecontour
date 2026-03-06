@@ -19,6 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.infrastructure.events.outbox_repository import OutboxRepository
 
+INTEGRATION_SOURCE = "google_contacts"
 MAX_RETRY_COUNT = 3
 
 
@@ -65,7 +66,7 @@ class TestContactOutboxProcessorIntegration:
         now = self._naive_utc_now()
         event_id = f"test-event-{uuid4()}"
         event_data = {
-            "integration_source": "google_contacts",
+            "integration_source": INTEGRATION_SOURCE,
             "external_id": external_id,
             "contact_data": contact_data,
             "sync_timestamp": datetime.now(UTC).isoformat(),
@@ -111,6 +112,119 @@ class TestContactOutboxProcessorIntegration:
             return_value=_TestEngine(),
         ):
             await OutboxProcessor().process_events()
+
+    async def _fetch_contact_by_name(
+        self,
+        connection: AsyncConnection,
+        *,
+        first_name: str,
+        last_name: str,
+    ) -> Any:
+        """Fetch a contact row by first and last name."""
+        result = await connection.execute(
+            text("""
+                SELECT id, first_name, last_name
+                FROM contacts
+                WHERE first_name = :first_name AND last_name = :last_name
+            """),
+            {"first_name": first_name, "last_name": last_name},
+        )
+        return result.fetchone()
+
+    async def _fetch_contact_by_id(
+        self,
+        connection: AsyncConnection,
+        *,
+        contact_id: int,
+    ) -> Any:
+        """Fetch a contact row by id."""
+        result = await connection.execute(
+            text("""
+                SELECT id, first_name, last_name
+                FROM contacts
+                WHERE id = :contact_id
+            """),
+            {"contact_id": contact_id},
+        )
+        return result.fetchone()
+
+    async def _fetch_contact_methods(
+        self,
+        connection: AsyncConnection,
+        *,
+        contact_id: int,
+    ) -> list[Any]:
+        """Fetch contact methods for the given contact."""
+        result = await connection.execute(
+            text("""
+                SELECT method_type, value
+                FROM contact_methods
+                WHERE contact_id = :contact_id
+                ORDER BY method_type
+            """),
+            {"contact_id": contact_id},
+        )
+        return list(result.fetchall())
+
+    async def _assert_external_reference(
+        self,
+        connection: AsyncConnection,
+        *,
+        contact_id: int,
+        external_id: str,
+    ) -> None:
+        """Assert that the contact has the expected Google external reference."""
+        result = await connection.execute(
+            text("""
+                SELECT external_system, external_entity_id
+                FROM external_references
+                WHERE internal_entity_type = 'contact' AND internal_entity_id = :contact_id
+            """),
+            {"contact_id": contact_id},
+        )
+        ref_row = result.fetchone()
+
+        assert ref_row is not None, "External reference should be created"
+        assert ref_row == (INTEGRATION_SOURCE, external_id)
+
+    async def _assert_no_external_reference(
+        self,
+        connection: AsyncConnection,
+        *,
+        external_id: str,
+    ) -> None:
+        """Assert that no Google external reference exists for the external id."""
+        result = await connection.execute(
+            text("""
+                SELECT COUNT(*)
+                FROM external_references
+                WHERE external_system = :external_system
+                AND external_entity_id = :external_id
+            """),
+            {"external_system": INTEGRATION_SOURCE, "external_id": external_id},
+        )
+        assert result.scalar_one() == 0
+
+    async def _assert_event_processed(
+        self,
+        connection: AsyncConnection,
+        *,
+        event_type: str,
+    ) -> None:
+        """Assert that the requested outbox event type was marked processed."""
+        result = await connection.execute(
+            text("""
+                SELECT processed_at
+                FROM outbox_events
+                WHERE event_type = :event_type
+            """),
+            {"event_type": event_type},
+        )
+        processed_at = result.scalar()
+
+        assert processed_at is not None, (
+            f"{event_type} event should be marked as processed"
+        )
 
     async def _assert_event_failed_terminally(
         self,
@@ -168,7 +282,7 @@ class TestContactOutboxProcessorIntegration:
             {
                 "internal_entity_type": "contact",
                 "internal_entity_id": contact_id,
-                "external_system": "google_contacts",
+                "external_system": INTEGRATION_SOURCE,
                 "external_entity_type": "person",
                 "external_entity_id": external_id,
                 "reference_data": "{}",
@@ -212,108 +326,47 @@ class TestContactOutboxProcessorIntegration:
         sample_contact_data: dict[str, Any],
     ):
         """Test that processing a contact.created event creates a contact in the database."""
+        external_id = "people/c123456789"
         await self._insert_contact_sync_event(
             clean_database,
             event_type="contact.created",
             contact_data=sample_contact_data,
-            external_id="people/c123456789",
+            external_id=external_id,
             sync_type="created",
         )
 
-        # Verify event is in the database
-        repository = OutboxRepository(clean_database)
-        unprocessed_events = await repository.get_unprocessed_events()
-        assert len(unprocessed_events) == 1
-        assert unprocessed_events[0].event_type == "contact.created"
+        await self._run_outbox_processor(clean_database)
 
-        # Step 2: Process the event using OutboxProcessor
-        from app.infrastructure.events.outbox_processor import OutboxProcessor
-
-        processor = OutboxProcessor()
-
-        # Process events manually using the test database connection
-        from app.infrastructure.search.search_indexer import SearchIndexer
-
-        search_indexer = SearchIndexer(db_connection=clean_database)
-
-        # Get unprocessed events
-        events = await repository.get_unprocessed_events(limit=50)
-
-        # Process each event
-        for event in events:
-            try:
-                await processor._process_single_event(event, repository, search_indexer)
-            except Exception:
-                # Increment retry count if under max retries
-                if event.retry_count < processor.max_retries:
-                    await repository.increment_retry_count(event.event_id)
-                raise
-
-        # Step 3: Verify the contact was created in the database
-        result = await clean_database.execute(
-            text("""
-                SELECT id, first_name, last_name
-                FROM contacts
-                WHERE first_name = :first_name AND last_name = :last_name
-            """),
-            {"first_name": "John", "last_name": "Doe"},
+        contact_row = await self._fetch_contact_by_name(
+            clean_database,
+            first_name="John",
+            last_name="Doe",
         )
-        contact_row = result.fetchone()
 
         assert contact_row is not None, "Contact should be created in database"
         assert contact_row[1] == "John"  # first_name
         assert contact_row[2] == "Doe"  # last_name
 
-        # Step 4: Verify contact methods (email and phone) were created
         contact_id = contact_row[0]
-        result = await clean_database.execute(
-            text("""
-                SELECT method_type, value
-                FROM contact_methods
-                WHERE contact_id = :contact_id
-                ORDER BY method_type
-            """),
-            {"contact_id": contact_id},
+        methods = await self._fetch_contact_methods(
+            clean_database,
+            contact_id=contact_id,
         )
-        methods = result.fetchall()
 
         assert len(methods) == 2, "Should have email and phone methods"
-        # Methods are ordered by method_type (email comes before phone alphabetically)
         assert methods[0][0] == "email"
         assert methods[0][1] == "john.doe@example.com"
         assert methods[1][0] == "phone"
         assert methods[1][1] == "+1-555-123-4567"
 
-        # Step 5: Verify external reference was created
-        result = await clean_database.execute(
-            text("""
-                SELECT external_system, external_entity_id
-                FROM external_references
-                WHERE internal_entity_type = 'contact' AND internal_entity_id = :contact_id
-            """),
-            {"contact_id": contact_id},
+        await self._assert_external_reference(
+            clean_database,
+            contact_id=contact_id,
+            external_id=external_id,
         )
-        ref_row = result.fetchone()
-
-        assert ref_row is not None, "External reference should be created"
-        assert ref_row[0] == "google_contacts"
-        assert ref_row[1] == "people/c123456789"
-
-        # Step 6: Verify the original contact.created event was marked as processed
-        # Note: The contact creation may generate additional domain events (ContactMethodAdded, etc.)
-        # so we check specifically for the contact.created event
-        all_events = await clean_database.execute(
-            text("""
-                SELECT event_type, processed_at
-                FROM outbox_events
-                WHERE event_type = 'contact.created'
-            """)
-        )
-        created_event = all_events.fetchone()
-
-        assert created_event is not None, "contact.created event should exist"
-        assert created_event[1] is not None, (
-            "contact.created event should be marked as processed"
+        await self._assert_event_processed(
+            clean_database,
+            event_type="contact.created",
         )
 
     @pytest.mark.asyncio
@@ -334,16 +387,10 @@ class TestContactOutboxProcessorIntegration:
         await self._run_outbox_processor(clean_database)
         await self._assert_event_failed_terminally(clean_database, event_id)
 
-        result = await clean_database.execute(
-            text("""
-                SELECT COUNT(*)
-                FROM external_references
-                WHERE external_system = 'google_contacts'
-                AND external_entity_id = :external_id
-            """),
-            {"external_id": external_id},
+        await self._assert_no_external_reference(
+            clean_database,
+            external_id=external_id,
         )
-        assert result.scalar_one() == 0
 
     @pytest.mark.asyncio
     async def test_process_events_marks_invalid_contact_updated_event_as_failed(
@@ -373,14 +420,10 @@ class TestContactOutboxProcessorIntegration:
         await self._run_outbox_processor(clean_database)
         await self._assert_event_failed_terminally(clean_database, event_id)
 
-        result = await clean_database.execute(
-            text("""
-                SELECT first_name, last_name
-                FROM contacts
-                WHERE id = :contact_id
-            """),
-            {"contact_id": contact_id},
+        contact_row = await self._fetch_contact_by_id(
+            clean_database,
+            contact_id=contact_id,
         )
-        contact_row = result.fetchone()
 
-        assert contact_row == ("Existing", "Contact")
+        assert contact_row is not None
+        assert contact_row[1:] == ("Existing", "Contact")
