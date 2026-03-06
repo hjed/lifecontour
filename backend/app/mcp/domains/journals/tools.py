@@ -1895,8 +1895,6 @@ def register_journal_tools(mcp: FastMCP[None]) -> None:
         """
         import uuid
 
-        from fastapi import HTTPException
-
         from app.core.journal.adapters.sql.calendar_repository import (
             SqlCalendarRepository,
         )
@@ -1906,7 +1904,7 @@ def register_journal_tools(mcp: FastMCP[None]) -> None:
 
         calendar = await calendar_repo.find_by_id(uuid.UUID(calendar_id))
         if not calendar or calendar.user_id != user_id:
-            raise HTTPException(status_code=404, detail="Calendar not found")
+            return MCPResponseBuilder.not_found_error_response("Calendar", calendar_id)
 
         if name is not None:
             calendar.name = name
@@ -1944,8 +1942,6 @@ def register_journal_tools(mcp: FastMCP[None]) -> None:
         """
         import uuid
 
-        from fastapi import HTTPException
-
         from app.core.journal.adapters.sql.calendar_repository import (
             SqlCalendarRepository,
         )
@@ -1955,7 +1951,7 @@ def register_journal_tools(mcp: FastMCP[None]) -> None:
 
         calendar = await calendar_repo.find_by_id(uuid.UUID(calendar_id))
         if not calendar or calendar.user_id != user_id:
-            raise HTTPException(status_code=404, detail="Calendar not found")
+            return MCPResponseBuilder.not_found_error_response("Calendar", calendar_id)
 
         from sqlalchemy import text
 
@@ -1971,9 +1967,9 @@ def register_journal_tools(mcp: FastMCP[None]) -> None:
         usage_count: int = row[0] if row else 0
 
         if usage_count > 0:
-            raise HTTPException(
-                status_code=409,
-                detail=f"Calendar is in use by {usage_count} journal(s)",
+            return MCPResponseBuilder.error_response(
+                f"Calendar is in use by {usage_count} journal(s)",
+                "CONFLICT",
             )
 
         if calendar.id is not None:

@@ -178,15 +178,17 @@ async def update_calendar(
 
     # Update attributes
     attrs = calendar_request.data.attributes
-    if attrs.name is not None:
-        calendar.name = attrs.name
-    if attrs.description is not None:
+    fields_set: set[str] = getattr(attrs, "model_fields_set", set())
+
+    if "name" in fields_set:
+        calendar.name = attrs.name  # type: ignore[assignment]
+    if "description" in fields_set:
         calendar.description = attrs.description
-    if attrs.color is not None:
-        calendar.color = attrs.color
-    if attrs.is_synced_to_google is not None:
-        calendar.is_synced_to_google = attrs.is_synced_to_google
-    if attrs.google_calendar_id is not None:
+    if "color" in fields_set:
+        calendar.color = attrs.color  # type: ignore[assignment]
+    if "is_synced_to_google" in fields_set:
+        calendar.is_synced_to_google = attrs.is_synced_to_google  # type: ignore[assignment]
+    if "google_calendar_id" in fields_set:
         calendar.google_calendar_id = attrs.google_calendar_id
 
     # Save changes

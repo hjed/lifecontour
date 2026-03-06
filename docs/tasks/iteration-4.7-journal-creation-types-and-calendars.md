@@ -70,7 +70,7 @@
 
 **Acceptance Criteria:**
 - [x] Confirm or introduce a `calendars` table and domain model consistent with the spec (`id`, `user_id`, `name`, `description`, `color`, `is_synced_to_google`, `google_calendar_id`, timestamps).
-- [x] Implement JSON API-compliant endpoints for listing, creating, updating, and soft-deleting calendars, with appropriate validation and authorization.
+- [x] Implement JSON API-compliant endpoints for listing, creating, updating, and hard-deleting calendars, with appropriate validation and authorization.
 - [x] Add backend unit and integration tests for these calendar endpoints, including constraints relevant to EVENT journals (for example, preventing deletion of a calendar that still has EVENT journals unless a clear migration path is implemented).
 - [x] Implement a Calendar Settings UI (for example, under journal or global settings) that allows adding/removing calendars, editing name and color, and toggling sync-related flags without triggering actual Google sync.
 - [x] Ensure the EVENT journal type UI (creation and inline editors) consumes the calendar list from these APIs and handles calendar deletion or renaming gracefully.

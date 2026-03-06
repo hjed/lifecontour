@@ -92,7 +92,7 @@ export function CalendarSettings() {
             </p>
           ) : (
             <div className='space-y-4'>
-              {calendars.map((cal: any) => {
+              {calendars.map(cal => {
                 const calendarData: JournalCalendar = {
                   id: cal.id,
                   name: cal.attributes.name,

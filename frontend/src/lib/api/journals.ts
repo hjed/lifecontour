@@ -524,6 +524,8 @@ async function fetchCalendars(): Promise<{
       name: string;
       color: string;
       description?: string;
+      is_synced_to_google?: boolean;
+      google_calendar_id?: string;
     };
   }>;
 }> {
@@ -590,7 +592,7 @@ async function updateCalendar(
   if (!response.ok) {
     const errorData: JsonApiErrorResponse = await response.json();
     throw new Error(
-      errorData.errors?.[0]?.detail || ERROR_MESSAGES.FETCH_FAILED
+      errorData.errors?.[0]?.detail || ERROR_MESSAGES.UPDATE_FAILED
     );
   }
 
@@ -604,9 +606,9 @@ async function deleteCalendar(id: string): Promise<void> {
   });
 
   if (!response.ok) {
-    const errorData = await response.json();
+    const errorData: JsonApiErrorResponse = await response.json();
     throw new Error(
-      errorData.errors?.[0]?.detail || 'Failed to delete calendar'
+      errorData.errors?.[0]?.detail || ERROR_MESSAGES.DELETE_FAILED
     );
   }
 }

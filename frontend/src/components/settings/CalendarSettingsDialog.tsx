@@ -164,7 +164,8 @@ export function CalendarSettingsDialog({
                       <Input
                         type='color'
                         className='h-10 w-12 cursor-pointer p-1'
-                        {...field}
+                        value={field.value || '#000000'}
+                        onChange={e => field.onChange(e.target.value)}
                       />
                       <Input
                         type='text'
