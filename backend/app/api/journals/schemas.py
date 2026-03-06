@@ -8,7 +8,7 @@ the JSON API specification.
 from datetime import date, datetime, time
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from app.api.common.schemas import (
     JsonApiCollectionResponse,
@@ -698,15 +698,27 @@ class CalendarCreateRequest(JsonApiCreateRequest[CalendarCreateData]):
 class CalendarUpdateAttributes(BaseModel):
     """Calendar attributes for updates."""
 
-    name: str | None = Field(default=None, description=CALENDAR_NAME_DESC)
+    name: str | None = Field(
+        default=None, description=CALENDAR_NAME_DESC, min_length=1, max_length=100
+    )
     description: str | None = Field(default=None, description="Calendar description")
-    color: str | None = Field(default=None, description=CALENDAR_COLOR_DESC)
+    color: str | None = Field(
+        default=None, description=CALENDAR_COLOR_DESC, pattern=r"^#[0-9A-Fa-f]{6}$"
+    )
     is_synced_to_google: bool | None = Field(
         default=None, description="Whether calendar is synced to Google Calendar"
     )
     google_calendar_id: str | None = Field(
         default=None, description="Google Calendar ID"
     )
+
+    @model_validator(mode="after")
+    def validate_non_nulls(self) -> "CalendarUpdateAttributes":
+        if "name" in self.model_fields_set and self.name is None:
+            raise ValueError("name cannot be null when updating")
+        if "color" in self.model_fields_set and self.color is None:
+            raise ValueError("color cannot be null when updating")
+        return self
 
 
 class CalendarUpdateData(BaseModel):

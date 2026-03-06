@@ -191,6 +191,17 @@ async def update_calendar(
     if "google_calendar_id" in fields_set:
         calendar.google_calendar_id = attrs.google_calendar_id
 
+    # Re-trigger domain validation
+    from app.core.journal.models.exceptions import CalendarValidationError
+
+    try:
+        calendar.__post_init__()
+    except CalendarValidationError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        ) from e
+
     # Save changes
     updated_calendar = await calendar_repo.save(calendar)
 

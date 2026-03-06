@@ -522,10 +522,10 @@ async function fetchCalendars(): Promise<{
     id: string;
     attributes: {
       name: string;
-      color: string;
-      description?: string;
+      color: string | null;
+      description?: string | null;
       is_synced_to_google?: boolean;
-      google_calendar_id?: string;
+      google_calendar_id?: string | null;
     };
   }>;
 }> {
