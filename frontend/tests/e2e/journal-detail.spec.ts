@@ -8,11 +8,20 @@
 import { test, expect } from './fixtures';
 import { TestDataManager } from './data-management';
 
-/** Returns the ordinal suffix for a day number, e.g. 1 → 'st', 2 → 'nd'. */
-function getOrdinal(n: number): string {
+// Helper to get ordinal suffix for a day number (e.g., 1 -> 'st')
+function getOrdinal(n: number) {
   const s = ['th', 'st', 'nd', 'rd'],
     v = n % 100;
   return s[(v - 20) % 10] || s[v] || s[0];
+}
+
+// Helper to format date as 'Wednesday, February 4th, 2026' (with ordinal suffix)
+function formatAriaLabel(date: Date) {
+  const weekday = date.toLocaleDateString('en-US', { weekday: 'long' });
+  const month = date.toLocaleDateString('en-US', { month: 'long' });
+  const day = date.getDate();
+  const year = date.getFullYear();
+  return `${weekday}, ${month} ${day}${getOrdinal(day)}, ${year}`;
 }
 
 test.describe('Journal Detail Page', () => {
@@ -156,15 +165,6 @@ test.describe('Journal Detail Page', () => {
       startDate.setDate(today.getDate() + 1);
       const endDate = new Date(today);
       endDate.setDate(today.getDate() + 3);
-
-      // Helper to format date as 'Wednesday, February 4th, 2026' (with ordinal suffix)
-      function formatAriaLabel(date: Date) {
-        const weekday = date.toLocaleDateString('en-US', { weekday: 'long' });
-        const month = date.toLocaleDateString('en-US', { month: 'long' });
-        const day = date.getDate();
-        const year = date.getFullYear();
-        return `${weekday}, ${month} ${day}${getOrdinal(day)}, ${year}`;
-      }
 
       const startLabel = formatAriaLabel(startDate);
       const endLabel = formatAriaLabel(endDate);
@@ -328,6 +328,87 @@ test.describe('Journal Detail Page', () => {
           .or(page.getByText(/mood/i))
           .first()
       ).toBeVisible();
+    });
+
+    test('should display type-specific editor sections for FITNESS type', async ({
+      authenticatedPage,
+      testCleanup,
+    }) => {
+      const page = authenticatedPage;
+
+      // Create a journal with FITNESS type
+      const response = await page.request.post('/api/journals', {
+        data: {
+          data: {
+            type: 'journal',
+            attributes: {
+              title: 'Morning Run',
+              content: 'Ran to the park and back.',
+              event_date_range: {
+                start: '2026-01-18T10:00:00Z',
+                end: '2026-01-18T10:30:00Z',
+              },
+              types: ['fitness'],
+              type_data: {
+                fitness: {
+                  duration: 1800,
+                  distance: 5000,
+                  heart_rate_avg: 155,
+                  gpx_track_data: `<?xml version="1.0" encoding="UTF-8"?>
+<gpx version="1.1" creator="Test">
+  <trk>
+    <trkseg>
+      <trkpt lat="-33.8688" lon="151.2093"></trkpt>
+      <trkpt lat="-33.8690" lon="151.2095"></trkpt>
+    </trkseg>
+  </trk>
+</gpx>`,
+                },
+              },
+            },
+          },
+        },
+      });
+
+      const journal = await response.json();
+      const journalId = journal.data.id;
+
+      // Register cleanup
+      testCleanup(async () => {
+        await page.request.delete(`/api/journals/${journalId}`);
+      });
+
+      // Navigate to journal detail page
+      await page.goto(`/journals/${journalId}`);
+      // Wait for the page title to be visible rather than network-idle, as Leaflet tile
+      // loading can keep the network busy and cause flaky timeouts.
+      await expect(page.getByTestId('journal-title-field')).toBeVisible();
+
+      // Verify FITNESS type section is present
+      const fitnessSection = page.getByText('Fitness Activity');
+      await expect(fitnessSection).toBeVisible();
+
+      // Click the collapsible trigger to expand the section
+      await page.getByTestId('type-section-trigger-fitness').click();
+
+      // Verify fitness-specific stats are visible
+      await expect(page.getByTestId('activity-stats-grid')).toBeVisible();
+      await expect(page.getByTestId('stat-distance')).toHaveText('5.00 km');
+      await expect(page.getByTestId('stat-duration')).toHaveText('30:00');
+
+      // Verify the map displays
+      await expect(page.getByTestId('gpx-track-display')).toBeVisible();
+      await expect(page.locator('.leaflet-container')).toBeVisible();
+
+      // Expand to edit mode and confirm form input populates correctly
+      const fitnessEditor = page.getByTestId('fitness-type-editor');
+      const editButton = fitnessEditor.getByTestId('edit-button');
+      await expect(editButton).toBeVisible();
+      await editButton.click();
+
+      const distanceInput = page.getByTestId('distance-input');
+      await expect(distanceInput).toBeVisible();
+      await expect(distanceInput).toHaveValue('5000');
     });
   });
 

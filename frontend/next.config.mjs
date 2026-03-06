@@ -1,5 +1,6 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  reactStrictMode: false, // Required for react-leaflet (Map container is already initialized)
   experimental: {
     typedRoutes: true,
   },
