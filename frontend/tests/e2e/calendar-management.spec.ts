@@ -62,9 +62,6 @@ test.describe('Calendar Management', () => {
     // 6. Delete the calendar
     page.once('dialog', dialog => dialog.accept());
 
-    const updatedCalendarItem = page
-      .locator('div')
-      .filter({ hasText: updatedName });
     await Promise.all([
       page.waitForResponse(
         response =>
@@ -72,7 +69,11 @@ test.describe('Calendar Management', () => {
           response.request().method() === 'DELETE' &&
           response.ok()
       ),
-      updatedCalendarItem.getByRole('button', { name: /Delete/i }).click(),
+      page
+        .getByRole('button', {
+          name: new RegExp(`Delete calendar ${updatedName}`, 'i'),
+        })
+        .click(),
     ]);
 
     // Verify it's gone

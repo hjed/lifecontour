@@ -533,7 +533,12 @@ async def _update_event_data(
     calendar_id = type_data_dict.get("calendar_id")
     if calendar_id is not None:
         if isinstance(calendar_id, str):
-            calendar_id = UUID(calendar_id)
+            try:
+                calendar_id = UUID(calendar_id)
+            except (ValueError, TypeError) as exc:
+                raise ValueError(
+                    f"Invalid calendar_id '{calendar_id}'. Must be a valid UUID."
+                ) from exc
         calendar_info = CalendarInfo(
             journal_id=journal_id,
             calendar_id=calendar_id,
@@ -1902,7 +1907,15 @@ def register_journal_tools(mcp: FastMCP[None]) -> None:
         user_id = _get_current_user_id()
         calendar_repo = SqlCalendarRepository(db_connection)
 
-        calendar = await calendar_repo.find_by_id(uuid.UUID(calendar_id))
+        try:
+            calendar_uuid = uuid.UUID(calendar_id)
+        except (ValueError, TypeError):
+            return MCPResponseBuilder.error_response(
+                f"Invalid calendar_id '{calendar_id}'. Must be a valid UUID.",
+                "VALIDATION_ERROR",
+            )
+
+        calendar = await calendar_repo.find_by_id(calendar_uuid)
         if not calendar or calendar.user_id != user_id:
             return MCPResponseBuilder.not_found_error_response("Calendar", calendar_id)
 
@@ -1949,7 +1962,15 @@ def register_journal_tools(mcp: FastMCP[None]) -> None:
         user_id = _get_current_user_id()
         calendar_repo = SqlCalendarRepository(db_connection)
 
-        calendar = await calendar_repo.find_by_id(uuid.UUID(calendar_id))
+        try:
+            calendar_uuid = uuid.UUID(calendar_id)
+        except (ValueError, TypeError):
+            return MCPResponseBuilder.error_response(
+                f"Invalid calendar_id '{calendar_id}'. Must be a valid UUID.",
+                "VALIDATION_ERROR",
+            )
+
+        calendar = await calendar_repo.find_by_id(calendar_uuid)
         if not calendar or calendar.user_id != user_id:
             return MCPResponseBuilder.not_found_error_response("Calendar", calendar_id)
 

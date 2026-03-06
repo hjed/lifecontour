@@ -105,6 +105,7 @@ export function CalendarSettings() {
                 return (
                   <div
                     key={cal.id}
+                    data-testid={`calendar-row-${cal.id}`}
                     className='flex items-center justify-between rounded-lg border p-3'
                   >
                     <div className='flex items-center gap-3'>
