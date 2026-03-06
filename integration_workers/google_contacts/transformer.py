@@ -138,15 +138,14 @@ class GoogleContactTransformer:
             elif hasattr(email, "type") and email.type:
                 label = email.type
 
-            contact_methods.append(
-                ContactMethod(
-                    method_type=MethodType.EMAIL,
-                    value=email.value,
-                    label=label,
-                    is_primary=is_primary,
-                    contact_id=0,
-                )
+            contact_method = self._create_contact_method(
+                method_type=MethodType.EMAIL,
+                value=email.value,
+                label=label,
+                is_primary=is_primary,
             )
+            if contact_method:
+                contact_methods.append(contact_method)
 
         return contact_methods
 
@@ -170,15 +169,14 @@ class GoogleContactTransformer:
             if hasattr(phone, "canonical_form") and phone.canonical_form:
                 phone_value = phone.canonical_form
 
-            contact_methods.append(
-                ContactMethod(
-                    method_type=MethodType.PHONE,
-                    value=phone_value,
-                    label=label,
-                    is_primary=is_primary,
-                    contact_id=0,
-                )
+            contact_method = self._create_contact_method(
+                method_type=MethodType.PHONE,
+                value=phone_value,
+                label=label,
+                is_primary=is_primary,
             )
+            if contact_method:
+                contact_methods.append(contact_method)
 
         return contact_methods
 
@@ -194,18 +192,17 @@ class GoogleContactTransformer:
                 street_line_1 = address.formatted_value
 
             if street_line_1 and getattr(address, "country_code", None):
-                contact_addresses.append(
-                    ContactAddress(
-                        street_line_1=street_line_1,
-                        country_code=address.country_code,
-                        street_line_2=getattr(address, "extended_address", None),
-                        locality=getattr(address, "city", None),
-                        region=getattr(address, "region", None),
-                        postal_code=getattr(address, "postal_code", None),
-                        is_primary=is_primary,
-                        contact_id=0,
-                    )
+                contact_address = self._create_contact_address(
+                    street_line_1=street_line_1,
+                    country_code=address.country_code,
+                    street_line_2=getattr(address, "extended_address", None),
+                    locality=getattr(address, "city", None),
+                    region=getattr(address, "region", None),
+                    postal_code=getattr(address, "postal_code", None),
+                    is_primary=is_primary,
                 )
+                if contact_address:
+                    contact_addresses.append(contact_address)
 
         return contact_addresses
 
@@ -217,14 +214,79 @@ class GoogleContactTransformer:
             if not hasattr(bio, "value") or not bio.value:
                 continue
 
-            notes.append(
-                ContactNote(
-                    content=bio.value,
-                    contact_id=0,
-                )
-            )
+            note = self._create_contact_note(bio.value)
+            if note:
+                notes.append(note)
 
         return notes
+
+    def _create_contact_method(
+        self,
+        method_type: MethodType,
+        value: str,
+        label: str | None,
+        is_primary: bool,
+    ) -> ContactMethod | None:
+        """Create a validated contact method, skipping invalid values."""
+        try:
+            return ContactMethod(
+                method_type=method_type,
+                value=value,
+                label=label,
+                is_primary=is_primary,
+                contact_id=0,
+            )
+        except ValueError as exc:
+            logger.warning(
+                "Skipping invalid Google contact method",
+                method_type=method_type.value,
+                value=value,
+                label=label,
+                error=str(exc),
+            )
+            return None
+
+    def _create_contact_address(
+        self,
+        street_line_1: str,
+        country_code: str,
+        street_line_2: str | None,
+        locality: str | None,
+        region: str | None,
+        postal_code: str | None,
+        is_primary: bool,
+    ) -> ContactAddress | None:
+        """Create a validated contact address, skipping invalid values."""
+        try:
+            return ContactAddress(
+                street_line_1=street_line_1,
+                country_code=country_code,
+                street_line_2=street_line_2,
+                locality=locality,
+                region=region,
+                postal_code=postal_code,
+                is_primary=is_primary,
+                contact_id=0,
+            )
+        except ValueError as exc:
+            logger.warning(
+                "Skipping invalid Google contact address",
+                street_line_1=street_line_1,
+                country_code=country_code,
+                error=str(exc),
+            )
+            return None
+
+    def _create_contact_note(self, content: str) -> ContactNote | None:
+        """Create a validated contact note, skipping invalid values."""
+        try:
+            return ContactNote(content=content, contact_id=0)
+        except ValueError as exc:
+            logger.warning(
+                "Skipping invalid Google contact note",
+                error=str(exc),
+            )
+            return None
 
     def _transform_memberships_to_tags(self, memberships: list[Any]) -> list[Tag]:
         """Transform Google contact group memberships to Tag entities."""

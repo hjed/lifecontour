@@ -10,6 +10,9 @@ from typing import Any
 
 import structlog
 
+from app.core.integrations.outbox_event_processor import (
+    PermanentOutboxEventProcessingError,
+)
 from app.infrastructure.database import get_async_database_engine
 from app.infrastructure.events.outbox_repository import OutboxRepository
 from app.infrastructure.search.search_indexer import SearchIndexer
@@ -40,7 +43,10 @@ class OutboxProcessor:
                 search_indexer = SearchIndexer(db_connection=conn)
 
                 # Get unprocessed events
-                events = await repository.get_unprocessed_events(limit=self.batch_size)
+                events = await repository.get_unprocessed_events(
+                    limit=self.batch_size,
+                    max_retry_count=self.max_retries,
+                )
 
                 if not events:
                     logger.debug("No unprocessed events found in outbox")
@@ -53,6 +59,18 @@ class OutboxProcessor:
                     try:
                         await self._process_single_event(
                             event, repository, search_indexer
+                        )
+
+                    except PermanentOutboxEventProcessingError as e:
+                        logger.error(
+                            "Outbox event has permanent invalid payload",
+                            event_id=event.event_id,
+                            event_type=event.event_type,
+                            retry_count=event.retry_count,
+                            error=str(e),
+                        )
+                        await repository.mark_as_failed(
+                            event.event_id, retry_count=self.max_retries
                         )
 
                     except Exception as e:

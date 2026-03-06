@@ -13,7 +13,10 @@ This processor implements production-grade resilience patterns:
 from typing import Any
 
 import structlog
-from core_shared.models.contacts.serialization import deserialize_contact
+from core_shared.models.contacts.serialization import (
+    ContactDeserializationError,
+    deserialize_contact,
+)
 from core_shared.models.outbox import OutboxEvent
 from core_shared.models.sync_metadata import SyncStatus
 from sqlalchemy.ext.asyncio import AsyncConnection
@@ -36,7 +39,9 @@ EVENT_TYPE_SYNC_COMPLETED = "sync.completed"
 class OutboxEventProcessingError(Exception):
     """Raised when outbox event processing fails."""
 
-    pass
+
+class PermanentOutboxEventProcessingError(OutboxEventProcessingError):
+    """Raised when an outbox event payload is permanently invalid."""
 
 
 class OutboxEventProcessor:
@@ -96,6 +101,15 @@ class OutboxEventProcessor:
                     f"Unknown event type: {event.event_type}"
                 )
 
+        except PermanentOutboxEventProcessingError as e:
+            logger.error(
+                "Failed to process outbox event",
+                event_id=event.id,
+                event_type=event.event_type,
+                error=str(e),
+                error_type=type(e).__name__,
+            )
+            raise
         except Exception as e:
             logger.error(
                 "Failed to process outbox event",
@@ -155,10 +169,8 @@ class OutboxEventProcessor:
         # Deserialize contact data from outbox event
         try:
             contact = deserialize_contact(contact_data)
-        except Exception as e:
-            raise OutboxEventProcessingError(
-                f"Failed to deserialize contact data: {str(e)}"
-            ) from e
+        except ContactDeserializationError as e:
+            raise PermanentOutboxEventProcessingError(str(e)) from e
 
         # Create the contact using the contact service
         try:
@@ -319,10 +331,8 @@ class OutboxEventProcessor:
 
             # Preserve the existing contact ID
             updated_contact_data.id = existing_contact.id
-        except Exception as e:
-            raise OutboxEventProcessingError(
-                f"Failed to deserialize contact data: {str(e)}"
-            ) from e
+        except ContactDeserializationError as e:
+            raise PermanentOutboxEventProcessingError(str(e)) from e
 
         # Update the contact using the contact service
         try:

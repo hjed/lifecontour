@@ -287,6 +287,46 @@ class TestGoogleContactTransformer:
         assert len(email_methods) == 1
         assert email_methods[0].value == "valid@example.com"
 
+    def test_transform_person_invalid_email_values_skipped(
+        self, transformer: GoogleContactTransformer
+    ) -> None:
+        """Test transformation skips malformed email values instead of failing."""
+        person = GooglePerson(
+            resourceName="people/c123456789",
+            emailAddresses=[
+                GoogleEmailAddress(value="not-an-email"),
+                GoogleEmailAddress(value="valid@example.com"),
+            ],
+        )
+
+        contact = transformer.transform_person(person)
+
+        email_methods = [
+            cm for cm in contact.methods if cm.method_type == MethodType.EMAIL
+        ]
+        assert len(email_methods) == 1
+        assert email_methods[0].value == "valid@example.com"
+
+    def test_transform_person_invalid_phone_values_skipped(
+        self, transformer: GoogleContactTransformer
+    ) -> None:
+        """Test transformation skips phone values that cannot pass validation."""
+        person = GooglePerson(
+            resourceName="people/c123456789",
+            phoneNumbers=[
+                GooglePhoneNumber(value="main office"),
+                GooglePhoneNumber(value="+61 400 123 456"),
+            ],
+        )
+
+        contact = transformer.transform_person(person)
+
+        phone_methods = [
+            cm for cm in contact.methods if cm.method_type == MethodType.PHONE
+        ]
+        assert len(phone_methods) == 1
+        assert phone_methods[0].value == "+61 400 123 456"
+
     def test_transform_person_address_fallback_to_formatted(
         self, transformer: GoogleContactTransformer
     ) -> None:
@@ -311,6 +351,47 @@ class TestGoogleContactTransformer:
         assert address.street_line_1 == "123 Main St, Anytown, CA 12345"
         assert address.locality == "Anytown"
         assert address.region == "CA"
+
+    def test_transform_person_invalid_addresses_skipped(
+        self, transformer: GoogleContactTransformer
+    ) -> None:
+        """Test transformation skips invalid addresses instead of failing."""
+        person = GooglePerson(
+            resourceName="people/c123456789",
+            addresses=[
+                GoogleAddress(
+                    streetAddress="1 Broken Street",
+                    countryCode="AUS",
+                ),
+                GoogleAddress(
+                    streetAddress="123 Main St",
+                    countryCode="AU",
+                ),
+            ],
+        )
+
+        contact = transformer.transform_person(person)
+
+        assert len(contact.addresses) == 1
+        assert contact.addresses[0].street_line_1 == "123 Main St"
+        assert contact.addresses[0].country_code == "AU"
+
+    def test_transform_person_blank_biographies_skipped(
+        self, transformer: GoogleContactTransformer
+    ) -> None:
+        """Test transformation skips blank biographies instead of failing."""
+        person = GooglePerson(
+            resourceName="people/c123456789",
+            biographies=[
+                GoogleBiography(value="   "),
+                GoogleBiography(value="Valid note"),
+            ],
+        )
+
+        contact = transformer.transform_person(person)
+
+        assert len(contact.notes) == 1
+        assert contact.notes[0].content == "Valid note"
 
     def test_transform_person_invalid_membership_names_skipped(
         self, transformer: GoogleContactTransformer

@@ -44,29 +44,36 @@ class OutboxRepository:
         """
         self.conn = connection
 
-    async def get_unprocessed_events(self, limit: int = 100) -> list[OutboxEvent]:
+    async def get_unprocessed_events(
+        self, limit: int = 100, max_retry_count: int | None = None
+    ) -> list[OutboxEvent]:
         """
         Get unprocessed events from the outbox.
 
         Args:
             limit: Maximum number of events to retrieve
+            max_retry_count: Optional retry threshold for excluding failed events
 
         Returns:
             List of unprocessed outbox events
         """
         try:
-            query = text(
-                """
-                SELECT id, event_id, event_type, aggregate_id, event_data,
-                       occurred_at, processed_at, retry_count, created_at
-                FROM outbox_events
-                WHERE processed_at IS NULL
-                ORDER BY created_at ASC
-                LIMIT :limit
-                """
-            )
+            query_lines = [
+                "SELECT id, event_id, event_type, aggregate_id, event_data,",
+                "       occurred_at, processed_at, retry_count, created_at",
+                "FROM outbox_events",
+                "WHERE processed_at IS NULL",
+            ]
+            params: dict[str, Any] = {"limit": limit}
 
-            result = await self.conn.execute(query, {"limit": limit})
+            if max_retry_count is not None:
+                query_lines.append("  AND retry_count < :max_retry_count")
+                params["max_retry_count"] = max_retry_count
+
+            query_lines.extend(["ORDER BY created_at ASC", "LIMIT :limit"])
+            query = text("\n".join(query_lines))
+
+            result = await self.conn.execute(query, params)
             rows = result.fetchall()
 
             events = []
@@ -152,6 +159,43 @@ class OutboxRepository:
         except Exception as e:
             logger.error(
                 "Failed to increment retry count", event_id=event_id, error=str(e)
+            )
+            raise
+
+    async def mark_as_failed(self, event_id: str, retry_count: int) -> None:
+        """
+        Mark an event as failed by setting its retry count to the terminal threshold.
+
+        Args:
+            event_id: ID of the event to mark as failed
+            retry_count: Retry count threshold representing a terminal failure
+        """
+        try:
+            query = text(
+                """
+                UPDATE outbox_events
+                SET retry_count = :retry_count
+                WHERE event_id = :event_id
+                """
+            )
+
+            await self.conn.execute(
+                query,
+                {"event_id": event_id, "retry_count": retry_count},
+            )
+
+            logger.debug(
+                "Event marked as failed",
+                event_id=event_id,
+                retry_count=retry_count,
+            )
+
+        except Exception as e:
+            logger.error(
+                "Failed to mark event as failed",
+                event_id=event_id,
+                retry_count=retry_count,
+                error=str(e),
             )
             raise
 
