@@ -14,6 +14,10 @@ import {
   useUpdateJournal,
   useDeleteJournal,
   useContactJournals,
+  useCalendars,
+  useCreateCalendar,
+  useUpdateCalendar,
+  useDeleteCalendar,
 } from '../journals';
 import { JournalType } from '@/types/journals';
 
@@ -485,6 +489,100 @@ describe('Journals API', () => {
       });
 
       expect(result.current.error).toEqual(new Error('Contact not found'));
+    });
+  });
+
+  describe('Calendar Hooks', () => {
+    describe('useCalendars', () => {
+      it('should fetch calendars successfully', async () => {
+        const mockResponse = {
+          data: [{ id: '1', attributes: { name: 'Cal 1', color: '#000000' } }],
+        };
+
+        mockFetch.mockResolvedValueOnce({
+          ok: true,
+          json: async () => mockResponse,
+        } as Response);
+
+        const { result } = renderHook(() => useCalendars(), {
+          wrapper: createWrapper,
+        });
+        await waitFor(() => {
+          expect(result.current.isSuccess).toBe(true);
+        });
+
+        expect(result.current.data?.data).toHaveLength(1);
+        expect(mockFetch).toHaveBeenCalledWith(
+          '/api/calendars',
+          expect.any(Object)
+        );
+      });
+    });
+
+    describe('useCreateCalendar', () => {
+      it('should create calendar successfully', async () => {
+        mockFetch.mockResolvedValueOnce({
+          ok: true,
+          json: async () => ({ data: { id: '1' } }),
+        } as Response);
+
+        const { result } = renderHook(() => useCreateCalendar(), {
+          wrapper: createWrapper,
+        });
+        result.current.mutate({ name: 'New Cal', color: '#ff0000' });
+
+        await waitFor(() => {
+          expect(result.current.isSuccess).toBe(true);
+        });
+        expect(mockFetch).toHaveBeenCalledWith(
+          '/api/calendars',
+          expect.objectContaining({ method: 'POST' })
+        );
+      });
+    });
+
+    describe('useUpdateCalendar', () => {
+      it('should update calendar successfully', async () => {
+        mockFetch.mockResolvedValueOnce({
+          ok: true,
+          json: async () => ({ data: { id: '1' } }),
+        } as Response);
+
+        const { result } = renderHook(() => useUpdateCalendar(), {
+          wrapper: createWrapper,
+        });
+        result.current.mutate({ id: '1', data: { name: 'Updated Cal' } });
+
+        await waitFor(() => {
+          expect(result.current.isSuccess).toBe(true);
+        });
+        expect(mockFetch).toHaveBeenCalledWith(
+          '/api/calendars/1',
+          expect.objectContaining({ method: 'PUT' })
+        );
+      });
+    });
+
+    describe('useDeleteCalendar', () => {
+      it('should delete calendar successfully', async () => {
+        mockFetch.mockResolvedValueOnce({
+          ok: true,
+          json: async () => ({}),
+        } as Response);
+
+        const { result } = renderHook(() => useDeleteCalendar(), {
+          wrapper: createWrapper,
+        });
+        result.current.mutate('1');
+
+        await waitFor(() => {
+          expect(result.current.isSuccess).toBe(true);
+        });
+        expect(mockFetch).toHaveBeenCalledWith(
+          '/api/calendars/1',
+          expect.objectContaining({ method: 'DELETE' })
+        );
+      });
     });
   });
 });

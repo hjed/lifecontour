@@ -718,6 +718,11 @@ class CalendarUpdateAttributes(BaseModel):
             raise ValueError("name cannot be null when updating")
         if "color" in self.model_fields_set and self.color is None:
             raise ValueError("color cannot be null when updating")
+        if (
+            "is_synced_to_google" in self.model_fields_set
+            and self.is_synced_to_google is None
+        ):
+            raise ValueError("is_synced_to_google cannot be null when updating")
         return self
 
 
