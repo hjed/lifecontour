@@ -19,6 +19,8 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.infrastructure.events.outbox_repository import OutboxRepository
 
+MAX_RETRY_COUNT = 3
+
 
 class _NoCommitConnectionProxy:
     """Proxy test connection that suppresses batch commits inside the savepoint."""
@@ -36,6 +38,20 @@ class _NoCommitConnectionProxy:
 class TestContactOutboxProcessorIntegration:
     """Integration tests for contact outbox event processing."""
 
+    def _naive_utc_now(self) -> datetime:
+        """Create a timezone-naive UTC datetime for legacy timestamp columns."""
+        return datetime.now(UTC).replace(tzinfo=None)
+
+    def _build_invalid_contact_data(self, last_name: str) -> dict[str, Any]:
+        """Build malformed contact payloads missing the required first_name."""
+        return {
+            "last_name": last_name,
+            "methods": [],
+            "addresses": [],
+            "notes": [],
+            "tags": [],
+        }
+
     async def _insert_contact_sync_event(
         self,
         connection: AsyncConnection,
@@ -46,7 +62,7 @@ class TestContactOutboxProcessorIntegration:
         sync_type: str,
     ) -> str:
         """Insert a contact sync outbox event for integration testing."""
-        now = datetime.utcnow()
+        now = self._naive_utc_now()
         event_id = f"test-event-{uuid4()}"
         event_data = {
             "integration_source": "google_contacts",
@@ -96,6 +112,69 @@ class TestContactOutboxProcessorIntegration:
         ):
             await OutboxProcessor().process_events()
 
+    async def _assert_event_failed_terminally(
+        self,
+        connection: AsyncConnection,
+        event_id: str,
+    ) -> None:
+        """Assert that an event reached terminal failure state."""
+        repository = OutboxRepository(connection)
+        remaining_events = await repository.get_unprocessed_events(
+            limit=10, max_retry_count=MAX_RETRY_COUNT
+        )
+        failed_events = await repository.get_failed_events(max_retries=MAX_RETRY_COUNT)
+
+        result = await connection.execute(
+            text("""
+                SELECT retry_count, processed_at
+                FROM outbox_events
+                WHERE event_id = :event_id
+            """),
+            {"event_id": event_id},
+        )
+        event_row = result.fetchone()
+
+        assert event_row is not None
+        assert event_row[0] == MAX_RETRY_COUNT
+        assert event_row[1] is None
+        assert all(event.event_id != event_id for event in remaining_events)
+        assert any(event.event_id == event_id for event in failed_events)
+
+    async def _insert_existing_contact_reference(
+        self,
+        connection: AsyncConnection,
+        *,
+        contact_id: int,
+        external_id: str,
+        first_name: str,
+        last_name: str,
+    ) -> None:
+        """Insert an existing contact and its Google external reference."""
+        await connection.execute(
+            text("""
+                INSERT INTO contacts (id, first_name, last_name, created_at, updated_at)
+                VALUES (:id, :first_name, :last_name, NOW(), NOW())
+            """),
+            {"id": contact_id, "first_name": first_name, "last_name": last_name},
+        )
+        await connection.execute(
+            text("""
+                INSERT INTO external_references
+                (internal_entity_type, internal_entity_id, external_system,
+                 external_entity_type, external_entity_id, reference_data)
+                VALUES (:internal_entity_type, :internal_entity_id, :external_system,
+                        :external_entity_type, :external_entity_id, :reference_data)
+            """),
+            {
+                "internal_entity_type": "contact",
+                "internal_entity_id": contact_id,
+                "external_system": "google_contacts",
+                "external_entity_type": "person",
+                "external_entity_id": external_id,
+                "reference_data": "{}",
+            },
+        )
+
     @pytest.fixture
     def sample_contact_data(self) -> dict[str, Any]:
         """Create sample internal contact data for testing."""
@@ -133,34 +212,12 @@ class TestContactOutboxProcessorIntegration:
         sample_contact_data: dict[str, Any],
     ):
         """Test that processing a contact.created event creates a contact in the database."""
-        # Step 1: Create a contact.created outbox event
-        # Note: We use raw SQL to match the actual database schema (Integer id, not UUID)
-        now = datetime.utcnow()  # Use timezone-naive datetime to match migration schema
-        event_data = {
-            "integration_source": "google_contacts",
-            "external_id": "people/c123456789",
-            "contact_data": sample_contact_data,
-            "sync_timestamp": datetime.now(UTC).isoformat(),
-            "sync_type": "created",
-            "etag": "etag123",
-        }
-
-        # Insert the event using the same pattern as OutboxEventPublisher
-        await clean_database.execute(
-            text("""
-                INSERT INTO outbox_events
-                (event_id, event_type, aggregate_id, event_data, occurred_at, retry_count, created_at)
-                VALUES (:event_id, :event_type, :aggregate_id, :event_data, :occurred_at, :retry_count, :created_at)
-            """),
-            {
-                "event_id": f"test-event-{uuid4()}",
-                "event_type": "contact.created",
-                "aggregate_id": 0,  # Not used for contact sync events
-                "event_data": json.dumps(event_data),
-                "occurred_at": now,
-                "retry_count": 0,
-                "created_at": now,
-            },
+        await self._insert_contact_sync_event(
+            clean_database,
+            event_type="contact.created",
+            contact_data=sample_contact_data,
+            external_id="people/c123456789",
+            sync_type="created",
         )
 
         # Verify event is in the database
@@ -265,45 +322,17 @@ class TestContactOutboxProcessorIntegration:
         clean_database: AsyncConnection,
     ):
         """Invalid contact.created payloads should be terminally failed and skipped."""
-        invalid_contact_data = {
-            "last_name": "Broken",
-            "methods": [],
-            "addresses": [],
-            "notes": [],
-            "tags": [],
-        }
         external_id = f"people/invalid-created-{uuid4()}"
         event_id = await self._insert_contact_sync_event(
             clean_database,
             event_type="contact.created",
-            contact_data=invalid_contact_data,
+            contact_data=self._build_invalid_contact_data("Broken"),
             external_id=external_id,
             sync_type="created",
         )
 
         await self._run_outbox_processor(clean_database)
-
-        repository = OutboxRepository(clean_database)
-        remaining_events = await repository.get_unprocessed_events(
-            limit=10, max_retry_count=3
-        )
-        failed_events = await repository.get_failed_events(max_retries=3)
-
-        result = await clean_database.execute(
-            text("""
-                SELECT retry_count, processed_at
-                FROM outbox_events
-                WHERE event_id = :event_id
-            """),
-            {"event_id": event_id},
-        )
-        event_row = result.fetchone()
-
-        assert event_row is not None
-        assert event_row[0] == 3
-        assert event_row[1] is None
-        assert all(event.event_id != event_id for event in remaining_events)
-        assert any(event.event_id == event_id for event in failed_events)
+        await self._assert_event_failed_terminally(clean_database, event_id)
 
         result = await clean_database.execute(
             text("""
@@ -325,69 +354,24 @@ class TestContactOutboxProcessorIntegration:
         contact_id = 98765
         external_id = f"people/invalid-updated-{uuid4()}"
 
-        await clean_database.execute(
-            text("""
-                INSERT INTO contacts (id, first_name, last_name, created_at, updated_at)
-                VALUES (:id, :first_name, :last_name, NOW(), NOW())
-            """),
-            {"id": contact_id, "first_name": "Existing", "last_name": "Contact"},
-        )
-        await clean_database.execute(
-            text("""
-                INSERT INTO external_references
-                (internal_entity_type, internal_entity_id, external_system,
-                 external_entity_type, external_entity_id, reference_data)
-                VALUES (:internal_entity_type, :internal_entity_id, :external_system,
-                        :external_entity_type, :external_entity_id, :reference_data)
-            """),
-            {
-                "internal_entity_type": "contact",
-                "internal_entity_id": contact_id,
-                "external_system": "google_contacts",
-                "external_entity_type": "person",
-                "external_entity_id": external_id,
-                "reference_data": "{}",
-            },
+        await self._insert_existing_contact_reference(
+            clean_database,
+            contact_id=contact_id,
+            external_id=external_id,
+            first_name="Existing",
+            last_name="Contact",
         )
 
-        invalid_contact_data = {
-            "last_name": "Mutated",
-            "methods": [],
-            "addresses": [],
-            "notes": [],
-            "tags": [],
-        }
         event_id = await self._insert_contact_sync_event(
             clean_database,
             event_type="contact.updated",
-            contact_data=invalid_contact_data,
+            contact_data=self._build_invalid_contact_data("Mutated"),
             external_id=external_id,
             sync_type="updated",
         )
 
         await self._run_outbox_processor(clean_database)
-
-        repository = OutboxRepository(clean_database)
-        remaining_events = await repository.get_unprocessed_events(
-            limit=10, max_retry_count=3
-        )
-        failed_events = await repository.get_failed_events(max_retries=3)
-
-        result = await clean_database.execute(
-            text("""
-                SELECT retry_count, processed_at
-                FROM outbox_events
-                WHERE event_id = :event_id
-            """),
-            {"event_id": event_id},
-        )
-        event_row = result.fetchone()
-
-        assert event_row is not None
-        assert event_row[0] == 3
-        assert event_row[1] is None
-        assert all(event.event_id != event_id for event in remaining_events)
-        assert any(event.event_id == event_id for event in failed_events)
+        await self._assert_event_failed_terminally(clean_database, event_id)
 
         result = await clean_database.execute(
             text("""

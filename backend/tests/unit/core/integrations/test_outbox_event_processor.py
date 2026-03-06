@@ -174,14 +174,21 @@ class TestOutboxEventProcessor:
         mock_external_ref_service.find_by_external_id.return_value = None
         mock_external_ref_service.create_external_reference.return_value = AsyncMock()
 
-        with patch.object(
-            processor, "external_reference_service", mock_external_ref_service
+        mock_sync_metadata_repo = AsyncMock()
+        mock_sync_metadata_repo.upsert.return_value = None
+
+        with (
+            patch.object(
+                processor, "external_reference_service", mock_external_ref_service
+            ),
+            patch.object(processor, "sync_metadata_repo", mock_sync_metadata_repo),
         ):
             # Process the event
             result = await processor.process_event(contact_created_event)
 
         # Verify contact service was called correctly
         mock_contact_service.create_contact.assert_called_once()
+        mock_sync_metadata_repo.upsert.assert_called_once()
         created_contact_arg = mock_contact_service.create_contact.call_args[0][0]
 
         assert created_contact_arg.first_name == "John"

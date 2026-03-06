@@ -90,37 +90,33 @@ class OutboxEventProcessor:
         )
 
         try:
-            if event.event_type == "contact.created":
+            if event.event_type == EVENT_TYPE_CONTACT_CREATED:
                 return await self._process_contact_created(event)
-            elif event.event_type == "contact.updated":
+            if event.event_type == EVENT_TYPE_CONTACT_UPDATED:
                 return await self._process_contact_updated(event)
-            elif event.event_type == "sync.completed":
-                return await self._process_sync_completed(event)
-            else:
-                raise OutboxEventProcessingError(
-                    f"Unknown event type: {event.event_type}"
-                )
+            if event.event_type == EVENT_TYPE_SYNC_COMPLETED:
+                return self._process_sync_completed(event)
+
+            raise OutboxEventProcessingError(f"Unknown event type: {event.event_type}")
 
         except PermanentOutboxEventProcessingError as e:
-            logger.error(
-                "Failed to process outbox event",
-                event_id=event.id,
-                event_type=event.event_type,
-                error=str(e),
-                error_type=type(e).__name__,
-            )
+            self._log_processing_failure(event, e)
             raise
         except Exception as e:
-            logger.error(
-                "Failed to process outbox event",
-                event_id=event.id,
-                event_type=event.event_type,
-                error=str(e),
-                error_type=type(e).__name__,
-            )
+            self._log_processing_failure(event, e)
             raise OutboxEventProcessingError(
                 f"Failed to process {event.event_type} event: {str(e)}"
             ) from e
+
+    def _log_processing_failure(self, event: OutboxEvent, error: Exception) -> None:
+        """Log a failed outbox event processing attempt."""
+        logger.error(
+            "Failed to process outbox event",
+            event_id=event.id,
+            event_type=event.event_type,
+            error=str(error),
+            error_type=type(error).__name__,
+        )
 
     async def _process_contact_created(self, event: OutboxEvent) -> dict[str, Any]:
         """Process a contact.created event."""
@@ -243,7 +239,7 @@ class OutboxEventProcessor:
 
         return {
             "status": "success",
-            "event_type": "contact.created",
+            "event_type": EVENT_TYPE_CONTACT_CREATED,
             "contact_id": created_contact.id,
             "integration_source": integration_source,
             "external_id": external_id,
@@ -300,7 +296,7 @@ class OutboxEventProcessor:
             return {
                 "status": "skipped",
                 "reason": "version_hash_unchanged",
-                "event_type": "contact.updated",
+                "event_type": EVENT_TYPE_CONTACT_UPDATED,
                 "integration_source": integration_source,
                 "external_id": external_id,
             }
@@ -378,13 +374,13 @@ class OutboxEventProcessor:
 
         return {
             "status": "success",
-            "event_type": "contact.updated",
+            "event_type": EVENT_TYPE_CONTACT_UPDATED,
             "contact_id": updated_contact.id,
             "integration_source": integration_source,
             "external_id": external_id,
         }
 
-    async def _process_sync_completed(self, event: OutboxEvent) -> dict[str, Any]:
+    def _process_sync_completed(self, event: OutboxEvent) -> dict[str, Any]:
         """Process a sync.completed event."""
         event_data = event.event_data
         integration_source = event_data["integration_source"]
@@ -406,7 +402,7 @@ class OutboxEventProcessor:
 
         return {
             "status": "success",
-            "event_type": "sync.completed",
+            "event_type": EVENT_TYPE_SYNC_COMPLETED,
             "integration_source": integration_source,
             "google_account_email": google_account_email,
             "metrics": metrics,
