@@ -13,7 +13,10 @@ This processor implements production-grade resilience patterns:
 from typing import Any
 
 import structlog
-from core_shared.models.contacts.serialization import deserialize_contact
+from core_shared.models.contacts.serialization import (
+    ContactDeserializationError,
+    deserialize_contact,
+)
 from core_shared.models.outbox import OutboxEvent
 from core_shared.models.sync_metadata import SyncStatus
 from sqlalchemy.ext.asyncio import AsyncConnection
@@ -36,7 +39,9 @@ EVENT_TYPE_SYNC_COMPLETED = "sync.completed"
 class OutboxEventProcessingError(Exception):
     """Raised when outbox event processing fails."""
 
-    pass
+
+class PermanentOutboxEventProcessingError(OutboxEventProcessingError):
+    """Raised when an outbox event payload is permanently invalid."""
 
 
 class OutboxEventProcessor:
@@ -75,7 +80,9 @@ class OutboxEventProcessor:
             Processing result dictionary
 
         Raises:
-            OutboxEventProcessingError: If event processing fails
+            PermanentOutboxEventProcessingError: If the event payload is invalid
+                and retrying will never succeed
+            OutboxEventProcessingError: If event processing fails transiently
         """
         logger.info(
             "Processing outbox event",
@@ -85,28 +92,41 @@ class OutboxEventProcessor:
         )
 
         try:
-            if event.event_type == "contact.created":
+            if event.event_type == EVENT_TYPE_CONTACT_CREATED:
                 return await self._process_contact_created(event)
-            elif event.event_type == "contact.updated":
+            if event.event_type == EVENT_TYPE_CONTACT_UPDATED:
                 return await self._process_contact_updated(event)
-            elif event.event_type == "sync.completed":
-                return await self._process_sync_completed(event)
-            else:
-                raise OutboxEventProcessingError(
-                    f"Unknown event type: {event.event_type}"
-                )
+            if event.event_type == EVENT_TYPE_SYNC_COMPLETED:
+                return self._process_sync_completed(event)
 
+            raise OutboxEventProcessingError(f"Unknown event type: {event.event_type}")
+
+        except PermanentOutboxEventProcessingError as e:
+            self._log_processing_failure(
+                event,
+                e,
+                message="Outbox event has permanent invalid payload",
+            )
+            raise
         except Exception as e:
-            logger.error(
-                "Failed to process outbox event",
-                event_id=event.id,
-                event_type=event.event_type,
-                error=str(e),
-                error_type=type(e).__name__,
+            self._log_processing_failure(
+                event, e, message="Failed to process outbox event"
             )
             raise OutboxEventProcessingError(
                 f"Failed to process {event.event_type} event: {str(e)}"
             ) from e
+
+    def _log_processing_failure(
+        self, event: OutboxEvent, error: Exception, message: str
+    ) -> None:
+        """Log a failed outbox event processing attempt."""
+        logger.error(
+            message,
+            event_id=event.id,
+            event_type=event.event_type,
+            error=str(error),
+            error_type=type(error).__name__,
+        )
 
     async def _process_contact_created(self, event: OutboxEvent) -> dict[str, Any]:
         """Process a contact.created event."""
@@ -155,10 +175,8 @@ class OutboxEventProcessor:
         # Deserialize contact data from outbox event
         try:
             contact = deserialize_contact(contact_data)
-        except Exception as e:
-            raise OutboxEventProcessingError(
-                f"Failed to deserialize contact data: {str(e)}"
-            ) from e
+        except ContactDeserializationError as e:
+            raise PermanentOutboxEventProcessingError(str(e)) from e
 
         # Create the contact using the contact service
         try:
@@ -231,7 +249,7 @@ class OutboxEventProcessor:
 
         return {
             "status": "success",
-            "event_type": "contact.created",
+            "event_type": EVENT_TYPE_CONTACT_CREATED,
             "contact_id": created_contact.id,
             "integration_source": integration_source,
             "external_id": external_id,
@@ -288,7 +306,7 @@ class OutboxEventProcessor:
             return {
                 "status": "skipped",
                 "reason": "version_hash_unchanged",
-                "event_type": "contact.updated",
+                "event_type": EVENT_TYPE_CONTACT_UPDATED,
                 "integration_source": integration_source,
                 "external_id": external_id,
             }
@@ -319,10 +337,8 @@ class OutboxEventProcessor:
 
             # Preserve the existing contact ID
             updated_contact_data.id = existing_contact.id
-        except Exception as e:
-            raise OutboxEventProcessingError(
-                f"Failed to deserialize contact data: {str(e)}"
-            ) from e
+        except ContactDeserializationError as e:
+            raise PermanentOutboxEventProcessingError(str(e)) from e
 
         # Update the contact using the contact service
         try:
@@ -368,13 +384,13 @@ class OutboxEventProcessor:
 
         return {
             "status": "success",
-            "event_type": "contact.updated",
+            "event_type": EVENT_TYPE_CONTACT_UPDATED,
             "contact_id": updated_contact.id,
             "integration_source": integration_source,
             "external_id": external_id,
         }
 
-    async def _process_sync_completed(self, event: OutboxEvent) -> dict[str, Any]:
+    def _process_sync_completed(self, event: OutboxEvent) -> dict[str, Any]:
         """Process a sync.completed event."""
         event_data = event.event_data
         integration_source = event_data["integration_source"]
@@ -396,7 +412,7 @@ class OutboxEventProcessor:
 
         return {
             "status": "success",
-            "event_type": "sync.completed",
+            "event_type": EVENT_TYPE_SYNC_COMPLETED,
             "integration_source": integration_source,
             "google_account_email": google_account_email,
             "metrics": metrics,

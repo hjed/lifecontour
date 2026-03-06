@@ -67,7 +67,7 @@ class TestOutboxRepository:
         mock_connection.execute.return_value = mock_result
 
         # Act
-        events = await repository.get_unprocessed_events(limit=10)
+        events = await repository.get_unprocessed_events(limit=10, max_retry_count=3)
 
         # Assert
         assert len(events) == 2
@@ -93,7 +93,10 @@ class TestOutboxRepository:
         assert "SELECT" in query
         assert "FROM outbox_events" in query
         assert "WHERE processed_at IS NULL" in query
+        assert "retry_count <" in query
         assert "LIMIT" in query
+        params = call_args[0][1]
+        assert params["max_retry_count"] == 3
 
     @pytest.mark.asyncio
     async def test_get_unprocessed_events_empty_result(
@@ -110,6 +113,37 @@ class TestOutboxRepository:
 
         # Assert
         assert events == []
+
+    @pytest.mark.asyncio
+    async def test_get_unprocessed_events_without_retry_filter(
+        self, repository, mock_connection, sample_outbox_events_data
+    ):
+        """Test retrieving unprocessed events without excluding failed events."""
+        mock_result = MagicMock()
+        mock_result.fetchall.return_value = [
+            MagicMock(**event_data) for event_data in sample_outbox_events_data
+        ]
+        mock_connection.execute.return_value = mock_result
+
+        await repository.get_unprocessed_events(limit=10)
+
+        call_args = mock_connection.execute.call_args
+        query = str(call_args[0][0])
+        assert "retry_count <" not in query
+
+    @pytest.mark.asyncio
+    async def test_mark_as_failed(self, repository, mock_connection):
+        """Test marking an event as permanently failed."""
+        await repository.mark_as_failed("event-789", retry_count=3)
+
+        mock_connection.execute.assert_called_once()
+        call_args = mock_connection.execute.call_args
+        query = str(call_args[0][0])
+        assert "UPDATE outbox_events" in query
+        assert "SET retry_count = :retry_count" in query
+        params = call_args[0][1]
+        assert params["event_id"] == "event-789"
+        assert params["retry_count"] == 3
 
     @pytest.mark.asyncio
     async def test_mark_as_processed(self, repository, mock_connection):

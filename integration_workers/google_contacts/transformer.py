@@ -124,88 +124,100 @@ class GoogleContactTransformer:
         self, email_addresses: list[Any]
     ) -> list[ContactMethod]:
         """Transform Google email addresses to ContactMethod entities."""
-        contact_methods = []
-
-        for email in email_addresses:
-            if not hasattr(email, "value") or not email.value:
-                continue
-
-            is_primary = hasattr(email, "metadata") and email.metadata.primary
-
-            label = None
-            if hasattr(email, "formatted_type") and email.formatted_type:
-                label = email.formatted_type
-            elif hasattr(email, "type") and email.type:
-                label = email.type
-
-            contact_methods.append(
-                ContactMethod(
-                    method_type=MethodType.EMAIL,
-                    value=email.value,
-                    label=label,
-                    is_primary=is_primary,
-                    contact_id=0,
-                )
-            )
-
-        return contact_methods
+        return self._transform_contact_methods(email_addresses, MethodType.EMAIL)
 
     def _transform_phone_numbers(self, phone_numbers: list[Any]) -> list[ContactMethod]:
         """Transform Google phone numbers to ContactMethod entities."""
+        return self._transform_contact_methods(
+            phone_numbers,
+            MethodType.PHONE,
+            preferred_value_attr="canonical_form",
+        )
+
+    def _transform_contact_methods(
+        self,
+        contact_values: list[Any],
+        method_type: MethodType,
+        preferred_value_attr: str | None = None,
+    ) -> list[ContactMethod]:
+        """Transform Google contact methods into validated ContactMethod entities."""
         contact_methods = []
 
-        for phone in phone_numbers:
-            if not hasattr(phone, "value") or not phone.value:
+        for contact_value in contact_values:
+            value = self._extract_contact_method_value(
+                contact_value, preferred_value_attr=preferred_value_attr
+            )
+            if not value:
                 continue
 
-            is_primary = hasattr(phone, "metadata") and phone.metadata.primary
-
-            label = None
-            if hasattr(phone, "formatted_type") and phone.formatted_type:
-                label = phone.formatted_type
-            elif hasattr(phone, "type") and phone.type:
-                label = phone.type
-
-            phone_value = phone.value
-            if hasattr(phone, "canonical_form") and phone.canonical_form:
-                phone_value = phone.canonical_form
-
-            contact_methods.append(
-                ContactMethod(
-                    method_type=MethodType.PHONE,
-                    value=phone_value,
-                    label=label,
-                    is_primary=is_primary,
-                    contact_id=0,
-                )
+            contact_method = self._create_contact_method(
+                method_type=method_type,
+                value=value,
+                label=self._extract_field_label(contact_value),
+                is_primary=self._is_primary_field(contact_value),
             )
+            if contact_method:
+                contact_methods.append(contact_method)
 
         return contact_methods
+
+    def _extract_contact_method_value(
+        self,
+        contact_value: Any,
+        preferred_value_attr: str | None = None,
+    ) -> str | None:
+        """Extract the most useful method value from a Google field."""
+        if preferred_value_attr:
+            preferred_value = getattr(contact_value, preferred_value_attr, None)
+            if isinstance(preferred_value, str) and preferred_value:
+                return preferred_value
+
+        value = getattr(contact_value, "value", None)
+        if isinstance(value, str) and value:
+            return value
+
+        return None
+
+    def _extract_field_label(self, field_value: Any) -> str | None:
+        """Extract a display label from a Google field value."""
+        formatted_type = getattr(field_value, "formatted_type", None)
+        if isinstance(formatted_type, str) and formatted_type:
+            return formatted_type
+
+        fallback_type = getattr(field_value, "type", None)
+        if isinstance(fallback_type, str) and fallback_type:
+            return fallback_type
+
+        return None
+
+    def _is_primary_field(self, field_value: Any) -> bool:
+        """Return whether a Google field is marked as primary."""
+        metadata = getattr(field_value, "metadata", None)
+        return bool(getattr(metadata, "primary", False))
 
     def _transform_addresses(self, addresses: list[Any]) -> list[ContactAddress]:
         """Transform Google addresses to ContactAddress entities."""
         contact_addresses = []
 
         for address in addresses:
-            is_primary = hasattr(address, "metadata") and address.metadata.primary
+            is_primary = self._is_primary_field(address)
 
             street_line_1 = getattr(address, "street_address", None)
             if not street_line_1 and hasattr(address, "formatted_value"):
                 street_line_1 = address.formatted_value
 
             if street_line_1 and getattr(address, "country_code", None):
-                contact_addresses.append(
-                    ContactAddress(
-                        street_line_1=street_line_1,
-                        country_code=address.country_code,
-                        street_line_2=getattr(address, "extended_address", None),
-                        locality=getattr(address, "city", None),
-                        region=getattr(address, "region", None),
-                        postal_code=getattr(address, "postal_code", None),
-                        is_primary=is_primary,
-                        contact_id=0,
-                    )
+                contact_address = self._create_contact_address(
+                    street_line_1=street_line_1,
+                    country_code=address.country_code,
+                    street_line_2=getattr(address, "extended_address", None),
+                    locality=getattr(address, "city", None),
+                    region=getattr(address, "region", None),
+                    postal_code=getattr(address, "postal_code", None),
+                    is_primary=is_primary,
                 )
+                if contact_address:
+                    contact_addresses.append(contact_address)
 
         return contact_addresses
 
@@ -217,50 +229,133 @@ class GoogleContactTransformer:
             if not hasattr(bio, "value") or not bio.value:
                 continue
 
-            notes.append(
-                ContactNote(
-                    content=bio.value,
-                    contact_id=0,
-                )
-            )
+            note = self._create_contact_note(bio.value)
+            if note:
+                notes.append(note)
 
         return notes
+
+    def _create_contact_method(
+        self,
+        method_type: MethodType,
+        value: str,
+        label: str | None,
+        is_primary: bool,
+    ) -> ContactMethod | None:
+        """Create a validated contact method, skipping invalid values."""
+        try:
+            return ContactMethod(
+                method_type=method_type,
+                value=value,
+                label=label,
+                is_primary=is_primary,
+                contact_id=0,
+            )
+        except ValueError as exc:
+            logger.warning(
+                "Skipping invalid Google contact method",
+                method_type=method_type.value,
+                value=value,
+                label=label,
+                error=str(exc),
+            )
+            return None
+
+    def _create_contact_address(
+        self,
+        street_line_1: str,
+        country_code: str,
+        street_line_2: str | None,
+        locality: str | None,
+        region: str | None,
+        postal_code: str | None,
+        is_primary: bool,
+    ) -> ContactAddress | None:
+        """Create a validated contact address, skipping invalid values."""
+        try:
+            return ContactAddress(
+                street_line_1=street_line_1,
+                country_code=country_code,
+                street_line_2=street_line_2,
+                locality=locality,
+                region=region,
+                postal_code=postal_code,
+                is_primary=is_primary,
+                contact_id=0,
+            )
+        except ValueError as exc:
+            logger.warning(
+                "Skipping invalid Google contact address",
+                street_line_1=street_line_1,
+                country_code=country_code,
+                error=str(exc),
+            )
+            return None
+
+    def _create_contact_note(self, content: str) -> ContactNote | None:
+        """Create a validated contact note, skipping invalid values."""
+        try:
+            return ContactNote(content=content, contact_id=0)
+        except ValueError as exc:
+            logger.warning(
+                "Skipping invalid Google contact note",
+                error=str(exc),
+            )
+            return None
 
     def _transform_memberships_to_tags(self, memberships: list[Any]) -> list[Tag]:
         """Transform Google contact group memberships to Tag entities."""
         tags = []
 
         for membership in memberships:
-            if (
-                hasattr(membership, "contact_group_membership")
-                and membership.contact_group_membership
-            ):
-                group_info = membership.contact_group_membership
-
-                group_name = None
-                if isinstance(group_info, dict):
-                    group_name = (
-                        group_info.get("contactGroupId")
-                        or group_info.get("contactGroupResourceName")
-                        or group_info.get("name")
-                    )
-                else:
-                    group_name = getattr(
-                        group_info, "contact_group_id", None
-                    ) or getattr(group_info, "contact_group_resource_name", None)
-
-                if group_name:
-                    try:
-                        sanitized_name = self._sanitize_tag_name(str(group_name))
-                        if sanitized_name:
-                            tags.append(Tag(name=TagName(sanitized_name)))
-                    except ValueError:
-                        logger.debug(
-                            "Skipping invalid contact group name for tag",
-                            group_name=group_name,
-                        )
+            tag = self._create_tag_from_membership(membership)
+            if tag:
+                tags.append(tag)
 
         return tags
+
+    def _create_tag_from_membership(self, membership: Any) -> Tag | None:
+        """Create a tag from a Google membership, if possible."""
+        group_name = self._extract_membership_group_name(membership)
+        if not group_name:
+            return None
+
+        try:
+            sanitized_name = self._sanitize_tag_name(str(group_name))
+            if sanitized_name:
+                return Tag(name=TagName(sanitized_name))
+        except ValueError:
+            logger.debug(
+                "Skipping invalid contact group name for tag",
+                group_name=group_name,
+            )
+
+        return None
+
+    def _extract_membership_group_name(self, membership: Any) -> str | None:
+        """Extract the contact group name or identifier from a membership."""
+        group_info = getattr(membership, "contact_group_membership", None)
+        if not group_info:
+            return None
+
+        if isinstance(group_info, dict):
+            return self._extract_group_name_from_dict(group_info)
+
+        return self._extract_group_name_from_object(group_info)
+
+    def _extract_group_name_from_dict(self, group_info: dict[str, Any]) -> str | None:
+        """Extract the preferred group name from a dict-style membership."""
+        return (
+            group_info.get("contactGroupId")
+            or group_info.get("contactGroupResourceName")
+            or group_info.get("name")
+        )
+
+    def _extract_group_name_from_object(self, group_info: Any) -> str | None:
+        """Extract the preferred group name from an object-style membership."""
+        return getattr(group_info, "contact_group_id", None) or getattr(
+            group_info, "contact_group_resource_name", None
+        )
 
     def _sanitize_tag_name(self, name: str) -> str | None:
         """

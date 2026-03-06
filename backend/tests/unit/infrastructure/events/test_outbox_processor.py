@@ -11,6 +11,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from app.core.integrations.outbox_event_processor import (
+    PermanentOutboxEventProcessingError,
+)
 from app.infrastructure.events.outbox_processor import (
     OutboxProcessor,
     get_outbox_processor,
@@ -199,6 +202,9 @@ class TestOutboxProcessor:
 
         # Assert
         assert mock_search_indexer.process_event.call_count == 2
+        mock_repository.get_unprocessed_events.assert_called_once_with(
+            limit=processor.batch_size, max_retry_count=processor.max_retries
+        )
 
         # First event should have retry count incremented
         mock_repository.increment_retry_count.assert_called_once_with("event-1")
@@ -207,23 +213,10 @@ class TestOutboxProcessor:
         mock_repository.mark_as_processed.assert_called_once_with("event-2")
 
     @pytest.mark.asyncio
-    async def test_process_events_max_retries_exceeded(
-        self, processor, mock_search_indexer
+    async def test_process_events_marks_permanent_failures_as_failed(
+        self, processor, mock_search_indexer, sample_outbox_events
     ):
-        """Test processing events that have exceeded max retries."""
-        # Arrange
-        failed_event = OutboxEvent(
-            id=3,
-            event_id="failed-event",
-            event_type="ContactCreated",
-            aggregate_id=99,
-            event_data={"contact_id": 99},
-            occurred_at=datetime(2024, 1, 1, 10, 0, 0),
-            processed_at=None,
-            retry_count=3,  # Equals max_retries
-            created_at=datetime(2024, 1, 1, 10, 0, 0),
-        )
-
+        """Test permanently invalid events are marked failed without retrying."""
         mock_conn = AsyncMock()
 
         @asynccontextmanager
@@ -233,11 +226,12 @@ class TestOutboxProcessor:
         mock_engine = AsyncMock()
         mock_engine.begin = mock_begin
 
+        failed_event = sample_outbox_events[0]
         mock_repository = MagicMock()
         mock_repository.get_unprocessed_events = AsyncMock(return_value=[failed_event])
         mock_repository.increment_retry_count = AsyncMock()
-
-        mock_search_indexer.process_event.side_effect = Exception("Still failing")
+        mock_repository.mark_as_failed = AsyncMock()
+        mock_repository.mark_as_processed = AsyncMock()
 
         with (
             patch(
@@ -252,13 +246,64 @@ class TestOutboxProcessor:
                 "app.infrastructure.events.outbox_processor.SearchIndexer",
                 return_value=mock_search_indexer,
             ),
+            patch.object(
+                processor,
+                "_process_single_event",
+                AsyncMock(
+                    side_effect=PermanentOutboxEventProcessingError(
+                        "Missing required contact field 'first_name'"
+                    )
+                ),
+            ),
         ):
-            # Act
             await processor.process_events()
 
-        # Assert
-        # Should not increment retry count when max retries exceeded
+        mock_repository.mark_as_failed.assert_called_once_with(
+            failed_event.event_id, retry_count=processor.max_retries
+        )
         mock_repository.increment_retry_count.assert_not_called()
+        mock_repository.mark_as_processed.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_process_single_event_reraises_permanent_failures_without_logging(
+        self, processor, mock_search_indexer
+    ):
+        """Test permanent failures bubble up without duplicate single-event logs."""
+        contact_event = OutboxEvent(
+            id=1,
+            event_id="contact-event-1",
+            event_type="contact.created",
+            aggregate_id=42,
+            event_data={"contact_id": 42},
+            occurred_at=datetime(2024, 1, 1, 12, 0, 0),
+            processed_at=None,
+            retry_count=0,
+            created_at=datetime(2024, 1, 1, 12, 0, 0),
+        )
+        mock_repository = MagicMock()
+        mock_repository.mark_as_processed = AsyncMock()
+
+        with (
+            patch.object(
+                processor,
+                "_process_contact_event",
+                AsyncMock(
+                    side_effect=PermanentOutboxEventProcessingError("invalid payload")
+                ),
+            ),
+            patch(
+                "app.infrastructure.events.outbox_processor.logger.error"
+            ) as mock_log_error,
+        ):
+            with pytest.raises(
+                PermanentOutboxEventProcessingError, match="invalid payload"
+            ):
+                await processor._process_single_event(
+                    contact_event, mock_repository, mock_search_indexer
+                )
+
+        mock_repository.mark_as_processed.assert_not_called()
+        mock_log_error.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_get_failed_events_summary(self, processor):
@@ -314,12 +359,15 @@ class TestOutboxProcessor:
         """Test getting failed events summary when there's a database error."""
 
         # Arrange
-        @asynccontextmanager
-        async def mock_begin_error():
-            raise Exception("Database error")
+        class FailingBeginContext:
+            async def __aenter__(self):
+                raise Exception("Database error")
 
-        mock_engine = AsyncMock()
-        mock_engine.begin = mock_begin_error
+            async def __aexit__(self, exc_type, exc, tb):
+                return None
+
+        mock_engine = MagicMock()
+        mock_engine.begin.return_value = FailingBeginContext()
 
         with patch(
             "app.infrastructure.events.outbox_processor.get_async_database_engine",

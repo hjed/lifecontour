@@ -10,6 +10,9 @@ from typing import Any
 
 import structlog
 
+from app.core.integrations.outbox_event_processor import (
+    PermanentOutboxEventProcessingError,
+)
 from app.infrastructure.database import get_async_database_engine
 from app.infrastructure.events.outbox_repository import OutboxRepository
 from app.infrastructure.search.search_indexer import SearchIndexer
@@ -40,7 +43,10 @@ class OutboxProcessor:
                 search_indexer = SearchIndexer(db_connection=conn)
 
                 # Get unprocessed events
-                events = await repository.get_unprocessed_events(limit=self.batch_size)
+                events = await repository.get_unprocessed_events(
+                    limit=self.batch_size,
+                    max_retry_count=self.max_retries,
+                )
 
                 if not events:
                     logger.debug("No unprocessed events found in outbox")
@@ -55,6 +61,18 @@ class OutboxProcessor:
                             event, repository, search_indexer
                         )
 
+                    except PermanentOutboxEventProcessingError as e:
+                        logger.error(
+                            "Outbox event has permanent invalid payload",
+                            event_id=event.event_id,
+                            event_type=event.event_type,
+                            retry_count=event.retry_count,
+                            error=str(e),
+                        )
+                        await repository.mark_as_failed(
+                            event.event_id, retry_count=self.max_retries
+                        )
+
                     except Exception as e:
                         logger.error(
                             "Failed to process outbox event",
@@ -64,16 +82,7 @@ class OutboxProcessor:
                             error=str(e),
                         )
 
-                        # Increment retry count if under max retries
-                        if event.retry_count < self.max_retries:
-                            await repository.increment_retry_count(event.event_id)
-                        else:
-                            logger.error(
-                                "Event exceeded max retries, giving up",
-                                event_id=event.event_id,
-                                event_type=event.event_type,
-                                retry_count=event.retry_count,
-                            )
+                        await repository.increment_retry_count(event.event_id)
 
                 # Commit the transaction
                 await conn.commit()
@@ -125,6 +134,8 @@ class OutboxProcessor:
                 event_type=event.event_type,
             )
 
+        except PermanentOutboxEventProcessingError:
+            raise
         except Exception as e:
             logger.error(
                 "Failed to process single outbox event",

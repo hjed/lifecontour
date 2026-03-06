@@ -19,6 +19,7 @@ from app.core.contacts.services.contact_service import ContactService
 from app.core.integrations.outbox_event_processor import (
     OutboxEventProcessingError,
     OutboxEventProcessor,
+    PermanentOutboxEventProcessingError,
 )
 
 
@@ -173,14 +174,21 @@ class TestOutboxEventProcessor:
         mock_external_ref_service.find_by_external_id.return_value = None
         mock_external_ref_service.create_external_reference.return_value = AsyncMock()
 
-        with patch.object(
-            processor, "external_reference_service", mock_external_ref_service
+        mock_sync_metadata_repo = AsyncMock()
+        mock_sync_metadata_repo.upsert.return_value = None
+
+        with (
+            patch.object(
+                processor, "external_reference_service", mock_external_ref_service
+            ),
+            patch.object(processor, "sync_metadata_repo", mock_sync_metadata_repo),
         ):
             # Process the event
             result = await processor.process_event(contact_created_event)
 
         # Verify contact service was called correctly
         mock_contact_service.create_contact.assert_called_once()
+        mock_sync_metadata_repo.upsert.assert_called_once()
         created_contact_arg = mock_contact_service.create_contact.call_args[0][0]
 
         assert created_contact_arg.first_name == "John"
@@ -388,8 +396,77 @@ class TestOutboxEventProcessor:
         with patch.object(
             processor, "external_reference_service", mock_external_ref_service
         ):
-            # Should raise OutboxEventProcessingError due to transformation failure
-            with pytest.raises(OutboxEventProcessingError) as exc_info:
+            # Should raise a permanent processing error for malformed payloads
+            with pytest.raises(PermanentOutboxEventProcessingError) as exc_info:
                 await processor.process_event(invalid_event)
 
-        assert "Failed to deserialize contact data" in str(exc_info.value)
+        assert "Missing required contact field 'first_name'" in str(exc_info.value)
+        mock_contact_service.create_contact.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_process_contact_updated_with_invalid_contact_data_is_permanent(
+        self,
+        processor: OutboxEventProcessor,
+        contact_updated_event: OutboxEvent,
+        mock_contact_service: AsyncMock,
+    ):
+        """Test malformed contact.updated payloads are treated as permanent failures."""
+        contact_updated_event.event_data["contact_data"] = {"invalid": "data"}
+
+        existing_contact = Contact(id=123, first_name="John", last_name="Doe")
+        mock_contact_service.find_contact_by_external_reference.return_value = (
+            existing_contact
+        )
+
+        mock_sync_metadata_repo = AsyncMock()
+        mock_sync_metadata_repo.find_and_lock.return_value = None
+        mock_sync_metadata_repo.should_sync = MagicMock(return_value=True)
+
+        with patch.object(processor, "sync_metadata_repo", mock_sync_metadata_repo):
+            with pytest.raises(PermanentOutboxEventProcessingError) as exc_info:
+                await processor.process_event(contact_updated_event)
+
+        assert "Missing required contact field 'first_name'" in str(exc_info.value)
+        mock_contact_service.update_contact.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_process_event_logs_permanent_failures_distinctly(
+        self,
+        processor: OutboxEventProcessor,
+        mock_contact_service: AsyncMock,
+    ):
+        """Test permanent payload failures use a distinct log message."""
+        invalid_event = OutboxEvent(
+            id=uuid4(),
+            event_type="contact.created",
+            event_data={
+                "integration_source": "google_contacts",
+                "external_id": "people/invalid",
+                "contact_data": {"invalid": "data"},
+                "sync_timestamp": datetime.now(UTC).isoformat(),
+                "sync_type": "created",
+            },
+            created_at=datetime.now(UTC),
+            processed_at=None,
+            retry_count=0,
+        )
+
+        mock_external_ref_service = AsyncMock()
+        mock_external_ref_service.find_by_external_id.return_value = None
+
+        with (
+            patch.object(
+                processor, "external_reference_service", mock_external_ref_service
+            ),
+            patch(
+                "app.core.integrations.outbox_event_processor.logger.error"
+            ) as mock_log_error,
+        ):
+            with pytest.raises(PermanentOutboxEventProcessingError):
+                await processor.process_event(invalid_event)
+
+        mock_log_error.assert_called_once()
+        assert mock_log_error.call_args.args[0] == (
+            "Outbox event has permanent invalid payload"
+        )
+        mock_contact_service.create_contact.assert_not_called()

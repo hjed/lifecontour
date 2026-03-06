@@ -58,6 +58,7 @@ class TestGoogleContactsWorker:
 
         # Create mock session with proper async behavior
         mock_session = AsyncMock()
+        mock_session.add = MagicMock()
 
         # Make connection() return the mock connection (it's an async method)
         async def mock_connection_func():
@@ -303,6 +304,115 @@ class TestGoogleContactsWorker:
             assert result[1][0] == connections[2]
             assert result[1][1] == {"id": 3}
             assert metrics["errors"] == 1
+
+    @pytest.mark.asyncio
+    async def test_perform_full_sync_uses_partial_batch_processing(self):
+        """Test full sync keeps valid contacts when a page contains invalid data."""
+        from worker import _perform_full_sync
+
+        mock_session = AsyncMock()
+        mock_session.add = MagicMock()
+        mock_client = AsyncMock()
+        mock_client.list_connections.return_value = {
+            "connections": [
+                {"resourceName": "people/1", "etag": "etag-1"},
+                {"resourceName": "people/2", "etag": "etag-2"},
+            ],
+            "nextSyncToken": "sync-token-123",
+        }
+        metrics = {"contacts_processed": 0, "errors": 0}
+        processed_contacts = [
+            (
+                MagicMock(resource_name="people/2", etag="etag-2"),
+                {
+                    "first_name": "Valid",
+                    "methods": [],
+                    "addresses": [],
+                    "notes": [],
+                    "tags": [],
+                },
+            )
+        ]
+
+        with (
+            patch(
+                "worker._process_contacts_batch", return_value=processed_contacts
+            ) as mock_process,
+            patch(
+                "worker._save_sync_token", new_callable=AsyncMock
+            ) as mock_save_sync_token,
+            patch(
+                "worker.OutboxEvent.create_contact_sync_event", return_value=MagicMock()
+            ),
+        ):
+            result = await _perform_full_sync(
+                session=mock_session,
+                client=mock_client,
+                google_account_email="test@example.com",
+                metrics=metrics,
+                user_id=1,
+            )
+
+        assert result == {"contacts_created": 1}
+        assert metrics["contacts_processed"] == 1
+        mock_process.assert_called_once()
+        assert mock_session.add.call_count == 1
+        mock_save_sync_token.assert_awaited_once_with(
+            mock_session, "test@example.com", "sync-token-123", 1
+        )
+
+    @pytest.mark.asyncio
+    async def test_perform_incremental_sync_uses_partial_batch_processing(self):
+        """Test incremental sync keeps valid contacts when a batch contains invalid data."""
+        from worker import _perform_incremental_sync
+
+        mock_session = AsyncMock()
+        mock_session.add = MagicMock()
+        sync_token_result = MagicMock()
+        sync_token_result.scalar.return_value = "existing-sync-token"
+        mock_session.execute.return_value = sync_token_result
+
+        mock_client = AsyncMock()
+        mock_client.list_connections.return_value = {
+            "connections": [
+                {"resourceName": "people/1", "etag": "etag-1"},
+                {"resourceName": "people/2", "etag": "etag-2"},
+            ]
+        }
+        metrics = {"contacts_processed": 0, "errors": 0}
+        processed_contacts = [
+            (
+                MagicMock(resource_name="people/2", etag="etag-2"),
+                {
+                    "first_name": "Valid",
+                    "methods": [],
+                    "addresses": [],
+                    "notes": [],
+                    "tags": [],
+                },
+            )
+        ]
+
+        with (
+            patch(
+                "worker._process_contacts_batch", return_value=processed_contacts
+            ) as mock_process,
+            patch(
+                "worker.OutboxEvent.create_contact_sync_event", return_value=MagicMock()
+            ),
+        ):
+            result = await _perform_incremental_sync(
+                session=mock_session,
+                client=mock_client,
+                google_account_email="test@example.com",
+                metrics=metrics,
+                user_id=1,
+            )
+
+        assert result == {"contacts_updated": 1}
+        assert metrics["contacts_processed"] == 1
+        mock_process.assert_called_once()
+        assert mock_session.add.call_count == 1
 
 
 class TestGoogleContactsAPIClient:
