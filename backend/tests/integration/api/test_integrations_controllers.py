@@ -106,12 +106,16 @@ class TestIntegrationsControllers:
         """Test successful Google Contacts sync trigger."""
         with (
             patch(
+                "app.infrastructure.auth.oauth_service.OAuthService.get_connected_google_account_email"
+            ) as mock_get_google_account_email,
+            patch(
                 "app.core.integrations.task_queue_service.TaskQueueService.enqueue_google_contacts_sync"
             ) as mock_enqueue,
             patch(
                 "app.core.integrations.task_queue_service.TaskQueueService.get_sync_job_details"
             ) as mock_get_details,
         ):
+            mock_get_google_account_email.return_value = "connected@gmail.com"
             # Mock successful job enqueueing
             mock_enqueue.return_value = "test-job-123"
             mock_get_details.return_value = {
@@ -145,7 +149,7 @@ class TestIntegrationsControllers:
 
             # Verify service was called
             mock_enqueue.assert_called_once_with(
-                google_account_email="test@example.com",
+                google_account_email="connected@gmail.com",
                 user_id="123",
                 sync_type="smart",
             )
@@ -153,11 +157,45 @@ class TestIntegrationsControllers:
                 job_id="test-job-123", user_id="123"
             )
 
+    def test_trigger_google_contacts_sync_requires_connected_google_account(
+        self, client: TestClient
+    ):
+        """Test sync trigger fails early when the user has no connected Google account."""
+        with (
+            patch(
+                "app.infrastructure.auth.oauth_service.OAuthService.get_connected_google_account_email"
+            ) as mock_get_google_account_email,
+            patch(
+                "app.core.integrations.task_queue_service.TaskQueueService.enqueue_google_contacts_sync"
+            ) as mock_enqueue,
+        ):
+            mock_get_google_account_email.side_effect = ValueError(
+                "No Google Contacts connection found for user 123"
+            )
+
+            response = client.post(
+                "/api/integrations/google/contacts/sync", json={"sync_type": "smart"}
+            )
+
+            assert response.status_code == 400
+            data = response.json()
+            assert (
+                data["errors"][0]["detail"]
+                == "Invalid sync parameters: No Google Contacts connection found for user 123"
+            )
+            mock_enqueue.assert_not_called()
+
     def test_trigger_google_contacts_sync_failure(self, client: TestClient):
         """Test Google Contacts sync trigger failure."""
-        with patch(
-            "app.core.integrations.task_queue_service.TaskQueueService.enqueue_google_contacts_sync"
-        ) as mock_enqueue:
+        with (
+            patch(
+                "app.infrastructure.auth.oauth_service.OAuthService.get_connected_google_account_email"
+            ) as mock_get_google_account_email,
+            patch(
+                "app.core.integrations.task_queue_service.TaskQueueService.enqueue_google_contacts_sync"
+            ) as mock_enqueue,
+        ):
+            mock_get_google_account_email.return_value = "connected@gmail.com"
             # Mock job enqueueing failure
             mock_enqueue.side_effect = Exception("Redis connection failed")
 

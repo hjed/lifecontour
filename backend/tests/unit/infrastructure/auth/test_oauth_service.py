@@ -548,6 +548,55 @@ class TestOAuthServiceGoogleContacts:
         assert result is True
         mock_connection.execute.assert_called_once()
 
+    async def test_get_connected_google_account_email_returns_email(
+        self, oauth_service_with_google, mock_connection
+    ):
+        """Test resolving the stored Google account email for a user."""
+        mock_scalars = Mock()
+        mock_scalars.all.return_value = ["connected@gmail.com"]
+        mock_result = Mock()
+        mock_result.scalars.return_value = mock_scalars
+        mock_connection.execute = AsyncMock(return_value=mock_result)
+
+        result = await oauth_service_with_google.get_connected_google_account_email(
+            "test-user-123", mock_connection
+        )
+
+        assert result == "connected@gmail.com"
+        mock_connection.execute.assert_called_once()
+
+    async def test_get_connected_google_account_email_raises_when_missing(
+        self, oauth_service_with_google, mock_connection
+    ):
+        """Test resolving the stored Google account email when none exists."""
+        mock_scalars = Mock()
+        mock_scalars.all.return_value = []
+        mock_result = Mock()
+        mock_result.scalars.return_value = mock_scalars
+        mock_connection.execute = AsyncMock(return_value=mock_result)
+
+        with pytest.raises(ValueError, match="No Google Contacts connection found"):
+            await oauth_service_with_google.get_connected_google_account_email(
+                "test-user-123", mock_connection
+            )
+
+    async def test_get_connected_google_account_email_raises_when_ambiguous(
+        self, oauth_service_with_google, mock_connection
+    ):
+        """Test resolving the stored Google account email when multiple exist."""
+        mock_scalars = Mock()
+        mock_scalars.all.return_value = ["first@gmail.com", "second@gmail.com"]
+        mock_result = Mock()
+        mock_result.scalars.return_value = mock_scalars
+        mock_connection.execute = AsyncMock(return_value=mock_result)
+
+        with pytest.raises(
+            ValueError, match="Multiple Google Contacts connections found"
+        ):
+            await oauth_service_with_google.get_connected_google_account_email(
+                "test-user-123", mock_connection
+            )
+
     async def test_get_google_contacts_authorization_url_no_provider(self):
         """Test Google Contacts authorization URL when Google provider not configured."""
         settings = Settings()  # No Google provider

@@ -95,6 +95,8 @@ class IntegrationStatusResponse(BaseModel):
 async def trigger_google_contacts_sync(
     request: SyncJobRequest,
     user: FromDishka[SessionUser],
+    oauth_service: FromDishka[OAuthService],
+    db_manager: FromDishka[IntegrationDatabaseManager],
     task_queue_service: FromDishka[TaskQueueService],
 ) -> SyncJobJsonApiResponse:
     """
@@ -104,9 +106,13 @@ async def trigger_google_contacts_sync(
     Google Contacts. The job will run asynchronously in the worker.
     """
     try:
-        # For now, use the user's email as the Google account email
-        # In a real implementation, you'd look up the user's connected Google account
-        google_account_email = user.email
+        async with db_manager.get_session() as session:
+            connection = await session.connection()
+            google_account_email = (
+                await oauth_service.get_connected_google_account_email(
+                    user.id, connection
+                )
+            )
 
         # Determine sync type from request or force_full_sync flag
         sync_type = request.sync_type.value
