@@ -2502,6 +2502,7 @@ class TestJournalTypeCreationWithDependencies:
         assert mood_data["energy_level"] == energy_level, (
             f"Expected energy_level={energy_level} but got {mood_data['energy_level']}"
         )
+        assert mood_data["mood_label"] == "Great"
 
     async def test_create_journal_with_outdoor_types_persists_type_data(
         self, integration_api_client
@@ -2510,7 +2511,7 @@ class TestJournalTypeCreationWithDependencies:
         create_data = create_journal_request_data(
             title="Active Day",
             content="Went for a walk then a jog",
-            types=["BUSHWALKING", "JOGGING"],
+            types=["OUTDOOR_ACTIVITY", "BUSHWALKING", "JOGGING", "FITNESS"],
             type_data={
                 "OUTDOOR_ACTIVITY": {
                     "weather_conditions": "Sunny, 20C",

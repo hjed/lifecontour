@@ -96,11 +96,17 @@ export function OutdoorActivityTypeEditor({
               {initialData.weather_conditions}
             </div>
           )}
-          {initialData.role && (
+          {(initialData.role || initialData.in_leadership_role) && (
             <div>
               <span className='text-muted-foreground font-medium'>Role: </span>
-              {initialData.role}
-              {initialData.in_leadership_role && ' (Leadership)'}
+              {initialData.role
+                ? initialData.role
+                : initialData.in_leadership_role
+                  ? 'Leadership role'
+                  : null}
+              {initialData.role &&
+                initialData.in_leadership_role &&
+                ' (Leadership)'}
             </div>
           )}
         </div>

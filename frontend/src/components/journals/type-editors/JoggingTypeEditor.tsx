@@ -9,7 +9,8 @@ import type { JoggingData } from '@/types/journals';
 import { useTypeEditorState } from './useTypeEditorState';
 import { TypeEditorActions } from './TypeEditorActions';
 import { RouteSelector } from '@/components/routes/RouteSelector';
-import { formatPace } from '../ActivityStats';
+import { formatSecondsPerKm } from '../ActivityStats';
+import { useRoute } from '@/lib/api/routes';
 
 interface JoggingTypeEditorProps {
   readonly journalId?: string;
@@ -30,8 +31,13 @@ export function JoggingTypeEditor({
   'data-testid': testId,
   createMode = false,
   onChange,
+  journalId: _journalId,
 }: JoggingTypeEditorProps) {
   const initialData = useMemo(() => data ?? DEFAULT_DATA, [data]);
+
+  // Fetch route details to display route name in read-only view
+  const { data: routeData } = useRoute(initialData.route_id ?? '');
+  const routeName = routeData?.data?.attributes?.name;
 
   const {
     isEditing,
@@ -115,16 +121,15 @@ export function JoggingTypeEditor({
           {initialData.pace && (
             <div>
               <span className='text-muted-foreground font-medium'>Pace: </span>
-              {formatPace(initialData.pace, 1000)}{' '}
-              {/* Assuming formatPace works with duration/1000m */}
+              {formatSecondsPerKm(initialData.pace)}{' '}
             </div>
           )}
           {initialData.route_id && (
             <div>
-              <span className='text-muted-foreground font-medium'>
-                Route ID:{' '}
+              <span className='text-muted-foreground font-medium'>Route: </span>
+              <span data-testid='jogging-route-display'>
+                {routeName ?? initialData.route_id}
               </span>
-              <span className='font-mono text-xs'>{initialData.route_id}</span>
             </div>
           )}
         </div>

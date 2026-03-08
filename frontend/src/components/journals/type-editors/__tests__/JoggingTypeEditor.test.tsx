@@ -5,6 +5,11 @@ jest.mock('@/components/routes/RouteSelector', () => ({
   RouteSelector: () => <div data-testid='mock-route-selector' />,
 }));
 
+// Mock useRoute to avoid requiring a QueryClientProvider in unit tests
+jest.mock('@/lib/api/routes', () => ({
+  useRoute: () => ({ data: undefined }),
+}));
+
 describe('JoggingTypeEditor', () => {
   beforeEach(() => {
     jest.clearAllMocks();

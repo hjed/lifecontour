@@ -1,6 +1,7 @@
 import { render, screen } from '@testing-library/react';
 import { ActivityStats } from '../ActivityStats';
 import type { FitnessData } from '@/types/journals';
+import type { Route } from '@/types/routes';
 
 describe('ActivityStats', () => {
   const completeData: FitnessData = {
@@ -63,7 +64,8 @@ describe('ActivityStats', () => {
   it('renders outdoor, jogging, and bushwalking data correctly', () => {
     const outdoorData = { weather_conditions: 'Sunny, 22°C' };
     const joggingData = { pace: 330 }; // 5:30 /km
-    const bushwalkingData = { track_grading: '4' };
+    // track_grading uses the same "Grade X" format as BushwalkingTypeEditor stores
+    const bushwalkingData = { track_grading: 'Grade 4' };
 
     render(
       <ActivityStats
@@ -77,6 +79,21 @@ describe('ActivityStats', () => {
     expect(screen.getByTestId('stat-pace-jogging')).toHaveTextContent(
       '5:30 /km'
     );
+    // The track_grading value is stored and displayed as-is (already "Grade X")
     expect(screen.getByTestId('stat-grading')).toHaveTextContent('Grade 4');
+  });
+
+  it('renders route display when provided', () => {
+    const routeDisplay: Route = {
+      id: 'route-123',
+      name: 'Blue Mountains Trail',
+      description: 'A scenic bushwalk',
+    };
+
+    render(<ActivityStats routeDisplay={routeDisplay} data={{}} />);
+
+    expect(screen.getByTestId('stat-route')).toHaveTextContent(
+      'Blue Mountains Trail'
+    );
   });
 });

@@ -8,20 +8,22 @@ import {
   Cloud,
   Compass,
 } from 'lucide-react';
-import { Card } from '@/components/ui/card';
-import { cn } from '@/lib/utils';
 import type {
   FitnessData,
   OutdoorActivityData,
   JoggingData,
   BushwalkingData,
 } from '@/types/journals';
+import type { Route } from '@/types/routes';
+import { Card } from '@/components/ui/card';
+import { cn } from '@/lib/utils';
 
 interface ActivityStatsProps {
   readonly data?: FitnessData;
   readonly outdoorData?: OutdoorActivityData;
   readonly joggingData?: JoggingData;
   readonly bushwalkingData?: BushwalkingData;
+  readonly routeDisplay?: Route;
   readonly className?: string;
 }
 
@@ -54,6 +56,16 @@ export function formatPace(
   return `${m}:${s.toString().padStart(2, '0')} /km`;
 }
 
+/**
+ * Format an already-computed seconds-per-km pace value into "mm:ss /km".
+ * Use this instead of formatPace() when the pace is already known.
+ */
+export function formatSecondsPerKm(secsPerKm: number): string {
+  const m = Math.floor(secsPerKm / 60);
+  const s = Math.floor(secsPerKm % 60);
+  return `${m}:${s.toString().padStart(2, '0')} /km`;
+}
+
 interface StatItemProps {
   readonly icon: React.ReactNode;
   readonly label: string;
@@ -80,6 +92,7 @@ export function ActivityStats({
   outdoorData,
   joggingData,
   bushwalkingData,
+  routeDisplay,
   className,
 }: ActivityStatsProps) {
   const fitness = data ?? {};
@@ -108,7 +121,8 @@ export function ActivityStats({
     !hasCalories &&
     !hasWeather &&
     !hasGrading &&
-    !showJoggingPace
+    !showJoggingPace &&
+    !routeDisplay
   ) {
     return null; // Don't render empty card
   }
@@ -138,7 +152,7 @@ export function ActivityStats({
           <StatItem
             icon={<Activity className='h-4 w-4' />}
             label='Pace'
-            value={formatPace(joggingData!.pace!, 1000)}
+            value={formatSecondsPerKm(joggingData!.pace!)}
             testId='stat-pace-jogging'
           />
         )}
@@ -192,8 +206,17 @@ export function ActivityStats({
           <StatItem
             icon={<Compass className='h-4 w-4' />}
             label='Track Grade'
-            value={`Grade ${bushwalkingData!.track_grading}`}
+            value={bushwalkingData!.track_grading}
             testId='stat-grading'
+          />
+        )}
+
+        {routeDisplay && (
+          <StatItem
+            icon={<Mountain className='h-4 w-4' />}
+            label='Route'
+            value={routeDisplay.name}
+            testId='stat-route'
           />
         )}
       </div>

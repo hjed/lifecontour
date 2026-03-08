@@ -15,6 +15,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { useRoute } from '@/lib/api/routes';
 
 interface BushwalkingTypeEditorProps {
   readonly journalId?: string;
@@ -68,8 +69,13 @@ export function BushwalkingTypeEditor({
   'data-testid': testId,
   createMode = false,
   onChange,
+  journalId: _journalId,
 }: BushwalkingTypeEditorProps) {
   const initialData = useMemo(() => data ?? DEFAULT_DATA, [data]);
+
+  // Fetch route details to display route name in read-only view
+  const { data: routeData } = useRoute(initialData.route_id ?? '');
+  const routeName = routeData?.data?.attributes?.name;
 
   const {
     isEditing,
@@ -132,7 +138,9 @@ export function BushwalkingTypeEditor({
           {initialData.route_id && (
             <div className='col-span-2'>
               <span className='text-muted-foreground font-medium'>Route: </span>
-              <span className='font-mono text-xs'>{initialData.route_id}</span>
+              <span data-testid='bushwalking-route-display'>
+                {routeName ?? initialData.route_id}
+              </span>
             </div>
           )}
         </div>

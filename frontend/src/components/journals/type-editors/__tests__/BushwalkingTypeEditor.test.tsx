@@ -5,6 +5,11 @@ jest.mock('@/components/routes/RouteSelector', () => ({
   RouteSelector: () => <div data-testid='mock-route-selector' />,
 }));
 
+// Mock useRoute to avoid requiring a QueryClientProvider in unit tests
+jest.mock('@/lib/api/routes', () => ({
+  useRoute: () => ({ data: undefined }),
+}));
+
 describe('BushwalkingTypeEditor', () => {
   it('renders grading dropdown and route selector in create mode', () => {
     render(<BushwalkingTypeEditor createMode={true} />);
@@ -15,7 +20,10 @@ describe('BushwalkingTypeEditor', () => {
 
   it('renders view mode with correct grading description', () => {
     render(
-      <BushwalkingTypeEditor createMode={false} data={{ track_grading: '3' }} />
+      <BushwalkingTypeEditor
+        createMode={false}
+        data={{ track_grading: 'Grade 3' }}
+      />
     );
 
     expect(screen.getByText('Grade 3')).toBeInTheDocument();
