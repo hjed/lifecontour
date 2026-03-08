@@ -159,22 +159,23 @@ export function CalendarSettingsDialog({
               render={({ field }) => (
                 <FormItem className='flex flex-col'>
                   <FormLabel>Color</FormLabel>
-                  <FormControl>
-                    <div className='flex items-center gap-3'>
-                      <Input
-                        type='color'
-                        className='h-10 w-12 cursor-pointer p-1'
-                        value={field.value || '#000000'}
-                        onChange={e => field.onChange(e.target.value)}
-                      />
+                  <div className='flex items-center gap-3'>
+                    <Input
+                      type='color'
+                      aria-label='Color picker'
+                      className='h-10 w-12 cursor-pointer p-1'
+                      value={field.value || '#000000'}
+                      onChange={e => field.onChange(e.target.value)}
+                    />
+                    <FormControl>
                       <Input
                         type='text'
                         className='w-28 font-mono uppercase'
                         data-testid='color-input'
                         {...field}
                       />
-                    </div>
-                  </FormControl>
+                    </FormControl>
+                  </div>
                   <FormMessage />
                 </FormItem>
               )}

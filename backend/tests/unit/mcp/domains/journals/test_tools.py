@@ -6,10 +6,14 @@ Note: Full functionality testing with mocked services is done in integration tes
 These unit tests focus on tool registration and basic structure.
 """
 
+from datetime import time
+from unittest.mock import AsyncMock
+from uuid import uuid4
+
 import pytest
 from fastmcp import Client, FastMCP
 
-from app.mcp.domains.journals.tools import register_journal_tools
+from app.mcp.domains.journals.tools import _update_event_data, register_journal_tools
 
 
 class TestJournalTools:
@@ -143,3 +147,73 @@ class TestJournalTools:
             properties = get_tool.inputSchema.get("properties", {})
             assert "journal_id" in properties
             assert "include_children" in properties
+
+
+class TestUpdateEventData:
+    @pytest.mark.asyncio
+    async def test_converts_uuid_and_time_strings(self) -> None:
+        calendar_id = str(uuid4())
+        calendar_info_repo = AsyncMock()
+
+        await _update_event_data(
+            journal_id=42,
+            type_data_dict={
+                "calendar_id": calendar_id,
+                "start_time": "09:15",
+                "end_time": "10:45:30",
+                "is_all_day": False,
+                "location": "Conference Room",
+                "sync_invitees": True,
+            },
+            calendar_info_repo=calendar_info_repo,
+        )
+
+        calendar_info = calendar_info_repo.save.await_args.args[0]
+        assert str(calendar_info.calendar_id) == calendar_id
+        assert calendar_info.start_time == time(9, 15)
+        assert calendar_info.end_time == time(10, 45, 30)
+        assert calendar_info.location == "Conference Room"
+        assert calendar_info.sync_invitees is True
+
+    @pytest.mark.asyncio
+    async def test_rejects_invalid_calendar_id_string(self) -> None:
+        calendar_info_repo = AsyncMock()
+
+        with pytest.raises(ValueError, match="Invalid calendar_id"):
+            await _update_event_data(
+                journal_id=42,
+                type_data_dict={"calendar_id": "not-a-uuid"},
+                calendar_info_repo=calendar_info_repo,
+            )
+
+        calendar_info_repo.save.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_rejects_invalid_calendar_id_type(self) -> None:
+        calendar_info_repo = AsyncMock()
+
+        with pytest.raises(ValueError, match="Invalid calendar_id"):
+            await _update_event_data(
+                journal_id=42,
+                type_data_dict={"calendar_id": 123},
+                calendar_info_repo=calendar_info_repo,
+            )
+
+        calendar_info_repo.save.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_rejects_invalid_time_string(self) -> None:
+        calendar_info_repo = AsyncMock()
+
+        with pytest.raises(ValueError, match="Invalid start_time"):
+            await _update_event_data(
+                journal_id=42,
+                type_data_dict={
+                    "calendar_id": str(uuid4()),
+                    "start_time": "not-a-time",
+                    "end_time": "10:00",
+                },
+                calendar_info_repo=calendar_info_repo,
+            )
+
+        calendar_info_repo.save.assert_not_awaited()

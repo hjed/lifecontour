@@ -36,7 +36,7 @@ test.describe('Calendar Management', () => {
     // 5. Edit the calendar
     await page
       .getByRole('button', {
-        name: new RegExp(`Edit calendar ${calendarName}`, 'i'),
+        name: `Edit calendar ${calendarName}`,
       })
       .click();
 
@@ -63,7 +63,15 @@ test.describe('Calendar Management', () => {
     ).not.toBeVisible();
 
     // 6. Delete the calendar
-    page.once('dialog', dialog => dialog.accept());
+    await page
+      .getByRole('button', {
+        name: `Delete calendar ${updatedName}`,
+      })
+      .click();
+
+    await expect(
+      page.getByRole('heading', { name: 'Delete Calendar' })
+    ).toBeVisible();
 
     await Promise.all([
       page.waitForResponse(
@@ -72,14 +80,11 @@ test.describe('Calendar Management', () => {
           response.request().method() === 'DELETE' &&
           response.ok()
       ),
-      page
-        .getByRole('button', {
-          name: new RegExp(`Delete calendar ${updatedName}`, 'i'),
-        })
-        .click(),
+      page.getByRole('button', { name: 'Delete' }).click(),
     ]);
 
     // Verify it's gone
+    await expect(page.getByRole('dialog')).not.toBeVisible();
     await expect(page.getByText(updatedName)).not.toBeVisible();
   });
 });

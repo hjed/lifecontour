@@ -185,6 +185,23 @@ describe('Journals API', () => {
 
       expect(result.current.error).toBeTruthy();
     });
+
+    it('should use the fetch fallback error when list detail is missing', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: false,
+        json: async () => ({ errors: [{}] }),
+      } as Response);
+
+      const { result } = renderHook(() => useJournals(), {
+        wrapper: createWrapper,
+      });
+
+      await waitFor(() => {
+        expect(result.current.isError).toBe(true);
+      });
+
+      expect(result.current.error).toEqual(new Error('Failed to fetch data'));
+    });
   });
 
   describe('useJournal', () => {
@@ -206,6 +223,23 @@ describe('Journals API', () => {
 
       expect(result.current.data?.data.id).toBe('1');
       expect(result.current.data?.data.attributes.title).toBe('Test Journal');
+    });
+
+    it('should use the fetch fallback error when detail is missing', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: false,
+        json: async () => ({ errors: [{}] }),
+      } as Response);
+
+      const { result } = renderHook(() => useJournal('1'), {
+        wrapper: createWrapper,
+      });
+
+      await waitFor(() => {
+        expect(result.current.isError).toBe(true);
+      });
+
+      expect(result.current.error).toEqual(new Error('Failed to fetch data'));
     });
   });
 
@@ -537,6 +571,26 @@ describe('Journals API', () => {
         expect(mockFetch).toHaveBeenCalledWith(
           '/api/calendars',
           expect.objectContaining({ method: 'POST' })
+        );
+      });
+
+      it('should use the create fallback error when detail is missing', async () => {
+        mockFetch.mockResolvedValueOnce({
+          ok: false,
+          json: async () => ({ errors: [{}] }),
+        } as Response);
+
+        const { result } = renderHook(() => useCreateCalendar(), {
+          wrapper: createWrapper,
+        });
+        result.current.mutate({ name: 'New Cal', color: '#ff0000' });
+
+        await waitFor(() => {
+          expect(result.current.isError).toBe(true);
+        });
+
+        expect(result.current.error).toEqual(
+          new Error('Failed to create item')
         );
       });
     });

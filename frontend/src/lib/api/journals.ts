@@ -169,7 +169,7 @@ async function fetchContactJournals(
   if (!response.ok) {
     const errorData: JsonApiErrorResponse = await response.json();
     throw new Error(
-      errorData.errors?.[0]?.detail || ERROR_MESSAGES.FETCH_FAILED
+      errorData.errors?.[0]?.detail || ERROR_MESSAGES.CREATE_FAILED
     );
   }
 
@@ -563,7 +563,7 @@ async function createCalendar(
   if (!response.ok) {
     const errorData: JsonApiErrorResponse = await response.json();
     throw new Error(
-      errorData.errors?.[0]?.detail || ERROR_MESSAGES.FETCH_FAILED
+      errorData.errors?.[0]?.detail || ERROR_MESSAGES.CREATE_FAILED
     );
   }
 

@@ -43,6 +43,11 @@ from app.mcp.domains.journals.tools import (
     _fetch_journal_types_and_data,
     register_journal_tools,
 )
+from tests.integration.mcp.http_helpers import (
+    extract_mcp_json_payload,
+    initialize_mcp_session,
+    mcp_headers,
+)
 
 
 class JournalTestProvider(Provider):
@@ -242,6 +247,71 @@ class TestJournalToolsIntegration:
         assert retrieved_journal is not None
         assert retrieved_journal.title == "Updated Test Journal"
         assert retrieved_journal.content == "Updated content via integration test"
+
+    @pytest.mark.asyncio
+    async def test_delete_calendar_returns_conflict_payload_for_in_use_calendar(
+        self, authenticated_lifespan_client
+    ) -> None:
+        async with authenticated_lifespan_client() as authenticated_client:
+            session_id = await initialize_mcp_session(authenticated_client)
+
+            calendar_response = await authenticated_client.post(
+                "/api/calendars",
+                json={
+                    "data": {
+                        "type": "calendars",
+                        "attributes": {
+                            "name": "Work Calendar",
+                            "color": "#3B82F6",
+                        },
+                    }
+                },
+            )
+            assert calendar_response.status_code == 201
+            calendar_id = calendar_response.json()["data"]["id"]
+
+            journal_response = await authenticated_client.post(
+                "/api/journals",
+                json={
+                    "data": {
+                        "type": "journals",
+                        "attributes": {
+                            "title": "Team Meeting",
+                            "content": "Discuss Q1 goals",
+                            "event_date_range": {
+                                "start": "2024-01-15T00:00:00Z",
+                                "end": "2024-01-15T00:00:00Z",
+                            },
+                            "types": ["EVENT"],
+                            "type_data": {
+                                "EVENT": {
+                                    "calendar_id": calendar_id,
+                                }
+                            },
+                        },
+                    }
+                },
+            )
+            assert journal_response.status_code == 201
+
+            response = await authenticated_client.post(
+                "/mcp-server/mcp",
+                json={
+                    "jsonrpc": "2.0",
+                    "id": 2,
+                    "method": "tools/call",
+                    "params": {
+                        "name": "delete_calendar",
+                        "arguments": {"calendar_id": calendar_id},
+                    },
+                },
+                headers=mcp_headers(session_id),
+            )
+
+            assert response.status_code == 200
+            payload = extract_mcp_json_payload(response.text)
+            assert payload["error"] == "CONFLICT"
+            assert payload["message"] == "Calendar is in use by 1 journal(s)"
 
     @pytest.mark.asyncio
     async def test_delete_journal_integration_real_db(

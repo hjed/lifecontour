@@ -26,6 +26,11 @@ from app.core.contacts.services import ContactService
 from app.infrastructure.search.search_service import SearchService
 from app.mcp.domains.contacts.tools import register_contact_tools
 from tests.fixtures.contact_fixtures import create_basic_contact, create_full_contact
+from tests.integration.mcp.http_helpers import (
+    extract_mcp_json_payload,
+    initialize_mcp_session,
+    mcp_headers,
+)
 
 
 class ContactTestProvider(Provider):
@@ -626,3 +631,34 @@ class TestContactToolsIntegration:
         # Verify tags were replaced (not appended)
         assert len(retrieved_contact.tags) == 1
         assert str(retrieved_contact.tags[0].name) == "updated"
+
+    @pytest.mark.asyncio
+    async def test_list_tags_via_mounted_http_session(
+        self,
+        authenticated_lifespan_client,
+        tag_repo,
+    ):
+        """Mounted MCP HTTP calls should resolve request-scoped dependencies."""
+        await tag_repo.save(Tag(name=TagName("friend")))
+        await tag_repo.save(Tag(name=TagName("colleague")))
+
+        async with authenticated_lifespan_client() as authenticated_client:
+            session_id = await initialize_mcp_session(authenticated_client)
+            response = await authenticated_client.post(
+                "/mcp-server/mcp",
+                json={
+                    "jsonrpc": "2.0",
+                    "id": 2,
+                    "method": "tools/call",
+                    "params": {
+                        "name": "list_tags",
+                        "arguments": {"limit": 10},
+                    },
+                },
+                headers=mcp_headers(session_id),
+            )
+
+        assert response.status_code == 200
+        payload = extract_mcp_json_payload(response.text)
+        assert payload["total_count"] == 2
+        assert [tag["name"] for tag in payload["tags"]] == ["colleague", "friend"]

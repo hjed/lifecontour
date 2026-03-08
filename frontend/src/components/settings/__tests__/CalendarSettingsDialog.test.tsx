@@ -30,7 +30,8 @@ describe('CalendarSettingsDialog', () => {
     expect(screen.getByRole('dialog')).toBeInTheDocument();
     expect(screen.getByText('Create Calendar')).toBeInTheDocument();
     expect(screen.getByLabelText(/name/i)).toHaveValue('');
-    expect(screen.getByTestId('color-input')).toHaveValue('#3b82f6');
+    expect(screen.getByLabelText(/^color$/i)).toHaveValue('#3b82f6');
+    expect(screen.getByLabelText(/color picker/i)).toHaveValue('#3b82f6');
   });
 
   it('renders edit form when calendar is provided', () => {
@@ -51,7 +52,8 @@ describe('CalendarSettingsDialog', () => {
     expect(screen.getByText('Edit Calendar')).toBeInTheDocument();
     expect(screen.getByLabelText(/name/i)).toHaveValue('Work');
     expect(screen.getByLabelText(/description/i)).toHaveValue('Work stuff');
-    expect(screen.getByTestId('color-input')).toHaveValue('#ff0000');
+    expect(screen.getByLabelText(/^color$/i)).toHaveValue('#ff0000');
+    expect(screen.getByLabelText(/color picker/i)).toHaveValue('#ff0000');
   });
 
   it('calls createCalendar on submit when creating', async () => {

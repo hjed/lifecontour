@@ -11,6 +11,14 @@ import {
   CardTitle,
   CardDescription,
 } from '@/components/ui/card';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { LoadingSpinner } from '@/components/ui/loading';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { CalendarSettingsDialog } from './CalendarSettingsDialog';
@@ -18,12 +26,15 @@ import { JournalCalendar } from '@/types/journals';
 
 export function CalendarSettings() {
   const { data, isLoading, error } = useCalendars();
-  const { mutate: deleteCalendar, isPending: isDeleting } = useDeleteCalendar();
+  const { mutateAsync: deleteCalendar, isPending: isDeleting } =
+    useDeleteCalendar();
 
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [editingCalendar, setEditingCalendar] = useState<
     JournalCalendar | undefined
   >();
+  const [calendarToDelete, setCalendarToDelete] =
+    useState<JournalCalendar | null>(null);
 
   const calendars = data?.data || [];
 
@@ -37,9 +48,25 @@ export function CalendarSettings() {
     setIsDialogOpen(true);
   };
 
-  const handleDelete = (id: string) => {
-    if (globalThis.confirm('Are you sure you want to delete this calendar?')) {
-      deleteCalendar(id);
+  const handleDeleteClick = (calendar: JournalCalendar) => {
+    setCalendarToDelete(calendar);
+  };
+
+  const handleDeleteDialogChange = (open: boolean) => {
+    if (!open) {
+      setCalendarToDelete(null);
+    }
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!calendarToDelete) {
+      return;
+    }
+
+    try {
+      await deleteCalendar(calendarToDelete.id);
+    } finally {
+      setCalendarToDelete(null);
     }
   };
 
@@ -138,7 +165,7 @@ export function CalendarSettings() {
                       <Button
                         variant='ghost'
                         size='sm'
-                        onClick={() => handleDelete(cal.id)}
+                        onClick={() => handleDeleteClick(calendarData)}
                         disabled={isDeleting}
                         aria-label={`Delete calendar ${calendarData.name}`}
                       >
@@ -158,6 +185,37 @@ export function CalendarSettings() {
         onOpenChange={setIsDialogOpen}
         calendar={editingCalendar}
       />
+
+      <Dialog
+        open={calendarToDelete !== null}
+        onOpenChange={handleDeleteDialogChange}
+      >
+        <DialogContent showCloseButton={false}>
+          <DialogHeader>
+            <DialogTitle>Delete Calendar</DialogTitle>
+            <DialogDescription>
+              Are you sure you want to delete the calendar &quot;
+              {calendarToDelete?.name}&quot;? This action cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              variant='outline'
+              onClick={() => setCalendarToDelete(null)}
+              disabled={isDeleting}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant='destructive'
+              onClick={handleConfirmDelete}
+              disabled={isDeleting}
+            >
+              {isDeleting ? 'Deleting...' : 'Delete'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </>
   );
 }
