@@ -34,8 +34,11 @@ test.describe('Calendar Management', () => {
     await expect(page.getByText(calendarName)).toBeVisible();
 
     // 5. Edit the calendar
-    const calendarItem = page.locator('div').filter({ hasText: calendarName });
-    await calendarItem.getByRole('button', { name: /Edit/i }).click();
+    await page
+      .getByRole('button', {
+        name: new RegExp(`Edit calendar ${calendarName}`, 'i'),
+      })
+      .click();
 
     // Change the name
     const updatedName = `${calendarName} (Updated)`;
