@@ -8,6 +8,9 @@ jest.mock('@/lib/api/routes', () => ({
   useRoutes: jest.fn(),
 }));
 
+const ROUTE_SELECTOR_REF_WARNING_PATTERN =
+  /Function components cannot be given refs|Accessing element\.ref was removed in React 19/i;
+
 describe('RouteSelector ref handling', () => {
   beforeEach(() => {
     jest.clearAllMocks();
@@ -22,20 +25,27 @@ describe('RouteSelector ref handling', () => {
       .spyOn(console, 'error')
       .mockImplementation(() => undefined);
 
-    (routesApi.useRoutes as jest.Mock).mockReturnValue({
-      data: { data: [{ id: '1', attributes: { name: 'Test Route 1' } }] },
-      isLoading: false,
-    });
+    try {
+      (routesApi.useRoutes as jest.Mock).mockReturnValue({
+        data: { data: [{ id: '1', attributes: { name: 'Test Route 1' } }] },
+        isLoading: false,
+      });
 
-    render(<RouteSelector onChange={jest.fn()} />);
+      render(<RouteSelector onChange={jest.fn()} />);
 
-    await user.click(screen.getByRole('combobox'));
+      await user.click(screen.getByRole('combobox'));
 
-    expect(
-      await screen.findByPlaceholderText('Search routes...')
-    ).toBeInTheDocument();
-    expect(consoleErrorSpy).not.toHaveBeenCalled();
+      expect(
+        await screen.findByPlaceholderText('Search routes...')
+      ).toBeInTheDocument();
 
-    consoleErrorSpy.mockRestore();
+      const refWarnings = consoleErrorSpy.mock.calls
+        .map(call => call.map(arg => String(arg)).join(' '))
+        .filter(message => ROUTE_SELECTOR_REF_WARNING_PATTERN.test(message));
+
+      expect(refWarnings).toHaveLength(0);
+    } finally {
+      consoleErrorSpy.mockRestore();
+    }
   });
 });

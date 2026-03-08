@@ -77,13 +77,13 @@ export function JoggingTypeEditor({
     const parts = val.split(':');
     let totalSeconds: number | null = null;
     if (parts.length === 2) {
-      const m = parseInt(parts[0], 10);
-      const s = parseInt(parts[1], 10);
+      const m = Number.parseInt(parts[0], 10);
+      const s = Number.parseInt(parts[1], 10);
       if (!Number.isNaN(m) && !Number.isNaN(s)) {
         totalSeconds = m * 60 + s;
       }
     } else if (parts.length === 1) {
-      const v = parseInt(parts[0], 10);
+      const v = Number.parseInt(parts[0], 10);
       if (!Number.isNaN(v)) {
         totalSeconds = v * 60; // Assume they entered minutes if no colon
       }

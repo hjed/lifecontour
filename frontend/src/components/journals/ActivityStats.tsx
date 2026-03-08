@@ -143,86 +143,87 @@ export function ActivityStats({
   className,
 }: ActivityStatsProps) {
   const fitness = data ?? {};
-  const hasDistance = fitness.distance != null && fitness.distance > 0;
-  const hasDuration = fitness.duration != null && fitness.duration > 0;
-  const hasElevation =
-    fitness.elevation_gain != null && fitness.elevation_gain > 0;
-  const hasHr = fitness.heart_rate_avg != null && fitness.heart_rate_avg > 0;
-  const hasCalories = fitness.calories != null && fitness.calories > 0;
+  const distance = fitness.distance;
+  const duration = fitness.duration;
+  const elevationGain = fitness.elevation_gain;
+  const averageHeartRate = fitness.heart_rate_avg;
+  const calories = fitness.calories;
+  const weatherConditions = outdoorData?.weather_conditions;
+  const trackGrading = bushwalkingData?.track_grading;
+  const numberOfAbseils = abseilingData?.number_of_abseils;
+  const totalLength = abseilingData?.total_length;
+  const frenchGrade = canyoningData?.french_grade;
+  const waterGaugeName = canyoningData?.water_guage_name;
+  const waterGaugeLevel = canyoningData?.water_guage_level;
+  const climbingType = climbingData?.climbing_type;
+  const climbingGrade = climbingData?.grade;
+  const climbingLength = climbingData?.length;
+  const waterType = kayakingData?.water_type;
+  const snowConditions = crossCountrySkiingData?.snow_conditions;
+  const joggingPace = joggingData?.pace;
 
-  const hasWeather =
-    outdoorData?.weather_conditions != null &&
-    outdoorData.weather_conditions !== '';
-  const hasGrading =
-    bushwalkingData?.track_grading != null &&
-    bushwalkingData.track_grading !== '';
-  const hasAbseils =
-    abseilingData?.number_of_abseils != null &&
-    abseilingData.number_of_abseils > 0;
-  const hasTotalLength =
-    abseilingData?.total_length != null && abseilingData.total_length > 0;
-  const hasFrenchGrade =
-    canyoningData?.french_grade != null && canyoningData.french_grade !== '';
+  const hasDistance = distance != null && distance > 0;
+  const hasDuration = duration != null && duration > 0;
+  const hasElevation = elevationGain != null && elevationGain > 0;
+  const hasHr = averageHeartRate != null && averageHeartRate > 0;
+  const hasCalories = calories != null && calories > 0;
+  const hasWeather = weatherConditions != null && weatherConditions !== '';
+  const hasGrading = trackGrading != null && trackGrading !== '';
+  const hasAbseils = numberOfAbseils != null && numberOfAbseils > 0;
+  const hasTotalLength = totalLength != null && totalLength > 0;
+  const hasFrenchGrade = frenchGrade != null && frenchGrade !== '';
   const hasWaterGauge =
-    (canyoningData?.water_guage_name != null &&
-      canyoningData.water_guage_name !== '') ||
-    canyoningData?.water_guage_level != null;
+    (waterGaugeName != null && waterGaugeName !== '') ||
+    waterGaugeLevel != null;
   const canyonFlags = [
     canyoningData?.is_vertical ? 'Vertical' : null,
     canyoningData?.is_night_canyon ? 'Night Canyon' : null,
     canyoningData?.is_white_water ? 'White Water' : null,
   ].filter((flag): flag is string => flag !== null);
   const hasCanyonFlags = canyonFlags.length > 0;
-  const hasClimbingType =
-    climbingData?.climbing_type != null && climbingData.climbing_type !== '';
-  const hasClimbingGrade =
-    climbingData?.grade != null && climbingData.grade > 0;
-  const hasClimbingLength =
-    climbingData?.length != null && climbingData.length > 0;
-  const hasWaterType =
-    kayakingData?.water_type != null && kayakingData.water_type !== '';
-  const hasSnowConditions =
-    crossCountrySkiingData?.snow_conditions != null &&
-    crossCountrySkiingData.snow_conditions !== '';
-
-  const showCalculatedPace = hasDistance && hasDuration && !joggingData?.pace;
-  const showJoggingPace = joggingData?.pace != null && joggingData.pace > 0;
+  const hasClimbingType = climbingType != null && climbingType !== '';
+  const hasClimbingGrade = climbingGrade != null && climbingGrade > 0;
+  const hasClimbingLength = climbingLength != null && climbingLength > 0;
+  const hasWaterType = waterType != null && waterType !== '';
+  const hasSnowConditions = snowConditions != null && snowConditions !== '';
+  const hasJoggingPace = joggingPace != null && joggingPace > 0;
+  const showCalculatedPace = hasDistance && hasDuration && !hasJoggingPace;
 
   const performanceItems: React.ReactNode[] = [];
   const contextItems: React.ReactNode[] = [];
   const technicalItems: React.ReactNode[] = [];
 
-  if (hasDistance) {
+  if (distance != null && distance > 0) {
     performanceItems.push(
       <StatItem
         key='distance'
         icon={<Ruler className='h-4 w-4' />}
         label='Distance'
-        value={formatDistance(fitness.distance!)}
+        value={formatDistance(distance)}
         testId='stat-distance'
       />
     );
   }
 
-  if (hasDuration) {
+  if (duration != null && duration > 0) {
     performanceItems.push(
       <StatItem
         key='duration'
         icon={<Clock className='h-4 w-4' />}
         label='Duration'
-        value={formatDuration(fitness.duration!)}
+        value={formatDuration(duration)}
         testId='stat-duration'
       />
     );
   }
 
-  if (showJoggingPace) {
+  if (joggingPace != null && joggingPace > 0) {
     performanceItems.push(
       <StatItem
         key='pace-jogging'
         icon={<Activity className='h-4 w-4' />}
         label='Pace'
-        value={formatSecondsPerKm(joggingData!.pace!)}
+        value={formatSecondsPerKm(joggingPace)}
         testId='stat-pace-jogging'
       />
     );
@@ -234,7 +235,7 @@ export function ActivityStats({
         key='pace'
         icon={<Activity className='h-4 w-4' />}
         label='Pace'
-        value={formatPace(fitness.duration!, fitness.distance!)}
+        value={formatPace(duration as number, distance as number)}
         testId='stat-pace'
       />
     );
@@ -294,7 +295,7 @@ export function ActivityStats({
         key='weather'
         icon={<Cloud className='h-4 w-4' />}
         label='Weather'
-        value={outdoorData!.weather_conditions}
+        value={weatherConditions}
         testId='stat-weather'
       />
     );
@@ -306,7 +307,7 @@ export function ActivityStats({
         key='grading'
         icon={<Compass className='h-4 w-4' />}
         label='Track Grade'
-        value={bushwalkingData!.track_grading}
+        value={trackGrading}
         testId='stat-grading'
       />
     );
@@ -318,10 +319,8 @@ export function ActivityStats({
         key='water-gauge'
         icon={<Cloud className='h-4 w-4' />}
         label='Water Gauge'
-        value={`${canyoningData!.water_guage_name ?? 'Gauge'}${
-          canyoningData!.water_guage_level != null
-            ? ` (${canyoningData!.water_guage_level})`
-            : ''
+        value={`${waterGaugeName ?? 'Gauge'}${
+          waterGaugeLevel != null ? ` (${waterGaugeLevel})` : ''
         }`}
         testId='stat-water-gauge'
       />
@@ -334,7 +333,7 @@ export function ActivityStats({
         key='water-type'
         icon={<Cloud className='h-4 w-4' />}
         label='Water Type'
-        value={kayakingData!.water_type}
+        value={waterType}
         testId='stat-water-type'
       />
     );
@@ -346,7 +345,7 @@ export function ActivityStats({
         key='snow-conditions'
         icon={<Cloud className='h-4 w-4' />}
         label='Snow Conditions'
-        value={crossCountrySkiingData!.snow_conditions}
+        value={snowConditions}
         testId='stat-snow-conditions'
       />
     );
@@ -358,7 +357,7 @@ export function ActivityStats({
         key='abseils'
         icon={<Activity className='h-4 w-4' />}
         label='Abseils'
-        value={abseilingData!.number_of_abseils}
+        value={numberOfAbseils}
         testId='stat-abseils'
       />
     );
@@ -370,7 +369,7 @@ export function ActivityStats({
         key='total-length'
         icon={<Ruler className='h-4 w-4' />}
         label='Total Length'
-        value={`${abseilingData!.total_length} m`}
+        value={`${totalLength} m`}
         testId='stat-total-length'
       />
     );
@@ -382,7 +381,7 @@ export function ActivityStats({
         key='french-grade'
         icon={<Compass className='h-4 w-4' />}
         label='French Grade'
-        value={canyoningData!.french_grade}
+        value={frenchGrade}
         testId='stat-french-grade'
       />
     );
@@ -406,7 +405,7 @@ export function ActivityStats({
         key='climbing-type'
         icon={<Activity className='h-4 w-4' />}
         label='Climbing Type'
-        value={climbingData!.climbing_type}
+        value={climbingType}
         testId='stat-climbing-type'
       />
     );
@@ -418,7 +417,7 @@ export function ActivityStats({
         key='climbing-grade'
         icon={<Compass className='h-4 w-4' />}
         label='Climbing Grade'
-        value={climbingData!.grade}
+        value={climbingGrade}
         testId='stat-climbing-grade'
       />
     );
@@ -430,7 +429,7 @@ export function ActivityStats({
         key='climbing-length'
         icon={<Ruler className='h-4 w-4' />}
         label='Climbing Length'
-        value={`${climbingData!.length} m`}
+        value={`${climbingLength} m`}
         testId='stat-climbing-length'
       />
     );

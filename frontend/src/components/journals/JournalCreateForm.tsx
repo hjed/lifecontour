@@ -11,7 +11,12 @@
 import { useCallback, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import type { Route } from 'next';
-import { useForm, useWatch, type Control } from 'react-hook-form';
+import {
+  useForm,
+  useWatch,
+  type Control,
+  type UseFormSetError,
+} from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { Badge } from '@/components/ui/badge';
@@ -100,6 +105,31 @@ interface TypeDataState {
   [JournalType.CLIMBING]?: ClimbingData;
   [JournalType.KAYAKING]?: KayakingData;
   [JournalType.CROSS_COUNTRY_SKIING]?: CrossCountrySkiingData;
+}
+
+type TypeDataJournalType = keyof TypeDataState;
+
+const TYPE_DATA_JOURNAL_TYPES = new Set<TypeDataJournalType>([
+  JournalType.EVENT,
+  JournalType.MOOD_RATING,
+  JournalType.PLAN,
+  JournalType.TRAVEL,
+  JournalType.PHOTO_ALBUM,
+  JournalType.FITNESS,
+  JournalType.OUTDOOR_ACTIVITY,
+  JournalType.JOGGING,
+  JournalType.BUSHWALKING,
+  JournalType.ABSEILING_TRIP,
+  JournalType.CANYONING,
+  JournalType.CLIMBING,
+  JournalType.KAYAKING,
+  JournalType.CROSS_COUNTRY_SKIING,
+]);
+
+function hasTypeDataJournalType(
+  type: JournalType
+): type is TypeDataJournalType {
+  return TYPE_DATA_JOURNAL_TYPES.has(type as TypeDataJournalType);
 }
 
 // All 15 journal type options for checkboxes
@@ -206,6 +236,85 @@ const TYPE_LABELS: Record<JournalType, string> = {
 
 function getJournalTypeTestId(type: JournalType): string {
   return type.toUpperCase();
+}
+
+type SelectedTypeData = TypeDataState[keyof TypeDataState];
+
+function setTypesError(
+  setError: UseFormSetError<FormValues>,
+  message: string
+): void {
+  setError('types', {
+    type: 'manual',
+    message,
+  });
+}
+
+function hasRequiredTypeData(
+  type: JournalType,
+  data: SelectedTypeData,
+  setError: UseFormSetError<FormValues>
+): boolean {
+  if (type === JournalType.EVENT) {
+    const eventData = data as CalendarInfoData | undefined;
+    if (!eventData?.calendar_id?.trim()) {
+      setTypesError(setError, 'Event requires a valid Calendar ID.');
+      return false;
+    }
+  }
+
+  if (type === JournalType.PHOTO_ALBUM) {
+    const albumData = data as PhotoAlbumData | undefined;
+    if (!albumData?.immich_album_id?.trim()) {
+      setTypesError(setError, 'Photo Album requires an Immich Album ID.');
+      return false;
+    }
+  }
+
+  return true;
+}
+
+function sanitiseTypeData(
+  type: JournalType,
+  data: Exclude<SelectedTypeData, undefined>
+): JournalTypeData {
+  if (type === JournalType.PLAN) {
+    const planData = data as PlanData;
+    return {
+      ...planData,
+      documents: planData.documents.filter(
+        doc => doc.url && doc.url.trim() !== ''
+      ),
+    };
+  }
+
+  return data;
+}
+
+function buildSubmittedTypeData(
+  selectedTypes: readonly JournalType[],
+  typeData: TypeDataState,
+  setError: UseFormSetError<FormValues>
+): Record<string, JournalTypeData> | null {
+  const submittedTypeData: Record<string, JournalTypeData> = {};
+
+  for (const type of selectedTypes) {
+    const currentTypeData = hasTypeDataJournalType(type)
+      ? typeData[type]
+      : undefined;
+
+    if (!hasRequiredTypeData(type, currentTypeData, setError)) {
+      return null;
+    }
+
+    if (currentTypeData === undefined) {
+      continue;
+    }
+
+    submittedTypeData[type] = sanitiseTypeData(type, currentTypeData);
+  }
+
+  return submittedTypeData;
 }
 
 interface JournalCreateFormProps {
@@ -336,47 +445,14 @@ export function JournalCreateForm({ onCancel }: JournalCreateFormProps = {}) {
     try {
       const endDate = values.dateRange.to || values.dateRange.from;
 
-      // Build type_data from collected editor data for selected types.
-      // Sanitise each type before including it to avoid backend validation errors
-      // when the editor mounts and emits its initial (empty) state.
-      const submittedTypeData: Record<string, JournalTypeData> = {};
-      for (const type of values.types) {
-        const data = typeData[type as keyof TypeDataState];
+      const submittedTypeData = buildSubmittedTypeData(
+        values.types,
+        typeData,
+        form.setError
+      );
 
-        // Client-side validation for required type-specific fields
-        if (type === JournalType.EVENT) {
-          const eventData = data as CalendarInfoData | undefined;
-          if (!eventData?.calendar_id?.trim()) {
-            form.setError('types', {
-              type: 'manual',
-              message: 'Event requires a valid Calendar ID.',
-            });
-            return;
-          }
-        } else if (type === JournalType.PHOTO_ALBUM) {
-          const albumData = data as PhotoAlbumData | undefined;
-          if (!albumData?.immich_album_id?.trim()) {
-            form.setError('types', {
-              type: 'manual',
-              message: 'Photo Album requires an Immich Album ID.',
-            });
-            return;
-          }
-        }
-
-        if (data === undefined) continue;
-
-        // PLAN: filter out document rows where the required `url` field is empty.
-        if (type === JournalType.PLAN) {
-          const planData = data as PlanData;
-          const validDocuments = planData.documents.filter(
-            doc => doc.url && doc.url.trim() !== ''
-          );
-          submittedTypeData[type] = { ...planData, documents: validDocuments };
-          continue;
-        }
-
-        submittedTypeData[type] = data;
+      if (submittedTypeData === null) {
+        return;
       }
 
       const result = await createJournal({

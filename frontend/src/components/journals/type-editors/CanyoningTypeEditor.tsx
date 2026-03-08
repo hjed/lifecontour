@@ -76,8 +76,23 @@ export function CanyoningTypeEditor({
     onChange,
   });
 
-  const [gradeInput, setGradeInput] = useState(initialData.french_grade ?? '');
-  const [gradeError, setGradeError] = useState<string | null>(null);
+  const gradeResetKey = useMemo(
+    () => JSON.stringify(initialData),
+    [initialData]
+  );
+  const [gradeState, setGradeState] = useState({
+    resetKey: gradeResetKey,
+    input: initialData.french_grade ?? '',
+    error: null as string | null,
+  });
+  const currentGradeState =
+    gradeState.resetKey === gradeResetKey
+      ? gradeState
+      : {
+          resetKey: gradeResetKey,
+          input: initialData.french_grade ?? '',
+          error: null,
+        };
 
   const canyonFlags = [
     initialData.is_vertical ? 'Vertical' : null,
@@ -86,22 +101,39 @@ export function CanyoningTypeEditor({
   ].filter((flag): flag is string => flag !== null);
 
   const handleFrenchGradeChange = (value: string) => {
-    setGradeInput(value);
+    const nextGradeState = {
+      resetKey: gradeResetKey,
+      input: value,
+      error: null as string | null,
+    };
 
     if (value.trim() === '') {
-      setGradeError(null);
+      setGradeState(nextGradeState);
       setEditData({ ...editData, french_grade: null });
       return;
     }
 
     const normalized = normalizeFrenchCanyonGrade(value);
     if (normalized) {
-      setGradeError(null);
+      setGradeState(nextGradeState);
       setEditData({ ...editData, french_grade: normalized });
       return;
     }
 
-    setGradeError('Use format v3a2IV**');
+    setGradeState({
+      ...nextGradeState,
+      error: 'Use format v3a2IV**',
+    });
+    setEditData({ ...editData, french_grade: null });
+  };
+
+  const handleEditorCancel = () => {
+    setGradeState({
+      resetKey: gradeResetKey,
+      input: initialData.french_grade ?? '',
+      error: null,
+    });
+    handleCancel();
   };
 
   if (!isEditing && !createMode) {
@@ -122,7 +154,7 @@ export function CanyoningTypeEditor({
             isEditing={false}
             onEdit={handleEdit}
             onSave={handleSave}
-            onCancel={handleCancel}
+            onCancel={handleEditorCancel}
           />
         </div>
       );
@@ -173,7 +205,7 @@ export function CanyoningTypeEditor({
           isEditing={false}
           onEdit={handleEdit}
           onSave={handleSave}
-          onCancel={handleCancel}
+          onCancel={handleEditorCancel}
         />
       </div>
     );
@@ -217,14 +249,16 @@ export function CanyoningTypeEditor({
           <Input
             id={frenchGradeFieldId}
             type='text'
-            value={gradeInput}
+            value={currentGradeState.input}
             onChange={e => handleFrenchGradeChange(e.target.value)}
             placeholder='e.g. v3a2IV**'
-            aria-invalid={gradeError ? true : undefined}
+            aria-invalid={currentGradeState.error ? true : undefined}
             data-testid='french-grade-input'
           />
-          {gradeError && (
-            <p className='text-destructive text-sm'>{gradeError}</p>
+          {currentGradeState.error && (
+            <p className='text-destructive text-sm'>
+              {currentGradeState.error}
+            </p>
           )}
         </div>
 
@@ -342,7 +376,7 @@ export function CanyoningTypeEditor({
           isEditing={isEditing}
           onEdit={handleEdit}
           onSave={handleSave}
-          onCancel={handleCancel}
+          onCancel={handleEditorCancel}
         />
       )}
     </div>
