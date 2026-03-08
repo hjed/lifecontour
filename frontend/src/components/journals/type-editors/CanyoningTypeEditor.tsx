@@ -29,16 +29,104 @@ interface CanyoningTypeEditorProps {
 
 const DEFAULT_DATA: CanyoningData = {};
 const FRENCH_GRADE_PATTERN = /^v([1-7])a([1-7])(VI|IV|V|III|II|I)(\*{0,3})$/i;
+const FRENCH_GRADE_ERROR = 'Use format v3a2IV**';
+
+interface GradeState {
+  readonly resetKey: string;
+  readonly input: string;
+  readonly error: string | null;
+}
 
 function normalizeFrenchCanyonGrade(value: string): string | null {
   const trimmed = value.trim();
   if (trimmed === '') return null;
 
-  const match = trimmed.match(FRENCH_GRADE_PATTERN);
+  const match = FRENCH_GRADE_PATTERN.exec(trimmed);
   if (!match) return null;
 
   const [, vertical, aquatic, engagement, stars] = match;
   return `v${vertical}a${aquatic}${engagement.toUpperCase()}${stars}`;
+}
+
+function createSavedGradeState(
+  resetKey: string,
+  frenchGrade: string | null | undefined
+): GradeState {
+  return {
+    resetKey,
+    input: frenchGrade ?? '',
+    error: null,
+  };
+}
+
+function createTransientGradeState(
+  resetKey: string,
+  input: string,
+  error: string | null = null
+): GradeState {
+  return {
+    resetKey,
+    input,
+    error,
+  };
+}
+
+function buildCanyonFlags(data: CanyoningData): string[] {
+  return [
+    data.is_vertical ? 'Vertical' : null,
+    data.is_night_canyon ? 'Night Canyon' : null,
+    data.is_white_water ? 'White Water' : null,
+  ].filter((flag): flag is string => flag !== null);
+}
+
+function buildWaterGaugeSummary(data: CanyoningData): string | null {
+  if (!data.water_guage_name && data.water_guage_level == null) {
+    return null;
+  }
+
+  return `${data.water_guage_name ?? 'Gauge'}${
+    data.water_guage_level != null ? ` (${data.water_guage_level})` : ''
+  }`;
+}
+
+function buildReadOnlySummaryItems(
+  data: CanyoningData,
+  routeName: string | undefined,
+  canyonFlags: string[]
+): ReadOnlyTypeSummaryItem[] {
+  const waterGaugeSummary = buildWaterGaugeSummary(data);
+  const summaryItems: ReadOnlyTypeSummaryItem[] = [];
+
+  if (data.route_id) {
+    summaryItems.push({
+      label: 'Route',
+      value: routeName ?? data.route_id,
+    });
+  }
+
+  if (data.french_grade) {
+    summaryItems.push({
+      label: 'French Grade',
+      value: data.french_grade,
+    });
+  }
+
+  if (waterGaugeSummary) {
+    summaryItems.push({
+      label: 'Water Gauge',
+      value: waterGaugeSummary,
+    });
+  }
+
+  if (canyonFlags.length > 0) {
+    summaryItems.push({
+      label: 'Flags',
+      value: <SummaryBadgeList values={canyonFlags} />,
+      fullWidth: true,
+    });
+  }
+
+  return summaryItems;
 }
 
 export function CanyoningTypeEditor({
@@ -80,32 +168,18 @@ export function CanyoningTypeEditor({
     () => JSON.stringify(initialData),
     [initialData]
   );
-  const [gradeState, setGradeState] = useState({
-    resetKey: gradeResetKey,
-    input: initialData.french_grade ?? '',
-    error: null as string | null,
-  });
+  const [gradeState, setGradeState] = useState<GradeState>(() =>
+    createSavedGradeState(gradeResetKey, initialData.french_grade)
+  );
   const currentGradeState =
     gradeState.resetKey === gradeResetKey
       ? gradeState
-      : {
-          resetKey: gradeResetKey,
-          input: initialData.french_grade ?? '',
-          error: null,
-        };
+      : createSavedGradeState(gradeResetKey, initialData.french_grade);
 
-  const canyonFlags = [
-    initialData.is_vertical ? 'Vertical' : null,
-    initialData.is_night_canyon ? 'Night Canyon' : null,
-    initialData.is_white_water ? 'White Water' : null,
-  ].filter((flag): flag is string => flag !== null);
+  const canyonFlags = buildCanyonFlags(initialData);
 
   const handleFrenchGradeChange = (value: string) => {
-    const nextGradeState = {
-      resetKey: gradeResetKey,
-      input: value,
-      error: null as string | null,
-    };
+    const nextGradeState = createTransientGradeState(gradeResetKey, value);
 
     if (value.trim() === '') {
       setGradeState(nextGradeState);
@@ -120,31 +194,27 @@ export function CanyoningTypeEditor({
       return;
     }
 
-    setGradeState({
-      ...nextGradeState,
-      error: 'Use format v3a2IV**',
-    });
+    setGradeState(
+      createTransientGradeState(gradeResetKey, value, FRENCH_GRADE_ERROR)
+    );
     setEditData({ ...editData, french_grade: null });
   };
 
   const handleEditorCancel = () => {
-    setGradeState({
-      resetKey: gradeResetKey,
-      input: initialData.french_grade ?? '',
-      error: null,
-    });
+    setGradeState(
+      createSavedGradeState(gradeResetKey, initialData.french_grade)
+    );
     handleCancel();
   };
 
   if (!isEditing && !createMode) {
-    const hasData =
-      initialData.route_id ||
-      initialData.french_grade ||
-      initialData.water_guage_name ||
-      initialData.water_guage_level != null ||
-      canyonFlags.length > 0;
+    const summaryItems = buildReadOnlySummaryItems(
+      initialData,
+      routeName,
+      canyonFlags
+    );
 
-    if (!hasData) {
+    if (summaryItems.length === 0) {
       return (
         <div className='flex items-center justify-between'>
           <p className='text-muted-foreground text-sm'>
@@ -158,41 +228,6 @@ export function CanyoningTypeEditor({
           />
         </div>
       );
-    }
-
-    const summaryItems: ReadOnlyTypeSummaryItem[] = [];
-
-    if (initialData.route_id) {
-      summaryItems.push({
-        label: 'Route',
-        value: routeName ?? initialData.route_id,
-      });
-    }
-
-    if (initialData.french_grade) {
-      summaryItems.push({
-        label: 'French Grade',
-        value: initialData.french_grade,
-      });
-    }
-
-    if (initialData.water_guage_name || initialData.water_guage_level != null) {
-      summaryItems.push({
-        label: 'Water Gauge',
-        value: `${initialData.water_guage_name ?? 'Gauge'}${
-          initialData.water_guage_level != null
-            ? ` (${initialData.water_guage_level})`
-            : ''
-        }`,
-      });
-    }
-
-    if (canyonFlags.length > 0) {
-      summaryItems.push({
-        label: 'Flags',
-        value: <SummaryBadgeList values={canyonFlags} />,
-        fullWidth: true,
-      });
     }
 
     return (

@@ -2203,6 +2203,36 @@ class TestJournalTypeDataValidation:
             "Integer for french_grade should return 400 not 500"
         )
 
+    async def test_update_canyoning_with_boolean_water_guage_level_returns_400(
+        self, integration_api_client
+    ):
+        """Sending a boolean for water_guage_level should return 400 not 500."""
+        create_data = create_journal_request_data(
+            title="Canyoning Water Gauge Type Check Test",
+            content="Test content",
+            types=["CANYONING"],
+        )
+        create_response = await integration_api_client.post(
+            "/api/journals", json=create_data
+        )
+        assert create_response.status_code == 201
+        journal_id = create_response.json()["data"]["id"]
+
+        update_data = {
+            "data": {
+                "type": "journal-type-data",
+                "attributes": {"water_guage_level": True},
+            }
+        }
+        response = await integration_api_client.put(
+            f"/api/journals/{journal_id}/types/CANYONING/data",
+            json=update_data,
+        )
+
+        assert response.status_code == 400, (
+            "Boolean water_guage_level should return 400 not 500"
+        )
+
     async def test_update_kayaking_with_invalid_uuid_returns_400(
         self, integration_api_client
     ):

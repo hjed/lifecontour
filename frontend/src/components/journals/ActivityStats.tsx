@@ -110,6 +110,14 @@ interface StatsSectionProps {
   readonly testId: string;
 }
 
+interface StatConfig {
+  readonly key: string;
+  readonly icon: React.ReactNode;
+  readonly label: string;
+  readonly value: React.ReactNode;
+  readonly testId: string;
+}
+
 function StatsSection({
   title,
   description,
@@ -127,6 +135,303 @@ function StatsSection({
       </div>
     </section>
   );
+}
+
+function isPositiveNumber(value: number | null | undefined): value is number {
+  return value != null && value > 0;
+}
+
+function isNonEmptyString(value: string | null | undefined): value is string {
+  return value != null && value !== '';
+}
+
+function createStatItem({ key, icon, label, value, testId }: StatConfig) {
+  return (
+    <StatItem
+      key={key}
+      icon={icon}
+      label={label}
+      value={value}
+      testId={testId}
+    />
+  );
+}
+
+function compactStatItems(
+  items: Array<React.ReactNode | null>
+): React.ReactNode[] {
+  return items.filter((item): item is React.ReactNode => item !== null);
+}
+
+function buildCanyonFlags(canyoningData?: CanyoningData): string[] {
+  return [
+    canyoningData?.is_vertical ? 'Vertical' : null,
+    canyoningData?.is_night_canyon ? 'Night Canyon' : null,
+    canyoningData?.is_white_water ? 'White Water' : null,
+  ].filter((flag): flag is string => flag !== null);
+}
+
+function getWaterGaugeLabel(
+  waterGaugeName: string | null | undefined,
+  waterGaugeLevel: number | null | undefined
+): string | null {
+  if (!isNonEmptyString(waterGaugeName) && waterGaugeLevel == null) {
+    return null;
+  }
+
+  return `${waterGaugeName ?? 'Gauge'}${
+    waterGaugeLevel != null ? ` (${waterGaugeLevel})` : ''
+  }`;
+}
+
+function buildPerformanceItems({
+  distance,
+  duration,
+  elevationGain,
+  averageHeartRate,
+  calories,
+  joggingPace,
+}: {
+  readonly distance: number | null | undefined;
+  readonly duration: number | null | undefined;
+  readonly elevationGain: number | null | undefined;
+  readonly averageHeartRate: number | null | undefined;
+  readonly calories: number | null | undefined;
+  readonly joggingPace: number | null | undefined;
+}): React.ReactNode[] {
+  const calculatedPace =
+    isPositiveNumber(distance) &&
+    isPositiveNumber(duration) &&
+    !isPositiveNumber(joggingPace)
+      ? formatPace(duration, distance)
+      : null;
+
+  return compactStatItems([
+    isPositiveNumber(distance)
+      ? createStatItem({
+          key: 'distance',
+          icon: <Ruler className='h-4 w-4' />,
+          label: 'Distance',
+          value: formatDistance(distance),
+          testId: 'stat-distance',
+        })
+      : null,
+    isPositiveNumber(duration)
+      ? createStatItem({
+          key: 'duration',
+          icon: <Clock className='h-4 w-4' />,
+          label: 'Duration',
+          value: formatDuration(duration),
+          testId: 'stat-duration',
+        })
+      : null,
+    isPositiveNumber(joggingPace)
+      ? createStatItem({
+          key: 'pace-jogging',
+          icon: <Activity className='h-4 w-4' />,
+          label: 'Pace',
+          value: formatSecondsPerKm(joggingPace),
+          testId: 'stat-pace-jogging',
+        })
+      : null,
+    calculatedPace
+      ? createStatItem({
+          key: 'pace',
+          icon: <Activity className='h-4 w-4' />,
+          label: 'Pace',
+          value: calculatedPace,
+          testId: 'stat-pace',
+        })
+      : null,
+    isPositiveNumber(elevationGain)
+      ? createStatItem({
+          key: 'elevation',
+          icon: <Mountain className='h-4 w-4' />,
+          label: 'Elevation Gain',
+          value: `${elevationGain} m`,
+          testId: 'stat-elevation',
+        })
+      : null,
+    isPositiveNumber(averageHeartRate)
+      ? createStatItem({
+          key: 'hr',
+          icon: <Heart className='h-4 w-4' />,
+          label: 'Avg HR',
+          value: `${averageHeartRate} bpm`,
+          testId: 'stat-hr',
+        })
+      : null,
+    isPositiveNumber(calories)
+      ? createStatItem({
+          key: 'calories',
+          icon: <Flame className='h-4 w-4' />,
+          label: 'Calories',
+          value: `${calories} kcal`,
+          testId: 'stat-calories',
+        })
+      : null,
+  ]);
+}
+
+function buildContextItems({
+  routeDisplay,
+  weatherConditions,
+  trackGrading,
+  waterGaugeName,
+  waterGaugeLevel,
+  waterType,
+  snowConditions,
+}: {
+  readonly routeDisplay?: Route;
+  readonly weatherConditions: string | null | undefined;
+  readonly trackGrading: string | null | undefined;
+  readonly waterGaugeName: string | null | undefined;
+  readonly waterGaugeLevel: number | null | undefined;
+  readonly waterType: string | null | undefined;
+  readonly snowConditions: string | null | undefined;
+}): React.ReactNode[] {
+  const waterGaugeLabel = getWaterGaugeLabel(waterGaugeName, waterGaugeLevel);
+
+  return compactStatItems([
+    routeDisplay
+      ? createStatItem({
+          key: 'route',
+          icon: <Mountain className='h-4 w-4' />,
+          label: 'Route',
+          value: routeDisplay.name,
+          testId: 'stat-route',
+        })
+      : null,
+    isNonEmptyString(weatherConditions)
+      ? createStatItem({
+          key: 'weather',
+          icon: <Cloud className='h-4 w-4' />,
+          label: 'Weather',
+          value: weatherConditions,
+          testId: 'stat-weather',
+        })
+      : null,
+    isNonEmptyString(trackGrading)
+      ? createStatItem({
+          key: 'grading',
+          icon: <Compass className='h-4 w-4' />,
+          label: 'Track Grade',
+          value: trackGrading,
+          testId: 'stat-grading',
+        })
+      : null,
+    waterGaugeLabel
+      ? createStatItem({
+          key: 'water-gauge',
+          icon: <Cloud className='h-4 w-4' />,
+          label: 'Water Gauge',
+          value: waterGaugeLabel,
+          testId: 'stat-water-gauge',
+        })
+      : null,
+    isNonEmptyString(waterType)
+      ? createStatItem({
+          key: 'water-type',
+          icon: <Cloud className='h-4 w-4' />,
+          label: 'Water Type',
+          value: waterType,
+          testId: 'stat-water-type',
+        })
+      : null,
+    isNonEmptyString(snowConditions)
+      ? createStatItem({
+          key: 'snow-conditions',
+          icon: <Cloud className='h-4 w-4' />,
+          label: 'Snow Conditions',
+          value: snowConditions,
+          testId: 'stat-snow-conditions',
+        })
+      : null,
+  ]);
+}
+
+function buildTechnicalItems({
+  numberOfAbseils,
+  totalLength,
+  frenchGrade,
+  canyonFlags,
+  climbingType,
+  climbingGrade,
+  climbingLength,
+}: {
+  readonly numberOfAbseils: number | null | undefined;
+  readonly totalLength: number | null | undefined;
+  readonly frenchGrade: string | null | undefined;
+  readonly canyonFlags: string[];
+  readonly climbingType: string | null | undefined;
+  readonly climbingGrade: number | null | undefined;
+  readonly climbingLength: number | null | undefined;
+}): React.ReactNode[] {
+  return compactStatItems([
+    isPositiveNumber(numberOfAbseils)
+      ? createStatItem({
+          key: 'abseils',
+          icon: <Activity className='h-4 w-4' />,
+          label: 'Abseils',
+          value: numberOfAbseils,
+          testId: 'stat-abseils',
+        })
+      : null,
+    isPositiveNumber(totalLength)
+      ? createStatItem({
+          key: 'total-length',
+          icon: <Ruler className='h-4 w-4' />,
+          label: 'Total Length',
+          value: `${totalLength} m`,
+          testId: 'stat-total-length',
+        })
+      : null,
+    isNonEmptyString(frenchGrade)
+      ? createStatItem({
+          key: 'french-grade',
+          icon: <Compass className='h-4 w-4' />,
+          label: 'French Grade',
+          value: frenchGrade,
+          testId: 'stat-french-grade',
+        })
+      : null,
+    canyonFlags.length > 0
+      ? createStatItem({
+          key: 'canyon-flags',
+          icon: <Mountain className='h-4 w-4' />,
+          label: 'Canyon Flags',
+          value: canyonFlags.join(', '),
+          testId: 'stat-canyon-flags',
+        })
+      : null,
+    isNonEmptyString(climbingType)
+      ? createStatItem({
+          key: 'climbing-type',
+          icon: <Activity className='h-4 w-4' />,
+          label: 'Climbing Type',
+          value: climbingType,
+          testId: 'stat-climbing-type',
+        })
+      : null,
+    isPositiveNumber(climbingGrade)
+      ? createStatItem({
+          key: 'climbing-grade',
+          icon: <Compass className='h-4 w-4' />,
+          label: 'Climbing Grade',
+          value: climbingGrade,
+          testId: 'stat-climbing-grade',
+        })
+      : null,
+    isPositiveNumber(climbingLength)
+      ? createStatItem({
+          key: 'climbing-length',
+          icon: <Ruler className='h-4 w-4' />,
+          label: 'Climbing Length',
+          value: `${climbingLength} m`,
+          testId: 'stat-climbing-length',
+        })
+      : null,
+  ]);
 }
 
 export function ActivityStats({
@@ -161,279 +466,33 @@ export function ActivityStats({
   const waterType = kayakingData?.water_type;
   const snowConditions = crossCountrySkiingData?.snow_conditions;
   const joggingPace = joggingData?.pace;
-
-  const hasDistance = distance != null && distance > 0;
-  const hasDuration = duration != null && duration > 0;
-  const hasElevation = elevationGain != null && elevationGain > 0;
-  const hasHr = averageHeartRate != null && averageHeartRate > 0;
-  const hasCalories = calories != null && calories > 0;
-  const hasWeather = weatherConditions != null && weatherConditions !== '';
-  const hasGrading = trackGrading != null && trackGrading !== '';
-  const hasAbseils = numberOfAbseils != null && numberOfAbseils > 0;
-  const hasTotalLength = totalLength != null && totalLength > 0;
-  const hasFrenchGrade = frenchGrade != null && frenchGrade !== '';
-  const hasWaterGauge =
-    (waterGaugeName != null && waterGaugeName !== '') ||
-    waterGaugeLevel != null;
-  const canyonFlags = [
-    canyoningData?.is_vertical ? 'Vertical' : null,
-    canyoningData?.is_night_canyon ? 'Night Canyon' : null,
-    canyoningData?.is_white_water ? 'White Water' : null,
-  ].filter((flag): flag is string => flag !== null);
-  const hasCanyonFlags = canyonFlags.length > 0;
-  const hasClimbingType = climbingType != null && climbingType !== '';
-  const hasClimbingGrade = climbingGrade != null && climbingGrade > 0;
-  const hasClimbingLength = climbingLength != null && climbingLength > 0;
-  const hasWaterType = waterType != null && waterType !== '';
-  const hasSnowConditions = snowConditions != null && snowConditions !== '';
-  const hasJoggingPace = joggingPace != null && joggingPace > 0;
-  const showCalculatedPace = hasDistance && hasDuration && !hasJoggingPace;
-
-  const performanceItems: React.ReactNode[] = [];
-  const contextItems: React.ReactNode[] = [];
-  const technicalItems: React.ReactNode[] = [];
-
-  if (distance != null && distance > 0) {
-    performanceItems.push(
-      <StatItem
-        key='distance'
-        icon={<Ruler className='h-4 w-4' />}
-        label='Distance'
-        value={formatDistance(distance)}
-        testId='stat-distance'
-      />
-    );
-  }
-
-  if (duration != null && duration > 0) {
-    performanceItems.push(
-      <StatItem
-        key='duration'
-        icon={<Clock className='h-4 w-4' />}
-        label='Duration'
-        value={formatDuration(duration)}
-        testId='stat-duration'
-      />
-    );
-  }
-
-  if (joggingPace != null && joggingPace > 0) {
-    performanceItems.push(
-      <StatItem
-        key='pace-jogging'
-        icon={<Activity className='h-4 w-4' />}
-        label='Pace'
-        value={formatSecondsPerKm(joggingPace)}
-        testId='stat-pace-jogging'
-      />
-    );
-  }
-
-  if (showCalculatedPace) {
-    performanceItems.push(
-      <StatItem
-        key='pace'
-        icon={<Activity className='h-4 w-4' />}
-        label='Pace'
-        value={formatPace(duration as number, distance as number)}
-        testId='stat-pace'
-      />
-    );
-  }
-
-  if (hasElevation) {
-    performanceItems.push(
-      <StatItem
-        key='elevation'
-        icon={<Mountain className='h-4 w-4' />}
-        label='Elevation Gain'
-        value={`${fitness.elevation_gain} m`}
-        testId='stat-elevation'
-      />
-    );
-  }
-
-  if (hasHr) {
-    performanceItems.push(
-      <StatItem
-        key='hr'
-        icon={<Heart className='h-4 w-4' />}
-        label='Avg HR'
-        value={`${fitness.heart_rate_avg} bpm`}
-        testId='stat-hr'
-      />
-    );
-  }
-
-  if (hasCalories) {
-    performanceItems.push(
-      <StatItem
-        key='calories'
-        icon={<Flame className='h-4 w-4' />}
-        label='Calories'
-        value={`${fitness.calories} kcal`}
-        testId='stat-calories'
-      />
-    );
-  }
-
-  if (routeDisplay) {
-    contextItems.push(
-      <StatItem
-        key='route'
-        icon={<Mountain className='h-4 w-4' />}
-        label='Route'
-        value={routeDisplay.name}
-        testId='stat-route'
-      />
-    );
-  }
-
-  if (hasWeather) {
-    contextItems.push(
-      <StatItem
-        key='weather'
-        icon={<Cloud className='h-4 w-4' />}
-        label='Weather'
-        value={weatherConditions}
-        testId='stat-weather'
-      />
-    );
-  }
-
-  if (hasGrading) {
-    contextItems.push(
-      <StatItem
-        key='grading'
-        icon={<Compass className='h-4 w-4' />}
-        label='Track Grade'
-        value={trackGrading}
-        testId='stat-grading'
-      />
-    );
-  }
-
-  if (hasWaterGauge) {
-    contextItems.push(
-      <StatItem
-        key='water-gauge'
-        icon={<Cloud className='h-4 w-4' />}
-        label='Water Gauge'
-        value={`${waterGaugeName ?? 'Gauge'}${
-          waterGaugeLevel != null ? ` (${waterGaugeLevel})` : ''
-        }`}
-        testId='stat-water-gauge'
-      />
-    );
-  }
-
-  if (hasWaterType) {
-    contextItems.push(
-      <StatItem
-        key='water-type'
-        icon={<Cloud className='h-4 w-4' />}
-        label='Water Type'
-        value={waterType}
-        testId='stat-water-type'
-      />
-    );
-  }
-
-  if (hasSnowConditions) {
-    contextItems.push(
-      <StatItem
-        key='snow-conditions'
-        icon={<Cloud className='h-4 w-4' />}
-        label='Snow Conditions'
-        value={snowConditions}
-        testId='stat-snow-conditions'
-      />
-    );
-  }
-
-  if (hasAbseils) {
-    technicalItems.push(
-      <StatItem
-        key='abseils'
-        icon={<Activity className='h-4 w-4' />}
-        label='Abseils'
-        value={numberOfAbseils}
-        testId='stat-abseils'
-      />
-    );
-  }
-
-  if (hasTotalLength) {
-    technicalItems.push(
-      <StatItem
-        key='total-length'
-        icon={<Ruler className='h-4 w-4' />}
-        label='Total Length'
-        value={`${totalLength} m`}
-        testId='stat-total-length'
-      />
-    );
-  }
-
-  if (hasFrenchGrade) {
-    technicalItems.push(
-      <StatItem
-        key='french-grade'
-        icon={<Compass className='h-4 w-4' />}
-        label='French Grade'
-        value={frenchGrade}
-        testId='stat-french-grade'
-      />
-    );
-  }
-
-  if (hasCanyonFlags) {
-    technicalItems.push(
-      <StatItem
-        key='canyon-flags'
-        icon={<Mountain className='h-4 w-4' />}
-        label='Canyon Flags'
-        value={canyonFlags.join(', ')}
-        testId='stat-canyon-flags'
-      />
-    );
-  }
-
-  if (hasClimbingType) {
-    technicalItems.push(
-      <StatItem
-        key='climbing-type'
-        icon={<Activity className='h-4 w-4' />}
-        label='Climbing Type'
-        value={climbingType}
-        testId='stat-climbing-type'
-      />
-    );
-  }
-
-  if (hasClimbingGrade) {
-    technicalItems.push(
-      <StatItem
-        key='climbing-grade'
-        icon={<Compass className='h-4 w-4' />}
-        label='Climbing Grade'
-        value={climbingGrade}
-        testId='stat-climbing-grade'
-      />
-    );
-  }
-
-  if (hasClimbingLength) {
-    technicalItems.push(
-      <StatItem
-        key='climbing-length'
-        icon={<Ruler className='h-4 w-4' />}
-        label='Climbing Length'
-        value={`${climbingLength} m`}
-        testId='stat-climbing-length'
-      />
-    );
-  }
+  const canyonFlags = buildCanyonFlags(canyoningData);
+  const performanceItems = buildPerformanceItems({
+    distance,
+    duration,
+    elevationGain,
+    averageHeartRate,
+    calories,
+    joggingPace,
+  });
+  const contextItems = buildContextItems({
+    routeDisplay,
+    weatherConditions,
+    trackGrading,
+    waterGaugeName,
+    waterGaugeLevel,
+    waterType,
+    snowConditions,
+  });
+  const technicalItems = buildTechnicalItems({
+    numberOfAbseils,
+    totalLength,
+    frenchGrade,
+    canyonFlags,
+    climbingType,
+    climbingGrade,
+    climbingLength,
+  });
 
   const sections = [
     {

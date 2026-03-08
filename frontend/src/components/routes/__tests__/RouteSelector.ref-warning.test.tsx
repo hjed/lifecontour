@@ -40,7 +40,7 @@ describe('RouteSelector ref handling', () => {
       ).toBeInTheDocument();
 
       const refWarnings = consoleErrorSpy.mock.calls
-        .map(call => call.map(arg => String(arg)).join(' '))
+        .map(call => call.map(String).join(' '))
         .filter(message => ROUTE_SELECTOR_REF_WARNING_PATTERN.test(message));
 
       expect(refWarnings).toHaveLength(0);
