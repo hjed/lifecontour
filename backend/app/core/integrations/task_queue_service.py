@@ -11,6 +11,9 @@ from typing import Any
 from arq import create_pool
 from arq.connections import ArqRedis, RedisSettings
 from arq.jobs import Job, JobDef, JobStatus
+from core_shared.integration_constants import (
+    GOOGLE_CONTACTS_ARQ_QUEUE_NAME as ARQ_QUEUE_NAME,
+)
 from core_shared.logging import get_logger
 from core_shared.metrics import queue_depth
 from core_shared.repositories import SyncJobRepository
@@ -20,9 +23,6 @@ from app.core.integrations.exceptions import JobEnqueueError, JobNotFoundExcepti
 from app.infrastructure.config import Settings
 
 logger = get_logger(__name__)
-
-# ARQ queue name for Google Contacts worker
-ARQ_QUEUE_NAME = "google_contacts"
 
 
 class TaskQueueService:

@@ -138,16 +138,15 @@ class OutboxEventProcessor:
     def _normalize_contact_data(self, contact_data: dict[str, Any]) -> dict[str, Any]:
         """Normalize inbound contact data before versioning and persistence."""
         normalized_contact_data = dict(contact_data)
-        normalized_contact_data["methods"] = self._deduplicate_contact_methods(
-            contact_data.get("methods")
-        )
+        methods = contact_data.get("methods")
+        if isinstance(methods, Sequence) and not isinstance(methods, (str, bytes)):
+            normalized_contact_data["methods"] = self._deduplicate_contact_methods(
+                methods
+            )
         return normalized_contact_data
 
-    def _deduplicate_contact_methods(self, methods: object) -> list[Any]:
+    def _deduplicate_contact_methods(self, methods: Sequence[object]) -> list[Any]:
         """Deduplicate duplicate inbound email methods while preserving order."""
-        if not isinstance(methods, Sequence) or isinstance(methods, (str, bytes)):
-            return []
-
         deduplicated_methods: list[Any] = []
         seen_email_indexes: dict[str, int] = {}
 

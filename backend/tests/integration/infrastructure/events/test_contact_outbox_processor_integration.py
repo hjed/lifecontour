@@ -524,7 +524,7 @@ class TestContactOutboxProcessorIntegration:
             clean_database,
             contact_id=contact_id,
             method_type="email",
-            value="john.doe@example.com",
+            value="  JOHN.DOE@EXAMPLE.COM  ",
             label="personal",
             is_primary=True,
         )
@@ -870,6 +870,36 @@ class TestContactOutboxProcessorIntegration:
         )
 
     @pytest.mark.asyncio
+    async def test_process_events_marks_contact_created_with_non_list_methods_as_failed(
+        self,
+        clean_database: AsyncConnection,
+    ):
+        """Malformed contact.created methods should stay invalid and fail terminally."""
+        external_id = f"people/invalid-created-methods-{uuid4()}"
+        event_id = await self._insert_contact_sync_event(
+            clean_database,
+            event_type="contact.created",
+            contact_data={
+                "first_name": "Broken",
+                "last_name": "Methods",
+                "methods": "john.doe@example.com",
+                "addresses": [],
+                "notes": [],
+                "tags": [],
+            },
+            external_id=external_id,
+            sync_type="created",
+        )
+
+        await self._run_outbox_processor(clean_database)
+        await self._assert_event_failed_terminally(clean_database, event_id)
+
+        await self._assert_no_external_reference(
+            clean_database,
+            external_id=external_id,
+        )
+
+    @pytest.mark.asyncio
     async def test_process_events_marks_invalid_contact_updated_event_as_failed(
         self,
         clean_database: AsyncConnection,
@@ -890,6 +920,49 @@ class TestContactOutboxProcessorIntegration:
             clean_database,
             event_type="contact.updated",
             contact_data=self._build_invalid_contact_data("Mutated"),
+            external_id=external_id,
+            sync_type="updated",
+        )
+
+        await self._run_outbox_processor(clean_database)
+        await self._assert_event_failed_terminally(clean_database, event_id)
+
+        contact_row = await self._fetch_contact_by_id(
+            clean_database,
+            contact_id=contact_id,
+        )
+
+        assert contact_row is not None
+        assert contact_row[1:] == ("Existing", "Contact")
+
+    @pytest.mark.asyncio
+    async def test_process_events_marks_contact_updated_with_non_list_methods_as_failed(
+        self,
+        clean_database: AsyncConnection,
+    ):
+        """Malformed contact.updated methods should stay invalid and fail terminally."""
+        contact_id = 98766
+        external_id = f"people/invalid-updated-methods-{uuid4()}"
+
+        await self._insert_existing_contact_reference(
+            clean_database,
+            contact_id=contact_id,
+            external_id=external_id,
+            first_name="Existing",
+            last_name="Contact",
+        )
+
+        event_id = await self._insert_contact_sync_event(
+            clean_database,
+            event_type="contact.updated",
+            contact_data={
+                "first_name": "Mutated",
+                "last_name": "Contact",
+                "methods": "updated@example.com",
+                "addresses": [],
+                "notes": [],
+                "tags": [],
+            },
             external_id=external_id,
             sync_type="updated",
         )

@@ -18,6 +18,9 @@ from core_shared.database.engine import create_session_factory
 
 # Import integration exceptions from core_shared
 from core_shared.exceptions import JobCancelledException
+from core_shared.integration_constants import (
+    GOOGLE_CONTACTS_ARQ_QUEUE_NAME as ARQ_QUEUE_NAME,
+)
 
 # Import shared observability modules
 from core_shared.logging import (
@@ -91,8 +94,6 @@ logger = get_logger(__name__)
 
 # Initialize metrics collector for this worker
 metrics_collector = MetricsCollector(worker_type="google_contacts")
-
-ARQ_QUEUE_NAME = "google_contacts"
 
 
 async def startup(ctx: dict[str, Any]) -> None:
@@ -571,7 +572,7 @@ def _handle_http_error(
     e: Exception, contact: dict[str, Any], metrics: dict[str, int]
 ) -> None:
     """Handle HTTP errors from Google API."""
-    from googleapiclient.errors import HttpError  # type: ignore[import-untyped]
+    from googleapiclient.errors import HttpError
 
     if not isinstance(e, HttpError):
         raise e
@@ -1699,7 +1700,7 @@ def retry_delay_func(retry_count: int) -> float:
     delay_with_jitter = delay * jitter
 
     # Cap at 15 minutes (900 seconds)
-    return min(delay_with_jitter, 900)
+    return float(min(delay_with_jitter, 900.0))
 
 
 # ARQ Worker Settings
