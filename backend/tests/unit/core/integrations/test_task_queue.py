@@ -64,6 +64,17 @@ class TestRedisSettings:
         assert redis_settings.port == 6380
         assert redis_settings.database == 15
 
+    def test_get_redis_settings_invalid_database_path_preserves_host_and_port(
+        self,
+    ) -> None:
+        """Test malformed DB paths default the DB without discarding host/port."""
+        settings = Settings(redis_url="redis://redis-server:6380/not-a-number")
+        redis_settings = get_redis_settings(settings)
+
+        assert redis_settings.host == "redis-server"
+        assert redis_settings.port == 6380
+        assert redis_settings.database == 0
+
     def test_get_redis_settings_invalid_url(self) -> None:
         """Test getting Redis settings with invalid URL format."""
         settings = Settings(redis_url="invalid://url")

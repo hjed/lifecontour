@@ -32,19 +32,24 @@ def get_redis_settings(settings: Settings | None = None) -> RedisSettings:
     redis_url = settings.redis_url
     parsed_redis_url = urlparse(redis_url)
 
-    try:
-        if parsed_redis_url.scheme != "redis" or parsed_redis_url.hostname is None:
-            raise ValueError("Invalid Redis URL")
-
-        host = parsed_redis_url.hostname
-        port = parsed_redis_url.port or 6379
-        database = 0
-        if parsed_redis_url.path not in {"", "/"}:
-            database = int(parsed_redis_url.path.lstrip("/"))
-    except ValueError:
+    if parsed_redis_url.scheme != "redis" or parsed_redis_url.hostname is None:
         host = "localhost"
         port = 6379
         database = 0
+    else:
+        host = parsed_redis_url.hostname
+
+        try:
+            port = parsed_redis_url.port or 6379
+        except ValueError:
+            port = 6379
+
+        database = 0
+        if parsed_redis_url.path not in {"", "/"}:
+            try:
+                database = int(parsed_redis_url.path.lstrip("/"))
+            except ValueError:
+                database = 0
 
     return RedisSettings(
         host=host,
