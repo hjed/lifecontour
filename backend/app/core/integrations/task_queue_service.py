@@ -107,6 +107,7 @@ class TaskQueueService:
                 sync_type,
                 _job_timeout=self.settings.task_queue_job_timeout_seconds,
                 _defer_until=None,  # Run immediately
+                _queue_name=ARQ_QUEUE_NAME,
             )
 
             if not job:

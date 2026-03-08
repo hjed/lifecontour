@@ -13,7 +13,7 @@ from arq.jobs import JobStatus
 from redis.asyncio import Redis
 
 from app.core.integrations.exceptions import JobNotFoundException
-from app.core.integrations.task_queue_service import TaskQueueService
+from app.core.integrations.task_queue_service import ARQ_QUEUE_NAME, TaskQueueService
 from app.infrastructure.config import Settings
 
 
@@ -116,6 +116,7 @@ class TestTaskQueueService:
                 "smart",
                 _job_timeout=300,
                 _defer_until=None,
+                _queue_name=ARQ_QUEUE_NAME,
             )
 
             assert job_id == "test-job-123"
