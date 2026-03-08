@@ -143,6 +143,54 @@ test.describe('Journal Types', () => {
       expect(data.data.attributes.type_data).toHaveProperty('mood_rating');
       expect(data.data.attributes.type_data).toHaveProperty('plan');
     });
+
+    test('should create a journal with outdoor_activity type', async ({
+      authenticatedPage,
+      testCleanup,
+    }) => {
+      const data = await createJournalWithCleanup(
+        authenticatedPage,
+        testCleanup,
+        'Outdoor Test Journal',
+        'Testing outdoor activity type',
+        ['outdoor_activity']
+      );
+
+      expect(data.data.attributes.types).toContain('outdoor_activity');
+      expect(data.data.attributes.type_data).toHaveProperty('outdoor_activity');
+    });
+
+    test('should create a journal with jogging type', async ({
+      authenticatedPage,
+      testCleanup,
+    }) => {
+      const data = await createJournalWithCleanup(
+        authenticatedPage,
+        testCleanup,
+        'Jogging Test Journal',
+        'Testing jogging type',
+        ['jogging']
+      );
+
+      expect(data.data.attributes.types).toContain('jogging');
+      expect(data.data.attributes.type_data).toHaveProperty('jogging');
+    });
+
+    test('should create a journal with bushwalking type', async ({
+      authenticatedPage,
+      testCleanup,
+    }) => {
+      const data = await createJournalWithCleanup(
+        authenticatedPage,
+        testCleanup,
+        'Bushwalking Test Journal',
+        'Testing bushwalking type',
+        ['bushwalking']
+      );
+
+      expect(data.data.attributes.types).toContain('bushwalking');
+      expect(data.data.attributes.type_data).toHaveProperty('bushwalking');
+    });
   });
 
   test.describe('Type Filtering', () => {
@@ -184,12 +232,17 @@ test.describe('Journal Types', () => {
       expect(filterResponse.ok()).toBeTruthy();
       const filterData = await filterResponse.json();
 
-      // Verify we got exactly 1 mood_rating journal (the one we created)
-      expect(filterData.data.length).toBe(1);
+      // Verify all returned journals have mood_rating type
+      for (const journal of filterData.data) {
+        expect(journal.attributes.types).toContain('mood_rating');
+      }
 
-      // Verify the returned journal has mood_rating type
-      expect(filterData.data[0].attributes.types).toContain('mood_rating');
-      expect(filterData.data[0].attributes.title).toBe('Mood Journal');
+      // Verify the specific journal we created is in the list
+      const ourJournal = filterData.data.find(
+        (j: any) => j.id === journalIds[1]
+      );
+      expect(ourJournal).toBeDefined();
+      expect(ourJournal.attributes.title).toBe('Mood Journal');
     });
   });
 });

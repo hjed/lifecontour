@@ -6,8 +6,25 @@
 
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { JournalCreateForm } from '../JournalCreateForm';
 import { JournalType } from '@/types/journals';
+
+const createTestQueryClient = () =>
+  new QueryClient({
+    defaultOptions: {
+      queries: {
+        retry: false,
+      },
+    },
+  });
+
+const renderWithClient = (ui: React.ReactElement) => {
+  const testQueryClient = createTestQueryClient();
+  return render(
+    <QueryClientProvider client={testQueryClient}>{ui}</QueryClientProvider>
+  );
+};
 
 // Mock the useCreateJournal hook
 const mockMutateAsync = jest.fn();
@@ -33,7 +50,7 @@ describe('JournalCreateForm', () => {
 
   describe('Rendering', () => {
     it('renders all required form fields', () => {
-      render(<JournalCreateForm />);
+      renderWithClient(<JournalCreateForm />);
 
       expect(screen.getByLabelText(/title/i)).toBeInTheDocument();
       expect(screen.getByLabelText(/date range/i)).toBeInTheDocument();
@@ -44,7 +61,7 @@ describe('JournalCreateForm', () => {
     });
 
     it('renders type selector checkboxes', () => {
-      render(<JournalCreateForm />);
+      renderWithClient(<JournalCreateForm />);
 
       expect(screen.getByLabelText(/note/i)).toBeInTheDocument();
       expect(screen.getByLabelText(/event/i)).toBeInTheDocument();
@@ -55,7 +72,7 @@ describe('JournalCreateForm', () => {
     });
 
     it('renders cancel button', () => {
-      render(<JournalCreateForm />);
+      renderWithClient(<JournalCreateForm />);
 
       expect(
         screen.getByRole('button', { name: /cancel/i })
@@ -66,7 +83,7 @@ describe('JournalCreateForm', () => {
   describe('Validation', () => {
     it('shows error when title is empty', async () => {
       const user = userEvent.setup();
-      render(<JournalCreateForm />);
+      renderWithClient(<JournalCreateForm />);
 
       const submitButton = screen.getByRole('button', {
         name: /create journal/i,
@@ -84,7 +101,7 @@ describe('JournalCreateForm', () => {
         data: { id: '1', type: 'journals', attributes: {} },
       });
 
-      render(<JournalCreateForm />);
+      renderWithClient(<JournalCreateForm />);
 
       const titleInput = screen.getByLabelText(/title/i);
       await user.type(titleInput, 'Test Journal');
@@ -101,7 +118,7 @@ describe('JournalCreateForm', () => {
 
     it('prevents submission when EVENT is selected but calendar ID is missing', async () => {
       const user = userEvent.setup();
-      render(<JournalCreateForm />);
+      renderWithClient(<JournalCreateForm />);
 
       await user.type(screen.getByLabelText(/title/i), 'Event Journal');
       await user.click(screen.getByLabelText(/^event$/i));
@@ -120,7 +137,7 @@ describe('JournalCreateForm', () => {
 
     it('prevents submission when PHOTO_ALBUM is selected but Immich Album ID is missing', async () => {
       const user = userEvent.setup();
-      render(<JournalCreateForm />);
+      renderWithClient(<JournalCreateForm />);
 
       await user.type(screen.getByLabelText(/title/i), 'Photo Journal');
       await user.click(screen.getByLabelText(/^photo album$/i));
@@ -141,7 +158,7 @@ describe('JournalCreateForm', () => {
   describe('Type Selection', () => {
     it('allows selecting multiple types', async () => {
       const user = userEvent.setup();
-      render(<JournalCreateForm />);
+      renderWithClient(<JournalCreateForm />);
 
       const noteCheckbox = screen.getByLabelText(/^note$/i);
       const eventCheckbox = screen.getByLabelText(/^event$/i);
@@ -155,7 +172,7 @@ describe('JournalCreateForm', () => {
 
     it('allows deselecting types', async () => {
       const user = userEvent.setup();
-      render(<JournalCreateForm />);
+      renderWithClient(<JournalCreateForm />);
 
       const noteCheckbox = screen.getByLabelText(/^note$/i);
 
@@ -169,7 +186,7 @@ describe('JournalCreateForm', () => {
 
   describe('All Journal Type Options', () => {
     it('renders all 15 journal type checkboxes', () => {
-      render(<JournalCreateForm />);
+      renderWithClient(<JournalCreateForm />);
 
       // Base types
       expect(screen.getByLabelText(/^note$/i)).toBeInTheDocument();
@@ -197,7 +214,7 @@ describe('JournalCreateForm', () => {
   describe('Inline Editors in Create Mode', () => {
     it('shows event type editor when EVENT is selected', async () => {
       const user = userEvent.setup();
-      render(<JournalCreateForm />);
+      renderWithClient(<JournalCreateForm />);
 
       const eventCheckbox = screen.getByLabelText(/^event$/i);
       await user.click(eventCheckbox);
@@ -207,7 +224,7 @@ describe('JournalCreateForm', () => {
 
     it('shows mood rating type editor when MOOD_RATING is selected', async () => {
       const user = userEvent.setup();
-      render(<JournalCreateForm />);
+      renderWithClient(<JournalCreateForm />);
 
       const moodCheckbox = screen.getByLabelText(/^mood rating$/i);
       await user.click(moodCheckbox);
@@ -217,7 +234,7 @@ describe('JournalCreateForm', () => {
 
     it('shows photo album type editor when PHOTO_ALBUM is selected', async () => {
       const user = userEvent.setup();
-      render(<JournalCreateForm />);
+      renderWithClient(<JournalCreateForm />);
 
       const photoCheckbox = screen.getByLabelText(/^photo album$/i);
       await user.click(photoCheckbox);
@@ -227,7 +244,7 @@ describe('JournalCreateForm', () => {
 
     it('shows plan type editor when PLAN is selected', async () => {
       const user = userEvent.setup();
-      render(<JournalCreateForm />);
+      renderWithClient(<JournalCreateForm />);
 
       const planCheckbox = screen.getByLabelText(/^plan$/i);
       await user.click(planCheckbox);
@@ -237,7 +254,7 @@ describe('JournalCreateForm', () => {
 
     it('shows travel type editor when TRAVEL is selected', async () => {
       const user = userEvent.setup();
-      render(<JournalCreateForm />);
+      renderWithClient(<JournalCreateForm />);
 
       const travelCheckbox = screen.getByLabelText(/^travel$/i);
       await user.click(travelCheckbox);
@@ -247,7 +264,7 @@ describe('JournalCreateForm', () => {
 
     it('hides editor when type is deselected', async () => {
       const user = userEvent.setup();
-      render(<JournalCreateForm />);
+      renderWithClient(<JournalCreateForm />);
 
       const eventCheckbox = screen.getByLabelText(/^event$/i);
       await user.click(eventCheckbox);
@@ -259,7 +276,7 @@ describe('JournalCreateForm', () => {
 
     it('editor inputs are enabled in create mode (no Edit button required)', async () => {
       const user = userEvent.setup();
-      render(<JournalCreateForm />);
+      renderWithClient(<JournalCreateForm />);
 
       const eventCheckbox = screen.getByLabelText(/^event$/i);
       await user.click(eventCheckbox);
@@ -279,7 +296,7 @@ describe('JournalCreateForm', () => {
 
     it('mood rating editor initialises with default values in create mode', async () => {
       const user = userEvent.setup();
-      render(<JournalCreateForm />);
+      renderWithClient(<JournalCreateForm />);
 
       const moodCheckbox = screen.getByLabelText(/^mood rating$/i);
       await user.click(moodCheckbox);
@@ -296,7 +313,7 @@ describe('JournalCreateForm', () => {
   describe('Type Dependency Information', () => {
     it('shows dependency info when CANYONING is selected', async () => {
       const user = userEvent.setup();
-      render(<JournalCreateForm />);
+      renderWithClient(<JournalCreateForm />);
 
       const canyoningCheckbox = screen.getByLabelText(/^canyoning$/i);
       await user.click(canyoningCheckbox);
@@ -306,7 +323,7 @@ describe('JournalCreateForm', () => {
 
     it('shows dependency info when BUSHWALKING is selected', async () => {
       const user = userEvent.setup();
-      render(<JournalCreateForm />);
+      renderWithClient(<JournalCreateForm />);
 
       const bushwalkingCheckbox = screen.getByLabelText(/^bushwalking$/i);
       await user.click(bushwalkingCheckbox);
@@ -316,7 +333,7 @@ describe('JournalCreateForm', () => {
 
     it('does not show dependency info for NOTE which has no dependencies', async () => {
       const user = userEvent.setup();
-      render(<JournalCreateForm />);
+      renderWithClient(<JournalCreateForm />);
 
       const noteCheckbox = screen.getByLabelText(/^note$/i);
       await user.click(noteCheckbox);
@@ -326,7 +343,7 @@ describe('JournalCreateForm', () => {
 
     it('hides dependency info when type is deselected', async () => {
       const user = userEvent.setup();
-      render(<JournalCreateForm />);
+      renderWithClient(<JournalCreateForm />);
 
       const canyoningCheckbox = screen.getByLabelText(/^canyoning$/i);
       await user.click(canyoningCheckbox);
@@ -344,7 +361,7 @@ describe('JournalCreateForm', () => {
         data: { id: '1', type: 'journals', attributes: {} },
       });
 
-      render(<JournalCreateForm />);
+      renderWithClient(<JournalCreateForm />);
 
       const titleInput = screen.getByLabelText(/title/i);
       const contentInput = screen.getByLabelText(/content/i);
@@ -376,7 +393,7 @@ describe('JournalCreateForm', () => {
         data: { id: '1', type: 'journals', attributes: {} },
       });
 
-      render(<JournalCreateForm />);
+      renderWithClient(<JournalCreateForm />);
 
       await user.type(screen.getByLabelText(/title/i), 'Mood Journal');
 
@@ -403,7 +420,7 @@ describe('JournalCreateForm', () => {
         data: { id: '1', type: 'journals', attributes: {} },
       });
 
-      render(<JournalCreateForm />);
+      renderWithClient(<JournalCreateForm />);
 
       await user.type(screen.getByLabelText(/title/i), 'Photo Journal');
 
@@ -435,7 +452,7 @@ describe('JournalCreateForm', () => {
         data: { id: '2', type: 'journals', attributes: {} },
       });
 
-      render(<JournalCreateForm />);
+      renderWithClient(<JournalCreateForm />);
 
       await user.type(screen.getByLabelText(/title/i), 'Event Journal');
 
@@ -467,7 +484,7 @@ describe('JournalCreateForm', () => {
         data: { id: '3', type: 'journals', attributes: {} },
       });
 
-      render(<JournalCreateForm />);
+      renderWithClient(<JournalCreateForm />);
 
       await user.type(screen.getByLabelText(/title/i), 'Plan Journal');
 

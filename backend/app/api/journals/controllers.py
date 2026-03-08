@@ -1037,6 +1037,9 @@ async def _process_journal_type_data(
     travel_data_repo: TravelDataRepository | None = None,
     mood_data_repo: MoodDataRepository | None = None,
     fitness_data_repo: FitnessDataRepository | None = None,
+    outdoor_activity_data_repo: OutdoorActivityDataRepository | None = None,
+    bushwalking_data_repo: BushwalkingDataRepository | None = None,
+    jogging_data_repo: JoggingDataRepository | None = None,
 ) -> None:
     """
     Process and save type-specific data for a journal.
@@ -1050,6 +1053,9 @@ async def _process_journal_type_data(
         travel_data_repo: Optional repository for travel data
         mood_data_repo: Optional repository for mood data
         fitness_data_repo: Optional repository for fitness data
+        outdoor_activity_data_repo: Optional repository for outdoor activity data
+        bushwalking_data_repo: Optional repository for bushwalking data
+        jogging_data_repo: Optional repository for jogging data
     """
     # Normalize type_data keys to lowercase for case-insensitive matching
     normalized_type_data = {k.lower(): v for k, v in type_data.items()}
@@ -1248,6 +1254,84 @@ async def _process_journal_type_data(
 
         await fitness_data_repo.save(fitness_data)
 
+    # Process OUTDOOR_ACTIVITY type data
+    if "outdoor_activity" in normalized_type_data and outdoor_activity_data_repo:
+        from app.core.journal.models.outdoor_activity_data import OutdoorActivityData
+
+        outdoor_payload = normalized_type_data["outdoor_activity"]
+        outdoor_data = await outdoor_activity_data_repo.find_by_journal_id(journal_id)
+        if outdoor_data is None:
+            outdoor_data = OutdoorActivityData(journal_id=journal_id)
+
+        if "activity_type" in outdoor_payload:
+            outdoor_data.activity_type = outdoor_payload["activity_type"]
+        if "weather_conditions" in outdoor_payload:
+            outdoor_data.weather_conditions = outdoor_payload["weather_conditions"]
+        if "role" in outdoor_payload:
+            outdoor_data.role = outdoor_payload["role"]
+        if "in_leadership_role" in outdoor_payload:
+            outdoor_data.in_leadership_role = outdoor_payload["in_leadership_role"]
+        if "participant_notes" in outdoor_payload:
+            outdoor_data.participant_notes = outdoor_payload["participant_notes"]
+
+        await outdoor_activity_data_repo.save(outdoor_data)
+
+    # Process BUSHWALKING type data
+    if "bushwalking" in normalized_type_data and bushwalking_data_repo:
+        from app.core.journal.models.bushwalking_data import BushwalkingData
+
+        bushwalking_payload = normalized_type_data["bushwalking"]
+        bushwalking_data = await bushwalking_data_repo.find_by_journal_id(journal_id)
+        if bushwalking_data is None:
+            bushwalking_data = BushwalkingData(journal_id=journal_id)
+
+        if "track_grading" in bushwalking_payload:
+            bushwalking_data.track_grading = bushwalking_payload["track_grading"]
+        if "route_id" in bushwalking_payload:
+            from uuid import UUID
+
+            route_id_raw = bushwalking_payload["route_id"]
+            if route_id_raw is None:
+                bushwalking_data.route_id = None
+            else:
+                bushwalking_data.route_id = UUID(route_id_raw)
+
+        await bushwalking_data_repo.save(bushwalking_data)
+
+    # Process JOGGING type data
+    if "jogging" in normalized_type_data and jogging_data_repo:
+        from app.core.journal.models.jogging_data import JoggingData
+
+        jogging_payload = normalized_type_data["jogging"]
+        jogging_data = await jogging_data_repo.find_by_journal_id(journal_id)
+        if jogging_data is None:
+            jogging_data = JoggingData(journal_id=journal_id)
+
+        if "pace" in jogging_payload:
+            pace_raw = jogging_payload["pace"]
+            if pace_raw is None:
+                jogging_data.pace = None
+            else:
+                try:
+                    jogging_data.pace = int(pace_raw)
+                except (TypeError, ValueError) as exc:
+                    from fastapi import HTTPException
+
+                    raise HTTPException(
+                        status_code=400,
+                        detail="pace must be an integer (seconds per km)",
+                    ) from exc
+        if "route_id" in jogging_payload:
+            from uuid import UUID
+
+            route_id_raw = jogging_payload["route_id"]
+            if route_id_raw is None:
+                jogging_data.route_id = None
+            else:
+                jogging_data.route_id = UUID(route_id_raw)
+
+        await jogging_data_repo.save(jogging_data)
+
 
 async def _process_journal_contact_relationships(
     journal_id: int,
@@ -1359,6 +1443,9 @@ async def create_journal(
             travel_data_repo,
             mood_data_repo,
             fitness_data_repo,
+            outdoor_activity_data_repo,
+            bushwalking_data_repo,
+            jogging_data_repo,
         )
 
     # Add contact relationships if provided in the request (via relationships field)

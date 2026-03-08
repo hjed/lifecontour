@@ -291,4 +291,163 @@ test.describe('Journal Creation UI Flow', () => {
     await expect(page.getByTestId('gpx-track-display')).toBeVisible();
     await expect(page.locator('.leaflet-container')).toBeVisible();
   });
+
+  test('should create an OUTDOOR_ACTIVITY journal and verify fields', async ({
+    authenticatedPage,
+  }) => {
+    const page = authenticatedPage;
+    await navigateToNewJournal(page);
+
+    await page.getByLabel(/title/i).fill(`Outdoor Trip ${Date.now()}`);
+    await page.getByLabel(/content/i).fill('Great outdoor trip.');
+    await page.getByLabel(/^outdoor activity$/i).check();
+
+    await expect(page.getByTestId('outdoor-type-editor')).toBeVisible();
+
+    await page.getByTestId('activity-type-input').fill('Rock Climbing');
+    await page.getByTestId('weather-conditions-input').fill('Sunny, 25C');
+    await page.getByTestId('role-input').fill('Lead Climber');
+    await page.getByTestId('leadership-role-switch').click();
+    await page
+      .getByTestId('participant-notes-input')
+      .fill('Everyone did well.');
+
+    await page.getByRole('button', { name: /create journal/i }).click();
+
+    await awaitCreationAndAssertBadge(page, 'manage-type-outdoor_activity');
+    await page.getByTestId('type-section-trigger-outdoor_activity').click();
+
+    // Verify fields are rendered
+    await expect(page.getByText('Rock Climbing')).toBeVisible();
+    await expect(page.getByText('Sunny, 25C')).toBeVisible();
+    await expect(page.getByText(/Lead Climber/)).toBeVisible();
+    await expect(page.getByText(/(Leadership)/i)).toBeVisible();
+    await expect(page.getByText('Everyone did well.')).toBeVisible();
+  });
+
+  test('should create a JOGGING journal and verify fields', async ({
+    authenticatedPage,
+  }) => {
+    const page = authenticatedPage;
+    await navigateToNewJournal(page);
+
+    await page.getByLabel(/title/i).fill(`Morning Jog ${Date.now()}`);
+    await page.getByLabel(/content/i).fill('Good morning run.');
+    await page.getByLabel(/^jogging$/i).check();
+
+    await expect(page.getByTestId('jogging-type-editor')).toBeVisible();
+
+    // Fill pace as 5:30
+    await page.getByTestId('pace-input').fill('5:30');
+
+    await page.getByRole('button', { name: /create journal/i }).click();
+
+    await awaitCreationAndAssertBadge(page, 'manage-type-jogging');
+    await page.getByTestId('type-section-trigger-jogging').click();
+
+    // Verify pace is rendered
+    await expect(page.getByText('5:30 /km')).toBeVisible();
+  });
+
+  test('should create a BUSHWALKING journal with a route and verify route display', async ({
+    authenticatedPage,
+  }) => {
+    const page = authenticatedPage;
+
+    // Create a route via API so we have a real record to select
+    const routeRes = await page.request.post('/api/routes', {
+      data: {
+        data: {
+          type: 'routes',
+          attributes: {
+            name: `E2E Bushwalk Route ${Date.now()}`,
+            description: 'A test bushwalking route',
+          },
+        },
+      },
+    });
+    expect(routeRes.ok()).toBeTruthy();
+    const routeJson = await routeRes.json();
+    const routeName: string = routeJson.data.attributes.name;
+
+    await navigateToNewJournal(page);
+
+    await page.getByLabel(/title/i).fill(`Bushwalk With Route ${Date.now()}`);
+    await page.getByLabel(/content/i).fill('Walk with a planned route.');
+    await page.getByLabel(/^bushwalking$/i).check();
+
+    await expect(page.getByTestId('bushwalking-type-editor')).toBeVisible();
+
+    // Verify route selector is visible
+    await expect(page.getByRole('combobox', { name: /route/i })).toBeVisible();
+
+    // Select a route via the route selector combobox
+    await page.getByRole('combobox', { name: /route/i }).click();
+    await expect(page.getByPlaceholder('Search routes...')).toBeVisible();
+    await page.getByText(routeName).click();
+
+    // Verify the selected route name appears in the combobox
+    await expect(page.getByRole('combobox', { name: /route/i })).toHaveText(
+      routeName
+    );
+
+    await page.getByRole('button', { name: /create journal/i }).click();
+
+    await awaitCreationAndAssertBadge(page, 'manage-type-bushwalking');
+    await page.getByTestId('type-section-trigger-bushwalking').click();
+
+    // Verify route is displayed in read-only view
+    await expect(page.getByText(routeName)).toBeVisible();
+  });
+
+  test('should create a JOGGING journal with a route and verify route selector and display', async ({
+    authenticatedPage,
+  }) => {
+    const page = authenticatedPage;
+
+    // Create a route via API so we have a real record to select
+    const routeRes = await page.request.post('/api/routes', {
+      data: {
+        data: {
+          type: 'routes',
+          attributes: {
+            name: `E2E Jogging Route ${Date.now()}`,
+            description: 'A test jogging route',
+          },
+        },
+      },
+    });
+    expect(routeRes.ok()).toBeTruthy();
+    const routeJson = await routeRes.json();
+    const routeName: string = routeJson.data.attributes.name;
+
+    await navigateToNewJournal(page);
+
+    await page.getByLabel(/title/i).fill(`Jog With Route ${Date.now()}`);
+    await page.getByLabel(/content/i).fill('Run with a planned route.');
+    await page.getByLabel(/^jogging$/i).check();
+
+    await expect(page.getByTestId('jogging-type-editor')).toBeVisible();
+
+    // Verify route selector is visible
+    await expect(page.getByRole('combobox', { name: /route/i })).toBeVisible();
+
+    // Select a route via the route selector combobox
+    await page.getByRole('combobox', { name: /route/i }).click();
+    await expect(page.getByPlaceholder('Search routes...')).toBeVisible();
+    await page.getByText(routeName).click();
+
+    // Verify the selected route name appears in the combobox
+    await expect(page.getByRole('combobox', { name: /route/i })).toHaveText(
+      routeName
+    );
+
+    await page.getByRole('button', { name: /create journal/i }).click();
+
+    await awaitCreationAndAssertBadge(page, 'manage-type-jogging');
+    await page.getByTestId('type-section-trigger-jogging').click();
+
+    // Verify route is displayed in read-only view
+    await expect(page.getByText(routeName)).toBeVisible();
+  });
 });

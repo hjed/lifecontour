@@ -58,16 +58,16 @@ It also shifts GPX track processing to the backend using `gpxpy` and renders on 
 **Objective:** Add UI forms for the remaining common outdoor activities and integrate the route selector.
 
 **Tasks:**
-- [ ] Create `OutdoorActivityTypeEditor`:
+- [x] Create `OutdoorActivityTypeEditor`:
   - Fields for `activity_type`, `weather_conditions`, `role`.
   - Checkboxes for `in_leadership_role` and a text area for `participant_notes`.
-- [ ] Create `JoggingTypeEditor` (Field for `pace`).
-- [ ] Create `BushwalkingTypeEditor`:
+- [x] Create `JoggingTypeEditor` (Field for `pace`).
+- [x] Create `BushwalkingTypeEditor`:
   - Incorporates the `RouteSelector` from PR 1.
   - Dropdown for the Australian Track Grading System (1-5).
-- [ ] Extend `ActivityStats` to support displaying specific outdoor parameters (weather, grading, pace).
-- [ ] React Testing Library tests for editors.
-- [ ] E2E Tests for `OUTDOOR_ACTIVITY`, `JOGGING`, and `BUSHWALKING`.
+- [x] Extend `ActivityStats` to support displaying specific outdoor parameters (weather, grading, pace).
+- [x] React Testing Library tests for editors.
+- [x] E2E Tests for `OUTDOOR_ACTIVITY`, `JOGGING`, and `BUSHWALKING`.
 
 ## PR 5: Complex Outdoor Activities UI (Abseiling, Canyoning, Climbing, Kayaking, Skiing)
 **Objective:** Implement editors for highly specialized activity profiles completing the UI.

@@ -37,6 +37,9 @@ import {
   type TravelData,
   type PhotoAlbumData,
   type FitnessData,
+  type OutdoorActivityData,
+  type JoggingData,
+  type BushwalkingData,
 } from '@/types/journals';
 import {
   EventTypeEditor,
@@ -45,6 +48,9 @@ import {
   PlanTypeEditor,
   TravelTypeEditor,
   PhotoAlbumTypeEditor,
+  OutdoorActivityTypeEditor,
+  JoggingTypeEditor,
+  BushwalkingTypeEditor,
 } from './type-editors';
 
 // Form validation schema
@@ -68,6 +74,9 @@ interface TypeDataState {
   [JournalType.TRAVEL]?: TravelData;
   [JournalType.PHOTO_ALBUM]?: PhotoAlbumData;
   [JournalType.FITNESS]?: FitnessData;
+  [JournalType.OUTDOOR_ACTIVITY]?: OutdoorActivityData;
+  [JournalType.JOGGING]?: JoggingData;
+  [JournalType.BUSHWALKING]?: BushwalkingData;
 }
 
 // All 15 journal type options for checkboxes
@@ -239,6 +248,27 @@ export function JournalCreateForm({ onCancel }: JournalCreateFormProps = {}) {
   const handleFitnessChange = useCallback(
     (data: unknown) =>
       handleTypeDataChange(JournalType.FITNESS, data as FitnessData),
+    [handleTypeDataChange]
+  );
+
+  const handleOutdoorActivityChange = useCallback(
+    (data: unknown) =>
+      handleTypeDataChange(
+        JournalType.OUTDOOR_ACTIVITY,
+        data as OutdoorActivityData
+      ),
+    [handleTypeDataChange]
+  );
+
+  const handleJoggingChange = useCallback(
+    (data: unknown) =>
+      handleTypeDataChange(JournalType.JOGGING, data as JoggingData),
+    [handleTypeDataChange]
+  );
+
+  const handleBushwalkingChange = useCallback(
+    (data: unknown) =>
+      handleTypeDataChange(JournalType.BUSHWALKING, data as BushwalkingData),
     [handleTypeDataChange]
   );
 
@@ -447,6 +477,24 @@ export function JournalCreateForm({ onCancel }: JournalCreateFormProps = {}) {
                     <FitnessTypeEditor
                       createMode
                       onChange={handleFitnessChange}
+                    />
+                  )}
+                  {type === JournalType.OUTDOOR_ACTIVITY && (
+                    <OutdoorActivityTypeEditor
+                      createMode
+                      onChange={handleOutdoorActivityChange}
+                    />
+                  )}
+                  {type === JournalType.JOGGING && (
+                    <JoggingTypeEditor
+                      createMode
+                      onChange={handleJoggingChange}
+                    />
+                  )}
+                  {type === JournalType.BUSHWALKING && (
+                    <BushwalkingTypeEditor
+                      createMode
+                      onChange={handleBushwalkingChange}
                     />
                   )}
                 </div>

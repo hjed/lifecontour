@@ -87,11 +87,6 @@ export class TestDataManager {
 
     try {
       // Debug: Check authentication and cookies
-      const contextCookies = await this.page.context().cookies();
-      console.log(
-        `🔐 [Data Manager] Context has ${contextCookies.length} cookies:`,
-        contextCookies.map(c => c.name).join(', ')
-      );
 
       const authTestResponse = await this.page.request.get('/api/auth/status');
       if (authTestResponse.ok()) {
@@ -103,6 +98,11 @@ export class TestDataManager {
         );
         const errorText = await authTestResponse.text();
         console.log(`🔐 [Data Manager] Auth error response:`, errorText);
+        const contextCookies = await this.page.context().cookies();
+        console.log(
+          `🔐 [Data Manager] Context has ${contextCookies.length} cookies:`,
+          contextCookies.map(c => c.name).join(', ')
+        );
       }
 
       // Make API request to create contact (JSON API format)
