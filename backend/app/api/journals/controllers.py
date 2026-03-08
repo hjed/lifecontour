@@ -1040,6 +1040,11 @@ async def _process_journal_type_data(
     outdoor_activity_data_repo: OutdoorActivityDataRepository | None = None,
     bushwalking_data_repo: BushwalkingDataRepository | None = None,
     jogging_data_repo: JoggingDataRepository | None = None,
+    abseiling_data_repo: AbseilingDataRepository | None = None,
+    canyoning_data_repo: CanyoningDataRepository | None = None,
+    climbing_data_repo: ClimbingDataRepository | None = None,
+    kayaking_data_repo: KayakingDataRepository | None = None,
+    skiing_data_repo: CrossCountrySkiingDataRepository | None = None,
 ) -> None:
     """
     Process and save type-specific data for a journal.
@@ -1056,6 +1061,11 @@ async def _process_journal_type_data(
         outdoor_activity_data_repo: Optional repository for outdoor activity data
         bushwalking_data_repo: Optional repository for bushwalking data
         jogging_data_repo: Optional repository for jogging data
+        abseiling_data_repo: Optional repository for abseiling data
+        canyoning_data_repo: Optional repository for canyoning data
+        climbing_data_repo: Optional repository for climbing data
+        kayaking_data_repo: Optional repository for kayaking data
+        skiing_data_repo: Optional repository for cross-country skiing data
     """
     # Normalize type_data keys to lowercase for case-insensitive matching
     normalized_type_data = {k.lower(): v for k, v in type_data.items()}
@@ -1332,6 +1342,51 @@ async def _process_journal_type_data(
 
         await jogging_data_repo.save(jogging_data)
 
+    # Process ABSEILING_TRIP type data
+    if "abseiling_trip" in normalized_type_data and abseiling_data_repo:
+        await _update_abseiling_type_data(
+            journal_id,
+            "ABSEILING_TRIP",
+            normalized_type_data["abseiling_trip"],
+            abseiling_data_repo,
+        )
+
+    # Process CANYONING type data
+    if "canyoning" in normalized_type_data and canyoning_data_repo:
+        await _update_canyoning_type_data(
+            journal_id,
+            "CANYONING",
+            normalized_type_data["canyoning"],
+            canyoning_data_repo,
+        )
+
+    # Process CLIMBING type data
+    if "climbing" in normalized_type_data and climbing_data_repo:
+        await _update_climbing_type_data(
+            journal_id,
+            "CLIMBING",
+            normalized_type_data["climbing"],
+            climbing_data_repo,
+        )
+
+    # Process KAYAKING type data
+    if "kayaking" in normalized_type_data and kayaking_data_repo:
+        await _update_kayaking_type_data(
+            journal_id,
+            "KAYAKING",
+            normalized_type_data["kayaking"],
+            kayaking_data_repo,
+        )
+
+    # Process CROSS_COUNTRY_SKIING type data
+    if "cross_country_skiing" in normalized_type_data and skiing_data_repo:
+        await _update_cross_country_skiing_type_data(
+            journal_id,
+            "CROSS_COUNTRY_SKIING",
+            normalized_type_data["cross_country_skiing"],
+            skiing_data_repo,
+        )
+
 
 async def _process_journal_contact_relationships(
     journal_id: int,
@@ -1446,6 +1501,11 @@ async def create_journal(
             outdoor_activity_data_repo,
             bushwalking_data_repo,
             jogging_data_repo,
+            abseiling_data_repo,
+            canyoning_data_repo,
+            climbing_data_repo,
+            kayaking_data_repo,
+            skiing_data_repo,
         )
 
     # Add contact relationships if provided in the request (via relationships field)

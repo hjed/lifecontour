@@ -14,7 +14,15 @@ import type { Route } from 'next';
 import { useForm, useWatch, type Control } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from '@/components/ui/card';
 import {
   Form,
   FormControl,
@@ -30,8 +38,13 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { useCreateJournal } from '@/lib/api/journals';
 import {
   JournalType,
+  type AbseilingData,
+  type CanyoningData,
+  type ClimbingData,
+  type CrossCountrySkiingData,
   type CalendarInfoData,
   type JournalTypeData,
+  type KayakingData,
   type MoodData,
   type PlanData,
   type TravelData,
@@ -42,15 +55,20 @@ import {
   type BushwalkingData,
 } from '@/types/journals';
 import {
+  AbseilingTripTypeEditor,
+  BushwalkingTypeEditor,
+  CanyoningTypeEditor,
+  ClimbingTypeEditor,
+  CrossCountrySkiingTypeEditor,
   EventTypeEditor,
   FitnessTypeEditor,
+  JoggingTypeEditor,
+  KayakingTypeEditor,
   MoodRatingTypeEditor,
+  OutdoorActivityTypeEditor,
   PlanTypeEditor,
   TravelTypeEditor,
   PhotoAlbumTypeEditor,
-  OutdoorActivityTypeEditor,
-  JoggingTypeEditor,
-  BushwalkingTypeEditor,
 } from './type-editors';
 
 // Form validation schema
@@ -77,6 +95,11 @@ interface TypeDataState {
   [JournalType.OUTDOOR_ACTIVITY]?: OutdoorActivityData;
   [JournalType.JOGGING]?: JoggingData;
   [JournalType.BUSHWALKING]?: BushwalkingData;
+  [JournalType.ABSEILING_TRIP]?: AbseilingData;
+  [JournalType.CANYONING]?: CanyoningData;
+  [JournalType.CLIMBING]?: ClimbingData;
+  [JournalType.KAYAKING]?: KayakingData;
+  [JournalType.CROSS_COUNTRY_SKIING]?: CrossCountrySkiingData;
 }
 
 // All 15 journal type options for checkboxes
@@ -181,6 +204,10 @@ const TYPE_LABELS: Record<JournalType, string> = {
   [JournalType.CROSS_COUNTRY_SKIING]: 'Cross-Country Skiing',
 };
 
+function getJournalTypeTestId(type: JournalType): string {
+  return type.toUpperCase();
+}
+
 interface JournalCreateFormProps {
   readonly onCancel?: () => void;
 }
@@ -269,6 +296,39 @@ export function JournalCreateForm({ onCancel }: JournalCreateFormProps = {}) {
   const handleBushwalkingChange = useCallback(
     (data: unknown) =>
       handleTypeDataChange(JournalType.BUSHWALKING, data as BushwalkingData),
+    [handleTypeDataChange]
+  );
+
+  const handleAbseilingTripChange = useCallback(
+    (data: unknown) =>
+      handleTypeDataChange(JournalType.ABSEILING_TRIP, data as AbseilingData),
+    [handleTypeDataChange]
+  );
+
+  const handleCanyoningChange = useCallback(
+    (data: unknown) =>
+      handleTypeDataChange(JournalType.CANYONING, data as CanyoningData),
+    [handleTypeDataChange]
+  );
+
+  const handleClimbingChange = useCallback(
+    (data: unknown) =>
+      handleTypeDataChange(JournalType.CLIMBING, data as ClimbingData),
+    [handleTypeDataChange]
+  );
+
+  const handleKayakingChange = useCallback(
+    (data: unknown) =>
+      handleTypeDataChange(JournalType.KAYAKING, data as KayakingData),
+    [handleTypeDataChange]
+  );
+
+  const handleCrossCountrySkiingChange = useCallback(
+    (data: unknown) =>
+      handleTypeDataChange(
+        JournalType.CROSS_COUNTRY_SKIING,
+        data as CrossCountrySkiingData
+      ),
     [handleTypeDataChange]
   );
 
@@ -438,66 +498,127 @@ export function JournalCreateForm({ onCancel }: JournalCreateFormProps = {}) {
           <div className='space-y-4'>
             {selectedTypes.map(type => {
               const deps = TYPE_DEPENDENCIES[type];
+              const typeTestId = getJournalTypeTestId(type);
               return (
-                <div key={type} className='space-y-3 rounded-md border p-4'>
-                  <p className='text-sm font-medium'>{TYPE_LABELS[type]}</p>
+                <Card
+                  key={type}
+                  className='border-border/80 shadow-sm'
+                  data-testid={`selected-type-panel-${typeTestId}`}
+                >
+                  <CardHeader className='space-y-3 pb-4'>
+                    <div className='space-y-1'>
+                      <CardTitle className='text-base'>
+                        {TYPE_LABELS[type]}
+                      </CardTitle>
+                      <CardDescription>
+                        Add the details for this journal type.
+                      </CardDescription>
+                    </div>
 
-                  {deps && deps.length > 0 && (
-                    <p className='text-muted-foreground text-xs'>
-                      Automatically adds:{' '}
-                      {deps.map(dep => TYPE_LABELS[dep]).join(', ')}
-                    </p>
-                  )}
+                    {deps && deps.length > 0 && (
+                      <div className='space-y-2'>
+                        <p className='text-muted-foreground text-xs font-medium tracking-wide uppercase'>
+                          Automatically adds
+                        </p>
+                        <div className='flex flex-wrap gap-2'>
+                          {deps.map(dep => (
+                            <Badge
+                              key={dep}
+                              variant='secondary'
+                              data-testid={`selected-type-dependency-${typeTestId}-${getJournalTypeTestId(dep)}`}
+                            >
+                              {TYPE_LABELS[dep]}
+                            </Badge>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </CardHeader>
 
-                  {type === JournalType.EVENT && (
-                    <EventTypeEditor createMode onChange={handleEventChange} />
-                  )}
-                  {type === JournalType.MOOD_RATING && (
-                    <MoodRatingTypeEditor
-                      createMode
-                      onChange={handleMoodRatingChange}
-                    />
-                  )}
-                  {type === JournalType.PLAN && (
-                    <PlanTypeEditor createMode onChange={handlePlanChange} />
-                  )}
-                  {type === JournalType.TRAVEL && (
-                    <TravelTypeEditor
-                      createMode
-                      onChange={handleTravelChange}
-                    />
-                  )}
-                  {type === JournalType.PHOTO_ALBUM && (
-                    <PhotoAlbumTypeEditor
-                      createMode
-                      onChange={handlePhotoAlbumChange}
-                    />
-                  )}
-                  {type === JournalType.FITNESS && (
-                    <FitnessTypeEditor
-                      createMode
-                      onChange={handleFitnessChange}
-                    />
-                  )}
-                  {type === JournalType.OUTDOOR_ACTIVITY && (
-                    <OutdoorActivityTypeEditor
-                      createMode
-                      onChange={handleOutdoorActivityChange}
-                    />
-                  )}
-                  {type === JournalType.JOGGING && (
-                    <JoggingTypeEditor
-                      createMode
-                      onChange={handleJoggingChange}
-                    />
-                  )}
-                  {type === JournalType.BUSHWALKING && (
-                    <BushwalkingTypeEditor
-                      createMode
-                      onChange={handleBushwalkingChange}
-                    />
-                  )}
-                </div>
+                  <CardContent className='pt-0'>
+                    {type === JournalType.EVENT && (
+                      <EventTypeEditor
+                        createMode
+                        onChange={handleEventChange}
+                      />
+                    )}
+                    {type === JournalType.MOOD_RATING && (
+                      <MoodRatingTypeEditor
+                        createMode
+                        onChange={handleMoodRatingChange}
+                      />
+                    )}
+                    {type === JournalType.PLAN && (
+                      <PlanTypeEditor createMode onChange={handlePlanChange} />
+                    )}
+                    {type === JournalType.TRAVEL && (
+                      <TravelTypeEditor
+                        createMode
+                        onChange={handleTravelChange}
+                      />
+                    )}
+                    {type === JournalType.PHOTO_ALBUM && (
+                      <PhotoAlbumTypeEditor
+                        createMode
+                        onChange={handlePhotoAlbumChange}
+                      />
+                    )}
+                    {type === JournalType.FITNESS && (
+                      <FitnessTypeEditor
+                        createMode
+                        onChange={handleFitnessChange}
+                      />
+                    )}
+                    {type === JournalType.OUTDOOR_ACTIVITY && (
+                      <OutdoorActivityTypeEditor
+                        createMode
+                        onChange={handleOutdoorActivityChange}
+                      />
+                    )}
+                    {type === JournalType.JOGGING && (
+                      <JoggingTypeEditor
+                        createMode
+                        onChange={handleJoggingChange}
+                      />
+                    )}
+                    {type === JournalType.BUSHWALKING && (
+                      <BushwalkingTypeEditor
+                        createMode
+                        onChange={handleBushwalkingChange}
+                      />
+                    )}
+                    {type === JournalType.ABSEILING_TRIP && (
+                      <AbseilingTripTypeEditor
+                        createMode
+                        onChange={handleAbseilingTripChange}
+                      />
+                    )}
+                    {type === JournalType.CANYONING && (
+                      <CanyoningTypeEditor
+                        createMode
+                        onChange={handleCanyoningChange}
+                      />
+                    )}
+                    {type === JournalType.CLIMBING && (
+                      <ClimbingTypeEditor
+                        createMode
+                        onChange={handleClimbingChange}
+                      />
+                    )}
+                    {type === JournalType.KAYAKING && (
+                      <KayakingTypeEditor
+                        createMode
+                        onChange={handleKayakingChange}
+                      />
+                    )}
+                    {type === JournalType.CROSS_COUNTRY_SKIING && (
+                      <CrossCountrySkiingTypeEditor
+                        createMode
+                        onChange={handleCrossCountrySkiingChange}
+                      />
+                    )}
+                  </CardContent>
+                </Card>
               );
             })}
           </div>

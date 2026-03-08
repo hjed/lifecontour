@@ -35,15 +35,20 @@ import type {
 } from '@/types/journals';
 import { cn } from '@/lib/utils';
 import {
+  AbseilingTripTypeEditor,
+  BushwalkingTypeEditor,
+  CanyoningTypeEditor,
+  ClimbingTypeEditor,
+  CrossCountrySkiingTypeEditor,
   EventTypeEditor,
+  FitnessTypeEditor,
+  JoggingTypeEditor,
+  KayakingTypeEditor,
   MoodRatingTypeEditor,
+  OutdoorActivityTypeEditor,
   PhotoAlbumTypeEditor,
   PlanTypeEditor,
   TravelTypeEditor,
-  FitnessTypeEditor,
-  OutdoorActivityTypeEditor,
-  JoggingTypeEditor,
-  BushwalkingTypeEditor,
 } from './type-editors';
 
 /** Union of all type-specific data shapes supported by JournalTypeSection. */
@@ -261,6 +266,46 @@ function TypeSpecificContent({
           journalId={journalId}
           data={typeData as BushwalkingData | undefined}
           onSave={makeEditorSave<BushwalkingData>(onSave, type)}
+        />
+      );
+    case JournalType.ABSEILING_TRIP:
+      return (
+        <AbseilingTripTypeEditor
+          journalId={journalId}
+          data={typeData as AbseilingData | undefined}
+          onSave={makeEditorSave<AbseilingData>(onSave, type)}
+        />
+      );
+    case JournalType.CANYONING:
+      return (
+        <CanyoningTypeEditor
+          journalId={journalId}
+          data={typeData as CanyoningData | undefined}
+          onSave={makeEditorSave<CanyoningData>(onSave, type)}
+        />
+      );
+    case JournalType.CLIMBING:
+      return (
+        <ClimbingTypeEditor
+          journalId={journalId}
+          data={typeData as ClimbingData | undefined}
+          onSave={makeEditorSave<ClimbingData>(onSave, type)}
+        />
+      );
+    case JournalType.KAYAKING:
+      return (
+        <KayakingTypeEditor
+          journalId={journalId}
+          data={typeData as KayakingData | undefined}
+          onSave={makeEditorSave<KayakingData>(onSave, type)}
+        />
+      );
+    case JournalType.CROSS_COUNTRY_SKIING:
+      return (
+        <CrossCountrySkiingTypeEditor
+          journalId={journalId}
+          data={typeData as CrossCountrySkiingData | undefined}
+          onSave={makeEditorSave<CrossCountrySkiingData>(onSave, type)}
         />
       );
     case JournalType.NOTE:

@@ -1,6 +1,6 @@
 # Iteration 4.5 Task 006: Activity UI Components (Breakdown)
 
-**Status:** 🟡 IN PROGRESS (PR 1 ✅, PR 2 ✅)
+**Status:** 🟢 COMPLETED (PR 1 ✅, PR 2 ✅, PR 3 ✅, PR 4 ✅, PR 5 implementation/tests/polish/E2E ✅)
 **Goal:** Build UI components for activity display and GPX visualization in manageable, PR-sized increments.
 **Parent Task:** [Iteration 4.5: Fitness & Activity Types](./iteration-4.5-fitness-activity-types.md)
 
@@ -73,14 +73,16 @@ It also shifts GPX track processing to the backend using `gpxpy` and renders on 
 **Objective:** Implement editors for highly specialized activity profiles completing the UI.
 
 **Tasks:**
-- [ ] Create `AbseilingTripTypeEditor` (`number_of_abseils`, `total_length`).
-- [ ] Create `CanyoningTypeEditor`:
+- [x] Create `AbseilingTripTypeEditor` (`number_of_abseils`, `total_length`).
+- [x] Create `CanyoningTypeEditor`:
   - `RouteSelector`.
   - Fields for French Grading System (`v`, `a`, `IV` elements).
   - Water gauge fields and flags.
-- [ ] Create `ClimbingTypeEditor` (`sport`/`trad`/`bouldering` dropdown, grade, length).
-- [ ] Create `KayakingTypeEditor` (`RouteSelector`, `water_type` field).
-- [ ] Create `CrossCountrySkiingTypeEditor` (`RouteSelector`, `snow_conditions` area).
-- [ ] Update `ActivityStats` plugin formatting for these complex types.
-- [ ] React Testing Library tests, including French grade parsing validation.
-- [ ] Final visual Polish and E2E Tests.
+- [x] Create `ClimbingTypeEditor` (`sport`/`trad`/`bouldering` dropdown, grade, length).
+- [x] Create `KayakingTypeEditor` (`RouteSelector`, `water_type` field).
+- [x] Create `CrossCountrySkiingTypeEditor` (`RouteSelector`, `snow_conditions` area).
+- [x] Update `ActivityStats` plugin formatting for these complex types.
+- [x] React Testing Library tests, including French grade parsing validation.
+- [x] Handle journals where multiple types have routes (e.g. `CANYONING` + `FITNESS`)
+- [x] Final visual polish for the selected type panels, grouped activity stats, and complex activity read-only summaries.
+- [x] Playwright E2E tests for the remaining complex activity flows.

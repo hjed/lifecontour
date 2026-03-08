@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useId, useMemo, useState } from 'react';
 import { Timer, Map as MapIcon } from 'lucide-react';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
@@ -34,6 +34,9 @@ export function JoggingTypeEditor({
   journalId: _journalId,
 }: JoggingTypeEditorProps) {
   const initialData = useMemo(() => data ?? DEFAULT_DATA, [data]);
+  const baseId = useId();
+  const paceFieldId = `${baseId}-pace`;
+  const routeFieldId = `${baseId}-route`;
 
   // Fetch route details to display route name in read-only view
   const { data: routeData } = useRoute(initialData.route_id ?? '');
@@ -151,7 +154,7 @@ export function JoggingTypeEditor({
       <div className='grid grid-cols-1 gap-4 md:grid-cols-2'>
         {/* Pace */}
         <div className='space-y-2'>
-          <Label htmlFor='pace' className='flex items-center gap-2'>
+          <Label htmlFor={paceFieldId} className='flex items-center gap-2'>
             <Timer
               className='text-muted-foreground h-4 w-4'
               aria-hidden='true'
@@ -159,7 +162,7 @@ export function JoggingTypeEditor({
             Pace (mm:ss per km)
           </Label>
           <Input
-            id='pace'
+            id={paceFieldId}
             type='text'
             value={localPace}
             onChange={handlePaceChange}
@@ -170,7 +173,7 @@ export function JoggingTypeEditor({
 
         {/* Route Selector */}
         <div className='space-y-2'>
-          <Label htmlFor='route-id' className='flex items-center gap-2'>
+          <Label htmlFor={routeFieldId} className='flex items-center gap-2'>
             <MapIcon
               className='text-muted-foreground h-4 w-4'
               aria-hidden='true'
@@ -178,7 +181,7 @@ export function JoggingTypeEditor({
             Route
           </Label>
           <RouteSelector
-            id='route-id'
+            id={routeFieldId}
             value={editData.route_id ?? null}
             onChange={routeId =>
               setEditData({ ...editData, route_id: routeId })

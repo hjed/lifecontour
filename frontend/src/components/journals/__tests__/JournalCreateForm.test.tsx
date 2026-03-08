@@ -262,6 +262,73 @@ describe('JournalCreateForm', () => {
       expect(screen.getByTestId('travel-type-editor')).toBeInTheDocument();
     });
 
+    it('shows abseiling type editor when ABSEILING_TRIP is selected', async () => {
+      const user = userEvent.setup();
+      renderWithClient(<JournalCreateForm />);
+
+      await user.click(screen.getByLabelText(/^abseiling trip$/i));
+
+      expect(
+        screen.getByTestId('abseiling-trip-type-editor')
+      ).toBeInTheDocument();
+    });
+
+    it('shows canyoning type editor when CANYONING is selected', async () => {
+      const user = userEvent.setup();
+      renderWithClient(<JournalCreateForm />);
+
+      await user.click(screen.getByLabelText(/^canyoning$/i));
+
+      expect(screen.getByTestId('canyoning-type-editor')).toBeInTheDocument();
+    });
+
+    it('shows climbing type editor when CLIMBING is selected', async () => {
+      const user = userEvent.setup();
+      renderWithClient(<JournalCreateForm />);
+
+      await user.click(screen.getByLabelText(/^climbing$/i));
+
+      expect(screen.getByTestId('climbing-type-editor')).toBeInTheDocument();
+    });
+
+    it('shows kayaking type editor when KAYAKING is selected', async () => {
+      const user = userEvent.setup();
+      renderWithClient(<JournalCreateForm />);
+
+      await user.click(screen.getByLabelText(/^kayaking$/i));
+
+      expect(screen.getByTestId('kayaking-type-editor')).toBeInTheDocument();
+    });
+
+    it('shows cross-country skiing type editor when CROSS_COUNTRY_SKIING is selected', async () => {
+      const user = userEvent.setup();
+      renderWithClient(<JournalCreateForm />);
+
+      await user.click(screen.getByLabelText(/^cross.country skiing$/i));
+
+      expect(
+        screen.getByTestId('cross-country-skiing-type-editor')
+      ).toBeInTheDocument();
+    });
+
+    it('uses unique route control ids when multiple route-based editors are selected', async () => {
+      const user = userEvent.setup();
+      renderWithClient(<JournalCreateForm />);
+
+      await user.click(screen.getByLabelText(/^bushwalking$/i));
+      await user.click(screen.getByLabelText(/^canyoning$/i));
+
+      const routeComboboxes = screen.getAllByRole('combobox', {
+        name: /route/i,
+      });
+      const routeIds = routeComboboxes.map(combobox =>
+        combobox.getAttribute('id')
+      );
+
+      expect(routeIds).toHaveLength(2);
+      expect(new Set(routeIds).size).toBe(2);
+    });
+
     it('hides editor when type is deselected', async () => {
       const user = userEvent.setup();
       renderWithClient(<JournalCreateForm />);
@@ -311,6 +378,31 @@ describe('JournalCreateForm', () => {
   });
 
   describe('Type Dependency Information', () => {
+    it('renders selected type details inside a structured panel with dependency badges', async () => {
+      const user = userEvent.setup();
+      renderWithClient(<JournalCreateForm />);
+
+      const canyoningCheckbox = screen.getByLabelText(/^canyoning$/i);
+      await user.click(canyoningCheckbox);
+
+      const panel = screen.getByTestId('selected-type-panel-CANYONING');
+
+      expect(
+        within(panel).getByRole('heading', { name: 'Canyoning' })
+      ).toBeInTheDocument();
+      expect(
+        within(panel).getByText(/automatically adds/i)
+      ).toBeInTheDocument();
+      expect(
+        within(panel).getByTestId('selected-type-dependency-CANYONING-FITNESS')
+      ).toHaveTextContent('Fitness');
+      expect(
+        within(panel).getByTestId(
+          'selected-type-dependency-CANYONING-OUTDOOR_ACTIVITY'
+        )
+      ).toHaveTextContent('Outdoor Activity');
+    });
+
     it('shows dependency info when CANYONING is selected', async () => {
       const user = userEvent.setup();
       renderWithClient(<JournalCreateForm />);
@@ -504,6 +596,69 @@ describe('JournalCreateForm', () => {
               [JournalType.PLAN]: expect.objectContaining({
                 // Initial empty state: the plan editor always emits documents: [] on mount
                 documents: expect.any(Array),
+              }),
+            }),
+          })
+        );
+      });
+    });
+
+    it('includes canyoning data in type_data when CANYONING is selected', async () => {
+      const user = userEvent.setup();
+      mockMutateAsync.mockResolvedValueOnce({
+        data: { id: '4', type: 'journals', attributes: {} },
+      });
+
+      renderWithClient(<JournalCreateForm />);
+
+      await user.type(screen.getByLabelText(/title/i), 'Canyon Journal');
+      await user.click(screen.getByLabelText(/^canyoning$/i));
+
+      await user.type(screen.getByTestId('french-grade-input'), 'v3a2iv**');
+      await user.type(screen.getByTestId('water-gauge-name-input'), 'Kowmung');
+      await user.type(screen.getByTestId('water-gauge-level-input'), '8');
+
+      await user.click(screen.getByRole('button', { name: /create journal/i }));
+
+      await waitFor(() => {
+        expect(mockMutateAsync).toHaveBeenCalledWith(
+          expect.objectContaining({
+            types: [JournalType.CANYONING],
+            type_data: expect.objectContaining({
+              [JournalType.CANYONING]: expect.objectContaining({
+                french_grade: 'v3a2IV**',
+                water_guage_name: 'Kowmung',
+                water_guage_level: 8,
+              }),
+            }),
+          })
+        );
+      });
+    });
+
+    it('includes abseiling data in type_data when ABSEILING_TRIP is selected', async () => {
+      const user = userEvent.setup();
+      mockMutateAsync.mockResolvedValueOnce({
+        data: { id: '5', type: 'journals', attributes: {} },
+      });
+
+      renderWithClient(<JournalCreateForm />);
+
+      await user.type(screen.getByLabelText(/title/i), 'Abseil Journal');
+      await user.click(screen.getByLabelText(/^abseiling trip$/i));
+      await user.type(screen.getByTestId('number-of-abseils-input'), '4');
+      await user.type(screen.getByTestId('total-length-input'), '120');
+
+      await user.click(screen.getByRole('button', { name: /create journal/i }));
+
+      await waitFor(() => {
+        expect(mockMutateAsync).toHaveBeenCalledWith(
+          expect.objectContaining({
+            types: [JournalType.ABSEILING_TRIP],
+            type_data: expect.objectContaining({
+              [JournalType.ABSEILING_TRIP]: expect.objectContaining({
+                number_of_abseils: 4,
+                total_length: 120,
               }),
             }),
           })

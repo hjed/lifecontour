@@ -2549,3 +2549,75 @@ class TestJournalTypeCreationWithDependencies:
 
         assert "fitness" in type_data
         assert type_data["fitness"]["distance"] == 8000
+
+    async def test_create_journal_with_complex_activity_types_persists_type_data(
+        self, integration_api_client
+    ):
+        """Creating a journal with the newer complex activity types persists submitted type_data."""
+        create_data = create_journal_request_data(
+            title="Big Adventure Day",
+            content="A mixed activity day across multiple disciplines",
+            types=[
+                "ABSEILING_TRIP",
+                "CANYONING",
+                "CLIMBING",
+                "KAYAKING",
+                "CROSS_COUNTRY_SKIING",
+            ],
+            type_data={
+                "ABSEILING_TRIP": {
+                    "number_of_abseils": 5,
+                    "total_length": 120,
+                },
+                "CANYONING": {
+                    "french_grade": "v3a2IV**",
+                    "water_guage_name": "Slot Canyon Gauge",
+                    "water_guage_level": 45,
+                    "is_vertical": True,
+                    "is_night_canyon": False,
+                    "is_white_water": True,
+                },
+                "CLIMBING": {
+                    "climbing_type": "sport",
+                    "grade": 18,
+                    "length": 25,
+                },
+                "KAYAKING": {
+                    "water_type": "river",
+                },
+                "CROSS_COUNTRY_SKIING": {
+                    "snow_conditions": "packed powder",
+                },
+            },
+        )
+
+        response = await integration_api_client.post("/api/journals", json=create_data)
+
+        assert response.status_code == 201, response.text
+        data = response.json()
+        attrs = data["data"]["attributes"]
+
+        type_data = attrs.get("type_data", {})
+
+        assert "abseiling_trip" in type_data
+        assert type_data["abseiling_trip"]["number_of_abseils"] == 5
+        assert type_data["abseiling_trip"]["total_length"] == 120
+
+        assert "canyoning" in type_data
+        assert type_data["canyoning"]["french_grade"] == "v3a2IV**"
+        assert type_data["canyoning"]["water_guage_name"] == "Slot Canyon Gauge"
+        assert type_data["canyoning"]["water_guage_level"] == 45
+        assert type_data["canyoning"]["is_vertical"] is True
+        assert type_data["canyoning"]["is_night_canyon"] is False
+        assert type_data["canyoning"]["is_white_water"] is True
+
+        assert "climbing" in type_data
+        assert type_data["climbing"]["climbing_type"] == "sport"
+        assert type_data["climbing"]["grade"] == 18
+        assert type_data["climbing"]["length"] == 25
+
+        assert "kayaking" in type_data
+        assert type_data["kayaking"]["water_type"] == "river"
+
+        assert "cross_country_skiing" in type_data
+        assert type_data["cross_country_skiing"]["snow_conditions"] == "packed powder"
