@@ -10,9 +10,11 @@ This processor implements production-grade resilience patterns:
 3. Atomic operations with proper transaction handling
 """
 
+from collections.abc import Sequence
 from typing import Any
 
 import structlog
+from core_shared.models.contacts.entities import Contact
 from core_shared.models.contacts.serialization import (
     ContactDeserializationError,
     deserialize_contact,
@@ -34,6 +36,11 @@ logger = structlog.get_logger()
 EVENT_TYPE_CONTACT_CREATED = "contact.created"
 EVENT_TYPE_CONTACT_UPDATED = "contact.updated"
 EVENT_TYPE_SYNC_COMPLETED = "sync.completed"
+
+
+def _normalize_email_dedup_key(value: str) -> str:
+    """Build a stable deduplication key for email methods."""
+    return value.strip().lower()
 
 
 class OutboxEventProcessingError(Exception):
@@ -128,12 +135,154 @@ class OutboxEventProcessor:
             error_type=type(error).__name__,
         )
 
+    def _normalize_contact_data(self, contact_data: dict[str, Any]) -> dict[str, Any]:
+        """Normalize inbound contact data before versioning and persistence."""
+        normalized_contact_data = dict(contact_data)
+        methods = contact_data.get("methods")
+        if isinstance(methods, Sequence) and not isinstance(methods, (str, bytes)):
+            normalized_contact_data["methods"] = self._deduplicate_contact_methods(
+                methods
+            )
+        return normalized_contact_data
+
+    def _deduplicate_contact_methods(self, methods: Sequence[object]) -> list[Any]:
+        """Deduplicate duplicate inbound email methods while preserving order."""
+        deduplicated_methods: list[Any] = []
+        seen_email_indexes: dict[str, int] = {}
+
+        for raw_method in methods:
+            if not isinstance(raw_method, dict):
+                deduplicated_methods.append(raw_method)
+                continue
+
+            method = dict(raw_method)
+            if method.get("method_type") != "email":
+                deduplicated_methods.append(method)
+                continue
+
+            value = method.get("value")
+            if not isinstance(value, str):
+                deduplicated_methods.append(method)
+                continue
+
+            dedup_key = _normalize_email_dedup_key(value)
+            if not dedup_key:
+                deduplicated_methods.append(method)
+                continue
+
+            existing_index = seen_email_indexes.get(dedup_key)
+            if existing_index is None:
+                seen_email_indexes[dedup_key] = len(deduplicated_methods)
+                deduplicated_methods.append(method)
+                continue
+
+            existing_method = deduplicated_methods[existing_index]
+            if not isinstance(existing_method, dict):
+                deduplicated_methods[existing_index] = method
+                continue
+
+            existing_is_primary = bool(existing_method.get("is_primary"))
+            new_is_primary = bool(method.get("is_primary"))
+
+            if new_is_primary and not existing_is_primary:
+                merged_method = dict(existing_method)
+                merged_method.update(method)
+                merged_method["is_primary"] = True
+                deduplicated_methods[existing_index] = merged_method
+            elif not existing_method.get("label") and method.get("label"):
+                existing_method["label"] = method["label"]
+
+            logger.info(
+                "Deduplicated duplicate inbound email method",
+                email=value,
+            )
+
+        return deduplicated_methods
+
+    def _extract_candidate_emails(self, contact_data: dict[str, Any]) -> list[str]:
+        """Extract unique candidate email addresses from normalized contact data."""
+        methods = contact_data.get("methods")
+        if not isinstance(methods, Sequence) or isinstance(methods, (str, bytes)):
+            return []
+
+        candidate_emails: list[str] = []
+        seen_email_keys: set[str] = set()
+
+        for raw_method in methods:
+            if not isinstance(raw_method, dict):
+                continue
+            if raw_method.get("method_type") != "email":
+                continue
+
+            value = raw_method.get("value")
+            if not isinstance(value, str):
+                continue
+
+            stripped_value = value.strip()
+            if not stripped_value:
+                continue
+
+            dedup_key = _normalize_email_dedup_key(stripped_value)
+            if dedup_key in seen_email_keys:
+                continue
+
+            seen_email_keys.add(dedup_key)
+            candidate_emails.append(stripped_value)
+
+        return candidate_emails
+
+    async def _find_existing_contact_for_email_reconciliation(
+        self,
+        contact_data: dict[str, Any],
+        integration_source: str,
+    ) -> Contact | None:
+        """Find a single safe local contact candidate for email-based reconciliation."""
+        matched_contacts: dict[int, Contact] = {}
+
+        for email in self._extract_candidate_emails(contact_data):
+            existing_contact = await self.contact_service.get_contact_by_email(email)
+            if existing_contact is None or existing_contact.id is None:
+                continue
+            matched_contacts[existing_contact.id] = existing_contact
+
+        if not matched_contacts:
+            return None
+
+        if len(matched_contacts) > 1:
+            matched_contact_ids = sorted(matched_contacts.keys())
+            raise OutboxEventProcessingError(
+                "Multiple existing contacts matched inbound email addresses for "
+                f"{integration_source}: {matched_contact_ids}"
+            )
+
+        matched_contact = next(iter(matched_contacts.values()))
+        if matched_contact.id is None:
+            raise OutboxEventProcessingError(
+                "Matched contact is missing an ID during email reconciliation"
+            )
+
+        existing_integration_reference = (
+            await self.external_reference_service.find_external_reference(
+                internal_entity_type="contact",
+                internal_entity_id=matched_contact.id,
+                external_system=integration_source,
+            )
+        )
+        if existing_integration_reference is not None:
+            raise OutboxEventProcessingError(
+                "Matched local contact is already linked to integration source "
+                f"{integration_source} via external ID "
+                f"{existing_integration_reference.external_entity_id}"
+            )
+
+        return matched_contact
+
     async def _process_contact_created(self, event: OutboxEvent) -> dict[str, Any]:
         """Process a contact.created event."""
         event_data: dict[str, Any] = event.event_data  # type: ignore
         integration_source: str = event_data["integration_source"]
         external_id: str = event_data["external_id"]
-        contact_data: dict[str, Any] = event_data["contact_data"]
+        contact_data = self._normalize_contact_data(event_data["contact_data"])
 
         # IDEMPOTENCY CHECK: Ensure we don't create duplicate contacts
         try:
@@ -178,14 +327,42 @@ class OutboxEventProcessor:
         except ContactDeserializationError as e:
             raise PermanentOutboxEventProcessingError(str(e)) from e
 
-        # Create the contact using the contact service
+        # Reconcile to an existing local contact when there is a single clear email match.
         try:
-            created_contact = await self.contact_service.create_contact(
-                contact, self.connection
+            matched_contact = (
+                await self._find_existing_contact_for_email_reconciliation(
+                    contact_data=contact_data,
+                    integration_source=integration_source,
+                )
             )
         except Exception as e:
             raise OutboxEventProcessingError(
-                f"Failed to create contact: {str(e)}"
+                f"Failed to reconcile contact by email: {str(e)}"
+            ) from e
+
+        contact_action = "created"
+
+        # Create or update the contact using the contact service.
+        try:
+            if matched_contact is None:
+                created_contact = await self.contact_service.create_contact(
+                    contact, self.connection
+                )
+            else:
+                contact.id = matched_contact.id
+                created_contact = await self.contact_service.update_contact(
+                    contact, self.connection
+                )
+                contact_action = "reconciled"
+                logger.info(
+                    "Reused existing local contact for inbound contact creation event",
+                    contact_id=created_contact.id,
+                    integration_source=integration_source,
+                    external_id=external_id,
+                )
+        except Exception as e:
+            raise OutboxEventProcessingError(
+                f"Failed to {contact_action} contact: {str(e)}"
             ) from e
 
         # Create external reference to link contact with external system
@@ -240,8 +417,9 @@ class OutboxEventProcessor:
             # This provides better resilience - contact creation succeeds even if sync_metadata fails
 
         logger.info(
-            "Successfully created contact from outbox event",
+            "Successfully processed contact creation from outbox event",
             contact_id=created_contact.id,
+            contact_action=contact_action,
             integration_source=integration_source,
             external_id=external_id,
             version_hash=version_hash,
@@ -267,7 +445,7 @@ class OutboxEventProcessor:
         event_data: dict[str, Any] = event.event_data  # type: ignore
         integration_source: str = event_data["integration_source"]
         external_id: str = event_data["external_id"]
-        contact_data: dict[str, Any] = event_data["contact_data"]
+        contact_data = self._normalize_contact_data(event_data["contact_data"])
 
         logger.info(
             "Processing contact update with locking",

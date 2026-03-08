@@ -30,6 +30,14 @@ class SqlContactRepository(ContactRepository):
     def __init__(self, connection: AsyncConnection):
         self.conn = connection
 
+    def _normalize_contact_method_value(
+        self, method_type: MethodType, value: str
+    ) -> str:
+        """Normalize stored method values before rehydrating domain entities."""
+        if method_type == MethodType.EMAIL:
+            return value.strip()
+        return value
+
     async def find_by_id(self, contact_id: int) -> Contact | None:
         """Find a contact by ID with all related data."""
         # Get contact basic info
@@ -71,11 +79,14 @@ class SqlContactRepository(ContactRepository):
             methods_query, {"contact_id": contact_id}
         )
         for method_row in methods_result.fetchall():
+            method_type = MethodType(method_row.method_type)
             method = ContactMethod(
                 id=method_row.id,
                 contact_id=contact_id,
-                method_type=MethodType(method_row.method_type),
-                value=method_row.value,
+                method_type=method_type,
+                value=self._normalize_contact_method_value(
+                    method_type, method_row.value
+                ),
                 label=method_row.label,
                 is_primary=method_row.is_primary,
                 created_at=method_row.created_at,
@@ -181,15 +192,24 @@ class SqlContactRepository(ContactRepository):
 
     async def find_by_email(self, email: str) -> Contact | None:
         """Find a contact by email address."""
+        normalized_email = email.strip().lower()
+        if not normalized_email:
+            return None
+
         query = text(
             """
             SELECT DISTINCT c.id FROM contacts c
             JOIN contact_methods cm ON c.id = cm.contact_id
-            WHERE cm.method_type = :method_type AND cm.value = :email
+            WHERE cm.method_type = :method_type
+              AND LOWER(BTRIM(cm.value)) = :normalized_email
         """
         )
         result = await self.conn.execute(
-            query, {"method_type": MethodType.EMAIL.value, "email": email}
+            query,
+            {
+                "method_type": MethodType.EMAIL.value,
+                "normalized_email": normalized_email,
+            },
         )
         row = result.fetchone()
 
@@ -498,11 +518,13 @@ class SqlContactRepository(ContactRepository):
         if row is None:
             return None
 
+        method_type = MethodType(row.method_type)
+
         return ContactMethod(
             id=row.id,
             contact_id=row.contact_id,
-            method_type=MethodType(row.method_type),
-            value=row.value,
+            method_type=method_type,
+            value=self._normalize_contact_method_value(method_type, row.value),
             label=row.label,
             is_primary=row.is_primary,
             created_at=row.created_at,
@@ -880,9 +902,10 @@ class SqlContactRepository(ContactRepository):
         )
         result = await self.conn.execute(methods_query, {"contact_ids": contact_ids})
         for row in result:
+            method_type = MethodType(row.method_type)
             method = ContactMethod(
-                method_type=MethodType(row.method_type),
-                value=row.value,
+                method_type=method_type,
+                value=self._normalize_contact_method_value(method_type, row.value),
                 contact_id=row.contact_id,
                 id=row.id,
                 label=row.label,

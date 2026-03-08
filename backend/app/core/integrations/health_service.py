@@ -10,15 +10,15 @@ from typing import Any
 
 import aiohttp
 from arq.connections import ArqRedis
+from core_shared.integration_constants import (
+    GOOGLE_CONTACTS_ARQ_QUEUE_NAME as ARQ_QUEUE_NAME,
+)
 from core_shared.logging import get_logger
 from core_shared.repositories import SyncJobRepository
 
 from app.core.integrations.database import IntegrationDatabaseManager
 
 logger = get_logger(__name__)
-
-# ARQ queue name for Google Contacts worker
-ARQ_QUEUE_NAME = "google_contacts"
 
 
 class IntegrationHealthService:

@@ -7,6 +7,7 @@ integration workers for background synchronization tasks.
 
 import logging
 from typing import Any
+from urllib.parse import urlparse
 
 from arq import create_pool
 from arq.connections import ArqRedis, RedisSettings
@@ -29,19 +30,31 @@ def get_redis_settings(settings: Settings | None = None) -> RedisSettings:
 
     # Parse Redis URL to extract components
     redis_url = settings.redis_url
-    if redis_url.startswith("redis://"):
-        # Simple parsing for redis://host:port format
-        url_parts = redis_url.replace("redis://", "").split(":")
-        host = url_parts[0]
-        port = int(url_parts[1]) if len(url_parts) > 1 else 6379
-    else:
+    parsed_redis_url = urlparse(redis_url)
+
+    if parsed_redis_url.scheme != "redis" or parsed_redis_url.hostname is None:
         host = "localhost"
         port = 6379
+        database = 0
+    else:
+        host = parsed_redis_url.hostname
+
+        try:
+            port = parsed_redis_url.port or 6379
+        except ValueError:
+            port = 6379
+
+        database = 0
+        if parsed_redis_url.path not in {"", "/"}:
+            try:
+                database = int(parsed_redis_url.path.lstrip("/"))
+            except ValueError:
+                database = 0
 
     return RedisSettings(
         host=host,
         port=port,
-        database=0,  # Use database 0 for task queue
+        database=database,
     )
 
 

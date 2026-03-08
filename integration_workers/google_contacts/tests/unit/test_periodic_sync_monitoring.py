@@ -187,3 +187,4 @@ class TestPeriodicSyncLogging:
         call_args = mock_redis.enqueue_job.call_args
         assert call_args[0][0] == "sync_google_contacts"  # Function name
         assert call_args[0][3] == "smart"  # sync_type parameter
+        assert call_args.kwargs["_queue_name"] == worker.ARQ_QUEUE_NAME

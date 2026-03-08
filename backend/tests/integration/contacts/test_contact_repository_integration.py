@@ -8,6 +8,8 @@ from core_shared.models.contacts.entities import (
     ContactNote,
     MethodType,
 )
+from sqlalchemy import text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core.contacts.adapters.sql import SqlContactRepository
@@ -180,6 +182,89 @@ class TestContactRepositoryIntegration:
         # Act & Assert
         with pytest.raises(DuplicateEmailError):
             await contact_repo.add_method(saved_contact2.id, method2)
+
+    @pytest.mark.asyncio
+    async def test_add_method_case_insensitive_duplicate_email_raises_error(
+        self, contact_repo
+    ):
+        """Test adding a case-equivalent duplicate email raises error."""
+        contact1 = Contact(first_name="John", last_name="Doe")
+        saved_contact1 = await contact_repo.save(contact1)
+
+        method1 = ContactMethod(
+            method_type=MethodType.EMAIL,
+            value="duplicate@example.com",
+            contact_id=saved_contact1.id,
+            is_primary=True,
+        )
+        await contact_repo.add_method(saved_contact1.id, method1)
+
+        contact2 = Contact(first_name="Jane", last_name="Smith")
+        saved_contact2 = await contact_repo.save(contact2)
+
+        method2 = ContactMethod(
+            method_type=MethodType.EMAIL,
+            value="DUPLICATE@example.com",
+            contact_id=saved_contact2.id,
+            is_primary=True,
+        )
+
+        with pytest.raises(DuplicateEmailError):
+            await contact_repo.add_method(saved_contact2.id, method2)
+
+    @pytest.mark.asyncio
+    async def test_normalized_email_unique_index_rejects_whitespace_and_case_variants(
+        self, clean_database: AsyncConnection
+    ):
+        """Test DB uniqueness uses trimmed/lowercased email semantics."""
+        first_contact_row = (
+            await clean_database.execute(
+                text(
+                    """
+                    INSERT INTO contacts (first_name, last_name)
+                    VALUES (:first_name, :last_name)
+                    RETURNING id
+                    """
+                ),
+                {"first_name": "John", "last_name": "Doe"},
+            )
+        ).fetchone()
+        assert first_contact_row is not None
+
+        second_contact_row = (
+            await clean_database.execute(
+                text(
+                    """
+                    INSERT INTO contacts (first_name, last_name)
+                    VALUES (:first_name, :last_name)
+                    RETURNING id
+                    """
+                ),
+                {"first_name": "Jane", "last_name": "Smith"},
+            )
+        ).fetchone()
+        assert second_contact_row is not None
+
+        await clean_database.execute(
+            text(
+                """
+                INSERT INTO contact_methods (contact_id, method_type, value, is_primary)
+                VALUES (:contact_id, 'email', :value, true)
+                """
+            ),
+            {"contact_id": first_contact_row.id, "value": "  duplicate@example.com  "},
+        )
+
+        with pytest.raises(IntegrityError):
+            await clean_database.execute(
+                text(
+                    """
+                    INSERT INTO contact_methods (contact_id, method_type, value, is_primary)
+                    VALUES (:contact_id, 'email', :value, true)
+                    """
+                ),
+                {"contact_id": second_contact_row.id, "value": "DUPLICATE@example.com"},
+            )
 
     @pytest.mark.asyncio
     async def test_add_address_success(self, contact_repo):

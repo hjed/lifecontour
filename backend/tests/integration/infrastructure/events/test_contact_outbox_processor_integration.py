@@ -6,6 +6,7 @@ This verifies that the OutboxEventProcessor correctly processes contact.* events
 from integration workers and creates/updates contacts in the database.
 """
 
+import copy
 import json
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
@@ -166,6 +167,28 @@ class TestContactOutboxProcessorIntegration:
         )
         return list(result.fetchall())
 
+    async def _count_contacts(self, connection: AsyncConnection) -> int:
+        """Count contacts in the database."""
+        result = await connection.execute(text("SELECT COUNT(*) FROM contacts"))
+        return int(result.scalar_one())
+
+    async def _fetch_outbox_event_state(
+        self,
+        connection: AsyncConnection,
+        *,
+        event_id: str,
+    ) -> Any:
+        """Fetch retry and processed state for a specific outbox event."""
+        result = await connection.execute(
+            text("""
+                SELECT retry_count, processed_at
+                FROM outbox_events
+                WHERE event_id = :event_id
+            """),
+            {"event_id": event_id},
+        )
+        return result.fetchone()
+
     async def _assert_external_reference(
         self,
         connection: AsyncConnection,
@@ -264,12 +287,11 @@ class TestContactOutboxProcessorIntegration:
         last_name: str,
     ) -> None:
         """Insert an existing contact and its Google external reference."""
-        await connection.execute(
-            text("""
-                INSERT INTO contacts (id, first_name, last_name, created_at, updated_at)
-                VALUES (:id, :first_name, :last_name, NOW(), NOW())
-            """),
-            {"id": contact_id, "first_name": first_name, "last_name": last_name},
+        await self._insert_contact(
+            connection,
+            contact_id=contact_id,
+            first_name=first_name,
+            last_name=last_name,
         )
         await connection.execute(
             text("""
@@ -286,6 +308,50 @@ class TestContactOutboxProcessorIntegration:
                 "external_entity_type": "person",
                 "external_entity_id": external_id,
                 "reference_data": "{}",
+            },
+        )
+
+    async def _insert_contact(
+        self,
+        connection: AsyncConnection,
+        *,
+        contact_id: int,
+        first_name: str,
+        last_name: str,
+    ) -> None:
+        """Insert a contact row for integration testing."""
+        await connection.execute(
+            text("""
+                INSERT INTO contacts (id, first_name, last_name, created_at, updated_at)
+                VALUES (:id, :first_name, :last_name, NOW(), NOW())
+            """),
+            {"id": contact_id, "first_name": first_name, "last_name": last_name},
+        )
+
+    async def _insert_contact_method(
+        self,
+        connection: AsyncConnection,
+        *,
+        contact_id: int,
+        method_type: str,
+        value: str,
+        label: str | None = None,
+        is_primary: bool = False,
+    ) -> None:
+        """Insert a contact method row for integration testing."""
+        await connection.execute(
+            text("""
+                INSERT INTO contact_methods
+                (contact_id, method_type, value, label, is_primary, created_at, updated_at)
+                VALUES
+                (:contact_id, :method_type, :value, :label, :is_primary, NOW(), NOW())
+            """),
+            {
+                "contact_id": contact_id,
+                "method_type": method_type,
+                "value": value,
+                "label": label,
+                "is_primary": is_primary,
             },
         )
 
@@ -370,6 +436,417 @@ class TestContactOutboxProcessorIntegration:
         )
 
     @pytest.mark.asyncio
+    async def test_process_contact_created_event_deduplicates_duplicate_email_methods(
+        self,
+        clean_database: AsyncConnection,
+        sample_contact_data: dict[str, Any],
+    ):
+        """Duplicate email methods in one inbound contact should not fail creation."""
+        external_id = f"people/duplicate-email-created-{uuid4()}"
+        contact_data = copy.deepcopy(sample_contact_data)
+        contact_data["methods"] = [
+            {
+                "method_type": "email",
+                "value": "john.doe@example.com",
+                "label": "work",
+                "is_primary": False,
+            },
+            {
+                "method_type": "email",
+                "value": "john.doe@example.com",
+                "label": "home",
+                "is_primary": True,
+            },
+            {
+                "method_type": "phone",
+                "value": "+1-555-123-4567",
+                "label": "mobile",
+                "is_primary": True,
+            },
+        ]
+
+        await self._insert_contact_sync_event(
+            clean_database,
+            event_type="contact.created",
+            contact_data=contact_data,
+            external_id=external_id,
+            sync_type="created",
+        )
+
+        await self._run_outbox_processor(clean_database)
+
+        contact_row = await self._fetch_contact_by_name(
+            clean_database,
+            first_name="John",
+            last_name="Doe",
+        )
+
+        assert contact_row is not None
+
+        methods = await self._fetch_contact_methods(
+            clean_database,
+            contact_id=contact_row[0],
+        )
+        email_methods = [method for method in methods if method[0] == "email"]
+        phone_methods = [method for method in methods if method[0] == "phone"]
+
+        assert len(email_methods) == 1
+        assert email_methods[0][1] == "john.doe@example.com"
+        assert len(phone_methods) == 1
+
+        await self._assert_external_reference(
+            clean_database,
+            contact_id=contact_row[0],
+            external_id=external_id,
+        )
+        await self._assert_event_processed(
+            clean_database,
+            event_type="contact.created",
+        )
+
+    @pytest.mark.asyncio
+    async def test_process_contact_created_event_matches_existing_local_contact_by_email(
+        self,
+        clean_database: AsyncConnection,
+        sample_contact_data: dict[str, Any],
+    ):
+        """contact.created should reuse an existing local contact matched by email."""
+        contact_id = 45678
+        external_id = f"people/match-existing-by-email-{uuid4()}"
+
+        await self._insert_contact(
+            clean_database,
+            contact_id=contact_id,
+            first_name="Local",
+            last_name="Only",
+        )
+        await self._insert_contact_method(
+            clean_database,
+            contact_id=contact_id,
+            method_type="email",
+            value="  JOHN.DOE@EXAMPLE.COM  ",
+            label="personal",
+            is_primary=True,
+        )
+
+        await self._insert_contact_sync_event(
+            clean_database,
+            event_type="contact.created",
+            contact_data=copy.deepcopy(sample_contact_data),
+            external_id=external_id,
+            sync_type="created",
+        )
+
+        await self._run_outbox_processor(clean_database)
+
+        assert await self._count_contacts(clean_database) == 1
+
+        matched_contact = await self._fetch_contact_by_id(
+            clean_database,
+            contact_id=contact_id,
+        )
+        assert matched_contact is not None
+        assert matched_contact[1] == "John"
+        assert matched_contact[2] == "Doe"
+
+        contact_by_name = await self._fetch_contact_by_name(
+            clean_database,
+            first_name="John",
+            last_name="Doe",
+        )
+        assert contact_by_name is not None
+        assert contact_by_name[0] == contact_id
+
+        methods = await self._fetch_contact_methods(
+            clean_database,
+            contact_id=contact_id,
+        )
+        email_methods = [method for method in methods if method[0] == "email"]
+        phone_methods = [method for method in methods if method[0] == "phone"]
+
+        assert len(email_methods) == 1
+        assert email_methods[0][1] == "john.doe@example.com"
+        assert len(phone_methods) == 1
+        assert phone_methods[0][1] == "+1-555-123-4567"
+
+        await self._assert_external_reference(
+            clean_database,
+            contact_id=contact_id,
+            external_id=external_id,
+        )
+        await self._assert_event_processed(
+            clean_database,
+            event_type="contact.created",
+        )
+
+    @pytest.mark.asyncio
+    async def test_process_contact_created_event_retries_when_multiple_local_contacts_match_inbound_emails(
+        self,
+        clean_database: AsyncConnection,
+        sample_contact_data: dict[str, Any],
+    ):
+        """Ambiguous email matches should fail safely without linking the wrong contact."""
+        first_contact_id = 45679
+        second_contact_id = 45680
+        external_id = f"people/ambiguous-email-match-{uuid4()}"
+
+        await self._insert_contact(
+            clean_database,
+            contact_id=first_contact_id,
+            first_name="Local",
+            last_name="One",
+        )
+        await self._insert_contact_method(
+            clean_database,
+            contact_id=first_contact_id,
+            method_type="email",
+            value="john.doe@example.com",
+            label="personal",
+            is_primary=True,
+        )
+
+        await self._insert_contact(
+            clean_database,
+            contact_id=second_contact_id,
+            first_name="Local",
+            last_name="Two",
+        )
+        await self._insert_contact_method(
+            clean_database,
+            contact_id=second_contact_id,
+            method_type="email",
+            value="jane.smith@example.com",
+            label="personal",
+            is_primary=True,
+        )
+
+        contact_data = copy.deepcopy(sample_contact_data)
+        contact_data["methods"] = [
+            {
+                "method_type": "email",
+                "value": "john.doe@example.com",
+                "label": "work",
+                "is_primary": True,
+            },
+            {
+                "method_type": "email",
+                "value": "jane.smith@example.com",
+                "label": "home",
+                "is_primary": False,
+            },
+            {
+                "method_type": "phone",
+                "value": "+1-555-123-4567",
+                "label": "mobile",
+                "is_primary": True,
+            },
+        ]
+
+        event_id = await self._insert_contact_sync_event(
+            clean_database,
+            event_type="contact.created",
+            contact_data=contact_data,
+            external_id=external_id,
+            sync_type="created",
+        )
+
+        await self._run_outbox_processor(clean_database)
+
+        assert await self._count_contacts(clean_database) == 2
+
+        first_contact = await self._fetch_contact_by_id(
+            clean_database,
+            contact_id=first_contact_id,
+        )
+        second_contact = await self._fetch_contact_by_id(
+            clean_database,
+            contact_id=second_contact_id,
+        )
+        assert first_contact is not None
+        assert second_contact is not None
+        assert first_contact[1:] == ("Local", "One")
+        assert second_contact[1:] == ("Local", "Two")
+
+        event_state = await self._fetch_outbox_event_state(
+            clean_database,
+            event_id=event_id,
+        )
+        assert event_state is not None
+        assert event_state[0] == 1
+        assert event_state[1] is None
+
+        await self._assert_no_external_reference(
+            clean_database,
+            external_id=external_id,
+        )
+
+    @pytest.mark.asyncio
+    async def test_process_contact_updated_event_deduplicates_duplicate_email_methods(
+        self,
+        clean_database: AsyncConnection,
+        sample_contact_data: dict[str, Any],
+    ):
+        """Duplicate email methods in one inbound update should not fail sync."""
+        contact_id = 56789
+        external_id = f"people/duplicate-email-updated-{uuid4()}"
+
+        await self._insert_existing_contact_reference(
+            clean_database,
+            contact_id=contact_id,
+            external_id=external_id,
+            first_name="Existing",
+            last_name="Contact",
+        )
+        await self._insert_contact_method(
+            clean_database,
+            contact_id=contact_id,
+            method_type="email",
+            value="legacy@example.com",
+            label="legacy",
+            is_primary=True,
+        )
+
+        contact_data = copy.deepcopy(sample_contact_data)
+        contact_data["first_name"] = "Updated"
+        contact_data["last_name"] = "Name"
+        contact_data["methods"] = [
+            {
+                "method_type": "email",
+                "value": "updated@example.com",
+                "label": "work",
+                "is_primary": False,
+            },
+            {
+                "method_type": "email",
+                "value": "updated@example.com",
+                "label": "home",
+                "is_primary": True,
+            },
+            {
+                "method_type": "phone",
+                "value": "+1-555-987-6543",
+                "label": "mobile",
+                "is_primary": True,
+            },
+        ]
+
+        await self._insert_contact_sync_event(
+            clean_database,
+            event_type="contact.updated",
+            contact_data=contact_data,
+            external_id=external_id,
+            sync_type="updated",
+        )
+
+        await self._run_outbox_processor(clean_database)
+
+        updated_contact = await self._fetch_contact_by_id(
+            clean_database,
+            contact_id=contact_id,
+        )
+        assert updated_contact is not None
+        assert updated_contact[1] == "Updated"
+        assert updated_contact[2] == "Name"
+
+        methods = await self._fetch_contact_methods(
+            clean_database,
+            contact_id=contact_id,
+        )
+        email_methods = [method for method in methods if method[0] == "email"]
+        phone_methods = [method for method in methods if method[0] == "phone"]
+
+        assert len(email_methods) == 1
+        assert email_methods[0][1] == "updated@example.com"
+        assert len(phone_methods) == 1
+        assert phone_methods[0][1] == "+1-555-987-6543"
+
+        await self._assert_external_reference(
+            clean_database,
+            contact_id=contact_id,
+            external_id=external_id,
+        )
+        await self._assert_event_processed(
+            clean_database,
+            event_type="contact.updated",
+        )
+
+    @pytest.mark.asyncio
+    async def test_process_events_persists_retry_count_after_db_error_and_continues_batch(
+        self,
+        clean_database: AsyncConnection,
+        sample_contact_data: dict[str, Any],
+    ):
+        """A DB error in one event should not abort retry persistence or later events."""
+        from app.infrastructure.events.outbox_processor import OutboxProcessor
+
+        failing_external_id = f"people/failing-{uuid4()}"
+        succeeding_external_id = f"people/succeeding-{uuid4()}"
+
+        failing_event_id = await self._insert_contact_sync_event(
+            clean_database,
+            event_type="contact.created",
+            contact_data=sample_contact_data,
+            external_id=failing_external_id,
+            sync_type="created",
+        )
+        await self._insert_contact_sync_event(
+            clean_database,
+            event_type="contact.created",
+            contact_data={
+                **copy.deepcopy(sample_contact_data),
+                "first_name": "Jane",
+                "last_name": "Smith",
+                "methods": [
+                    {
+                        "method_type": "email",
+                        "value": "jane.smith@example.com",
+                        "label": "work",
+                        "is_primary": True,
+                    }
+                ],
+            },
+            external_id=succeeding_external_id,
+            sync_type="created",
+        )
+
+        original_process_contact_event = OutboxProcessor._process_contact_event
+
+        async def fail_first_contact_event(
+            self: OutboxProcessor, event: Any, connection: Any
+        ) -> None:
+            if event.event_id == failing_event_id:
+                await connection.execute(text("SELECT * FROM definitely_missing_table"))
+            await original_process_contact_event(self, event, connection)
+
+        with patch.object(
+            OutboxProcessor,
+            "_process_contact_event",
+            new=fail_first_contact_event,
+        ):
+            await self._run_outbox_processor(clean_database)
+
+        failing_event_state = await self._fetch_outbox_event_state(
+            clean_database,
+            event_id=failing_event_id,
+        )
+        assert failing_event_state is not None
+        assert failing_event_state[0] == 1
+        assert failing_event_state[1] is None
+
+        succeeding_contact = await self._fetch_contact_by_name(
+            clean_database,
+            first_name="Jane",
+            last_name="Smith",
+        )
+        assert succeeding_contact is not None
+
+        await self._assert_external_reference(
+            clean_database,
+            contact_id=succeeding_contact[0],
+            external_id=succeeding_external_id,
+        )
+
+    @pytest.mark.asyncio
     async def test_process_events_marks_invalid_contact_created_event_as_failed(
         self,
         clean_database: AsyncConnection,
@@ -380,6 +857,36 @@ class TestContactOutboxProcessorIntegration:
             clean_database,
             event_type="contact.created",
             contact_data=self._build_invalid_contact_data("Broken"),
+            external_id=external_id,
+            sync_type="created",
+        )
+
+        await self._run_outbox_processor(clean_database)
+        await self._assert_event_failed_terminally(clean_database, event_id)
+
+        await self._assert_no_external_reference(
+            clean_database,
+            external_id=external_id,
+        )
+
+    @pytest.mark.asyncio
+    async def test_process_events_marks_contact_created_with_non_list_methods_as_failed(
+        self,
+        clean_database: AsyncConnection,
+    ):
+        """Malformed contact.created methods should stay invalid and fail terminally."""
+        external_id = f"people/invalid-created-methods-{uuid4()}"
+        event_id = await self._insert_contact_sync_event(
+            clean_database,
+            event_type="contact.created",
+            contact_data={
+                "first_name": "Broken",
+                "last_name": "Methods",
+                "methods": "john.doe@example.com",
+                "addresses": [],
+                "notes": [],
+                "tags": [],
+            },
             external_id=external_id,
             sync_type="created",
         )
@@ -413,6 +920,49 @@ class TestContactOutboxProcessorIntegration:
             clean_database,
             event_type="contact.updated",
             contact_data=self._build_invalid_contact_data("Mutated"),
+            external_id=external_id,
+            sync_type="updated",
+        )
+
+        await self._run_outbox_processor(clean_database)
+        await self._assert_event_failed_terminally(clean_database, event_id)
+
+        contact_row = await self._fetch_contact_by_id(
+            clean_database,
+            contact_id=contact_id,
+        )
+
+        assert contact_row is not None
+        assert contact_row[1:] == ("Existing", "Contact")
+
+    @pytest.mark.asyncio
+    async def test_process_events_marks_contact_updated_with_non_list_methods_as_failed(
+        self,
+        clean_database: AsyncConnection,
+    ):
+        """Malformed contact.updated methods should stay invalid and fail terminally."""
+        contact_id = 98766
+        external_id = f"people/invalid-updated-methods-{uuid4()}"
+
+        await self._insert_existing_contact_reference(
+            clean_database,
+            contact_id=contact_id,
+            external_id=external_id,
+            first_name="Existing",
+            last_name="Contact",
+        )
+
+        event_id = await self._insert_contact_sync_event(
+            clean_database,
+            event_type="contact.updated",
+            contact_data={
+                "first_name": "Mutated",
+                "last_name": "Contact",
+                "methods": "updated@example.com",
+                "addresses": [],
+                "notes": [],
+                "tags": [],
+            },
             external_id=external_id,
             sync_type="updated",
         )

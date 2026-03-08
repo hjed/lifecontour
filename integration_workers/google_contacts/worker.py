@@ -12,10 +12,15 @@ from typing import Any
 
 from arq import run_worker
 from arq.connections import RedisSettings
+from arq.cron import cron
+from arq.typing import StartupShutdown, WorkerSettingsBase
 from core_shared.database.engine import create_session_factory
 
 # Import integration exceptions from core_shared
 from core_shared.exceptions import JobCancelledException
+from core_shared.integration_constants import (
+    GOOGLE_CONTACTS_ARQ_QUEUE_NAME as ARQ_QUEUE_NAME,
+)
 
 # Import shared observability modules
 from core_shared.logging import (
@@ -26,12 +31,8 @@ from core_shared.logging import (
 )
 from core_shared.metrics import MetricsCollector
 from core_shared.models.contacts.serialization import serialize_contact
-
-# Import outbox models from core_shared
 from core_shared.models.outbox import OutboxEvent
 from core_shared.models.sync_metadata import SyncStatus
-
-# Import sync job repository from core_shared
 from core_shared.repositories import SyncJobRepository
 from pydantic import SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -80,7 +81,7 @@ class WorkerSettings(BaseSettings):
 
 
 # Global settings instance
-settings = WorkerSettings()
+settings = WorkerSettings()  # type: ignore[call-arg]
 
 # Configure structured logging using shared module
 configure_logging(
@@ -1195,6 +1196,7 @@ async def periodic_sync_all_accounts(ctx: dict[str, Any]) -> dict[str, Any]:
                         user_id,
                         "smart",  # Use smart sync for periodic syncs
                         _job_timeout=600,  # 10 minutes
+                        _queue_name=ARQ_QUEUE_NAME,
                     )
 
                     if job:
@@ -1294,7 +1296,7 @@ async def sync_google_contacts(
     session_factory = ctx["session_factory"]
 
     # Initialize metrics
-    metrics = {
+    metrics: dict[str, Any] = {
         "contacts_processed": 0,
         "contacts_created": 0,
         "contacts_updated": 0,
@@ -1536,7 +1538,7 @@ async def push_local_contacts_to_google(
     session_factory = ctx["session_factory"]
 
     # Initialize metrics
-    metrics = {
+    metrics: dict[str, Any] = {
         "pushed_count": 0,
         "created_count": 0,
         "updated_count": 0,
@@ -1698,11 +1700,11 @@ def retry_delay_func(retry_count: int) -> float:
     delay_with_jitter = delay * jitter
 
     # Cap at 15 minutes (900 seconds)
-    return min(delay_with_jitter, 900)
+    return float(min(delay_with_jitter, 900.0))
 
 
 # ARQ Worker Settings
-class GoogleContactsWorkerSettings:
+class GoogleContactsWorkerSettings(WorkerSettingsBase):
     """ARQ worker configuration."""
 
     # Task functions
@@ -1713,8 +1715,8 @@ class GoogleContactsWorkerSettings:
     ]
 
     # Worker lifecycle
-    on_startup = startup
-    on_shutdown = shutdown
+    on_startup: StartupShutdown = startup
+    on_shutdown: StartupShutdown = shutdown
 
     # Redis settings
     redis_settings = RedisSettings.from_dsn(settings.redis_url)
@@ -1729,14 +1731,12 @@ class GoogleContactsWorkerSettings:
     retry_delay = retry_delay_func  # Use function for exponential backoff with jitter
 
     # Queue name
-    queue_name = "google_contacts"
+    queue_name = ARQ_QUEUE_NAME
 
     # Periodic sync configuration (cron jobs)
     # Only configure cron_jobs if periodic sync is enabled
     cron_jobs = []
     if settings.enable_periodic_sync:
-        from arq.cron import cron
-
         # Generate cron schedule based on sync_interval_hours
         # For example: sync_interval_hours=6 -> hours={0, 6, 12, 18}
         sync_hours = set(range(0, 24, settings.sync_interval_hours))

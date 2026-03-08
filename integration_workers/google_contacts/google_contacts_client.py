@@ -43,9 +43,9 @@ class GoogleContactsAPIClient:
         self.google_client_id = google_client_id
         self.google_client_secret = google_client_secret
         self.user_id = user_id
-        self._service = None
+        self._service: Any | None = None
 
-    async def _get_service(self):
+    async def _get_service(self) -> Any:
         """Get or create Google People API service with authentication."""
         if self._service is None:
             try:

@@ -54,12 +54,14 @@ class OutboxProcessor:
 
                 logger.info("Processing outbox events", event_count=len(events))
 
-                # Process each event
+                # Process each event in its own savepoint so one database error
+                # does not abort retry persistence or later events in the batch.
                 for event in events:
                     try:
-                        await self._process_single_event(
-                            event, repository, search_indexer
-                        )
+                        async with conn.begin_nested():
+                            await self._process_single_event(
+                                event, repository, search_indexer
+                            )
 
                     except PermanentOutboxEventProcessingError as e:
                         logger.error(
@@ -84,9 +86,6 @@ class OutboxProcessor:
 
                         await repository.increment_retry_count(event.event_id)
 
-                # Commit the transaction
-                await conn.commit()
-
                 logger.info(
                     "Finished processing outbox events", processed_count=len(events)
                 )
@@ -105,12 +104,10 @@ class OutboxProcessor:
         - Other events -> SearchIndexer (MeiliSearch indexing)
 
         Note on transaction scope:
-        This method runs within a batch-level transaction. For contact sync events,
-        SELECT FOR UPDATE locks are held until the batch commits. This is intentional:
-        - Ensures atomicity between event processing and marking as processed
-        - Row-level locks allow concurrent processing of different contacts
-        - Lock duration is proportional to batch size (typically small)
-        - Prevents race conditions when the same contact is synced concurrently
+        This method runs within a per-event nested transaction/savepoint inside the
+        batch transaction. Successful event work and its processed marker are committed
+        together, while failures roll back to the savepoint so retry state can still be
+        persisted and later events can continue.
 
         Args:
             event: Outbox event to process
