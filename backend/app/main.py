@@ -229,18 +229,23 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     return app
 
 
+def run_app(settings: Settings | None = None) -> None:
+    """Run the application with the configured host and port."""
+    import uvicorn
+
+    resolved_settings = settings or get_settings()
+    uvicorn.run(
+        "app.main:app",
+        host=resolved_settings.host,
+        port=resolved_settings.port,
+        reload=resolved_settings.debug,
+        log_level=resolved_settings.log_level.lower(),
+    )
+
+
 # Create the application instance
 app = create_app()
 
 
 if __name__ == "__main__":
-    import uvicorn
-
-    settings = get_settings()
-    uvicorn.run(
-        "app.main:app",
-        host="0.0.0.0",
-        port=8000,
-        reload=settings.debug,
-        log_level=settings.log_level.lower(),
-    )
+    run_app()

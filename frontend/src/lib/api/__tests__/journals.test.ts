@@ -524,6 +524,23 @@ describe('Journals API', () => {
 
       expect(result.current.error).toEqual(new Error('Contact not found'));
     });
+
+    it('should use the fetch fallback error when detail is missing', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: false,
+        json: async () => ({ errors: [{}] }),
+      } as Response);
+
+      const { result } = renderHook(() => useContactJournals('123'), {
+        wrapper: createWrapper,
+      });
+
+      await waitFor(() => {
+        expect(result.current.isError).toBe(true);
+      });
+
+      expect(result.current.error).toEqual(new Error('Failed to fetch data'));
+    });
   });
 
   describe('Calendar Hooks', () => {

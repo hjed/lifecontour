@@ -13,6 +13,8 @@ from typing import Any, cast
 
 import pytest
 import pytest_asyncio
+from dishka.integrations.fastapi import setup_dishka as setup_fastapi_dishka
+from dishka.integrations.starlette import setup_dishka as setup_starlette_dishka
 from itsdangerous import TimestampSigner
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine, create_async_engine
@@ -465,9 +467,11 @@ async def _authenticated_client_context(
             pass
 
         app.state.dishka_container = test_container
+        setup_fastapi_dishka(test_container, app)
         mcp_app = getattr(app.state, "mcp_app", None)
         if mcp_app is not None:
             mcp_app.state.dishka_container = test_container
+            setup_starlette_dishka(test_container, mcp_app)
 
         @asynccontextmanager
         async def client_context() -> AsyncGenerator[AsyncClient, None]:

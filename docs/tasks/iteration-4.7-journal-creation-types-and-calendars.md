@@ -79,6 +79,9 @@
 - [x] Run and fix all quality gates for the PR (same as above).
 - [x] If calendar-related REST endpoints or MCP tools (for example, journal search filters by `calendar_id` or any future calendar MCP tools) are introduced or changed, update their MCP definitions and tests in the same PR.
 
+**Follow-up noted during PR review / Sonar triage:**
+- [ ] Refactor `backend/app/mcp/domains/journals/tools.py` to reduce the cognitive complexity of `register_journal_tools(...)` without changing tool behaviour. This was intentionally deferred from the PR review remediation pass because the valid low-risk Sonar findings were fixed first and a broader registration refactor needs its own focused test-first change.
+
 ## 4. Testing & Quality Expectations for Iteration 4.7
 - All tasks follow strict test‑first development: write or extend unit, integration, and E2E tests before implementing behaviour.
 - Tests must use the existing fixtures and deterministic test data patterns (no conditional logic or data-dependent skipping).

@@ -568,53 +568,56 @@ async def _create_type_specific_data(
     # These will be created when the user provides type_data
 
 
+def _parse_calendar_id(calendar_id: Any) -> UUID | None:
+    if calendar_id is None:
+        return None
+
+    if isinstance(calendar_id, UUID):
+        return calendar_id
+
+    if isinstance(calendar_id, str):
+        try:
+            return UUID(calendar_id)
+        except (ValueError, TypeError) as exc:
+            raise ValueError(
+                f"Invalid calendar_id '{calendar_id}'. Must be a valid UUID."
+            ) from exc
+
+    raise ValueError(f"Invalid calendar_id '{calendar_id}'. Must be a valid UUID.")
+
+
+def _parse_optional_time_field(type_data_dict: dict[str, Any], field_name: str) -> Any:
+    value = type_data_dict.get(field_name)
+    if not isinstance(value, str):
+        return value
+
+    try:
+        return dt_time.fromisoformat(value)
+    except ValueError as exc:
+        raise ValueError(
+            f"Invalid {field_name} '{value}'. Must use HH:MM or HH:MM:SS format."
+        ) from exc
+
+
 async def _update_event_data(
     journal_id: int,
     type_data_dict: dict[str, Any],
     calendar_info_repo: SqlCalendarInfoRepository,
 ) -> None:
-    calendar_id = type_data_dict.get("calendar_id")
-    if calendar_id is not None:
-        if isinstance(calendar_id, str):
-            try:
-                calendar_id = UUID(calendar_id)
-            except (ValueError, TypeError) as exc:
-                raise ValueError(
-                    f"Invalid calendar_id '{calendar_id}'. Must be a valid UUID."
-                ) from exc
-        elif not isinstance(calendar_id, UUID):
-            raise ValueError(
-                f"Invalid calendar_id '{calendar_id}'. Must be a valid UUID."
-            )
+    calendar_id = _parse_calendar_id(type_data_dict.get("calendar_id"))
+    if calendar_id is None:
+        return
 
-        start_time = type_data_dict.get("start_time")
-        if isinstance(start_time, str):
-            try:
-                start_time = dt_time.fromisoformat(start_time)
-            except ValueError as exc:
-                raise ValueError(
-                    f"Invalid start_time '{start_time}'. Must use HH:MM or HH:MM:SS format."
-                ) from exc
-
-        end_time = type_data_dict.get("end_time")
-        if isinstance(end_time, str):
-            try:
-                end_time = dt_time.fromisoformat(end_time)
-            except ValueError as exc:
-                raise ValueError(
-                    f"Invalid end_time '{end_time}'. Must use HH:MM or HH:MM:SS format."
-                ) from exc
-
-        calendar_info = CalendarInfo(
-            journal_id=journal_id,
-            calendar_id=calendar_id,
-            start_time=start_time,
-            end_time=end_time,
-            is_all_day=type_data_dict.get("is_all_day", False),
-            location=type_data_dict.get("location"),
-            sync_invitees=type_data_dict.get("sync_invitees", False),
-        )
-        await calendar_info_repo.save(calendar_info)
+    calendar_info = CalendarInfo(
+        journal_id=journal_id,
+        calendar_id=calendar_id,
+        start_time=_parse_optional_time_field(type_data_dict, "start_time"),
+        end_time=_parse_optional_time_field(type_data_dict, "end_time"),
+        is_all_day=type_data_dict.get("is_all_day", False),
+        location=type_data_dict.get("location"),
+        sync_invitees=type_data_dict.get("sync_invitees", False),
+    )
+    await calendar_info_repo.save(calendar_info)
 
 
 async def _update_mood_data(
@@ -1805,8 +1808,8 @@ def register_journal_tools(mcp: FastMCP[None]) -> None:
         class CalendarListItem(BaseModel):
             id: str
             name: str
-            description: str | None
-            color: str | None
+            description: str | None = None
+            color: str | None = None
 
         class CalendarListResponse(BaseModel):
             calendars: list[CalendarListItem]

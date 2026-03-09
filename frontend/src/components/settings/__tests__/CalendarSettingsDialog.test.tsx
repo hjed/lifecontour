@@ -1,3 +1,5 @@
+/** @jest-environment jsdom */
+
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { CalendarSettingsDialog } from '../CalendarSettingsDialog';
 import { useCreateCalendar, useUpdateCalendar } from '@/lib/api/journals';

@@ -6,8 +6,8 @@ using Dishka dependency injection patterns.
 """
 
 from datetime import UTC, datetime, timedelta
-from typing import Any
-from unittest.mock import Mock
+from typing import Any, cast
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 import pytest_asyncio
@@ -64,11 +64,9 @@ class JournalTestProvider(Provider):
     @provide(scope=Scope.REQUEST)
     def get_event_publisher(self, connection: AsyncConnection) -> OutboxEventPublisher:
         # Return a mock event publisher for testing
-        from unittest.mock import AsyncMock
-
         mock_publisher = Mock(spec=OutboxEventPublisher)
         mock_publisher.publish = AsyncMock(return_value=None)
-        return mock_publisher
+        return cast(OutboxEventPublisher, mock_publisher)
 
     @provide(scope=Scope.REQUEST)
     def get_journal_service(
@@ -538,7 +536,7 @@ class TestFetchJournalTypesAndDataNewActivityTypes:
             {"journal_id": journal_id},
         )
 
-        types, type_data = await self._call_fetch(journal_id, clean_database)
+        _, type_data = await self._call_fetch(journal_id, clean_database)
 
         fitness = type_data["fitness"]
         assert fitness["heart_rate_avg"] == 145

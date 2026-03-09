@@ -1,6 +1,7 @@
 """Helpers for mounted MCP HTTP integration tests."""
 
 import json
+from collections.abc import Iterable
 from typing import Any
 
 import mcp.types as mcp_types
@@ -19,37 +20,44 @@ _WRAPPER_KEYS = {
 }
 
 
+def _load_json(value: str) -> tuple[bool, Any]:
+    try:
+        return True, json.loads(value)
+    except json.JSONDecodeError:
+        return False, None
+
+
+def _collect_nested_json_dicts(values: Iterable[Any]) -> list[dict[str, Any]]:
+    nested_dicts: list[dict[str, Any]] = []
+    for nested_value in values:
+        nested_dicts.extend(_iter_json_dicts(nested_value))
+    return nested_dicts
+
+
+def _iter_sse_json_dicts(value: str) -> list[dict[str, Any]]:
+    dicts: list[dict[str, Any]] = []
+    for line in value.splitlines():
+        if not line.startswith("data:"):
+            continue
+
+        loaded, parsed_line = _load_json(line.removeprefix("data:").strip())
+        if loaded:
+            dicts.extend(_iter_json_dicts(parsed_line))
+    return dicts
+
+
 def _iter_json_dicts(value: Any) -> list[dict[str, Any]]:
     if isinstance(value, str):
-        try:
-            return _iter_json_dicts(json.loads(value))
-        except json.JSONDecodeError:
-            pass
-
-        dicts: list[dict[str, Any]] = []
-        for line in value.splitlines():
-            if not line.startswith("data:"):
-                continue
-
-            try:
-                parsed_line = json.loads(line.removeprefix("data:").strip())
-            except json.JSONDecodeError:
-                continue
-
-            dicts.extend(_iter_json_dicts(parsed_line))
-        return dicts
+        loaded, parsed_value = _load_json(value)
+        if loaded:
+            return _iter_json_dicts(parsed_value)
+        return _iter_sse_json_dicts(value)
 
     if isinstance(value, dict):
-        nested_dicts = [value]
-        for nested_value in value.values():
-            nested_dicts.extend(_iter_json_dicts(nested_value))
-        return nested_dicts
+        return [value, *_collect_nested_json_dicts(value.values())]
 
     if isinstance(value, list):
-        list_nested_dicts: list[dict[str, Any]] = []
-        for nested_value in value:
-            list_nested_dicts.extend(_iter_json_dicts(nested_value))
-        return list_nested_dicts
+        return _collect_nested_json_dicts(value)
 
     return []
 
