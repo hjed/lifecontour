@@ -2233,6 +2233,156 @@ class TestJournalTypeDataValidation:
             "Boolean water_guage_level should return 400 not 500"
         )
 
+    async def test_update_abseiling_with_null_optional_integers_clears_values(
+        self, integration_api_client
+    ):
+        """Updating ABSEILING_TRIP with null optional ints should clear persisted values."""
+        create_data = create_journal_request_data(
+            title="Abseiling Clear Test",
+            content="Test content",
+            types=["ABSEILING_TRIP"],
+            type_data={
+                "ABSEILING_TRIP": {
+                    "number_of_abseils": 5,
+                    "total_length": 120,
+                }
+            },
+        )
+        create_response = await integration_api_client.post(
+            "/api/journals", json=create_data
+        )
+        assert create_response.status_code == 201
+        journal_id = create_response.json()["data"]["id"]
+
+        update_data = {
+            "data": {
+                "type": "journal-type-data",
+                "attributes": {
+                    "number_of_abseils": None,
+                    "total_length": None,
+                },
+            }
+        }
+        response = await integration_api_client.put(
+            f"/api/journals/{journal_id}/types/ABSEILING_TRIP/data",
+            json=update_data,
+        )
+
+        assert response.status_code == 200, response.text
+        abseiling_data = response.json()["data"]["attributes"]["type_data"][
+            "abseiling_trip"
+        ]
+        assert "number_of_abseils" not in abseiling_data
+        assert "total_length" not in abseiling_data
+
+    async def test_update_canyoning_with_null_water_guage_level_clears_value(
+        self, integration_api_client
+    ):
+        """Updating CANYONING with null water_guage_level should clear the persisted value."""
+        create_data = create_journal_request_data(
+            title="Canyoning Clear Test",
+            content="Test content",
+            types=["CANYONING"],
+            type_data={
+                "CANYONING": {
+                    "french_grade": "v3a2IV**",
+                    "water_guage_level": 45,
+                }
+            },
+        )
+        create_response = await integration_api_client.post(
+            "/api/journals", json=create_data
+        )
+        assert create_response.status_code == 201
+        journal_id = create_response.json()["data"]["id"]
+
+        update_data = {
+            "data": {
+                "type": "journal-type-data",
+                "attributes": {"water_guage_level": None},
+            }
+        }
+        response = await integration_api_client.put(
+            f"/api/journals/{journal_id}/types/CANYONING/data",
+            json=update_data,
+        )
+
+        assert response.status_code == 200, response.text
+        canyoning_data = response.json()["data"]["attributes"]["type_data"]["canyoning"]
+        assert "water_guage_level" not in canyoning_data
+
+    async def test_update_climbing_with_null_optional_integers_clears_values(
+        self, integration_api_client
+    ):
+        """Updating CLIMBING with null optional ints should clear persisted values."""
+        create_data = create_journal_request_data(
+            title="Climbing Clear Test",
+            content="Test content",
+            types=["CLIMBING"],
+            type_data={
+                "CLIMBING": {
+                    "climbing_type": "sport",
+                    "grade": 18,
+                    "length": 25,
+                }
+            },
+        )
+        create_response = await integration_api_client.post(
+            "/api/journals", json=create_data
+        )
+        assert create_response.status_code == 201
+        journal_id = create_response.json()["data"]["id"]
+
+        update_data = {
+            "data": {
+                "type": "journal-type-data",
+                "attributes": {"grade": None, "length": None},
+            }
+        }
+        response = await integration_api_client.put(
+            f"/api/journals/{journal_id}/types/CLIMBING/data",
+            json=update_data,
+        )
+
+        assert response.status_code == 200, response.text
+        climbing_data = response.json()["data"]["attributes"]["type_data"]["climbing"]
+        assert "grade" not in climbing_data
+        assert "length" not in climbing_data
+
+    async def test_create_bushwalking_with_invalid_route_id_returns_400(
+        self, integration_api_client
+    ):
+        """Creating BUSHWALKING with an invalid route_id UUID should return 400."""
+        create_data = create_journal_request_data(
+            title="Bushwalking Create UUID Validation Test",
+            content="Test content",
+            types=["BUSHWALKING"],
+            type_data={"BUSHWALKING": {"route_id": "not-a-valid-uuid"}},
+        )
+
+        response = await integration_api_client.post("/api/journals", json=create_data)
+
+        assert response.status_code == 400, (
+            "Invalid create-time bushwalking route_id should return 400 not 500"
+        )
+
+    async def test_create_jogging_with_invalid_route_id_returns_400(
+        self, integration_api_client
+    ):
+        """Creating JOGGING with an invalid route_id UUID should return 400."""
+        create_data = create_journal_request_data(
+            title="Jogging Create UUID Validation Test",
+            content="Test content",
+            types=["JOGGING"],
+            type_data={"JOGGING": {"route_id": "not-a-valid-uuid"}},
+        )
+
+        response = await integration_api_client.post("/api/journals", json=create_data)
+
+        assert response.status_code == 400, (
+            "Invalid create-time jogging route_id should return 400 not 500"
+        )
+
     async def test_update_kayaking_with_invalid_uuid_returns_400(
         self, integration_api_client
     ):

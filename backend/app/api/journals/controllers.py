@@ -147,6 +147,13 @@ def _require_integer(value: Any, field_name: str) -> int:
     return value
 
 
+def _parse_optional_integer(value: Any, field_name: str) -> int | None:
+    """Validate an optional integer field while rejecting booleans."""
+    if value is None:
+        return None
+    return _require_integer(value, field_name)
+
+
 async def _create_type_specific_data(
     journal_type: "JournalType",
     journal_id: int,
@@ -1320,13 +1327,9 @@ async def _process_journal_type_data(
         if "track_grading" in bushwalking_payload:
             bushwalking_data.track_grading = bushwalking_payload["track_grading"]
         if "route_id" in bushwalking_payload:
-            from uuid import UUID
-
-            route_id_raw = bushwalking_payload["route_id"]
-            if route_id_raw is None:
-                bushwalking_data.route_id = None
-            else:
-                bushwalking_data.route_id = UUID(route_id_raw)
+            bushwalking_data.route_id = _parse_optional_uuid(
+                bushwalking_payload["route_id"], "route_id"
+            )
 
         await bushwalking_data_repo.save(bushwalking_data)
 
@@ -1354,13 +1357,9 @@ async def _process_journal_type_data(
                         detail="pace must be an integer (seconds per km)",
                     ) from exc
         if "route_id" in jogging_payload:
-            from uuid import UUID
-
-            route_id_raw = jogging_payload["route_id"]
-            if route_id_raw is None:
-                jogging_data.route_id = None
-            else:
-                jogging_data.route_id = UUID(route_id_raw)
+            jogging_data.route_id = _parse_optional_uuid(
+                jogging_payload["route_id"], "route_id"
+            )
 
         await jogging_data_repo.save(jogging_data)
 
@@ -2250,11 +2249,11 @@ async def _update_abseiling_type_data(
     # Validate types eagerly so mismatches return 400 rather than an unhandled TypeError.
     updates: dict[str, Any] = {}
     if "number_of_abseils" in attrs:
-        updates["number_of_abseils"] = _require_integer(
+        updates["number_of_abseils"] = _parse_optional_integer(
             attrs["number_of_abseils"], "number_of_abseils"
         )
     if "total_length" in attrs:
-        updates["total_length"] = _require_integer(
+        updates["total_length"] = _parse_optional_integer(
             attrs["total_length"], "total_length"
         )
 
@@ -2286,7 +2285,7 @@ async def _update_canyoning_type_data(
     if "water_guage_name" in attrs:
         updates["water_guage_name"] = attrs["water_guage_name"]
     if "water_guage_level" in attrs:
-        updates["water_guage_level"] = _require_integer(
+        updates["water_guage_level"] = _parse_optional_integer(
             attrs["water_guage_level"], "water_guage_level"
         )
     if "is_vertical" in attrs:
@@ -2322,9 +2321,9 @@ async def _update_climbing_type_data(
             raise JournalValidationError("climbing_type", "Must be a string")
         updates["climbing_type"] = attrs["climbing_type"]
     if "grade" in attrs:
-        updates["grade"] = _require_integer(attrs["grade"], "grade")
+        updates["grade"] = _parse_optional_integer(attrs["grade"], "grade")
     if "length" in attrs:
-        updates["length"] = _require_integer(attrs["length"], "length")
+        updates["length"] = _parse_optional_integer(attrs["length"], "length")
 
     validated_data = dataclasses.replace(climbing_data, **updates)
     await climbing_data_repo.save(validated_data)
