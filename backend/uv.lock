@@ -718,11 +718,11 @@ wheels = [
 
 [[package]]
 name = "dishka"
-version = "1.8.0"
+version = "1.9.1"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/96/9f/4445637e0543242ea8733f894910f83d2d402ff6aca0b0b41fcdd83290c7/dishka-1.8.0.tar.gz", hash = "sha256:15bad7d0a671b547a81e59188769d8b676918404f349b70664225574e4f27701", size = 268984, upload-time = "2026-02-11T11:05:11.567Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/b9/97/18d4a9bd44f6baa975cd8d54ed3a1a86b341a43c9c077e647d351c9d4573/dishka-1.9.1.tar.gz", hash = "sha256:973f19dc65160a97370181106764ae076052af4489e94b0cedb3eb4e47fe13bf", size = 274962, upload-time = "2026-03-08T09:43:47.298Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/0a/99/5540e68c60e96901cd439484c19826f01dbc718b48c8817e73602f3959f2/dishka-1.8.0-py3-none-any.whl", hash = "sha256:7f7bbc6c973ca1c8d8010c3a4feb4d1cafc0e600990e2e9cea6704a120bba1dd", size = 111517, upload-time = "2026-02-11T11:05:13.198Z" },
+    { url = "https://files.pythonhosted.org/packages/33/98/c8f80be83fbd92f5f9d4bdb5d619a9c9901fb1523c0b02a448b942e532e6/dishka-1.9.1-py3-none-any.whl", hash = "sha256:5080a46bf40bd403aee396aac81f999f679078655f9a6f2062111d62e94e7b18", size = 114327, upload-time = "2026-03-08T09:43:46.097Z" },
 ]
 
 [[package]]
