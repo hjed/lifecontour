@@ -7,7 +7,7 @@ middleware setup, and route registration.
 
 import asyncio
 from collections.abc import AsyncGenerator
-from contextlib import asynccontextmanager
+from contextlib import AsyncExitStack, asynccontextmanager
 
 import structlog
 from dishka.integrations.fastapi import setup_dishka
@@ -31,7 +31,7 @@ from app.mcp.server import create_mcp_app
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Application lifespan manager for startup and shutdown events."""
-    settings = get_settings()
+    settings: Settings = app.state.settings
     logger = structlog.get_logger()
 
     # Setup logging
@@ -91,16 +91,33 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             endpoint=settings.otel_exporter_otlp_endpoint,
         )
 
+    mcp_app = getattr(app.state, "mcp_app", None)
+    mcp_lifespan = getattr(mcp_app, "lifespan", None) if mcp_app is not None else None
+
     # Start background tasks
     outbox_task = None
     try:
-        # Start outbox processor background task
-        outbox_task = asyncio.create_task(
-            run_outbox_processor_loop(interval_seconds=10)
-        )
-        logger.info("Outbox processor background task started")
+        async with AsyncExitStack() as exit_stack:
+            if mcp_lifespan is not None:
+                await exit_stack.enter_async_context(mcp_lifespan(mcp_app))
+                logger.info(
+                    "MCP: Mounted app lifespan started",
+                    endpoint=f"{settings.mcp_mount_path}/mcp",
+                )
 
-        yield
+            # Start outbox processor background task
+            outbox_task = asyncio.create_task(
+                run_outbox_processor_loop(interval_seconds=10)
+            )
+            logger.info("Outbox processor background task started")
+
+            yield
+
+        if mcp_lifespan is not None:
+            logger.info(
+                "MCP: Mounted app lifespan stopped",
+                endpoint=f"{settings.mcp_mount_path}/mcp",
+            )
 
     finally:
         # Cleanup background tasks
@@ -136,7 +153,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     # Setup Dishka dependency injection
     container = create_container(settings)
+    app.state.settings = settings
     app.state.dishka_container = container  # Store for lifespan access
+    app.state.mcp_app = None
     setup_dishka(container, app)
 
     # Import routers after Dishka setup to avoid type annotation issues
@@ -199,6 +218,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         logger.info("MCP: Mounting MCP server", mount_path=settings.mcp_mount_path)
 
         mcp_app = create_mcp_app(container, disable_auth=settings.disable_auth)
+        app.state.mcp_app = mcp_app
         app.mount(settings.mcp_mount_path, mcp_app)  # type: ignore[arg-type]
 
         logger.info(
@@ -209,18 +229,23 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     return app
 
 
+def run_app(settings: Settings | None = None) -> None:
+    """Run the application with the configured host and port."""
+    import uvicorn
+
+    resolved_settings = settings or get_settings()
+    uvicorn.run(
+        "app.main:app",
+        host=resolved_settings.host,
+        port=resolved_settings.port,
+        reload=resolved_settings.debug,
+        log_level=resolved_settings.log_level.lower(),
+    )
+
+
 # Create the application instance
 app = create_app()
 
 
 if __name__ == "__main__":
-    import uvicorn
-
-    settings = get_settings()
-    uvicorn.run(
-        "app.main:app",
-        host="0.0.0.0",
-        port=8000,
-        reload=settings.debug,
-        log_level=settings.log_level.lower(),
-    )
+    run_app()

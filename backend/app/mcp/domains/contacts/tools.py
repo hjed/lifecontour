@@ -18,7 +18,6 @@ from core_shared.models.contacts.entities import (
 )
 from core_shared.models.contacts.exceptions import ContactValidationError
 from core_shared.models.contacts.value_objects import TagName
-from dishka.integrations.starlette import FromDishka, inject
 from fastmcp import FastMCP
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncConnection
@@ -41,6 +40,13 @@ from app.mcp.shared.converters import (
     SearchResultProcessor,
 )
 from app.mcp.shared.decorators import mcp_unified_error_handler
+from app.mcp.shared.dependencies import (
+    get_async_connection,
+    get_contact_service,
+    get_search_service,
+    get_tag_repository,
+    mcp_depends,
+)
 from app.mcp.shared.response_builders import MCPResponseBuilder
 
 logger = structlog.get_logger()
@@ -108,9 +114,7 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
 
     @mcp.tool
     @mcp_unified_error_handler("get_contact", "contact")
-    @inject
     async def get_contact(
-        contact_service: FromDishka[ContactService],
         contact_id: Annotated[
             int, Field(description="The unique identifier of the contact")
         ],
@@ -121,6 +125,7 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
                 description="Optional: Include field change history for the contact",
             ),
         ] = False,
+        contact_service: ContactService = mcp_depends(get_contact_service),
     ) -> str:
         """
         Get contact details by ID for AI analysis.
@@ -171,14 +176,13 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
 
     @mcp.tool
     @mcp_unified_error_handler("search_contacts", "search")
-    @inject
     async def search_contacts(
-        search_service: FromDishka[SearchService],
         query: Annotated[str, Field(description="Search query for contacts")],
         limit: Annotated[
             int, Field(description="Maximum number of results", ge=1, le=50)
         ] = 20,
         tags: Annotated[list[str] | None, Field(description="Filter by tags")] = None,
+        search_service: SearchService = mcp_depends(get_search_service),
     ) -> str:
         """
         Search contacts using MeiliSearch for AI analysis.
@@ -249,14 +253,13 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
 
     @mcp.tool
     @mcp_unified_error_handler("create_contact", "management")
-    @inject
     async def create_contact(
-        contact_service: FromDishka[ContactService],
-        tag_repo: FromDishka[TagRepository],
-        connection: FromDishka[AsyncConnection],
         contact_data: Annotated[
             str, Field(description="JSON string with contact data")
         ],
+        contact_service: ContactService = mcp_depends(get_contact_service),
+        tag_repo: TagRepository = mcp_depends(get_tag_repository),
+        connection: AsyncConnection = mcp_depends(get_async_connection),
     ) -> str:
         """
         Create a new contact for AI-managed relationship building.
@@ -363,11 +366,7 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
 
     @mcp.tool
     @mcp_unified_error_handler("update_contact", "management")
-    @inject
     async def update_contact(
-        contact_service: FromDishka[ContactService],
-        tag_repo: FromDishka[TagRepository],
-        connection: FromDishka[AsyncConnection],
         contact_data: Annotated[
             str, Field(description="JSON string with contact update data")
         ],
@@ -385,6 +384,9 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
                 description="Optional: For field-level updates, specify the new field value",
             ),
         ] = None,
+        contact_service: ContactService = mcp_depends(get_contact_service),
+        tag_repo: TagRepository = mcp_depends(get_tag_repository),
+        connection: AsyncConnection = mcp_depends(get_async_connection),
     ) -> str:
         """
         Update an existing contact for AI-managed relationship maintenance.
@@ -534,11 +536,10 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
 
     @mcp.tool
     @mcp_unified_error_handler("list_contacts", "contact")
-    @inject
     async def list_contacts(
-        contact_service: FromDishka[ContactService],
         page: Annotated[int, Field(description="Page number", ge=1)] = 1,
         limit: Annotated[int, Field(description="Contacts per page", ge=1, le=50)] = 20,
+        contact_service: ContactService = mcp_depends(get_contact_service),
     ) -> str:
         """
         List contacts with pagination for AI analysis.
@@ -610,9 +611,7 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
 
     @mcp.tool
     @mcp_unified_error_handler("global_search", "search")
-    @inject
     async def global_search(
-        search_service: FromDishka[SearchService],
         query: Annotated[
             str, Field(description="Global search query across all entities")
         ],
@@ -623,6 +622,7 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
             list[str] | None,
             Field(description="Entity types to search (e.g., 'contact')"),
         ] = None,
+        search_service: SearchService = mcp_depends(get_search_service),
     ) -> str:
         """
         Perform global search across all entity types for AI analysis.
@@ -673,13 +673,12 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
 
     @mcp.tool
     @mcp_unified_error_handler("toggle_contact_favourite", "management")
-    @inject
     async def toggle_contact_favourite(
-        contact_service: FromDishka[ContactService],
-        connection: FromDishka[AsyncConnection],
         contact_id: Annotated[
             int, Field(description="ID of the contact to toggle favourite status")
         ],
+        contact_service: ContactService = mcp_depends(get_contact_service),
+        connection: AsyncConnection = mcp_depends(get_async_connection),
     ) -> str:
         """
         Toggle the favourite status of a contact for AI-managed relationship prioritization.
@@ -735,12 +734,11 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
 
     @mcp.tool
     @mcp_unified_error_handler("list_tags", "tag")
-    @inject
     async def list_tags(
-        tag_repo: FromDishka[TagRepository],
         limit: Annotated[
             int, Field(description="Maximum number of tags to return", ge=1, le=100)
         ] = 50,
+        tag_repo: TagRepository = mcp_depends(get_tag_repository),
     ) -> str:
         """
         List all available tags for AI-managed contact categorization.

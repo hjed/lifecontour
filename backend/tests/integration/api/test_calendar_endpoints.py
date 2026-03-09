@@ -152,6 +152,157 @@ class TestCalendarEndpoints:
         assert isinstance(data["data"], list)
         assert data["data"] == []
 
+    async def test_update_calendar(self, integration_api_client):
+        """Test updating an existing calendar."""
+        # Create a calendar first
+        create_data = {
+            "data": {
+                "type": "calendars",
+                "attributes": {
+                    "name": "Original Name",
+                    "color": "#000000",
+                },
+            }
+        }
+        create_response = await integration_api_client.post(
+            "/api/calendars", json=create_data
+        )
+        calendar_id = create_response.json()["data"]["id"]
+
+        # Update the calendar
+        update_data = {
+            "data": {
+                "type": "calendars",
+                "id": calendar_id,
+                "attributes": {
+                    "name": "Updated Name",
+                    "color": "#FFFFFF",
+                    "description": "Updated description",
+                    "is_synced_to_google": True,
+                    "google_calendar_id": "test_google_cal_id",
+                },
+            }
+        }
+        update_response = await integration_api_client.put(
+            f"/api/calendars/{calendar_id}", json=update_data
+        )
+
+        assert update_response.status_code == 200
+        data = update_response.json()
+        assert data["data"]["id"] == calendar_id
+        assert data["data"]["attributes"]["name"] == "Updated Name"
+        assert data["data"]["attributes"]["color"] == "#FFFFFF"
+        assert data["data"]["attributes"]["description"] == "Updated description"
+        assert data["data"]["attributes"]["is_synced_to_google"] is True
+        assert data["data"]["attributes"]["google_calendar_id"] == "test_google_cal_id"
+
+    async def test_update_calendar_not_found(self, integration_api_client):
+        """Test updating a non-existent calendar returns 404."""
+        import uuid
+
+        calendar_id = str(uuid.uuid4())
+
+        update_data = {
+            "data": {
+                "type": "calendars",
+                "id": calendar_id,
+                "attributes": {
+                    "name": "Updated Name",
+                    "color": "#FFFFFF",
+                },
+            }
+        }
+        response = await integration_api_client.put(
+            f"/api/calendars/{calendar_id}", json=update_data
+        )
+        assert response.status_code == 404
+
+    async def test_delete_calendar(self, integration_api_client):
+        """Test deleting a calendar."""
+        # Create a calendar first
+        create_data = {
+            "data": {
+                "type": "calendars",
+                "attributes": {
+                    "name": "To Delete",
+                    "color": "#000000",
+                },
+            }
+        }
+        create_response = await integration_api_client.post(
+            "/api/calendars", json=create_data
+        )
+        calendar_id = create_response.json()["data"]["id"]
+
+        # Delete the calendar
+        delete_response = await integration_api_client.delete(
+            f"/api/calendars/{calendar_id}"
+        )
+        assert delete_response.status_code == 204
+
+        # Verify it's gone
+        list_response = await integration_api_client.get("/api/calendars")
+        calendars = list_response.json()["data"]
+        assert not any(c["id"] == calendar_id for c in calendars)
+
+    async def test_delete_calendar_not_found(self, integration_api_client):
+        """Test deleting a non-existent calendar returns 404."""
+        import uuid
+
+        calendar_id = str(uuid.uuid4())
+
+        response = await integration_api_client.delete(f"/api/calendars/{calendar_id}")
+        assert response.status_code == 404
+
+    async def test_delete_calendar_in_use(self, integration_api_client):
+        """Test deleting a calendar in use by an EVENT journal returns 409."""
+        # Create a calendar
+        create_data = {
+            "data": {
+                "type": "calendars",
+                "attributes": {
+                    "name": "Work Calendar",
+                    "color": "#3B82F6",
+                },
+            }
+        }
+        calendar_response = await integration_api_client.post(
+            "/api/calendars", json=create_data
+        )
+        calendar_id = calendar_response.json()["data"]["id"]
+
+        # Create an EVENT journal with calendar info
+        journal_data = {
+            "data": {
+                "type": "journals",
+                "attributes": {
+                    "title": "Team Meeting",
+                    "content": "Discuss Q1 goals",
+                    "event_date_range": {
+                        "start": "2024-01-15T00:00:00Z",
+                        "end": "2024-01-15T00:00:00Z",
+                    },
+                    "types": ["EVENT"],
+                    "type_data": {
+                        "EVENT": {
+                            "calendar_id": calendar_id,
+                        }
+                    },
+                },
+            }
+        }
+        await integration_api_client.post("/api/journals", json=journal_data)
+
+        # Try to delete the calendar
+        delete_response = await integration_api_client.delete(
+            f"/api/calendars/{calendar_id}"
+        )
+        assert delete_response.status_code == 409
+
+        error_data = delete_response.json()
+        assert "errors" in error_data
+        assert "used by" in error_data["errors"][0]["detail"].lower()
+
 
 @pytest.mark.integration
 class TestEventJournalCreation:

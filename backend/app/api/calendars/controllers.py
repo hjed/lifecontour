@@ -15,6 +15,7 @@ from app.api.journals.schemas import (
     CalendarCreateRequest,
     CalendarListResponse,
     CalendarResponse,
+    CalendarUpdateRequest,
 )
 from app.core.journal.adapters.sql.calendar_repository import CalendarRepository
 from app.core.journal.models.calendar import Calendar
@@ -119,6 +120,113 @@ async def create_calendar(
         id=str(created_calendar.id),
         attributes=calendar_attributes,
         links=JsonApiLinks(self=f"{base_url}/api/calendars/{created_calendar.id}"),
+    )
+
+    return CalendarResponse(data=calendar_resource)
+
+
+@router.put("/{calendar_id}", status_code=status.HTTP_200_OK)
+@inject
+async def update_calendar(
+    calendar_id: str,
+    request: Request,
+    calendar_request: CalendarUpdateRequest,
+    calendar_repo: FromDishka[CalendarRepository],
+    user: FromDishka[SessionUser],  # Require authentication
+) -> CalendarResponse:
+    """
+    Update an existing calendar.
+    """
+    from uuid import UUID
+
+    from fastapi import HTTPException
+
+    from app.api.common.schemas import JsonApiLinks
+    from app.api.journals.schemas import CalendarAttributes, CalendarResource
+
+    base_url = get_request_base_url(request)
+
+    try:
+        calendar_uuid = UUID(calendar_id)
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid calendar ID format",
+        ) from e
+
+    # Validate that path ID matches body ID if body ID is provided
+    body_id = calendar_request.data.id
+    if body_id is not None:
+        try:
+            body_uuid = UUID(str(body_id))
+        except ValueError as e:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid calendar ID format in request body",
+            ) from e
+        if body_uuid != calendar_uuid:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Path ID does not match body ID",
+            )
+
+    # Get the calendar to verify ownership
+    calendar = await calendar_repo.find_by_id(calendar_uuid)
+    if not calendar:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Calendar not found",
+        )
+
+    # Verify the calendar belongs to the user
+    if calendar.user_id != user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You don't have permission to modify this calendar",
+        )
+
+    # Update attributes
+    attrs = calendar_request.data.attributes
+    fields_set: set[str] = getattr(attrs, "model_fields_set", set())
+
+    if "name" in fields_set:
+        calendar.name = attrs.name  # type: ignore[assignment]
+    if "description" in fields_set:
+        calendar.description = attrs.description
+    if "color" in fields_set:
+        calendar.color = attrs.color  # type: ignore[assignment]
+    if "is_synced_to_google" in fields_set:
+        calendar.is_synced_to_google = attrs.is_synced_to_google  # type: ignore[assignment]
+    if "google_calendar_id" in fields_set:
+        calendar.google_calendar_id = attrs.google_calendar_id
+
+    # Re-trigger domain validation
+    from app.core.journal.models.exceptions import CalendarValidationError
+
+    try:
+        calendar.__post_init__()
+    except CalendarValidationError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        ) from e
+
+    # Save changes
+    updated_calendar = await calendar_repo.save(calendar)
+
+    # Convert to resource
+    calendar_attributes = CalendarAttributes(
+        name=updated_calendar.name,
+        description=updated_calendar.description,
+        color=updated_calendar.color,
+        is_synced_to_google=updated_calendar.is_synced_to_google,
+        google_calendar_id=updated_calendar.google_calendar_id,
+    )
+
+    calendar_resource = CalendarResource(
+        id=str(updated_calendar.id),
+        attributes=calendar_attributes,
+        links=JsonApiLinks(self=f"{base_url}/api/calendars/{updated_calendar.id}"),
     )
 
     return CalendarResponse(data=calendar_resource)

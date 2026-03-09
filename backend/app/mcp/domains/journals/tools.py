@@ -7,17 +7,18 @@ Each tool is designed to return AI-friendly, contextual information.
 
 import dataclasses
 import json
+from datetime import time as dt_time
 from typing import Annotated, Any
 from uuid import UUID
 
 import structlog
-from dishka.integrations.starlette import FromDishka, inject
 from fastmcp import FastMCP
-from fastmcp.server.dependencies import get_http_request
-from pydantic import Field
+from pydantic import BaseModel, Field
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core.contacts.adapters.sql.contact_repository import SqlContactRepository
+from app.core.contacts.models.exceptions import ContactNotFoundError
 from app.core.journal.adapters.sql.abseiling_data_repository import (
     SqlAbseilingDataRepository,
 )
@@ -27,6 +28,7 @@ from app.core.journal.adapters.sql.bushwalking_data_repository import (
 from app.core.journal.adapters.sql.calendar_info_repository import (
     SqlCalendarInfoRepository,
 )
+from app.core.journal.adapters.sql.calendar_repository import SqlCalendarRepository
 from app.core.journal.adapters.sql.canyoning_data_repository import (
     SqlCanyoningDataRepository,
 )
@@ -55,11 +57,15 @@ from app.core.journal.adapters.sql.plan_data_repository import SqlPlanDataReposi
 from app.core.journal.adapters.sql.travel_data_repository import SqlTravelDataRepository
 from app.core.journal.models.abseiling_data import AbseilingData
 from app.core.journal.models.bushwalking_data import BushwalkingData
+from app.core.journal.models.calendar import Calendar
 from app.core.journal.models.calendar_info import CalendarInfo
 from app.core.journal.models.canyoning_data import CanyoningData
 from app.core.journal.models.climbing_data import ClimbingData
 from app.core.journal.models.entities import Journal
-from app.core.journal.models.exceptions import JournalValidationError
+from app.core.journal.models.exceptions import (
+    JournalNotFoundError,
+    JournalValidationError,
+)
 from app.core.journal.models.fitness_data import FitnessData
 from app.core.journal.models.jogging_data import JoggingData
 from app.core.journal.models.journal_contact_relationship import (
@@ -77,35 +83,72 @@ from app.core.journal.models.plan_data import PlanData
 from app.core.journal.models.travel_data import TravelData
 from app.core.journal.models.value_objects import EventDateRange
 from app.core.journal.services.journal_service import JournalService
-from app.infrastructure.auth.models import SessionUser
 from app.infrastructure.events.outbox_event_publisher import OutboxEventPublisher
 from app.mcp.domains.journals.converters import JournalConverter
 from app.mcp.domains.journals.schemas import (
     JournalCreateRequest,
+    JournalSearchResponse,
     JournalUpdateRequest,
 )
 from app.mcp.shared.decorators import mcp_unified_error_handler
+from app.mcp.shared.dependencies import (
+    get_async_connection,
+    get_current_user_id,
+    get_outbox_event_publisher,
+    mcp_depends,
+)
 from app.mcp.shared.response_builders import MCPResponseBuilder
 
 logger = structlog.get_logger()
 
 
-def _get_current_user_id() -> str:
-    """
-    Get the current authenticated user ID from the request context.
+@dataclasses.dataclass(frozen=True)
+class _JournalToolRepositories:
+    """Concrete SQL repositories used by journal MCP tools."""
 
-    Returns:
-        The user ID from the authenticated session
+    journal_repo: SqlJournalRepository
+    calendar_info_repo: SqlCalendarInfoRepository
+    mood_data_repo: SqlMoodDataRepository
+    plan_data_repo: SqlPlanDataRepository
+    travel_data_repo: SqlTravelDataRepository
+    photo_album_data_repo: SqlPhotoAlbumDataRepository
+    fitness_data_repo: SqlFitnessDataRepository
+    outdoor_activity_data_repo: SqlOutdoorActivityDataRepository
+    bushwalking_data_repo: SqlBushwalkingDataRepository
+    jogging_data_repo: SqlJoggingDataRepository
+    abseiling_data_repo: SqlAbseilingDataRepository
+    canyoning_data_repo: SqlCanyoningDataRepository
+    climbing_data_repo: SqlClimbingDataRepository
+    contact_relationship_repo: SqlJournalContactRelationshipRepository
+    contact_repo: SqlContactRepository
+    tag_repo: SqlJournalTagRepository
 
-    Raises:
-        RuntimeError: If no authenticated user is found in the request context
-    """
-    request = get_http_request()
-    if not hasattr(request.state, "user"):
-        raise RuntimeError("No authenticated user found in request context")
 
-    user: SessionUser = request.state.user
-    return user.id
+def _create_journal_tool_repositories(
+    db_connection: AsyncConnection,
+) -> _JournalToolRepositories:
+    """Build the concrete repositories needed by journal MCP tools."""
+
+    return _JournalToolRepositories(
+        journal_repo=SqlJournalRepository(db_connection),
+        calendar_info_repo=SqlCalendarInfoRepository(db_connection),
+        mood_data_repo=SqlMoodDataRepository(db_connection),
+        plan_data_repo=SqlPlanDataRepository(db_connection),
+        travel_data_repo=SqlTravelDataRepository(db_connection),
+        photo_album_data_repo=SqlPhotoAlbumDataRepository(db_connection),
+        fitness_data_repo=SqlFitnessDataRepository(db_connection),
+        outdoor_activity_data_repo=SqlOutdoorActivityDataRepository(db_connection),
+        bushwalking_data_repo=SqlBushwalkingDataRepository(db_connection),
+        jogging_data_repo=SqlJoggingDataRepository(db_connection),
+        abseiling_data_repo=SqlAbseilingDataRepository(db_connection),
+        canyoning_data_repo=SqlCanyoningDataRepository(db_connection),
+        climbing_data_repo=SqlClimbingDataRepository(db_connection),
+        contact_relationship_repo=SqlJournalContactRelationshipRepository(
+            db_connection
+        ),
+        contact_repo=SqlContactRepository(db_connection),
+        tag_repo=SqlJournalTagRepository(db_connection),
+    )
 
 
 def _journal_to_search_result(journal: Journal) -> Any:
@@ -525,6 +568,230 @@ async def _create_type_specific_data(
     # These will be created when the user provides type_data
 
 
+def _parse_calendar_id(calendar_id: Any) -> UUID | None:
+    if calendar_id is None:
+        return None
+
+    if isinstance(calendar_id, UUID):
+        return calendar_id
+
+    if isinstance(calendar_id, str):
+        try:
+            return UUID(calendar_id)
+        except (ValueError, TypeError) as exc:
+            raise ValueError(
+                f"Invalid calendar_id '{calendar_id}'. Must be a valid UUID."
+            ) from exc
+
+    raise ValueError(f"Invalid calendar_id '{calendar_id}'. Must be a valid UUID.")
+
+
+def _parse_optional_time_field(type_data_dict: dict[str, Any], field_name: str) -> Any:
+    value = type_data_dict.get(field_name)
+    if not isinstance(value, str):
+        return value
+
+    try:
+        return dt_time.fromisoformat(value)
+    except ValueError as exc:
+        raise ValueError(
+            f"Invalid {field_name} '{value}'. Must use HH:MM or HH:MM:SS format."
+        ) from exc
+
+
+async def _update_event_data(
+    journal_id: int,
+    type_data_dict: dict[str, Any],
+    calendar_info_repo: SqlCalendarInfoRepository,
+) -> None:
+    calendar_id = _parse_calendar_id(type_data_dict.get("calendar_id"))
+    if calendar_id is None:
+        return
+
+    calendar_info = CalendarInfo(
+        journal_id=journal_id,
+        calendar_id=calendar_id,
+        start_time=_parse_optional_time_field(type_data_dict, "start_time"),
+        end_time=_parse_optional_time_field(type_data_dict, "end_time"),
+        is_all_day=type_data_dict.get("is_all_day", False),
+        location=type_data_dict.get("location"),
+        sync_invitees=type_data_dict.get("sync_invitees", False),
+    )
+    await calendar_info_repo.save(calendar_info)
+
+
+async def _update_mood_data(
+    journal_id: int,
+    type_data_dict: dict[str, Any],
+    mood_data_repo: SqlMoodDataRepository,
+) -> None:
+    existing_mood = await mood_data_repo.find_by_journal_id(journal_id)
+    if existing_mood:
+        if "mood_value" in type_data_dict:
+            existing_mood.mood_value = type_data_dict["mood_value"]
+        if "mood_label" in type_data_dict:
+            existing_mood.mood_label = type_data_dict["mood_label"]
+        if "energy_level" in type_data_dict:
+            existing_mood.energy_level = type_data_dict["energy_level"]
+        await mood_data_repo.save(existing_mood)
+
+
+async def _update_photo_album_data(
+    journal_id: int,
+    type_data_dict: dict[str, Any],
+    photo_album_data_repo: SqlPhotoAlbumDataRepository,
+) -> None:
+    immich_album_id = type_data_dict.get("immich_album_id")
+    if immich_album_id is not None:
+        photo_album_data = PhotoAlbumData(
+            journal_id=journal_id,
+            immich_album_id=str(immich_album_id),
+        )
+        await photo_album_data_repo.save(photo_album_data)
+
+
+async def _update_fitness_data(
+    journal_id: int,
+    type_data_dict: dict[str, Any],
+    fitness_data_repo: SqlFitnessDataRepository,
+) -> None:
+    existing_fitness = await fitness_data_repo.find_by_journal_id(journal_id)
+    if existing_fitness:
+        for field in [
+            "heart_rate_avg",
+            "heart_rate_max",
+            "distance",
+            "elevation_gain",
+            "elevation_loss",
+            "duration",
+            "calories",
+            "gpx_track_data",
+            "strava_activity_id",
+        ]:
+            if field in type_data_dict:
+                setattr(existing_fitness, field, type_data_dict[field])
+        await fitness_data_repo.save(existing_fitness)
+
+
+async def _update_outdoor_activity_data(
+    journal_id: int,
+    type_data_dict: dict[str, Any],
+    outdoor_activity_data_repo: SqlOutdoorActivityDataRepository,
+) -> None:
+    existing_outdoor = await outdoor_activity_data_repo.find_by_journal_id(journal_id)
+    if existing_outdoor:
+        updates: dict[str, Any] = {}
+        for field in [
+            "activity_type",
+            "weather_conditions",
+            "role",
+            "in_leadership_role",
+            "participant_notes",
+        ]:
+            if field in type_data_dict:
+                updates[field] = type_data_dict[field]
+        validated_outdoor = dataclasses.replace(existing_outdoor, **updates)
+        await outdoor_activity_data_repo.save(validated_outdoor)
+
+
+def _parse_route_id(type_data_dict: dict[str, Any], updates: dict[str, Any]) -> None:
+    if "route_id" in type_data_dict:
+        route_id_val = type_data_dict["route_id"]
+        try:
+            updates["route_id"] = (
+                UUID(route_id_val) if isinstance(route_id_val, str) else route_id_val
+            )
+        except ValueError as e:
+            raise JournalValidationError(
+                "route_id", f"Invalid UUID format: {route_id_val}"
+            ) from e
+
+
+async def _update_bushwalking_data(
+    journal_id: int,
+    type_data_dict: dict[str, Any],
+    bushwalking_data_repo: SqlBushwalkingDataRepository,
+) -> None:
+    existing_bushwalking = await bushwalking_data_repo.find_by_journal_id(journal_id)
+    if existing_bushwalking:
+        bw_updates: dict[str, Any] = {}
+        if "track_grading" in type_data_dict:
+            bw_updates["track_grading"] = type_data_dict["track_grading"]
+        _parse_route_id(type_data_dict, bw_updates)
+        validated_bushwalking = dataclasses.replace(existing_bushwalking, **bw_updates)
+        await bushwalking_data_repo.save(validated_bushwalking)
+
+
+async def _update_jogging_data(
+    journal_id: int,
+    type_data_dict: dict[str, Any],
+    jogging_data_repo: SqlJoggingDataRepository,
+) -> None:
+    existing_jogging = await jogging_data_repo.find_by_journal_id(journal_id)
+    if existing_jogging:
+        jog_updates: dict[str, Any] = {}
+        if "pace" in type_data_dict:
+            jog_updates["pace"] = type_data_dict["pace"]
+        _parse_route_id(type_data_dict, jog_updates)
+        validated_jogging = dataclasses.replace(existing_jogging, **jog_updates)
+        await jogging_data_repo.save(validated_jogging)
+
+
+async def _update_abseiling_data(
+    journal_id: int,
+    type_data_dict: dict[str, Any],
+    abseiling_data_repo: SqlAbseilingDataRepository,
+) -> None:
+    existing_abseiling = await abseiling_data_repo.find_by_journal_id(journal_id)
+    if existing_abseiling:
+        abs_updates: dict[str, Any] = {}
+        if "number_of_abseils" in type_data_dict:
+            abs_updates["number_of_abseils"] = type_data_dict["number_of_abseils"]
+        if "total_length" in type_data_dict:
+            abs_updates["total_length"] = type_data_dict["total_length"]
+        validated_abseiling = dataclasses.replace(existing_abseiling, **abs_updates)
+        await abseiling_data_repo.save(validated_abseiling)
+
+
+async def _update_canyoning_data(
+    journal_id: int,
+    type_data_dict: dict[str, Any],
+    canyoning_data_repo: SqlCanyoningDataRepository,
+) -> None:
+    existing_canyoning = await canyoning_data_repo.find_by_journal_id(journal_id)
+    if existing_canyoning:
+        can_updates: dict[str, Any] = {}
+        _parse_route_id(type_data_dict, can_updates)
+        for field in [
+            "french_grade",
+            "water_guage_name",
+            "water_guage_level",
+            "is_vertical",
+            "is_night_canyon",
+            "is_white_water",
+        ]:
+            if field in type_data_dict:
+                can_updates[field] = type_data_dict[field]
+        validated_canyoning = dataclasses.replace(existing_canyoning, **can_updates)
+        await canyoning_data_repo.save(validated_canyoning)
+
+
+async def _update_climbing_data(
+    journal_id: int,
+    type_data_dict: dict[str, Any],
+    climbing_data_repo: SqlClimbingDataRepository,
+) -> None:
+    existing_climbing = await climbing_data_repo.find_by_journal_id(journal_id)
+    if existing_climbing:
+        clb_updates: dict[str, Any] = {}
+        _parse_route_id(type_data_dict, clb_updates)
+        for field in ["climbing_type", "grade", "length"]:
+            if field in type_data_dict:
+                clb_updates[field] = type_data_dict[field]
+        validated_climbing = dataclasses.replace(existing_climbing, **clb_updates)
+        await climbing_data_repo.save(validated_climbing)
+
+
 async def _update_type_specific_data(
     journal_type: JournalType,
     journal_id: int,
@@ -558,200 +825,35 @@ async def _update_type_specific_data(
         canyoning_data_repo: Repository for canyoning data
         climbing_data_repo: Repository for climbing data
     """
-    if journal_type == JournalType.EVENT and type_data_dict:
-        # Create or update calendar info (calendar_id is required)
-        calendar_id = type_data_dict.get("calendar_id")
-        if calendar_id is not None:
-            # Convert string to UUID if needed
-            if isinstance(calendar_id, str):
-                calendar_id = UUID(calendar_id)
+    if not type_data_dict:
+        return
 
-            calendar_info = CalendarInfo(
-                journal_id=journal_id,
-                calendar_id=calendar_id,
-                start_time=type_data_dict.get("start_time"),
-                end_time=type_data_dict.get("end_time"),
-                is_all_day=type_data_dict.get("is_all_day", False),
-                location=type_data_dict.get("location"),
-                sync_invitees=type_data_dict.get("sync_invitees", False),
-            )
-            await calendar_info_repo.save(calendar_info)
-    elif journal_type == JournalType.MOOD_RATING and type_data_dict:
-        # Update mood data
-        existing_mood = await mood_data_repo.find_by_journal_id(journal_id)
-        if existing_mood:
-            if "mood_value" in type_data_dict:
-                existing_mood.mood_value = type_data_dict["mood_value"]
-            if "mood_label" in type_data_dict:
-                existing_mood.mood_label = type_data_dict["mood_label"]
-            if "energy_level" in type_data_dict:
-                existing_mood.energy_level = type_data_dict["energy_level"]
-            await mood_data_repo.save(existing_mood)
-    elif journal_type == JournalType.PHOTO_ALBUM and type_data_dict:
-        # Create or update photo album data (immich_album_id is required)
-        immich_album_id = type_data_dict.get("immich_album_id")
-        if immich_album_id is not None:
-            photo_album_data = PhotoAlbumData(
-                journal_id=journal_id,
-                immich_album_id=str(immich_album_id),
-            )
-            await photo_album_data_repo.save(photo_album_data)
-    elif journal_type == JournalType.FITNESS and type_data_dict:
-        existing_fitness = await fitness_data_repo.find_by_journal_id(journal_id)
-        if existing_fitness:
-            if "heart_rate_avg" in type_data_dict:
-                existing_fitness.heart_rate_avg = type_data_dict["heart_rate_avg"]
-            if "heart_rate_max" in type_data_dict:
-                existing_fitness.heart_rate_max = type_data_dict["heart_rate_max"]
-            if "distance" in type_data_dict:
-                existing_fitness.distance = type_data_dict["distance"]
-            if "elevation_gain" in type_data_dict:
-                existing_fitness.elevation_gain = type_data_dict["elevation_gain"]
-            if "elevation_loss" in type_data_dict:
-                existing_fitness.elevation_loss = type_data_dict["elevation_loss"]
-            if "duration" in type_data_dict:
-                existing_fitness.duration = type_data_dict["duration"]
-            if "calories" in type_data_dict:
-                existing_fitness.calories = type_data_dict["calories"]
-            if "gpx_track_data" in type_data_dict:
-                existing_fitness.gpx_track_data = type_data_dict["gpx_track_data"]
-            if "strava_activity_id" in type_data_dict:
-                existing_fitness.strava_activity_id = type_data_dict[
-                    "strava_activity_id"
-                ]
-            await fitness_data_repo.save(existing_fitness)
-    elif journal_type == JournalType.OUTDOOR_ACTIVITY and type_data_dict:
-        existing_outdoor = await outdoor_activity_data_repo.find_by_journal_id(
-            journal_id
+    if journal_type == JournalType.EVENT:
+        await _update_event_data(journal_id, type_data_dict, calendar_info_repo)
+    elif journal_type == JournalType.MOOD_RATING:
+        await _update_mood_data(journal_id, type_data_dict, mood_data_repo)
+    elif journal_type == JournalType.PHOTO_ALBUM:
+        await _update_photo_album_data(
+            journal_id, type_data_dict, photo_album_data_repo
         )
-        if existing_outdoor:
-            # Build updates dict and use dataclasses.replace() to trigger __post_init__
-            # validation, matching the REST API controller pattern.
-            updates: dict[str, Any] = {}
-            if "activity_type" in type_data_dict:
-                updates["activity_type"] = type_data_dict["activity_type"]
-            if "weather_conditions" in type_data_dict:
-                updates["weather_conditions"] = type_data_dict["weather_conditions"]
-            if "role" in type_data_dict:
-                updates["role"] = type_data_dict["role"]
-            if "in_leadership_role" in type_data_dict:
-                updates["in_leadership_role"] = type_data_dict["in_leadership_role"]
-            if "participant_notes" in type_data_dict:
-                updates["participant_notes"] = type_data_dict["participant_notes"]
-            validated_outdoor = dataclasses.replace(existing_outdoor, **updates)
-            await outdoor_activity_data_repo.save(validated_outdoor)
-    elif journal_type == JournalType.BUSHWALKING and type_data_dict:
-        existing_bushwalking = await bushwalking_data_repo.find_by_journal_id(
-            journal_id
+    elif journal_type == JournalType.FITNESS:
+        await _update_fitness_data(journal_id, type_data_dict, fitness_data_repo)
+    elif journal_type == JournalType.OUTDOOR_ACTIVITY:
+        await _update_outdoor_activity_data(
+            journal_id, type_data_dict, outdoor_activity_data_repo
         )
-        if existing_bushwalking:
-            # Build updates dict and use dataclasses.replace() to trigger __post_init__
-            # validation, matching the REST API controller pattern.
-            bw_updates: dict[str, Any] = {}
-            if "track_grading" in type_data_dict:
-                bw_updates["track_grading"] = type_data_dict["track_grading"]
-            if "route_id" in type_data_dict:
-                route_id_val = type_data_dict["route_id"]
-                try:
-                    bw_updates["route_id"] = (
-                        UUID(route_id_val)
-                        if isinstance(route_id_val, str)
-                        else route_id_val
-                    )
-                except ValueError as e:
-                    raise JournalValidationError(
-                        "route_id", f"Invalid UUID format: {route_id_val}"
-                    ) from e
-            validated_bushwalking = dataclasses.replace(
-                existing_bushwalking, **bw_updates
-            )
-            await bushwalking_data_repo.save(validated_bushwalking)
-    elif journal_type == JournalType.JOGGING and type_data_dict:
-        existing_jogging = await jogging_data_repo.find_by_journal_id(journal_id)
-        if existing_jogging:
-            # Build updates dict and use dataclasses.replace() to trigger __post_init__
-            # validation, matching the REST API controller pattern.
-            jog_updates: dict[str, Any] = {}
-            if "pace" in type_data_dict:
-                jog_updates["pace"] = type_data_dict["pace"]
-            if "route_id" in type_data_dict:
-                route_id_val = type_data_dict["route_id"]
-                try:
-                    jog_updates["route_id"] = (
-                        UUID(route_id_val)
-                        if isinstance(route_id_val, str)
-                        else route_id_val
-                    )
-                except ValueError as e:
-                    raise JournalValidationError(
-                        "route_id", f"Invalid UUID format: {route_id_val}"
-                    ) from e
-            validated_jogging = dataclasses.replace(existing_jogging, **jog_updates)
-            await jogging_data_repo.save(validated_jogging)
-    elif journal_type == JournalType.ABSEILING_TRIP and type_data_dict:
-        existing_abseiling = await abseiling_data_repo.find_by_journal_id(journal_id)
-        if existing_abseiling:
-            abs_updates: dict[str, Any] = {}
-            if "number_of_abseils" in type_data_dict:
-                abs_updates["number_of_abseils"] = type_data_dict["number_of_abseils"]
-            if "total_length" in type_data_dict:
-                abs_updates["total_length"] = type_data_dict["total_length"]
-            validated_abseiling = dataclasses.replace(existing_abseiling, **abs_updates)
-            await abseiling_data_repo.save(validated_abseiling)
-    elif journal_type == JournalType.CANYONING and type_data_dict:
-        existing_canyoning = await canyoning_data_repo.find_by_journal_id(journal_id)
-        if existing_canyoning:
-            can_updates: dict[str, Any] = {}
-            if "route_id" in type_data_dict:
-                route_id_val = type_data_dict["route_id"]
-                try:
-                    can_updates["route_id"] = (
-                        UUID(route_id_val)
-                        if isinstance(route_id_val, str)
-                        else route_id_val
-                    )
-                except ValueError as e:
-                    raise JournalValidationError(
-                        "route_id", f"Invalid UUID format: {route_id_val}"
-                    ) from e
-            if "french_grade" in type_data_dict:
-                can_updates["french_grade"] = type_data_dict["french_grade"]
-            if "water_guage_name" in type_data_dict:
-                can_updates["water_guage_name"] = type_data_dict["water_guage_name"]
-            if "water_guage_level" in type_data_dict:
-                can_updates["water_guage_level"] = type_data_dict["water_guage_level"]
-            if "is_vertical" in type_data_dict:
-                can_updates["is_vertical"] = type_data_dict["is_vertical"]
-            if "is_night_canyon" in type_data_dict:
-                can_updates["is_night_canyon"] = type_data_dict["is_night_canyon"]
-            if "is_white_water" in type_data_dict:
-                can_updates["is_white_water"] = type_data_dict["is_white_water"]
-            validated_canyoning = dataclasses.replace(existing_canyoning, **can_updates)
-            await canyoning_data_repo.save(validated_canyoning)
-    elif journal_type == JournalType.CLIMBING and type_data_dict:
-        existing_climbing = await climbing_data_repo.find_by_journal_id(journal_id)
-        if existing_climbing:
-            clb_updates: dict[str, Any] = {}
-            if "route_id" in type_data_dict:
-                route_id_val = type_data_dict["route_id"]
-                try:
-                    clb_updates["route_id"] = (
-                        UUID(route_id_val)
-                        if isinstance(route_id_val, str)
-                        else route_id_val
-                    )
-                except ValueError as e:
-                    raise JournalValidationError(
-                        "route_id", f"Invalid UUID format: {route_id_val}"
-                    ) from e
-            if "climbing_type" in type_data_dict:
-                clb_updates["climbing_type"] = type_data_dict["climbing_type"]
-            if "grade" in type_data_dict:
-                clb_updates["grade"] = type_data_dict["grade"]
-            if "length" in type_data_dict:
-                clb_updates["length"] = type_data_dict["length"]
-            validated_climbing = dataclasses.replace(existing_climbing, **clb_updates)
-            await climbing_data_repo.save(validated_climbing)
+    elif journal_type == JournalType.BUSHWALKING:
+        await _update_bushwalking_data(
+            journal_id, type_data_dict, bushwalking_data_repo
+        )
+    elif journal_type == JournalType.JOGGING:
+        await _update_jogging_data(journal_id, type_data_dict, jogging_data_repo)
+    elif journal_type == JournalType.ABSEILING_TRIP:
+        await _update_abseiling_data(journal_id, type_data_dict, abseiling_data_repo)
+    elif journal_type == JournalType.CANYONING:
+        await _update_canyoning_data(journal_id, type_data_dict, canyoning_data_repo)
+    elif journal_type == JournalType.CLIMBING:
+        await _update_climbing_data(journal_id, type_data_dict, climbing_data_repo)
 
 
 async def _persist_contact_relationships(
@@ -908,25 +1010,7 @@ def register_journal_tools(mcp: FastMCP[None]) -> None:
 
     @mcp.tool
     @mcp_unified_error_handler("create_journal_entry", "journal")
-    @inject
     async def create_journal_entry(
-        db_connection: FromDishka[AsyncConnection],
-        event_publisher: FromDishka[OutboxEventPublisher],
-        calendar_info_repo: FromDishka[SqlCalendarInfoRepository],
-        mood_data_repo: FromDishka[SqlMoodDataRepository],
-        plan_data_repo: FromDishka[SqlPlanDataRepository],
-        travel_data_repo: FromDishka[SqlTravelDataRepository],
-        photo_album_data_repo: FromDishka[SqlPhotoAlbumDataRepository],
-        fitness_data_repo: FromDishka[SqlFitnessDataRepository],
-        outdoor_activity_data_repo: FromDishka[SqlOutdoorActivityDataRepository],
-        bushwalking_data_repo: FromDishka[SqlBushwalkingDataRepository],
-        jogging_data_repo: FromDishka[SqlJoggingDataRepository],
-        abseiling_data_repo: FromDishka[SqlAbseilingDataRepository],
-        canyoning_data_repo: FromDishka[SqlCanyoningDataRepository],
-        climbing_data_repo: FromDishka[SqlClimbingDataRepository],
-        contact_relationship_repo: FromDishka[SqlJournalContactRelationshipRepository],
-        contact_repo: FromDishka[SqlContactRepository],
-        tag_repo: FromDishka[SqlJournalTagRepository],
         journal_data: Annotated[
             str,
             Field(
@@ -936,6 +1020,8 @@ def register_journal_tools(mcp: FastMCP[None]) -> None:
                 "tags (list[str]), parent_id (int, optional)"
             ),
         ],
+        db_connection: AsyncConnection = mcp_depends(get_async_connection),
+        event_publisher: OutboxEventPublisher = mcp_depends(get_outbox_event_publisher),
     ) -> str:
         """
         Create a new journal entry with types, type-specific data, relationships, and tags.
@@ -969,10 +1055,11 @@ def register_journal_tools(mcp: FastMCP[None]) -> None:
             raise ValueError(f"Invalid journal data: {e}") from e
 
         # Get current user ID from auth context
-        user_id = _get_current_user_id()
+        user_id = get_current_user_id()
 
         # Create repositories
-        journal_repo = SqlJournalRepository(db_connection)
+        repos = _create_journal_tool_repositories(db_connection)
+        journal_repo = repos.journal_repo
 
         # Create journal service
         journal_service = JournalService(journal_repo, event_publisher)
@@ -1017,16 +1104,16 @@ def register_journal_tools(mcp: FastMCP[None]) -> None:
                         await _create_type_specific_data(
                             added_type,
                             journal_id,
-                            mood_data_repo,
-                            plan_data_repo,
-                            travel_data_repo,
-                            fitness_data_repo,
-                            outdoor_activity_data_repo,
-                            bushwalking_data_repo,
-                            jogging_data_repo,
-                            abseiling_data_repo,
-                            canyoning_data_repo,
-                            climbing_data_repo,
+                            repos.mood_data_repo,
+                            repos.plan_data_repo,
+                            repos.travel_data_repo,
+                            repos.fitness_data_repo,
+                            repos.outdoor_activity_data_repo,
+                            repos.bushwalking_data_repo,
+                            repos.jogging_data_repo,
+                            repos.abseiling_data_repo,
+                            repos.canyoning_data_repo,
+                            repos.climbing_data_repo,
                         )
 
                     # Update type-specific data if provided
@@ -1035,16 +1122,16 @@ def register_journal_tools(mcp: FastMCP[None]) -> None:
                             journal_type,
                             journal_id,
                             request.type_data[type_str.upper()],
-                            calendar_info_repo,
-                            mood_data_repo,
-                            photo_album_data_repo,
-                            fitness_data_repo,
-                            outdoor_activity_data_repo,
-                            bushwalking_data_repo,
-                            jogging_data_repo,
-                            abseiling_data_repo,
-                            canyoning_data_repo,
-                            climbing_data_repo,
+                            repos.calendar_info_repo,
+                            repos.mood_data_repo,
+                            repos.photo_album_data_repo,
+                            repos.fitness_data_repo,
+                            repos.outdoor_activity_data_repo,
+                            repos.bushwalking_data_repo,
+                            repos.jogging_data_repo,
+                            repos.abseiling_data_repo,
+                            repos.canyoning_data_repo,
+                            repos.climbing_data_repo,
                         )
                 except (ValueError, KeyError):
                     # Invalid type, skip
@@ -1053,31 +1140,33 @@ def register_journal_tools(mcp: FastMCP[None]) -> None:
         # Add contact relationships if provided
         if request.contact_relationships:
             await _persist_contact_relationships(
-                journal_id, request.contact_relationships, contact_relationship_repo
+                journal_id,
+                request.contact_relationships,
+                repos.contact_relationship_repo,
             )
 
         # Add tags if provided
         if request.tags:
-            await _persist_tags(journal_id, request.tags, tag_repo)
+            await _persist_tags(journal_id, request.tags, repos.tag_repo)
 
         # Fetch all enrichment data
         types, type_data, contacts, tags = await _fetch_enrichment_data(
             journal_id,
-            calendar_info_repo,
-            mood_data_repo,
-            plan_data_repo,
-            travel_data_repo,
-            photo_album_data_repo,
-            fitness_data_repo,
-            outdoor_activity_data_repo,
-            bushwalking_data_repo,
-            jogging_data_repo,
-            abseiling_data_repo,
-            canyoning_data_repo,
-            climbing_data_repo,
-            contact_relationship_repo,
-            contact_repo,
-            tag_repo,
+            repos.calendar_info_repo,
+            repos.mood_data_repo,
+            repos.plan_data_repo,
+            repos.travel_data_repo,
+            repos.photo_album_data_repo,
+            repos.fitness_data_repo,
+            repos.outdoor_activity_data_repo,
+            repos.bushwalking_data_repo,
+            repos.jogging_data_repo,
+            repos.abseiling_data_repo,
+            repos.canyoning_data_repo,
+            repos.climbing_data_repo,
+            repos.contact_relationship_repo,
+            repos.contact_repo,
+            repos.tag_repo,
         )
 
         # Convert to AI-friendly response
@@ -1093,25 +1182,7 @@ def register_journal_tools(mcp: FastMCP[None]) -> None:
 
     @mcp.tool
     @mcp_unified_error_handler("update_journal_entry", "journal")
-    @inject
     async def update_journal_entry(
-        db_connection: FromDishka[AsyncConnection],
-        event_publisher: FromDishka[OutboxEventPublisher],
-        calendar_info_repo: FromDishka[SqlCalendarInfoRepository],
-        mood_data_repo: FromDishka[SqlMoodDataRepository],
-        plan_data_repo: FromDishka[SqlPlanDataRepository],
-        travel_data_repo: FromDishka[SqlTravelDataRepository],
-        photo_album_data_repo: FromDishka[SqlPhotoAlbumDataRepository],
-        fitness_data_repo: FromDishka[SqlFitnessDataRepository],
-        outdoor_activity_data_repo: FromDishka[SqlOutdoorActivityDataRepository],
-        bushwalking_data_repo: FromDishka[SqlBushwalkingDataRepository],
-        jogging_data_repo: FromDishka[SqlJoggingDataRepository],
-        abseiling_data_repo: FromDishka[SqlAbseilingDataRepository],
-        canyoning_data_repo: FromDishka[SqlCanyoningDataRepository],
-        climbing_data_repo: FromDishka[SqlClimbingDataRepository],
-        contact_relationship_repo: FromDishka[SqlJournalContactRelationshipRepository],
-        contact_repo: FromDishka[SqlContactRepository],
-        tag_repo: FromDishka[SqlJournalTagRepository],
         journal_id: Annotated[
             int, Field(description="The unique identifier of the journal to update")
         ],
@@ -1124,6 +1195,8 @@ def register_journal_tools(mcp: FastMCP[None]) -> None:
                 "tags (list[str])"
             ),
         ],
+        db_connection: AsyncConnection = mcp_depends(get_async_connection),
+        event_publisher: OutboxEventPublisher = mcp_depends(get_outbox_event_publisher),
     ) -> str:
         """
         Update an existing journal entry with partial data.
@@ -1154,14 +1227,13 @@ def register_journal_tools(mcp: FastMCP[None]) -> None:
             raise ValueError(f"Invalid journal data: {e}") from e
 
         # Create repositories
-        journal_repo = SqlJournalRepository(db_connection)
+        repos = _create_journal_tool_repositories(db_connection)
+        journal_repo = repos.journal_repo
         journal_service = JournalService(journal_repo, event_publisher)
 
         # Get existing journal
         existing_journal = await journal_repo.find_by_id(journal_id)
         if not existing_journal:
-            from app.core.journal.models.exceptions import JournalNotFoundError
-
             raise JournalNotFoundError(journal_id)
 
         # Track changed fields
@@ -1191,18 +1263,18 @@ def register_journal_tools(mcp: FastMCP[None]) -> None:
             # Get current types
             current_types, _ = await _fetch_journal_types_and_data(
                 journal_id,
-                calendar_info_repo,
-                mood_data_repo,
-                plan_data_repo,
-                travel_data_repo,
-                photo_album_data_repo,
-                fitness_data_repo,
-                outdoor_activity_data_repo,
-                bushwalking_data_repo,
-                jogging_data_repo,
-                abseiling_data_repo,
-                canyoning_data_repo,
-                climbing_data_repo,
+                repos.calendar_info_repo,
+                repos.mood_data_repo,
+                repos.plan_data_repo,
+                repos.travel_data_repo,
+                repos.photo_album_data_repo,
+                repos.fitness_data_repo,
+                repos.outdoor_activity_data_repo,
+                repos.bushwalking_data_repo,
+                repos.jogging_data_repo,
+                repos.abseiling_data_repo,
+                repos.canyoning_data_repo,
+                repos.climbing_data_repo,
             )
 
             # Remove types that are not in the new list
@@ -1235,16 +1307,16 @@ def register_journal_tools(mcp: FastMCP[None]) -> None:
                             await _create_type_specific_data(
                                 added_type,
                                 journal_id,
-                                mood_data_repo,
-                                plan_data_repo,
-                                travel_data_repo,
-                                fitness_data_repo,
-                                outdoor_activity_data_repo,
-                                bushwalking_data_repo,
-                                jogging_data_repo,
-                                abseiling_data_repo,
-                                canyoning_data_repo,
-                                climbing_data_repo,
+                                repos.mood_data_repo,
+                                repos.plan_data_repo,
+                                repos.travel_data_repo,
+                                repos.fitness_data_repo,
+                                repos.outdoor_activity_data_repo,
+                                repos.bushwalking_data_repo,
+                                repos.jogging_data_repo,
+                                repos.abseiling_data_repo,
+                                repos.canyoning_data_repo,
+                                repos.climbing_data_repo,
                             )
 
                     # Update type-specific data if provided
@@ -1253,16 +1325,16 @@ def register_journal_tools(mcp: FastMCP[None]) -> None:
                             journal_type,
                             journal_id,
                             request.type_data[type_str.upper()],
-                            calendar_info_repo,
-                            mood_data_repo,
-                            photo_album_data_repo,
-                            fitness_data_repo,
-                            outdoor_activity_data_repo,
-                            bushwalking_data_repo,
-                            jogging_data_repo,
-                            abseiling_data_repo,
-                            canyoning_data_repo,
-                            climbing_data_repo,
+                            repos.calendar_info_repo,
+                            repos.mood_data_repo,
+                            repos.photo_album_data_repo,
+                            repos.fitness_data_repo,
+                            repos.outdoor_activity_data_repo,
+                            repos.bushwalking_data_repo,
+                            repos.jogging_data_repo,
+                            repos.abseiling_data_repo,
+                            repos.canyoning_data_repo,
+                            repos.climbing_data_repo,
                         )
                 except (ValueError, KeyError):
                     # Invalid type, skip
@@ -1277,16 +1349,16 @@ def register_journal_tools(mcp: FastMCP[None]) -> None:
                         journal_type,
                         journal_id,
                         type_data_dict,
-                        calendar_info_repo,
-                        mood_data_repo,
-                        photo_album_data_repo,
-                        fitness_data_repo,
-                        outdoor_activity_data_repo,
-                        bushwalking_data_repo,
-                        jogging_data_repo,
-                        abseiling_data_repo,
-                        canyoning_data_repo,
-                        climbing_data_repo,
+                        repos.calendar_info_repo,
+                        repos.mood_data_repo,
+                        repos.photo_album_data_repo,
+                        repos.fitness_data_repo,
+                        repos.outdoor_activity_data_repo,
+                        repos.bushwalking_data_repo,
+                        repos.jogging_data_repo,
+                        repos.abseiling_data_repo,
+                        repos.canyoning_data_repo,
+                        repos.climbing_data_repo,
                     )
                 except (ValueError, KeyError):
                     # Invalid type, skip
@@ -1295,48 +1367,50 @@ def register_journal_tools(mcp: FastMCP[None]) -> None:
         # Update contact relationships if provided (replace all relationships)
         if request.contact_relationships is not None:
             # Remove all existing relationships
-            existing_relationships = await contact_relationship_repo.get_by_journal(
-                journal_id
+            existing_relationships = (
+                await repos.contact_relationship_repo.get_by_journal(journal_id)
             )
             for rel in existing_relationships:
-                await contact_relationship_repo.delete(
+                await repos.contact_relationship_repo.delete(
                     journal_id, rel.contact_id, rel.relationship_type
                 )
 
             # Add new relationships
             await _persist_contact_relationships(
-                journal_id, request.contact_relationships, contact_relationship_repo
+                journal_id,
+                request.contact_relationships,
+                repos.contact_relationship_repo,
             )
 
         # Update tags if provided (replace all tags)
         if request.tags is not None:
             # Remove all existing tags
-            existing_tags = await tag_repo.get_tags_for_journal(journal_id)
+            existing_tags = await repos.tag_repo.get_tags_for_journal(journal_id)
             for existing_tag in existing_tags:
                 if existing_tag.id is not None:
-                    await tag_repo.remove_tag(journal_id, existing_tag.id)
+                    await repos.tag_repo.remove_tag(journal_id, existing_tag.id)
 
             # Add new tags
-            await _persist_tags(journal_id, request.tags, tag_repo)
+            await _persist_tags(journal_id, request.tags, repos.tag_repo)
 
         # Fetch all enrichment data
         types, type_data, contacts, tags = await _fetch_enrichment_data(
             journal_id,
-            calendar_info_repo,
-            mood_data_repo,
-            plan_data_repo,
-            travel_data_repo,
-            photo_album_data_repo,
-            fitness_data_repo,
-            outdoor_activity_data_repo,
-            bushwalking_data_repo,
-            jogging_data_repo,
-            abseiling_data_repo,
-            canyoning_data_repo,
-            climbing_data_repo,
-            contact_relationship_repo,
-            contact_repo,
-            tag_repo,
+            repos.calendar_info_repo,
+            repos.mood_data_repo,
+            repos.plan_data_repo,
+            repos.travel_data_repo,
+            repos.photo_album_data_repo,
+            repos.fitness_data_repo,
+            repos.outdoor_activity_data_repo,
+            repos.bushwalking_data_repo,
+            repos.jogging_data_repo,
+            repos.abseiling_data_repo,
+            repos.canyoning_data_repo,
+            repos.climbing_data_repo,
+            repos.contact_relationship_repo,
+            repos.contact_repo,
+            repos.tag_repo,
         )
 
         # Convert to AI-friendly response
@@ -1352,9 +1426,7 @@ def register_journal_tools(mcp: FastMCP[None]) -> None:
 
     @mcp.tool
     @mcp_unified_error_handler("get_journal", "journal")
-    @inject
     async def get_journal(
-        db_connection: FromDishka[AsyncConnection],
         journal_id: Annotated[
             int, Field(description="The unique identifier of the journal")
         ],
@@ -1365,6 +1437,7 @@ def register_journal_tools(mcp: FastMCP[None]) -> None:
                 description="Optional: Include child journals in the response",
             ),
         ] = False,
+        db_connection: AsyncConnection = mcp_depends(get_async_connection),
     ) -> str:
         """
         Get journal details by ID for AI analysis.
@@ -1390,29 +1463,12 @@ def register_journal_tools(mcp: FastMCP[None]) -> None:
             JournalNotFoundError: If the journal with the given ID does not exist
         """
         # Create repositories
-        journal_repo = SqlJournalRepository(db_connection)
-        calendar_info_repo = SqlCalendarInfoRepository(db_connection)
-        mood_data_repo = SqlMoodDataRepository(db_connection)
-        plan_data_repo = SqlPlanDataRepository(db_connection)
-        travel_data_repo = SqlTravelDataRepository(db_connection)
-        photo_album_data_repo = SqlPhotoAlbumDataRepository(db_connection)
-        fitness_data_repo = SqlFitnessDataRepository(db_connection)
-        outdoor_activity_data_repo = SqlOutdoorActivityDataRepository(db_connection)
-        bushwalking_data_repo = SqlBushwalkingDataRepository(db_connection)
-        jogging_data_repo = SqlJoggingDataRepository(db_connection)
-        abseiling_data_repo = SqlAbseilingDataRepository(db_connection)
-        canyoning_data_repo = SqlCanyoningDataRepository(db_connection)
-        climbing_data_repo = SqlClimbingDataRepository(db_connection)
-        contact_relationship_repo = SqlJournalContactRelationshipRepository(
-            db_connection
-        )
-        tag_repo = SqlJournalTagRepository(db_connection)
+        repos = _create_journal_tool_repositories(db_connection)
+        journal_repo = repos.journal_repo
 
         # Get journal
         journal = await journal_repo.find_by_id(journal_id)
         if not journal:
-            from app.core.journal.models.exceptions import JournalNotFoundError
-
             raise JournalNotFoundError(journal_id)
 
         # Get children if requested
@@ -1423,28 +1479,27 @@ def register_journal_tools(mcp: FastMCP[None]) -> None:
         # Fetch types and type-specific data
         types, type_data = await _fetch_journal_types_and_data(
             journal_id,
-            calendar_info_repo,
-            mood_data_repo,
-            plan_data_repo,
-            travel_data_repo,
-            photo_album_data_repo,
-            fitness_data_repo,
-            outdoor_activity_data_repo,
-            bushwalking_data_repo,
-            jogging_data_repo,
-            abseiling_data_repo,
-            canyoning_data_repo,
-            climbing_data_repo,
+            repos.calendar_info_repo,
+            repos.mood_data_repo,
+            repos.plan_data_repo,
+            repos.travel_data_repo,
+            repos.photo_album_data_repo,
+            repos.fitness_data_repo,
+            repos.outdoor_activity_data_repo,
+            repos.bushwalking_data_repo,
+            repos.jogging_data_repo,
+            repos.abseiling_data_repo,
+            repos.canyoning_data_repo,
+            repos.climbing_data_repo,
         )
 
         # Fetch contact relationships and contact details
-        contact_repo = SqlContactRepository(db_connection)
         contacts = await _fetch_contact_relationships_with_names(
-            journal_id, contact_relationship_repo, contact_repo
+            journal_id, repos.contact_relationship_repo, repos.contact_repo
         )
 
         # Fetch tags
-        journal_tags = await tag_repo.get_tags_for_journal(journal_id)
+        journal_tags = await repos.tag_repo.get_tags_for_journal(journal_id)
 
         # Convert to AI-friendly response
         response = JournalConverter.to_response(
@@ -1460,9 +1515,7 @@ def register_journal_tools(mcp: FastMCP[None]) -> None:
 
     @mcp.tool
     @mcp_unified_error_handler("search_journals", "journal")
-    @inject
     async def search_journals(
-        db_connection: FromDishka[AsyncConnection],
         query: Annotated[
             str | None,
             Field(
@@ -1484,6 +1537,7 @@ def register_journal_tools(mcp: FastMCP[None]) -> None:
                 description="Maximum number of results to return (default: 20)",
             ),
         ] = 20,
+        db_connection: AsyncConnection = mcp_depends(get_async_connection),
     ) -> str:
         """
         Search journals with filtering options.
@@ -1506,7 +1560,7 @@ def register_journal_tools(mcp: FastMCP[None]) -> None:
             ValueError: If invalid filter values are provided
         """
         # Get current user ID from auth context
-        user_id = _get_current_user_id()
+        user_id = get_current_user_id()
 
         # Create repositories
         journal_repo = SqlJournalRepository(db_connection)
@@ -1524,8 +1578,6 @@ def register_journal_tools(mcp: FastMCP[None]) -> None:
         )
 
         # Convert to search results
-        from app.mcp.domains.journals.schemas import JournalSearchResponse
-
         results = [_journal_to_search_result(journal) for journal in journals]
 
         response = JournalSearchResponse(
@@ -1540,10 +1592,7 @@ def register_journal_tools(mcp: FastMCP[None]) -> None:
 
     @mcp.tool
     @mcp_unified_error_handler("delete_journal", "journal")
-    @inject
     async def delete_journal(
-        db_connection: FromDishka[AsyncConnection],
-        event_publisher: FromDishka[OutboxEventPublisher],
         journal_id: Annotated[
             int, Field(description="The unique identifier of the journal to delete")
         ],
@@ -1554,6 +1603,8 @@ def register_journal_tools(mcp: FastMCP[None]) -> None:
                 description="Optional: Delete child journals as well",
             ),
         ] = False,
+        db_connection: AsyncConnection = mcp_depends(get_async_connection),
+        event_publisher: OutboxEventPublisher = mcp_depends(get_outbox_event_publisher),
     ) -> str:
         """
         Delete a journal entry.
@@ -1585,8 +1636,6 @@ def register_journal_tools(mcp: FastMCP[None]) -> None:
         # Delete journal
         await journal_service.delete_journal(journal_id, db_connection)
 
-        from pydantic import BaseModel
-
         class DeleteResponse(BaseModel):
             journal_id: int
             deleted: bool
@@ -1602,9 +1651,7 @@ def register_journal_tools(mcp: FastMCP[None]) -> None:
 
     @mcp.tool
     @mcp_unified_error_handler("get_contact_journals", "journal")
-    @inject
     async def get_contact_journals(
-        db_connection: FromDishka[AsyncConnection],
         contact_id: Annotated[
             int, Field(description="The unique identifier of the contact")
         ],
@@ -1615,6 +1662,7 @@ def register_journal_tools(mcp: FastMCP[None]) -> None:
                 description="Maximum number of results to return (default: 20)",
             ),
         ] = 20,
+        db_connection: AsyncConnection = mcp_depends(get_async_connection),
     ) -> str:
         """
         Get journals associated with a contact.
@@ -1647,8 +1695,6 @@ def register_journal_tools(mcp: FastMCP[None]) -> None:
                 journals.append(journal)
 
         # Convert to search results
-        from app.mcp.domains.journals.schemas import JournalSearchResponse
-
         results = [_journal_to_search_result(journal) for journal in journals]
 
         response = JournalSearchResponse(
@@ -1663,9 +1709,7 @@ def register_journal_tools(mcp: FastMCP[None]) -> None:
 
     @mcp.tool
     @mcp_unified_error_handler("link_journal_to_contact", "journal")
-    @inject
     async def link_journal_to_contact(
-        db_connection: FromDishka[AsyncConnection],
         journal_id: Annotated[
             int, Field(description="The unique identifier of the journal")
         ],
@@ -1678,6 +1722,7 @@ def register_journal_tools(mcp: FastMCP[None]) -> None:
                 description="Relationship type (PARTICIPANT, INVITEE, MENTION, ABOUT)"
             ),
         ],
+        db_connection: AsyncConnection = mcp_depends(get_async_connection),
     ) -> str:
         """
         Link a journal to a contact with a specific relationship type.
@@ -1715,15 +1760,11 @@ def register_journal_tools(mcp: FastMCP[None]) -> None:
         # Verify journal exists
         journal = await journal_repo.find_by_id(journal_id)
         if not journal:
-            from app.core.journal.models.exceptions import JournalNotFoundError
-
             raise JournalNotFoundError(journal_id)
 
         # Verify contact exists
         contact = await contact_repo.find_by_id(contact_id)
         if not contact:
-            from app.core.contacts.models.exceptions import ContactNotFoundError
-
             raise ContactNotFoundError(contact_id)
 
         # Create relationship
@@ -1733,8 +1774,6 @@ def register_journal_tools(mcp: FastMCP[None]) -> None:
             relationship_type=rel_type,
         )
         await contact_rel_repo.create(relationship)
-
-        from pydantic import BaseModel
 
         class LinkResponse(BaseModel):
             journal_id: int
@@ -1752,3 +1791,184 @@ def register_journal_tools(mcp: FastMCP[None]) -> None:
         )
 
         return MCPResponseBuilder.success_response(response)
+
+    @mcp.tool
+    @mcp_unified_error_handler("list_calendars", "journal")
+    async def list_calendars(
+        db_connection: AsyncConnection = mcp_depends(get_async_connection),
+    ) -> str:
+        """
+        List all calendars available for EVENT journals.
+        """
+        user_id = get_current_user_id()
+        calendar_repo = SqlCalendarRepository(db_connection)
+
+        calendars = await calendar_repo.get_all(user_id=user_id)
+
+        class CalendarListItem(BaseModel):
+            id: str
+            name: str
+            description: str | None = None
+            color: str | None = None
+
+        class CalendarListResponse(BaseModel):
+            calendars: list[CalendarListItem]
+
+        response = CalendarListResponse(
+            calendars=[
+                CalendarListItem(
+                    id=str(c.id),
+                    name=c.name,
+                    description=c.description,
+                    color=c.color,
+                )
+                for c in calendars
+            ]
+        )
+
+        return MCPResponseBuilder.success_response(response)
+
+    @mcp.tool
+    @mcp_unified_error_handler("create_calendar", "journal")
+    async def create_calendar(
+        name: Annotated[str, Field(description="Calendar name")],
+        description: Annotated[
+            str | None, Field(description="Calendar description", default=None)
+        ] = None,
+        color: Annotated[
+            str | None, Field(description="Calendar color hex code", default=None)
+        ] = None,
+        db_connection: AsyncConnection = mcp_depends(get_async_connection),
+    ) -> str:
+        """
+        Create a new calendar to be used with EVENT journals.
+        """
+        user_id = get_current_user_id()
+        calendar_repo = SqlCalendarRepository(db_connection)
+
+        new_calendar = Calendar(
+            user_id=user_id,
+            name=name,
+            description=description,
+            color=color or "#3B82F6",
+            is_synced_to_google=False,
+            google_calendar_id=None,
+        )
+
+        saved_calendar = await calendar_repo.save(new_calendar)
+
+        class CalendarResponse(BaseModel):
+            id: str
+            name: str
+            summary: str
+
+        return MCPResponseBuilder.success_response(
+            CalendarResponse(
+                id=str(saved_calendar.id),
+                name=saved_calendar.name,
+                summary=f"Created calendar '{saved_calendar.name}'",
+            )
+        )
+
+    @mcp.tool
+    @mcp_unified_error_handler("update_calendar", "journal")
+    async def update_calendar(
+        calendar_id: Annotated[str, Field(description="Calendar UUID")],
+        name: Annotated[
+            str | None, Field(description="Calendar name", default=None)
+        ] = None,
+        description: Annotated[
+            str | None, Field(description="Calendar description", default=None)
+        ] = None,
+        color: Annotated[
+            str | None, Field(description="Calendar color hex code", default=None)
+        ] = None,
+        db_connection: AsyncConnection = mcp_depends(get_async_connection),
+    ) -> str:
+        """
+        Update an existing calendar.
+        """
+        user_id = get_current_user_id()
+        calendar_repo = SqlCalendarRepository(db_connection)
+
+        calendar_uuid = _parse_calendar_id(calendar_id)
+        if calendar_uuid is None:
+            raise ValueError(
+                f"Invalid calendar_id '{calendar_id}'. Must be a valid UUID."
+            )
+
+        calendar = await calendar_repo.find_by_id(calendar_uuid)
+        if not calendar or calendar.user_id != user_id:
+            return MCPResponseBuilder.not_found_error_response("Calendar", calendar_id)
+
+        if name is not None:
+            calendar.name = name
+        if description is not None:
+            calendar.description = description
+        if color is not None:
+            calendar.color = color
+
+        saved_calendar = await calendar_repo.save(calendar)
+
+        class CalendarResponse(BaseModel):
+            id: str
+            name: str
+            summary: str
+
+        return MCPResponseBuilder.success_response(
+            CalendarResponse(
+                id=str(saved_calendar.id),
+                name=saved_calendar.name,
+                summary=f"Updated calendar '{saved_calendar.name}'",
+            )
+        )
+
+    @mcp.tool
+    @mcp_unified_error_handler("delete_calendar", "journal")
+    async def delete_calendar(
+        calendar_id: Annotated[str, Field(description="Calendar UUID")],
+        db_connection: AsyncConnection = mcp_depends(get_async_connection),
+    ) -> str:
+        """
+        Delete a calendar. Will fail if the calendar is in use.
+        """
+        user_id = get_current_user_id()
+        calendar_repo = SqlCalendarRepository(db_connection)
+
+        calendar_uuid = _parse_calendar_id(calendar_id)
+        if calendar_uuid is None:
+            raise ValueError(
+                f"Invalid calendar_id '{calendar_id}'. Must be a valid UUID."
+            )
+
+        calendar = await calendar_repo.find_by_id(calendar_uuid)
+        if not calendar or calendar.user_id != user_id:
+            return MCPResponseBuilder.not_found_error_response("Calendar", calendar_id)
+
+        check_query = text(
+            """
+            SELECT COUNT(*) as count
+            FROM journal_calendar_info
+            WHERE calendar_id = :calendar_id
+            """
+        )
+        result = await db_connection.execute(
+            check_query, {"calendar_id": str(calendar.id)}
+        )
+        usage_count = int(result.scalar_one())
+
+        if usage_count > 0:
+            return MCPResponseBuilder.error_response(
+                "CONFLICT",
+                f"Calendar is in use by {usage_count} journal(s)",
+            )
+
+        if calendar.id is not None:
+            await calendar_repo.delete(calendar.id)
+
+        class DeleteCalendarResponse(BaseModel):
+            summary: str
+
+        return MCPResponseBuilder.success_response(
+            DeleteCalendarResponse(summary=f"Deleted calendar '{calendar.name}'")
+        )

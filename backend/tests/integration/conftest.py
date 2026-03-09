@@ -1,17 +1,25 @@
 """Integration test configuration with Docker PostgreSQL support."""
 
 import asyncio
+import json
 import os
 import subprocess
 import time
+from base64 import b64encode
 from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from typing import Any, cast
 
 import pytest
 import pytest_asyncio
+from dishka.integrations.fastapi import setup_dishka as setup_fastapi_dishka
+from dishka.integrations.starlette import setup_dishka as setup_starlette_dishka
+from itsdangerous import TimestampSigner
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine, create_async_engine
+
+from tests.integration.sse_helpers import reset_sse_starlette_appstatus_event
 
 # Constants
 CONTAINER_NAME_FILTER = "name=pms-postgres"
@@ -361,10 +369,140 @@ def restore_environment_variables(original_values: dict[str, str | None]) -> Non
 def clear_caches() -> None:
     """Helper function to clear FastAPI caches."""
     from app.infrastructure.config import get_settings
-    from app.infrastructure.database import get_database_engine
+    from app.infrastructure.database import (
+        get_async_database_engine,
+        get_database_engine,
+    )
 
     get_settings.cache_clear()
     get_database_engine.cache_clear()
+    get_async_database_engine.cache_clear()
+
+
+@asynccontextmanager
+async def _authenticated_client_context(
+    async_connection: AsyncConnection,
+    test_settings: Any,
+    test_user: Any,
+    *,
+    start_lifespan: bool = False,
+) -> AsyncGenerator[Any, None]:
+    """Create an authenticated async client for integration tests."""
+    from dishka import Provider, Scope, make_async_container, provide
+    from dishka.integrations.fastapi import FastapiProvider
+    from httpx import ASGITransport, AsyncClient
+    from sqlalchemy.ext.asyncio import AsyncConnection
+
+    from app.infrastructure.auth.models import SessionUser
+    from app.infrastructure.auth.oauth_service import OAuthService
+    from app.infrastructure.config import Settings
+    from app.infrastructure.di.contacts import ContactProvider
+    from app.infrastructure.di.infrastructure import InfrastructureProvider
+    from app.infrastructure.di.integrations import IntegrationProvider
+    from app.infrastructure.di.journal import JournalProvider
+    from app.infrastructure.events.outbox_event_publisher import OutboxEventPublisher
+    from app.infrastructure.search.search_service import SearchService
+    from app.main import create_app
+
+    class TestDatabaseProvider(Provider):
+        """Provides the test savepoint connection to the DI container."""
+
+        def __init__(self, connection: AsyncConnection):
+            super().__init__()
+            self.connection = connection
+
+        @provide(scope=Scope.REQUEST)
+        def get_connection(self) -> AsyncConnection:
+            return self.connection
+
+    class TestAuthProvider(Provider):
+        """Test provider for authenticated client."""
+
+        @provide(scope=Scope.APP)
+        def get_settings(self) -> Settings:
+            """Get test settings for app scope."""
+            return cast(Settings, test_settings)
+
+        @provide(scope=Scope.REQUEST)
+        def get_session_user(self) -> SessionUser:
+            return cast(SessionUser, test_user)
+
+        @provide(scope=Scope.REQUEST)
+        def get_oauth_service(self, settings: Settings) -> OAuthService:
+            """Get OAuth service instance for request scope."""
+            return OAuthService(settings)
+
+        @provide(scope=Scope.APP)
+        def get_search_service(self) -> SearchService:
+            """Get search service (test stub)."""
+            return SearchService()
+
+        @provide(scope=Scope.REQUEST)
+        def get_outbox_event_publisher(
+            self, connection: AsyncConnection
+        ) -> OutboxEventPublisher:
+            """Get outbox event publisher for request scope."""
+            return OutboxEventPublisher(connection)
+
+    original_values = {"DATABASE_URL": os.environ.get("DATABASE_URL")}
+    if start_lifespan:
+        os.environ["DATABASE_URL"] = str(test_settings.database_url)
+        clear_caches()
+
+    app = create_app(settings=test_settings)
+    test_container = make_async_container(
+        TestDatabaseProvider(async_connection),
+        InfrastructureProvider(),
+        TestAuthProvider(),
+        ContactProvider(),
+        JournalProvider(),
+        IntegrationProvider(),
+        FastapiProvider(),
+    )
+
+    try:
+        try:
+            await app.state.dishka_container.close()
+        except (RuntimeError, AttributeError):
+            pass
+
+        app.state.dishka_container = test_container
+        setup_fastapi_dishka(test_container, app)
+        mcp_app = getattr(app.state, "mcp_app", None)
+        if mcp_app is not None:
+            mcp_app.state.dishka_container = test_container
+            setup_starlette_dishka(test_container, mcp_app)
+
+        @asynccontextmanager
+        async def client_context() -> AsyncGenerator[AsyncClient, None]:
+            transport = ASGITransport(app=app)
+            async with AsyncClient(
+                transport=transport, base_url="http://test"
+            ) as client:
+                client.cookies.set(
+                    "session",
+                    _create_session_cookie_value(
+                        {"user": test_user.model_dump(mode="json")},
+                        test_settings.session_secret_key,
+                    ),
+                )
+                yield client
+
+        if start_lifespan:
+            reset_sse_starlette_appstatus_event()
+            async with app.router.lifespan_context(app):
+                async with client_context() as client:
+                    yield client
+        else:
+            async with client_context() as client:
+                yield client
+    finally:
+        if not start_lifespan:
+            await test_container.close()
+        if start_lifespan:
+            reset_sse_starlette_appstatus_event()
+            restore_environment_variables(original_values)
+            clear_caches()
 
 
 def start_test_database():
@@ -512,6 +650,13 @@ def test_user():
         avatar_url="https://example.com/avatar.jpg",
         provider="test",
     )
+
+
+def _create_session_cookie_value(session_data: dict[str, Any], secret_key: str) -> str:
+    """Create a Starlette SessionMiddleware-compatible session cookie value."""
+    encoded_session = b64encode(json.dumps(session_data).encode("utf-8"))
+    signer = TimestampSigner(secret_key)
+    return signer.sign(encoded_session).decode("utf-8")
 
 
 @pytest.fixture
@@ -662,90 +807,31 @@ async def authenticated_client(
     during a test are rolled back when the savepoint is released, preventing
     state leakage between tests.
     """
-    from dishka import Provider, Scope, make_async_container, provide
-    from dishka.integrations.fastapi import setup_dishka
-    from httpx import ASGITransport, AsyncClient
-    from sqlalchemy.ext.asyncio import AsyncConnection
-
-    from app.infrastructure.auth.models import SessionUser
-    from app.infrastructure.auth.oauth_service import OAuthService
-    from app.infrastructure.config import Settings
-    from app.infrastructure.events.outbox_event_publisher import OutboxEventPublisher
-    from app.infrastructure.search.search_service import SearchService
-    from app.main import create_app
-
-    class TestDatabaseProvider(Provider):
-        """Provides the test savepoint connection to the DI container."""
-
-        def __init__(self, connection: AsyncConnection):
-            super().__init__()
-            self.connection = connection
-
-        @provide(scope=Scope.REQUEST)
-        def get_connection(self) -> AsyncConnection:
-            return self.connection
-
-    class TestAuthProvider(Provider):
-        """Test provider for authenticated client."""
-
-        @provide(scope=Scope.APP)
-        def get_settings(self) -> Settings:
-            """Get test settings for app scope."""
-            return cast(Settings, test_settings)
-
-        @provide(scope=Scope.REQUEST)
-        def get_session_user(self) -> SessionUser:
-            return cast(SessionUser, test_user)
-
-        @provide(scope=Scope.REQUEST)
-        def get_oauth_service(self, settings: Settings) -> OAuthService:
-            """Get OAuth service instance for request scope."""
-            return OAuthService(settings)
-
-        @provide(scope=Scope.APP)
-        def get_search_service(self) -> SearchService:
-            """Get search service (test stub)."""
-            return SearchService()
-
-        @provide(scope=Scope.REQUEST)
-        def get_outbox_event_publisher(
-            self, connection: AsyncConnection
-        ) -> OutboxEventPublisher:
-            """Get outbox event publisher for request scope."""
-            return OutboxEventPublisher(connection)
-
-    # Create app with test settings
-    app = create_app(settings=test_settings)
-
-    # Replace container with test container that uses the savepoint connection
-    from dishka.integrations.fastapi import FastapiProvider
-
-    from app.infrastructure.di.contacts import ContactProvider
-    from app.infrastructure.di.infrastructure import InfrastructureProvider
-    from app.infrastructure.di.integrations import IntegrationProvider
-    from app.infrastructure.di.journal import JournalProvider
-
-    test_container = make_async_container(
-        TestDatabaseProvider(async_connection),  # <-- use savepoint connection
-        InfrastructureProvider(),
-        TestAuthProvider(),
-        ContactProvider(),
-        JournalProvider(),
-        IntegrationProvider(),
-        FastapiProvider(),
-    )
-    try:
-        await app.state.dishka_container.close()
-    except (RuntimeError, AttributeError):
-        pass
-    app.state.dishka_container = test_container
-    setup_dishka(test_container, app)
-
-    transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as client:
+    async with _authenticated_client_context(
+        async_connection,
+        test_settings,
+        test_user,
+    ) as client:
         yield client
 
-    await test_container.close()
+
+@pytest_asyncio.fixture
+async def authenticated_lifespan_client(
+    async_connection: AsyncConnection, test_settings, test_user
+) -> AsyncGenerator[Any, None]:
+    """Provide an authenticated client factory that manages app lifespan."""
+
+    @asynccontextmanager
+    async def factory() -> AsyncGenerator[Any, None]:
+        async with _authenticated_client_context(
+            async_connection,
+            test_settings,
+            test_user,
+            start_lifespan=True,
+        ) as client:
+            yield client
+
+    yield factory
 
 
 @pytest.fixture

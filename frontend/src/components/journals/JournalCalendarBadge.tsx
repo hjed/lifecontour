@@ -8,7 +8,7 @@
 'use client';
 
 import { useState } from 'react';
-import { Calendar as CalendarIcon } from 'lucide-react';
+import { Calendar as CalendarIcon, Settings } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
@@ -23,6 +23,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import Link from 'next/link';
+import type { Route } from 'next';
 import { cn } from '@/lib/utils';
 import { JournalType, type JournalCalendar } from '@/types/journals';
 
@@ -141,6 +143,15 @@ export function JournalCalendarBadge({
               placeholder='Choose a calendar'
               selectId='calendar-select'
             />
+            <div className='mt-2 border-t pt-2'>
+              <Link
+                href={'/settings' as Route}
+                className='text-muted-foreground hover:text-foreground flex items-center text-xs'
+              >
+                <Settings className='mr-1 h-3 w-3' />
+                Manage Calendars
+              </Link>
+            </div>
           </div>
         </PopoverContent>
       </Popover>
@@ -194,6 +205,15 @@ export function JournalCalendarBadge({
             disabled={isLoading}
             selectId='calendar-select-edit'
           />
+          <div className='mt-2 border-t pt-2'>
+            <Link
+              href={'/settings' as Route}
+              className='text-muted-foreground hover:text-foreground flex items-center text-xs'
+            >
+              <Settings className='mr-1 h-3 w-3' />
+              Manage Calendars
+            </Link>
+          </div>
         </div>
       </PopoverContent>
     </Popover>

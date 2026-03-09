@@ -8,7 +8,7 @@ the JSON API specification.
 from datetime import date, datetime, time
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from app.api.common.schemas import (
     JsonApiCollectionResponse,
@@ -23,6 +23,9 @@ DISPLAY_ORDER_DESC = "Display order"
 BOOKING_REFERENCE_DESC = "Booking reference"
 RESOURCE_TYPE_DESC = "Resource type"
 RESOURCE_LINKS_DESC = "Resource links"
+ROUTE_ID_DESC = "UUID of the associated route"
+CALENDAR_NAME_DESC = "Calendar name"
+CALENDAR_COLOR_DESC = "Calendar color (hex code)"
 
 
 # Event Date Range Schema
@@ -215,7 +218,7 @@ class BushwalkingDataSchema(BaseModel):
 
     route_id: str | None = Field(
         default=None,
-        description="UUID of the associated route",
+        description=ROUTE_ID_DESC,
     )
     track_grading: str | None = Field(
         default=None,
@@ -228,7 +231,7 @@ class JoggingDataSchema(BaseModel):
 
     route_id: str | None = Field(
         default=None,
-        description="UUID of the associated route",
+        description=ROUTE_ID_DESC,
     )
     pace: int | None = Field(
         default=None,
@@ -257,7 +260,7 @@ class CanyoningDataSchema(BaseModel):
 
     route_id: str | None = Field(
         default=None,
-        description="UUID of the associated route",
+        description=ROUTE_ID_DESC,
     )
     french_grade: str | None = Field(
         default=None,
@@ -290,7 +293,7 @@ class ClimbingDataSchema(BaseModel):
 
     route_id: str | None = Field(
         default=None,
-        description="UUID of the associated route",
+        description=ROUTE_ID_DESC,
     )
     climbing_type: str | None = Field(
         default=None,
@@ -313,7 +316,7 @@ class KayakingDataSchema(BaseModel):
 
     route_id: str | None = Field(
         default=None,
-        description="UUID of the associated route",
+        description=ROUTE_ID_DESC,
     )
     water_type: str | None = Field(
         default=None,
@@ -326,7 +329,7 @@ class CrossCountrySkiingDataSchema(BaseModel):
 
     route_id: str | None = Field(
         default=None,
-        description="UUID of the associated route",
+        description=ROUTE_ID_DESC,
     )
     snow_conditions: str | None = Field(
         default=None,
@@ -405,8 +408,8 @@ class CalendarSchema(BaseModel):
     """Calendar schema for journal responses."""
 
     id: str = Field(..., description="Calendar ID")
-    name: str = Field(..., description="Calendar name")
-    color: str | None = Field(default=None, description="Calendar color (hex code)")
+    name: str = Field(..., description=CALENDAR_NAME_DESC)
+    color: str | None = Field(default=None, description=CALENDAR_COLOR_DESC)
 
 
 # Journal Attributes
@@ -656,9 +659,9 @@ class JournalTagAddRequest(JsonApiCreateRequest[JournalTagAddData]):
 class CalendarAttributes(BaseModel):
     """Calendar attributes."""
 
-    name: str = Field(..., description="Calendar name")
+    name: str = Field(..., description=CALENDAR_NAME_DESC)
     description: str | None = Field(default=None, description="Calendar description")
-    color: str | None = Field(default=None, description="Calendar color (hex code)")
+    color: str | None = Field(default=None, description=CALENDAR_COLOR_DESC)
     is_synced_to_google: bool = Field(
         default=False, description="Whether calendar is synced to Google Calendar"
     )
@@ -688,6 +691,53 @@ class CalendarCreateData(BaseModel):
 
 class CalendarCreateRequest(JsonApiCreateRequest[CalendarCreateData]):
     """Request model for creating a calendar."""
+
+    pass
+
+
+class CalendarUpdateAttributes(BaseModel):
+    """Calendar attributes for updates."""
+
+    name: str | None = Field(
+        default=None, description=CALENDAR_NAME_DESC, min_length=1, max_length=100
+    )
+    description: str | None = Field(default=None, description="Calendar description")
+    color: str | None = Field(
+        default=None, description=CALENDAR_COLOR_DESC, pattern=r"^#[0-9A-Fa-f]{6}$"
+    )
+    is_synced_to_google: bool | None = Field(
+        default=None, description="Whether calendar is synced to Google Calendar"
+    )
+    google_calendar_id: str | None = Field(
+        default=None, description="Google Calendar ID"
+    )
+
+    @model_validator(mode="after")
+    def validate_non_nulls(self) -> "CalendarUpdateAttributes":
+        if "name" in self.model_fields_set and self.name is None:
+            raise ValueError("name cannot be null when updating")
+        if "color" in self.model_fields_set and self.color is None:
+            raise ValueError("color cannot be null when updating")
+        if (
+            "is_synced_to_google" in self.model_fields_set
+            and self.is_synced_to_google is None
+        ):
+            raise ValueError("is_synced_to_google cannot be null when updating")
+        return self
+
+
+class CalendarUpdateData(BaseModel):
+    """Data for updating a calendar."""
+
+    type: str = Field(default="calendars", description=RESOURCE_TYPE_DESC)
+    id: str = Field(..., description="Calendar ID to update")
+    attributes: CalendarUpdateAttributes = Field(
+        ..., description="Calendar attributes to update"
+    )
+
+
+class CalendarUpdateRequest(JsonApiUpdateRequest[CalendarUpdateData]):
+    """Request model for updating a calendar."""
 
     pass
 

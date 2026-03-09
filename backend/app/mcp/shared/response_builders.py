@@ -130,7 +130,7 @@ class MCPLogger:
     @staticmethod
     def log_operation_error(operation: str, error: str, **kwargs: Any) -> None:
         """Log an error during an MCP operation."""
-        logger.error(f"MCP: Error in {operation}", error=error, **kwargs)
+        logger.error(f"MCP: Error in {operation}", error=error, exc_info=True, **kwargs)
 
     @staticmethod
     def log_validation_error(operation: str, error: str, **kwargs: Any) -> None:
