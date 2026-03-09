@@ -206,7 +206,7 @@ describe('JournalCreateForm', () => {
       expect(screen.getByLabelText(/^climbing$/i)).toBeInTheDocument();
       expect(screen.getByLabelText(/^kayaking$/i)).toBeInTheDocument();
       expect(
-        screen.getByLabelText(/^cross.country skiing$/i)
+        screen.getByLabelText(/^cross-country skiing$/i)
       ).toBeInTheDocument();
     });
   });
@@ -304,7 +304,7 @@ describe('JournalCreateForm', () => {
       const user = userEvent.setup();
       renderWithClient(<JournalCreateForm />);
 
-      await user.click(screen.getByLabelText(/^cross.country skiing$/i));
+      await user.click(screen.getByLabelText(/^cross-country skiing$/i));
 
       expect(
         screen.getByTestId('cross-country-skiing-type-editor')

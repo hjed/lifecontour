@@ -97,7 +97,7 @@ describe('ActivityStats', () => {
     );
   });
 
-  it('renders complex activity type stats for PR 5 activity editors', () => {
+  it('renders complex activity type stats for multiple activity editors', () => {
     render(
       <ActivityStats
         data={{ distance: 12000 }}

@@ -224,9 +224,9 @@ async function globalSetup(_config: FullConfig) {
       console.log('🔍 Verifying service health...');
     }
 
-    // Wait for backend API
-    console.log('🔍 Checking backend API health...');
-    await waitForService('http://localhost:8001/api/health');
+    // Wait for backend API readiness
+    console.log('🔍 Checking backend API readiness...');
+    await waitForService('http://localhost:8001/api/health/ready');
 
     // Wait for OAuth provider (check admin health endpoint)
     console.log('🔍 Checking OAuth provider health...');

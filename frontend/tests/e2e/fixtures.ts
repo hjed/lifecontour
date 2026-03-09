@@ -196,13 +196,13 @@ async function completeWorkerOAuthFlow(browser: any): Promise<AuthState> {
       oauthButton.click(),
     ]);
 
-    const currentUrl = page.url();
+    let currentUrl = page.url();
     console.debug(
       '🔐 [Worker Auth] Current URL after OAuth click:',
       currentUrl
     );
 
-    // Step 3: Handle OAuth provider interaction
+    // Step 3: Handle OAuth provider interaction / callback processing
     if (currentUrl.includes('localhost:4646') || currentUrl.includes('hydra')) {
       console.debug(
         '🔐 [Worker Auth] Successfully redirected to Hydra OAuth provider'
@@ -217,46 +217,43 @@ async function completeWorkerOAuthFlow(browser: any): Promise<AuthState> {
         { timeout: 30000 }
       );
 
-      const callbackUrl = page.url();
-      console.debug(
-        '🔐 [Worker Auth] URL after Hydra processing:',
-        callbackUrl
-      );
+      currentUrl = page.url();
+      console.debug('🔐 [Worker Auth] URL after Hydra processing:', currentUrl);
+    }
 
-      if (callbackUrl.includes('/auth/callback')) {
-        console.debug(
-          '🔐 [Worker Auth] OAuth callback received, processing...'
+    if (currentUrl.includes('/auth/callback')) {
+      console.debug('🔐 [Worker Auth] OAuth callback received, processing...');
+
+      // Wait for callback to complete by watching for the final redirect.
+      // We can land on the callback directly if Hydra redirects very quickly,
+      // so this needs to run even when we never observed the provider page.
+      try {
+        await page.waitForURL(
+          (url: URL) => !url.toString().includes('/auth/callback'),
+          { timeout: 15000 }
         );
-
-        // Wait for callback to complete by watching for the final redirect
-        // The callback page should redirect to /contacts or another authenticated route
-        try {
-          await page.waitForURL(
-            (url: URL) => !url.toString().includes('/auth/callback'),
-            { timeout: 15000 }
+        currentUrl = page.url();
+        console.debug('🔐 [Worker Auth] Final URL after callback:', currentUrl);
+      } catch {
+        // If redirect times out, we might still be on the callback page
+        // This can happen if the callback page is still processing
+        console.warn(
+          '🔐 [Worker Auth] Callback redirect timeout, checking if still on callback page'
+        );
+        const stillOnCallback = page.url().includes('/auth/callback');
+        if (stillOnCallback) {
+          // Wait a bit longer for the callback to complete
+          await page.waitForTimeout(2000);
+          currentUrl = page.url();
+          console.log(
+            '🔐 [Worker Auth] After additional wait, URL is:',
+            currentUrl
           );
-          console.debug(
-            '🔐 [Worker Auth] Final URL after callback:',
-            page.url()
-          );
-        } catch {
-          // If redirect times out, we might still be on the callback page
-          // This can happen if the callback page is still processing
-          console.warn(
-            '🔐 [Worker Auth] Callback redirect timeout, checking if still on callback page'
-          );
-          const stillOnCallback = page.url().includes('/auth/callback');
-          if (stillOnCallback) {
-            // Wait a bit longer for the callback to complete
-            await page.waitForTimeout(2000);
-            console.log(
-              '🔐 [Worker Auth] After additional wait, URL is:',
-              page.url()
-            );
-          }
         }
       }
-    } else if (currentUrl.includes('/auth/login')) {
+    }
+
+    if (currentUrl.includes('/auth/login')) {
       console.warn(
         '🔐 [Worker Auth] Still on login page - OAuth provider may not be configured'
       );
