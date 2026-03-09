@@ -75,10 +75,14 @@ jest.mock('@/lib/api/journals', () => ({
 }));
 
 jest.mock('@/lib/api/contacts', () => ({
-  useContacts: () => ({
+  useContacts: jest.fn(() => ({
     data: { data: [] },
-  }),
+  })),
 }));
+
+const mockUseContacts = jest.mocked(
+  jest.requireMock('@/lib/api/contacts').useContacts
+);
 
 // Mock child components
 jest.mock('../JournalBreadcrumb', () => ({
@@ -171,6 +175,12 @@ describe('JournalDetailView', () => {
       expect(screen.getByTestId('breadcrumb')).toBeInTheDocument();
       expect(screen.getAllByText('Test Journal').length).toBeGreaterThan(0);
       expect(screen.getByText('Test content')).toBeInTheDocument();
+    });
+
+    it('does not preload contacts for the contact relationship picker', () => {
+      renderWithQueryClient(<JournalDetailView journal={mockJournal} />);
+
+      expect(mockUseContacts).not.toHaveBeenCalled();
     });
 
     it('renders all badge components', () => {

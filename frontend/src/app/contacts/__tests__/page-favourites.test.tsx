@@ -5,8 +5,8 @@
 import { screen } from '@testing-library/react';
 import ContactsPage from '../page';
 import {
-  useContacts,
-  useSearchContacts,
+  useInfiniteContacts,
+  useInfiniteSearchContacts,
   useToggleContactFavourite,
 } from '@/lib/api/contacts';
 import { ContactListResponse } from '@/types/contacts';
@@ -54,9 +54,37 @@ jest.mock('@/lib/constants', () => ({
 
 // Mock the API hooks
 jest.mock('@/lib/api/contacts', () => ({
-  useContacts: jest.fn(),
-  useSearchContacts: jest.fn(),
+  useInfiniteContacts: jest.fn(),
+  useInfiniteSearchContacts: jest.fn(),
   useToggleContactFavourite: jest.fn(),
+  getContactPaginationMeta: jest.fn((meta?: Record<string, unknown>) => ({
+    totalCount:
+      typeof meta?.total_count === 'number'
+        ? meta.total_count
+        : typeof meta?.total === 'number'
+          ? meta.total
+          : undefined,
+    currentPage:
+      typeof meta?.current_page === 'number'
+        ? meta.current_page
+        : typeof meta?.page === 'number'
+          ? meta.page
+          : undefined,
+    pageCount:
+      typeof meta?.page_count === 'number'
+        ? meta.page_count
+        : typeof meta?.total_pages === 'number'
+          ? meta.total_pages
+          : typeof meta?.totalPages === 'number'
+            ? meta.totalPages
+            : undefined,
+    perPage:
+      typeof meta?.per_page === 'number'
+        ? meta.per_page
+        : typeof meta?.limit === 'number'
+          ? meta.limit
+          : undefined,
+  })),
 }));
 
 // Mock the FavouriteToggle component
@@ -69,14 +97,39 @@ jest.mock('@/components/contacts/FavouriteToggle', () => ({
   ),
 }));
 
-const mockUseContacts = useContacts as jest.MockedFunction<typeof useContacts>;
-const mockUseSearchContacts = useSearchContacts as jest.MockedFunction<
-  typeof useSearchContacts
+const mockUseInfiniteContacts = useInfiniteContacts as jest.MockedFunction<
+  typeof useInfiniteContacts
 >;
+const mockUseInfiniteSearchContacts =
+  useInfiniteSearchContacts as jest.MockedFunction<
+    typeof useInfiniteSearchContacts
+  >;
 const mockUseToggleContactFavourite =
   useToggleContactFavourite as jest.MockedFunction<
     typeof useToggleContactFavourite
   >;
+
+function createInfiniteQueryResult(data?: ContactListResponse) {
+  return {
+    data: data
+      ? {
+          pages: [data],
+          pageParams: [1],
+        }
+      : undefined,
+    isLoading: false,
+    error: null,
+    hasNextPage: false,
+    isFetchingNextPage: false,
+    fetchNextPage: jest.fn(),
+    isPending: false,
+    isError: false,
+    isSuccess: true,
+    status: 'success',
+    fetchStatus: 'idle',
+    refetch: jest.fn(),
+  } as const;
+}
 
 describe('ContactsPage - Favourites', () => {
   beforeEach(() => {
@@ -93,11 +146,9 @@ describe('ContactsPage - Favourites', () => {
       }),
     });
 
-    mockUseSearchContacts.mockReturnValue({
-      data: undefined,
-      isLoading: false,
-      error: null,
-    } as any);
+    mockUseInfiniteSearchContacts.mockReturnValue(
+      createInfiniteQueryResult() as any
+    );
 
     // Set up default mock for useToggleContactFavourite
     mockUseToggleContactFavourite.mockReturnValue({
@@ -145,11 +196,9 @@ describe('ContactsPage - Favourites', () => {
       meta: { total: 2, page: 1, limit: 20 },
     };
 
-    mockUseContacts.mockReturnValue({
-      data: mockData,
-      isLoading: false,
-      error: null,
-    } as any);
+    mockUseInfiniteContacts.mockReturnValue(
+      createInfiniteQueryResult(mockData) as any
+    );
 
     renderWithProviders(<ContactsPage />);
 
@@ -191,11 +240,9 @@ describe('ContactsPage - Favourites', () => {
       meta: { total: 1, page: 1, limit: 20 },
     };
 
-    mockUseContacts.mockReturnValue({
-      data: mockData,
-      isLoading: false,
-      error: null,
-    } as any);
+    mockUseInfiniteContacts.mockReturnValue(
+      createInfiniteQueryResult(mockData) as any
+    );
 
     renderWithProviders(<ContactsPage />);
 

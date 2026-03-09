@@ -260,6 +260,8 @@ export interface ContactFilters {
   favourite?: boolean;
   created_after?: string;
   created_before?: string;
+  page?: number;
+  limit?: number;
 }
 
 // Predefined Tag Colors (Australian theme)

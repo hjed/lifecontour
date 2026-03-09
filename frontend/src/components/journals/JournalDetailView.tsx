@@ -60,7 +60,6 @@ import {
   useAddJournalType,
   useRemoveJournalType,
 } from '@/lib/api/journals';
-import { useContacts } from '@/lib/api/contacts';
 import { useRouter } from 'next/navigation';
 
 interface JournalDetailViewProps {
@@ -91,7 +90,6 @@ export function JournalDetailView({
 
   // Data fetching
   const { data: tagsResponse } = useJournalTags();
-  const { data: contactsResponse } = useContacts({}, { enabled: true });
   const { data: calendarsData } = useCalendars();
 
   const availableTags = tagsResponse?.data || [];
@@ -100,11 +98,6 @@ export function JournalDetailView({
       id: c.id,
       name: c.attributes.name,
       color: c.attributes.color,
-    })) || [];
-  const availableContacts =
-    contactsResponse?.data.map(c => ({
-      id: Number.parseInt(c.id, 10),
-      name: `${c.attributes.first_name} ${c.attributes.last_name || ''}`.trim(),
     })) || [];
 
   // Handlers
@@ -330,7 +323,6 @@ export function JournalDetailView({
                 contacts={journal.contacts}
                 onContactAdd={handleContactAdd}
                 onContactRemove={handleContactRemove}
-                availableContacts={availableContacts}
               />
             </div>
 

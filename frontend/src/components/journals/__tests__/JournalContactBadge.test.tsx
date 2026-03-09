@@ -11,6 +11,7 @@ import {
   JournalContactRelationshipType,
   type JournalContactRelationship,
 } from '@/types/journals';
+import type { ContactResource } from '@/types/contacts';
 
 // Mock Popover component
 jest.mock('@/components/ui/popover', () => ({
@@ -30,6 +31,39 @@ jest.mock('@/components/ui/select', () => ({
   SelectItem: ({ children }: any) => <div>{children}</div>,
 }));
 
+const mockSearchSelectContact: ContactResource = {
+  type: 'contacts',
+  id: '3',
+  attributes: {
+    first_name: 'Bob',
+    last_name: 'Johnson',
+    middle_name: '',
+    nick_name: '',
+    is_favourite: false,
+    created_at: '2024-01-01T00:00:00Z',
+    updated_at: '2024-01-01T00:00:00Z',
+    contact_methods: [],
+    addresses: [],
+    notes: [],
+    relationships: [],
+  },
+};
+
+jest.mock('@/components/contacts/ContactSearchCombobox', () => ({
+  ContactSearchCombobox: ({ onSelect, disabled }: any) => (
+    <div>
+      <button
+        type='button'
+        data-testid='contact-search-combobox'
+        disabled={disabled}
+        onClick={() => onSelect(mockSearchSelectContact)}
+      >
+        Search contacts
+      </button>
+    </div>
+  ),
+}));
+
 describe('JournalContactBadge', () => {
   const mockContacts: JournalContactRelationship[] = [
     {
@@ -42,12 +76,6 @@ describe('JournalContactBadge', () => {
       name: 'Jane Smith',
       relationship_type: JournalContactRelationshipType.MENTION,
     },
-  ];
-
-  const mockAvailableContacts = [
-    { id: 1, name: 'John Doe' },
-    { id: 2, name: 'Jane Smith' },
-    { id: 3, name: 'Bob Johnson' },
   ];
 
   const mockOnContactAdd = jest.fn();
@@ -94,11 +122,41 @@ describe('JournalContactBadge', () => {
         <JournalContactBadge
           contacts={mockContacts}
           onContactAdd={mockOnContactAdd}
-          availableContacts={mockAvailableContacts}
         />
       );
 
       expect(screen.getByText('Add Contact')).toBeInTheDocument();
+    });
+
+    it('renders the contact search combobox for adding contacts', () => {
+      render(
+        <JournalContactBadge
+          contacts={mockContacts}
+          onContactAdd={mockOnContactAdd}
+        />
+      );
+
+      expect(screen.getByTestId('contact-search-combobox')).toBeInTheDocument();
+    });
+
+    it('adds the selected contact from the search combobox', async () => {
+      const user = userEvent.setup();
+      mockOnContactAdd.mockResolvedValue(undefined);
+
+      render(
+        <JournalContactBadge
+          contacts={mockContacts}
+          onContactAdd={mockOnContactAdd}
+        />
+      );
+
+      await user.click(screen.getByTestId('contact-search-combobox'));
+      await user.click(screen.getByRole('button', { name: 'Add' }));
+
+      expect(mockOnContactAdd).toHaveBeenCalledWith(
+        '3',
+        JournalContactRelationshipType.PARTICIPANT
+      );
     });
 
     it('does not render add button when onContactAdd is not provided', () => {

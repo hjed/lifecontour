@@ -5,7 +5,12 @@
  * with proper error handling and caching.
  */
 
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import {
+  useInfiniteQuery,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from '@tanstack/react-query';
 import { toast } from 'sonner';
 import {
   ContactAddressAttributes,
@@ -19,7 +24,7 @@ import {
   ContactFilters,
   TagListResponse,
 } from '@/types/contacts';
-import { JsonApiErrorResponse } from '@/types/api';
+import { JsonApiErrorResponse, JsonApiMeta } from '@/types/api';
 import {
   API_ENDPOINTS,
   ERROR_MESSAGES,
@@ -40,6 +45,66 @@ export const tagKeys = {
   all: ['tags'] as const,
   lists: () => [...tagKeys.all, 'list'] as const,
 };
+
+interface ContactPaginationMeta {
+  totalCount?: number;
+  currentPage?: number;
+  pageCount?: number;
+  perPage?: number;
+}
+
+function getMetaNumber(
+  meta: JsonApiMeta | undefined,
+  ...keys: string[]
+): number | undefined {
+  if (!meta) return undefined;
+
+  for (const key of keys) {
+    const value = meta[key];
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      return value;
+    }
+  }
+
+  return undefined;
+}
+
+function omitPage<T extends { page?: number }>(value: T): Omit<T, 'page'> {
+  const nextValue = { ...value };
+  delete nextValue.page;
+  return nextValue as Omit<T, 'page'>;
+}
+
+function getListQueryFilters(filters: ContactFilters): ContactFilters {
+  return omitPage(filters);
+}
+
+function getNextContactPageParam(
+  lastPage: ContactListResponse
+): number | undefined {
+  const { currentPage, pageCount } = getContactPaginationMeta(lastPage.meta);
+
+  if (
+    currentPage === undefined ||
+    pageCount === undefined ||
+    currentPage >= pageCount
+  ) {
+    return undefined;
+  }
+
+  return currentPage + 1;
+}
+
+export function getContactPaginationMeta(
+  meta?: JsonApiMeta
+): ContactPaginationMeta {
+  return {
+    totalCount: getMetaNumber(meta, 'total_count', 'total'),
+    currentPage: getMetaNumber(meta, 'current_page', 'page'),
+    pageCount: getMetaNumber(meta, 'page_count', 'total_pages', 'totalPages'),
+    perPage: getMetaNumber(meta, 'per_page', 'limit'),
+  };
+}
 
 // API Functions
 export async function fetchContacts(
@@ -64,6 +129,10 @@ export async function fetchContacts(
     params.append('created_after', filters.created_after);
   if (filters.created_before)
     params.append('created_before', filters.created_before);
+  if (filters.page !== undefined)
+    params.append('page', filters.page.toString());
+  if (filters.limit !== undefined)
+    params.append('limit', filters.limit.toString());
 
   const url = `${API_ENDPOINTS.CONTACTS.BASE}?${params.toString()}`;
 
@@ -262,6 +331,26 @@ export function useContacts(
   });
 }
 
+export function useInfiniteContacts(
+  filters: ContactFilters = {},
+  options: { enabled?: boolean } = {}
+) {
+  const initialPage = filters.page ?? 1;
+
+  return useInfiniteQuery({
+    queryKey: contactKeys.list(getListQueryFilters(filters)),
+    queryFn: ({ pageParam }) =>
+      fetchContacts({
+        ...filters,
+        page: pageParam,
+      }),
+    initialPageParam: initialPage,
+    getNextPageParam: getNextContactPageParam,
+    staleTime: 5 * 60 * 1000, // 5 minutes
+    enabled: options.enabled,
+  });
+}
+
 export function useContact(id: string) {
   return useQuery({
     queryKey: contactKeys.detail(id),
@@ -283,6 +372,35 @@ export function useSearchContacts(
   return useQuery({
     queryKey: contactKeys.search(`${query}-${JSON.stringify(options)}`),
     queryFn: () => searchContacts(query, options),
+    enabled:
+      queryOptions.enabled === undefined
+        ? query.length > 0
+        : queryOptions.enabled,
+    staleTime: 2 * 60 * 1000, // 2 minutes for search results
+  });
+}
+
+export function useInfiniteSearchContacts(
+  query: string,
+  options: {
+    page?: number;
+    limit?: number;
+    tags?: string[];
+  } = {},
+  queryOptions: { enabled?: boolean } = {}
+) {
+  const initialPage = options.page ?? 1;
+  const searchOptions = omitPage(options);
+
+  return useInfiniteQuery({
+    queryKey: contactKeys.search(`${query}-${JSON.stringify(searchOptions)}`),
+    queryFn: ({ pageParam }) =>
+      searchContacts(query, {
+        ...searchOptions,
+        page: pageParam,
+      }),
+    initialPageParam: initialPage,
+    getNextPageParam: getNextContactPageParam,
     enabled:
       queryOptions.enabled === undefined
         ? query.length > 0

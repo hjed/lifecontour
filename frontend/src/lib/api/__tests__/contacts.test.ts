@@ -2,10 +2,12 @@
  * @jest-environment jsdom
  */
 
-import { renderHook, waitFor } from '@testing-library/react';
+import { act, renderHook, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import React, { ReactNode } from 'react';
 import {
+  useInfiniteContacts,
+  useInfiniteSearchContacts,
   useContacts,
   useContact,
   useSearchContacts,
@@ -147,6 +149,8 @@ describe('Contacts API', () => {
         tags: ['1', '2'], // Use tag IDs as strings (will be parsed to integers)
         created_after: '2024-01-01',
         created_before: '2024-12-31',
+        page: 2,
+        limit: 25,
       };
 
       mockFetch.mockResolvedValueOnce({
@@ -163,8 +167,68 @@ describe('Contacts API', () => {
       });
 
       const expectedUrl =
-        '/api/contacts?search=john&tag_ids=1&tag_ids=2&created_after=2024-01-01&created_before=2024-12-31';
+        '/api/contacts?search=john&tag_ids=1&tag_ids=2&created_after=2024-01-01&created_before=2024-12-31&page=2&limit=25';
       expect(mockFetch).toHaveBeenCalledWith(expectedUrl, expect.any(Object));
+    });
+  });
+
+  describe('useInfiniteContacts', () => {
+    it('should fetch the next contact page when available', async () => {
+      const firstPage = {
+        data: [],
+        meta: {
+          total_count: 2,
+          current_page: 1,
+          page_count: 2,
+          per_page: 1,
+        },
+      };
+      const secondPage = {
+        data: [],
+        meta: {
+          total_count: 2,
+          current_page: 2,
+          page_count: 2,
+          per_page: 1,
+        },
+      };
+
+      mockFetch
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => firstPage,
+        } as Response)
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => secondPage,
+        } as Response);
+
+      const { result } = renderHook(() => useInfiniteContacts(), {
+        wrapper: createWrapper,
+      });
+
+      await waitFor(() => {
+        expect(result.current.isSuccess).toBe(true);
+      });
+
+      await waitFor(() => {
+        expect(result.current.hasNextPage).toBe(true);
+      });
+
+      await act(async () => {
+        await result.current.fetchNextPage();
+      });
+
+      await waitFor(() => {
+        expect(result.current.data?.pages).toHaveLength(2);
+      });
+
+      expect(mockFetch).toHaveBeenNthCalledWith(2, '/api/contacts?page=2', {
+        credentials: 'include',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
     });
   });
 
@@ -250,6 +314,70 @@ describe('Contacts API', () => {
 
       expect(result.current.fetchStatus).toBe('idle');
       expect(mockFetch).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('useInfiniteSearchContacts', () => {
+    it('should fetch the next search page when available', async () => {
+      const firstPage = {
+        data: [],
+        meta: {
+          total_count: 2,
+          current_page: 1,
+          page_count: 2,
+          per_page: 1,
+        },
+      };
+      const secondPage = {
+        data: [],
+        meta: {
+          total_count: 2,
+          current_page: 2,
+          page_count: 2,
+          per_page: 1,
+        },
+      };
+
+      mockFetch
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => firstPage,
+        } as Response)
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => secondPage,
+        } as Response);
+
+      const { result } = renderHook(() => useInfiniteSearchContacts('john'), {
+        wrapper: createWrapper,
+      });
+
+      await waitFor(() => {
+        expect(result.current.isSuccess).toBe(true);
+      });
+
+      await waitFor(() => {
+        expect(result.current.hasNextPage).toBe(true);
+      });
+
+      await act(async () => {
+        await result.current.fetchNextPage();
+      });
+
+      await waitFor(() => {
+        expect(result.current.data?.pages).toHaveLength(2);
+      });
+
+      expect(mockFetch).toHaveBeenNthCalledWith(
+        2,
+        '/api/search/contacts?q=john&page=2',
+        {
+          credentials: 'include',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+        }
+      );
     });
   });
 

@@ -7,10 +7,14 @@
 
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Plus, Search, Filter, Users } from 'lucide-react';
 import Link from 'next/link';
-import { useContacts, useSearchContacts } from '@/lib/api/contacts';
+import {
+  getContactPaginationMeta,
+  useInfiniteContacts,
+  useInfiniteSearchContacts,
+} from '@/lib/api/contacts';
 import { ContactFilters } from '@/types/contacts';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -36,6 +40,7 @@ function ContactsPageContent() {
   const [searchQuery, setSearchQuery] = useState('');
   const [filters, setFilters] = useState<ContactFilters>({});
   const [showFilters, setShowFilters] = useState(false);
+  const infiniteScrollTriggerRef = useRef<HTMLDivElement | null>(null);
 
   // Debounce search query to avoid excessive API calls
   const debouncedSearchQuery = useDebounce(
@@ -50,22 +55,81 @@ function ContactsPageContent() {
     data: contactsData,
     isLoading: isLoadingContacts,
     error: contactsError,
-  } = useContacts(filters, { enabled: !shouldUseSearch });
+    hasNextPage: hasNextContactsPage,
+    isFetchingNextPage: isFetchingNextContactsPage,
+    fetchNextPage: fetchNextContactsPage,
+  } = useInfiniteContacts(filters, { enabled: !shouldUseSearch });
 
   const {
     data: searchData,
     isLoading: isLoadingSearch,
     error: searchError,
-  } = useSearchContacts(debouncedSearchQuery, {}, { enabled: shouldUseSearch });
+    hasNextPage: hasNextSearchPage,
+    isFetchingNextPage: isFetchingNextSearchPage,
+    fetchNextPage: fetchNextSearchPage,
+  } = useInfiniteSearchContacts(
+    debouncedSearchQuery,
+    {},
+    { enabled: shouldUseSearch }
+  );
 
   const data = shouldUseSearch ? searchData : contactsData;
   const isLoading = shouldUseSearch ? isLoadingSearch : isLoadingContacts;
   const error = shouldUseSearch ? searchError : contactsError;
+  const hasNextPage = shouldUseSearch ? hasNextSearchPage : hasNextContactsPage;
+  const isFetchingNextPage = shouldUseSearch
+    ? isFetchingNextSearchPage
+    : isFetchingNextContactsPage;
+  const fetchNextPage = shouldUseSearch
+    ? fetchNextSearchPage
+    : fetchNextContactsPage;
 
-  const totalContacts = data?.meta?.total || 0;
+  const loadedPages = useMemo(() => data?.pages ?? [], [data]);
+  const loadedContacts = useMemo(
+    () => loadedPages.flatMap(page => page.data),
+    [loadedPages]
+  );
+  const latestPage =
+    loadedPages.length > 0 ? loadedPages[loadedPages.length - 1] : undefined;
+  const latestMeta = latestPage?.meta;
+  const { totalCount } = getContactPaginationMeta(latestMeta);
+  const processingTimeMs =
+    typeof latestMeta?.processing_time_ms === 'number'
+      ? latestMeta.processing_time_ms
+      : undefined;
+
+  const totalContacts = totalCount ?? loadedContacts.length;
 
   // Use the centralized display contacts hook with search highlighting support
-  const displayContacts = useDisplayContacts(data?.data, shouldUseSearch);
+  const displayContacts = useDisplayContacts(loadedContacts, shouldUseSearch);
+
+  useEffect(() => {
+    const trigger = infiniteScrollTriggerRef.current;
+
+    if (!trigger || !hasNextPage || isLoading || isFetchingNextPage) {
+      return;
+    }
+
+    const observer = new IntersectionObserver(entries => {
+      const [entry] = entries;
+
+      if (entry?.isIntersecting && hasNextPage && !isFetchingNextPage) {
+        void fetchNextPage();
+      }
+    });
+
+    observer.observe(trigger);
+
+    return () => {
+      observer.disconnect();
+    };
+  }, [
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage,
+    isLoading,
+    loadedContacts.length,
+  ]);
 
   const handleSearchChange = (value: string) => {
     setSearchQuery(value);
@@ -182,9 +246,7 @@ function ContactsPageContent() {
             ? 'Loading contacts...'
             : shouldUseSearch
               ? `${totalContacts} contact${totalContacts !== 1 ? 's' : ''} found for "${debouncedSearchQuery}"${
-                  data?.meta?.processing_time_ms
-                    ? ` (${data.meta.processing_time_ms}ms)`
-                    : ''
+                  processingTimeMs ? ` (${processingTimeMs}ms)` : ''
                 }`
               : `${totalContacts} contact${totalContacts !== 1 ? 's' : ''} found`}
         </span>
@@ -209,32 +271,49 @@ function ContactsPageContent() {
           ))}
         </div>
       ) : (
-        <ContactList
-          contacts={displayContacts}
-          emptyState={
-            <Card>
-              <CardContent className='pt-6'>
-                <div className='py-8 text-center' data-testid='empty-state'>
-                  <Users className='text-muted-foreground mx-auto mb-4 h-12 w-12' />
-                  <h3 className='mb-2 text-lg font-semibold'>
-                    No contacts found
-                  </h3>
-                  <p className='text-muted-foreground mb-4'>
-                    {searchQuery
-                      ? `No contacts match "${searchQuery}"`
-                      : 'Get started by adding your first contact'}
-                  </p>
-                  <Button asChild data-testid='add-contact-button'>
-                    <Link href='/contacts/new'>
-                      <Plus className='mr-2 h-4 w-4' />
-                      Add Contact
-                    </Link>
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
-          }
-        />
+        <>
+          <ContactList
+            contacts={displayContacts}
+            emptyState={
+              <Card>
+                <CardContent className='pt-6'>
+                  <div className='py-8 text-center' data-testid='empty-state'>
+                    <Users className='text-muted-foreground mx-auto mb-4 h-12 w-12' />
+                    <h3 className='mb-2 text-lg font-semibold'>
+                      No contacts found
+                    </h3>
+                    <p className='text-muted-foreground mb-4'>
+                      {searchQuery
+                        ? `No contacts match "${searchQuery}"`
+                        : 'Get started by adding your first contact'}
+                    </p>
+                    <Button asChild data-testid='add-contact-button'>
+                      <Link href='/contacts/new'>
+                        <Plus className='mr-2 h-4 w-4' />
+                        Add Contact
+                      </Link>
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+            }
+          />
+
+          {(hasNextPage || isFetchingNextPage) &&
+            displayContacts.length > 0 && (
+              <div
+                ref={infiniteScrollTriggerRef}
+                className='py-6 text-center'
+                data-testid='contacts-infinite-scroll-trigger'
+              >
+                <span className='text-muted-foreground text-sm'>
+                  {isFetchingNextPage
+                    ? 'Loading more contacts...'
+                    : 'Load more contacts'}
+                </span>
+              </div>
+            )}
+        </>
       )}
     </div>
   );
