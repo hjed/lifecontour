@@ -143,11 +143,12 @@ test.describe('Contact Inline Editing', () => {
     // Scroll the element into view
     await nicknameField.scrollIntoViewIfNeeded();
 
-    // Wait for the element to be visible and clickable
+    // Enter edit mode and wait for the edit input to mount
     await expect(nicknameField).toBeVisible();
-    await nicknameField.click({ force: true });
+    await nicknameField.click();
 
-    const input = page.locator('[data-testid="nickname-field"] input');
+    const input = page.locator('[data-testid="nickname-field-input"]');
+    await expect(input).toBeVisible();
     await input.clear();
     await input.fill('UpdatedNickname');
 

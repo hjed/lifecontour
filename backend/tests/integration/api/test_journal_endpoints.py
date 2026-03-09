@@ -2203,6 +2203,186 @@ class TestJournalTypeDataValidation:
             "Integer for french_grade should return 400 not 500"
         )
 
+    async def test_update_canyoning_with_boolean_water_guage_level_returns_400(
+        self, integration_api_client
+    ):
+        """Sending a boolean for water_guage_level should return 400 not 500."""
+        create_data = create_journal_request_data(
+            title="Canyoning Water Gauge Type Check Test",
+            content="Test content",
+            types=["CANYONING"],
+        )
+        create_response = await integration_api_client.post(
+            "/api/journals", json=create_data
+        )
+        assert create_response.status_code == 201
+        journal_id = create_response.json()["data"]["id"]
+
+        update_data = {
+            "data": {
+                "type": "journal-type-data",
+                "attributes": {"water_guage_level": True},
+            }
+        }
+        response = await integration_api_client.put(
+            f"/api/journals/{journal_id}/types/CANYONING/data",
+            json=update_data,
+        )
+
+        assert response.status_code == 400, (
+            "Boolean water_guage_level should return 400 not 500"
+        )
+
+    async def test_update_abseiling_with_null_optional_integers_clears_values(
+        self, integration_api_client
+    ):
+        """Updating ABSEILING_TRIP with null optional ints should clear persisted values."""
+        create_data = create_journal_request_data(
+            title="Abseiling Clear Test",
+            content="Test content",
+            types=["ABSEILING_TRIP"],
+            type_data={
+                "ABSEILING_TRIP": {
+                    "number_of_abseils": 5,
+                    "total_length": 120,
+                }
+            },
+        )
+        create_response = await integration_api_client.post(
+            "/api/journals", json=create_data
+        )
+        assert create_response.status_code == 201
+        journal_id = create_response.json()["data"]["id"]
+
+        update_data = {
+            "data": {
+                "type": "journal-type-data",
+                "attributes": {
+                    "number_of_abseils": None,
+                    "total_length": None,
+                },
+            }
+        }
+        response = await integration_api_client.put(
+            f"/api/journals/{journal_id}/types/ABSEILING_TRIP/data",
+            json=update_data,
+        )
+
+        assert response.status_code == 200, response.text
+        abseiling_data = response.json()["data"]["attributes"]["type_data"][
+            "abseiling_trip"
+        ]
+        assert "number_of_abseils" not in abseiling_data
+        assert "total_length" not in abseiling_data
+
+    async def test_update_canyoning_with_null_water_guage_level_clears_value(
+        self, integration_api_client
+    ):
+        """Updating CANYONING with null water_guage_level should clear the persisted value."""
+        create_data = create_journal_request_data(
+            title="Canyoning Clear Test",
+            content="Test content",
+            types=["CANYONING"],
+            type_data={
+                "CANYONING": {
+                    "french_grade": "v3a2IV**",
+                    "water_guage_level": 45,
+                }
+            },
+        )
+        create_response = await integration_api_client.post(
+            "/api/journals", json=create_data
+        )
+        assert create_response.status_code == 201
+        journal_id = create_response.json()["data"]["id"]
+
+        update_data = {
+            "data": {
+                "type": "journal-type-data",
+                "attributes": {"water_guage_level": None},
+            }
+        }
+        response = await integration_api_client.put(
+            f"/api/journals/{journal_id}/types/CANYONING/data",
+            json=update_data,
+        )
+
+        assert response.status_code == 200, response.text
+        canyoning_data = response.json()["data"]["attributes"]["type_data"]["canyoning"]
+        assert "water_guage_level" not in canyoning_data
+
+    async def test_update_climbing_with_null_optional_integers_clears_values(
+        self, integration_api_client
+    ):
+        """Updating CLIMBING with null optional ints should clear persisted values."""
+        create_data = create_journal_request_data(
+            title="Climbing Clear Test",
+            content="Test content",
+            types=["CLIMBING"],
+            type_data={
+                "CLIMBING": {
+                    "climbing_type": "sport",
+                    "grade": 18,
+                    "length": 25,
+                }
+            },
+        )
+        create_response = await integration_api_client.post(
+            "/api/journals", json=create_data
+        )
+        assert create_response.status_code == 201
+        journal_id = create_response.json()["data"]["id"]
+
+        update_data = {
+            "data": {
+                "type": "journal-type-data",
+                "attributes": {"grade": None, "length": None},
+            }
+        }
+        response = await integration_api_client.put(
+            f"/api/journals/{journal_id}/types/CLIMBING/data",
+            json=update_data,
+        )
+
+        assert response.status_code == 200, response.text
+        climbing_data = response.json()["data"]["attributes"]["type_data"]["climbing"]
+        assert "grade" not in climbing_data
+        assert "length" not in climbing_data
+
+    async def test_create_bushwalking_with_invalid_route_id_returns_400(
+        self, integration_api_client
+    ):
+        """Creating BUSHWALKING with an invalid route_id UUID should return 400."""
+        create_data = create_journal_request_data(
+            title="Bushwalking Create UUID Validation Test",
+            content="Test content",
+            types=["BUSHWALKING"],
+            type_data={"BUSHWALKING": {"route_id": "not-a-valid-uuid"}},
+        )
+
+        response = await integration_api_client.post("/api/journals", json=create_data)
+
+        assert response.status_code == 400, (
+            "Invalid create-time bushwalking route_id should return 400 not 500"
+        )
+
+    async def test_create_jogging_with_invalid_route_id_returns_400(
+        self, integration_api_client
+    ):
+        """Creating JOGGING with an invalid route_id UUID should return 400."""
+        create_data = create_journal_request_data(
+            title="Jogging Create UUID Validation Test",
+            content="Test content",
+            types=["JOGGING"],
+            type_data={"JOGGING": {"route_id": "not-a-valid-uuid"}},
+        )
+
+        response = await integration_api_client.post("/api/journals", json=create_data)
+
+        assert response.status_code == 400, (
+            "Invalid create-time jogging route_id should return 400 not 500"
+        )
+
     async def test_update_kayaking_with_invalid_uuid_returns_400(
         self, integration_api_client
     ):
@@ -2549,3 +2729,75 @@ class TestJournalTypeCreationWithDependencies:
 
         assert "fitness" in type_data
         assert type_data["fitness"]["distance"] == 8000
+
+    async def test_create_journal_with_complex_activity_types_persists_type_data(
+        self, integration_api_client
+    ):
+        """Creating a journal with the newer complex activity types persists submitted type_data."""
+        create_data = create_journal_request_data(
+            title="Big Adventure Day",
+            content="A mixed activity day across multiple disciplines",
+            types=[
+                "ABSEILING_TRIP",
+                "CANYONING",
+                "CLIMBING",
+                "KAYAKING",
+                "CROSS_COUNTRY_SKIING",
+            ],
+            type_data={
+                "ABSEILING_TRIP": {
+                    "number_of_abseils": 5,
+                    "total_length": 120,
+                },
+                "CANYONING": {
+                    "french_grade": "v3a2IV**",
+                    "water_guage_name": "Slot Canyon Gauge",
+                    "water_guage_level": 45,
+                    "is_vertical": True,
+                    "is_night_canyon": False,
+                    "is_white_water": True,
+                },
+                "CLIMBING": {
+                    "climbing_type": "sport",
+                    "grade": 18,
+                    "length": 25,
+                },
+                "KAYAKING": {
+                    "water_type": "river",
+                },
+                "CROSS_COUNTRY_SKIING": {
+                    "snow_conditions": "packed powder",
+                },
+            },
+        )
+
+        response = await integration_api_client.post("/api/journals", json=create_data)
+
+        assert response.status_code == 201, response.text
+        data = response.json()
+        attrs = data["data"]["attributes"]
+
+        type_data = attrs.get("type_data", {})
+
+        assert "abseiling_trip" in type_data
+        assert type_data["abseiling_trip"]["number_of_abseils"] == 5
+        assert type_data["abseiling_trip"]["total_length"] == 120
+
+        assert "canyoning" in type_data
+        assert type_data["canyoning"]["french_grade"] == "v3a2IV**"
+        assert type_data["canyoning"]["water_guage_name"] == "Slot Canyon Gauge"
+        assert type_data["canyoning"]["water_guage_level"] == 45
+        assert type_data["canyoning"]["is_vertical"] is True
+        assert type_data["canyoning"]["is_night_canyon"] is False
+        assert type_data["canyoning"]["is_white_water"] is True
+
+        assert "climbing" in type_data
+        assert type_data["climbing"]["climbing_type"] == "sport"
+        assert type_data["climbing"]["grade"] == 18
+        assert type_data["climbing"]["length"] == 25
+
+        assert "kayaking" in type_data
+        assert type_data["kayaking"]["water_type"] == "river"
+
+        assert "cross_country_skiing" in type_data
+        assert type_data["cross_country_skiing"]["snow_conditions"] == "packed powder"

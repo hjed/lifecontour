@@ -1,11 +1,10 @@
 'use client';
 
-import { useMemo } from 'react';
+import { useId } from 'react';
 import { Map as MapIcon, Compass } from 'lucide-react';
 import { Label } from '@/components/ui/label';
 import { cn } from '@/lib/utils';
 import type { BushwalkingData } from '@/types/journals';
-import { useTypeEditorState } from './useTypeEditorState';
 import { TypeEditorActions } from './TypeEditorActions';
 import { RouteSelector } from '@/components/routes/RouteSelector';
 import {
@@ -15,7 +14,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { useRoute } from '@/lib/api/routes';
+import { useRouteBackedTypeEditor } from './useRouteBackedTypeEditor';
 
 interface BushwalkingTypeEditorProps {
   readonly journalId?: string;
@@ -71,21 +70,21 @@ export function BushwalkingTypeEditor({
   onChange,
   journalId: _journalId,
 }: BushwalkingTypeEditorProps) {
-  const initialData = useMemo(() => data ?? DEFAULT_DATA, [data]);
-
-  // Fetch route details to display route name in read-only view
-  const { data: routeData } = useRoute(initialData.route_id ?? '');
-  const routeName = routeData?.data?.attributes?.name;
-
+  const baseId = useId();
+  const routeFieldId = `${baseId}-route`;
+  const trackGradingFieldId = `${baseId}-track-grading`;
   const {
+    initialData,
+    routeName,
     isEditing,
     editData,
     setEditData,
     handleEdit,
     handleSave,
     handleCancel,
-  } = useTypeEditorState({
-    initialData,
+  } = useRouteBackedTypeEditor({
+    data,
+    defaultData: DEFAULT_DATA,
     onSave,
     createMode,
     onChange,
@@ -162,7 +161,7 @@ export function BushwalkingTypeEditor({
       <div className='grid grid-cols-1 gap-6 md:grid-cols-2'>
         {/* Route Selector */}
         <div className='space-y-2'>
-          <Label htmlFor='route-id' className='flex items-center gap-2'>
+          <Label htmlFor={routeFieldId} className='flex items-center gap-2'>
             <MapIcon
               className='text-muted-foreground h-4 w-4'
               aria-hidden='true'
@@ -170,7 +169,7 @@ export function BushwalkingTypeEditor({
             Route
           </Label>
           <RouteSelector
-            id='route-id'
+            id={routeFieldId}
             value={editData.route_id ?? null}
             onChange={routeId =>
               setEditData({ ...editData, route_id: routeId })
@@ -181,7 +180,10 @@ export function BushwalkingTypeEditor({
 
         {/* Track Grading Dropdown */}
         <div className='space-y-2'>
-          <Label htmlFor='track-grading' className='flex items-center gap-2'>
+          <Label
+            htmlFor={trackGradingFieldId}
+            className='flex items-center gap-2'
+          >
             <Compass
               className='text-muted-foreground h-4 w-4'
               aria-hidden='true'
@@ -197,7 +199,7 @@ export function BushwalkingTypeEditor({
               })
             }
           >
-            <SelectTrigger id='track-grading'>
+            <SelectTrigger id={trackGradingFieldId}>
               <SelectValue placeholder='Select track grade...' />
             </SelectTrigger>
             <SelectContent>

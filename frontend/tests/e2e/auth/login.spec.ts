@@ -126,16 +126,11 @@ test.describe('Login Page - Unauthenticated Users', () => {
       // Wait for providers to load
       await unauthenticatedPage.waitForLoadState('networkidle');
 
-      // Set up route handler BEFORE setting up the request promise
-      let loginRequested = false;
-      await unauthenticatedPage.route('**/api/auth/login', route => {
-        loginRequested = true;
-        route.continue();
-      });
-
-      // Now set up the request promise after the route is configured
+      // Track the actual login request triggered by the OAuth button click
       const requestPromise = unauthenticatedPage.waitForRequest(
-        '**/api/auth/login',
+        request =>
+          request.url().includes('/api/auth/login') &&
+          request.method() === 'POST',
         {
           timeout: 10000,
         }
@@ -151,9 +146,13 @@ test.describe('Login Page - Unauthenticated Users', () => {
       // Click the button
       await firstButton.click();
 
-      // Wait for the login request to be made
-      await requestPromise;
-      expect(loginRequested).toBe(true);
+      const request = await requestPromise;
+
+      expect(request.url()).toContain('/api/auth/login');
+      expect(request.method()).toBe('POST');
+      expect(request.postDataJSON()).toMatchObject({
+        provider: expect.any(String),
+      });
     });
   });
 

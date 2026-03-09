@@ -7,12 +7,12 @@ Controllers act as adapters between HTTP and domain services.
 
 import dataclasses
 from datetime import UTC, datetime
-from typing import Any
+from typing import Annotated, Any
 from uuid import UUID
 
 import structlog
 from dishka.integrations.fastapi import FromDishka, inject
-from fastapi import APIRouter, Query, Request, status
+from fastapi import APIRouter, HTTPException, Query, Request, status
 from meilisearch.errors import MeilisearchError
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncConnection
@@ -125,6 +125,33 @@ def _parse_journal_type(type_str: str) -> JournalType:
     except ValueError:
         # Fall back to enum name (uppercase like "MOOD_RATING")
         return JournalType[type_str.upper()]
+
+
+def _parse_optional_uuid(value: Any, field_name: str) -> UUID | None:
+    """Parse an optional UUID field from request attributes."""
+    if value is None:
+        return None
+
+    try:
+        return UUID(str(value))
+    except ValueError as exc:
+        raise JournalValidationError(
+            field_name, f"{INVALID_UUID_FORMAT_MSG}: {value}"
+        ) from exc
+
+
+def _require_integer(value: Any, field_name: str) -> int:
+    """Validate that a field is an integer while rejecting booleans."""
+    if not isinstance(value, int) or isinstance(value, bool):
+        raise JournalValidationError(field_name, "Must be an integer")
+    return value
+
+
+def _parse_optional_integer(value: Any, field_name: str) -> int | None:
+    """Validate an optional integer field while rejecting booleans."""
+    if value is None:
+        return None
+    return _require_integer(value, field_name)
 
 
 async def _create_type_specific_data(
@@ -672,22 +699,24 @@ async def list_journals(
     contact_relationship_repo: FromDishka[JournalContactRelationshipRepository],
     tag_repo: FromDishka[JournalTagRepository],
     user: FromDishka[SessionUser],  # Require authentication
-    page: int = Query(default=1, description="Page number", ge=1),
-    limit: int = Query(default=20, description="Items per page", ge=1, le=100),
-    journal_type: str | None = Query(
-        default=None, description="Filter by journal type", alias="type"
-    ),
-    start_date: datetime | None = Query(
-        default=None, description="Filter by start date (inclusive)"
-    ),
-    end_date: datetime | None = Query(
-        default=None, description="Filter by end date (inclusive)"
-    ),
-    contact_id: int | None = Query(default=None, description="Filter by contact ID"),
-    tag_id: str | None = Query(default=None, description="Filter by tag ID"),
-    calendar_id: str | None = Query(default=None, description="Filter by calendar ID"),
-    parent_id: int | None = Query(default=None, description="Filter by parent ID"),
-    search: str | None = Query(default=None, description="Search query"),
+    page: Annotated[int, Query(description="Page number", ge=1)] = 1,
+    limit: Annotated[int, Query(description="Items per page", ge=1, le=100)] = 20,
+    journal_type: Annotated[
+        str | None, Query(description="Filter by journal type", alias="type")
+    ] = None,
+    start_date: Annotated[
+        datetime | None, Query(description="Filter by start date (inclusive)")
+    ] = None,
+    end_date: Annotated[
+        datetime | None, Query(description="Filter by end date (inclusive)")
+    ] = None,
+    contact_id: Annotated[int | None, Query(description="Filter by contact ID")] = None,
+    tag_id: Annotated[str | None, Query(description="Filter by tag ID")] = None,
+    calendar_id: Annotated[
+        str | None, Query(description="Filter by calendar ID")
+    ] = None,
+    parent_id: Annotated[int | None, Query(description="Filter by parent ID")] = None,
+    search: Annotated[str | None, Query(description="Search query")] = None,
 ) -> JournalListResponse:
     """
     List journals with pagination and filtering.
@@ -773,13 +802,13 @@ async def search_journals(
     request: Request,
     search_service: FromDishka[SearchService],
     user: FromDishka[SessionUser],  # Require authentication
-    q: str = Query(..., description="Search query", min_length=1, max_length=500),
-    page: int = Query(default=1, description="Page number", ge=1),
-    limit: int = Query(default=20, description="Results per page", ge=1, le=100),
-    types: list[str] | None = Query(
-        default=None, description="Filter by journal types"
-    ),
-    sort: list[str] | None = Query(default=None, description="Sort criteria"),
+    q: Annotated[str, Query(description="Search query", min_length=1, max_length=500)],
+    page: Annotated[int, Query(description="Page number", ge=1)] = 1,
+    limit: Annotated[int, Query(description="Results per page", ge=1, le=100)] = 20,
+    types: Annotated[
+        list[str] | None, Query(description="Filter by journal types")
+    ] = None,
+    sort: Annotated[list[str] | None, Query(description="Sort criteria")] = None,
 ) -> JournalListResponse:
     """
     Search journals using MeiliSearch.
@@ -1040,6 +1069,11 @@ async def _process_journal_type_data(
     outdoor_activity_data_repo: OutdoorActivityDataRepository | None = None,
     bushwalking_data_repo: BushwalkingDataRepository | None = None,
     jogging_data_repo: JoggingDataRepository | None = None,
+    abseiling_data_repo: AbseilingDataRepository | None = None,
+    canyoning_data_repo: CanyoningDataRepository | None = None,
+    climbing_data_repo: ClimbingDataRepository | None = None,
+    kayaking_data_repo: KayakingDataRepository | None = None,
+    skiing_data_repo: CrossCountrySkiingDataRepository | None = None,
 ) -> None:
     """
     Process and save type-specific data for a journal.
@@ -1056,6 +1090,11 @@ async def _process_journal_type_data(
         outdoor_activity_data_repo: Optional repository for outdoor activity data
         bushwalking_data_repo: Optional repository for bushwalking data
         jogging_data_repo: Optional repository for jogging data
+        abseiling_data_repo: Optional repository for abseiling data
+        canyoning_data_repo: Optional repository for canyoning data
+        climbing_data_repo: Optional repository for climbing data
+        kayaking_data_repo: Optional repository for kayaking data
+        skiing_data_repo: Optional repository for cross-country skiing data
     """
     # Normalize type_data keys to lowercase for case-insensitive matching
     normalized_type_data = {k.lower(): v for k, v in type_data.items()}
@@ -1288,13 +1327,9 @@ async def _process_journal_type_data(
         if "track_grading" in bushwalking_payload:
             bushwalking_data.track_grading = bushwalking_payload["track_grading"]
         if "route_id" in bushwalking_payload:
-            from uuid import UUID
-
-            route_id_raw = bushwalking_payload["route_id"]
-            if route_id_raw is None:
-                bushwalking_data.route_id = None
-            else:
-                bushwalking_data.route_id = UUID(route_id_raw)
+            bushwalking_data.route_id = _parse_optional_uuid(
+                bushwalking_payload["route_id"], "route_id"
+            )
 
         await bushwalking_data_repo.save(bushwalking_data)
 
@@ -1322,15 +1357,56 @@ async def _process_journal_type_data(
                         detail="pace must be an integer (seconds per km)",
                     ) from exc
         if "route_id" in jogging_payload:
-            from uuid import UUID
-
-            route_id_raw = jogging_payload["route_id"]
-            if route_id_raw is None:
-                jogging_data.route_id = None
-            else:
-                jogging_data.route_id = UUID(route_id_raw)
+            jogging_data.route_id = _parse_optional_uuid(
+                jogging_payload["route_id"], "route_id"
+            )
 
         await jogging_data_repo.save(jogging_data)
+
+    # Process ABSEILING_TRIP type data
+    if "abseiling_trip" in normalized_type_data and abseiling_data_repo:
+        await _update_abseiling_type_data(
+            journal_id,
+            "ABSEILING_TRIP",
+            normalized_type_data["abseiling_trip"],
+            abseiling_data_repo,
+        )
+
+    # Process CANYONING type data
+    if "canyoning" in normalized_type_data and canyoning_data_repo:
+        await _update_canyoning_type_data(
+            journal_id,
+            "CANYONING",
+            normalized_type_data["canyoning"],
+            canyoning_data_repo,
+        )
+
+    # Process CLIMBING type data
+    if "climbing" in normalized_type_data and climbing_data_repo:
+        await _update_climbing_type_data(
+            journal_id,
+            "CLIMBING",
+            normalized_type_data["climbing"],
+            climbing_data_repo,
+        )
+
+    # Process KAYAKING type data
+    if "kayaking" in normalized_type_data and kayaking_data_repo:
+        await _update_kayaking_type_data(
+            journal_id,
+            "KAYAKING",
+            normalized_type_data["kayaking"],
+            kayaking_data_repo,
+        )
+
+    # Process CROSS_COUNTRY_SKIING type data
+    if "cross_country_skiing" in normalized_type_data and skiing_data_repo:
+        await _update_cross_country_skiing_type_data(
+            journal_id,
+            "CROSS_COUNTRY_SKIING",
+            normalized_type_data["cross_country_skiing"],
+            skiing_data_repo,
+        )
 
 
 async def _process_journal_contact_relationships(
@@ -1446,6 +1522,11 @@ async def create_journal(
             outdoor_activity_data_repo,
             bushwalking_data_repo,
             jogging_data_repo,
+            abseiling_data_repo,
+            canyoning_data_repo,
+            climbing_data_repo,
+            kayaking_data_repo,
+            skiing_data_repo,
         )
 
     # Add contact relationships if provided in the request (via relationships field)
@@ -2119,16 +2200,7 @@ async def _update_bushwalking_type_data(
     # This ensures domain validation (e.g. valid track_grading) is enforced.
     updates: dict[str, Any] = {}
     if "route_id" in attrs:
-        raw_route_id = attrs["route_id"]
-        if raw_route_id is not None:
-            try:
-                updates["route_id"] = UUID(str(raw_route_id))
-            except ValueError as e:
-                raise JournalValidationError(
-                    "route_id", f"Invalid UUID format: {raw_route_id}"
-                ) from e
-        else:
-            updates["route_id"] = None
+        updates["route_id"] = _parse_optional_uuid(attrs["route_id"], "route_id")
     if "track_grading" in attrs:
         updates["track_grading"] = attrs["track_grading"]
 
@@ -2152,16 +2224,7 @@ async def _update_jogging_type_data(
     # Build update kwargs and use dataclasses.replace() to trigger __post_init__ validation.
     updates: dict[str, Any] = {}
     if "route_id" in attrs:
-        raw_route_id = attrs["route_id"]
-        if raw_route_id is not None:
-            try:
-                updates["route_id"] = UUID(str(raw_route_id))
-            except ValueError as e:
-                raise JournalValidationError(
-                    "route_id", f"Invalid UUID format: {raw_route_id}"
-                ) from e
-        else:
-            updates["route_id"] = None
+        updates["route_id"] = _parse_optional_uuid(attrs["route_id"], "route_id")
     if "pace" in attrs:
         updates["pace"] = attrs["pace"]
 
@@ -2186,17 +2249,13 @@ async def _update_abseiling_type_data(
     # Validate types eagerly so mismatches return 400 rather than an unhandled TypeError.
     updates: dict[str, Any] = {}
     if "number_of_abseils" in attrs:
-        if not isinstance(attrs["number_of_abseils"], int) or isinstance(
-            attrs["number_of_abseils"], bool
-        ):
-            raise JournalValidationError("number_of_abseils", "Must be an integer")
-        updates["number_of_abseils"] = attrs["number_of_abseils"]
+        updates["number_of_abseils"] = _parse_optional_integer(
+            attrs["number_of_abseils"], "number_of_abseils"
+        )
     if "total_length" in attrs:
-        if not isinstance(attrs["total_length"], int) or isinstance(
-            attrs["total_length"], bool
-        ):
-            raise JournalValidationError("total_length", "Must be an integer")
-        updates["total_length"] = attrs["total_length"]
+        updates["total_length"] = _parse_optional_integer(
+            attrs["total_length"], "total_length"
+        )
 
     validated_data = dataclasses.replace(abseiling_data, **updates)
     await abseiling_data_repo.save(validated_data)
@@ -2218,16 +2277,7 @@ async def _update_canyoning_type_data(
     # Build update kwargs and use dataclasses.replace() to trigger __post_init__ validation.
     updates: dict[str, Any] = {}
     if "route_id" in attrs:
-        raw_route_id = attrs["route_id"]
-        if raw_route_id is not None:
-            try:
-                updates["route_id"] = UUID(str(raw_route_id))
-            except ValueError as e:
-                raise JournalValidationError(
-                    "route_id", f"Invalid UUID format: {raw_route_id}"
-                ) from e
-        else:
-            updates["route_id"] = None
+        updates["route_id"] = _parse_optional_uuid(attrs["route_id"], "route_id")
     if "french_grade" in attrs:
         if not isinstance(attrs["french_grade"], str):
             raise JournalValidationError("french_grade", "Must be a string")
@@ -2235,11 +2285,9 @@ async def _update_canyoning_type_data(
     if "water_guage_name" in attrs:
         updates["water_guage_name"] = attrs["water_guage_name"]
     if "water_guage_level" in attrs:
-        if not isinstance(attrs["water_guage_level"], int) or isinstance(
-            attrs["water_guage_level"], bool
-        ):
-            raise JournalValidationError("water_guage_level", "Must be an integer")
-        updates["water_guage_level"] = attrs["water_guage_level"]
+        updates["water_guage_level"] = _parse_optional_integer(
+            attrs["water_guage_level"], "water_guage_level"
+        )
     if "is_vertical" in attrs:
         updates["is_vertical"] = attrs["is_vertical"]
     if "is_night_canyon" in attrs:
@@ -2267,28 +2315,15 @@ async def _update_climbing_type_data(
     # Build update kwargs and use dataclasses.replace() to trigger __post_init__ validation.
     updates: dict[str, Any] = {}
     if "route_id" in attrs:
-        raw_route_id = attrs["route_id"]
-        if raw_route_id is not None:
-            try:
-                updates["route_id"] = UUID(str(raw_route_id))
-            except ValueError as e:
-                raise JournalValidationError(
-                    "route_id", f"Invalid UUID format: {raw_route_id}"
-                ) from e
-        else:
-            updates["route_id"] = None
+        updates["route_id"] = _parse_optional_uuid(attrs["route_id"], "route_id")
     if "climbing_type" in attrs:
         if not isinstance(attrs["climbing_type"], str):
             raise JournalValidationError("climbing_type", "Must be a string")
         updates["climbing_type"] = attrs["climbing_type"]
     if "grade" in attrs:
-        if not isinstance(attrs["grade"], int) or isinstance(attrs["grade"], bool):
-            raise JournalValidationError("grade", "Must be an integer")
-        updates["grade"] = attrs["grade"]
+        updates["grade"] = _parse_optional_integer(attrs["grade"], "grade")
     if "length" in attrs:
-        if not isinstance(attrs["length"], int) or isinstance(attrs["length"], bool):
-            raise JournalValidationError("length", "Must be an integer")
-        updates["length"] = attrs["length"]
+        updates["length"] = _parse_optional_integer(attrs["length"], "length")
 
     validated_data = dataclasses.replace(climbing_data, **updates)
     await climbing_data_repo.save(validated_data)
@@ -2309,16 +2344,7 @@ async def _update_kayaking_type_data(
 
     updates: dict[str, Any] = {}
     if "route_id" in attrs:
-        raw_route_id = attrs["route_id"]
-        if raw_route_id is not None:
-            try:
-                updates["route_id"] = UUID(str(raw_route_id))
-            except ValueError as e:
-                raise JournalValidationError(
-                    "route_id", f"Invalid UUID format: {raw_route_id}"
-                ) from e
-        else:
-            updates["route_id"] = None
+        updates["route_id"] = _parse_optional_uuid(attrs["route_id"], "route_id")
     if "water_type" in attrs:
         raw_water_type = attrs["water_type"]
         if raw_water_type is not None and not isinstance(raw_water_type, str):
@@ -2344,16 +2370,7 @@ async def _update_cross_country_skiing_type_data(
 
     updates: dict[str, Any] = {}
     if "route_id" in attrs:
-        raw_route_id = attrs["route_id"]
-        if raw_route_id is not None:
-            try:
-                updates["route_id"] = UUID(str(raw_route_id))
-            except ValueError as e:
-                raise JournalValidationError(
-                    "route_id", f"Invalid UUID format: {raw_route_id}"
-                ) from e
-        else:
-            updates["route_id"] = None
+        updates["route_id"] = _parse_optional_uuid(attrs["route_id"], "route_id")
     if "snow_conditions" in attrs:
         raw_snow_conditions = attrs["snow_conditions"]
         if raw_snow_conditions is not None and not isinstance(raw_snow_conditions, str):
@@ -2884,7 +2901,10 @@ async def remove_tag_from_journal(
     return JournalResponse(data=journal_resource)
 
 
-@router.get("/{journal_id}/gpx")
+@router.get(
+    "/{journal_id}/gpx",
+    responses={404: {"description": "Journal or GPX track data not found"}},
+)
 @inject
 async def get_journal_gpx(
     journal_id: int,
@@ -2907,8 +2927,6 @@ async def get_journal_gpx(
 
     fitness_data = await fitness_data_repo.find_by_journal_id(journal_id)
     if not fitness_data or not fitness_data.gpx_track_data:
-        from fastapi import HTTPException
-
         raise HTTPException(
             status_code=404,
             detail=f"GPX track data not found for journal with ID {journal_id}",

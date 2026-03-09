@@ -11,10 +11,23 @@
 import { useCallback, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import type { Route } from 'next';
-import { useForm, useWatch, type Control } from 'react-hook-form';
+import {
+  useForm,
+  useWatch,
+  type Control,
+  type UseFormSetError,
+} from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from '@/components/ui/card';
 import {
   Form,
   FormControl,
@@ -30,8 +43,13 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { useCreateJournal } from '@/lib/api/journals';
 import {
   JournalType,
+  type AbseilingData,
+  type CanyoningData,
+  type ClimbingData,
+  type CrossCountrySkiingData,
   type CalendarInfoData,
   type JournalTypeData,
+  type KayakingData,
   type MoodData,
   type PlanData,
   type TravelData,
@@ -42,15 +60,20 @@ import {
   type BushwalkingData,
 } from '@/types/journals';
 import {
+  AbseilingTripTypeEditor,
+  BushwalkingTypeEditor,
+  CanyoningTypeEditor,
+  ClimbingTypeEditor,
+  CrossCountrySkiingTypeEditor,
   EventTypeEditor,
   FitnessTypeEditor,
+  JoggingTypeEditor,
+  KayakingTypeEditor,
   MoodRatingTypeEditor,
+  OutdoorActivityTypeEditor,
   PlanTypeEditor,
   TravelTypeEditor,
   PhotoAlbumTypeEditor,
-  OutdoorActivityTypeEditor,
-  JoggingTypeEditor,
-  BushwalkingTypeEditor,
 } from './type-editors';
 
 // Form validation schema
@@ -77,6 +100,36 @@ interface TypeDataState {
   [JournalType.OUTDOOR_ACTIVITY]?: OutdoorActivityData;
   [JournalType.JOGGING]?: JoggingData;
   [JournalType.BUSHWALKING]?: BushwalkingData;
+  [JournalType.ABSEILING_TRIP]?: AbseilingData;
+  [JournalType.CANYONING]?: CanyoningData;
+  [JournalType.CLIMBING]?: ClimbingData;
+  [JournalType.KAYAKING]?: KayakingData;
+  [JournalType.CROSS_COUNTRY_SKIING]?: CrossCountrySkiingData;
+}
+
+type TypeDataJournalType = keyof TypeDataState;
+
+const TYPE_DATA_JOURNAL_TYPES = new Set<TypeDataJournalType>([
+  JournalType.EVENT,
+  JournalType.MOOD_RATING,
+  JournalType.PLAN,
+  JournalType.TRAVEL,
+  JournalType.PHOTO_ALBUM,
+  JournalType.FITNESS,
+  JournalType.OUTDOOR_ACTIVITY,
+  JournalType.JOGGING,
+  JournalType.BUSHWALKING,
+  JournalType.ABSEILING_TRIP,
+  JournalType.CANYONING,
+  JournalType.CLIMBING,
+  JournalType.KAYAKING,
+  JournalType.CROSS_COUNTRY_SKIING,
+]);
+
+function hasTypeDataJournalType(
+  type: JournalType
+): type is TypeDataJournalType {
+  return TYPE_DATA_JOURNAL_TYPES.has(type as TypeDataJournalType);
 }
 
 // All 15 journal type options for checkboxes
@@ -181,6 +234,89 @@ const TYPE_LABELS: Record<JournalType, string> = {
   [JournalType.CROSS_COUNTRY_SKIING]: 'Cross-Country Skiing',
 };
 
+function getJournalTypeTestId(type: JournalType): string {
+  return type.toUpperCase();
+}
+
+type SelectedTypeData = TypeDataState[keyof TypeDataState];
+
+function setTypesError(
+  setError: UseFormSetError<FormValues>,
+  message: string
+): void {
+  setError('types', {
+    type: 'manual',
+    message,
+  });
+}
+
+function hasRequiredTypeData(
+  type: JournalType,
+  data: SelectedTypeData,
+  setError: UseFormSetError<FormValues>
+): boolean {
+  if (type === JournalType.EVENT) {
+    const eventData = data as CalendarInfoData | undefined;
+    if (!eventData?.calendar_id?.trim()) {
+      setTypesError(setError, 'Event requires a valid Calendar ID.');
+      return false;
+    }
+  }
+
+  if (type === JournalType.PHOTO_ALBUM) {
+    const albumData = data as PhotoAlbumData | undefined;
+    if (!albumData?.immich_album_id?.trim()) {
+      setTypesError(setError, 'Photo Album requires an Immich Album ID.');
+      return false;
+    }
+  }
+
+  return true;
+}
+
+function sanitiseTypeData(
+  type: JournalType,
+  data: Exclude<SelectedTypeData, undefined>
+): JournalTypeData {
+  if (type === JournalType.PLAN) {
+    const planData = data as PlanData;
+    return {
+      ...planData,
+      documents: planData.documents.filter(
+        doc => doc.url && doc.url.trim() !== ''
+      ),
+    };
+  }
+
+  return data;
+}
+
+function buildSubmittedTypeData(
+  selectedTypes: readonly JournalType[],
+  typeData: TypeDataState,
+  setError: UseFormSetError<FormValues>
+): Record<string, JournalTypeData> | null {
+  const submittedTypeData: Record<string, JournalTypeData> = {};
+
+  for (const type of selectedTypes) {
+    const currentTypeData = hasTypeDataJournalType(type)
+      ? typeData[type]
+      : undefined;
+
+    if (!hasRequiredTypeData(type, currentTypeData, setError)) {
+      return null;
+    }
+
+    if (currentTypeData === undefined) {
+      continue;
+    }
+
+    submittedTypeData[type] = sanitiseTypeData(type, currentTypeData);
+  }
+
+  return submittedTypeData;
+}
+
 interface JournalCreateFormProps {
   readonly onCancel?: () => void;
 }
@@ -272,51 +408,51 @@ export function JournalCreateForm({ onCancel }: JournalCreateFormProps = {}) {
     [handleTypeDataChange]
   );
 
+  const handleAbseilingTripChange = useCallback(
+    (data: unknown) =>
+      handleTypeDataChange(JournalType.ABSEILING_TRIP, data as AbseilingData),
+    [handleTypeDataChange]
+  );
+
+  const handleCanyoningChange = useCallback(
+    (data: unknown) =>
+      handleTypeDataChange(JournalType.CANYONING, data as CanyoningData),
+    [handleTypeDataChange]
+  );
+
+  const handleClimbingChange = useCallback(
+    (data: unknown) =>
+      handleTypeDataChange(JournalType.CLIMBING, data as ClimbingData),
+    [handleTypeDataChange]
+  );
+
+  const handleKayakingChange = useCallback(
+    (data: unknown) =>
+      handleTypeDataChange(JournalType.KAYAKING, data as KayakingData),
+    [handleTypeDataChange]
+  );
+
+  const handleCrossCountrySkiingChange = useCallback(
+    (data: unknown) =>
+      handleTypeDataChange(
+        JournalType.CROSS_COUNTRY_SKIING,
+        data as CrossCountrySkiingData
+      ),
+    [handleTypeDataChange]
+  );
+
   const onSubmit = async (values: FormValues) => {
     try {
       const endDate = values.dateRange.to || values.dateRange.from;
 
-      // Build type_data from collected editor data for selected types.
-      // Sanitise each type before including it to avoid backend validation errors
-      // when the editor mounts and emits its initial (empty) state.
-      const submittedTypeData: Record<string, JournalTypeData> = {};
-      for (const type of values.types) {
-        const data = typeData[type as keyof TypeDataState];
+      const submittedTypeData = buildSubmittedTypeData(
+        values.types,
+        typeData,
+        form.setError
+      );
 
-        // Client-side validation for required type-specific fields
-        if (type === JournalType.EVENT) {
-          const eventData = data as CalendarInfoData | undefined;
-          if (!eventData?.calendar_id?.trim()) {
-            form.setError('types', {
-              type: 'manual',
-              message: 'Event requires a valid Calendar ID.',
-            });
-            return;
-          }
-        } else if (type === JournalType.PHOTO_ALBUM) {
-          const albumData = data as PhotoAlbumData | undefined;
-          if (!albumData?.immich_album_id?.trim()) {
-            form.setError('types', {
-              type: 'manual',
-              message: 'Photo Album requires an Immich Album ID.',
-            });
-            return;
-          }
-        }
-
-        if (data === undefined) continue;
-
-        // PLAN: filter out document rows where the required `url` field is empty.
-        if (type === JournalType.PLAN) {
-          const planData = data as PlanData;
-          const validDocuments = planData.documents.filter(
-            doc => doc.url && doc.url.trim() !== ''
-          );
-          submittedTypeData[type] = { ...planData, documents: validDocuments };
-          continue;
-        }
-
-        submittedTypeData[type] = data;
+      if (submittedTypeData === null) {
+        return;
       }
 
       const result = await createJournal({
@@ -438,66 +574,127 @@ export function JournalCreateForm({ onCancel }: JournalCreateFormProps = {}) {
           <div className='space-y-4'>
             {selectedTypes.map(type => {
               const deps = TYPE_DEPENDENCIES[type];
+              const typeTestId = getJournalTypeTestId(type);
               return (
-                <div key={type} className='space-y-3 rounded-md border p-4'>
-                  <p className='text-sm font-medium'>{TYPE_LABELS[type]}</p>
+                <Card
+                  key={type}
+                  className='border-border/80 shadow-sm'
+                  data-testid={`selected-type-panel-${typeTestId}`}
+                >
+                  <CardHeader className='space-y-3 pb-4'>
+                    <div className='space-y-1'>
+                      <CardTitle className='text-base'>
+                        {TYPE_LABELS[type]}
+                      </CardTitle>
+                      <CardDescription>
+                        Add the details for this journal type.
+                      </CardDescription>
+                    </div>
 
-                  {deps && deps.length > 0 && (
-                    <p className='text-muted-foreground text-xs'>
-                      Automatically adds:{' '}
-                      {deps.map(dep => TYPE_LABELS[dep]).join(', ')}
-                    </p>
-                  )}
+                    {deps && deps.length > 0 && (
+                      <div className='space-y-2'>
+                        <p className='text-muted-foreground text-xs font-medium tracking-wide uppercase'>
+                          Automatically adds
+                        </p>
+                        <div className='flex flex-wrap gap-2'>
+                          {deps.map(dep => (
+                            <Badge
+                              key={dep}
+                              variant='secondary'
+                              data-testid={`selected-type-dependency-${typeTestId}-${getJournalTypeTestId(dep)}`}
+                            >
+                              {TYPE_LABELS[dep]}
+                            </Badge>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </CardHeader>
 
-                  {type === JournalType.EVENT && (
-                    <EventTypeEditor createMode onChange={handleEventChange} />
-                  )}
-                  {type === JournalType.MOOD_RATING && (
-                    <MoodRatingTypeEditor
-                      createMode
-                      onChange={handleMoodRatingChange}
-                    />
-                  )}
-                  {type === JournalType.PLAN && (
-                    <PlanTypeEditor createMode onChange={handlePlanChange} />
-                  )}
-                  {type === JournalType.TRAVEL && (
-                    <TravelTypeEditor
-                      createMode
-                      onChange={handleTravelChange}
-                    />
-                  )}
-                  {type === JournalType.PHOTO_ALBUM && (
-                    <PhotoAlbumTypeEditor
-                      createMode
-                      onChange={handlePhotoAlbumChange}
-                    />
-                  )}
-                  {type === JournalType.FITNESS && (
-                    <FitnessTypeEditor
-                      createMode
-                      onChange={handleFitnessChange}
-                    />
-                  )}
-                  {type === JournalType.OUTDOOR_ACTIVITY && (
-                    <OutdoorActivityTypeEditor
-                      createMode
-                      onChange={handleOutdoorActivityChange}
-                    />
-                  )}
-                  {type === JournalType.JOGGING && (
-                    <JoggingTypeEditor
-                      createMode
-                      onChange={handleJoggingChange}
-                    />
-                  )}
-                  {type === JournalType.BUSHWALKING && (
-                    <BushwalkingTypeEditor
-                      createMode
-                      onChange={handleBushwalkingChange}
-                    />
-                  )}
-                </div>
+                  <CardContent className='pt-0'>
+                    {type === JournalType.EVENT && (
+                      <EventTypeEditor
+                        createMode
+                        onChange={handleEventChange}
+                      />
+                    )}
+                    {type === JournalType.MOOD_RATING && (
+                      <MoodRatingTypeEditor
+                        createMode
+                        onChange={handleMoodRatingChange}
+                      />
+                    )}
+                    {type === JournalType.PLAN && (
+                      <PlanTypeEditor createMode onChange={handlePlanChange} />
+                    )}
+                    {type === JournalType.TRAVEL && (
+                      <TravelTypeEditor
+                        createMode
+                        onChange={handleTravelChange}
+                      />
+                    )}
+                    {type === JournalType.PHOTO_ALBUM && (
+                      <PhotoAlbumTypeEditor
+                        createMode
+                        onChange={handlePhotoAlbumChange}
+                      />
+                    )}
+                    {type === JournalType.FITNESS && (
+                      <FitnessTypeEditor
+                        createMode
+                        onChange={handleFitnessChange}
+                      />
+                    )}
+                    {type === JournalType.OUTDOOR_ACTIVITY && (
+                      <OutdoorActivityTypeEditor
+                        createMode
+                        onChange={handleOutdoorActivityChange}
+                      />
+                    )}
+                    {type === JournalType.JOGGING && (
+                      <JoggingTypeEditor
+                        createMode
+                        onChange={handleJoggingChange}
+                      />
+                    )}
+                    {type === JournalType.BUSHWALKING && (
+                      <BushwalkingTypeEditor
+                        createMode
+                        onChange={handleBushwalkingChange}
+                      />
+                    )}
+                    {type === JournalType.ABSEILING_TRIP && (
+                      <AbseilingTripTypeEditor
+                        createMode
+                        onChange={handleAbseilingTripChange}
+                      />
+                    )}
+                    {type === JournalType.CANYONING && (
+                      <CanyoningTypeEditor
+                        createMode
+                        onChange={handleCanyoningChange}
+                      />
+                    )}
+                    {type === JournalType.CLIMBING && (
+                      <ClimbingTypeEditor
+                        createMode
+                        onChange={handleClimbingChange}
+                      />
+                    )}
+                    {type === JournalType.KAYAKING && (
+                      <KayakingTypeEditor
+                        createMode
+                        onChange={handleKayakingChange}
+                      />
+                    )}
+                    {type === JournalType.CROSS_COUNTRY_SKIING && (
+                      <CrossCountrySkiingTypeEditor
+                        createMode
+                        onChange={handleCrossCountrySkiingChange}
+                      />
+                    )}
+                  </CardContent>
+                </Card>
               );
             })}
           </div>

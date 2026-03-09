@@ -96,4 +96,69 @@ describe('ActivityStats', () => {
       'Blue Mountains Trail'
     );
   });
+
+  it('renders complex activity type stats for multiple activity editors', () => {
+    render(
+      <ActivityStats
+        data={{ distance: 12000 }}
+        abseilingData={{ number_of_abseils: 6, total_length: 180 }}
+        canyoningData={{
+          french_grade: 'v3a2IV**',
+          water_guage_name: 'Kowmung Gauge',
+          water_guage_level: 8,
+          is_vertical: true,
+          is_night_canyon: true,
+        }}
+        climbingData={{ climbing_type: 'sport', grade: 18, length: 30 }}
+        kayakingData={{ water_type: 'river' }}
+        crossCountrySkiingData={{ snow_conditions: 'Fresh powder' }}
+      />
+    );
+
+    expect(
+      screen.getByTestId('activity-stats-section-performance')
+    ).toHaveTextContent('Performance');
+    expect(
+      screen.getByTestId('activity-stats-section-context')
+    ).toHaveTextContent('Route & Conditions');
+    expect(
+      screen.getByTestId('activity-stats-section-technical')
+    ).toHaveTextContent('Technical Details');
+
+    expect(screen.getByTestId('stat-abseils')).toHaveTextContent('6');
+    expect(screen.getByTestId('stat-total-length')).toHaveTextContent('180 m');
+    expect(screen.getByTestId('stat-french-grade')).toHaveTextContent(
+      'v3a2IV**'
+    );
+    expect(screen.getByTestId('stat-water-gauge')).toHaveTextContent(
+      'Kowmung Gauge (8)'
+    );
+    expect(screen.getByTestId('stat-canyon-flags')).toHaveTextContent(
+      'Vertical, Night Canyon'
+    );
+    expect(screen.getByTestId('stat-climbing-type')).toHaveTextContent('sport');
+    expect(screen.getByTestId('stat-climbing-grade')).toHaveTextContent('18');
+    expect(screen.getByTestId('stat-climbing-length')).toHaveTextContent(
+      '30 m'
+    );
+    expect(screen.getByTestId('stat-water-type')).toHaveTextContent('river');
+    expect(screen.getByTestId('stat-snow-conditions')).toHaveTextContent(
+      'Fresh powder'
+    );
+  });
+
+  it('falls back to a default water gauge label when canyoning only provides a level', () => {
+    render(
+      <ActivityStats
+        canyoningData={{
+          water_guage_name: '',
+          water_guage_level: 8,
+        }}
+      />
+    );
+
+    expect(screen.getByTestId('stat-water-gauge')).toHaveTextContent(
+      'Gauge (8)'
+    );
+  });
 });

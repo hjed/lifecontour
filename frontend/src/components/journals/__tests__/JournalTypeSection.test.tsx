@@ -10,6 +10,10 @@ import { JournalTypeSection } from '../JournalTypeSection';
 import { JournalType } from '@/types/journals';
 import type { MoodData } from '@/types/journals';
 
+jest.mock('@/lib/api/routes', () => ({
+  useRoute: () => ({ data: undefined }),
+}));
+
 describe('JournalTypeSection', () => {
   const mockJournalId = '123';
 
@@ -70,6 +74,11 @@ describe('JournalTypeSection', () => {
       { type: JournalType.PLAN, label: 'Plan Documents' },
       { type: JournalType.TRAVEL, label: 'Travel Itinerary' },
       { type: JournalType.PHOTO_ALBUM, label: 'Photo Album' },
+      { type: JournalType.ABSEILING_TRIP, label: 'Abseiling Trip' },
+      { type: JournalType.CANYONING, label: 'Canyoning' },
+      { type: JournalType.CLIMBING, label: 'Climbing' },
+      { type: JournalType.KAYAKING, label: 'Kayaking' },
+      { type: JournalType.CROSS_COUNTRY_SKIING, label: 'Cross-Country Skiing' },
     ];
 
     types.forEach(({ type, label }) => {
@@ -104,6 +113,37 @@ describe('JournalTypeSection', () => {
     expect(screen.getByTestId('mood-value-display')).toHaveTextContent('8');
     expect(screen.getByTestId('mood-label-input')).toHaveValue('Happy');
     expect(screen.getByTestId('energy-level-display')).toHaveTextContent('7');
+  });
+
+  it('renders canyoning content when expanded', () => {
+    render(
+      <JournalTypeSection
+        journalId={mockJournalId}
+        type={JournalType.CANYONING}
+        typeData={{ french_grade: 'v3a2IV**', route_id: 'route-123' }}
+        defaultOpen={true}
+      />
+    );
+
+    expect(screen.getByTestId('canyoning-type-editor')).toBeInTheDocument();
+    expect(screen.getByText('v3a2IV**')).toBeInTheDocument();
+    expect(screen.getByText('route-123')).toBeInTheDocument();
+  });
+
+  it('renders abseiling content when expanded', () => {
+    render(
+      <JournalTypeSection
+        journalId={mockJournalId}
+        type={JournalType.ABSEILING_TRIP}
+        typeData={{ number_of_abseils: 4, total_length: 120 }}
+        defaultOpen={true}
+      />
+    );
+
+    expect(
+      screen.getByTestId('abseiling-trip-type-editor')
+    ).toBeInTheDocument();
+    expect(screen.getByText('120 m')).toBeInTheDocument();
   });
 
   it('applies custom className', () => {

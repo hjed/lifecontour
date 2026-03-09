@@ -18,6 +18,16 @@ async function navigateToNewJournal(page: Page) {
   await page.waitForLoadState('networkidle');
 }
 
+/** Fill the common journal fields and select the requested type. */
+async function fillJournalBasics(
+  page: Page,
+  opts: { title: string; content: string; typeLabelRegex: RegExp }
+) {
+  await page.getByLabel(/title/i).fill(opts.title);
+  await page.getByLabel(/content/i).fill(opts.content);
+  await page.getByLabel(opts.typeLabelRegex).check();
+}
+
 /**
  * Fill common fields, select the given journal type, and submit the creation form.
  * Returns after the form has been submitted (does NOT wait for redirect).
@@ -26,10 +36,81 @@ async function fillAndSubmitJournal(
   page: Page,
   opts: { title: string; content: string; typeLabelRegex: RegExp }
 ) {
-  await page.getByLabel(/title/i).fill(opts.title);
-  await page.getByLabel(/content/i).fill(opts.content);
-  await page.getByLabel(opts.typeLabelRegex).check();
+  await fillJournalBasics(page, opts);
   await page.getByRole('button', { name: /create journal/i }).click();
+}
+
+/** Create a route record via the API for route-backed journal types. */
+async function createRoute(
+  page: Page,
+  opts: { name: string; description: string }
+): Promise<{ id: string; name: string }> {
+  const routeRes = await page.request.post('/api/routes', {
+    data: {
+      data: {
+        type: 'routes',
+        attributes: {
+          name: opts.name,
+          description: opts.description,
+        },
+      },
+    },
+  });
+
+  expect(routeRes.ok()).toBeTruthy();
+
+  const routeJson = await routeRes.json();
+
+  return {
+    id: routeJson.data.id as string,
+    name: routeJson.data.attributes.name as string,
+  };
+}
+
+/** Select a route inside a specific type editor's route selector. */
+async function selectRouteInEditor(
+  page: Page,
+  editorTestId: string,
+  routeName: string
+) {
+  const editor = page.getByTestId(editorTestId);
+  const routeCombobox = editor.getByRole('combobox', { name: /route/i });
+
+  await expect(routeCombobox).toBeVisible();
+  await routeCombobox.click();
+
+  const searchInput = page.getByPlaceholder('Search routes...');
+  await expect(searchInput).toBeVisible();
+  await searchInput.fill(routeName);
+
+  await page.getByText(routeName, { exact: true }).click();
+  await expect(routeCombobox).toHaveText(routeName);
+}
+
+/** Assert the selected type panel and its dependency badges in the create form. */
+async function assertSelectedTypeDependencies(
+  page: Page,
+  typeTestId: string,
+  dependencyTypeTestIds: string[]
+) {
+  await expect(
+    page.getByTestId(`selected-type-panel-${typeTestId}`)
+  ).toBeVisible();
+
+  for (const dependencyTypeTestId of dependencyTypeTestIds) {
+    await expect(
+      page.getByTestId(
+        `selected-type-dependency-${typeTestId}-${dependencyTypeTestId}`
+      )
+    ).toBeVisible();
+  }
+}
+
+/** Assert the expected set of attached type badges on the journal detail page. */
+async function assertAttachedTypeBadges(page: Page, types: string[]) {
+  for (const type of types) {
+    await expect(page.getByTestId(`manage-type-${type}`)).toBeVisible();
+  }
 }
 
 /**
@@ -354,42 +435,21 @@ test.describe('Journal Creation UI Flow', () => {
   }) => {
     const page = authenticatedPage;
 
-    // Create a route via API so we have a real record to select
-    const routeRes = await page.request.post('/api/routes', {
-      data: {
-        data: {
-          type: 'routes',
-          attributes: {
-            name: `E2E Bushwalk Route ${Date.now()}`,
-            description: 'A test bushwalking route',
-          },
-        },
-      },
+    const route = await createRoute(page, {
+      name: `E2E Bushwalk Route ${Date.now()}`,
+      description: 'A test bushwalking route',
     });
-    expect(routeRes.ok()).toBeTruthy();
-    const routeJson = await routeRes.json();
-    const routeName: string = routeJson.data.attributes.name;
 
     await navigateToNewJournal(page);
 
-    await page.getByLabel(/title/i).fill(`Bushwalk With Route ${Date.now()}`);
-    await page.getByLabel(/content/i).fill('Walk with a planned route.');
-    await page.getByLabel(/^bushwalking$/i).check();
+    await fillJournalBasics(page, {
+      title: `Bushwalk With Route ${Date.now()}`,
+      content: 'Walk with a planned route.',
+      typeLabelRegex: /^bushwalking$/i,
+    });
 
     await expect(page.getByTestId('bushwalking-type-editor')).toBeVisible();
-
-    // Verify route selector is visible
-    await expect(page.getByRole('combobox', { name: /route/i })).toBeVisible();
-
-    // Select a route via the route selector combobox
-    await page.getByRole('combobox', { name: /route/i }).click();
-    await expect(page.getByPlaceholder('Search routes...')).toBeVisible();
-    await page.getByText(routeName).click();
-
-    // Verify the selected route name appears in the combobox
-    await expect(page.getByRole('combobox', { name: /route/i })).toHaveText(
-      routeName
-    );
+    await selectRouteInEditor(page, 'bushwalking-type-editor', route.name);
 
     await page.getByRole('button', { name: /create journal/i }).click();
 
@@ -397,7 +457,7 @@ test.describe('Journal Creation UI Flow', () => {
     await page.getByTestId('type-section-trigger-bushwalking').click();
 
     // Verify route is displayed in read-only view
-    await expect(page.getByText(routeName)).toBeVisible();
+    await expect(page.getByText(route.name)).toBeVisible();
   });
 
   test('should create a JOGGING journal with a route and verify route selector and display', async ({
@@ -405,42 +465,21 @@ test.describe('Journal Creation UI Flow', () => {
   }) => {
     const page = authenticatedPage;
 
-    // Create a route via API so we have a real record to select
-    const routeRes = await page.request.post('/api/routes', {
-      data: {
-        data: {
-          type: 'routes',
-          attributes: {
-            name: `E2E Jogging Route ${Date.now()}`,
-            description: 'A test jogging route',
-          },
-        },
-      },
+    const route = await createRoute(page, {
+      name: `E2E Jogging Route ${Date.now()}`,
+      description: 'A test jogging route',
     });
-    expect(routeRes.ok()).toBeTruthy();
-    const routeJson = await routeRes.json();
-    const routeName: string = routeJson.data.attributes.name;
 
     await navigateToNewJournal(page);
 
-    await page.getByLabel(/title/i).fill(`Jog With Route ${Date.now()}`);
-    await page.getByLabel(/content/i).fill('Run with a planned route.');
-    await page.getByLabel(/^jogging$/i).check();
+    await fillJournalBasics(page, {
+      title: `Jog With Route ${Date.now()}`,
+      content: 'Run with a planned route.',
+      typeLabelRegex: /^jogging$/i,
+    });
 
     await expect(page.getByTestId('jogging-type-editor')).toBeVisible();
-
-    // Verify route selector is visible
-    await expect(page.getByRole('combobox', { name: /route/i })).toBeVisible();
-
-    // Select a route via the route selector combobox
-    await page.getByRole('combobox', { name: /route/i }).click();
-    await expect(page.getByPlaceholder('Search routes...')).toBeVisible();
-    await page.getByText(routeName).click();
-
-    // Verify the selected route name appears in the combobox
-    await expect(page.getByRole('combobox', { name: /route/i })).toHaveText(
-      routeName
-    );
+    await selectRouteInEditor(page, 'jogging-type-editor', route.name);
 
     await page.getByRole('button', { name: /create journal/i }).click();
 
@@ -448,6 +487,249 @@ test.describe('Journal Creation UI Flow', () => {
     await page.getByTestId('type-section-trigger-jogging').click();
 
     // Verify route is displayed in read-only view
-    await expect(page.getByText(routeName)).toBeVisible();
+    await expect(page.getByText(route.name)).toBeVisible();
+  });
+
+  test('should create an ABSEILING_TRIP journal and verify dependencies and summary', async ({
+    authenticatedPage,
+  }) => {
+    const page = authenticatedPage;
+    await navigateToNewJournal(page);
+
+    await fillJournalBasics(page, {
+      title: `Abseiling Trip ${Date.now()}`,
+      content: 'Big descent day with multiple drops.',
+      typeLabelRegex: /^abseiling trip$/i,
+    });
+
+    await assertSelectedTypeDependencies(page, 'ABSEILING_TRIP', [
+      'OUTDOOR_ACTIVITY',
+      'FITNESS',
+    ]);
+    await expect(page.getByTestId('abseiling-trip-type-editor')).toBeVisible();
+
+    await page.getByTestId('number-of-abseils-input').fill('4');
+    await page.getByTestId('total-length-input').fill('120');
+
+    await page.getByRole('button', { name: /create journal/i }).click();
+
+    await awaitCreationAndAssertBadge(page, 'manage-type-abseiling_trip');
+    await assertAttachedTypeBadges(page, [
+      'abseiling_trip',
+      'outdoor_activity',
+      'fitness',
+    ]);
+
+    await page.getByTestId('type-section-trigger-abseiling_trip').click();
+
+    const summary = page.getByTestId('abseiling-trip-summary');
+    await expect(summary).toBeVisible();
+    await expect(summary).toContainText('4');
+    await expect(summary).toContainText('120 m');
+  });
+
+  test('should create a CANYONING journal and verify transitive dependencies and summary', async ({
+    authenticatedPage,
+  }) => {
+    const page = authenticatedPage;
+    const route = await createRoute(page, {
+      name: `E2E Canyon Route ${Date.now()}`,
+      description: 'A test canyoning route',
+    });
+
+    await navigateToNewJournal(page);
+
+    await fillJournalBasics(page, {
+      title: `Canyon Trip ${Date.now()}`,
+      content: 'Technical canyon with flowing water.',
+      typeLabelRegex: /^canyoning$/i,
+    });
+
+    await assertSelectedTypeDependencies(page, 'CANYONING', [
+      'BUSHWALKING',
+      'ABSEILING_TRIP',
+      'OUTDOOR_ACTIVITY',
+      'FITNESS',
+    ]);
+    await expect(page.getByTestId('canyoning-type-editor')).toBeVisible();
+
+    await selectRouteInEditor(page, 'canyoning-type-editor', route.name);
+    await page.getByTestId('french-grade-input').fill('v3a2iv**');
+    await page.getByTestId('water-gauge-name-input').fill('Kowmung Gauge');
+    await page.getByTestId('water-gauge-level-input').fill('8');
+    await page.getByTestId('vertical-switch').click();
+    await page.getByTestId('white-water-switch').click();
+
+    await page.getByRole('button', { name: /create journal/i }).click();
+
+    await awaitCreationAndAssertBadge(page, 'manage-type-canyoning');
+    await assertAttachedTypeBadges(page, [
+      'canyoning',
+      'bushwalking',
+      'abseiling_trip',
+      'outdoor_activity',
+      'fitness',
+    ]);
+
+    await page.getByTestId('type-section-trigger-canyoning').click();
+
+    const summary = page.getByTestId('canyoning-summary');
+    await expect(summary).toBeVisible();
+    await expect(summary).toContainText(route.name);
+    await expect(summary).toContainText('v3a2IV**');
+    await expect(summary).toContainText('Kowmung Gauge (8)');
+    await expect(summary).toContainText('Vertical');
+    await expect(summary).toContainText('White Water');
+  });
+
+  test('should create a CLIMBING journal and verify dependencies and summary', async ({
+    authenticatedPage,
+  }) => {
+    const page = authenticatedPage;
+    const route = await createRoute(page, {
+      name: `E2E Climbing Route ${Date.now()}`,
+      description: 'A test climbing route',
+    });
+
+    await navigateToNewJournal(page);
+
+    await fillJournalBasics(page, {
+      title: `Climbing Session ${Date.now()}`,
+      content: 'Strong day on the wall.',
+      typeLabelRegex: /^climbing$/i,
+    });
+
+    await assertSelectedTypeDependencies(page, 'CLIMBING', [
+      'OUTDOOR_ACTIVITY',
+      'FITNESS',
+    ]);
+    await expect(page.getByTestId('climbing-type-editor')).toBeVisible();
+
+    await selectRouteInEditor(page, 'climbing-type-editor', route.name);
+
+    const climbingTypeCombobox = page
+      .getByTestId('climbing-type-editor')
+      .getByRole('combobox', { name: /climbing type/i });
+
+    await climbingTypeCombobox.click();
+    await page.getByRole('option', { name: 'sport' }).click();
+    await expect(climbingTypeCombobox).toContainText('sport');
+
+    await page.getByTestId('climbing-grade-input').fill('18');
+    await page.getByTestId('climbing-length-input').fill('30');
+
+    await page.getByRole('button', { name: /create journal/i }).click();
+
+    await awaitCreationAndAssertBadge(page, 'manage-type-climbing');
+    await assertAttachedTypeBadges(page, [
+      'climbing',
+      'outdoor_activity',
+      'fitness',
+    ]);
+
+    await page.getByTestId('type-section-trigger-climbing').click();
+
+    const summary = page.getByTestId('climbing-summary');
+    await expect(summary).toBeVisible();
+    await expect(summary).toContainText(route.name);
+    await expect(summary).toContainText('sport');
+    await expect(summary).toContainText('18');
+    await expect(summary).toContainText('30 m');
+  });
+
+  test('should create a KAYAKING journal and verify dependencies and summary', async ({
+    authenticatedPage,
+  }) => {
+    const page = authenticatedPage;
+    const route = await createRoute(page, {
+      name: `E2E Kayak Route ${Date.now()}`,
+      description: 'A test kayaking route',
+    });
+
+    await navigateToNewJournal(page);
+
+    await fillJournalBasics(page, {
+      title: `Kayak Paddle ${Date.now()}`,
+      content: 'Cold water paddle with steady flow.',
+      typeLabelRegex: /^kayaking$/i,
+    });
+
+    await assertSelectedTypeDependencies(page, 'KAYAKING', [
+      'OUTDOOR_ACTIVITY',
+      'FITNESS',
+    ]);
+    await expect(page.getByTestId('kayaking-type-editor')).toBeVisible();
+
+    await selectRouteInEditor(page, 'kayaking-type-editor', route.name);
+    await page.getByTestId('water-type-input').fill('river');
+
+    await page.getByRole('button', { name: /create journal/i }).click();
+
+    await awaitCreationAndAssertBadge(page, 'manage-type-kayaking');
+    await assertAttachedTypeBadges(page, [
+      'kayaking',
+      'outdoor_activity',
+      'fitness',
+    ]);
+
+    await page.getByTestId('type-section-trigger-kayaking').click();
+
+    const summary = page.getByTestId('kayaking-summary');
+    await expect(summary).toBeVisible();
+    await expect(summary).toContainText(route.name);
+    await expect(summary).toContainText('river');
+  });
+
+  test('should create a CROSS_COUNTRY_SKIING journal and verify dependencies and summary', async ({
+    authenticatedPage,
+  }) => {
+    const page = authenticatedPage;
+    const route = await createRoute(page, {
+      name: `E2E Ski Route ${Date.now()}`,
+      description: 'A test cross-country skiing route',
+    });
+
+    await navigateToNewJournal(page);
+
+    await fillJournalBasics(page, {
+      title: `XC Ski Tour ${Date.now()}`,
+      content: 'Snowy day on groomed tracks.',
+      typeLabelRegex: /^cross-country skiing$/i,
+    });
+
+    await assertSelectedTypeDependencies(page, 'CROSS_COUNTRY_SKIING', [
+      'BUSHWALKING',
+      'OUTDOOR_ACTIVITY',
+      'FITNESS',
+    ]);
+    await expect(
+      page.getByTestId('cross-country-skiing-type-editor')
+    ).toBeVisible();
+
+    await selectRouteInEditor(
+      page,
+      'cross-country-skiing-type-editor',
+      route.name
+    );
+    await page
+      .getByTestId('snow-conditions-input')
+      .fill('Fresh powder with groomed tracks');
+
+    await page.getByRole('button', { name: /create journal/i }).click();
+
+    await awaitCreationAndAssertBadge(page, 'manage-type-cross_country_skiing');
+    await assertAttachedTypeBadges(page, [
+      'cross_country_skiing',
+      'bushwalking',
+      'outdoor_activity',
+      'fitness',
+    ]);
+
+    await page.getByTestId('type-section-trigger-cross_country_skiing').click();
+
+    const summary = page.getByTestId('cross-country-skiing-summary');
+    await expect(summary).toBeVisible();
+    await expect(summary).toContainText(route.name);
+    await expect(summary).toContainText('Fresh powder with groomed tracks');
   });
 });

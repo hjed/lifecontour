@@ -1,16 +1,15 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useId, useState } from 'react';
 import { Timer, Map as MapIcon } from 'lucide-react';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
 import type { JoggingData } from '@/types/journals';
-import { useTypeEditorState } from './useTypeEditorState';
 import { TypeEditorActions } from './TypeEditorActions';
 import { RouteSelector } from '@/components/routes/RouteSelector';
 import { formatSecondsPerKm } from '../ActivityStats';
-import { useRoute } from '@/lib/api/routes';
+import { useRouteBackedTypeEditor } from './useRouteBackedTypeEditor';
 
 interface JoggingTypeEditorProps {
   readonly journalId?: string;
@@ -33,21 +32,21 @@ export function JoggingTypeEditor({
   onChange,
   journalId: _journalId,
 }: JoggingTypeEditorProps) {
-  const initialData = useMemo(() => data ?? DEFAULT_DATA, [data]);
-
-  // Fetch route details to display route name in read-only view
-  const { data: routeData } = useRoute(initialData.route_id ?? '');
-  const routeName = routeData?.data?.attributes?.name;
-
+  const baseId = useId();
+  const paceFieldId = `${baseId}-pace`;
+  const routeFieldId = `${baseId}-route`;
   const {
+    initialData,
+    routeName,
     isEditing,
     editData,
     setEditData,
     handleEdit,
     handleSave,
     handleCancel,
-  } = useTypeEditorState({
-    initialData,
+  } = useRouteBackedTypeEditor({
+    data,
+    defaultData: DEFAULT_DATA,
     onSave,
     createMode,
     onChange,
@@ -74,13 +73,13 @@ export function JoggingTypeEditor({
     const parts = val.split(':');
     let totalSeconds: number | null = null;
     if (parts.length === 2) {
-      const m = parseInt(parts[0], 10);
-      const s = parseInt(parts[1], 10);
+      const m = Number.parseInt(parts[0], 10);
+      const s = Number.parseInt(parts[1], 10);
       if (!Number.isNaN(m) && !Number.isNaN(s)) {
         totalSeconds = m * 60 + s;
       }
     } else if (parts.length === 1) {
-      const v = parseInt(parts[0], 10);
+      const v = Number.parseInt(parts[0], 10);
       if (!Number.isNaN(v)) {
         totalSeconds = v * 60; // Assume they entered minutes if no colon
       }
@@ -151,7 +150,7 @@ export function JoggingTypeEditor({
       <div className='grid grid-cols-1 gap-4 md:grid-cols-2'>
         {/* Pace */}
         <div className='space-y-2'>
-          <Label htmlFor='pace' className='flex items-center gap-2'>
+          <Label htmlFor={paceFieldId} className='flex items-center gap-2'>
             <Timer
               className='text-muted-foreground h-4 w-4'
               aria-hidden='true'
@@ -159,7 +158,7 @@ export function JoggingTypeEditor({
             Pace (mm:ss per km)
           </Label>
           <Input
-            id='pace'
+            id={paceFieldId}
             type='text'
             value={localPace}
             onChange={handlePaceChange}
@@ -170,7 +169,7 @@ export function JoggingTypeEditor({
 
         {/* Route Selector */}
         <div className='space-y-2'>
-          <Label htmlFor='route-id' className='flex items-center gap-2'>
+          <Label htmlFor={routeFieldId} className='flex items-center gap-2'>
             <MapIcon
               className='text-muted-foreground h-4 w-4'
               aria-hidden='true'
@@ -178,7 +177,7 @@ export function JoggingTypeEditor({
             Route
           </Label>
           <RouteSelector
-            id='route-id'
+            id={routeFieldId}
             value={editData.route_id ?? null}
             onChange={routeId =>
               setEditData({ ...editData, route_id: routeId })
