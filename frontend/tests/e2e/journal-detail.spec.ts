@@ -530,11 +530,15 @@ test.describe('Journal Detail Page', () => {
       await expect(addContactButton).toBeVisible();
       await addContactButton.click();
 
-      // Select the contact from the dropdown
-      const contactSelect = page.getByTestId('contact-select');
-      await contactSelect.click();
       const contactName = `${contact.firstName} ${contact.lastName}`;
+      const contactSearchCombobox = page.getByPlaceholder(
+        'Search for a contact...'
+      );
+      await expect(contactSearchCombobox).toBeVisible();
+      await contactSearchCombobox.fill(contact.firstName);
+      await expect(page.getByRole('listbox')).toBeVisible();
       await page.getByRole('option', { name: contactName }).click();
+      await expect(page.getByText(`Selected: ${contactName}`)).toBeVisible();
 
       // Confirm addition (exact: true avoids matching the 'Add Contact' trigger button)
       await page.getByRole('button', { name: 'Add', exact: true }).click();

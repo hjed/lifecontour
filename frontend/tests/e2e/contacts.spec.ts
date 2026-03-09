@@ -1,4 +1,5 @@
 import { test, expect } from './fixtures';
+import { TestDataManager } from './data-management';
 
 test.describe('Contact Management - Authenticated User', () => {
   test('should load contacts page successfully when authenticated', async ({
@@ -62,6 +63,61 @@ test.describe('Contact Management - Authenticated User', () => {
     // Verify content is present
     const bodyText = await authenticatedPage.textContent('body');
     expect(bodyText).toBeTruthy();
+  });
+
+  test('should load contacts beyond the first page with infinite scroll', async ({
+    authenticatedPage,
+    testCleanup,
+  }) => {
+    const page = authenticatedPage;
+    const dataManager = new TestDataManager(page);
+    const totalContacts = 25;
+
+    await page.setViewportSize({ width: 1280, height: 720 });
+    await dataManager.clearAllContacts();
+
+    const contacts = await dataManager.createContacts(
+      Array.from({ length: totalContacts }, (_, index) => ({
+        firstName: `PagedContact${String(index + 1).padStart(2, '0')}`,
+        lastName: 'InfiniteScroll',
+      }))
+    );
+
+    testCleanup(async () => {
+      for (const contact of contacts) {
+        const response = await page.request.delete(
+          `/api/contacts/${contact.id}`
+        );
+
+        if (!response.ok() && response.status() !== 404) {
+          throw new Error(
+            `Failed to delete contact ${contact.id}: ${response.status()}`
+          );
+        }
+      }
+    });
+
+    await page.goto('/contacts');
+    await expect(page).toHaveTitle(/Personal Management System/);
+    await expect(page.getByRole('heading', { name: 'Contacts' })).toBeVisible();
+    await expect(
+      page.getByText(`${totalContacts} contacts found`)
+    ).toBeVisible();
+
+    const contactCards = page.locator('[data-testid^="contact-"]');
+    await expect.poll(async () => contactCards.count()).toBe(20);
+
+    const laterPageContact = page.getByTestId(`contact-${contacts[24]!.id}`);
+    await expect(laterPageContact).toHaveCount(0);
+
+    const infiniteScrollTrigger = page.getByTestId(
+      'contacts-infinite-scroll-trigger'
+    );
+    await expect(infiniteScrollTrigger).toBeVisible();
+    await infiniteScrollTrigger.scrollIntoViewIfNeeded();
+
+    await expect.poll(async () => contactCards.count()).toBe(totalContacts);
+    await expect(laterPageContact).toBeVisible();
   });
 });
 
