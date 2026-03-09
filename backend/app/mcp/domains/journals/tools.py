@@ -1891,12 +1891,10 @@ def register_journal_tools(mcp: FastMCP[None]) -> None:
         user_id = get_current_user_id()
         calendar_repo = SqlCalendarRepository(db_connection)
 
-        try:
-            calendar_uuid = UUID(calendar_id)
-        except (ValueError, TypeError):
-            return MCPResponseBuilder.error_response(
-                "VALIDATION_ERROR",
-                f"Invalid calendar_id '{calendar_id}'. Must be a valid UUID.",
+        calendar_uuid = _parse_calendar_id(calendar_id)
+        if calendar_uuid is None:
+            raise ValueError(
+                f"Invalid calendar_id '{calendar_id}'. Must be a valid UUID."
             )
 
         calendar = await calendar_repo.find_by_id(calendar_uuid)
@@ -1937,12 +1935,10 @@ def register_journal_tools(mcp: FastMCP[None]) -> None:
         user_id = get_current_user_id()
         calendar_repo = SqlCalendarRepository(db_connection)
 
-        try:
-            calendar_uuid = UUID(calendar_id)
-        except (ValueError, TypeError):
-            return MCPResponseBuilder.error_response(
-                "VALIDATION_ERROR",
-                f"Invalid calendar_id '{calendar_id}'. Must be a valid UUID.",
+        calendar_uuid = _parse_calendar_id(calendar_id)
+        if calendar_uuid is None:
+            raise ValueError(
+                f"Invalid calendar_id '{calendar_id}'. Must be a valid UUID."
             )
 
         calendar = await calendar_repo.find_by_id(calendar_uuid)

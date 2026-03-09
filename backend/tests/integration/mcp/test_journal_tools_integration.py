@@ -247,6 +247,46 @@ class TestJournalToolsIntegration:
         assert retrieved_journal.content == "Updated content via integration test"
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("tool_name", "arguments"),
+        [
+            (
+                "update_calendar",
+                {"calendar_id": "not-a-uuid", "name": "Updated name"},
+            ),
+            ("delete_calendar", {"calendar_id": "not-a-uuid"}),
+        ],
+    )
+    async def test_calendar_tools_invalid_uuid_use_validation_error_response(
+        self,
+        authenticated_lifespan_client,
+        tool_name: str,
+        arguments: dict[str, str],
+    ) -> None:
+        async with authenticated_lifespan_client() as authenticated_client:
+            session_id = await initialize_mcp_session(authenticated_client)
+
+            response = await authenticated_client.post(
+                "/mcp-server/mcp",
+                json={
+                    "jsonrpc": "2.0",
+                    "id": 2,
+                    "method": "tools/call",
+                    "params": {"name": tool_name, "arguments": arguments},
+                },
+                headers=mcp_headers(session_id),
+            )
+
+            assert response.status_code == 200
+            payload = extract_mcp_json_payload(response.text)
+            assert payload["error"] == "Validation error"
+            assert payload["field"] == "Input"
+            assert payload["message"] == (
+                "Validation failed for Input: Invalid calendar_id 'not-a-uuid'. "
+                "Must be a valid UUID."
+            )
+
+    @pytest.mark.asyncio
     async def test_delete_calendar_returns_conflict_payload_for_in_use_calendar(
         self, authenticated_lifespan_client
     ) -> None:
