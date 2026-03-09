@@ -116,6 +116,21 @@ describe('CanyoningTypeEditor', () => {
     expect(screen.getByText('route-123')).toBeInTheDocument();
   });
 
+  it('falls back to a default water gauge label when only a level is provided', () => {
+    render(
+      <CanyoningTypeEditor
+        createMode={false}
+        data={{
+          water_guage_name: '',
+          water_guage_level: 8,
+        }}
+      />
+    );
+
+    expect(screen.getByTestId('canyoning-summary')).toBeInTheDocument();
+    expect(screen.getByText('Gauge (8)')).toBeInTheDocument();
+  });
+
   it('resets local French grade UI state when saved data changes', () => {
     const { rerender } = render(
       <CanyoningTypeEditor

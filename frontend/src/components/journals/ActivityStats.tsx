@@ -28,6 +28,7 @@ import {
   CardTitle,
 } from '@/components/ui/card';
 import { Separator } from '@/components/ui/separator';
+import { buildCanyonFlags, getWaterGaugeLabel } from './canyoningSummary';
 
 interface ActivityStatsProps {
   readonly data?: FitnessData;
@@ -163,27 +164,6 @@ function compactStatItems(
   return items.filter((item): item is React.ReactNode => item !== null);
 }
 
-function buildCanyonFlags(canyoningData?: CanyoningData): string[] {
-  return [
-    canyoningData?.is_vertical ? 'Vertical' : null,
-    canyoningData?.is_night_canyon ? 'Night Canyon' : null,
-    canyoningData?.is_white_water ? 'White Water' : null,
-  ].filter((flag): flag is string => flag !== null);
-}
-
-function getWaterGaugeLabel(
-  waterGaugeName: string | null | undefined,
-  waterGaugeLevel: number | null | undefined
-): string | null {
-  if (!isNonEmptyString(waterGaugeName) && waterGaugeLevel == null) {
-    return null;
-  }
-
-  return `${waterGaugeName ?? 'Gauge'}${
-    waterGaugeLevel != null ? ` (${waterGaugeLevel})` : ''
-  }`;
-}
-
 function buildPerformanceItems({
   distance,
   duration,
@@ -290,7 +270,10 @@ function buildContextItems({
   readonly waterType: string | null | undefined;
   readonly snowConditions: string | null | undefined;
 }): React.ReactNode[] {
-  const waterGaugeLabel = getWaterGaugeLabel(waterGaugeName, waterGaugeLevel);
+  const waterGaugeLabel = getWaterGaugeLabel({
+    water_guage_name: waterGaugeName,
+    water_guage_level: waterGaugeLevel,
+  });
 
   return compactStatItems([
     routeDisplay

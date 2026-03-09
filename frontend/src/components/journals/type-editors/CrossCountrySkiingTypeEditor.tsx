@@ -1,19 +1,18 @@
 'use client';
 
-import { useId, useMemo } from 'react';
+import { useId } from 'react';
 import { Map as MapIcon, Snowflake } from 'lucide-react';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { cn } from '@/lib/utils';
 import type { CrossCountrySkiingData } from '@/types/journals';
 import { RouteSelector } from '@/components/routes/RouteSelector';
-import { useRoute } from '@/lib/api/routes';
 import {
   ReadOnlyTypeSummary,
   type ReadOnlyTypeSummaryItem,
 } from './ReadOnlyTypeSummary';
-import { useTypeEditorState } from './useTypeEditorState';
 import { TypeEditorActions } from './TypeEditorActions';
+import { useRouteBackedTypeEditor } from './useRouteBackedTypeEditor';
 
 interface CrossCountrySkiingTypeEditorProps {
   readonly journalId?: string;
@@ -36,22 +35,22 @@ export function CrossCountrySkiingTypeEditor({
   createMode = false,
   onChange,
 }: CrossCountrySkiingTypeEditorProps) {
-  const initialData = useMemo(() => data ?? DEFAULT_DATA, [data]);
-  const { data: routeData } = useRoute(initialData.route_id ?? '');
-  const routeName = routeData?.data?.attributes?.name;
   const baseId = useId();
   const routeFieldId = `${baseId}-route`;
   const snowConditionsFieldId = `${baseId}-snow-conditions`;
 
   const {
+    initialData,
+    routeName,
     isEditing,
     editData,
     setEditData,
     handleEdit,
     handleSave,
     handleCancel,
-  } = useTypeEditorState({
-    initialData,
+  } = useRouteBackedTypeEditor({
+    data,
+    defaultData: DEFAULT_DATA,
     onSave,
     createMode,
     onChange,

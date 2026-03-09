@@ -1,16 +1,15 @@
 'use client';
 
-import { useId, useMemo, useState } from 'react';
+import { useId, useState } from 'react';
 import { Timer, Map as MapIcon } from 'lucide-react';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
 import type { JoggingData } from '@/types/journals';
-import { useTypeEditorState } from './useTypeEditorState';
 import { TypeEditorActions } from './TypeEditorActions';
 import { RouteSelector } from '@/components/routes/RouteSelector';
 import { formatSecondsPerKm } from '../ActivityStats';
-import { useRoute } from '@/lib/api/routes';
+import { useRouteBackedTypeEditor } from './useRouteBackedTypeEditor';
 
 interface JoggingTypeEditorProps {
   readonly journalId?: string;
@@ -33,24 +32,21 @@ export function JoggingTypeEditor({
   onChange,
   journalId: _journalId,
 }: JoggingTypeEditorProps) {
-  const initialData = useMemo(() => data ?? DEFAULT_DATA, [data]);
   const baseId = useId();
   const paceFieldId = `${baseId}-pace`;
   const routeFieldId = `${baseId}-route`;
-
-  // Fetch route details to display route name in read-only view
-  const { data: routeData } = useRoute(initialData.route_id ?? '');
-  const routeName = routeData?.data?.attributes?.name;
-
   const {
+    initialData,
+    routeName,
     isEditing,
     editData,
     setEditData,
     handleEdit,
     handleSave,
     handleCancel,
-  } = useTypeEditorState({
-    initialData,
+  } = useRouteBackedTypeEditor({
+    data,
+    defaultData: DEFAULT_DATA,
     onSave,
     createMode,
     onChange,

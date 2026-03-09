@@ -1,6 +1,6 @@
 'use client';
 
-import { useId, useMemo } from 'react';
+import { useId } from 'react';
 import { Compass, Map as MapIcon, Ruler } from 'lucide-react';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
@@ -14,13 +14,12 @@ import {
 import { cn } from '@/lib/utils';
 import type { ClimbingData } from '@/types/journals';
 import { RouteSelector } from '@/components/routes/RouteSelector';
-import { useRoute } from '@/lib/api/routes';
 import {
   ReadOnlyTypeSummary,
   type ReadOnlyTypeSummaryItem,
 } from './ReadOnlyTypeSummary';
-import { useTypeEditorState } from './useTypeEditorState';
 import { TypeEditorActions } from './TypeEditorActions';
+import { useRouteBackedTypeEditor } from './useRouteBackedTypeEditor';
 
 interface ClimbingTypeEditorProps {
   readonly journalId?: string;
@@ -44,9 +43,6 @@ export function ClimbingTypeEditor({
   createMode = false,
   onChange,
 }: ClimbingTypeEditorProps) {
-  const initialData = useMemo(() => data ?? DEFAULT_DATA, [data]);
-  const { data: routeData } = useRoute(initialData.route_id ?? '');
-  const routeName = routeData?.data?.attributes?.name;
   const baseId = useId();
   const routeFieldId = `${baseId}-route`;
   const climbingTypeFieldId = `${baseId}-climbing-type`;
@@ -54,14 +50,17 @@ export function ClimbingTypeEditor({
   const climbingLengthFieldId = `${baseId}-climbing-length`;
 
   const {
+    initialData,
+    routeName,
     isEditing,
     editData,
     setEditData,
     handleEdit,
     handleSave,
     handleCancel,
-  } = useTypeEditorState({
-    initialData,
+  } = useRouteBackedTypeEditor({
+    data,
+    defaultData: DEFAULT_DATA,
     onSave,
     createMode,
     onChange,

@@ -1,11 +1,10 @@
 'use client';
 
-import { useId, useMemo } from 'react';
+import { useId } from 'react';
 import { Map as MapIcon, Compass } from 'lucide-react';
 import { Label } from '@/components/ui/label';
 import { cn } from '@/lib/utils';
 import type { BushwalkingData } from '@/types/journals';
-import { useTypeEditorState } from './useTypeEditorState';
 import { TypeEditorActions } from './TypeEditorActions';
 import { RouteSelector } from '@/components/routes/RouteSelector';
 import {
@@ -15,7 +14,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { useRoute } from '@/lib/api/routes';
+import { useRouteBackedTypeEditor } from './useRouteBackedTypeEditor';
 
 interface BushwalkingTypeEditorProps {
   readonly journalId?: string;
@@ -71,24 +70,21 @@ export function BushwalkingTypeEditor({
   onChange,
   journalId: _journalId,
 }: BushwalkingTypeEditorProps) {
-  const initialData = useMemo(() => data ?? DEFAULT_DATA, [data]);
   const baseId = useId();
   const routeFieldId = `${baseId}-route`;
   const trackGradingFieldId = `${baseId}-track-grading`;
-
-  // Fetch route details to display route name in read-only view
-  const { data: routeData } = useRoute(initialData.route_id ?? '');
-  const routeName = routeData?.data?.attributes?.name;
-
   const {
+    initialData,
+    routeName,
     isEditing,
     editData,
     setEditData,
     handleEdit,
     handleSave,
     handleCancel,
-  } = useTypeEditorState({
-    initialData,
+  } = useRouteBackedTypeEditor({
+    data,
+    defaultData: DEFAULT_DATA,
     onSave,
     createMode,
     onChange,

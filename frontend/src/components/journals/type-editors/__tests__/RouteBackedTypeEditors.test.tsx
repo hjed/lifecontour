@@ -1,6 +1,8 @@
 import { render, screen } from '@testing-library/react';
+import { BushwalkingTypeEditor } from '../BushwalkingTypeEditor';
 import { ClimbingTypeEditor } from '../ClimbingTypeEditor';
 import { CrossCountrySkiingTypeEditor } from '../CrossCountrySkiingTypeEditor';
+import { JoggingTypeEditor } from '../JoggingTypeEditor';
 import { KayakingTypeEditor } from '../KayakingTypeEditor';
 
 jest.mock('@/components/routes/RouteSelector', () => ({
@@ -12,6 +14,22 @@ jest.mock('@/lib/api/routes', () => ({
 }));
 
 const routeBackedEditorCases = [
+  {
+    name: 'BushwalkingTypeEditor',
+    renderCreate: () => render(<BushwalkingTypeEditor createMode={true} />),
+    assertCreate: () => {
+      expect(screen.getByText(/Australian Track Grading/i)).toBeInTheDocument();
+    },
+    renderView: () =>
+      render(
+        <BushwalkingTypeEditor
+          createMode={false}
+          data={{ route_id: 'route-123', track_grading: 'Grade 4' }}
+        />
+      ),
+    summaryTexts: ['Grade 4', 'route-123'],
+    summaryTestId: 'bushwalking-type-editor',
+  },
   {
     name: 'ClimbingTypeEditor',
     renderCreate: () => render(<ClimbingTypeEditor createMode={true} />),
@@ -50,6 +68,22 @@ const routeBackedEditorCases = [
       ),
     summaryTestId: 'kayaking-summary',
     summaryTexts: ['river', 'route-123'],
+  },
+  {
+    name: 'JoggingTypeEditor',
+    renderCreate: () => render(<JoggingTypeEditor createMode={true} />),
+    assertCreate: () => {
+      expect(screen.getByTestId('pace-input')).toBeInTheDocument();
+    },
+    renderView: () =>
+      render(
+        <JoggingTypeEditor
+          createMode={false}
+          data={{ route_id: 'route-123', pace: 330 }}
+        />
+      ),
+    summaryTexts: ['5:30 /km', 'route-123'],
+    summaryTestId: 'jogging-type-editor',
   },
   {
     name: 'CrossCountrySkiingTypeEditor',

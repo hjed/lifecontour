@@ -146,4 +146,19 @@ describe('ActivityStats', () => {
       'Fresh powder'
     );
   });
+
+  it('falls back to a default water gauge label when canyoning only provides a level', () => {
+    render(
+      <ActivityStats
+        canyoningData={{
+          water_guage_name: '',
+          water_guage_level: 8,
+        }}
+      />
+    );
+
+    expect(screen.getByTestId('stat-water-gauge')).toHaveTextContent(
+      'Gauge (8)'
+    );
+  });
 });
