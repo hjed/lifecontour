@@ -15,6 +15,7 @@ import structlog
 from authlib.common.security import generate_token
 from authlib.integrations.starlette_client import OAuth
 from fastapi import HTTPException, Request, status
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.infrastructure.auth.models import OAuthUserInfo
@@ -912,21 +913,11 @@ class OAuthService:
         Returns:
             True if user has Google Contacts tokens stored, False otherwise
         """
-        from sqlalchemy import text
-
         try:
-            # Query user_google_auth table to check if user has tokens
-            stmt = text("""
-                SELECT user_id, google_account_email
-                FROM user_google_auth
-                WHERE user_id = :user_id
-                LIMIT 1
-            """)
-
-            result = await connection.execute(stmt, {"user_id": user_id})
-            row = result.fetchone()
-
-            has_tokens = row is not None
+            google_account_emails = await self._get_google_contacts_account_emails(
+                user_id, connection
+            )
+            has_tokens = len(google_account_emails) > 0
 
             logger.debug(
                 "Google Contacts connection check",
@@ -945,3 +936,35 @@ class OAuthService:
             )
             # Return False on error to avoid breaking the UI
             return False
+
+    async def get_connected_google_account_email(
+        self, user_id: str, connection: AsyncConnection
+    ) -> str:
+        """Return the single connected Google account email for a user."""
+        google_account_emails = await self._get_google_contacts_account_emails(
+            user_id, connection
+        )
+
+        if not google_account_emails:
+            raise ValueError(f"No Google Contacts connection found for user {user_id}")
+
+        if len(google_account_emails) > 1:
+            raise ValueError(
+                f"Multiple Google Contacts connections found for user {user_id}"
+            )
+
+        return google_account_emails[0]
+
+    async def _get_google_contacts_account_emails(
+        self, user_id: str, connection: AsyncConnection
+    ) -> list[str]:
+        """Return all connected Google account emails for a user."""
+        stmt = text("""
+            SELECT google_account_email
+            FROM user_google_auth
+            WHERE user_id = :user_id
+            ORDER BY google_account_email
+        """)
+
+        result = await connection.execute(stmt, {"user_id": user_id})
+        return list(result.scalars().all())

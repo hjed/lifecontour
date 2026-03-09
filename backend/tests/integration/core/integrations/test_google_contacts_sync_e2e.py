@@ -414,7 +414,7 @@ async def _run_outbox_processor(connection: AsyncConnection) -> None:
 
 
 async def _assert_google_contacts_sync_side_effects(
-    connection: AsyncConnection, *, job_id: str, test_email: str
+    connection: AsyncConnection, *, job_id: str, google_account_email: str
 ) -> None:
     sync_job = (
         await connection.execute(
@@ -506,7 +506,7 @@ async def _assert_google_contacts_sync_side_effects(
             text(
                 "SELECT contacts_sync_token FROM user_google_integration WHERE google_account_email = :email"
             ),
-            {"email": test_email},
+            {"email": google_account_email},
         )
     ).scalar_one()
     assert sync_token == "sync-token-after-full-sync"
@@ -595,7 +595,7 @@ async def test_google_contacts_sync_flow_runs_through_arq_and_outbox(
         await _assert_google_contacts_sync_side_effects(
             async_connection,
             job_id=job_id,
-            test_email=test_email,
+            google_account_email=test_email,
         )
     finally:
         await service.close()
@@ -613,7 +613,9 @@ async def test_google_contacts_sync_flow_runs_from_http_endpoint(
     _ = clean_database
     now = datetime.now(UTC)
     future_expiry = now + timedelta(hours=1)
-    test_email = test_user.email
+    session_user = test_user.model_copy(update={"email": "app-user@example.com"})
+    google_account_email = "connected-google@example.com"
+    assert session_user.email != google_account_email
     fernet_key = Fernet.generate_key()
     fernet = Fernet(fernet_key)
     http_test_settings = test_settings.model_copy(
@@ -633,8 +635,8 @@ async def test_google_contacts_sync_flow_runs_from_http_endpoint(
         await redis_pool.flushdb()
         await _insert_google_auth_tokens(
             async_connection,
-            user_id=str(test_user.id),
-            email=test_email,
+            user_id=str(session_user.id),
+            email=google_account_email,
             fernet=fernet,
             expires_at=future_expiry,
             now=now,
@@ -643,7 +645,7 @@ async def test_google_contacts_sync_flow_runs_from_http_endpoint(
         async with _authenticated_client_with_savepoint_db_manager(
             async_connection,
             http_test_settings,
-            test_user,
+            session_user,
         ) as authenticated_client:
             response = await authenticated_client.post(
                 "/api/integrations/google/contacts/sync",
@@ -677,7 +679,7 @@ async def test_google_contacts_sync_flow_runs_from_http_endpoint(
         await _assert_google_contacts_sync_side_effects(
             async_connection,
             job_id=job_id,
-            test_email=test_email,
+            google_account_email=google_account_email,
         )
     finally:
         await redis_pool.flushdb()
