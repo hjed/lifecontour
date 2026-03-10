@@ -4,7 +4,6 @@
 
 import { screen } from '@testing-library/react';
 import ContactsPage from '../page';
-import { useContacts, useSearchContacts } from '@/lib/api/contacts';
 import { ContactListResponse } from '@/types/contacts';
 import {
   renderWithProviders,
@@ -18,9 +17,7 @@ jest.mock('@/lib/api/contacts', () => {
     jest.requireActual('@/test-utils');
 
   return {
-    useContacts: jest.fn(),
     useInfiniteContacts: jest.fn(),
-    useSearchContacts: jest.fn(),
     useInfiniteSearchContacts: jest.fn(),
     useToggleContactFavourite: jest.fn(),
     getContactPaginationMeta: jest.fn(createMockGetContactPaginationMeta),
@@ -33,10 +30,6 @@ jest.mock('@/hooks/useDebounce', () => ({
 
 // Note: Next.js navigation is mocked globally in jest.setup.ts
 
-const mockUseContacts = useContacts as jest.MockedFunction<typeof useContacts>;
-const mockUseSearchContacts = useSearchContacts as jest.MockedFunction<
-  typeof useSearchContacts
->;
 const mockUseInfiniteContacts = jest.mocked(
   jest.requireMock('@/lib/api/contacts').useInfiniteContacts
 );
@@ -56,7 +49,7 @@ type ContactsQueryState = {
   error?: Error | null;
   hasNextPage?: boolean;
   isFetchingNextPage?: boolean;
-  fetchNextPage?: jest.Mock;
+  fetchNextPage?: jest.Mock<Promise<unknown>>;
 };
 
 type MockIntersectionObserverInstance = {
@@ -69,6 +62,20 @@ type MockIntersectionObserverInstance = {
 
 const mockIntersectionObserverInstances: MockIntersectionObserverInstance[] =
   [];
+
+function getQueryStatus(
+  state: ContactsQueryState
+): 'pending' | 'error' | 'success' {
+  if (state.isLoading) {
+    return 'pending';
+  }
+
+  if (state.error) {
+    return 'error';
+  }
+
+  return 'success';
+}
 
 function createPaginatedResponse(
   contacts: ContactListResponse['data'] = [
@@ -118,10 +125,11 @@ function createInfiniteQueryResult(
     isError: !!state.error,
     isPending: state.isLoading ?? false,
     isSuccess: !state.isLoading && !state.error,
-    status: state.isLoading ? 'pending' : state.error ? 'error' : 'success',
+    status: getQueryStatus(state),
     hasNextPage: state.hasNextPage ?? false,
     isFetchingNextPage: state.isFetchingNextPage ?? false,
-    fetchNextPage: state.fetchNextPage ?? jest.fn(),
+    fetchNextPage:
+      state.fetchNextPage ?? jest.fn().mockResolvedValue(undefined),
     refetch: jest.fn(),
   };
 }
@@ -153,7 +161,7 @@ describe('ContactsPage', () => {
     setupMocks.fetch();
     mockIntersectionObserverInstances.length = 0;
 
-    global.IntersectionObserver = jest.fn(
+    globalThis.IntersectionObserver = jest.fn(
       (callback: IntersectionObserverCallback) => {
         const instance: MockIntersectionObserverInstance = {
           callback,
@@ -207,42 +215,12 @@ describe('ContactsPage', () => {
     const searchPages =
       searchState.pages ?? (searchState.data ? [searchState.data] : undefined);
 
-    mockUseContacts.mockReturnValue({
-      data: contactsState.data ?? contactPages?.[0],
-      isLoading: contactsState.isLoading ?? false,
-      error: contactsState.error ?? null,
-      isError: !!contactsState.error,
-      isPending: contactsState.isLoading ?? false,
-      isSuccess: !contactsState.isLoading && !contactsState.error,
-      status: contactsState.isLoading
-        ? 'pending'
-        : contactsState.error
-          ? 'error'
-          : 'success',
-      refetch: jest.fn(),
-    } as any);
-
     mockUseInfiniteContacts.mockReturnValue(
       createInfiniteQueryResult({
         ...contactsState,
         pages: contactPages,
       }) as any
     );
-
-    mockUseSearchContacts.mockReturnValue({
-      data: searchState.data ?? searchPages?.[0],
-      isLoading: searchState.isLoading ?? false,
-      error: searchState.error ?? null,
-      isError: !!searchState.error,
-      isPending: searchState.isLoading ?? false,
-      isSuccess: !searchState.isLoading && !searchState.error,
-      status: searchState.isLoading
-        ? 'pending'
-        : searchState.error
-          ? 'error'
-          : 'success',
-      refetch: jest.fn(),
-    } as any);
 
     mockUseInfiniteSearchContacts.mockReturnValue(
       createInfiniteQueryResult({
@@ -408,6 +386,36 @@ describe('ContactsPage', () => {
     expect(await screen.findByText('2 contacts found')).toBeInTheDocument();
   });
 
+  it('falls back to loaded contact count when pagination meta total is zero', async () => {
+    const visibleContacts = [
+      contactTestUtils.createMockContact(),
+      contactTestUtils.createMockContact({
+        id: '2',
+        attributes: {
+          first_name: 'Jane',
+          last_name: 'Smith',
+          middle_name: '',
+          nick_name: '',
+          created_at: '2024-01-01T00:00:00Z',
+          updated_at: '2024-01-01T00:00:00Z',
+          contact_methods: [],
+          addresses: [],
+          notes: [],
+          relationships: [],
+        },
+      }),
+    ];
+
+    setupContactMocks({
+      data: createPaginatedResponse(visibleContacts, { totalCount: 0 }),
+    });
+    renderContactsPage();
+
+    expect(await screen.findByText('Jane Smith')).toBeInTheDocument();
+    expect(screen.getByText('2 contacts found')).toBeInTheDocument();
+    expect(screen.queryByText('0 contacts found')).not.toBeInTheDocument();
+  });
+
   it('renders contacts from all loaded infinite-query pages', async () => {
     const firstPage = createPaginatedResponse(
       [contactTestUtils.createMockContact()],
@@ -445,7 +453,7 @@ describe('ContactsPage', () => {
   });
 
   it('fetches the next page when the infinite scroll trigger intersects', async () => {
-    const fetchNextPage = jest.fn();
+    const fetchNextPage = jest.fn().mockResolvedValue(undefined);
 
     setupContactMocks({
       pages: [

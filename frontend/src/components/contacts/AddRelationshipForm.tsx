@@ -145,6 +145,7 @@ export function AddRelationshipForm({
           <ContactSearchCombobox
             onSelect={handleContactSelect}
             placeholder='Search for a contact...'
+            inputId='contact-search'
             excludeContactId={contactId}
             disabled={disabled}
           />

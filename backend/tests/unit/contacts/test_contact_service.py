@@ -200,6 +200,44 @@ class TestContactService:
         mock_contact_repo.get_contacts_by_filters.assert_not_called()
 
     @pytest.mark.asyncio
+    async def test_get_contacts_count_without_filters_uses_total_count(
+        self, contact_service, mock_contact_repo
+    ):
+        """Test get_contacts_count without filters uses the total count method."""
+        # Arrange
+        mock_contact_repo.get_count.return_value = 42
+
+        # Act
+        result = await contact_service.get_contacts_count()
+
+        # Assert
+        assert result == 42
+        mock_contact_repo.get_count.assert_called_once_with()
+        mock_contact_repo.get_contacts_count_by_filters.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_get_contacts_count_with_filters_uses_filtered_count(
+        self, contact_service, mock_contact_repo
+    ):
+        """Test get_contacts_count with filters uses the filtered count method."""
+        # Arrange
+        mock_contact_repo.get_contacts_count_by_filters.return_value = 2
+
+        # Act
+        result = await contact_service.get_contacts_count(
+            is_favourite=True,
+            tag_ids=[1, 2],
+        )
+
+        # Assert
+        assert result == 2
+        mock_contact_repo.get_contacts_count_by_filters.assert_called_once_with(
+            is_favourite=True,
+            tag_ids=[1, 2],
+        )
+        mock_contact_repo.get_count.assert_not_called()
+
+    @pytest.mark.asyncio
     async def test_create_contact_success(
         self, contact_service, mock_contact_repo, mock_transaction
     ):

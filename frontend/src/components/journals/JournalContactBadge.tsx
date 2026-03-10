@@ -23,6 +23,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { Label } from '@/components/ui/label';
 import { ContactSearchCombobox } from '@/components/contacts/ContactSearchCombobox';
 import { cn } from '@/lib/utils';
 import type { ContactResource } from '@/types/contacts';
@@ -160,10 +161,11 @@ export function JournalContactBadge({
           <PopoverContent className='w-80 p-3' align='start'>
             <div className='space-y-3'>
               <div className='space-y-2'>
-                <div className='text-sm font-medium'>Select Contact</div>
+                <Label htmlFor='journal-contact-search'>Select Contact</Label>
                 <ContactSearchCombobox
                   onSelect={setSelectedContact}
                   placeholder='Search for a contact...'
+                  inputId='journal-contact-search'
                   disabled={isLoading}
                 />
                 {selectedContactName && (

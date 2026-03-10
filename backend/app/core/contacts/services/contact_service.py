@@ -1562,9 +1562,19 @@ class ContactService:
             offset=offset,
         )
 
-    async def get_contacts_count(self) -> int:
-        """Get total count of contacts."""
-        return await self.contact_repo.get_count()
+    async def get_contacts_count(
+        self,
+        is_favourite: bool | None = None,
+        tag_ids: list[int] | None = None,
+    ) -> int:
+        """Get total count of contacts with optional filtering."""
+        if is_favourite is None and tag_ids is None:
+            return await self.contact_repo.get_count()
+
+        return await self.contact_repo.get_contacts_count_by_filters(
+            is_favourite=is_favourite,
+            tag_ids=tag_ids,
+        )
 
     async def get_contacts_by_tag(self, tag_id: int) -> list[Contact]:
         """Get contacts by tag."""

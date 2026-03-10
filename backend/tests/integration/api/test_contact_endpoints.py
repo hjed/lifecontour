@@ -1,5 +1,7 @@
 """Integration tests for contact API endpoints."""
 
+import asyncio
+
 import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
@@ -488,12 +490,23 @@ class TestContactEndpoints:
         client = integration_api_client
 
         # Create favourite and non-favourite contacts
-        favourite_contact = {
+        favourite_contact_one = {
             "data": {
                 "type": "contact",
                 "attributes": {
-                    "first_name": "Favourite",
-                    "last_name": "User",
+                    "first_name": "Alpha",
+                    "last_name": "Favourite",
+                    "is_favourite": True,
+                },
+            }
+        }
+
+        favourite_contact_two = {
+            "data": {
+                "type": "contact",
+                "attributes": {
+                    "first_name": "Beta",
+                    "last_name": "Favourite",
                     "is_favourite": True,
                 },
             }
@@ -510,29 +523,44 @@ class TestContactEndpoints:
             }
         }
 
-        await client.post("/api/contacts", json=favourite_contact)
-        await client.post("/api/contacts", json=regular_contact)
+        create_responses = await asyncio.gather(
+            client.post("/api/contacts", json=favourite_contact_one),
+            client.post("/api/contacts", json=favourite_contact_two),
+            client.post("/api/contacts", json=regular_contact),
+        )
+        assert all(response.status_code == 201 for response in create_responses)
 
-        # Test filtering by favourite=true
-        response = await client.get("/api/contacts?favourite=true")
+        # Test filtering by favourite=true with correct filtered metadata and links
+        response = await client.get("/api/contacts?favourite=true&limit=1")
         assert response.status_code == 200
 
         data = response.json()
         assert len(data["data"]) == 1
-        assert data["data"][0]["attributes"]["first_name"] == "Favourite"
+        assert data["data"][0]["attributes"]["first_name"] == "Alpha"
         assert data["data"][0]["attributes"]["is_favourite"] is True
+        assert data["meta"] == {
+            "total_count": 2,
+            "page_count": 2,
+            "current_page": 1,
+            "per_page": 1,
+        }
+        assert data["links"] == {
+            "self": "http://testserver/api/contacts?page=1&limit=1&favourite=true",
+            "first": "http://testserver/api/contacts?page=1&limit=1&favourite=true",
+            "last": "http://testserver/api/contacts?page=2&limit=1&favourite=true",
+            "prev": None,
+            "next": "http://testserver/api/contacts?page=2&limit=1&favourite=true",
+            "related": None,
+        }
 
         # Test filtering by favourite=false
         response = await client.get("/api/contacts?favourite=false")
         assert response.status_code == 200
 
         data = response.json()
-        # Should have at least the regular contact we created
-        regular_contacts = [
-            c for c in data["data"] if c["attributes"]["first_name"] == "Regular"
-        ]
-        assert len(regular_contacts) == 1
-        assert regular_contacts[0]["attributes"]["is_favourite"] is False
+        assert len(data["data"]) == 1
+        assert data["data"][0]["attributes"]["first_name"] == "Regular"
+        assert data["data"][0]["attributes"]["is_favourite"] is False
 
     async def test_get_contact_journals(self, integration_api_client):
         """Test getting journals associated with a contact."""

@@ -50,8 +50,9 @@ const mockSearchSelectContact: ContactResource = {
 };
 
 jest.mock('@/components/contacts/ContactSearchCombobox', () => ({
-  ContactSearchCombobox: ({ onSelect, disabled }: any) => (
+  ContactSearchCombobox: ({ onSelect, disabled, inputId }: any) => (
     <div>
+      <input id={inputId} placeholder='Search for a contact...' readOnly />
       <button
         type='button'
         data-testid='contact-search-combobox'
@@ -137,6 +138,20 @@ describe('JournalContactBadge', () => {
       );
 
       expect(screen.getByTestId('contact-search-combobox')).toBeInTheDocument();
+    });
+
+    it('associates the select contact label with the combobox input', () => {
+      render(
+        <JournalContactBadge
+          contacts={mockContacts}
+          onContactAdd={mockOnContactAdd}
+        />
+      );
+
+      expect(screen.getByLabelText('Select Contact')).toHaveAttribute(
+        'placeholder',
+        'Search for a contact...'
+      );
     });
 
     it('adds the selected contact from the search combobox', async () => {

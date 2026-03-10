@@ -11,6 +11,12 @@
 
 import { FullConfig } from '@playwright/test';
 import { execSync } from 'node:child_process';
+import {
+  FRONTEND_TEST_CALLBACK_URL,
+  FRONTEND_TEST_PORT,
+  FRONTEND_TEST_URL,
+  getFrontendCorsOrigins,
+} from './e2e/utils/frontend-test-config';
 
 type Logger = Pick<Console, 'log' | 'error'>;
 
@@ -107,13 +113,14 @@ function execCommand(
   command: string,
   description: string,
   projectRoot: string,
-  options?: { ignoreError?: boolean }
+  options?: { env?: NodeJS.ProcessEnv; ignoreError?: boolean }
 ): void {
   console.log(`🔧 ${description}...`);
   try {
     execSync(command, {
       stdio: 'inherit',
       cwd: projectRoot,
+      env: options?.env ?? process.env,
     });
     console.log(`✅ ${description} completed`);
   } catch (error) {
@@ -132,6 +139,54 @@ function printServiceLogs(dockerComposeCmd: string, projectRoot: string): void {
     stdio: 'inherit',
     cwd: projectRoot,
   });
+}
+
+function getDockerTestEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  return {
+    ...env,
+    FRONTEND_URL: FRONTEND_TEST_URL,
+    FRONTEND_PORT: FRONTEND_TEST_PORT,
+    CORS_ORIGINS: getFrontendCorsOrigins(),
+  };
+}
+
+function hasExpectedBackendConfig(
+  frontendUrl: string,
+  projectRoot: string
+): boolean {
+  try {
+    const result = execSync(
+      "docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' pms-backend",
+      {
+        encoding: 'utf8',
+        stdio: 'pipe',
+        cwd: projectRoot,
+      }
+    );
+
+    return result.includes(`FRONTEND_URL=${frontendUrl}`);
+  } catch {
+    return false;
+  }
+}
+
+async function hasExpectedOAuthClientRedirect(
+  callbackUrl: string
+): Promise<boolean> {
+  try {
+    const response = await fetch(
+      'http://localhost:4447/admin/clients/test-client-id'
+    );
+
+    if (!response.ok) {
+      return false;
+    }
+
+    const client = (await response.json()) as { redirect_uris?: string[] };
+    return client.redirect_uris?.includes(callbackUrl) ?? false;
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -232,6 +287,7 @@ export async function runGlobalSetup(
   dependencies.chdir(projectRoot);
 
   const dockerComposeCmd = dependencies.getDockerComposeCommand();
+  const dockerTestEnv = getDockerTestEnv(dependencies.env);
   dependencies.logger.log(
     `🐳 Using Docker Compose command: ${dockerComposeCmd}`
   );
@@ -243,24 +299,42 @@ export async function runGlobalSetup(
       );
       dependencies.logger.log('🔍 Verifying service health...');
     } else {
-      if (dependencies.areServicesRunning(dockerComposeCmd, projectRoot)) {
+      const servicesRunning = dependencies.areServicesRunning(
+        dockerComposeCmd,
+        projectRoot
+      );
+      const backendConfigMatches = servicesRunning
+        ? hasExpectedBackendConfig(FRONTEND_TEST_URL, projectRoot)
+        : false;
+      const oauthClientMatches = servicesRunning
+        ? await hasExpectedOAuthClientRedirect(FRONTEND_TEST_CALLBACK_URL)
+        : false;
+
+      if (servicesRunning && backendConfigMatches && oauthClientMatches) {
         dependencies.logger.log(
           '📋 Docker services already running, skipping startup...'
         );
       } else {
+        if (servicesRunning) {
+          dependencies.logger.log(
+            '♻️ Docker services are running with stale frontend/OAuth config, restarting them...'
+          );
+        }
+
         dependencies.removeExistingContainers();
 
         dependencies.execCommand(
           `${dockerComposeCmd} --profile test --env-file .env.test down --remove-orphans`,
           'Cleaning up existing containers',
-          projectRoot
+          projectRoot,
+          { env: dockerTestEnv }
         );
 
         dependencies.execCommand(
           `${dockerComposeCmd} --profile test --env-file .env.test up -d --build`,
           'Starting Docker services',
           projectRoot,
-          { ignoreError: true }
+          { env: dockerTestEnv, ignoreError: true }
         );
       }
 

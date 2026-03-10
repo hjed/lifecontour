@@ -23,6 +23,7 @@ const BLUR_DELAY_MS = 200; // Delay to prevent dropdown from closing before clic
 interface ContactSearchComboboxProps {
   readonly onSelect: (contact: ContactResource) => void;
   readonly placeholder?: string;
+  readonly inputId?: string;
   readonly excludeContactId?: string;
   readonly className?: string;
   readonly disabled?: boolean;
@@ -72,6 +73,7 @@ async function searchContacts(query: string): Promise<ContactListResponse> {
 export function ContactSearchCombobox({
   onSelect,
   placeholder = 'Search contacts...',
+  inputId,
   excludeContactId,
   className,
   disabled = false,
@@ -154,6 +156,7 @@ export function ContactSearchCombobox({
       <div className='relative'>
         <Search className='text-muted-foreground absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2' />
         <Input
+          id={inputId}
           type='text'
           placeholder={placeholder}
           value={searchQuery}

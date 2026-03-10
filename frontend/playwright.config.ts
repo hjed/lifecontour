@@ -1,4 +1,9 @@
 import { defineConfig, devices } from '@playwright/test';
+import {
+  FRONTEND_TEST_PORT,
+  FRONTEND_TEST_URL,
+  SHOULD_REUSE_PLAYWRIGHT_WEB_SERVER,
+} from './tests/e2e/utils/frontend-test-config';
 
 /**
  * Playwright E2E Test Configuration
@@ -47,7 +52,7 @@ export default defineConfig({
   /* Shared settings for all the projects below. See https://playwright.dev/docs/api/class-testoptions. */
   use: {
     /* Base URL to use in actions like `await page.goto('/')`. */
-    baseURL: 'http://localhost:3000',
+    baseURL: FRONTEND_TEST_URL,
 
     /* Collect trace on first retry - essential for debugging flaky tests */
     trace: 'on-first-retry',
@@ -122,13 +127,15 @@ export default defineConfig({
   /* Run your local dev server before starting the tests */
   webServer: {
     command: 'pnpm dev',
-    url: 'http://localhost:3000',
-    // In CI, start a fresh server. Locally, reuse existing server if running
-    reuseExistingServer: !process.env.CI,
+    url: FRONTEND_TEST_URL,
+    // Default to a fresh repo-controlled frontend server for deterministic local runs.
+    reuseExistingServer: SHOULD_REUSE_PLAYWRIGHT_WEB_SERVER,
     timeout: 120 * 1000, // 2 minutes for dev server to start
     stdout: 'ignore', // Suppress dev server output to avoid cluttering test output
     stderr: 'pipe', // Show errors from dev server
     env: {
+      ...process.env,
+      PORT: FRONTEND_TEST_PORT,
       BACKEND_URL: 'http://localhost:8001', // Use test backend port
       NEXT_PUBLIC_API_URL: 'http://localhost:8001',
       NEXT_PUBLIC_OAUTH_PROVIDER_URL: 'http://localhost:4446',

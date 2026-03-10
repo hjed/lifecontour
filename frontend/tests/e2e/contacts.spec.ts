@@ -107,7 +107,15 @@ test.describe('Contact Management - Authenticated User', () => {
     const contactCards = page.locator('[data-testid^="contact-"]');
     await expect.poll(async () => contactCards.count()).toBe(20);
 
-    const laterPageContact = page.getByTestId(`contact-${contacts[24]!.id}`);
+    const laterPageContactSource = contacts[24];
+
+    if (!laterPageContactSource) {
+      throw new Error('Expected a contact beyond the first page');
+    }
+
+    const laterPageContact = page.getByTestId(
+      `contact-${laterPageContactSource.id}`
+    );
     await expect(laterPageContact).toHaveCount(0);
 
     const infiniteScrollTrigger = page.getByTestId(

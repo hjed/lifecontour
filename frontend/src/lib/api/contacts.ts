@@ -379,10 +379,7 @@ export function useSearchContacts(
   return useQuery({
     queryKey: contactKeys.search(`${query}-${JSON.stringify(options)}`),
     queryFn: () => searchContacts(query, options),
-    enabled:
-      queryOptions.enabled === undefined
-        ? query.length > 0
-        : queryOptions.enabled,
+    enabled: queryOptions.enabled ?? query.length > 0,
     staleTime: 2 * 60 * 1000, // 2 minutes for search results
   });
 }
@@ -410,10 +407,7 @@ export function useInfiniteSearchContacts(
       }),
     initialPageParam: initialPage,
     getNextPageParam: getNextContactPageParam,
-    enabled:
-      queryOptions.enabled === undefined
-        ? query.length > 0
-        : queryOptions.enabled,
+    enabled: queryOptions.enabled ?? query.length > 0,
     staleTime: 2 * 60 * 1000, // 2 minutes for search results
   });
 }

@@ -98,7 +98,20 @@ function ContactsPageContent() {
       ? latestMeta.processing_time_ms
       : undefined;
 
-  const totalContacts = totalCount ?? loadedContacts.length;
+  const totalContacts =
+    totalCount === undefined
+      ? loadedContacts.length
+      : Math.max(totalCount, loadedContacts.length);
+  const contactLabel = totalContacts === 1 ? 'contact' : 'contacts';
+  const processingTimeSuffix =
+    processingTimeMs !== undefined ? ` (${processingTimeMs}ms)` : '';
+  let resultsSummary = `${totalContacts} ${contactLabel} found`;
+
+  if (isLoading) {
+    resultsSummary = 'Loading contacts...';
+  } else if (shouldUseSearch) {
+    resultsSummary = `${resultsSummary} for "${debouncedSearchQuery}"${processingTimeSuffix}`;
+  }
 
   // Use the centralized display contacts hook with search highlighting support
   const displayContacts = useDisplayContacts(loadedContacts, shouldUseSearch);
@@ -114,7 +127,7 @@ function ContactsPageContent() {
       const [entry] = entries;
 
       if (entry?.isIntersecting && hasNextPage && !isFetchingNextPage) {
-        void fetchNextPage();
+        fetchNextPage().catch(() => undefined);
       }
     });
 
@@ -241,15 +254,7 @@ function ContactsPageContent() {
       {/* Results Summary */}
       <div className='mb-4 flex items-center gap-2'>
         <Users className='text-muted-foreground h-4 w-4' />
-        <span className='text-muted-foreground text-sm'>
-          {isLoading
-            ? 'Loading contacts...'
-            : shouldUseSearch
-              ? `${totalContacts} contact${totalContacts !== 1 ? 's' : ''} found for "${debouncedSearchQuery}"${
-                  processingTimeMs ? ` (${processingTimeMs}ms)` : ''
-                }`
-              : `${totalContacts} contact${totalContacts !== 1 ? 's' : ''} found`}
-        </span>
+        <span className='text-muted-foreground text-sm'>{resultsSummary}</span>
       </div>
 
       {/* Contact List */}

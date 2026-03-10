@@ -358,33 +358,27 @@ export const contactTestUtils = {
 export function createMockGetContactPaginationMeta(
   meta?: Record<string, unknown>
 ) {
+  const getFirstNumericValue = (keys: string[]) => {
+    for (const key of keys) {
+      const value = meta?.[key];
+
+      if (typeof value === 'number') {
+        return value;
+      }
+    }
+
+    return undefined;
+  };
+
   return {
-    totalCount:
-      typeof meta?.total_count === 'number'
-        ? meta.total_count
-        : typeof meta?.total === 'number'
-          ? meta.total
-          : undefined,
-    currentPage:
-      typeof meta?.current_page === 'number'
-        ? meta.current_page
-        : typeof meta?.page === 'number'
-          ? meta.page
-          : undefined,
-    pageCount:
-      typeof meta?.page_count === 'number'
-        ? meta.page_count
-        : typeof meta?.total_pages === 'number'
-          ? meta.total_pages
-          : typeof meta?.totalPages === 'number'
-            ? meta.totalPages
-            : undefined,
-    perPage:
-      typeof meta?.per_page === 'number'
-        ? meta.per_page
-        : typeof meta?.limit === 'number'
-          ? meta.limit
-          : undefined,
+    totalCount: getFirstNumericValue(['total_count', 'total']),
+    currentPage: getFirstNumericValue(['current_page', 'page']),
+    pageCount: getFirstNumericValue([
+      'page_count',
+      'total_pages',
+      'totalPages',
+    ]),
+    perPage: getFirstNumericValue(['per_page', 'limit']),
   };
 }
 

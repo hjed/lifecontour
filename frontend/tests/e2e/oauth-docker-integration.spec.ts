@@ -8,6 +8,10 @@
  */
 
 import { test, expect } from './fixtures';
+import {
+  FRONTEND_TEST_CALLBACK_URL,
+  FRONTEND_TEST_LOGIN_URL,
+} from './utils/frontend-test-config';
 
 test.describe('OAuth Docker Integration', () => {
   test('should verify Hydra OAuth provider is accessible', async ({
@@ -69,9 +73,7 @@ test.describe('OAuth Docker Integration', () => {
 
         // Verify client configuration
         expect(client.client_id).toBe('test-client-id');
-        expect(client.redirect_uris).toContain(
-          'http://localhost:3000/auth/callback'
-        );
+        expect(client.redirect_uris).toContain(FRONTEND_TEST_CALLBACK_URL);
         expect(client.grant_types).toContain('authorization_code');
         expect(client.response_types).toContain('code');
 
@@ -313,7 +315,7 @@ test.describe('OAuth Docker Integration', () => {
           const currentUrl = page.url();
           console.log('5. URL after OAuth click:', currentUrl);
 
-          if (currentUrl !== 'http://localhost:3000/auth/login') {
+          if (currentUrl !== FRONTEND_TEST_LOGIN_URL) {
             console.log('6. OAuth flow initiated successfully');
           } else {
             console.log('6. Remained on login page - checking for errors...');

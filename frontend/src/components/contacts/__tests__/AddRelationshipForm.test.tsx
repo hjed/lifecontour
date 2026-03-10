@@ -19,10 +19,12 @@ jest.mock('../ContactSearchCombobox', () => ({
   ContactSearchCombobox: function MockContactSearchCombobox({
     onSelect,
     placeholder,
+    inputId,
   }: any) {
     return (
       <div>
         <input
+          id={inputId}
           placeholder={placeholder}
           onChange={e => {
             if (e.target.value === 'test') {
@@ -123,6 +125,24 @@ describe('AddRelationshipForm', () => {
     expect(
       screen.getByPlaceholderText('Search for a contact...')
     ).toBeInTheDocument();
+  });
+
+  it('associates the contact label with the combobox input', () => {
+    const Wrapper = createWrapper();
+    render(
+      <Wrapper>
+        <AddRelationshipForm
+          contactId='1'
+          onSubmit={mockOnSubmit}
+          onCancel={mockOnCancel}
+        />
+      </Wrapper>
+    );
+
+    expect(screen.getByLabelText('Contact')).toHaveAttribute(
+      'placeholder',
+      'Search for a contact...'
+    );
   });
 
   it('renders relationship type select', () => {
