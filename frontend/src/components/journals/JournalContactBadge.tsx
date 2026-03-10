@@ -7,7 +7,7 @@
 
 'use client';
 
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { User, X, Plus } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -23,7 +23,10 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { Label } from '@/components/ui/label';
+import { ContactSearchCombobox } from '@/components/contacts/ContactSearchCombobox';
 import { cn } from '@/lib/utils';
+import type { ContactResource } from '@/types/contacts';
 import type { JournalContact } from '@/types/journals';
 import { JournalContactRelationshipType } from '@/types/journals';
 
@@ -38,7 +41,6 @@ interface JournalContactBadgeProps {
     contactId: string,
     relationshipType: JournalContactRelationshipType
   ) => Promise<void>;
-  readonly availableContacts?: Array<{ id: number; name: string }>;
   readonly relationshipTypes?: JournalContactRelationshipType[];
   readonly disabled?: boolean;
   readonly className?: string;
@@ -53,7 +55,6 @@ export function JournalContactBadge({
   onContactAdd,
   onContactRemove,
   onRelationshipChange,
-  availableContacts = [],
   relationshipTypes = [
     JournalContactRelationshipType.PARTICIPANT,
     JournalContactRelationshipType.INVITEE,
@@ -64,23 +65,43 @@ export function JournalContactBadge({
   className,
 }: JournalContactBadgeProps) {
   const [isAddOpen, setIsAddOpen] = useState(false);
-  const [selectedContactId, setSelectedContactId] = useState<string | null>(
-    null
-  );
+  const [selectedContact, setSelectedContact] =
+    useState<ContactResource | null>(null);
   const [selectedRelationshipType, setSelectedRelationshipType] =
     useState<JournalContactRelationshipType>(
       JournalContactRelationshipType.PARTICIPANT
     );
   const [isLoading, setIsLoading] = useState(false);
 
+  const isSelectedContactAlreadyLinked = useMemo(
+    () =>
+      selectedContact !== null &&
+      contacts.some(contact => contact.id === selectedContact.id),
+    [contacts, selectedContact]
+  );
+
+  const selectedContactName = useMemo(() => {
+    if (!selectedContact) return null;
+
+    return [
+      selectedContact.attributes.first_name,
+      selectedContact.attributes.last_name,
+    ]
+      .filter(Boolean)
+      .join(' ')
+      .trim();
+  }, [selectedContact]);
+
   const handleAddContact = async () => {
-    if (!onContactAdd || !selectedContactId) return;
+    if (!onContactAdd || !selectedContact || isSelectedContactAlreadyLinked) {
+      return;
+    }
 
     setIsLoading(true);
     try {
-      await onContactAdd(selectedContactId, selectedRelationshipType);
+      await onContactAdd(selectedContact.id, selectedRelationshipType);
       setIsAddOpen(false);
-      setSelectedContactId(null);
+      setSelectedContact(null);
       setSelectedRelationshipType(JournalContactRelationshipType.PARTICIPANT);
     } catch (error) {
       console.error('Failed to add contact:', error);
@@ -140,38 +161,23 @@ export function JournalContactBadge({
           <PopoverContent className='w-80 p-3' align='start'>
             <div className='space-y-3'>
               <div className='space-y-2'>
-                <label htmlFor='contact-select' className='text-sm font-medium'>
-                  Select Contact
-                </label>
-                <Select
-                  value={selectedContactId?.toString()}
-                  onValueChange={value => setSelectedContactId(value)}
+                <Label htmlFor='journal-contact-search'>Select Contact</Label>
+                <ContactSearchCombobox
+                  onSelect={setSelectedContact}
+                  placeholder='Search for a contact...'
+                  inputId='journal-contact-search'
                   disabled={isLoading}
-                >
-                  <SelectTrigger
-                    id='contact-select'
-                    data-testid='contact-select'
-                  >
-                    <SelectValue placeholder='Choose a contact' />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {availableContacts
-                      .filter(
-                        c =>
-                          !contacts.some(
-                            existing => existing.id === c.id.toString()
-                          )
-                      )
-                      .map(contact => (
-                        <SelectItem
-                          key={contact.id}
-                          value={contact.id.toString()}
-                        >
-                          {contact.name}
-                        </SelectItem>
-                      ))}
-                  </SelectContent>
-                </Select>
+                />
+                {selectedContactName && (
+                  <p className='text-muted-foreground text-xs'>
+                    Selected: {selectedContactName}
+                  </p>
+                )}
+                {isSelectedContactAlreadyLinked && (
+                  <p className='text-destructive text-xs'>
+                    That contact is already linked to this journal.
+                  </p>
+                )}
               </div>
 
               <div className='space-y-2'>
@@ -208,7 +214,11 @@ export function JournalContactBadge({
 
               <Button
                 onClick={handleAddContact}
-                disabled={!selectedContactId || isLoading}
+                disabled={
+                  !selectedContact ||
+                  isSelectedContactAlreadyLinked ||
+                  isLoading
+                }
                 className='w-full'
                 size='sm'
               >

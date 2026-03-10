@@ -27,6 +27,7 @@ import {
   TagFactory,
   DataSetFactory,
 } from './data-management';
+import { FRONTEND_TEST_LOGIN_URL } from './utils/frontend-test-config';
 
 // Types for our fixtures
 export interface AuthState {
@@ -178,7 +179,7 @@ async function completeWorkerOAuthFlow(browser: any): Promise<AuthState> {
 
   try {
     // Step 1: Navigate to login page and wait for OAuth button to be ready
-    await page.goto('http://localhost:3000/auth/login');
+    await page.goto(FRONTEND_TEST_LOGIN_URL);
 
     // Wait for OAuth button to be visible and enabled (web-first assertion)
     const oauthButton = page
@@ -202,8 +203,8 @@ async function completeWorkerOAuthFlow(browser: any): Promise<AuthState> {
       currentUrl
     );
 
-    // Step 3: Handle OAuth provider interaction / callback processing
-    if (currentUrl.includes('localhost:4646') || currentUrl.includes('hydra')) {
+    // Step 3: Handle OAuth provider interaction
+    if (currentUrl.includes('localhost:4446') || currentUrl.includes('hydra')) {
       console.debug(
         '🔐 [Worker Auth] Successfully redirected to Hydra OAuth provider'
       );

@@ -798,6 +798,67 @@ class SqlContactRepository(ContactRepository):
         row = result.fetchone()
         return row[0] if row else 0
 
+    def _build_contact_filter_query_parts(
+        self,
+        is_favourite: bool | None = None,
+        tag_ids: list[int] | None = None,
+    ) -> tuple[list[str], list[str], dict[str, bool | int]]:
+        """Build shared SQL JOIN/WHERE fragments and params for contact filtering."""
+        query_parts: list[str] = []
+        where_parts: list[str] = []
+        params: dict[str, bool | int] = {}
+
+        if tag_ids:
+            query_parts.append(
+                """
+                JOIN contact_tags ct ON c.id = ct.contact_id
+                """
+            )
+
+        if is_favourite is not None:
+            where_parts.append("c.is_favourite = :is_favourite")
+            params["is_favourite"] = is_favourite
+
+        if tag_ids:
+            tag_param_placeholders = []
+            for tag_index, tag_id_value in enumerate(tag_ids):
+                tag_param_name = f"tag_id_param_{tag_index}"
+                tag_param_placeholders.append(f":{tag_param_name}")
+                params[tag_param_name] = tag_id_value
+
+            tag_placeholders_sql = ", ".join(tag_param_placeholders)
+            where_parts.append(f"ct.tag_id IN ({tag_placeholders_sql})")
+
+        return query_parts, where_parts, params
+
+    async def get_contacts_count_by_filters(
+        self,
+        is_favourite: bool | None = None,
+        tag_ids: list[int] | None = None,
+    ) -> int:
+        """Get the distinct count of contacts filtered by favourite status and/or tags."""
+        query_parts = [
+            """
+            SELECT COUNT(DISTINCT c.id) as count
+            FROM contacts c
+            """
+        ]
+        filter_query_parts, where_parts, params = (
+            self._build_contact_filter_query_parts(
+                is_favourite=is_favourite,
+                tag_ids=tag_ids,
+            )
+        )
+        query_parts.extend(filter_query_parts)
+
+        if where_parts:
+            query_parts.append("WHERE " + " AND ".join(where_parts))
+
+        query = text("".join(query_parts))
+        result = await self.conn.execute(query, params)
+        row = result.fetchone()
+        return row[0] if row else 0
+
     async def get_contacts_by_filters(
         self,
         is_favourite: bool | None = None,
@@ -806,7 +867,6 @@ class SqlContactRepository(ContactRepository):
         offset: int = 0,
     ) -> list[Contact]:
         """Get contacts filtered by favourite status and/or tags."""
-        # Build the query dynamically based on filters
         query_parts = [
             """
             SELECT DISTINCT c.id, c.first_name, c.last_name, c.middle_name, c.nick_name,
@@ -814,42 +874,22 @@ class SqlContactRepository(ContactRepository):
             FROM contacts c
             """
         ]
-
-        # Add tag join if filtering by tags
-        if tag_ids:
-            query_parts.append(
-                """
-                JOIN contact_tags ct ON c.id = ct.contact_id
-                """
+        filter_query_parts, where_parts, filter_params = (
+            self._build_contact_filter_query_parts(
+                is_favourite=is_favourite,
+                tag_ids=tag_ids,
             )
+        )
+        query_parts.extend(filter_query_parts)
+        params: dict[str, bool | int] = {
+            **filter_params,
+            "limit": limit,
+            "offset": offset,
+        }
 
-        # Start WHERE clause
-        where_parts = []
-        params = {"limit": limit, "offset": offset}
-
-        # Add favourite filter if specified
-        if is_favourite is not None:
-            where_parts.append("c.is_favourite = :is_favourite")
-            params["is_favourite"] = is_favourite
-
-        # Add tag filter if specified
-        if tag_ids:
-            # Create safe parameter names and placeholders for tag IDs
-            tag_param_placeholders = []
-            for tag_index, tag_id_value in enumerate(tag_ids):
-                # Use explicit, safe parameter naming pattern
-                tag_param_name = f"tag_id_param_{tag_index}"
-                tag_param_placeholders.append(f":{tag_param_name}")
-                params[tag_param_name] = tag_id_value
-
-            tag_placeholders_sql = ", ".join(tag_param_placeholders)
-            where_parts.append(f"ct.tag_id IN ({tag_placeholders_sql})")
-
-        # Combine WHERE parts if any
         if where_parts:
             query_parts.append("WHERE " + " AND ".join(where_parts))
 
-        # Add ORDER BY and LIMIT
         query_parts.append(
             """
             ORDER BY c.first_name, c.last_name
@@ -857,7 +897,6 @@ class SqlContactRepository(ContactRepository):
             """
         )
 
-        # Execute the query
         query = text("".join(query_parts))
         result = await self.conn.execute(query, params)
         contacts = []

@@ -7,12 +7,14 @@ from core_shared.models.contacts.entities import (
     ContactMethod,
     ContactNote,
     MethodType,
+    Tag,
 )
+from core_shared.models.contacts.value_objects import TagName
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncConnection
 
-from app.core.contacts.adapters.sql import SqlContactRepository
+from app.core.contacts.adapters.sql import SqlContactRepository, SqlTagRepository
 from app.core.contacts.models.exceptions import (
     DuplicateEmailError,
 )
@@ -26,6 +28,11 @@ class TestContactRepositoryIntegration:
     def contact_repo(self, clean_database: AsyncConnection):
         """Create ContactRepository instance with real database connection."""
         return SqlContactRepository(clean_database)
+
+    @pytest.fixture
+    def tag_repo(self, clean_database: AsyncConnection):
+        """Create TagRepository instance with real database connection."""
+        return SqlTagRepository(clean_database)
 
     @pytest.mark.asyncio
     async def test_save_new_contact(self, contact_repo):
@@ -453,3 +460,52 @@ class TestContactRepositoryIntegration:
         assert "FilterFav1" in filtered_names
         assert "FilterFav2" in filtered_names
         assert "FilterReg" not in filtered_names
+
+    @pytest.mark.asyncio
+    async def test_get_contacts_count_by_filters_favourite_only(self, contact_repo):
+        """Test counting contacts by favourite status."""
+        # Arrange
+        await contact_repo.save(
+            Contact(first_name="CountFav1", last_name="User", is_favourite=True)
+        )
+        await contact_repo.save(
+            Contact(first_name="CountFav2", last_name="User", is_favourite=True)
+        )
+        await contact_repo.save(
+            Contact(first_name="CountReg", last_name="User", is_favourite=False)
+        )
+
+        # Act
+        count = await contact_repo.get_contacts_count_by_filters(is_favourite=True)
+
+        # Assert
+        assert count == 2
+
+    @pytest.mark.asyncio
+    async def test_get_contacts_count_by_filters_counts_tag_matches_distinctly(
+        self, contact_repo, tag_repo
+    ):
+        """Test filtered contact counts stay distinct when one contact matches multiple tags."""
+        # Arrange
+        contact_with_both_tags = await contact_repo.save(
+            Contact(first_name="Multi", last_name="Match")
+        )
+        contact_with_one_tag = await contact_repo.save(
+            Contact(first_name="Single", last_name="Match")
+        )
+        await contact_repo.save(Contact(first_name="Other", last_name="Contact"))
+
+        work_tag = await tag_repo.save(Tag(name=TagName("work")))
+        client_tag = await tag_repo.save(Tag(name=TagName("client")))
+
+        await contact_repo.assign_tag(contact_with_both_tags.id, work_tag.id)
+        await contact_repo.assign_tag(contact_with_both_tags.id, client_tag.id)
+        await contact_repo.assign_tag(contact_with_one_tag.id, work_tag.id)
+
+        # Act
+        count = await contact_repo.get_contacts_count_by_filters(
+            tag_ids=[work_tag.id, client_tag.id]
+        )
+
+        # Assert
+        assert count == 2

@@ -120,6 +120,15 @@ class ContactRepository(ABC):
         pass
 
     @abstractmethod
+    async def get_contacts_count_by_filters(
+        self,
+        is_favourite: bool | None = None,
+        tag_ids: list[int] | None = None,
+    ) -> int:
+        """Get the distinct count of contacts filtered by favourite status and/or tags."""
+        pass
+
+    @abstractmethod
     async def add_method(self, contact_id: int, method: ContactMethod) -> ContactMethod:
         """Add a contact method."""
         pass

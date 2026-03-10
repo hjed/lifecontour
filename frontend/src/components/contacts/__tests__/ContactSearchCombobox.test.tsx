@@ -10,7 +10,7 @@ import { ContactListResponse } from '@/types/contacts';
 
 // Mock the API
 const mockFetch = jest.fn();
-global.fetch = mockFetch;
+globalThis.fetch = mockFetch;
 
 // Mock toast
 jest.mock('sonner', () => ({
@@ -93,6 +93,23 @@ describe('ContactSearchCombobox', () => {
     expect(
       screen.getByPlaceholderText('Search contacts...')
     ).toBeInTheDocument();
+  });
+
+  it('applies a custom input id', () => {
+    const Wrapper = createWrapper();
+    render(
+      <Wrapper>
+        <ContactSearchCombobox
+          onSelect={jest.fn()}
+          inputId='journal-contact-search'
+        />
+      </Wrapper>
+    );
+
+    expect(screen.getByRole('combobox')).toHaveAttribute(
+      'id',
+      'journal-contact-search'
+    );
   });
 
   it('shows loading state when searching', async () => {

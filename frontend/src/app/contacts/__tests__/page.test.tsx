@@ -4,7 +4,6 @@
 
 import { screen } from '@testing-library/react';
 import ContactsPage from '../page';
-import { useContacts, useSearchContacts } from '@/lib/api/contacts';
 import { ContactListResponse } from '@/types/contacts';
 import {
   renderWithProviders,
@@ -13,11 +12,17 @@ import {
   setupMocks,
 } from '@/test-utils';
 
-jest.mock('@/lib/api/contacts', () => ({
-  useContacts: jest.fn(),
-  useSearchContacts: jest.fn(),
-  useToggleContactFavourite: jest.fn(),
-}));
+jest.mock('@/lib/api/contacts', () => {
+  const { createMockGetContactPaginationMeta } =
+    jest.requireActual('@/test-utils');
+
+  return {
+    useInfiniteContacts: jest.fn(),
+    useInfiniteSearchContacts: jest.fn(),
+    useToggleContactFavourite: jest.fn(),
+    getContactPaginationMeta: jest.fn(createMockGetContactPaginationMeta),
+  };
+});
 
 jest.mock('@/hooks/useDebounce', () => ({
   useDebounce: jest.fn(value => value),
@@ -25,21 +30,154 @@ jest.mock('@/hooks/useDebounce', () => ({
 
 // Note: Next.js navigation is mocked globally in jest.setup.ts
 
-const mockUseContacts = useContacts as jest.MockedFunction<typeof useContacts>;
-const mockUseSearchContacts = useSearchContacts as jest.MockedFunction<
-  typeof useSearchContacts
->;
+const mockUseInfiniteContacts = jest.mocked(
+  jest.requireMock('@/lib/api/contacts').useInfiniteContacts
+);
+const mockUseInfiniteSearchContacts = jest.mocked(
+  jest.requireMock('@/lib/api/contacts').useInfiniteSearchContacts
+);
 
 // Get the mocked function from the module
 const mockUseToggleContactFavourite = jest.mocked(
   jest.requireMock('@/lib/api/contacts').useToggleContactFavourite
 );
 
+type ContactsQueryState = {
+  data?: ContactListResponse;
+  pages?: ContactListResponse[];
+  isLoading?: boolean;
+  error?: Error | null;
+  hasNextPage?: boolean;
+  isFetchingNextPage?: boolean;
+  fetchNextPage?: jest.Mock<Promise<unknown>>;
+};
+
+type MockIntersectionObserverInstance = {
+  callback: IntersectionObserverCallback;
+  observe: jest.Mock;
+  unobserve: jest.Mock;
+  disconnect: jest.Mock;
+  observedElements: Element[];
+};
+
+const mockIntersectionObserverInstances: MockIntersectionObserverInstance[] =
+  [];
+
+function getQueryStatus(
+  state: ContactsQueryState
+): 'pending' | 'error' | 'success' {
+  if (state.isLoading) {
+    return 'pending';
+  }
+
+  if (state.error) {
+    return 'error';
+  }
+
+  return 'success';
+}
+
+function createPaginatedResponse(
+  contacts: ContactListResponse['data'] = [
+    contactTestUtils.createMockContact(),
+  ],
+  options: {
+    totalCount?: number;
+    currentPage?: number;
+    pageCount?: number;
+    processingTimeMs?: number;
+  } = {}
+): ContactListResponse {
+  const totalCount = options.totalCount ?? contacts.length;
+  const currentPage = options.currentPage ?? 1;
+  const pageCount = options.pageCount ?? Math.max(1, currentPage);
+
+  return {
+    data: contacts,
+    meta: {
+      total_count: totalCount,
+      page_count: pageCount,
+      current_page: currentPage,
+      per_page: 20,
+      processing_time_ms: options.processingTimeMs,
+      total: totalCount,
+      page: currentPage,
+      total_pages: pageCount,
+    },
+  };
+}
+
+function createInfiniteQueryResult(
+  state: ContactsQueryState = {}
+): Record<string, unknown> {
+  const pages = state.pages ?? (state.data ? [state.data] : undefined);
+
+  return {
+    data:
+      pages === undefined
+        ? undefined
+        : {
+            pages,
+            pageParams: pages.map((_, index) => index + 1),
+          },
+    isLoading: state.isLoading ?? false,
+    error: state.error ?? null,
+    isError: !!state.error,
+    isPending: state.isLoading ?? false,
+    isSuccess: !state.isLoading && !state.error,
+    status: getQueryStatus(state),
+    hasNextPage: state.hasNextPage ?? false,
+    isFetchingNextPage: state.isFetchingNextPage ?? false,
+    fetchNextPage:
+      state.fetchNextPage ?? jest.fn().mockResolvedValue(undefined),
+    refetch: jest.fn(),
+  };
+}
+
+function triggerLastIntersection(isIntersecting = true) {
+  const observer =
+    mockIntersectionObserverInstances.length > 0
+      ? mockIntersectionObserverInstances[
+          mockIntersectionObserverInstances.length - 1
+        ]
+      : undefined;
+
+  if (!observer) {
+    throw new Error('No IntersectionObserver instance found');
+  }
+
+  const target = observer.observedElements[0] ?? document.createElement('div');
+
+  observer.callback(
+    [{ isIntersecting, target } as IntersectionObserverEntry],
+    observer as unknown as IntersectionObserver
+  );
+}
+
 describe('ContactsPage', () => {
   beforeEach(() => {
     contactTestUtils.setupContactTest();
     setupMocks.clearMocks();
     setupMocks.fetch();
+    mockIntersectionObserverInstances.length = 0;
+
+    globalThis.IntersectionObserver = jest.fn(
+      (callback: IntersectionObserverCallback) => {
+        const instance: MockIntersectionObserverInstance = {
+          callback,
+          observe: jest.fn((element: Element) => {
+            instance.observedElements.push(element);
+          }),
+          unobserve: jest.fn(),
+          disconnect: jest.fn(),
+          observedElements: [],
+        };
+
+        mockIntersectionObserverInstances.push(instance);
+
+        return instance;
+      }
+    ) as unknown as typeof IntersectionObserver;
 
     // Mock authenticated session for all tests
     (fetch as jest.Mock).mockResolvedValue({
@@ -68,46 +206,28 @@ describe('ContactsPage', () => {
   };
 
   const setupContactMocks = (
-    contactsState: {
-      data?: ContactListResponse;
-      isLoading?: boolean;
-      error?: Error | null;
-    } = {},
-    searchState: {
-      data?: ContactListResponse;
-      isLoading?: boolean;
-      error?: Error | null;
-    } = {}
+    contactsState: ContactsQueryState = {},
+    searchState: ContactsQueryState = {}
   ) => {
-    mockUseContacts.mockReturnValue({
-      data: contactsState.data,
-      isLoading: contactsState.isLoading ?? false,
-      error: contactsState.error ?? null,
-      isError: !!contactsState.error,
-      isPending: contactsState.isLoading ?? false,
-      isSuccess: !contactsState.isLoading && !contactsState.error,
-      status: contactsState.isLoading
-        ? 'pending'
-        : contactsState.error
-          ? 'error'
-          : 'success',
-      refetch: jest.fn(),
-    } as any);
+    const contactPages =
+      contactsState.pages ??
+      (contactsState.data ? [contactsState.data] : undefined);
+    const searchPages =
+      searchState.pages ?? (searchState.data ? [searchState.data] : undefined);
 
-    mockUseSearchContacts.mockReturnValue({
-      data: searchState.data,
-      isLoading: searchState.isLoading ?? false,
-      error: searchState.error ?? null,
-      isError: !!searchState.error,
-      isPending: searchState.isLoading ?? false,
-      isSuccess: !searchState.isLoading && !searchState.error,
-      status: searchState.isLoading
-        ? 'pending'
-        : searchState.error
-          ? 'error'
-          : 'success',
-      refetch: jest.fn(),
-    } as any);
+    mockUseInfiniteContacts.mockReturnValue(
+      createInfiniteQueryResult({
+        ...contactsState,
+        pages: contactPages,
+      }) as any
+    );
+
+    mockUseInfiniteSearchContacts.mockReturnValue(
+      createInfiniteQueryResult({
+        ...searchState,
+        pages: searchPages,
+      }) as any
+    );
   };
 
   const mockContactsData = contactTestUtils.createMockContactsResponse();
@@ -264,5 +384,94 @@ describe('ContactsPage', () => {
     renderContactsPage();
 
     expect(await screen.findByText('2 contacts found')).toBeInTheDocument();
+  });
+
+  it('falls back to loaded contact count when pagination meta total is zero', async () => {
+    const visibleContacts = [
+      contactTestUtils.createMockContact(),
+      contactTestUtils.createMockContact({
+        id: '2',
+        attributes: {
+          first_name: 'Jane',
+          last_name: 'Smith',
+          middle_name: '',
+          nick_name: '',
+          created_at: '2024-01-01T00:00:00Z',
+          updated_at: '2024-01-01T00:00:00Z',
+          contact_methods: [],
+          addresses: [],
+          notes: [],
+          relationships: [],
+        },
+      }),
+    ];
+
+    setupContactMocks({
+      data: createPaginatedResponse(visibleContacts, { totalCount: 0 }),
+    });
+    renderContactsPage();
+
+    expect(await screen.findByText('Jane Smith')).toBeInTheDocument();
+    expect(screen.getByText('2 contacts found')).toBeInTheDocument();
+    expect(screen.queryByText('0 contacts found')).not.toBeInTheDocument();
+  });
+
+  it('renders contacts from all loaded infinite-query pages', async () => {
+    const firstPage = createPaginatedResponse(
+      [contactTestUtils.createMockContact()],
+      { totalCount: 2, currentPage: 1, pageCount: 2 }
+    );
+    const secondPage = createPaginatedResponse(
+      [
+        contactTestUtils.createMockContact({
+          id: '2',
+          attributes: {
+            first_name: 'Jane',
+            last_name: 'Smith',
+            middle_name: '',
+            nick_name: '',
+            created_at: '2024-01-01T00:00:00Z',
+            updated_at: '2024-01-01T00:00:00Z',
+            contact_methods: [],
+            addresses: [],
+            notes: [],
+            relationships: [],
+          },
+        }),
+      ],
+      { totalCount: 2, currentPage: 2, pageCount: 2 }
+    );
+
+    setupContactMocks({
+      pages: [firstPage, secondPage],
+      hasNextPage: true,
+    });
+    renderContactsPage();
+
+    expect(await screen.findByText('John Doe')).toBeInTheDocument();
+    expect(screen.getByText('Jane Smith')).toBeInTheDocument();
+  });
+
+  it('fetches the next page when the infinite scroll trigger intersects', async () => {
+    const fetchNextPage = jest.fn().mockResolvedValue(undefined);
+
+    setupContactMocks({
+      pages: [
+        createPaginatedResponse([contactTestUtils.createMockContact()], {
+          totalCount: 2,
+          currentPage: 1,
+          pageCount: 2,
+        }),
+      ],
+      hasNextPage: true,
+      fetchNextPage,
+    });
+    renderContactsPage();
+
+    await screen.findByTestId('contacts-infinite-scroll-trigger');
+
+    triggerLastIntersection(true);
+
+    expect(fetchNextPage).toHaveBeenCalledTimes(1);
   });
 });

@@ -122,7 +122,16 @@ async def list_contacts(
         tag_ids=tag_ids,
     )
 
-    total_count = await contact_service.get_contacts_count()
+    total_count = await contact_service.get_contacts_count(
+        is_favourite=favourite,
+        tag_ids=tag_ids,
+    )
+
+    additional_params: dict[str, str | list[str]] = {}
+    if favourite is not None:
+        additional_params["favourite"] = str(favourite).lower()
+    if tag_ids:
+        additional_params["tag_ids"] = [str(tag_id) for tag_id in tag_ids]
 
     contact_resources = [
         ContactConverter.to_resource(contact, base_url) for contact in contacts
@@ -130,7 +139,11 @@ async def list_contacts(
 
     meta = create_pagination_meta(total_count, page, limit)
     links = create_pagination_links(
-        f"{base_url}/api/contacts", page, limit, total_count
+        f"{base_url}/api/contacts",
+        page,
+        limit,
+        total_count,
+        additional_params=additional_params or None,
     )
 
     return ContactListResponse(

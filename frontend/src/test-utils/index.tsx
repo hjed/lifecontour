@@ -355,6 +355,33 @@ export const contactTestUtils = {
   }),
 } as const;
 
+export function createMockGetContactPaginationMeta(
+  meta?: Record<string, unknown>
+) {
+  const getFirstNumericValue = (keys: string[]) => {
+    for (const key of keys) {
+      const value = meta?.[key];
+
+      if (typeof value === 'number') {
+        return value;
+      }
+    }
+
+    return undefined;
+  };
+
+  return {
+    totalCount: getFirstNumericValue(['total_count', 'total']),
+    currentPage: getFirstNumericValue(['current_page', 'page']),
+    pageCount: getFirstNumericValue([
+      'page_count',
+      'total_pages',
+      'totalPages',
+    ]),
+    perPage: getFirstNumericValue(['per_page', 'limit']),
+  };
+}
+
 // Common test patterns
 export const testPatterns = {
   expectAuthStatus: (status: 'authenticated' | 'not-authenticated') => {

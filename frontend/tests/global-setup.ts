@@ -11,6 +11,12 @@
 
 import { FullConfig } from '@playwright/test';
 import { execSync } from 'node:child_process';
+import {
+  FRONTEND_TEST_CALLBACK_URL,
+  FRONTEND_TEST_PORT,
+  FRONTEND_TEST_URL,
+  getFrontendCorsOrigins,
+} from './e2e/utils/frontend-test-config';
 
 type Logger = Pick<Console, 'log' | 'error'>;
 
@@ -25,6 +31,8 @@ type GlobalSetupDependencies = {
   removeExistingContainers: typeof removeExistingContainers;
   execCommand: typeof execCommand;
   printServiceLogs: typeof printServiceLogs;
+  hasExpectedBackendConfig: typeof hasExpectedBackendConfig;
+  hasExpectedOAuthClientRedirect: typeof hasExpectedOAuthClientRedirect;
 };
 
 function getProjectRoot(currentWorkingDirectory: string): string {
@@ -107,13 +115,14 @@ function execCommand(
   command: string,
   description: string,
   projectRoot: string,
-  options?: { ignoreError?: boolean }
+  options?: { env?: NodeJS.ProcessEnv; ignoreError?: boolean }
 ): void {
   console.log(`🔧 ${description}...`);
   try {
     execSync(command, {
       stdio: 'inherit',
       cwd: projectRoot,
+      env: options?.env ?? process.env,
     });
     console.log(`✅ ${description} completed`);
   } catch (error) {
@@ -132,6 +141,54 @@ function printServiceLogs(dockerComposeCmd: string, projectRoot: string): void {
     stdio: 'inherit',
     cwd: projectRoot,
   });
+}
+
+function getDockerTestEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  return {
+    ...env,
+    FRONTEND_URL: FRONTEND_TEST_URL,
+    FRONTEND_PORT: FRONTEND_TEST_PORT,
+    CORS_ORIGINS: getFrontendCorsOrigins(),
+  };
+}
+
+function hasExpectedBackendConfig(
+  frontendUrl: string,
+  projectRoot: string
+): boolean {
+  try {
+    const result = execSync(
+      "docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' pms-backend",
+      {
+        encoding: 'utf8',
+        stdio: 'pipe',
+        cwd: projectRoot,
+      }
+    );
+
+    return result.includes(`FRONTEND_URL=${frontendUrl}`);
+  } catch {
+    return false;
+  }
+}
+
+async function hasExpectedOAuthClientRedirect(
+  callbackUrl: string
+): Promise<boolean> {
+  try {
+    const response = await fetch(
+      'http://localhost:4447/admin/clients/test-client-id'
+    );
+
+    if (!response.ok) {
+      return false;
+    }
+
+    const client = (await response.json()) as { redirect_uris?: string[] };
+    return client.redirect_uris?.includes(callbackUrl) ?? false;
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -211,7 +268,121 @@ function createDefaultDependencies(): GlobalSetupDependencies {
     removeExistingContainers,
     execCommand,
     printServiceLogs,
+    hasExpectedBackendConfig,
+    hasExpectedOAuthClientRedirect,
   };
+}
+
+function restartDockerServices(
+  dependencies: GlobalSetupDependencies,
+  dockerComposeCmd: string,
+  projectRoot: string,
+  dockerTestEnv: NodeJS.ProcessEnv
+): void {
+  dependencies.removeExistingContainers();
+
+  dependencies.execCommand(
+    `${dockerComposeCmd} --profile test --env-file .env.test down --remove-orphans`,
+    'Cleaning up existing containers',
+    projectRoot,
+    { env: dockerTestEnv }
+  );
+
+  dependencies.execCommand(
+    `${dockerComposeCmd} --profile test --env-file .env.test up -d --build`,
+    'Starting Docker services',
+    projectRoot,
+    { env: dockerTestEnv, ignoreError: true }
+  );
+}
+
+async function ensureLocalDockerServices(
+  dependencies: GlobalSetupDependencies,
+  dockerComposeCmd: string,
+  projectRoot: string,
+  dockerTestEnv: NodeJS.ProcessEnv
+): Promise<void> {
+  const servicesRunning = dependencies.areServicesRunning(
+    dockerComposeCmd,
+    projectRoot
+  );
+  const backendConfigMatches = servicesRunning
+    ? dependencies.hasExpectedBackendConfig(FRONTEND_TEST_URL, projectRoot)
+    : false;
+  const oauthClientMatches = servicesRunning
+    ? await dependencies.hasExpectedOAuthClientRedirect(
+        FRONTEND_TEST_CALLBACK_URL
+      )
+    : false;
+
+  if (servicesRunning && backendConfigMatches && oauthClientMatches) {
+    dependencies.logger.log(
+      '📋 Docker services already running, skipping startup...'
+    );
+    dependencies.logger.log('🔍 Verifying service health...');
+    return;
+  }
+
+  if (servicesRunning) {
+    dependencies.logger.log(
+      '♻️ Docker services are running with stale frontend/OAuth config, restarting them...'
+    );
+  }
+
+  restartDockerServices(
+    dependencies,
+    dockerComposeCmd,
+    projectRoot,
+    dockerTestEnv
+  );
+  dependencies.logger.log('🔍 Verifying service health...');
+}
+
+async function verifyCoreServiceHealth(
+  dependencies: GlobalSetupDependencies,
+  dockerComposeCmd: string,
+  projectRoot: string
+): Promise<void> {
+  dependencies.logger.log('🔍 Checking backend API readiness...');
+  await dependencies.waitForService('http://localhost:8001/api/health/ready');
+
+  dependencies.execCommand(
+    `${dockerComposeCmd} --profile test exec -T backend alembic upgrade head`,
+    'Ensuring backend database schema is up to date',
+    projectRoot
+  );
+
+  dependencies.logger.log('🔍 Re-checking backend API readiness...');
+  await dependencies.waitForService('http://localhost:8001/api/health/ready');
+
+  dependencies.logger.log('🔍 Checking OAuth provider health...');
+  await dependencies.waitForService('http://localhost:4447/health/ready');
+}
+
+function handleGlobalSetupFailure(
+  dependencies: GlobalSetupDependencies,
+  error: unknown,
+  dockerComposeCmd: string,
+  projectRoot: string
+): never | void {
+  dependencies.logger.error('❌ Global setup failed:', error);
+
+  if (dependencies.env.CI) {
+    dependencies.logger.log(
+      '🧪 Docker failed in CI, enabling mock mode for tests'
+    );
+    dependencies.env.USE_MOCK_BACKEND = 'true';
+    return;
+  }
+
+  try {
+    dependencies.logger.log('📋 Docker service logs:');
+    dependencies.printServiceLogs(dockerComposeCmd, projectRoot);
+  } catch (logError) {
+    dependencies.logger.error('Failed to retrieve logs:', logError);
+  }
+
+  throw error;
 }
 
 export async function runGlobalSetup(
@@ -232,6 +403,7 @@ export async function runGlobalSetup(
   dependencies.chdir(projectRoot);
 
   const dockerComposeCmd = dependencies.getDockerComposeCommand();
+  const dockerTestEnv = getDockerTestEnv(dependencies.env);
   dependencies.logger.log(
     `🐳 Using Docker Compose command: ${dockerComposeCmd}`
   );
@@ -243,44 +415,15 @@ export async function runGlobalSetup(
       );
       dependencies.logger.log('🔍 Verifying service health...');
     } else {
-      if (dependencies.areServicesRunning(dockerComposeCmd, projectRoot)) {
-        dependencies.logger.log(
-          '📋 Docker services already running, skipping startup...'
-        );
-      } else {
-        dependencies.removeExistingContainers();
-
-        dependencies.execCommand(
-          `${dockerComposeCmd} --profile test --env-file .env.test down --remove-orphans`,
-          'Cleaning up existing containers',
-          projectRoot
-        );
-
-        dependencies.execCommand(
-          `${dockerComposeCmd} --profile test --env-file .env.test up -d --build`,
-          'Starting Docker services',
-          projectRoot,
-          { ignoreError: true }
-        );
-      }
-
-      dependencies.logger.log('🔍 Verifying service health...');
+      await ensureLocalDockerServices(
+        dependencies,
+        dockerComposeCmd,
+        projectRoot,
+        dockerTestEnv
+      );
     }
 
-    dependencies.logger.log('🔍 Checking backend API readiness...');
-    await dependencies.waitForService('http://localhost:8001/api/health/ready');
-
-    dependencies.execCommand(
-      `${dockerComposeCmd} --profile test exec -T backend alembic upgrade head`,
-      'Ensuring backend database schema is up to date',
-      projectRoot
-    );
-
-    dependencies.logger.log('🔍 Re-checking backend API readiness...');
-    await dependencies.waitForService('http://localhost:8001/api/health/ready');
-
-    dependencies.logger.log('🔍 Checking OAuth provider health...');
-    await dependencies.waitForService('http://localhost:4447/health/ready');
+    await verifyCoreServiceHealth(dependencies, dockerComposeCmd, projectRoot);
 
     dependencies.logger.log('🔍 Checking MeiliSearch health...');
     await dependencies.waitForService('http://localhost:7701/health');
@@ -288,24 +431,12 @@ export async function runGlobalSetup(
     dependencies.logger.log('✅ All services are ready!');
     dependencies.logger.log('🎉 Global setup completed successfully!');
   } catch (error) {
-    dependencies.logger.error('❌ Global setup failed:', error);
-
-    if (dependencies.env.CI) {
-      dependencies.logger.log(
-        '🧪 Docker failed in CI, enabling mock mode for tests'
-      );
-      dependencies.env.USE_MOCK_BACKEND = 'true';
-      return;
-    }
-
-    try {
-      dependencies.logger.log('📋 Docker service logs:');
-      dependencies.printServiceLogs(dockerComposeCmd, projectRoot);
-    } catch (logError) {
-      dependencies.logger.error('Failed to retrieve logs:', logError);
-    }
-
-    throw error;
+    return handleGlobalSetupFailure(
+      dependencies,
+      error,
+      dockerComposeCmd,
+      projectRoot
+    );
   }
 }
 
