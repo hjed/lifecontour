@@ -1,17 +1,15 @@
 'use client';
 
 import { useId } from 'react';
-import { Map as MapIcon, Snowflake } from 'lucide-react';
+import { Snowflake } from 'lucide-react';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
-import { cn } from '@/lib/utils';
 import type { CrossCountrySkiingData } from '@/types/journals';
-import { RouteSelector } from '@/components/routes/RouteSelector';
 import {
-  ReadOnlyTypeSummary,
-  type ReadOnlyTypeSummaryItem,
-} from './ReadOnlyTypeSummary';
-import { TypeEditorActions } from './TypeEditorActions';
+  compactSummaryItems,
+  buildRouteSummaryItem,
+  RouteBackedTypeEditorLayout,
+} from './RouteBackedTypeEditorLayout';
 import { useRouteBackedTypeEditor } from './useRouteBackedTypeEditor';
 
 interface CrossCountrySkiingTypeEditorProps {
@@ -56,119 +54,60 @@ export function CrossCountrySkiingTypeEditor({
     onChange,
   });
 
-  if (!isEditing && !createMode) {
-    const hasData = initialData.route_id || initialData.snow_conditions;
-
-    if (!hasData) {
-      return (
-        <div className='flex items-center justify-between'>
-          <p className='text-muted-foreground text-sm'>
-            No cross-country skiing details provided.
-          </p>
-          <TypeEditorActions
-            isEditing={false}
-            onEdit={handleEdit}
-            onSave={handleSave}
-            onCancel={handleCancel}
-          />
-        </div>
-      );
-    }
-
-    const summaryItems: ReadOnlyTypeSummaryItem[] = [];
-
-    if (initialData.route_id) {
-      summaryItems.push({
-        label: 'Route',
-        value: routeName ?? initialData.route_id,
-      });
-    }
-
-    if (initialData.snow_conditions) {
-      summaryItems.push({
-        label: 'Snow Conditions',
-        value: initialData.snow_conditions,
-        fullWidth: true,
-      });
-    }
-
-    return (
-      <div
-        className={cn('space-y-4 text-sm', className)}
-        data-testid={testId || 'cross-country-skiing-type-editor'}
-      >
-        <ReadOnlyTypeSummary
-          items={summaryItems}
-          testId='cross-country-skiing-summary'
-        />
-        <TypeEditorActions
-          isEditing={false}
-          onEdit={handleEdit}
-          onSave={handleSave}
-          onCancel={handleCancel}
-        />
-      </div>
-    );
-  }
+  const summaryItems = compactSummaryItems(
+    buildRouteSummaryItem(initialData.route_id, routeName),
+    initialData.snow_conditions
+      ? {
+          label: 'Snow Conditions',
+          value: initialData.snow_conditions,
+          fullWidth: true,
+        }
+      : null
+  );
 
   return (
-    <div
-      className={cn('space-y-4', className)}
-      data-testid={testId || 'cross-country-skiing-type-editor'}
+    <RouteBackedTypeEditorLayout
+      className={className}
+      testId={testId || 'cross-country-skiing-type-editor'}
+      createMode={createMode}
+      isEditing={isEditing}
+      emptyMessage='No cross-country skiing details provided.'
+      summaryItems={summaryItems}
+      summaryTestId='cross-country-skiing-summary'
+      routeFieldId={routeFieldId}
+      routeValue={editData.route_id}
+      onRouteChange={routeId =>
+        setEditData(previous => ({ ...previous, route_id: routeId }))
+      }
+      routePlaceholder='Select a ski route...'
+      onEdit={handleEdit}
+      onSave={handleSave}
+      onCancel={handleCancel}
     >
-      <div className='grid grid-cols-1 gap-4 md:grid-cols-2'>
-        <div className='space-y-2'>
-          <Label htmlFor={routeFieldId} className='flex items-center gap-2'>
-            <MapIcon
-              className='text-muted-foreground h-4 w-4'
-              aria-hidden='true'
-            />
-            Route
-          </Label>
-          <RouteSelector
-            id={routeFieldId}
-            value={editData.route_id ?? null}
-            onChange={routeId =>
-              setEditData({ ...editData, route_id: routeId })
-            }
-            placeholder='Select a ski route...'
+      <div className='space-y-2'>
+        <Label
+          htmlFor={snowConditionsFieldId}
+          className='flex items-center gap-2'
+        >
+          <Snowflake
+            className='text-muted-foreground h-4 w-4'
+            aria-hidden='true'
           />
-        </div>
-
-        <div className='space-y-2'>
-          <Label
-            htmlFor={snowConditionsFieldId}
-            className='flex items-center gap-2'
-          >
-            <Snowflake
-              className='text-muted-foreground h-4 w-4'
-              aria-hidden='true'
-            />
-            Snow Conditions
-          </Label>
-          <Textarea
-            id={snowConditionsFieldId}
-            value={editData.snow_conditions ?? ''}
-            onChange={e =>
-              setEditData({
-                ...editData,
-                snow_conditions: e.target.value || null,
-              })
-            }
-            placeholder='Describe the snow conditions...'
-            data-testid='snow-conditions-input'
-          />
-        </div>
-      </div>
-
-      {!createMode && (
-        <TypeEditorActions
-          isEditing={isEditing}
-          onEdit={handleEdit}
-          onSave={handleSave}
-          onCancel={handleCancel}
+          Snow Conditions
+        </Label>
+        <Textarea
+          id={snowConditionsFieldId}
+          value={editData.snow_conditions ?? ''}
+          onChange={e =>
+            setEditData(previous => ({
+              ...previous,
+              snow_conditions: e.target.value || null,
+            }))
+          }
+          placeholder='Describe the snow conditions...'
+          data-testid='snow-conditions-input'
         />
-      )}
-    </div>
+      </div>
+    </RouteBackedTypeEditorLayout>
   );
 }

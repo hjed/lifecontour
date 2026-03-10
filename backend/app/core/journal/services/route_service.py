@@ -209,7 +209,11 @@ class RouteService:
         return route
 
     async def get_routes_for_user(
-        self, user_id: str, limit: int = 50, offset: int = 0
+        self,
+        user_id: str,
+        limit: int = 50,
+        offset: int = 0,
+        name: str | None = None,
     ) -> list[Route]:
         """
         Get all routes for a user with pagination.
@@ -218,20 +222,28 @@ class RouteService:
             user_id: The user ID to filter by
             limit: Maximum number of routes to return
             offset: Number of routes to skip
+            name: Optional case-insensitive partial route name filter
 
         Returns:
             List of routes
         """
-        return await self.route_repo.get_all(user_id, limit, offset)
+        if name is None:
+            return await self.route_repo.get_all(user_id, limit, offset)
 
-    async def get_route_count(self, user_id: str) -> int:
+        return await self.route_repo.get_all(user_id, limit, offset, name)
+
+    async def get_route_count(self, user_id: str, name: str | None = None) -> int:
         """
         Get count of routes for a user.
 
         Args:
             user_id: The user ID to count routes for
+            name: Optional case-insensitive partial route name filter
 
         Returns:
             Total count of routes
         """
-        return await self.route_repo.get_count(user_id)
+        if name is None:
+            return await self.route_repo.get_count(user_id)
+
+        return await self.route_repo.get_count(user_id, name)

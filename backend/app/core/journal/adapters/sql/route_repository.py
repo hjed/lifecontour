@@ -1,5 +1,6 @@
 """SQL implementation of RouteRepository using SQLAlchemy Core."""
 
+from typing import Any
 from uuid import UUID
 
 from core_shared.models.route import Route
@@ -103,22 +104,42 @@ class SqlRouteRepository(RouteRepository):
         # Note: We don't raise an error if the route doesn't exist
         # This is consistent with the integration test expectations
 
+    def _build_route_filters(
+        self, user_id: str, name: str | None = None
+    ) -> tuple[list[str], dict[str, Any]]:
+        """Build shared WHERE clauses and parameters for route listing queries."""
+        where_clauses = ["user_id = :user_id"]
+        params: dict[str, Any] = {"user_id": user_id}
+
+        if name:
+            where_clauses.append("name ILIKE :name_pattern")
+            params["name_pattern"] = f"%{name}%"
+
+        return where_clauses, params
+
     async def get_all(
-        self, user_id: str, limit: int = 100, offset: int = 0
+        self,
+        user_id: str,
+        limit: int = 100,
+        offset: int = 0,
+        name: str | None = None,
     ) -> list[Route]:
         """Get all routes for a user with pagination."""
+        where_clauses, params = self._build_route_filters(user_id, name)
         query = text(
             """
             SELECT id, user_id, name, description, gpx_data, created_at, updated_at
             FROM routes
-            WHERE user_id = :user_id
+            WHERE """
+            + " AND ".join(where_clauses)
+            + """
             ORDER BY name ASC, created_at DESC
             LIMIT :limit OFFSET :offset
         """
         )
-        result = await self.conn.execute(
-            query, {"user_id": user_id, "limit": limit, "offset": offset}
-        )
+        params["limit"] = limit
+        params["offset"] = offset
+        result = await self.conn.execute(query, params)
         return [
             Route(
                 id=row.id,
@@ -132,14 +153,17 @@ class SqlRouteRepository(RouteRepository):
             for row in result.fetchall()
         ]
 
-    async def get_count(self, user_id: str) -> int:
+    async def get_count(self, user_id: str, name: str | None = None) -> int:
         """Get total count of routes for a user."""
+        where_clauses, params = self._build_route_filters(user_id, name)
         query = text(
             """
-            SELECT COUNT(*) FROM routes WHERE user_id = :user_id
-        """
+            SELECT COUNT(*)
+            FROM routes
+            WHERE """
+            + " AND ".join(where_clauses)
         )
-        result = await self.conn.execute(query, {"user_id": user_id})
+        result = await self.conn.execute(query, params)
         row = result.fetchone()
         return row[0] if row else 0
 

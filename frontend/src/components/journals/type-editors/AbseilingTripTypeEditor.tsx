@@ -132,13 +132,13 @@ export function AbseilingTripTypeEditor({
             min={0}
             value={editData.number_of_abseils ?? ''}
             onChange={e =>
-              setEditData({
-                ...editData,
+              setEditData(previous => ({
+                ...previous,
                 number_of_abseils:
                   e.target.value === ''
                     ? null
                     : Number.parseInt(e.target.value, 10),
-              })
+              }))
             }
             data-testid='number-of-abseils-input'
           />
@@ -161,13 +161,13 @@ export function AbseilingTripTypeEditor({
             min={0}
             value={editData.total_length ?? ''}
             onChange={e =>
-              setEditData({
-                ...editData,
+              setEditData(previous => ({
+                ...previous,
                 total_length:
                   e.target.value === ''
                     ? null
                     : Number.parseInt(e.target.value, 10),
-              })
+              }))
             }
             data-testid='total-length-input'
           />

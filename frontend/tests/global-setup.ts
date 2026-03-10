@@ -12,6 +12,25 @@
 import { FullConfig } from '@playwright/test';
 import { execSync } from 'node:child_process';
 
+type Logger = Pick<Console, 'log' | 'error'>;
+
+type GlobalSetupDependencies = {
+  env: NodeJS.ProcessEnv;
+  cwd: () => string;
+  chdir: (directory: string) => void;
+  logger: Logger;
+  waitForService: typeof waitForService;
+  getDockerComposeCommand: typeof getDockerComposeCommand;
+  areServicesRunning: typeof areServicesRunning;
+  removeExistingContainers: typeof removeExistingContainers;
+  execCommand: typeof execCommand;
+  printServiceLogs: typeof printServiceLogs;
+};
+
+function getProjectRoot(currentWorkingDirectory: string): string {
+  return currentWorkingDirectory.replace(/[/\\]frontend$/, '');
+}
+
 /**
  * Wait for a service to be ready by polling its health endpoint
  */
@@ -87,13 +106,14 @@ function getDockerComposeCommand(): string {
 function execCommand(
   command: string,
   description: string,
+  projectRoot: string,
   options?: { ignoreError?: boolean }
 ): void {
   console.log(`🔧 ${description}...`);
   try {
     execSync(command, {
       stdio: 'inherit',
-      cwd: process.cwd().replace(/[/\\]frontend$/, ''), // Ensure we're in project root (Windows/Unix compatible)
+      cwd: projectRoot,
     });
     console.log(`✅ ${description} completed`);
   } catch (error) {
@@ -105,6 +125,13 @@ function execCommand(
       throw error;
     }
   }
+}
+
+function printServiceLogs(dockerComposeCmd: string, projectRoot: string): void {
+  execSync(`${dockerComposeCmd} --profile test logs --tail=50`, {
+    stdio: 'inherit',
+    cwd: projectRoot,
+  });
 }
 
 /**
@@ -141,15 +168,17 @@ function removeExistingContainers(): void {
 /**
  * Check if Docker services are already running
  */
-function areServicesRunning(): boolean {
+function areServicesRunning(
+  dockerComposeCmd: string,
+  projectRoot: string
+): boolean {
   try {
-    const dockerComposeCmd = getDockerComposeCommand();
     const result = execSync(
       `${dockerComposeCmd} --profile test ps --services --filter "status=running"`,
       {
         encoding: 'utf8',
         stdio: 'pipe',
-        cwd: process.cwd().replace(/[/\\]frontend$/, ''),
+        cwd: projectRoot,
       }
     );
 
@@ -170,99 +199,118 @@ function areServicesRunning(): boolean {
   }
 }
 
-async function globalSetup(_config: FullConfig) {
-  console.log('🚀 Starting Playwright Global Setup...');
+function createDefaultDependencies(): GlobalSetupDependencies {
+  return {
+    env: process.env,
+    cwd: () => process.cwd(),
+    chdir: directory => process.chdir(directory),
+    logger: console,
+    waitForService,
+    getDockerComposeCommand,
+    areServicesRunning,
+    removeExistingContainers,
+    execCommand,
+    printServiceLogs,
+  };
+}
 
-  // Check if we should skip Docker setup entirely
-  if (process.env.SKIP_DOCKER_SETUP === 'true') {
-    console.log('⏭️ Skipping Docker setup (SKIP_DOCKER_SETUP=true)');
-    console.log('🧪 Running tests with mocked backend services');
+export async function runGlobalSetup(
+  dependencies: GlobalSetupDependencies = createDefaultDependencies()
+): Promise<void> {
+  const projectRoot = getProjectRoot(dependencies.cwd());
+
+  dependencies.logger.log('🚀 Starting Playwright Global Setup...');
+
+  if (dependencies.env.SKIP_DOCKER_SETUP === 'true') {
+    dependencies.logger.log(
+      '⏭️ Skipping Docker setup (SKIP_DOCKER_SETUP=true)'
+    );
+    dependencies.logger.log('🧪 Running tests with mocked backend services');
     return;
   }
 
-  // Change to project root directory
-  const projectRoot = process.cwd().replace(/[/\\]frontend$/, '');
-  process.chdir(projectRoot);
+  dependencies.chdir(projectRoot);
 
-  // Detect the correct Docker Compose command
-  const dockerComposeCmd = getDockerComposeCommand();
-  console.log(`🐳 Using Docker Compose command: ${dockerComposeCmd}`);
+  const dockerComposeCmd = dependencies.getDockerComposeCommand();
+  dependencies.logger.log(
+    `🐳 Using Docker Compose command: ${dockerComposeCmd}`
+  );
 
   try {
-    // In CI, services should already be started by the CI workflow
-    // In local development, we may need to start them
-    if (process.env.CI) {
-      console.log(
+    if (dependencies.env.CI) {
+      dependencies.logger.log(
         '🏗️ CI environment detected - services should already be running'
       );
-      console.log('🔍 Verifying service health...');
+      dependencies.logger.log('🔍 Verifying service health...');
     } else {
-      // Check if services are already running
-      if (areServicesRunning()) {
-        console.log('📋 Docker services already running, skipping startup...');
+      if (dependencies.areServicesRunning(dockerComposeCmd, projectRoot)) {
+        dependencies.logger.log(
+          '📋 Docker services already running, skipping startup...'
+        );
       } else {
-        // Force-remove any pre-existing containers whose names overlap with the
-        // test profile (e.g. leftover containers from the dev profile).
-        removeExistingContainers();
+        dependencies.removeExistingContainers();
 
-        // Stop any existing containers to ensure clean state
-        execCommand(
+        dependencies.execCommand(
           `${dockerComposeCmd} --profile test --env-file .env.test down --remove-orphans`,
-          'Cleaning up existing containers'
+          'Cleaning up existing containers',
+          projectRoot
         );
 
-        // Start Docker services (docker-compose v1 doesn't support --wait)
-        // Note: This may exit with error code if init containers exit after completing,
-        // but we ignore that since we verify service health separately
-        execCommand(
+        dependencies.execCommand(
           `${dockerComposeCmd} --profile test --env-file .env.test up -d --build`,
           'Starting Docker services',
+          projectRoot,
           { ignoreError: true }
         );
       }
 
-      console.log('🔍 Verifying service health...');
+      dependencies.logger.log('🔍 Verifying service health...');
     }
 
-    // Wait for backend API readiness
-    console.log('🔍 Checking backend API readiness...');
-    await waitForService('http://localhost:8001/api/health/ready');
+    dependencies.logger.log('🔍 Checking backend API readiness...');
+    await dependencies.waitForService('http://localhost:8001/api/health/ready');
 
-    // Wait for OAuth provider (check admin health endpoint)
-    console.log('🔍 Checking OAuth provider health...');
-    await waitForService('http://localhost:4447/health/ready');
+    dependencies.execCommand(
+      `${dockerComposeCmd} --profile test exec -T backend alembic upgrade head`,
+      'Ensuring backend database schema is up to date',
+      projectRoot
+    );
 
-    // Wait for MeiliSearch
-    console.log('🔍 Checking MeiliSearch health...');
-    await waitForService('http://localhost:7701/health');
+    dependencies.logger.log('🔍 Re-checking backend API readiness...');
+    await dependencies.waitForService('http://localhost:8001/api/health/ready');
 
-    console.log('✅ All services are ready!');
+    dependencies.logger.log('🔍 Checking OAuth provider health...');
+    await dependencies.waitForService('http://localhost:4447/health/ready');
 
-    console.log('🎉 Global setup completed successfully!');
+    dependencies.logger.log('🔍 Checking MeiliSearch health...');
+    await dependencies.waitForService('http://localhost:7701/health');
+
+    dependencies.logger.log('✅ All services are ready!');
+    dependencies.logger.log('🎉 Global setup completed successfully!');
   } catch (error) {
-    console.error('❌ Global setup failed:', error);
+    dependencies.logger.error('❌ Global setup failed:', error);
 
-    // In CI, if Docker fails, we can fall back to mock mode
-    if (process.env.CI) {
-      console.log('🧪 Docker failed in CI, enabling mock mode for tests');
-      process.env.USE_MOCK_BACKEND = 'true';
-      return; // Continue with tests using mocks
+    if (dependencies.env.CI) {
+      dependencies.logger.log(
+        '🧪 Docker failed in CI, enabling mock mode for tests'
+      );
+      dependencies.env.USE_MOCK_BACKEND = 'true';
+      return;
     }
 
-    // Show service logs for debugging
     try {
-      console.log('📋 Docker service logs:');
-      const dockerComposeCmd = getDockerComposeCommand();
-      execSync(`${dockerComposeCmd} --profile test logs --tail=50`, {
-        stdio: 'inherit',
-        cwd: projectRoot,
-      });
+      dependencies.logger.log('📋 Docker service logs:');
+      dependencies.printServiceLogs(dockerComposeCmd, projectRoot);
     } catch (logError) {
-      console.error('Failed to retrieve logs:', logError);
+      dependencies.logger.error('Failed to retrieve logs:', logError);
     }
 
     throw error;
   }
+}
+
+async function globalSetup(_config: FullConfig) {
+  await runGlobalSetup();
 }
 
 export default globalSetup;

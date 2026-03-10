@@ -86,9 +86,9 @@ export function JoggingTypeEditor({
     }
 
     if (totalSeconds !== null && totalSeconds > 0) {
-      setEditData({ ...editData, pace: totalSeconds });
+      setEditData(previous => ({ ...previous, pace: totalSeconds }));
     } else if (val === '') {
-      setEditData({ ...editData, pace: null });
+      setEditData(previous => ({ ...previous, pace: null }));
     }
   };
 
@@ -180,7 +180,7 @@ export function JoggingTypeEditor({
             id={routeFieldId}
             value={editData.route_id ?? null}
             onChange={routeId =>
-              setEditData({ ...editData, route_id: routeId })
+              setEditData(previous => ({ ...previous, route_id: routeId }))
             }
             placeholder='Select a running route...'
           />

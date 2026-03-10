@@ -5,7 +5,7 @@
  */
 
 import { test, expect } from './fixtures';
-import { type Page } from '@playwright/test';
+import { type Locator, type Page } from '@playwright/test';
 
 // ---------------------------------------------------------------------------
 // Shared helpers — extracted to eliminate per-test duplication flagged by
@@ -38,6 +38,10 @@ async function fillAndSubmitJournal(
 ) {
   await fillJournalBasics(page, opts);
   await page.getByRole('button', { name: /create journal/i }).click();
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 /** Create a route record via the API for route-backed journal types. */
@@ -83,7 +87,12 @@ async function selectRouteInEditor(
   await expect(searchInput).toBeVisible();
   await searchInput.fill(routeName);
 
-  await page.getByText(routeName, { exact: true }).click();
+  const routeOption = page.getByRole('option', {
+    name: new RegExp(`^${escapeRegExp(routeName)}(?:\\s|$)`),
+  });
+
+  await expect(routeOption).toBeVisible();
+  await routeOption.click();
   await expect(routeCombobox).toHaveText(routeName);
 }
 
@@ -91,23 +100,23 @@ async function selectRouteInEditor(
 async function assertSelectedTypeDependencies(
   page: Page,
   typeTestId: string,
-  dependencyTypeTestIds: string[]
+  dependencyTypeTestIds: readonly string[]
 ) {
   await expect(
-    page.getByTestId(`selected-type-panel-${typeTestId}`)
+    page.locator(`[data-testid="selected-type-panel-${typeTestId}"]`)
   ).toBeVisible();
 
   for (const dependencyTypeTestId of dependencyTypeTestIds) {
     await expect(
-      page.getByTestId(
-        `selected-type-dependency-${typeTestId}-${dependencyTypeTestId}`
+      page.locator(
+        `[data-testid="selected-type-dependency-${typeTestId}-${dependencyTypeTestId}"]`
       )
     ).toBeVisible();
   }
 }
 
 /** Assert the expected set of attached type badges on the journal detail page. */
-async function assertAttachedTypeBadges(page: Page, types: string[]) {
+async function assertAttachedTypeBadges(page: Page, types: readonly string[]) {
   for (const type of types) {
     await expect(page.getByTestId(`manage-type-${type}`)).toBeVisible();
   }
@@ -124,6 +133,66 @@ async function awaitCreationAndAssertBadge(
   await page.waitForURL(/\/journals\/\d+/);
   await expect(page.getByTestId(badgeTestId)).toBeVisible();
   return page.url();
+}
+
+interface ComplexRouteBackedJournalOptions {
+  readonly route: {
+    readonly name: string;
+    readonly description: string;
+  };
+  readonly journal: {
+    readonly title: string;
+    readonly content: string;
+    readonly typeLabelRegex: RegExp;
+  };
+  readonly selectedTypeTestId: string;
+  readonly dependencyTypeTestIds: readonly string[];
+  readonly editorTestId: string;
+  readonly badgeTestId: string;
+  readonly attachedTypes: readonly string[];
+  readonly typeSectionTriggerTestId: string;
+  readonly summaryTestId: string;
+  readonly fillTypeFields: (args: {
+    page: Page;
+    editor: Locator;
+    routeName: string;
+  }) => Promise<void>;
+  readonly assertSummary: (args: {
+    summary: Locator;
+    routeName: string;
+  }) => Promise<void>;
+}
+
+async function createRouteBackedComplexJournal(
+  page: Page,
+  opts: ComplexRouteBackedJournalOptions
+) {
+  const route = await createRoute(page, opts.route);
+
+  await navigateToNewJournal(page);
+  await fillJournalBasics(page, opts.journal);
+  await assertSelectedTypeDependencies(
+    page,
+    opts.selectedTypeTestId,
+    opts.dependencyTypeTestIds
+  );
+
+  const editor = page.getByTestId(opts.editorTestId);
+  await expect(editor).toBeVisible();
+
+  await selectRouteInEditor(page, opts.editorTestId, route.name);
+  await opts.fillTypeFields({ page, editor, routeName: route.name });
+
+  await page.getByRole('button', { name: /create journal/i }).click();
+
+  await awaitCreationAndAssertBadge(page, opts.badgeTestId);
+  await assertAttachedTypeBadges(page, opts.attachedTypes);
+
+  await page.getByTestId(opts.typeSectionTriggerTestId).click();
+
+  const summary = page.getByTestId(opts.summaryTestId);
+  await expect(summary).toBeVisible();
+  await opts.assertSummary({ summary, routeName: route.name });
 }
 
 // ---------------------------------------------------------------------------
@@ -532,204 +601,161 @@ test.describe('Journal Creation UI Flow', () => {
     authenticatedPage,
   }) => {
     const page = authenticatedPage;
-    const route = await createRoute(page, {
-      name: `E2E Canyon Route ${Date.now()}`,
-      description: 'A test canyoning route',
+    await createRouteBackedComplexJournal(page, {
+      route: {
+        name: `E2E Canyon Route ${Date.now()}`,
+        description: 'A test canyoning route',
+      },
+      journal: {
+        title: `Canyon Trip ${Date.now()}`,
+        content: 'Technical canyon with flowing water.',
+        typeLabelRegex: /^canyoning$/i,
+      },
+      selectedTypeTestId: 'CANYONING',
+      dependencyTypeTestIds: [
+        'BUSHWALKING',
+        'ABSEILING_TRIP',
+        'OUTDOOR_ACTIVITY',
+        'FITNESS',
+      ],
+      editorTestId: 'canyoning-type-editor',
+      badgeTestId: 'manage-type-canyoning',
+      attachedTypes: [
+        'canyoning',
+        'bushwalking',
+        'abseiling_trip',
+        'outdoor_activity',
+        'fitness',
+      ],
+      typeSectionTriggerTestId: 'type-section-trigger-canyoning',
+      summaryTestId: 'canyoning-summary',
+      fillTypeFields: async ({ page: detailPage }) => {
+        await detailPage.getByTestId('french-grade-input').fill('v3a2iv**');
+        await detailPage
+          .getByTestId('water-gauge-name-input')
+          .fill('Kowmung Gauge');
+        await detailPage.getByTestId('water-gauge-level-input').fill('8');
+        await detailPage.getByTestId('vertical-switch').click();
+        await detailPage.getByTestId('white-water-switch').click();
+      },
+      assertSummary: async ({ summary, routeName }) => {
+        await expect(summary).toContainText(routeName);
+        await expect(summary).toContainText('v3a2IV**');
+        await expect(summary).toContainText('Kowmung Gauge (8)');
+        await expect(summary).toContainText('Vertical');
+        await expect(summary).toContainText('White Water');
+      },
     });
-
-    await navigateToNewJournal(page);
-
-    await fillJournalBasics(page, {
-      title: `Canyon Trip ${Date.now()}`,
-      content: 'Technical canyon with flowing water.',
-      typeLabelRegex: /^canyoning$/i,
-    });
-
-    await assertSelectedTypeDependencies(page, 'CANYONING', [
-      'BUSHWALKING',
-      'ABSEILING_TRIP',
-      'OUTDOOR_ACTIVITY',
-      'FITNESS',
-    ]);
-    await expect(page.getByTestId('canyoning-type-editor')).toBeVisible();
-
-    await selectRouteInEditor(page, 'canyoning-type-editor', route.name);
-    await page.getByTestId('french-grade-input').fill('v3a2iv**');
-    await page.getByTestId('water-gauge-name-input').fill('Kowmung Gauge');
-    await page.getByTestId('water-gauge-level-input').fill('8');
-    await page.getByTestId('vertical-switch').click();
-    await page.getByTestId('white-water-switch').click();
-
-    await page.getByRole('button', { name: /create journal/i }).click();
-
-    await awaitCreationAndAssertBadge(page, 'manage-type-canyoning');
-    await assertAttachedTypeBadges(page, [
-      'canyoning',
-      'bushwalking',
-      'abseiling_trip',
-      'outdoor_activity',
-      'fitness',
-    ]);
-
-    await page.getByTestId('type-section-trigger-canyoning').click();
-
-    const summary = page.getByTestId('canyoning-summary');
-    await expect(summary).toBeVisible();
-    await expect(summary).toContainText(route.name);
-    await expect(summary).toContainText('v3a2IV**');
-    await expect(summary).toContainText('Kowmung Gauge (8)');
-    await expect(summary).toContainText('Vertical');
-    await expect(summary).toContainText('White Water');
   });
 
   test('should create a CLIMBING journal and verify dependencies and summary', async ({
     authenticatedPage,
   }) => {
     const page = authenticatedPage;
-    const route = await createRoute(page, {
-      name: `E2E Climbing Route ${Date.now()}`,
-      description: 'A test climbing route',
+    await createRouteBackedComplexJournal(page, {
+      route: {
+        name: `E2E Climbing Route ${Date.now()}`,
+        description: 'A test climbing route',
+      },
+      journal: {
+        title: `Climbing Session ${Date.now()}`,
+        content: 'Strong day on the wall.',
+        typeLabelRegex: /^climbing$/i,
+      },
+      selectedTypeTestId: 'CLIMBING',
+      dependencyTypeTestIds: ['OUTDOOR_ACTIVITY', 'FITNESS'],
+      editorTestId: 'climbing-type-editor',
+      badgeTestId: 'manage-type-climbing',
+      attachedTypes: ['climbing', 'outdoor_activity', 'fitness'],
+      typeSectionTriggerTestId: 'type-section-trigger-climbing',
+      summaryTestId: 'climbing-summary',
+      fillTypeFields: async ({ page: detailPage, editor }) => {
+        const climbingTypeCombobox = editor.getByRole('combobox', {
+          name: /climbing type/i,
+        });
+
+        await climbingTypeCombobox.click();
+        await detailPage.getByRole('option', { name: 'sport' }).click();
+        await expect(climbingTypeCombobox).toContainText('sport');
+
+        await detailPage.getByTestId('climbing-grade-input').fill('18');
+        await detailPage.getByTestId('climbing-length-input').fill('30');
+      },
+      assertSummary: async ({ summary, routeName }) => {
+        await expect(summary).toContainText(routeName);
+        await expect(summary).toContainText('sport');
+        await expect(summary).toContainText('18');
+        await expect(summary).toContainText('30 m');
+      },
     });
-
-    await navigateToNewJournal(page);
-
-    await fillJournalBasics(page, {
-      title: `Climbing Session ${Date.now()}`,
-      content: 'Strong day on the wall.',
-      typeLabelRegex: /^climbing$/i,
-    });
-
-    await assertSelectedTypeDependencies(page, 'CLIMBING', [
-      'OUTDOOR_ACTIVITY',
-      'FITNESS',
-    ]);
-    await expect(page.getByTestId('climbing-type-editor')).toBeVisible();
-
-    await selectRouteInEditor(page, 'climbing-type-editor', route.name);
-
-    const climbingTypeCombobox = page
-      .getByTestId('climbing-type-editor')
-      .getByRole('combobox', { name: /climbing type/i });
-
-    await climbingTypeCombobox.click();
-    await page.getByRole('option', { name: 'sport' }).click();
-    await expect(climbingTypeCombobox).toContainText('sport');
-
-    await page.getByTestId('climbing-grade-input').fill('18');
-    await page.getByTestId('climbing-length-input').fill('30');
-
-    await page.getByRole('button', { name: /create journal/i }).click();
-
-    await awaitCreationAndAssertBadge(page, 'manage-type-climbing');
-    await assertAttachedTypeBadges(page, [
-      'climbing',
-      'outdoor_activity',
-      'fitness',
-    ]);
-
-    await page.getByTestId('type-section-trigger-climbing').click();
-
-    const summary = page.getByTestId('climbing-summary');
-    await expect(summary).toBeVisible();
-    await expect(summary).toContainText(route.name);
-    await expect(summary).toContainText('sport');
-    await expect(summary).toContainText('18');
-    await expect(summary).toContainText('30 m');
   });
 
   test('should create a KAYAKING journal and verify dependencies and summary', async ({
     authenticatedPage,
   }) => {
     const page = authenticatedPage;
-    const route = await createRoute(page, {
-      name: `E2E Kayak Route ${Date.now()}`,
-      description: 'A test kayaking route',
+    await createRouteBackedComplexJournal(page, {
+      route: {
+        name: `E2E Kayak Route ${Date.now()}`,
+        description: 'A test kayaking route',
+      },
+      journal: {
+        title: `Kayak Paddle ${Date.now()}`,
+        content: 'Cold water paddle with steady flow.',
+        typeLabelRegex: /^kayaking$/i,
+      },
+      selectedTypeTestId: 'KAYAKING',
+      dependencyTypeTestIds: ['OUTDOOR_ACTIVITY', 'FITNESS'],
+      editorTestId: 'kayaking-type-editor',
+      badgeTestId: 'manage-type-kayaking',
+      attachedTypes: ['kayaking', 'outdoor_activity', 'fitness'],
+      typeSectionTriggerTestId: 'type-section-trigger-kayaking',
+      summaryTestId: 'kayaking-summary',
+      fillTypeFields: async ({ page: detailPage }) => {
+        await detailPage.getByTestId('water-type-input').fill('river');
+      },
+      assertSummary: async ({ summary, routeName }) => {
+        await expect(summary).toContainText(routeName);
+        await expect(summary).toContainText('river');
+      },
     });
-
-    await navigateToNewJournal(page);
-
-    await fillJournalBasics(page, {
-      title: `Kayak Paddle ${Date.now()}`,
-      content: 'Cold water paddle with steady flow.',
-      typeLabelRegex: /^kayaking$/i,
-    });
-
-    await assertSelectedTypeDependencies(page, 'KAYAKING', [
-      'OUTDOOR_ACTIVITY',
-      'FITNESS',
-    ]);
-    await expect(page.getByTestId('kayaking-type-editor')).toBeVisible();
-
-    await selectRouteInEditor(page, 'kayaking-type-editor', route.name);
-    await page.getByTestId('water-type-input').fill('river');
-
-    await page.getByRole('button', { name: /create journal/i }).click();
-
-    await awaitCreationAndAssertBadge(page, 'manage-type-kayaking');
-    await assertAttachedTypeBadges(page, [
-      'kayaking',
-      'outdoor_activity',
-      'fitness',
-    ]);
-
-    await page.getByTestId('type-section-trigger-kayaking').click();
-
-    const summary = page.getByTestId('kayaking-summary');
-    await expect(summary).toBeVisible();
-    await expect(summary).toContainText(route.name);
-    await expect(summary).toContainText('river');
   });
 
   test('should create a CROSS_COUNTRY_SKIING journal and verify dependencies and summary', async ({
     authenticatedPage,
   }) => {
     const page = authenticatedPage;
-    const route = await createRoute(page, {
-      name: `E2E Ski Route ${Date.now()}`,
-      description: 'A test cross-country skiing route',
+    await createRouteBackedComplexJournal(page, {
+      route: {
+        name: `E2E Ski Route ${Date.now()}`,
+        description: 'A test cross-country skiing route',
+      },
+      journal: {
+        title: `XC Ski Tour ${Date.now()}`,
+        content: 'Snowy day on groomed tracks.',
+        typeLabelRegex: /^cross-country skiing$/i,
+      },
+      selectedTypeTestId: 'CROSS_COUNTRY_SKIING',
+      dependencyTypeTestIds: ['BUSHWALKING', 'OUTDOOR_ACTIVITY', 'FITNESS'],
+      editorTestId: 'cross-country-skiing-type-editor',
+      badgeTestId: 'manage-type-cross_country_skiing',
+      attachedTypes: [
+        'cross_country_skiing',
+        'bushwalking',
+        'outdoor_activity',
+        'fitness',
+      ],
+      typeSectionTriggerTestId: 'type-section-trigger-cross_country_skiing',
+      summaryTestId: 'cross-country-skiing-summary',
+      fillTypeFields: async ({ page: detailPage }) => {
+        await detailPage
+          .getByTestId('snow-conditions-input')
+          .fill('Fresh powder with groomed tracks');
+      },
+      assertSummary: async ({ summary, routeName }) => {
+        await expect(summary).toContainText(routeName);
+        await expect(summary).toContainText('Fresh powder with groomed tracks');
+      },
     });
-
-    await navigateToNewJournal(page);
-
-    await fillJournalBasics(page, {
-      title: `XC Ski Tour ${Date.now()}`,
-      content: 'Snowy day on groomed tracks.',
-      typeLabelRegex: /^cross-country skiing$/i,
-    });
-
-    await assertSelectedTypeDependencies(page, 'CROSS_COUNTRY_SKIING', [
-      'BUSHWALKING',
-      'OUTDOOR_ACTIVITY',
-      'FITNESS',
-    ]);
-    await expect(
-      page.getByTestId('cross-country-skiing-type-editor')
-    ).toBeVisible();
-
-    await selectRouteInEditor(
-      page,
-      'cross-country-skiing-type-editor',
-      route.name
-    );
-    await page
-      .getByTestId('snow-conditions-input')
-      .fill('Fresh powder with groomed tracks');
-
-    await page.getByRole('button', { name: /create journal/i }).click();
-
-    await awaitCreationAndAssertBadge(page, 'manage-type-cross_country_skiing');
-    await assertAttachedTypeBadges(page, [
-      'cross_country_skiing',
-      'bushwalking',
-      'outdoor_activity',
-      'fitness',
-    ]);
-
-    await page.getByTestId('type-section-trigger-cross_country_skiing').click();
-
-    const summary = page.getByTestId('cross-country-skiing-summary');
-    await expect(summary).toBeVisible();
-    await expect(summary).toContainText(route.name);
-    await expect(summary).toContainText('Fresh powder with groomed tracks');
   });
 });

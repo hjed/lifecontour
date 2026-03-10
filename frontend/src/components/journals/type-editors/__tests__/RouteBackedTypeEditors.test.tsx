@@ -29,6 +29,9 @@ const routeBackedEditorCases = [
       ),
     summaryTexts: ['Grade 4', 'route-123'],
     summaryTestId: 'bushwalking-type-editor',
+    renderEmptyView: () =>
+      render(<BushwalkingTypeEditor createMode={false} data={{}} />),
+    emptyMessage: 'No bushwalking details provided.',
   },
   {
     name: 'ClimbingTypeEditor',
@@ -52,6 +55,9 @@ const routeBackedEditorCases = [
       ),
     summaryTestId: 'climbing-summary',
     summaryTexts: ['sport', '18', '30 m', 'route-123'],
+    renderEmptyView: () =>
+      render(<ClimbingTypeEditor createMode={false} data={{}} />),
+    emptyMessage: 'No climbing details provided.',
   },
   {
     name: 'KayakingTypeEditor',
@@ -68,6 +74,9 @@ const routeBackedEditorCases = [
       ),
     summaryTestId: 'kayaking-summary',
     summaryTexts: ['river', 'route-123'],
+    renderEmptyView: () =>
+      render(<KayakingTypeEditor createMode={false} data={{}} />),
+    emptyMessage: 'No kayaking details provided.',
   },
   {
     name: 'JoggingTypeEditor',
@@ -84,6 +93,9 @@ const routeBackedEditorCases = [
       ),
     summaryTexts: ['5:30 /km', 'route-123'],
     summaryTestId: 'jogging-type-editor',
+    renderEmptyView: () =>
+      render(<JoggingTypeEditor createMode={false} data={{}} />),
+    emptyMessage: 'No jogging details provided.',
   },
   {
     name: 'CrossCountrySkiingTypeEditor',
@@ -101,6 +113,9 @@ const routeBackedEditorCases = [
       ),
     summaryTestId: 'cross-country-skiing-summary',
     summaryTexts: ['Fresh powder', 'route-123'],
+    renderEmptyView: () =>
+      render(<CrossCountrySkiingTypeEditor createMode={false} data={{}} />),
+    emptyMessage: 'No cross-country skiing details provided.',
   },
 ] as const;
 
@@ -119,5 +134,12 @@ describe.each(routeBackedEditorCases)('$name', testCase => {
     for (const text of testCase.summaryTexts) {
       expect(screen.getByText(text)).toBeInTheDocument();
     }
+  });
+
+  it('renders the empty read-only state when no type data exists', () => {
+    testCase.renderEmptyView();
+
+    expect(screen.getByText(testCase.emptyMessage)).toBeInTheDocument();
+    expect(screen.getByTestId('edit-button')).toBeInTheDocument();
   });
 });

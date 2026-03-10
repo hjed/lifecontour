@@ -265,6 +265,24 @@ class TestRouteEndpoints:
         assert len(data["data"]) == 5
         assert data["meta"]["current_page"] == 3
 
+    async def test_list_routes_filters_by_name(self, integration_api_client):
+        """Test listing routes with a case-insensitive name filter."""
+        await create_route(integration_api_client, "Blue Mountains Grand Canyon")
+        await create_route(integration_api_client, "Grand Traverse")
+        await create_route(integration_api_client, "Sydney Harbour Walk")
+
+        response = await integration_api_client.get("/api/routes?name=grand&limit=10")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert [item["attributes"]["name"] for item in data["data"]] == [
+            "Blue Mountains Grand Canyon",
+            "Grand Traverse",
+        ]
+        assert data["meta"]["total_count"] == 2
+        assert data["meta"]["page_count"] == 1
+        assert "name=grand" in data["links"]["self"]
+
     async def test_update_route(self, integration_api_client):
         """Test updating a route."""
         # Create a route

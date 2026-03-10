@@ -101,10 +101,10 @@ export function MoodRatingTypeEditor({
             max='10'
             value={editData.mood_value || 5}
             onChange={e =>
-              setEditData({
-                ...editData,
+              setEditData(previous => ({
+                ...previous,
                 mood_value: Number.parseInt(e.target.value, 10),
-              })
+              }))
             }
             disabled={!isEditing}
             className='flex-1'
@@ -126,7 +126,10 @@ export function MoodRatingTypeEditor({
           id='mood-label'
           value={editData.mood_label || ''}
           onChange={e =>
-            setEditData({ ...editData, mood_label: e.target.value || null })
+            setEditData(previous => ({
+              ...previous,
+              mood_label: e.target.value || null,
+            }))
           }
           placeholder='e.g., Happy, Anxious, Calm'
           disabled={!isEditing}
@@ -148,10 +151,10 @@ export function MoodRatingTypeEditor({
             max='10'
             value={editData.energy_level || 5}
             onChange={e =>
-              setEditData({
-                ...editData,
+              setEditData(previous => ({
+                ...previous,
                 energy_level: Number.parseInt(e.target.value, 10),
-              })
+              }))
             }
             disabled={!isEditing}
             className='flex-1'

@@ -243,6 +243,23 @@ class TestRouteServiceList:
         mock_route_repo.get_all.assert_called_once_with(user_id, 10, 0)
 
     @pytest.mark.asyncio
+    async def test_get_routes_for_user_with_name_filter(
+        self, route_service, mock_route_repo
+    ):
+        """Test getting filtered routes for a user."""
+        user_id = "test-user-123"
+        routes = [create_test_route(route_id=uuid4(), name="Grand Canyon")]
+
+        mock_route_repo.get_all.return_value = routes
+
+        result = await route_service.get_routes_for_user(
+            user_id, name="grand", limit=10, offset=0
+        )
+
+        assert result == routes
+        mock_route_repo.get_all.assert_called_once_with(user_id, 10, 0, "grand")
+
+    @pytest.mark.asyncio
     async def test_get_route_count(self, route_service, mock_route_repo):
         """Test getting route count for a user."""
         # Arrange
@@ -256,3 +273,17 @@ class TestRouteServiceList:
         # Assert
         assert result == 5
         mock_route_repo.get_count.assert_called_once_with(user_id)
+
+    @pytest.mark.asyncio
+    async def test_get_route_count_with_name_filter(
+        self, route_service, mock_route_repo
+    ):
+        """Test getting filtered route count for a user."""
+        user_id = "test-user-123"
+
+        mock_route_repo.get_count.return_value = 2
+
+        result = await route_service.get_route_count(user_id, name="grand")
+
+        assert result == 2
+        mock_route_repo.get_count.assert_called_once_with(user_id, "grand")
