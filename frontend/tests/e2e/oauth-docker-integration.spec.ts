@@ -315,10 +315,12 @@ test.describe('OAuth Docker Integration', () => {
           const currentUrl = page.url();
           console.log('5. URL after OAuth click:', currentUrl);
 
-          if (currentUrl !== FRONTEND_TEST_LOGIN_URL) {
-            console.log('6. OAuth flow initiated successfully');
-          } else {
+          const remainedOnLoginPage = currentUrl === FRONTEND_TEST_LOGIN_URL;
+
+          if (remainedOnLoginPage) {
             console.log('6. Remained on login page - checking for errors...');
+          } else {
+            console.log('6. OAuth flow initiated successfully');
           }
         } else {
           console.log('3. No OAuth providers configured');

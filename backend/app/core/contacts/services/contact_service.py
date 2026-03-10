@@ -1,6 +1,5 @@
 """Main contact service with transaction management."""
 
-import asyncio
 from typing import Any, cast
 
 import structlog
@@ -182,7 +181,7 @@ class ContactService:
         self.tag_hierarchy = tag_hierarchy_service or TagHierarchyService(tag_repo)
 
     async def _execute_with_retry(
-        self, operation: Any, transaction: AsyncConnection, max_retries: int = 3
+        self, operation: Any, transaction: AsyncConnection
     ) -> Any:
         """Execute operation without internal retries (delegated to outer transaction manager)."""
         try:
@@ -190,10 +189,6 @@ class ContactService:
         except IntegrityError as e:
             self._convert_integrity_error_to_domain_exception(e)
             raise
-
-    async def _wait_before_retry(self, attempt: int) -> None:
-        """Wait before retry with exponential backoff."""
-        await asyncio.sleep(0.1 * (2**attempt))
 
     def _convert_integrity_error_to_domain_exception(
         self, error: IntegrityError
