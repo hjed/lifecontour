@@ -6,6 +6,7 @@ import { act, renderHook, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import React, { ReactNode } from 'react';
 import {
+  contactKeys,
   useInfiniteContacts,
   useInfiniteSearchContacts,
   useContacts,
@@ -173,6 +174,53 @@ describe('Contacts API', () => {
   });
 
   describe('useInfiniteContacts', () => {
+    it('should use a distinct query key from useContacts for the same filters', async () => {
+      const mockResponse = {
+        data: [],
+        meta: {
+          total_count: 1,
+          current_page: 1,
+          page_count: 1,
+          per_page: 20,
+        },
+      };
+
+      mockFetch.mockResolvedValue({
+        ok: true,
+        json: async () => mockResponse,
+      } as Response);
+
+      const filters = {};
+
+      const { result: contactsResult } = renderHook(
+        () => useContacts(filters),
+        {
+          wrapper: createWrapper,
+        }
+      );
+      const { result: infiniteResult } = renderHook(
+        () => useInfiniteContacts(filters),
+        {
+          wrapper: createWrapper,
+        }
+      );
+
+      await waitFor(() => {
+        expect(contactsResult.current.isSuccess).toBe(true);
+        expect(infiniteResult.current.isSuccess).toBe(true);
+      });
+
+      expect(contactKeys.list(filters)).not.toEqual(
+        contactKeys.infiniteList(filters)
+      );
+      expect(
+        queryClient.getQueryState(contactKeys.list(filters))
+      ).toBeDefined();
+      expect(
+        queryClient.getQueryState(contactKeys.infiniteList(filters))
+      ).toBeDefined();
+    });
+
     it('should fetch the next contact page when available', async () => {
       const firstPage = {
         data: [],
@@ -318,6 +366,53 @@ describe('Contacts API', () => {
   });
 
   describe('useInfiniteSearchContacts', () => {
+    it('should use a distinct query key from useSearchContacts', async () => {
+      const mockResponse = {
+        data: [],
+        meta: {
+          total_count: 1,
+          current_page: 1,
+          page_count: 1,
+          per_page: 20,
+        },
+      };
+
+      mockFetch.mockResolvedValue({
+        ok: true,
+        json: async () => mockResponse,
+      } as Response);
+
+      const query = 'john';
+
+      const { result: searchResult } = renderHook(
+        () => useSearchContacts(query),
+        {
+          wrapper: createWrapper,
+        }
+      );
+      const { result: infiniteSearchResult } = renderHook(
+        () => useInfiniteSearchContacts(query),
+        {
+          wrapper: createWrapper,
+        }
+      );
+
+      await waitFor(() => {
+        expect(searchResult.current.isSuccess).toBe(true);
+        expect(infiniteSearchResult.current.isSuccess).toBe(true);
+      });
+
+      expect(contactKeys.search(`${query}-{}`)).not.toEqual(
+        contactKeys.infiniteSearch(`${query}-{}`)
+      );
+      expect(
+        queryClient.getQueryState(contactKeys.search(`${query}-{}`))
+      ).toBeDefined();
+      expect(
+        queryClient.getQueryState(contactKeys.infiniteSearch(`${query}-{}`))
+      ).toBeDefined();
+    });
+
     it('should fetch the next search page when available', async () => {
       const firstPage = {
         data: [],

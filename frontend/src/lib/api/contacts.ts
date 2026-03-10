@@ -36,9 +36,16 @@ export const contactKeys = {
   all: ['contacts'] as const,
   lists: () => [...contactKeys.all, 'list'] as const,
   list: (filters: ContactFilters) => [...contactKeys.lists(), filters] as const,
+  infiniteLists: () => [...contactKeys.lists(), 'infinite'] as const,
+  infiniteList: (filters: ContactFilters) =>
+    [...contactKeys.infiniteLists(), filters] as const,
   details: () => [...contactKeys.all, 'detail'] as const,
   detail: (id: string) => [...contactKeys.details(), id] as const,
-  search: (query: string) => [...contactKeys.all, 'search', query] as const,
+  searches: () => [...contactKeys.all, 'search'] as const,
+  search: (query: string) => [...contactKeys.searches(), query] as const,
+  infiniteSearches: () => [...contactKeys.searches(), 'infinite'] as const,
+  infiniteSearch: (query: string) =>
+    [...contactKeys.infiniteSearches(), query] as const,
 };
 
 export const tagKeys = {
@@ -338,7 +345,7 @@ export function useInfiniteContacts(
   const initialPage = filters.page ?? 1;
 
   return useInfiniteQuery({
-    queryKey: contactKeys.list(getListQueryFilters(filters)),
+    queryKey: contactKeys.infiniteList(getListQueryFilters(filters)),
     queryFn: ({ pageParam }) =>
       fetchContacts({
         ...filters,
@@ -393,7 +400,9 @@ export function useInfiniteSearchContacts(
   const searchOptions = omitPage(options);
 
   return useInfiniteQuery({
-    queryKey: contactKeys.search(`${query}-${JSON.stringify(searchOptions)}`),
+    queryKey: contactKeys.infiniteSearch(
+      `${query}-${JSON.stringify(searchOptions)}`
+    ),
     queryFn: ({ pageParam }) =>
       searchContacts(query, {
         ...searchOptions,

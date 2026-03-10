@@ -355,6 +355,39 @@ export const contactTestUtils = {
   }),
 } as const;
 
+export function createMockGetContactPaginationMeta(
+  meta?: Record<string, unknown>
+) {
+  return {
+    totalCount:
+      typeof meta?.total_count === 'number'
+        ? meta.total_count
+        : typeof meta?.total === 'number'
+          ? meta.total
+          : undefined,
+    currentPage:
+      typeof meta?.current_page === 'number'
+        ? meta.current_page
+        : typeof meta?.page === 'number'
+          ? meta.page
+          : undefined,
+    pageCount:
+      typeof meta?.page_count === 'number'
+        ? meta.page_count
+        : typeof meta?.total_pages === 'number'
+          ? meta.total_pages
+          : typeof meta?.totalPages === 'number'
+            ? meta.totalPages
+            : undefined,
+    perPage:
+      typeof meta?.per_page === 'number'
+        ? meta.per_page
+        : typeof meta?.limit === 'number'
+          ? meta.limit
+          : undefined,
+  };
+}
+
 // Common test patterns
 export const testPatterns = {
   expectAuthStatus: (status: 'authenticated' | 'not-authenticated') => {

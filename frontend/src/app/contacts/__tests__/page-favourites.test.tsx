@@ -53,39 +53,17 @@ jest.mock('@/lib/constants', () => ({
 }));
 
 // Mock the API hooks
-jest.mock('@/lib/api/contacts', () => ({
-  useInfiniteContacts: jest.fn(),
-  useInfiniteSearchContacts: jest.fn(),
-  useToggleContactFavourite: jest.fn(),
-  getContactPaginationMeta: jest.fn((meta?: Record<string, unknown>) => ({
-    totalCount:
-      typeof meta?.total_count === 'number'
-        ? meta.total_count
-        : typeof meta?.total === 'number'
-          ? meta.total
-          : undefined,
-    currentPage:
-      typeof meta?.current_page === 'number'
-        ? meta.current_page
-        : typeof meta?.page === 'number'
-          ? meta.page
-          : undefined,
-    pageCount:
-      typeof meta?.page_count === 'number'
-        ? meta.page_count
-        : typeof meta?.total_pages === 'number'
-          ? meta.total_pages
-          : typeof meta?.totalPages === 'number'
-            ? meta.totalPages
-            : undefined,
-    perPage:
-      typeof meta?.per_page === 'number'
-        ? meta.per_page
-        : typeof meta?.limit === 'number'
-          ? meta.limit
-          : undefined,
-  })),
-}));
+jest.mock('@/lib/api/contacts', () => {
+  const { createMockGetContactPaginationMeta } =
+    jest.requireActual('@/test-utils');
+
+  return {
+    useInfiniteContacts: jest.fn(),
+    useInfiniteSearchContacts: jest.fn(),
+    useToggleContactFavourite: jest.fn(),
+    getContactPaginationMeta: jest.fn(createMockGetContactPaginationMeta),
+  };
+});
 
 // Mock the FavouriteToggle component
 jest.mock('@/components/contacts/FavouriteToggle', () => ({
