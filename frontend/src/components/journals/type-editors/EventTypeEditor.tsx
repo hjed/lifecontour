@@ -93,7 +93,10 @@ export function EventTypeEditor({
           id='calendar-id'
           value={editData.calendar_id || ''}
           onChange={e =>
-            setEditData({ ...editData, calendar_id: e.target.value })
+            setEditData(previous => ({
+              ...previous,
+              calendar_id: e.target.value,
+            }))
           }
           placeholder='Select calendar'
           disabled={!isEditing}
@@ -108,13 +111,13 @@ export function EventTypeEditor({
           checked={editData.is_all_day}
           onCheckedChange={checked => {
             const isAllDay = checked as boolean;
-            setEditData({
-              ...editData,
+            setEditData(previous => ({
+              ...previous,
               is_all_day: isAllDay,
               // Clear time fields when switching to all-day
-              start_time: isAllDay ? null : editData.start_time,
-              end_time: isAllDay ? null : editData.end_time,
-            });
+              start_time: isAllDay ? null : previous.start_time,
+              end_time: isAllDay ? null : previous.end_time,
+            }));
           }}
           disabled={!isEditing}
           data-testid='is-all-day-checkbox'
@@ -140,7 +143,10 @@ export function EventTypeEditor({
               type='time'
               value={editData.start_time || ''}
               onChange={e =>
-                setEditData({ ...editData, start_time: e.target.value })
+                setEditData(previous => ({
+                  ...previous,
+                  start_time: e.target.value,
+                }))
               }
               disabled={!isEditing}
               data-testid='start-time-input'
@@ -153,7 +159,10 @@ export function EventTypeEditor({
               type='time'
               value={editData.end_time || ''}
               onChange={e =>
-                setEditData({ ...editData, end_time: e.target.value })
+                setEditData(previous => ({
+                  ...previous,
+                  end_time: e.target.value,
+                }))
               }
               disabled={!isEditing}
               data-testid='end-time-input'
@@ -171,7 +180,9 @@ export function EventTypeEditor({
         <Input
           id='location'
           value={editData.location || ''}
-          onChange={e => setEditData({ ...editData, location: e.target.value })}
+          onChange={e =>
+            setEditData(previous => ({ ...previous, location: e.target.value }))
+          }
           placeholder='Add location'
           disabled={!isEditing}
           data-testid='location-input'
@@ -184,7 +195,10 @@ export function EventTypeEditor({
           id='sync-invitees'
           checked={editData.sync_invitees}
           onCheckedChange={checked =>
-            setEditData({ ...editData, sync_invitees: checked as boolean })
+            setEditData(previous => ({
+              ...previous,
+              sync_invitees: checked as boolean,
+            }))
           }
           disabled={!isEditing}
           data-testid='sync-invitees-checkbox'

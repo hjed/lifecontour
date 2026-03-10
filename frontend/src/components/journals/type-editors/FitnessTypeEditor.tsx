@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useRef } from 'react';
+import { useMemo, useRef } from 'react';
 import {
   Activity,
   Flame,
@@ -70,11 +70,6 @@ export function FitnessTypeEditor({
   });
 
   const fileInputRef = useRef<HTMLInputElement>(null);
-  // Keep a ref to always access the latest editData inside async callbacks
-  const editDataRef = useRef<FitnessData>(editData);
-  useEffect(() => {
-    editDataRef.current = editData;
-  });
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -82,7 +77,7 @@ export function FitnessTypeEditor({
 
     try {
       const content = await file.text();
-      setEditData({ ...editDataRef.current, gpx_track_data: content });
+      setEditData(previous => ({ ...previous, gpx_track_data: content }));
     } catch (error) {
       console.error('Failed to read GPX file', error);
     }
@@ -90,14 +85,14 @@ export function FitnessTypeEditor({
 
   const updateNumberField = (field: keyof FitnessData, value: string) => {
     if (value === '') {
-      setEditData({ ...editData, [field]: null });
+      setEditData(previous => ({ ...previous, [field]: null }));
       return;
     }
     const parsedValue = parseInt(value, 10);
-    setEditData({
-      ...editData,
+    setEditData(previous => ({
+      ...previous,
       [field]: Number.isNaN(parsedValue) ? null : parsedValue,
-    });
+    }));
   };
 
   return (
@@ -227,10 +222,10 @@ export function FitnessTypeEditor({
               type='text'
               value={editData.strava_activity_id ?? ''}
               onChange={e =>
-                setEditData({
-                  ...editData,
+                setEditData(previous => ({
+                  ...previous,
                   strava_activity_id: e.target.value || null,
-                })
+                }))
               }
               disabled={!isEditing}
               data-testid='strava-id-input'

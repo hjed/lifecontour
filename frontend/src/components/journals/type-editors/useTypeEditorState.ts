@@ -8,7 +8,14 @@
  * - Create mode (always in edit mode, no save/cancel needed)
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type SetStateAction,
+} from 'react';
 
 interface UseTypeEditorStateOptions<T> {
   readonly initialData: T;
@@ -33,7 +40,7 @@ interface UseTypeEditorStateOptions<T> {
 interface UseTypeEditorStateReturn<T> {
   readonly isEditing: boolean;
   readonly editData: T;
-  readonly setEditData: (data: T) => void;
+  readonly setEditData: (data: SetStateAction<T>) => void;
   readonly handleEdit: () => void;
   readonly handleSave: () => Promise<void>;
   readonly handleCancel: () => void;
@@ -77,12 +84,23 @@ export function useTypeEditorState<T>({
 
   const [isEditing, setIsEditing] = useState(createMode);
   const [editData, setEditDataState] = useState<T>(computedInitialData);
+  const latestEditDataRef = useRef(editData);
 
-  // Wrap setEditData to call onChange when data changes
+  useEffect(() => {
+    latestEditDataRef.current = editData;
+  }, [editData]);
+
+  // Wrap setEditData to support updater functions and emit the resolved value.
   const setEditData = useCallback(
-    (data: T) => {
-      setEditDataState(data);
-      onChange?.(data);
+    (data: SetStateAction<T>) => {
+      const nextData =
+        typeof data === 'function'
+          ? (data as (previousState: T) => T)(latestEditDataRef.current)
+          : data;
+
+      latestEditDataRef.current = nextData;
+      setEditDataState(nextData);
+      onChange?.(nextData);
     },
     [onChange]
   );
@@ -125,6 +143,7 @@ export function useTypeEditorState<T>({
       // No-op in create mode: cannot cancel out of an inline create editor
       return;
     }
+    latestEditDataRef.current = initialData;
     setEditDataState(initialData);
     setIsEditing(false);
   }, [createMode, initialData]);

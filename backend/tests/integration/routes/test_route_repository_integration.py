@@ -178,6 +178,27 @@ class TestRouteRepositoryQueries:
         page2_ids = {r.id for r in page2}
         assert page1_ids.isdisjoint(page2_ids)
 
+    async def test_get_all_filters_by_name_case_insensitively(
+        self, route_repository: SqlRouteRepository
+    ):
+        """Test getting routes filtered by partial name match."""
+        matching_route_1 = create_test_route(user_id="user-1", name="Grand Canyon")
+        matching_route_2 = create_test_route(user_id="user-1", name="grand ridge")
+        non_matching_route = create_test_route(user_id="user-1", name="Harbour Walk")
+        other_user_route = create_test_route(user_id="user-2", name="Grand Traverse")
+
+        await route_repository.save(matching_route_1)
+        await route_repository.save(matching_route_2)
+        await route_repository.save(non_matching_route)
+        await route_repository.save(other_user_route)
+
+        filtered_routes = await route_repository.get_all("user-1", name="GRAND")
+
+        assert [route.name for route in filtered_routes] == [
+            "Grand Canyon",
+            "grand ridge",
+        ]
+
     async def test_get_count_returns_total_routes(
         self, route_repository: SqlRouteRepository
     ):
@@ -197,6 +218,27 @@ class TestRouteRepositoryQueries:
 
         assert count_user1 == 3
         assert count_user2 == 2
+
+    async def test_get_count_filters_by_name(
+        self, route_repository: SqlRouteRepository
+    ):
+        """Test getting filtered route count for a user."""
+        await route_repository.save(
+            create_test_route(user_id="user-1", name="Grand Canyon")
+        )
+        await route_repository.save(
+            create_test_route(user_id="user-1", name="Grand Traverse")
+        )
+        await route_repository.save(
+            create_test_route(user_id="user-1", name="Harbour Walk")
+        )
+        await route_repository.save(
+            create_test_route(user_id="user-2", name="Grand Loop")
+        )
+
+        count = await route_repository.get_count("user-1", name="grand")
+
+        assert count == 2
 
     async def test_get_count_returns_zero_for_no_routes(
         self, route_repository: SqlRouteRepository

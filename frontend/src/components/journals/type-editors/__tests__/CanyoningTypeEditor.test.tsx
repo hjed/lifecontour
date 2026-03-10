@@ -1,9 +1,25 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import { CanyoningTypeEditor } from '../CanyoningTypeEditor';
 
 jest.mock('@/components/routes/RouteSelector', () => ({
-  RouteSelector: ({ id }: { id?: string }) => (
-    <div data-testid='mock-route-selector' data-route-selector-id={id} />
+  RouteSelector: ({
+    id,
+    value,
+    onChange,
+  }: {
+    id?: string;
+    value?: string | null;
+    onChange: (routeId: string | null) => void;
+  }) => (
+    <button
+      type='button'
+      data-testid='mock-route-selector'
+      data-route-selector-id={id}
+      data-route-value={value ?? ''}
+      onClick={() => onChange('route-123')}
+    >
+      Select route
+    </button>
   ),
 }));
 
@@ -56,6 +72,28 @@ describe('CanyoningTypeEditor', () => {
       expect.objectContaining({ french_grade: null })
     );
     expect(screen.getByText(/use format v3a2iv\*\*/i)).toBeInTheDocument();
+  });
+
+  it('preserves both route and gauge updates when they are batched together', () => {
+    const handleChange = jest.fn();
+
+    render(<CanyoningTypeEditor createMode={true} onChange={handleChange} />);
+
+    handleChange.mockClear();
+
+    act(() => {
+      fireEvent.click(screen.getByTestId('mock-route-selector'));
+      fireEvent.change(screen.getByTestId('water-gauge-name-input'), {
+        target: { value: 'Kowmung Gauge' },
+      });
+    });
+
+    expect(handleChange).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        route_id: 'route-123',
+        water_guage_name: 'Kowmung Gauge',
+      })
+    );
   });
 
   it('shows a validation message for invalid French canyon grades', () => {
@@ -114,6 +152,15 @@ describe('CanyoningTypeEditor', () => {
     expect(screen.getByText(/Vertical/i)).toBeInTheDocument();
     expect(screen.getByText(/White Water/i)).toBeInTheDocument();
     expect(screen.getByText('route-123')).toBeInTheDocument();
+  });
+
+  it('renders the empty read-only state when no canyoning data exists', () => {
+    render(<CanyoningTypeEditor createMode={false} data={{}} />);
+
+    expect(
+      screen.getByText('No canyoning details provided.')
+    ).toBeInTheDocument();
+    expect(screen.getByTestId('edit-button')).toBeInTheDocument();
   });
 
   it('falls back to a default water gauge label when only a level is provided', () => {

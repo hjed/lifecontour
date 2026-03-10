@@ -42,6 +42,10 @@ async def list_routes(
     user: FromDishka[SessionUser],  # Require authentication
     page: int = Query(default=1, description="Page number", ge=1),
     limit: int = Query(default=20, description="Items per page", ge=1, le=100),
+    name: str | None = Query(
+        default=None,
+        description="Optional case-insensitive partial route name filter",
+    ),
 ) -> RouteListResponse:
     """
     List routes with pagination.
@@ -57,17 +61,24 @@ async def list_routes(
         user_id=user.id,
         limit=pagination.limit,
         offset=pagination.offset,
+        name=name,
     )
 
     # Get total count for pagination
-    total_count = await route_service.get_route_count(user_id=user.id)
+    total_count = await route_service.get_route_count(user_id=user.id, name=name)
 
     # Convert to resources
     route_resources = [RouteConverter.to_resource(route, base_url) for route in routes]
 
     # Create pagination metadata and links
     meta = create_pagination_meta(total_count, page, limit)
-    links = create_pagination_links(f"{base_url}/api/routes", page, limit, total_count)
+    links = create_pagination_links(
+        f"{base_url}/api/routes",
+        page,
+        limit,
+        total_count,
+        additional_params={"name": name} if name else None,
+    )
 
     return RouteListResponse(
         data=route_resources,

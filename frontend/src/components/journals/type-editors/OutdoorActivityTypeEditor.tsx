@@ -150,10 +150,10 @@ export function OutdoorActivityTypeEditor({
             type='text'
             value={editData.activity_type ?? ''}
             onChange={e =>
-              setEditData({
-                ...editData,
+              setEditData(previous => ({
+                ...previous,
                 activity_type: e.target.value || null,
-              })
+              }))
             }
             placeholder='e.g., Hiking, Snowshoeing'
             data-testid='activity-type-input'
@@ -177,10 +177,10 @@ export function OutdoorActivityTypeEditor({
             type='text'
             value={editData.weather_conditions ?? ''}
             onChange={e =>
-              setEditData({
-                ...editData,
+              setEditData(previous => ({
+                ...previous,
                 weather_conditions: e.target.value || null,
-              })
+              }))
             }
             placeholder='e.g., Sunny, 22°C'
             data-testid='weather-conditions-input'
@@ -201,7 +201,10 @@ export function OutdoorActivityTypeEditor({
             type='text'
             value={editData.role ?? ''}
             onChange={e =>
-              setEditData({ ...editData, role: e.target.value || null })
+              setEditData(previous => ({
+                ...previous,
+                role: e.target.value || null,
+              }))
             }
             placeholder='e.g., Participant, Guide'
             data-testid='role-input'
@@ -214,7 +217,10 @@ export function OutdoorActivityTypeEditor({
             id='leadership-role'
             checked={editData.in_leadership_role ?? false}
             onCheckedChange={(checked: boolean) =>
-              setEditData({ ...editData, in_leadership_role: checked })
+              setEditData(previous => ({
+                ...previous,
+                in_leadership_role: checked,
+              }))
             }
             data-testid='leadership-role-switch'
           />
@@ -234,10 +240,10 @@ export function OutdoorActivityTypeEditor({
           id='participant-notes'
           value={editData.participant_notes ?? ''}
           onChange={e =>
-            setEditData({
-              ...editData,
+            setEditData(previous => ({
+              ...previous,
               participant_notes: e.target.value || null,
-            })
+            }))
           }
           placeholder='Notes about other participants...'
           className='min-h-[100px]'

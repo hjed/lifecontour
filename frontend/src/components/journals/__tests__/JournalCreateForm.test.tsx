@@ -4,7 +4,14 @@
  * Tests form rendering, validation, submission, and type selection.
  */
 
-import { render, screen, waitFor, within } from '@testing-library/react';
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { JournalCreateForm } from '../JournalCreateForm';
@@ -664,6 +671,58 @@ describe('JournalCreateForm', () => {
           })
         );
       });
+    });
+
+    it('submits the latest abseiling type_data after a same-tick edit and submit', async () => {
+      const user = userEvent.setup();
+      const consoleErrorSpy = jest
+        .spyOn(console, 'error')
+        .mockImplementation(() => undefined);
+      mockMutateAsync.mockResolvedValueOnce({
+        data: { id: '6', type: 'journals', attributes: {} },
+      });
+
+      try {
+        renderWithClient(<JournalCreateForm />);
+
+        await user.type(
+          screen.getByLabelText(/title/i),
+          'Immediate Abseil Journal'
+        );
+        await user.click(screen.getByLabelText(/^abseiling trip$/i));
+
+        const numberOfAbseilsInput = screen.getByTestId(
+          'number-of-abseils-input'
+        );
+        const totalLengthInput = screen.getByTestId('total-length-input');
+        const submitButton = screen.getByRole('button', {
+          name: /create journal/i,
+        });
+
+        await act(async () => {
+          fireEvent.change(numberOfAbseilsInput, { target: { value: '7' } });
+          fireEvent.change(totalLengthInput, { target: { value: '210' } });
+          fireEvent.click(submitButton);
+        });
+
+        await waitFor(() => {
+          expect(mockMutateAsync).toHaveBeenCalledWith(
+            expect.objectContaining({
+              types: [JournalType.ABSEILING_TRIP],
+              type_data: expect.objectContaining({
+                [JournalType.ABSEILING_TRIP]: expect.objectContaining({
+                  number_of_abseils: 7,
+                  total_length: 210,
+                }),
+              }),
+            })
+          );
+        });
+
+        expect(consoleErrorSpy).not.toHaveBeenCalled();
+      } finally {
+        consoleErrorSpy.mockRestore();
+      }
     });
   });
 });

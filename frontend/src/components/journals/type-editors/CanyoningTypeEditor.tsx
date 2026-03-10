@@ -1,20 +1,20 @@
 'use client';
 
 import { useId, useMemo, useState } from 'react';
-import { Compass, Gauge, Map as MapIcon, Moon, Waves } from 'lucide-react';
+import { Compass, Gauge, Moon, Waves } from 'lucide-react';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
-import { cn } from '@/lib/utils';
 import type { CanyoningData } from '@/types/journals';
 import { buildCanyonFlags, getWaterGaugeLabel } from '../canyoningSummary';
-import { RouteSelector } from '@/components/routes/RouteSelector';
 import {
-  ReadOnlyTypeSummary,
   SummaryBadgeList,
   type ReadOnlyTypeSummaryItem,
 } from './ReadOnlyTypeSummary';
-import { TypeEditorActions } from './TypeEditorActions';
+import {
+  RouteBackedTypeEditorLayout,
+  buildRouteSummaryItem,
+} from './RouteBackedTypeEditorLayout';
 import { useRouteBackedTypeEditor } from './useRouteBackedTypeEditor';
 
 interface CanyoningTypeEditorProps {
@@ -79,11 +79,9 @@ function buildReadOnlySummaryItems(
   const waterGaugeSummary = getWaterGaugeLabel(data);
   const summaryItems: ReadOnlyTypeSummaryItem[] = [];
 
-  if (data.route_id) {
-    summaryItems.push({
-      label: 'Route',
-      value: routeName ?? data.route_id,
-    });
+  const routeSummaryItem = buildRouteSummaryItem(data.route_id, routeName);
+  if (routeSummaryItem) {
+    summaryItems.push(routeSummaryItem);
   }
 
   if (data.french_grade) {
@@ -165,21 +163,21 @@ export function CanyoningTypeEditor({
 
     if (value.trim() === '') {
       setGradeState(nextGradeState);
-      setEditData({ ...editData, french_grade: null });
+      setEditData(previous => ({ ...previous, french_grade: null }));
       return;
     }
 
     const normalized = normalizeFrenchCanyonGrade(value);
     if (normalized) {
       setGradeState(nextGradeState);
-      setEditData({ ...editData, french_grade: normalized });
+      setEditData(previous => ({ ...previous, french_grade: normalized }));
       return;
     }
 
     setGradeState(
       createTransientGradeState(gradeResetKey, value, FRENCH_GRADE_ERROR)
     );
-    setEditData({ ...editData, french_grade: null });
+    setEditData(previous => ({ ...previous, french_grade: null }));
   };
 
   const handleEditorCancel = () => {
@@ -189,213 +187,148 @@ export function CanyoningTypeEditor({
     handleCancel();
   };
 
-  if (!isEditing && !createMode) {
-    const summaryItems = buildReadOnlySummaryItems(
-      initialData,
-      routeName,
-      canyonFlags
-    );
-
-    if (summaryItems.length === 0) {
-      return (
-        <div className='flex items-center justify-between'>
-          <p className='text-muted-foreground text-sm'>
-            No canyoning details provided.
-          </p>
-          <TypeEditorActions
-            isEditing={false}
-            onEdit={handleEdit}
-            onSave={handleSave}
-            onCancel={handleEditorCancel}
-          />
-        </div>
-      );
-    }
-
-    return (
-      <div
-        className={cn('space-y-4 text-sm', className)}
-        data-testid={testId || 'canyoning-type-editor'}
-      >
-        <ReadOnlyTypeSummary items={summaryItems} testId='canyoning-summary' />
-        <TypeEditorActions
-          isEditing={false}
-          onEdit={handleEdit}
-          onSave={handleSave}
-          onCancel={handleEditorCancel}
-        />
-      </div>
-    );
-  }
+  const summaryItems = buildReadOnlySummaryItems(
+    initialData,
+    routeName,
+    canyonFlags
+  );
 
   return (
-    <div
-      className={cn('space-y-4', className)}
-      data-testid={testId || 'canyoning-type-editor'}
+    <RouteBackedTypeEditorLayout
+      className={className}
+      testId={testId || 'canyoning-type-editor'}
+      createMode={createMode}
+      isEditing={isEditing}
+      emptyMessage='No canyoning details provided.'
+      summaryItems={summaryItems}
+      summaryTestId='canyoning-summary'
+      routeFieldId={routeFieldId}
+      routeValue={editData.route_id}
+      onRouteChange={routeId =>
+        setEditData(previous => ({ ...previous, route_id: routeId }))
+      }
+      routePlaceholder='Select a canyon route...'
+      onEdit={handleEdit}
+      onSave={handleSave}
+      onCancel={handleEditorCancel}
     >
-      <div className='grid grid-cols-1 gap-4 md:grid-cols-2'>
-        <div className='space-y-2'>
-          <Label htmlFor={routeFieldId} className='flex items-center gap-2'>
-            <MapIcon
-              className='text-muted-foreground h-4 w-4'
-              aria-hidden='true'
-            />
-            Route
-          </Label>
-          <RouteSelector
-            id={routeFieldId}
-            value={editData.route_id ?? null}
-            onChange={routeId =>
-              setEditData({ ...editData, route_id: routeId })
-            }
-            placeholder='Select a canyon route...'
+      <div className='space-y-2'>
+        <Label htmlFor={frenchGradeFieldId} className='flex items-center gap-2'>
+          <Compass
+            className='text-muted-foreground h-4 w-4'
+            aria-hidden='true'
           />
-        </div>
-
-        <div className='space-y-2'>
-          <Label
-            htmlFor={frenchGradeFieldId}
-            className='flex items-center gap-2'
-          >
-            <Compass
-              className='text-muted-foreground h-4 w-4'
-              aria-hidden='true'
-            />
-            French Grade
-          </Label>
-          <Input
-            id={frenchGradeFieldId}
-            type='text'
-            value={currentGradeState.input}
-            onChange={e => handleFrenchGradeChange(e.target.value)}
-            placeholder='e.g. v3a2IV**'
-            aria-invalid={currentGradeState.error ? true : undefined}
-            data-testid='french-grade-input'
-          />
-          {currentGradeState.error && (
-            <p className='text-destructive text-sm'>
-              {currentGradeState.error}
-            </p>
-          )}
-        </div>
-
-        <div className='space-y-2'>
-          <Label
-            htmlFor={waterGaugeNameFieldId}
-            className='flex items-center gap-2'
-          >
-            <Gauge
-              className='text-muted-foreground h-4 w-4'
-              aria-hidden='true'
-            />
-            Water Gauge Name
-          </Label>
-          <Input
-            id={waterGaugeNameFieldId}
-            type='text'
-            value={editData.water_guage_name ?? ''}
-            onChange={e =>
-              setEditData({
-                ...editData,
-                water_guage_name: e.target.value || null,
-              })
-            }
-            placeholder='e.g. Kowmung Gauge'
-            data-testid='water-gauge-name-input'
-          />
-        </div>
-
-        <div className='space-y-2'>
-          <Label
-            htmlFor={waterGaugeLevelFieldId}
-            className='flex items-center gap-2'
-          >
-            <Gauge
-              className='text-muted-foreground h-4 w-4'
-              aria-hidden='true'
-            />
-            Water Gauge Level
-          </Label>
-          <Input
-            id={waterGaugeLevelFieldId}
-            type='number'
-            value={editData.water_guage_level ?? ''}
-            onChange={e =>
-              setEditData({
-                ...editData,
-                water_guage_level:
-                  e.target.value === ''
-                    ? null
-                    : Number.parseInt(e.target.value, 10),
-              })
-            }
-            data-testid='water-gauge-level-input'
-          />
-        </div>
-
-        <div className='flex items-center space-x-2 pt-2'>
-          <Switch
-            id={verticalFieldId}
-            checked={editData.is_vertical ?? false}
-            onCheckedChange={(checked: boolean) =>
-              setEditData({ ...editData, is_vertical: checked })
-            }
-            data-testid='vertical-switch'
-          />
-          <Label htmlFor={verticalFieldId}>Vertical</Label>
-        </div>
-
-        <div className='flex items-center space-x-2 pt-2'>
-          <Switch
-            id={nightCanyonFieldId}
-            checked={editData.is_night_canyon ?? false}
-            onCheckedChange={(checked: boolean) =>
-              setEditData({ ...editData, is_night_canyon: checked })
-            }
-            data-testid='night-canyon-switch'
-          />
-          <Label
-            htmlFor={nightCanyonFieldId}
-            className='flex items-center gap-2'
-          >
-            <Moon
-              className='text-muted-foreground h-4 w-4'
-              aria-hidden='true'
-            />
-            Night Canyon
-          </Label>
-        </div>
-
-        <div className='flex items-center space-x-2 pt-2'>
-          <Switch
-            id={whiteWaterFieldId}
-            checked={editData.is_white_water ?? false}
-            onCheckedChange={(checked: boolean) =>
-              setEditData({ ...editData, is_white_water: checked })
-            }
-            data-testid='white-water-switch'
-          />
-          <Label
-            htmlFor={whiteWaterFieldId}
-            className='flex items-center gap-2'
-          >
-            <Waves
-              className='text-muted-foreground h-4 w-4'
-              aria-hidden='true'
-            />
-            White Water
-          </Label>
-        </div>
+          French Grade
+        </Label>
+        <Input
+          id={frenchGradeFieldId}
+          type='text'
+          value={currentGradeState.input}
+          onChange={e => handleFrenchGradeChange(e.target.value)}
+          placeholder='e.g. v3a2IV**'
+          aria-invalid={currentGradeState.error ? true : undefined}
+          data-testid='french-grade-input'
+        />
+        {currentGradeState.error && (
+          <p className='text-destructive text-sm'>{currentGradeState.error}</p>
+        )}
       </div>
 
-      {!createMode && (
-        <TypeEditorActions
-          isEditing={isEditing}
-          onEdit={handleEdit}
-          onSave={handleSave}
-          onCancel={handleEditorCancel}
+      <div className='space-y-2'>
+        <Label
+          htmlFor={waterGaugeNameFieldId}
+          className='flex items-center gap-2'
+        >
+          <Gauge className='text-muted-foreground h-4 w-4' aria-hidden='true' />
+          Water Gauge Name
+        </Label>
+        <Input
+          id={waterGaugeNameFieldId}
+          type='text'
+          value={editData.water_guage_name ?? ''}
+          onChange={e =>
+            setEditData(previous => ({
+              ...previous,
+              water_guage_name: e.target.value || null,
+            }))
+          }
+          placeholder='e.g. Kowmung Gauge'
+          data-testid='water-gauge-name-input'
         />
-      )}
-    </div>
+      </div>
+
+      <div className='space-y-2'>
+        <Label
+          htmlFor={waterGaugeLevelFieldId}
+          className='flex items-center gap-2'
+        >
+          <Gauge className='text-muted-foreground h-4 w-4' aria-hidden='true' />
+          Water Gauge Level
+        </Label>
+        <Input
+          id={waterGaugeLevelFieldId}
+          type='number'
+          value={editData.water_guage_level ?? ''}
+          onChange={e =>
+            setEditData(previous => ({
+              ...previous,
+              water_guage_level:
+                e.target.value === ''
+                  ? null
+                  : Number.parseInt(e.target.value, 10),
+            }))
+          }
+          data-testid='water-gauge-level-input'
+        />
+      </div>
+
+      <div className='flex items-center space-x-2 pt-2'>
+        <Switch
+          id={verticalFieldId}
+          checked={editData.is_vertical ?? false}
+          onCheckedChange={(checked: boolean) =>
+            setEditData(previous => ({ ...previous, is_vertical: checked }))
+          }
+          data-testid='vertical-switch'
+        />
+        <Label htmlFor={verticalFieldId}>Vertical</Label>
+      </div>
+
+      <div className='flex items-center space-x-2 pt-2'>
+        <Switch
+          id={nightCanyonFieldId}
+          checked={editData.is_night_canyon ?? false}
+          onCheckedChange={(checked: boolean) =>
+            setEditData(previous => ({
+              ...previous,
+              is_night_canyon: checked,
+            }))
+          }
+          data-testid='night-canyon-switch'
+        />
+        <Label htmlFor={nightCanyonFieldId} className='flex items-center gap-2'>
+          <Moon className='text-muted-foreground h-4 w-4' aria-hidden='true' />
+          Night Canyon
+        </Label>
+      </div>
+
+      <div className='flex items-center space-x-2 pt-2'>
+        <Switch
+          id={whiteWaterFieldId}
+          checked={editData.is_white_water ?? false}
+          onCheckedChange={(checked: boolean) =>
+            setEditData(previous => ({
+              ...previous,
+              is_white_water: checked,
+            }))
+          }
+          data-testid='white-water-switch'
+        />
+        <Label htmlFor={whiteWaterFieldId} className='flex items-center gap-2'>
+          <Waves className='text-muted-foreground h-4 w-4' aria-hidden='true' />
+          White Water
+        </Label>
+      </div>
+    </RouteBackedTypeEditorLayout>
   );
 }

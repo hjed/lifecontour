@@ -172,7 +172,7 @@ export function BushwalkingTypeEditor({
             id={routeFieldId}
             value={editData.route_id ?? null}
             onChange={routeId =>
-              setEditData({ ...editData, route_id: routeId })
+              setEditData(previous => ({ ...previous, route_id: routeId }))
             }
             placeholder='Select a route...'
           />
@@ -193,10 +193,10 @@ export function BushwalkingTypeEditor({
           <Select
             value={editData.track_grading ?? ''}
             onValueChange={value =>
-              setEditData({
-                ...editData,
+              setEditData(previous => ({
+                ...previous,
                 track_grading: value === 'none' ? null : value,
-              })
+              }))
             }
           >
             <SelectTrigger id={trackGradingFieldId}>

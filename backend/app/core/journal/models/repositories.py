@@ -1053,7 +1053,11 @@ class RouteRepository(ABC):
 
     @abstractmethod
     async def get_all(
-        self, user_id: str, limit: int = 100, offset: int = 0
+        self,
+        user_id: str,
+        limit: int = 100,
+        offset: int = 0,
+        name: str | None = None,
     ) -> list[Route]:
         """
         Get all routes for a user with pagination.
@@ -1062,6 +1066,7 @@ class RouteRepository(ABC):
             user_id: The user ID to filter by
             limit: Maximum number of routes to return
             offset: Number of routes to skip
+            name: Optional case-insensitive partial route name filter
 
         Returns:
             List of routes
@@ -1069,12 +1074,13 @@ class RouteRepository(ABC):
         pass
 
     @abstractmethod
-    async def get_count(self, user_id: str) -> int:
+    async def get_count(self, user_id: str, name: str | None = None) -> int:
         """
         Get total count of routes for a user.
 
         Args:
             user_id: The user ID to filter by
+            name: Optional case-insensitive partial route name filter
 
         Returns:
             Total number of routes for the user
