@@ -227,9 +227,6 @@ class RouteService:
         Returns:
             List of routes
         """
-        if name is None:
-            return await self.route_repo.get_all(user_id, limit, offset)
-
         return await self.route_repo.get_all(user_id, limit, offset, name)
 
     async def get_route_count(self, user_id: str, name: str | None = None) -> int:
@@ -243,7 +240,4 @@ class RouteService:
         Returns:
             Total count of routes
         """
-        if name is None:
-            return await self.route_repo.get_count(user_id)
-
         return await self.route_repo.get_count(user_id, name)

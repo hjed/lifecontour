@@ -283,6 +283,39 @@ class TestRouteEndpoints:
         assert data["meta"]["page_count"] == 1
         assert "name=grand" in data["links"]["self"]
 
+    async def test_list_routes_encodes_name_filter_in_pagination_links(
+        self, integration_api_client
+    ):
+        """Test pagination links URL-encode special characters in name filters."""
+        await create_route(integration_api_client, "Grand & Blue Canyon")
+        await create_route(integration_api_client, "Grand & Blue Mountains")
+        await create_route(integration_api_client, "Grand & Blue Ridge")
+
+        response = await integration_api_client.get(
+            "/api/routes", params={"name": "Grand & Blue", "limit": 1, "page": 2}
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+
+        assert data["meta"]["total_count"] == 3
+        assert data["meta"]["page_count"] == 3
+        assert data["links"]["self"] == (
+            "http://testserver/api/routes?page=2&limit=1&name=Grand+%26+Blue"
+        )
+        assert data["links"]["first"] == (
+            "http://testserver/api/routes?page=1&limit=1&name=Grand+%26+Blue"
+        )
+        assert data["links"]["last"] == (
+            "http://testserver/api/routes?page=3&limit=1&name=Grand+%26+Blue"
+        )
+        assert data["links"]["prev"] == (
+            "http://testserver/api/routes?page=1&limit=1&name=Grand+%26+Blue"
+        )
+        assert data["links"]["next"] == (
+            "http://testserver/api/routes?page=3&limit=1&name=Grand+%26+Blue"
+        )
+
     async def test_update_route(self, integration_api_client):
         """Test updating a route."""
         # Create a route

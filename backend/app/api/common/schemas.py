@@ -6,6 +6,7 @@ for consistent API responses across all domains.
 """
 
 from typing import Any, Generic, TypeVar
+from urllib.parse import urlencode
 from uuid import uuid4
 
 from pydantic import BaseModel, Field
@@ -180,15 +181,14 @@ def create_pagination_links(
 
     def build_url(target_page: int) -> str:
         """Build URL with page, limit, and additional parameters."""
-        url = f"{base_url}?page={target_page}&limit={limit}"
+        query_params: dict[str, int | str | list[str]] = {
+            "page": target_page,
+            "limit": limit,
+        }
         if additional_params:
-            for key, value in additional_params.items():
-                if isinstance(value, list):
-                    for item in value:
-                        url += f"&{key}={item}"
-                else:
-                    url += f"&{key}={value}"
-        return url
+            query_params.update(additional_params)
+
+        return f"{base_url}?{urlencode(query_params, doseq=True)}"
 
     links = JsonApiLinks(
         self=build_url(page),

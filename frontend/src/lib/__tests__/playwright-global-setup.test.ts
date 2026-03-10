@@ -97,5 +97,21 @@ describe('runGlobalSetup', () => {
       'Ensuring backend database schema is up to date',
       '/workspace'
     );
+    expect(waitForService).toHaveBeenNthCalledWith(
+      1,
+      'http://localhost:8001/api/health/ready'
+    );
+    expect(waitForService).toHaveBeenNthCalledWith(
+      2,
+      'http://localhost:8001/api/health/ready'
+    );
+    expect(waitForService).toHaveBeenNthCalledWith(
+      3,
+      'http://localhost:4447/health/ready'
+    );
+    expect(waitForService).toHaveBeenNthCalledWith(
+      4,
+      'http://localhost:7701/health'
+    );
   });
 });

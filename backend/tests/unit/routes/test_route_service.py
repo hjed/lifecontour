@@ -240,7 +240,7 @@ class TestRouteServiceList:
 
         # Assert
         assert result == routes
-        mock_route_repo.get_all.assert_called_once_with(user_id, 10, 0)
+        mock_route_repo.get_all.assert_called_once_with(user_id, 10, 0, None)
 
     @pytest.mark.asyncio
     async def test_get_routes_for_user_with_name_filter(
@@ -272,7 +272,7 @@ class TestRouteServiceList:
 
         # Assert
         assert result == 5
-        mock_route_repo.get_count.assert_called_once_with(user_id)
+        mock_route_repo.get_count.assert_called_once_with(user_id, None)
 
     @pytest.mark.asyncio
     async def test_get_route_count_with_name_filter(
