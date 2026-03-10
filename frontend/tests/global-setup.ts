@@ -31,6 +31,8 @@ type GlobalSetupDependencies = {
   removeExistingContainers: typeof removeExistingContainers;
   execCommand: typeof execCommand;
   printServiceLogs: typeof printServiceLogs;
+  hasExpectedBackendConfig: typeof hasExpectedBackendConfig;
+  hasExpectedOAuthClientRedirect: typeof hasExpectedOAuthClientRedirect;
 };
 
 function getProjectRoot(currentWorkingDirectory: string): string {
@@ -254,7 +256,6 @@ function areServicesRunning(
   }
 }
 
-<<<<<<< HEAD
 function createDefaultDependencies(): GlobalSetupDependencies {
   return {
     env: process.env,
@@ -267,111 +268,122 @@ function createDefaultDependencies(): GlobalSetupDependencies {
     removeExistingContainers,
     execCommand,
     printServiceLogs,
+    hasExpectedBackendConfig,
+    hasExpectedOAuthClientRedirect,
   };
 }
-=======
+
 function restartDockerServices(
+  dependencies: GlobalSetupDependencies,
   dockerComposeCmd: string,
+  projectRoot: string,
   dockerTestEnv: NodeJS.ProcessEnv
 ): void {
-  // Force-remove any pre-existing containers whose names overlap with the
-  // test profile (e.g. leftover containers from the dev profile).
-  removeExistingContainers();
+  dependencies.removeExistingContainers();
 
-  // Stop any existing containers to ensure clean state
-  execCommand(
+  dependencies.execCommand(
     `${dockerComposeCmd} --profile test --env-file .env.test down --remove-orphans`,
     'Cleaning up existing containers',
+    projectRoot,
     { env: dockerTestEnv }
   );
 
-  // Start Docker services (docker-compose v1 doesn't support --wait)
-  // Note: This may exit with error code if init containers exit after completing,
-  // but we ignore that since we verify service health separately
-  execCommand(
+  dependencies.execCommand(
     `${dockerComposeCmd} --profile test --env-file .env.test up -d --build`,
     'Starting Docker services',
+    projectRoot,
     { env: dockerTestEnv, ignoreError: true }
   );
 }
 
 async function ensureLocalDockerServices(
+  dependencies: GlobalSetupDependencies,
   dockerComposeCmd: string,
+  projectRoot: string,
   dockerTestEnv: NodeJS.ProcessEnv
 ): Promise<void> {
-  const servicesRunning = areServicesRunning();
+  const servicesRunning = dependencies.areServicesRunning(
+    dockerComposeCmd,
+    projectRoot
+  );
+  const backendConfigMatches = servicesRunning
+    ? dependencies.hasExpectedBackendConfig(FRONTEND_TEST_URL, projectRoot)
+    : false;
+  const oauthClientMatches = servicesRunning
+    ? await dependencies.hasExpectedOAuthClientRedirect(
+        FRONTEND_TEST_CALLBACK_URL
+      )
+    : false;
 
-  if (!servicesRunning) {
-    restartDockerServices(dockerComposeCmd, dockerTestEnv);
-    console.log('🔍 Verifying service health...');
+  if (servicesRunning && backendConfigMatches && oauthClientMatches) {
+    dependencies.logger.log(
+      '📋 Docker services already running, skipping startup...'
+    );
+    dependencies.logger.log('🔍 Verifying service health...');
     return;
   }
 
-  const backendConfigMatches = hasExpectedBackendConfig(FRONTEND_TEST_URL);
-  const oauthClientMatches = await hasExpectedOAuthClientRedirect(
-    FRONTEND_TEST_CALLBACK_URL
-  );
-
-  if (backendConfigMatches && oauthClientMatches) {
-    console.log('📋 Docker services already running, skipping startup...');
-    console.log('🔍 Verifying service health...');
-    return;
+  if (servicesRunning) {
+    dependencies.logger.log(
+      '♻️ Docker services are running with stale frontend/OAuth config, restarting them...'
+    );
   }
 
-  console.log(
-    '♻️ Docker services are running with stale frontend/OAuth config, restarting them...'
+  restartDockerServices(
+    dependencies,
+    dockerComposeCmd,
+    projectRoot,
+    dockerTestEnv
   );
-  restartDockerServices(dockerComposeCmd, dockerTestEnv);
-  console.log('🔍 Verifying service health...');
+  dependencies.logger.log('🔍 Verifying service health...');
 }
 
-async function verifyServiceHealth(): Promise<void> {
-  // Wait for backend API readiness
-  console.log('🔍 Checking backend API readiness...');
-  await waitForService('http://localhost:8001/api/health/ready');
+async function verifyCoreServiceHealth(
+  dependencies: GlobalSetupDependencies,
+  dockerComposeCmd: string,
+  projectRoot: string
+): Promise<void> {
+  dependencies.logger.log('🔍 Checking backend API readiness...');
+  await dependencies.waitForService('http://localhost:8001/api/health/ready');
 
-  // Wait for OAuth provider (check admin health endpoint)
-  console.log('🔍 Checking OAuth provider health...');
-  await waitForService('http://localhost:4447/health/ready');
+  dependencies.execCommand(
+    `${dockerComposeCmd} --profile test exec -T backend alembic upgrade head`,
+    'Ensuring backend database schema is up to date',
+    projectRoot
+  );
 
-  // Wait for MeiliSearch
-  console.log('🔍 Checking MeiliSearch health...');
-  await waitForService('http://localhost:7701/health');
+  dependencies.logger.log('🔍 Re-checking backend API readiness...');
+  await dependencies.waitForService('http://localhost:8001/api/health/ready');
 
-  console.log('✅ All services are ready!');
+  dependencies.logger.log('🔍 Checking OAuth provider health...');
+  await dependencies.waitForService('http://localhost:4447/health/ready');
 }
 
 function handleGlobalSetupFailure(
+  dependencies: GlobalSetupDependencies,
   error: unknown,
+  dockerComposeCmd: string,
   projectRoot: string
 ): never | void {
-  console.error('❌ Global setup failed:', error);
+  dependencies.logger.error('❌ Global setup failed:', error);
 
-  // In CI, if Docker fails, we can fall back to mock mode
-  if (process.env.CI) {
-    console.log('🧪 Docker failed in CI, enabling mock mode for tests');
-    process.env.USE_MOCK_BACKEND = 'true';
+  if (dependencies.env.CI) {
+    dependencies.logger.log(
+      '🧪 Docker failed in CI, enabling mock mode for tests'
+    );
+    dependencies.env.USE_MOCK_BACKEND = 'true';
     return;
   }
 
-  // Show service logs for debugging
   try {
-    console.log('📋 Docker service logs:');
-    const dockerComposeCmd = getDockerComposeCommand();
-    execSync(`${dockerComposeCmd} --profile test logs --tail=50`, {
-      stdio: 'inherit',
-      cwd: projectRoot,
-    });
+    dependencies.logger.log('📋 Docker service logs:');
+    dependencies.printServiceLogs(dockerComposeCmd, projectRoot);
   } catch (logError) {
-    console.error('Failed to retrieve logs:', logError);
+    dependencies.logger.error('Failed to retrieve logs:', logError);
   }
 
   throw error;
 }
-
-async function globalSetup(_config: FullConfig) {
-  console.log('🚀 Starting Playwright Global Setup...');
->>>>>>> 7a7458f20 (Address actionable Sonar findings)
 
 export async function runGlobalSetup(
   dependencies: GlobalSetupDependencies = createDefaultDependencies()
@@ -403,69 +415,15 @@ export async function runGlobalSetup(
       );
       dependencies.logger.log('🔍 Verifying service health...');
     } else {
-<<<<<<< HEAD
-      const servicesRunning = dependencies.areServicesRunning(
+      await ensureLocalDockerServices(
+        dependencies,
         dockerComposeCmd,
-        projectRoot
+        projectRoot,
+        dockerTestEnv
       );
-      const backendConfigMatches = servicesRunning
-        ? hasExpectedBackendConfig(FRONTEND_TEST_URL, projectRoot)
-        : false;
-      const oauthClientMatches = servicesRunning
-        ? await hasExpectedOAuthClientRedirect(FRONTEND_TEST_CALLBACK_URL)
-        : false;
-
-      if (servicesRunning && backendConfigMatches && oauthClientMatches) {
-        dependencies.logger.log(
-          '📋 Docker services already running, skipping startup...'
-        );
-      } else {
-        if (servicesRunning) {
-          dependencies.logger.log(
-            '♻️ Docker services are running with stale frontend/OAuth config, restarting them...'
-          );
-        }
-
-        dependencies.removeExistingContainers();
-
-        dependencies.execCommand(
-          `${dockerComposeCmd} --profile test --env-file .env.test down --remove-orphans`,
-          'Cleaning up existing containers',
-          projectRoot,
-          { env: dockerTestEnv }
-        );
-
-        dependencies.execCommand(
-          `${dockerComposeCmd} --profile test --env-file .env.test up -d --build`,
-          'Starting Docker services',
-          projectRoot,
-          { env: dockerTestEnv, ignoreError: true }
-        );
-      }
-
-      dependencies.logger.log('🔍 Verifying service health...');
     }
 
-    dependencies.logger.log('🔍 Checking backend API readiness...');
-    await dependencies.waitForService('http://localhost:8001/api/health/ready');
-
-    dependencies.execCommand(
-      `${dockerComposeCmd} --profile test exec -T backend alembic upgrade head`,
-      'Ensuring backend database schema is up to date',
-      projectRoot
-    );
-
-    dependencies.logger.log('🔍 Re-checking backend API readiness...');
-    await dependencies.waitForService('http://localhost:8001/api/health/ready');
-
-    dependencies.logger.log('🔍 Checking OAuth provider health...');
-    await dependencies.waitForService('http://localhost:4447/health/ready');
-=======
-      await ensureLocalDockerServices(dockerComposeCmd, dockerTestEnv);
-    }
-
-    await verifyServiceHealth();
->>>>>>> 7a7458f20 (Address actionable Sonar findings)
+    await verifyCoreServiceHealth(dependencies, dockerComposeCmd, projectRoot);
 
     dependencies.logger.log('🔍 Checking MeiliSearch health...');
     await dependencies.waitForService('http://localhost:7701/health');
@@ -473,28 +431,12 @@ export async function runGlobalSetup(
     dependencies.logger.log('✅ All services are ready!');
     dependencies.logger.log('🎉 Global setup completed successfully!');
   } catch (error) {
-<<<<<<< HEAD
-    dependencies.logger.error('❌ Global setup failed:', error);
-
-    if (dependencies.env.CI) {
-      dependencies.logger.log(
-        '🧪 Docker failed in CI, enabling mock mode for tests'
-      );
-      dependencies.env.USE_MOCK_BACKEND = 'true';
-      return;
-    }
-
-    try {
-      dependencies.logger.log('📋 Docker service logs:');
-      dependencies.printServiceLogs(dockerComposeCmd, projectRoot);
-    } catch (logError) {
-      dependencies.logger.error('Failed to retrieve logs:', logError);
-    }
-
-    throw error;
-=======
-    return handleGlobalSetupFailure(error, projectRoot);
->>>>>>> 7a7458f20 (Address actionable Sonar findings)
+    return handleGlobalSetupFailure(
+      dependencies,
+      error,
+      dockerComposeCmd,
+      projectRoot
+    );
   }
 }
 
