@@ -11,6 +11,7 @@ import { test, expect } from './fixtures';
 import {
   FRONTEND_TEST_CALLBACK_URL,
   FRONTEND_TEST_LOGIN_URL,
+  FRONTEND_TEST_URL,
 } from './utils/frontend-test-config';
 
 test.describe('OAuth Docker Integration', () => {
@@ -74,6 +75,10 @@ test.describe('OAuth Docker Integration', () => {
         // Verify client configuration
         expect(client.client_id).toBe('test-client-id');
         expect(client.redirect_uris).toContain(FRONTEND_TEST_CALLBACK_URL);
+        expect(client.post_logout_redirect_uris).toContain(
+          `${FRONTEND_TEST_URL}/`
+        );
+        expect(client.client_uri).toBe(FRONTEND_TEST_URL);
         expect(client.grant_types).toContain('authorization_code');
         expect(client.response_types).toContain('code');
 
