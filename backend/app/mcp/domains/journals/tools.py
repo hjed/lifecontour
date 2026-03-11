@@ -7,7 +7,7 @@ Each tool is designed to return AI-friendly, contextual information.
 
 import dataclasses
 import json
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, date, datetime
 from datetime import time as dt_time
 from typing import Annotated, Any
 from uuid import UUID
@@ -567,17 +567,152 @@ async def _count_activity_rows(
     return int(count_value) if count_value is not None else 0
 
 
-def _get_period_start(period_value: datetime, interval: str) -> date:
-    """Get the bucket start date for the requested trend interval."""
-    if interval == "day":
-        return period_value.date()
-    if interval == "week":
-        return (period_value - timedelta(days=period_value.weekday())).date()
-    if interval == "month":
-        return date(period_value.year, period_value.month, 1)
-    if interval == "year":
-        return date(period_value.year, 1, 1)
-    raise ValueError("interval must be one of: day, week, month, year")
+async def _fetch_activity_overall_stats_row(
+    db_connection: AsyncConnection,
+    user_id: str,
+    *,
+    activity_type: str | None = None,
+    start_date: str | None = None,
+    end_date: str | None = None,
+) -> Any:
+    """Fetch overall activity aggregate totals without materializing activity rows."""
+    params, where_clauses = _build_activity_query_filters(
+        user_id,
+        activity_type=activity_type,
+        start_date=start_date,
+        end_date=end_date,
+    )
+    query_sql = _build_activity_rows_query_sql(
+        where_clauses,
+        select_sql="""
+        SELECT
+            COUNT(*) AS total_activities,
+            COALESCE(SUM(distance), 0) AS total_distance,
+            COALESCE(SUM(duration), 0) AS total_duration,
+            COALESCE(SUM(elevation_gain), 0) AS total_elevation_gain,
+            COALESCE(SUM(calories), 0) AS total_calories
+        """,
+        include_ordering=False,
+    )
+
+    result = await db_connection.execute(text(query_sql), params)
+    return result.fetchone()
+
+
+async def _fetch_activity_type_stats_rows(
+    db_connection: AsyncConnection,
+    user_id: str,
+    *,
+    activity_type: str | None = None,
+    start_date: str | None = None,
+    end_date: str | None = None,
+) -> list[Any]:
+    """Fetch grouped activity-type aggregates in SQL."""
+    params, where_clauses = _build_activity_query_filters(
+        user_id,
+        activity_type=activity_type,
+        start_date=start_date,
+        end_date=end_date,
+    )
+    query_sql = _build_activity_rows_query_sql(
+        where_clauses,
+        select_sql="""
+        SELECT
+            activity_type,
+            COUNT(*) AS count,
+            COALESCE(SUM(distance), 0) AS total_distance,
+            COALESCE(SUM(duration), 0) AS total_duration,
+            COALESCE(SUM(elevation_gain), 0) AS total_elevation_gain,
+            COALESCE(SUM(calories), 0) AS total_calories
+        """,
+        include_ordering=False,
+    )
+    query_sql += """
+        GROUP BY activity_type
+        ORDER BY activity_type
+    """
+
+    result = await db_connection.execute(text(query_sql), params)
+    return list(result.fetchall())
+
+
+async def _fetch_activity_personal_record_row(
+    db_connection: AsyncConnection,
+    user_id: str,
+    *,
+    metric_name: str,
+    activity_type: str | None = None,
+    start_date: str | None = None,
+    end_date: str | None = None,
+) -> Any:
+    """Fetch the top personal-record row for a metric in SQL."""
+    if metric_name not in {"distance", "duration", "elevation_gain", "calories"}:
+        raise ValueError(f"Unsupported activity metric '{metric_name}'")
+
+    params, where_clauses = _build_activity_query_filters(
+        user_id,
+        activity_type=activity_type,
+        start_date=start_date,
+        end_date=end_date,
+    )
+    query_sql = _build_activity_rows_query_sql(
+        where_clauses,
+        select_sql=f"""
+        SELECT
+            id AS journal_id,
+            title AS journal_title,
+            activity_type,
+            {metric_name} AS metric_value,
+            event_date_range_start,
+            created_at
+        """,
+        include_ordering=False,
+    )
+    query_sql += f"""
+        ORDER BY {metric_name} DESC, event_date_range_start DESC, created_at DESC
+        LIMIT 1
+    """
+
+    result = await db_connection.execute(text(query_sql), params)
+    return result.fetchone()
+
+
+async def _fetch_activity_trend_rows(
+    db_connection: AsyncConnection,
+    user_id: str,
+    *,
+    interval: str,
+    activity_type: str | None = None,
+    start_date: str | None = None,
+    end_date: str | None = None,
+) -> list[Any]:
+    """Fetch time-bucketed activity aggregates in SQL."""
+    params, where_clauses = _build_activity_query_filters(
+        user_id,
+        activity_type=activity_type,
+        start_date=start_date,
+        end_date=end_date,
+    )
+    params["interval_unit"] = interval
+    query_sql = _build_activity_rows_query_sql(
+        where_clauses,
+        select_sql="""
+        SELECT
+            DATE_TRUNC(:interval_unit, event_date_range_start AT TIME ZONE 'UTC')::date AS period_start,
+            COUNT(*) AS activity_count,
+            COALESCE(SUM(distance), 0) AS total_distance,
+            COALESCE(SUM(duration), 0) AS total_duration,
+            COALESCE(SUM(elevation_gain), 0) AS total_elevation_gain
+        """,
+        include_ordering=False,
+    )
+    query_sql += """
+        GROUP BY period_start
+        ORDER BY period_start
+    """
+
+    result = await db_connection.execute(text(query_sql), params)
+    return list(result.fetchall())
 
 
 async def _fetch_route_history_rows(
@@ -2274,7 +2409,14 @@ def register_journal_tools(mcp: FastMCP[None]) -> None:
     ) -> str:
         """Aggregate activity totals, breakdowns, and personal records."""
         user_id = get_current_user_id()
-        activity_rows = await _fetch_activity_rows(
+        overall_stats_row = await _fetch_activity_overall_stats_row(
+            db_connection,
+            user_id,
+            activity_type=activity_type,
+            start_date=start_date,
+            end_date=end_date,
+        )
+        activity_type_rows = await _fetch_activity_type_stats_rows(
             db_connection,
             user_id,
             activity_type=activity_type,
@@ -2283,79 +2425,62 @@ def register_journal_tools(mcp: FastMCP[None]) -> None:
         )
 
         overall_totals = ActivityTotals(
-            distance=sum(activity_row.distance for activity_row in activity_rows),
-            duration=sum(activity_row.duration for activity_row in activity_rows),
-            elevation_gain=sum(
-                activity_row.elevation_gain for activity_row in activity_rows
+            distance=int(getattr(overall_stats_row, "total_distance", 0) or 0),
+            duration=int(getattr(overall_stats_row, "total_duration", 0) or 0),
+            elevation_gain=int(
+                getattr(overall_stats_row, "total_elevation_gain", 0) or 0
             ),
-            calories=sum(activity_row.calories for activity_row in activity_rows),
+            calories=int(getattr(overall_stats_row, "total_calories", 0) or 0),
         )
-
-        stats_by_type: dict[str, dict[str, int]] = {}
-        for activity_row in activity_rows:
-            type_totals = stats_by_type.setdefault(
-                activity_row.activity_type,
-                {
-                    "count": 0,
-                    "total_distance": 0,
-                    "total_duration": 0,
-                    "total_elevation_gain": 0,
-                    "total_calories": 0,
-                },
-            )
-            type_totals["count"] += 1
-            type_totals["total_distance"] += activity_row.distance
-            type_totals["total_duration"] += activity_row.duration
-            type_totals["total_elevation_gain"] += activity_row.elevation_gain
-            type_totals["total_calories"] += activity_row.calories
 
         activity_type_stats = [
             ActivityTypeStats(
-                activity_type=resolved_type,
-                count=totals["count"],
-                total_distance=totals["total_distance"],
-                total_duration=totals["total_duration"],
-                total_elevation_gain=totals["total_elevation_gain"],
-                total_calories=totals["total_calories"],
+                activity_type=row.activity_type,
+                count=int(row.count or 0),
+                total_distance=int(row.total_distance or 0),
+                total_duration=int(row.total_duration or 0),
+                total_elevation_gain=int(row.total_elevation_gain or 0),
+                total_calories=int(row.total_calories or 0),
             )
-            for resolved_type, totals in sorted(stats_by_type.items())
+            for row in activity_type_rows
         ]
 
-        def build_personal_record(
-            rows: list[_ActivityJournalRow],
+        async def build_personal_record(
             metric_name: str,
         ) -> ActivityPersonalRecord | None:
-            if not rows:
-                return None
-            best_row = max(
-                rows, key=lambda activity_row: getattr(activity_row, metric_name)
+            record_row = await _fetch_activity_personal_record_row(
+                db_connection,
+                user_id,
+                metric_name=metric_name,
+                activity_type=activity_type,
+                start_date=start_date,
+                end_date=end_date,
             )
-            journal_id = best_row.journal.id
-            if journal_id is None:
+            if record_row is None:
                 return None
+
             return ActivityPersonalRecord(
-                activity_type=best_row.activity_type,
-                journal_id=journal_id,
-                journal_title=best_row.journal.title,
-                value=getattr(best_row, metric_name),
+                activity_type=record_row.activity_type,
+                journal_id=int(record_row.journal_id),
+                journal_title=record_row.journal_title,
+                value=int(record_row.metric_value or 0),
             )
 
         personal_records = {
-            "longest_distance": build_personal_record(activity_rows, "distance"),
-            "longest_duration": build_personal_record(activity_rows, "duration"),
-            "highest_elevation_gain": build_personal_record(
-                activity_rows, "elevation_gain"
-            ),
-            "most_calories": build_personal_record(activity_rows, "calories"),
+            "longest_distance": await build_personal_record("distance"),
+            "longest_duration": await build_personal_record("duration"),
+            "highest_elevation_gain": await build_personal_record("elevation_gain"),
+            "most_calories": await build_personal_record("calories"),
         }
+        total_activities = int(getattr(overall_stats_row, "total_activities", 0) or 0)
 
         response = ActivityStatsResponse(
-            total_activities=len(activity_rows),
+            total_activities=total_activities,
             overall_totals=overall_totals,
             activity_types=activity_type_stats,
             personal_records=personal_records,
             summary=(
-                f"Analysed {len(activity_rows)} activity journal(s) across "
+                f"Analysed {total_activities} activity journal(s) across "
                 f"{len(activity_type_stats)} activity type(s)"
             ),
         )
@@ -2391,51 +2516,33 @@ def register_journal_tools(mcp: FastMCP[None]) -> None:
             raise ValueError("interval must be one of: day, week, month, year")
 
         user_id = get_current_user_id()
-        activity_rows = await _fetch_activity_rows(
+        trend_rows = await _fetch_activity_trend_rows(
             db_connection,
             user_id,
+            interval=normalized_interval,
             activity_type=activity_type,
             start_date=start_date,
             end_date=end_date,
         )
 
-        period_buckets: dict[str, dict[str, int]] = {}
-        for activity_row in activity_rows:
-            period_start = _get_period_start(
-                activity_row.journal.event_date_range.start,
-                normalized_interval,
-            ).isoformat()
-            bucket = period_buckets.setdefault(
-                period_start,
-                {
-                    "activity_count": 0,
-                    "total_distance": 0,
-                    "total_duration": 0,
-                    "total_elevation_gain": 0,
-                },
-            )
-            bucket["activity_count"] += 1
-            bucket["total_distance"] += activity_row.distance
-            bucket["total_duration"] += activity_row.duration
-            bucket["total_elevation_gain"] += activity_row.elevation_gain
-
         periods = [
             ActivityTrendPeriod(
-                period_start=period_start,
-                activity_count=values["activity_count"],
-                total_distance=values["total_distance"],
-                total_duration=values["total_duration"],
-                total_elevation_gain=values["total_elevation_gain"],
+                period_start=row.period_start.isoformat(),
+                activity_count=int(row.activity_count or 0),
+                total_distance=int(row.total_distance or 0),
+                total_duration=int(row.total_duration or 0),
+                total_elevation_gain=int(row.total_elevation_gain or 0),
             )
-            for period_start, values in sorted(period_buckets.items())
+            for row in trend_rows
         ]
+        total_activities = sum(period.activity_count for period in periods)
 
         response = ActivityTrendsResponse(
             interval=normalized_interval,
-            total_activities=len(activity_rows),
+            total_activities=total_activities,
             periods=periods,
             summary=(
-                f"Analysed {len(activity_rows)} activity journal(s) across "
+                f"Analysed {total_activities} activity journal(s) across "
                 f"{len(periods)} {normalized_interval} bucket(s)"
             ),
         )

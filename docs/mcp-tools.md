@@ -372,7 +372,7 @@ Searches fitness and outdoor activity journals with activity-specific filtering.
 
 **Parameters:**
 - `query` (string, optional): Search query for journal title/content
-- `activity_type` (string, optional): Effective activity type filter such as `fitness`, `jogging`, `bushwalking`, `kayaking`, `canyoning`, `climbing`, or `cross_country_skiing`
+- `activity_type` (string, optional): Effective activity type filter. Accepted values are `fitness`, `outdoor_activity`, `jogging`, `bushwalking`, `abseiling_trip`, `climbing`, `canyoning`, `kayaking`, and `cross_country_skiing`
 - `start_date` (string, optional): ISO date/datetime lower bound for the journal event range
 - `end_date` (string, optional): ISO date/datetime upper bound for the journal event range
 - `limit` (integer, optional): Maximum number of results (default: 20)
