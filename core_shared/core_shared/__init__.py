@@ -43,13 +43,24 @@ from core_shared.metrics import (
     sync_errors,
     sync_items_processed,
 )
-from core_shared.models import Base, ExternalReference, SyncMetadata, SyncStatus
+from core_shared.models import (
+    Base,
+    ExternalEventLinkSyncCapability,
+    ExternalEventLinkSyncStatus,
+    ExternalReference,
+    JournalExternalEventLink,
+    SyncMetadata,
+    SyncStatus,
+)
 
 __all__ = [
     "Base",
     "SyncMetadata",
     "ExternalReference",
     "SyncStatus",
+    "JournalExternalEventLink",
+    "ExternalEventLinkSyncCapability",
+    "ExternalEventLinkSyncStatus",
     "create_async_engine_from_url",
     "create_session_factory",
     "BaseIntegrationService",

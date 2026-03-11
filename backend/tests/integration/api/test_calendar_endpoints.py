@@ -2,6 +2,7 @@
 
 import pytest
 import pytest_asyncio
+from sqlalchemy import text
 
 
 @pytest.mark.integration
@@ -299,6 +300,86 @@ class TestCalendarEndpoints:
         )
         assert delete_response.status_code == 409
 
+        error_data = delete_response.json()
+        assert "errors" in error_data
+        assert "used by" in error_data["errors"][0]["detail"].lower()
+
+    async def test_delete_calendar_in_use_by_secondary_link_returns_409(
+        self,
+        integration_api_client,
+        async_connection,
+    ):
+        """Deleting a secondarily linked calendar should also be blocked."""
+        primary_calendar_response = await integration_api_client.post(
+            "/api/calendars",
+            json={
+                "data": {
+                    "type": "calendars",
+                    "attributes": {"name": "Primary Calendar", "color": "#3B82F6"},
+                }
+            },
+        )
+        primary_calendar_id = primary_calendar_response.json()["data"]["id"]
+
+        secondary_calendar_response = await integration_api_client.post(
+            "/api/calendars",
+            json={
+                "data": {
+                    "type": "calendars",
+                    "attributes": {"name": "Secondary Calendar", "color": "#22C55E"},
+                }
+            },
+        )
+        secondary_calendar_id = secondary_calendar_response.json()["data"]["id"]
+
+        journal_response = await integration_api_client.post(
+            "/api/journals",
+            json={
+                "data": {
+                    "type": "journals",
+                    "attributes": {
+                        "title": "Linked Meeting",
+                        "content": "Calendar link foundation",
+                        "event_date_range": {
+                            "start": "2024-01-15T00:00:00Z",
+                            "end": "2024-01-15T00:00:00Z",
+                        },
+                        "types": ["EVENT"],
+                        "type_data": {"EVENT": {"calendar_id": primary_calendar_id}},
+                    },
+                }
+            },
+        )
+        journal_id = int(journal_response.json()["data"]["id"])
+
+        await async_connection.execute(
+            text(
+                """
+                INSERT INTO journal_external_event_links (
+                    journal_id, calendar_id, external_event_id,
+                    external_version, sync_capability, sync_status
+                )
+                VALUES (
+                    :journal_id, :calendar_id, :external_event_id,
+                    :external_version, :sync_capability, :sync_status
+                )
+                """
+            ),
+            {
+                "journal_id": journal_id,
+                "calendar_id": secondary_calendar_id,
+                "external_event_id": "secondary-event-1",
+                "external_version": "etag-2",
+                "sync_capability": "bidirectional",
+                "sync_status": "synced",
+            },
+        )
+
+        delete_response = await integration_api_client.delete(
+            f"/api/calendars/{secondary_calendar_id}"
+        )
+
+        assert delete_response.status_code == 409
         error_data = delete_response.json()
         assert "errors" in error_data
         assert "used by" in error_data["errors"][0]["detail"].lower()

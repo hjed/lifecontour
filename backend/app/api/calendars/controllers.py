@@ -294,9 +294,18 @@ async def delete_calendar(
     # This prevents accidental deletion of calendars that are actively being used
     check_query = text(
         """
-        SELECT COUNT(*) as count
-        FROM journal_calendar_info
-        WHERE calendar_id = :calendar_id
+        SELECT COUNT(*) AS count
+        FROM (
+            SELECT journal_id
+            FROM journal_calendar_info
+            WHERE calendar_id = :calendar_id
+
+            UNION
+
+            SELECT journal_id
+            FROM journal_external_event_links
+            WHERE calendar_id = :calendar_id
+        ) AS linked_journals
         """
     )
     result = await connection.execute(check_query, {"calendar_id": calendar_uuid})

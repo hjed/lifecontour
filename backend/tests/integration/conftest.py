@@ -213,6 +213,27 @@ class DockerManager:
         except subprocess.CalledProcessError:
             return None
 
+    def _sync_database_connection_details(self, container_name: str) -> None:
+        """Synchronize DB config with the running Postgres container's published port."""
+        result = subprocess.run(
+            ["docker", "port", container_name, "5432/tcp"],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+
+        port_mappings = [
+            line.strip() for line in result.stdout.splitlines() if line.strip()
+        ]
+        if not port_mappings:
+            raise RuntimeError(
+                f"Could not determine published Postgres port for {container_name}"
+            )
+
+        published_port = port_mappings[0].rsplit(":", 1)[-1]
+        self.db_config.host = "localhost"
+        self.db_config.port = published_port
+
     def start_database(self) -> None:
         """Start Docker PostgreSQL container for testing."""
         try:
@@ -245,6 +266,7 @@ class DockerManager:
                 self.get_container_name(CONTAINER_NAME_FILTER)
                 or BACKEND_POSTGRES_CONTAINER
             )
+            self._sync_database_connection_details(container_name)
 
             # Reset the test DB to avoid partially-migrated state from previous runs.
             self._reset_test_database(container_name)
@@ -286,7 +308,7 @@ class DockerManager:
             test_env = {
                 **os.environ,
                 "ENVIRONMENT": "test",
-                "DATABASE_URL": "postgresql+asyncpg://postgres:postgres@localhost:5433/personal_management_test",
+                "DATABASE_URL": self.db_config.get_async_url(),
             }
 
             print(f"Running migrations from directory: {self.backend_dir}")
@@ -338,8 +360,8 @@ class DockerManager:
 
 
 # Global instances
-_db_config = DatabaseConfig.from_environment()
 _docker_manager = DockerManager()
+_db_config = _docker_manager.db_config
 
 
 @pytest.fixture(scope="session")

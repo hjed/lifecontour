@@ -7,7 +7,14 @@ a database connection.
 
 from datetime import UTC, datetime
 
-from core_shared.models import ExternalReference, SyncMetadata, SyncStatus
+from core_shared.models import (
+    ExternalEventLinkSyncCapability,
+    ExternalEventLinkSyncStatus,
+    ExternalReference,
+    JournalExternalEventLink,
+    SyncMetadata,
+    SyncStatus,
+)
 
 
 class TestSyncStatus:
@@ -19,6 +26,23 @@ class TestSyncStatus:
         assert SyncStatus.FAILED.value == "failed"
         assert SyncStatus.IN_PROGRESS.value == "in_progress"
         assert SyncStatus.PENDING.value == "pending"
+
+
+class TestExternalEventLinkEnums:
+    """Test external event link enums."""
+
+    def test_sync_capability_values(self) -> None:
+        """Test that event link sync capability has expected values."""
+        assert ExternalEventLinkSyncCapability.OUTBOUND.value == "outbound"
+        assert ExternalEventLinkSyncCapability.BIDIRECTIONAL.value == "bidirectional"
+
+    def test_sync_status_values(self) -> None:
+        """Test that event link sync status has expected values."""
+        assert ExternalEventLinkSyncStatus.PENDING.value == "pending"
+        assert ExternalEventLinkSyncStatus.SYNCED.value == "synced"
+        assert ExternalEventLinkSyncStatus.CONFLICTED.value == "conflicted"
+        assert ExternalEventLinkSyncStatus.CANCELLED.value == "cancelled"
+        assert ExternalEventLinkSyncStatus.ERRORED.value == "errored"
 
 
 class TestSyncMetadata:
@@ -121,29 +145,100 @@ class TestExternalReference:
         assert ExternalReference.__tablename__ == "external_references"
 
 
+class TestJournalExternalEventLink:
+    """Test JournalExternalEventLink model."""
+
+    def test_journal_external_event_link_creation(self) -> None:
+        """Test creating JournalExternalEventLink instance."""
+        now = datetime.now(UTC)
+
+        link = JournalExternalEventLink(
+            journal_id=123,
+            calendar_id="00000000-0000-0000-0000-000000000123",
+            external_event_id="google-event-123",
+            external_version="etag-abc",
+            sync_capability=ExternalEventLinkSyncCapability.BIDIRECTIONAL.value,
+            sync_status=ExternalEventLinkSyncStatus.SYNCED.value,
+            created_at=now,
+            updated_at=now,
+        )
+
+        assert link.journal_id == 123
+        assert str(link.calendar_id) == "00000000-0000-0000-0000-000000000123"
+        assert link.external_event_id == "google-event-123"
+        assert link.external_version == "etag-abc"
+        assert (
+            link.sync_capability == ExternalEventLinkSyncCapability.BIDIRECTIONAL.value
+        )
+        assert link.sync_status == ExternalEventLinkSyncStatus.SYNCED.value
+
+    def test_journal_external_event_link_repr(self) -> None:
+        """Test JournalExternalEventLink string representation."""
+        link = JournalExternalEventLink(
+            journal_id=123,
+            calendar_id="00000000-0000-0000-0000-000000000123",
+            external_event_id="google-event-123",
+            sync_capability=ExternalEventLinkSyncCapability.OUTBOUND.value,
+            sync_status=ExternalEventLinkSyncStatus.PENDING.value,
+        )
+
+        repr_str = repr(link)
+        assert "JournalExternalEventLink(journal_id=123" in repr_str
+        assert "calendar_id='00000000-0000-0000-0000-000000000123'" in repr_str
+        assert "sync_capability='outbound'" in repr_str
+        assert "sync_status='pending'" in repr_str
+
+    def test_journal_external_event_link_table_name(self) -> None:
+        """Test that JournalExternalEventLink has correct table name."""
+        assert JournalExternalEventLink.__tablename__ == "journal_external_event_links"
+
+
 class TestModelImports:
     """Test that models can be imported from package."""
 
     def test_import_from_core_shared(self) -> None:
         """Test importing models from main package."""
-        from core_shared import Base, ExternalReference, SyncMetadata, SyncStatus
+        from core_shared import (
+            Base,
+            ExternalEventLinkSyncCapability,
+            ExternalEventLinkSyncStatus,
+            ExternalReference,
+            JournalExternalEventLink,
+            SyncMetadata,
+            SyncStatus,
+        )
 
         # Test that classes are available
         assert SyncMetadata is not None
         assert SyncStatus is not None
         assert ExternalReference is not None
+        assert JournalExternalEventLink is not None
+        assert ExternalEventLinkSyncCapability is not None
+        assert ExternalEventLinkSyncStatus is not None
         assert Base is not None
 
         # Test that they are the correct types
         assert issubclass(SyncMetadata, Base)
         assert issubclass(ExternalReference, Base)
+        assert issubclass(JournalExternalEventLink, Base)
 
     def test_import_from_models_package(self) -> None:
         """Test importing models from models subpackage."""
-        from core_shared.models import Base, ExternalReference, SyncMetadata, SyncStatus
+        from core_shared.models import (
+            Base,
+            ExternalEventLinkSyncCapability,
+            ExternalEventLinkSyncStatus,
+            ExternalReference,
+            JournalExternalEventLink,
+            SyncMetadata,
+            SyncStatus,
+        )
 
         # Test that classes are available
         assert SyncMetadata is not None
         assert SyncStatus is not None
         assert ExternalReference is not None
+        assert JournalExternalEventLink is not None
+        assert ExternalEventLinkSyncCapability is not None
+        assert ExternalEventLinkSyncStatus is not None
         assert Base is not None

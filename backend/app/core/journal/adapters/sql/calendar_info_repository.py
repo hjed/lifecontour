@@ -1,13 +1,26 @@
 """SQL implementation of CalendarInfoRepository."""
 
+from dataclasses import replace
 from typing import Any
 from uuid import UUID
 
+from core_shared.models import (
+    ExternalEventLinkSyncCapability,
+    ExternalEventLinkSyncStatus,
+)
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core.journal.models.calendar_info import CalendarInfo
 from app.core.journal.models.repositories import CalendarInfoRepository
+
+
+def project_calendar_info_to_linked_calendar(
+    calendar_info: CalendarInfo,
+    calendar_id: UUID,
+) -> CalendarInfo:
+    """Project legacy calendar info onto a linked calendar ID."""
+    return replace(calendar_info, calendar_id=calendar_id)
 
 
 class SqlCalendarInfoRepository(CalendarInfoRepository):
@@ -55,9 +68,17 @@ class SqlCalendarInfoRepository(CalendarInfoRepository):
         # Check if row exists
         existing = await self.find_by_journal_id(calendar_info.journal_id)
         if existing is None:
-            return await self._insert(calendar_info)
+            saved = await self._insert(calendar_info)
         else:
-            return await self._update(calendar_info)
+            saved = await self._update(calendar_info)
+            if existing.calendar_id != calendar_info.calendar_id:
+                await self._delete_external_event_link(
+                    calendar_info.journal_id,
+                    existing.calendar_id,
+                )
+
+        await self._ensure_external_event_link(saved)
+        return saved
 
     async def _insert(self, calendar_info: CalendarInfo) -> CalendarInfo:
         """Insert new calendar info."""
@@ -126,12 +147,18 @@ class SqlCalendarInfoRepository(CalendarInfoRepository):
 
     async def delete(self, journal_id: int) -> None:
         """Delete calendar info by journal ID."""
+        await self.conn.execute(
+            text(
+                "DELETE FROM journal_external_event_links WHERE journal_id = :journal_id"
+            ),
+            {"journal_id": journal_id},
+        )
         query = text("DELETE FROM journal_calendar_info WHERE journal_id = :journal_id")
         await self.conn.execute(query, {"journal_id": journal_id})
 
     async def get_by_calendar_id(self, calendar_id: UUID) -> list[CalendarInfo]:
         """Get all calendar info entries for a calendar."""
-        query = text(
+        primary_query = text(
             """
             SELECT journal_id, calendar_id, start_time, end_time,
                    is_all_day, location, sync_invitees,
@@ -141,5 +168,82 @@ class SqlCalendarInfoRepository(CalendarInfoRepository):
             ORDER BY journal_id ASC
             """
         )
-        result = await self.conn.execute(query, {"calendar_id": str(calendar_id)})
-        return [self._row_to_calendar_info(row) for row in result.fetchall()]
+        primary_result = await self.conn.execute(
+            primary_query, {"calendar_id": str(calendar_id)}
+        )
+        primary_events = [
+            self._row_to_calendar_info(row) for row in primary_result.fetchall()
+        ]
+
+        linked_query = text(
+            """
+            SELECT jci.journal_id, jci.calendar_id, jci.start_time, jci.end_time,
+                   jci.is_all_day, jci.location, jci.sync_invitees,
+                   jci.created_at, jci.updated_at,
+                   jeel.calendar_id AS linked_calendar_id
+            FROM journal_external_event_links jeel
+            INNER JOIN journal_calendar_info jci ON jci.journal_id = jeel.journal_id
+            WHERE jeel.calendar_id = :calendar_id
+              AND jci.calendar_id <> jeel.calendar_id
+            ORDER BY jci.journal_id ASC
+            """
+        )
+        linked_result = await self.conn.execute(
+            linked_query, {"calendar_id": str(calendar_id)}
+        )
+        linked_events = [
+            project_calendar_info_to_linked_calendar(
+                self._row_to_calendar_info(row),
+                row.linked_calendar_id,
+            )
+            for row in linked_result.fetchall()
+        ]
+
+        return [*primary_events, *linked_events]
+
+    async def _ensure_external_event_link(self, calendar_info: CalendarInfo) -> None:
+        """Ensure the compatibility link row exists for legacy EVENT storage."""
+        await self.conn.execute(
+            text(
+                """
+                INSERT INTO journal_external_event_links (
+                    journal_id,
+                    calendar_id,
+                    external_event_id,
+                    external_version,
+                    sync_capability,
+                    sync_status
+                )
+                VALUES (
+                    :journal_id,
+                    :calendar_id,
+                    NULL,
+                    NULL,
+                    :sync_capability,
+                    :sync_status
+                )
+                ON CONFLICT (journal_id, calendar_id)
+                DO UPDATE SET updated_at = now()
+                """
+            ),
+            {
+                "journal_id": calendar_info.journal_id,
+                "calendar_id": str(calendar_info.calendar_id),
+                "sync_capability": ExternalEventLinkSyncCapability.OUTBOUND.value,
+                "sync_status": ExternalEventLinkSyncStatus.PENDING.value,
+            },
+        )
+
+    async def _delete_external_event_link(
+        self, journal_id: int, calendar_id: UUID
+    ) -> None:
+        """Delete a specific compatibility link row."""
+        await self.conn.execute(
+            text(
+                """
+                DELETE FROM journal_external_event_links
+                WHERE journal_id = :journal_id AND calendar_id = :calendar_id
+                """
+            ),
+            {"journal_id": journal_id, "calendar_id": str(calendar_id)},
+        )

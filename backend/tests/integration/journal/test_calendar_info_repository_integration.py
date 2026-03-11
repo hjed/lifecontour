@@ -4,6 +4,7 @@ from datetime import UTC, datetime, time, timedelta
 
 import pytest
 import pytest_asyncio
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core.journal.adapters.sql.calendar_info_repository import (
@@ -118,6 +119,42 @@ class TestCalendarInfoRepositorySave:
         assert saved.created_at is not None
         assert saved.updated_at is not None
 
+    async def test_save_creates_external_event_link_for_legacy_event(
+        self,
+        calendar_info_repository: SqlCalendarInfoRepository,
+        async_connection: AsyncConnection,
+        test_journal: Journal,
+        test_calendar: Calendar,
+    ):
+        """Saving legacy CalendarInfo should seed the new per-calendar link table."""
+        calendar_info = create_test_calendar_info(
+            journal_id=test_journal.id,  # type: ignore[arg-type]
+            calendar_id=test_calendar.id,
+        )
+
+        await calendar_info_repository.save(calendar_info)
+
+        result = await async_connection.execute(
+            text(
+                """
+                SELECT journal_id, calendar_id, external_event_id, external_version,
+                       sync_capability, sync_status
+                FROM journal_external_event_links
+                WHERE journal_id = :journal_id
+                """
+            ),
+            {"journal_id": test_journal.id},
+        )
+        row = result.fetchone()
+
+        assert row is not None
+        assert row.journal_id == test_journal.id
+        assert row.calendar_id == test_calendar.id
+        assert row.external_event_id is None
+        assert row.external_version is None
+        assert row.sync_capability == "outbound"
+        assert row.sync_status == "pending"
+
     async def test_save_with_all_day_event(
         self,
         calendar_info_repository: SqlCalendarInfoRepository,
@@ -214,6 +251,62 @@ class TestCalendarInfoRepositoryDelete:
         found = await calendar_info_repository.find_by_journal_id(test_journal.id)  # type: ignore[arg-type]
         assert found is None
 
+    async def test_delete_removes_external_event_links(
+        self,
+        calendar_info_repository: SqlCalendarInfoRepository,
+        async_connection: AsyncConnection,
+        calendar_repository: SqlCalendarRepository,
+        test_journal: Journal,
+        test_calendar: Calendar,
+    ):
+        """Deleting legacy CalendarInfo should remove all per-calendar external links."""
+        await calendar_info_repository.save(
+            create_test_calendar_info(
+                journal_id=test_journal.id,  # type: ignore[arg-type]
+                calendar_id=test_calendar.id,
+            )
+        )
+        second_calendar = await calendar_repository.save(
+            Calendar(
+                user_id="test-user-123",
+                name="Second Calendar",
+                color="#00AAFF",
+            )
+        )
+        await async_connection.execute(
+            text(
+                """
+                INSERT INTO journal_external_event_links (
+                    journal_id, calendar_id, external_event_id,
+                    external_version, sync_capability, sync_status
+                )
+                VALUES (
+                    :journal_id, :calendar_id, :external_event_id,
+                    :external_version, :sync_capability, :sync_status
+                )
+                """
+            ),
+            {
+                "journal_id": test_journal.id,
+                "calendar_id": second_calendar.id,
+                "external_event_id": "secondary-event-1",
+                "external_version": "etag-2",
+                "sync_capability": "bidirectional",
+                "sync_status": "synced",
+            },
+        )
+
+        await calendar_info_repository.delete(test_journal.id)  # type: ignore[arg-type]
+
+        result = await async_connection.execute(
+            text(
+                "SELECT COUNT(*) FROM journal_external_event_links WHERE journal_id = :journal_id"
+            ),
+            {"journal_id": test_journal.id},
+        )
+
+        assert result.scalar_one() == 0
+
     async def test_delete_nonexistent_does_not_raise(
         self,
         calendar_info_repository: SqlCalendarInfoRepository,
@@ -276,3 +369,56 @@ class TestCalendarInfoRepositoryGetByCalendarId:
 
         assert len(events) == 2
         assert {e.journal_id for e in events} == {journal1.id, journal2.id}
+
+    async def test_get_by_calendar_id_includes_secondary_linked_calendar(
+        self,
+        calendar_info_repository: SqlCalendarInfoRepository,
+        async_connection: AsyncConnection,
+        calendar_repository: SqlCalendarRepository,
+        test_journal: Journal,
+        test_calendar: Calendar,
+    ):
+        """Linked secondary calendars should still project the journal through legacy queries."""
+        await calendar_info_repository.save(
+            create_test_calendar_info(
+                journal_id=test_journal.id,  # type: ignore[arg-type]
+                calendar_id=test_calendar.id,
+            )
+        )
+        second_calendar = await calendar_repository.save(
+            Calendar(
+                user_id="test-user-123",
+                name="Secondary Calendar",
+                color="#22AA22",
+            )
+        )
+        assert second_calendar.id is not None
+
+        await async_connection.execute(
+            text(
+                """
+                INSERT INTO journal_external_event_links (
+                    journal_id, calendar_id, external_event_id,
+                    external_version, sync_capability, sync_status
+                )
+                VALUES (
+                    :journal_id, :calendar_id, :external_event_id,
+                    :external_version, :sync_capability, :sync_status
+                )
+                """
+            ),
+            {
+                "journal_id": test_journal.id,
+                "calendar_id": second_calendar.id,
+                "external_event_id": "secondary-event-1",
+                "external_version": "etag-2",
+                "sync_capability": "bidirectional",
+                "sync_status": "synced",
+            },
+        )
+
+        events = await calendar_info_repository.get_by_calendar_id(second_calendar.id)
+
+        assert len(events) == 1
+        assert events[0].journal_id == test_journal.id
+        assert events[0].calendar_id == second_calendar.id

@@ -114,15 +114,15 @@ The sequence reflects both product priority and technical dependency:
 **PR Size:** ~5-7 files
 
 **Acceptance Criteria:**
-- [ ] Introduce an explicit per-calendar external event link model that can represent multiple external links for one journal.
-- [ ] Store per-link sync metadata such as external identifier, ETag/version marker, sync capability, and sync status without breaking existing EVENT journal behaviour.
-- [ ] Keep at least one calendar required for EVENT journals.
-- [ ] Add translation or compatibility handling so existing single-link assumptions are retired safely rather than duplicated indefinitely.
+- [x] Introduce an explicit per-calendar external event link model that can represent multiple external links for one journal.
+- [x] Store per-link sync metadata such as external identifier, ETag/version marker, sync capability, and sync status without breaking existing EVENT journal behaviour.
+- [x] Keep at least one calendar required for EVENT journals.
+- [x] Add translation or compatibility handling so existing single-link assumptions are retired safely rather than duplicated indefinitely.
 
 **Required Test Coverage:**
-- **Unit:** link-model validation, capability classification, compatibility/translation helpers.
-- **Integration:** real-database schema and repository tests for journals with one and multiple linked calendars.
-- **E2E:** create or edit an EVENT journal with calendar linkage and verify the existing journal flow remains usable.
+- **Unit:** link-model validation, capability classification, compatibility/translation helpers. ✅ Covered in this branch.
+- **Integration:** real-database schema and repository tests for journals with one and multiple linked calendars. ✅ Covered in this branch.
+- **E2E:** create or edit an EVENT journal with calendar linkage and verify the existing journal flow remains usable. ⏸️ Deferred for this backend/shared-contract slice by agreement because no frontend-visible behaviour changed in Phase 1.
 
 #### Phase 2: Google Calendar Client Extension and OAuth Scope Wiring
 **PR Size:** ~4-6 files
