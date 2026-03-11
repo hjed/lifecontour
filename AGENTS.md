@@ -2,7 +2,6 @@
 
 ## Project Context
 
-This document provides essential guidelines for AI assistants working on the Personal CRM & Journal System. The system uses a Python FastAPI backend with PostgreSQL database and TypeScript/React frontend, integrating personal data from multiple sources with both MCP (Model Context Protocol) and web interfaces.
 
 Refer to the [architecture document](docs/architecture.md) for a high-level overview of the system architecture and navigation.
 
@@ -16,8 +15,6 @@ Tasks can be found in the [tasks document](docs/tasks.md).
 - **Authentication**: Session-based authentication with Starlette SessionMiddleware
 - **Search**: MeiliSearch with event-driven indexing via transactional outbox pattern
 - **Testing**: pytest (backend), React Testing Library (frontend), Playwright (e2e)
-- **Integrations**: Google Calendar/Contacts, Immich photos
-- **Deployment**: Docker with nginx proxy support
 
 ### Core Principles
 
@@ -49,25 +46,6 @@ Tasks can be found in the [tasks document](docs/tasks.md).
 - Test each layer independently and together during development
 - Run linting, type checking, and all tests before considering any change complete
 - Isolated integration workers developed separately from core domains
-- Architecture can evolve - check technology choices with user before acting
-
-### AI Context Management for Integration Workers
-
-When working on integration workers, provide focused context to avoid confusion:
-
-**For Integration Worker Tasks:**
-- Provide the full contents of the specific worker directory (e.g., `integration_workers/strava/`)
-- Include relevant models from `core_shared/` package
-- Include `docs/architecture/integration-architecture.md` for patterns
-- **Do NOT** include other integration workers or core application code
-
-**Example Context for Strava Integration:**
-```
-Files to include:
-- integration_workers/strava/ (complete directory)
-- core_shared/models/ (relevant models only)
-- docs/architecture/integration-architecture.md
-```
 
 ### ⚠️ CRITICAL: Test Data Setup Requirements
 
@@ -99,38 +77,6 @@ if (tagCount > 0) {
 }
 ```
 
-#### ✅ REQUIRED Test Patterns
-
-```typescript
-// ALWAYS set up exact test data needed
-test('should display contacts when they exist', async ({ page }) => {
-  const { testData } = createTestHelpers(page);
-
-  // Set up exactly what this test needs
-  await testData.setupAuthenticatedUser();
-  await testData.createTestContacts([
-    { firstName: 'John', lastName: 'Doe' },
-    { firstName: 'Jane', lastName: 'Smith' },
-  ]);
-
-  // Test expects exactly 2 contacts
-  const contacts = await page.locator('[data-testid="contact-card"]');
-  expect(await contacts.count()).toBe(2);
-});
-
-// ALWAYS have separate tests for different scenarios
-test('should display empty state when no contacts exist', async ({ page }) => {
-  const { testData } = createTestHelpers(page);
-
-  // Set up empty state
-  await testData.setupAuthenticatedUser();
-  // Don't create any contacts
-
-  // Test expects empty state
-  const emptyState = page.locator('text=/no contacts/i');
-  await expect(emptyState).toBeVisible();
-});
-```
 
 #### Test Data Setup Rules
 
@@ -150,7 +96,6 @@ test('should display empty state when no contacts exist', async ({ page }) => {
 - **Type Hints**: Required for all functions and methods (mypy enforced)
 - **Import Organization**: ruff handles import sorting
 - **Naming**: snake_case for variables/functions, PascalCase for classes
-- **No Inline Imports**: No `from module import specific_thing` allowed inside functions or classes
 
 ## Testing Strategy
 
@@ -187,7 +132,7 @@ pnpm type-check       # TypeScript type checking
 
 ### Integration Testing Patterns
 
-- **Docker PostgreSQL**: Use `docker-compose.yml` for real database testing (with the correct profile e.g. "test")
+- **Docker PostgreSQL**: Use `docker-compose.yml` for real database testing with the correct profile, and prefer the runtime-backed helpers so local ports and `COMPOSE_PROJECT_NAME` are derived from the current workspace while CI stays fixed/deterministic.
 - **Transaction Isolation**: Each test runs in isolated transaction with rollback
 - **Schema Recreation**: Fresh database schema for each test session
 - **Real Constraints**: Test actual database constraints and SQL behavior
@@ -204,13 +149,12 @@ pnpm type-check       # TypeScript type checking
   - Suitable for business logic and API schema validation
 
 - **Integration Tests** (`tests/integration/`): Use `tests/integration/conftest.py` fixtures for real database testing
-  - Uses Docker PostgreSQL on port 5433 via `docker-compose.test.yml`
+  - Uses Docker PostgreSQL via `docker-compose.yml` with the correct profile and current-worktree-derived runtime values for local development
   - Real database constraints and SQL behavior
   - Suitable for repository operations, service layer testing, and API endpoints that need database
 
 **Common Mistake to Avoid:**
 - ❌ **Never** create custom fixtures in integration test files that duplicate conftest.py functionality
-- ❌ **Never** put integration tests that need real database in `tests/integration/**` without using proper fixtures
 - ❌ **Never** use `DatabaseProvider(test_settings)` in test clients — this creates independent connections that bypass the savepoint and **commit data to the database**, causing state to leak between tests
 - ✅ **Always** use the existing `async_connection` and `clean_database` fixtures from `tests/integration/conftest.py`
 - ✅ **Always** place API integration tests in the correct directory structure to inherit proper fixtures
@@ -223,11 +167,8 @@ pnpm type-check       # TypeScript type checking
 - Use shadcn/ui components with proper TypeScript interfaces
 - Minimize the use of `'use client'`, `useEffect`, and `setState`; favor React Server Components (RSC) and Next.js SSR features.
 - Implement proper accessibility with ARIA attributes and screen reader support
-- Follow responsive design patterns with mobile-first approach
 - Use semantic color classes for dark mode support: `bg-background`,
   `text-foreground`, `border-border`
-- Structure files with exported components, subcomponents, helpers, static content, and types.
-
 - Leverage shadcn/ui's CSS custom properties for theming
 
 ## Development Standards
@@ -246,16 +187,8 @@ pnpm type-check       # TypeScript type checking
 ```text
 personal-management-system/
 ├── backend/                      # Python FastAPI application
-│   ├── app/
-|   |   |── core/                 # Core Domain Logic
-|   |   |── infrastructure/       # Common code for Database, Events, etc.
-│   │   ├── api/                  # FastAPI route handlers
-│   │   ├── migrations/           # SQL queries and migrations
-│   │   └── mcp/                  # MCP server implementation
-│   ├── core_shared/              # Shared models, schemas, db logic (private package)
-│   ├── integration_workers/      # Isolated workers for each integration
-│   ├── tests/                    # pytest test suite
-│   └── pyproject.toml            # UV dependencies
+├── core_shared/              # Shared python models, schemas, db logic (private package)
+├── integration_workers/      # Isolated workers for each integration
 ├── frontend/                     # Next.js TypeScript application
 │   ├── src/
 │   │   ├── app/                  # Next.js app router
@@ -273,9 +206,7 @@ personal-management-system/
 #### Core Development Patterns
 
 - **Test-Driven**: Write tests first, then implement to make them pass
-- **Explicit SQL**: Use SQLAlchemy Core with raw SQL queries for readability
 - **Simple Components**: Clear business logic without complex abstractions
-- **Type Safety**: Strong type hints, mypy compliance, Pydantic models for validation
 - **Clear Separation**: Keep domain logic separate from API and database concerns
 - **Python Enums**: Use enums for domain values (e.g., `MethodType.EMAIL`) for type safety
 
@@ -290,11 +221,6 @@ personal-management-system/
 - **Pattern**: Constructor injection with typed interfaces and automatic resolution
 - **Scopes**: Use APP scope for singletons, REQUEST scope for per-request objects
 - **FastAPI Integration**: Use `FromDishka[Type]` for dependency injection in endpoints
-
-#### MCP Implementation
-
-- **FastMCP v2**: Use FastMCP v2 (jlowin/fastmcp) for MCP server implementation instead of official MCP SDK
-- **Dishka Integration**: Use Dishka dependency injection in MCP tools (`FromDishka[Type]`) for consistency with REST API
 
 ### Frontend Standards
 
@@ -327,14 +253,6 @@ To avoid repetition, detailed guidelines are maintained in specialized documents
 - **[Docker Fixes](docs/troubleshooting/docker-fixes.md)**
 - **[CI Integration Tests](docs/troubleshooting/ci-integration-tests-fix.md)**
 - **[Frontend CI Fixes](docs/troubleshooting/frontend-ci-fixes.md)**
-
-## Essential Reminders
-
-1. **Tests First** - Write tests before implementation, always
-2. **Check with user** before making technology or architectural changes
-3. **Start simple** - implement core functionality before optimizations
-4. **Document decisions** - update architecture docs when patterns evolve
-5. **Quality checks mandatory** - run linting, type checking, and tests for every change
 
 ## Library Documentation
 
