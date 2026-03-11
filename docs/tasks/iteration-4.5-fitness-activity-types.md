@@ -482,13 +482,11 @@ This iteration extends the journal system with fitness and outdoor activity type
 **Known Limitations / Deferred Follow-up:**
 - Period-over-period comparison analytics are still future work; the current MCP analytics expose bucketed trend data but do not yet calculate delta comparisons versus previous periods
 - Multi-type journal search currently reuses repository filtering for single-type queries and performs type-aware refinement in MCP for comma-separated multi-type queries; if search volume grows, move that refinement into repository SQL
-- Activity MCP queries currently load all matching activity rows before applying the MCP result limit; if activity volume grows, push pagination/counting into SQL so analytics/search avoid unnecessary in-memory materialization
 - Route usage analytics currently query route-aware activity tables directly because `SqlRouteRepository.check_usage_in_journals()` remains a stub; consider consolidating route usage detection in the route repository during a future iteration
 
 **Follow-up Work for Future Iterations:**
 - Add period-over-period delta summaries and rolling averages to activity analytics
 - Add repository-level support for multi-type journal filtering so MCP search scales without post-query refinement
-- Add SQL-level pagination/count support for activity MCP queries so large activity histories do not require loading every matching row into memory
 - Reuse route history aggregation in the routes domain/service layer so route analytics and route deletion checks share the same source of truth
 
 **Analytics Features:**
@@ -576,7 +574,6 @@ This iteration extends the journal system with fitness and outdoor activity type
 **Follow-up backlog from Iteration 4.5:**
 - Period-over-period analytics deltas for MCP activity summaries
 - Repository-level multi-type journal filtering for MCP search performance
-- SQL-level pagination/count support for activity MCP queries
 - Shared route usage aggregation between route repository and MCP analytics
 
 **Then:** Iteration 6 (Immich Integration)

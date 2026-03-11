@@ -1163,6 +1163,56 @@ class TestActivityMcpToolsMountedIntegration:
         assert [result["title"] for result in payload["results"]] == ["Midday run"]
 
     @pytest.mark.asyncio
+    async def test_search_activities_reports_total_hits_beyond_limited_results(
+        self,
+        authenticated_lifespan_client,
+        clean_database: AsyncConnection,
+    ) -> None:
+        earlier_journal_id = await self._insert_journal(
+            clean_database,
+            title="Earlier run",
+            content="Steady aerobic session",
+            start=datetime(2024, 3, 8, 7, 0, tzinfo=UTC),
+        )
+        await self._insert_fitness_data(
+            clean_database,
+            journal_id=earlier_journal_id,
+            distance=8000,
+            elevation_gain=60,
+            duration=2400,
+            calories=500,
+        )
+        await self._insert_jogging_data(clean_database, journal_id=earlier_journal_id)
+
+        later_journal_id = await self._insert_journal(
+            clean_database,
+            title="Later run",
+            content="Progression finish",
+            start=datetime(2024, 3, 9, 7, 0, tzinfo=UTC),
+        )
+        await self._insert_fitness_data(
+            clean_database,
+            journal_id=later_journal_id,
+            distance=10000,
+            elevation_gain=90,
+            duration=3000,
+            calories=620,
+        )
+        await self._insert_jogging_data(clean_database, journal_id=later_journal_id)
+
+        async with authenticated_lifespan_client() as authenticated_client:
+            session_id = await initialize_mcp_session(authenticated_client)
+            payload = await self._call_tool(
+                authenticated_client,
+                session_id,
+                "search_activities",
+                {"activity_type": "jogging", "limit": 1},
+            )
+
+        assert payload["total_hits"] == 2
+        assert [result["title"] for result in payload["results"]] == ["Later run"]
+
+    @pytest.mark.asyncio
     async def test_get_activity_stats_returns_grouped_totals_and_personal_records(
         self,
         authenticated_lifespan_client,

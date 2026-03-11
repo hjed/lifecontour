@@ -7,13 +7,14 @@ These unit tests focus on tool registration and basic structure.
 """
 
 from datetime import UTC, datetime, time
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import pytest
 from fastmcp import Client, FastMCP
 
 from app.mcp.domains.journals.tools import (
+    _fetch_activity_rows,
     _parse_optional_datetime_filter,
     _update_event_data,
     register_journal_tools,
@@ -170,6 +171,30 @@ class TestDatetimeFilterParsing:
         assert _parse_optional_datetime_filter(
             "2024-03-11T09:15:00Z", "start_date"
         ) == datetime(2024, 3, 11, 9, 15, 0, tzinfo=UTC)
+
+
+class TestFetchActivityRows:
+    @pytest.mark.asyncio
+    async def test_applies_sql_limit_and_offset(self) -> None:
+        db_connection = AsyncMock()
+        result = MagicMock()
+        result.fetchall.return_value = []
+        db_connection.execute.return_value = result
+
+        await _fetch_activity_rows(
+            db_connection,
+            "user-123",
+            activity_type="jogging",
+            limit=5,
+            offset=10,
+        )
+
+        query = db_connection.execute.await_args.args[0]
+        params = db_connection.execute.await_args.args[1]
+
+        assert "LIMIT :limit OFFSET :offset" in str(query)
+        assert params["limit"] == 5
+        assert params["offset"] == 10
 
 
 class TestUpdateEventData:

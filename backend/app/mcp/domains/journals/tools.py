@@ -397,19 +397,19 @@ async def _build_search_results(
     return results
 
 
-async def _fetch_activity_rows(
-    db_connection: AsyncConnection,
+def _build_activity_query_filters(
     user_id: str,
     *,
     search_query: str | None = None,
     activity_type: str | None = None,
     start_date: str | None = None,
     end_date: str | None = None,
-) -> list[_ActivityJournalRow]:
-    """Fetch activity journals with resolved effective activity types and metrics."""
+) -> tuple[dict[str, Any], list[str]]:
+    """Build shared parameters and filters for activity journal queries."""
     normalized_activity_type = _parse_activity_type_filter(activity_type)
     start_date_filter = _parse_optional_datetime_filter(start_date, "start_date")
     end_date_filter = _parse_optional_datetime_filter(end_date, "end_date", is_end=True)
+
     params: dict[str, Any] = {"user_id": user_id}
     where_clauses: list[str] = []
 
@@ -431,7 +431,17 @@ async def _fetch_activity_rows(
         params["end_date"] = end_date_filter
         where_clauses.append("event_date_range_start <= :end_date")
 
-    query_sql = """
+    return params, where_clauses
+
+
+def _build_activity_rows_query_sql(
+    where_clauses: list[str],
+    *,
+    select_sql: str,
+    include_ordering: bool,
+) -> str:
+    """Build activity journal SQL with optional shared filters and ordering."""
+    query_sql = f"""
         WITH activity_rows AS (
             SELECT
                 j.id,
@@ -479,20 +489,82 @@ async def _fetch_activity_rows(
                 ON skiing.journal_id = j.id
             WHERE j.user_id = :user_id
         )
-        SELECT *
+        {select_sql}
         FROM activity_rows
-        ORDER BY event_date_range_start DESC, created_at DESC
         """
+
     if where_clauses:
-        query_sql = query_sql.replace(
-            "ORDER BY event_date_range_start DESC, created_at DESC",
-            "WHERE "
-            + " AND ".join(where_clauses)
-            + "\n        ORDER BY event_date_range_start DESC, created_at DESC",
-        )
+        query_sql += "\n        WHERE " + " AND ".join(where_clauses)
+
+    if include_ordering:
+        query_sql += "\n        ORDER BY event_date_range_start DESC, created_at DESC"
+
+    return query_sql
+
+
+async def _fetch_activity_rows(
+    db_connection: AsyncConnection,
+    user_id: str,
+    *,
+    search_query: str | None = None,
+    activity_type: str | None = None,
+    start_date: str | None = None,
+    end_date: str | None = None,
+    limit: int | None = None,
+    offset: int = 0,
+) -> list[_ActivityJournalRow]:
+    """Fetch activity journals with resolved effective activity types and metrics."""
+    params, where_clauses = _build_activity_query_filters(
+        user_id,
+        search_query=search_query,
+        activity_type=activity_type,
+        start_date=start_date,
+        end_date=end_date,
+    )
+    query_sql = _build_activity_rows_query_sql(
+        where_clauses,
+        select_sql="SELECT *",
+        include_ordering=True,
+    )
+
+    if limit is not None:
+        params["limit"] = limit
+        params["offset"] = offset
+        query_sql += "\n        LIMIT :limit OFFSET :offset"
 
     result = await db_connection.execute(text(query_sql), params)
     return [_activity_row_from_row(row) for row in result.fetchall()]
+
+
+async def _count_activity_rows(
+    db_connection: AsyncConnection,
+    user_id: str,
+    *,
+    search_query: str | None = None,
+    activity_type: str | None = None,
+    start_date: str | None = None,
+    end_date: str | None = None,
+) -> int:
+    """Count matching activity journals without materializing the full result set."""
+    params, where_clauses = _build_activity_query_filters(
+        user_id,
+        search_query=search_query,
+        activity_type=activity_type,
+        start_date=start_date,
+        end_date=end_date,
+    )
+    query_sql = _build_activity_rows_query_sql(
+        where_clauses,
+        select_sql="SELECT COUNT(*)",
+        include_ordering=False,
+    )
+
+    result = await db_connection.execute(text(query_sql), params)
+    row = result.fetchone()
+    if row is None:
+        return 0
+    count_value = row[0]
+    return int(count_value) if count_value is not None else 0
 
 
 def _get_period_start(period_value: datetime, interval: str) -> date:
@@ -2143,7 +2215,7 @@ def register_journal_tools(mcp: FastMCP[None]) -> None:
         """Search activity journals with effective activity-type filtering."""
         user_id = get_current_user_id()
         repos = _create_journal_tool_repositories(db_connection)
-        activity_rows = await _fetch_activity_rows(
+        total_hits = await _count_activity_rows(
             db_connection,
             user_id,
             search_query=query,
@@ -2152,22 +2224,34 @@ def register_journal_tools(mcp: FastMCP[None]) -> None:
             end_date=end_date,
         )
 
-        limited_rows = activity_rows[:limit]
+        activity_rows: list[_ActivityJournalRow] = []
+        if total_hits > 0:
+            activity_rows = await _fetch_activity_rows(
+                db_connection,
+                user_id,
+                search_query=query,
+                activity_type=activity_type,
+                start_date=start_date,
+                end_date=end_date,
+                limit=limit,
+                offset=0,
+            )
+
         results = await _build_search_results(
-            [activity_row.journal for activity_row in limited_rows],
+            [activity_row.journal for activity_row in activity_rows],
             repos,
             activity_rows_by_id={
                 activity_row.journal.id: activity_row
-                for activity_row in limited_rows
+                for activity_row in activity_rows
                 if activity_row.journal.id is not None
             },
         )
         response = JournalSearchResponse(
             results=results,
             query=query,
-            total_hits=len(activity_rows),
+            total_hits=total_hits,
             processing_time_ms=0,
-            summary=f"Found {len(activity_rows)} activity journal(s)",
+            summary=f"Found {total_hits} activity journal(s)",
         )
         return MCPResponseBuilder.success_response(response)
 
