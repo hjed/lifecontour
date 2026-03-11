@@ -28,6 +28,13 @@ Integrations MUST follow the integration architecture specified in the [integrat
 ## Task Organization
 Tasks are organized into **feature iterations** that deliver end-to-end value incrementally. Each iteration is documented in detail in separate files for better organization and navigation.
 
+## Product Specifications
+
+Read these first when working on the active product-alignment streams:
+
+- **[Contacts Product Specification](./product-specifications/contacts-product-specification.md)** - target product behaviour for the contacts improvement stream
+- **[Journals Product Specification](./product-specifications/journals-product-specification.md)** - target product behaviour for the journals improvement stream
+
 ---
 
 ## Iterations Overview
@@ -195,25 +202,24 @@ Tasks are organized into **feature iterations** that deliver end-to-end value in
 - On-demand photo fetching (no local caching)
 - Integration with PHOTO_ALBUM journal type
 
-### [Iteration 7: Google Calendar Integration](./tasks/iteration-7-calendar-integration.md)
+### [Iteration 7: Journals Product Alignment, Calendar Sync & Time Navigation](./tasks/iteration-7-calendar-integration.md)
 **Status:** 🟡 PLANNED
-**Dependencies:** Iteration 4 (Journal Core with EVENT type)
-**Goal:** Integrate Google Calendar with bidirectional sync and advanced calendar features
+**Dependencies:** Iteration 4 (journal core), Iteration 2 (Google integration and worker foundations), existing journal search/detail foundations
+**Goal:** Deliver the journals product specification in reviewable slices covering multi-calendar sync, merge/review workflows, hierarchy, time-oriented journal browsing, calendar views, and AI/MCP parity
 
 **Key Features:**
-- Google Calendar API integration (extends existing Google integration)
-- Bidirectional calendar synchronization
-- EVENT journal sync to Google Calendar
-- Calendar views (month, week, day, agenda)
-- Meeting preparation with contact context
-- Calendar analytics and scheduling insights
-- ARQ worker for background sync
+- Multi-calendar EVENT journal sync with ETag-based conflict handling
+- Needs Review queue and journal merge workflow
+- Parent-child journal creation and hierarchy visibility
+- Current-day-centred bidirectional infinite scroll journal list
+- Calendar views (month, week, day, agenda) with sync visibility
+- AI daily summaries and day-level stats with MCP parity
 
 **Architecture:**
-- Extends Google Contacts integration patterns
-- Bidirectional sync with conflict resolution
-- EVENT journals as calendar events
-- Advanced features: meeting prep, analytics
+- Extends the Google integration and isolated worker patterns from Iteration 2
+- Keeps journals as the canonical record while linking to external calendar events
+- Reuses the contacts-style reviewable PR and full-coverage delivery model
+- Preserves parity between UI capabilities and MCP workflows
 
 ### [Iteration 8: Advanced Features & Analytics](./tasks/iteration-8-advanced-features.md)
 **Status:** 🟡 PLANNED
