@@ -134,6 +134,112 @@ class JournalSearchResponse(BaseModel):
     )
 
 
+class ActivityTotals(BaseModel):
+    """Aggregate activity metrics."""
+
+    distance: int = Field(default=0, description="Total distance in metres")
+    duration: int = Field(default=0, description="Total duration in seconds")
+    elevation_gain: int = Field(default=0, description="Total elevation gain in metres")
+    calories: int = Field(default=0, description="Total calories burned")
+
+
+class ActivityTypeStats(BaseModel):
+    """Aggregated statistics for a specific activity type."""
+
+    activity_type: str = Field(description="Activity type name")
+    count: int = Field(description="Number of activities of this type")
+    total_distance: int = Field(default=0, description="Total distance in metres")
+    total_duration: int = Field(default=0, description="Total duration in seconds")
+    total_elevation_gain: int = Field(
+        default=0, description="Total elevation gain in metres"
+    )
+    total_calories: int = Field(default=0, description="Total calories burned")
+
+
+class ActivityPersonalRecord(BaseModel):
+    """Personal record entry for an activity metric."""
+
+    activity_type: str = Field(description="Activity type for the record")
+    journal_id: int = Field(description="Journal identifier for the record")
+    journal_title: str = Field(description="Journal title for the record")
+    value: int = Field(description="Record value for the metric")
+
+
+class ActivityStatsResponse(BaseModel):
+    """AI-friendly activity statistics response."""
+
+    total_activities: int = Field(description="Total number of matched activities")
+    overall_totals: ActivityTotals = Field(
+        description="Overall totals across activities"
+    )
+    activity_types: list[ActivityTypeStats] = Field(
+        default_factory=list, description="Per-activity-type breakdown"
+    )
+    personal_records: dict[str, ActivityPersonalRecord | None] = Field(
+        default_factory=dict,
+        description="Named personal records such as longest distance or duration",
+    )
+    summary: str = Field(description="AI-friendly summary of activity statistics")
+
+
+class ActivityTrendPeriod(BaseModel):
+    """Aggregated trend bucket for activity analytics."""
+
+    period_start: str = Field(description="Bucket start date in ISO format")
+    activity_count: int = Field(description="Number of activities in the bucket")
+    total_distance: int = Field(default=0, description="Total distance in metres")
+    total_duration: int = Field(default=0, description="Total duration in seconds")
+    total_elevation_gain: int = Field(
+        default=0, description="Total elevation gain in metres"
+    )
+
+
+class ActivityTrendsResponse(BaseModel):
+    """AI-friendly activity trends response."""
+
+    interval: str = Field(description="Trend interval: day, week, month, or year")
+    total_activities: int = Field(description="Total number of matched activities")
+    periods: list[ActivityTrendPeriod] = Field(
+        default_factory=list, description="Trend buckets ordered by period"
+    )
+    summary: str = Field(description="AI-friendly summary of trend results")
+
+
+class RouteSummary(BaseModel):
+    """Summary of a route referenced by activities."""
+
+    id: str = Field(description="Route UUID")
+    name: str = Field(description="Route name")
+    description: str | None = Field(default=None, description="Route description")
+
+
+class RouteHistoryEntry(BaseModel):
+    """Activity entry referencing a route."""
+
+    journal_id: int = Field(description="Journal identifier")
+    journal_title: str = Field(description="Journal title")
+    activity_type: str = Field(description="Resolved activity type")
+    event_date_range: EventDateRangeSchema = Field(
+        description="Journal event date range"
+    )
+    distance: int | None = Field(default=None, description="Distance in metres")
+    duration: int | None = Field(default=None, description="Duration in seconds")
+
+
+class RouteHistoryResponse(BaseModel):
+    """AI-friendly route usage history response."""
+
+    route: RouteSummary = Field(description="Route summary")
+    usage_count: int = Field(description="Total number of matching activity entries")
+    activity_types: list[str] = Field(
+        default_factory=list, description="Distinct activity types using the route"
+    )
+    entries: list[RouteHistoryEntry] = Field(
+        default_factory=list, description="Route activity entries ordered newest first"
+    )
+    summary: str = Field(description="AI-friendly summary of route usage")
+
+
 class JournalCreateRequest(BaseModel):
     """AI-friendly journal creation request format."""
 

@@ -28,7 +28,7 @@ class MCPResponseBuilder:
         Returns:
             JSON string formatted for MCP consumption
         """
-        return json.dumps(data.model_dump(), indent=2)
+        return json.dumps(data.model_dump(mode="json"), indent=2)
 
     @staticmethod
     def error_response(
