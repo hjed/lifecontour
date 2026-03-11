@@ -149,6 +149,10 @@ class TestJournalToolsIntegration:
                 "update_journal_entry",
                 "delete_journal",
                 "search_journals",
+                "search_activities",
+                "get_activity_stats",
+                "analyze_activity_trends",
+                "get_route_history",
                 "link_journal_to_contact",
                 "get_contact_journals",
             ]
@@ -473,7 +477,7 @@ class TestFetchJournalTypesAndDataNewActivityTypes:
     """
     Integration tests verifying _fetch_journal_types_and_data detects
     FITNESS, OUTDOOR_ACTIVITY, BUSHWALKING, JOGGING, ABSEILING_TRIP,
-    CANYONING, and CLIMBING types.
+    CANYONING, CLIMBING, KAYAKING, and CROSS_COUNTRY_SKIING types.
     """
 
     @pytest_asyncio.fixture
@@ -515,6 +519,12 @@ class TestFetchJournalTypesAndDataNewActivityTypes:
         from app.core.journal.adapters.sql.climbing_data_repository import (
             SqlClimbingDataRepository,
         )
+        from app.core.journal.adapters.sql.cross_country_skiing_data_repository import (
+            SqlCrossCountrySkiingDataRepository,
+        )
+        from app.core.journal.adapters.sql.kayaking_data_repository import (
+            SqlKayakingDataRepository,
+        )
         from app.core.journal.adapters.sql.mood_data_repository import (
             SqlMoodDataRepository,
         )
@@ -542,6 +552,8 @@ class TestFetchJournalTypesAndDataNewActivityTypes:
             SqlAbseilingDataRepository(conn),
             SqlCanyoningDataRepository(conn),
             SqlClimbingDataRepository(conn),
+            SqlKayakingDataRepository(conn),
+            SqlCrossCountrySkiingDataRepository(conn),
         )
 
     @pytest.mark.asyncio
@@ -718,6 +730,46 @@ class TestFetchJournalTypesAndDataNewActivityTypes:
         assert climbing["route_id"] is None
 
     @pytest.mark.asyncio
+    async def test_fetch_detects_kayaking_type(
+        self, journal_id: int, clean_database: AsyncConnection
+    ) -> None:
+        """KAYAKING type is detected when journal_kayaking_data row exists."""
+        await clean_database.execute(
+            text("""
+                INSERT INTO journal_kayaking_data (journal_id, water_type)
+                VALUES (:journal_id, 'river')
+            """),
+            {"journal_id": journal_id},
+        )
+
+        types, type_data = await self._call_fetch(journal_id, clean_database)
+
+        assert "kayaking" in types
+        kayaking = type_data["kayaking"]
+        assert kayaking["water_type"] == "river"
+        assert kayaking["route_id"] is None
+
+    @pytest.mark.asyncio
+    async def test_fetch_detects_cross_country_skiing_type(
+        self, journal_id: int, clean_database: AsyncConnection
+    ) -> None:
+        """CROSS_COUNTRY_SKIING type is detected when journal_skiing_data row exists."""
+        await clean_database.execute(
+            text("""
+                INSERT INTO journal_skiing_data (journal_id, snow_conditions)
+                VALUES (:journal_id, 'packed powder')
+            """),
+            {"journal_id": journal_id},
+        )
+
+        types, type_data = await self._call_fetch(journal_id, clean_database)
+
+        assert "cross_country_skiing" in types
+        skiing = type_data["cross_country_skiing"]
+        assert skiing["snow_conditions"] == "packed powder"
+        assert skiing["route_id"] is None
+
+    @pytest.mark.asyncio
     async def test_journal_with_no_activity_data_is_note(
         self, journal_id: int, clean_database: AsyncConnection
     ) -> None:
@@ -726,3 +778,735 @@ class TestFetchJournalTypesAndDataNewActivityTypes:
 
         assert types == ["note"]
         assert type_data == {}
+
+
+class TestActivityMcpToolsMountedIntegration:
+    """Mounted MCP tests for activity search and analytics tools."""
+
+    async def _call_tool(
+        self,
+        authenticated_client: Any,
+        session_id: str,
+        tool_name: str,
+        arguments: dict[str, Any],
+    ) -> dict[str, Any]:
+        response = await authenticated_client.post(
+            "/mcp-server/mcp",
+            json={
+                "jsonrpc": "2.0",
+                "id": 2,
+                "method": "tools/call",
+                "params": {"name": tool_name, "arguments": arguments},
+            },
+            headers=mcp_headers(session_id),
+        )
+        assert response.status_code == 200
+        return extract_mcp_json_payload(response.text)
+
+    async def _insert_journal(
+        self,
+        conn: AsyncConnection,
+        *,
+        title: str,
+        content: str,
+        start: datetime,
+        user_id: str = "test-user-123",
+    ) -> int:
+        result = await conn.execute(
+            text("""
+                INSERT INTO journals
+                    (user_id, title, content, event_date_range_start, event_date_range_end)
+                VALUES (:user_id, :title, :content, :start, :end)
+                RETURNING id
+            """),
+            {
+                "user_id": user_id,
+                "title": title,
+                "content": content,
+                "start": start,
+                "end": start + timedelta(hours=2),
+            },
+        )
+        row = result.fetchone()
+        assert row is not None
+        return int(row[0])
+
+    async def _insert_route(
+        self,
+        conn: AsyncConnection,
+        *,
+        name: str,
+        user_id: str = "test-user-123",
+    ) -> str:
+        result = await conn.execute(
+            text("""
+                INSERT INTO routes (user_id, name, description)
+                VALUES (:user_id, :name, :description)
+                RETURNING id
+            """),
+            {
+                "user_id": user_id,
+                "name": name,
+                "description": f"Route for {name}",
+            },
+        )
+        row = result.fetchone()
+        assert row is not None
+        return str(row[0])
+
+    async def _insert_fitness_data(
+        self,
+        conn: AsyncConnection,
+        *,
+        journal_id: int,
+        distance: int,
+        elevation_gain: int,
+        duration: int,
+        calories: int,
+    ) -> None:
+        await conn.execute(
+            text("""
+                INSERT INTO journal_fitness_data (
+                    journal_id, distance, elevation_gain, duration, calories
+                )
+                VALUES (
+                    :journal_id, :distance, :elevation_gain, :duration, :calories
+                )
+            """),
+            {
+                "journal_id": journal_id,
+                "distance": distance,
+                "elevation_gain": elevation_gain,
+                "duration": duration,
+                "calories": calories,
+            },
+        )
+
+    async def _insert_outdoor_activity_data(
+        self,
+        conn: AsyncConnection,
+        *,
+        journal_id: int,
+        activity_type: str,
+    ) -> None:
+        await conn.execute(
+            text("""
+                INSERT INTO journal_outdoor_activity_data (
+                    journal_id, activity_type, weather_conditions, role,
+                    in_leadership_role, participant_notes
+                )
+                VALUES (
+                    :journal_id, :activity_type, 'Clear', 'participant',
+                    false, 'Test activity'
+                )
+            """),
+            {"journal_id": journal_id, "activity_type": activity_type},
+        )
+
+    async def _insert_kayaking_data(
+        self,
+        conn: AsyncConnection,
+        *,
+        journal_id: int,
+        route_id: str | None = None,
+        water_type: str = "river",
+    ) -> None:
+        await conn.execute(
+            text("""
+                INSERT INTO journal_kayaking_data (journal_id, route_id, water_type)
+                VALUES (:journal_id, :route_id, :water_type)
+            """),
+            {
+                "journal_id": journal_id,
+                "route_id": route_id,
+                "water_type": water_type,
+            },
+        )
+
+    async def _insert_jogging_data(
+        self,
+        conn: AsyncConnection,
+        *,
+        journal_id: int,
+        route_id: str | None = None,
+        pace: int = 330,
+    ) -> None:
+        await conn.execute(
+            text("""
+                INSERT INTO journal_jogging_data (journal_id, route_id, pace)
+                VALUES (:journal_id, :route_id, :pace)
+            """),
+            {
+                "journal_id": journal_id,
+                "route_id": route_id,
+                "pace": pace,
+            },
+        )
+
+    async def _insert_bushwalking_data(
+        self,
+        conn: AsyncConnection,
+        *,
+        journal_id: int,
+        route_id: str | None = None,
+        track_grading: str = "Grade 3",
+    ) -> None:
+        await conn.execute(
+            text("""
+                INSERT INTO journal_bushwalking_data (journal_id, route_id, track_grading)
+                VALUES (:journal_id, :route_id, :track_grading)
+            """),
+            {
+                "journal_id": journal_id,
+                "route_id": route_id,
+                "track_grading": track_grading,
+            },
+        )
+
+    async def _insert_cross_country_skiing_data(
+        self,
+        conn: AsyncConnection,
+        *,
+        journal_id: int,
+        route_id: str | None = None,
+        snow_conditions: str = "packed powder",
+    ) -> None:
+        await conn.execute(
+            text("""
+                INSERT INTO journal_skiing_data (journal_id, route_id, snow_conditions)
+                VALUES (:journal_id, :route_id, :snow_conditions)
+            """),
+            {
+                "journal_id": journal_id,
+                "route_id": route_id,
+                "snow_conditions": snow_conditions,
+            },
+        )
+
+    @pytest.mark.asyncio
+    async def test_search_journals_applies_query_and_types_filters(
+        self,
+        authenticated_lifespan_client,
+        clean_database: AsyncConnection,
+    ) -> None:
+        river_note_id = await self._insert_journal(
+            clean_database,
+            title="River reflections",
+            content="A quiet river note",
+            start=datetime(2024, 2, 1, tzinfo=UTC),
+        )
+        assert river_note_id > 0
+
+        kayaking_journal_id = await self._insert_journal(
+            clean_database,
+            title="Harbour paddle",
+            content="Strong river current and steady pace",
+            start=datetime(2024, 2, 2, tzinfo=UTC),
+        )
+        await self._insert_fitness_data(
+            clean_database,
+            journal_id=kayaking_journal_id,
+            distance=12000,
+            elevation_gain=20,
+            duration=4200,
+            calories=700,
+        )
+        await self._insert_outdoor_activity_data(
+            clean_database,
+            journal_id=kayaking_journal_id,
+            activity_type="Kayaking",
+        )
+        await self._insert_kayaking_data(
+            clean_database,
+            journal_id=kayaking_journal_id,
+            water_type="river",
+        )
+
+        jogging_journal_id = await self._insert_journal(
+            clean_database,
+            title="River run",
+            content="Tempo effort along the river",
+            start=datetime(2024, 2, 3, tzinfo=UTC),
+        )
+        await self._insert_fitness_data(
+            clean_database,
+            journal_id=jogging_journal_id,
+            distance=8000,
+            elevation_gain=110,
+            duration=2400,
+            calories=500,
+        )
+        await self._insert_jogging_data(clean_database, journal_id=jogging_journal_id)
+
+        async with authenticated_lifespan_client() as authenticated_client:
+            session_id = await initialize_mcp_session(authenticated_client)
+            payload = await self._call_tool(
+                authenticated_client,
+                session_id,
+                "search_journals",
+                {"query": "river", "types": "kayaking", "limit": 10},
+            )
+
+        assert payload["query"] == "river"
+        assert payload["total_hits"] == 1
+        assert [result["title"] for result in payload["results"]] == ["Harbour paddle"]
+
+    @pytest.mark.asyncio
+    async def test_search_activities_filters_by_activity_type(
+        self,
+        authenticated_lifespan_client,
+        clean_database: AsyncConnection,
+    ) -> None:
+        kayaking_journal_id = await self._insert_journal(
+            clean_database,
+            title="River paddle",
+            content="Training lap",
+            start=datetime(2024, 3, 1, tzinfo=UTC),
+        )
+        await self._insert_fitness_data(
+            clean_database,
+            journal_id=kayaking_journal_id,
+            distance=10000,
+            elevation_gain=15,
+            duration=3600,
+            calories=650,
+        )
+        await self._insert_outdoor_activity_data(
+            clean_database,
+            journal_id=kayaking_journal_id,
+            activity_type="Kayaking",
+        )
+        await self._insert_kayaking_data(clean_database, journal_id=kayaking_journal_id)
+
+        jogging_journal_id = await self._insert_journal(
+            clean_database,
+            title="Morning run",
+            content="Easy aerobic run",
+            start=datetime(2024, 3, 2, tzinfo=UTC),
+        )
+        await self._insert_fitness_data(
+            clean_database,
+            journal_id=jogging_journal_id,
+            distance=6000,
+            elevation_gain=80,
+            duration=1800,
+            calories=400,
+        )
+        await self._insert_jogging_data(clean_database, journal_id=jogging_journal_id)
+
+        async with authenticated_lifespan_client() as authenticated_client:
+            session_id = await initialize_mcp_session(authenticated_client)
+            payload = await self._call_tool(
+                authenticated_client,
+                session_id,
+                "search_activities",
+                {"activity_type": "kayaking", "limit": 10},
+            )
+
+        assert payload["total_hits"] == 1
+        assert [result["title"] for result in payload["results"]] == ["River paddle"]
+
+    @pytest.mark.asyncio
+    async def test_search_activities_applies_overlapping_date_range_filters(
+        self,
+        authenticated_lifespan_client,
+        clean_database: AsyncConnection,
+    ) -> None:
+        overlapping_journal_id = await self._insert_journal(
+            clean_database,
+            title="Midday run",
+            content="Tempo block through lunch",
+            start=datetime(2024, 3, 10, 10, 0, tzinfo=UTC),
+        )
+        await self._insert_fitness_data(
+            clean_database,
+            journal_id=overlapping_journal_id,
+            distance=9000,
+            elevation_gain=120,
+            duration=2700,
+            calories=580,
+        )
+        await self._insert_jogging_data(
+            clean_database, journal_id=overlapping_journal_id
+        )
+
+        later_journal_id = await self._insert_journal(
+            clean_database,
+            title="Afternoon run",
+            content="Later steady session",
+            start=datetime(2024, 3, 10, 14, 0, tzinfo=UTC),
+        )
+        await self._insert_fitness_data(
+            clean_database,
+            journal_id=later_journal_id,
+            distance=7000,
+            elevation_gain=90,
+            duration=2100,
+            calories=460,
+        )
+        await self._insert_jogging_data(clean_database, journal_id=later_journal_id)
+
+        async with authenticated_lifespan_client() as authenticated_client:
+            session_id = await initialize_mcp_session(authenticated_client)
+            payload = await self._call_tool(
+                authenticated_client,
+                session_id,
+                "search_activities",
+                {
+                    "start_date": "2024-03-10T11:00:00Z",
+                    "end_date": "2024-03-10T11:00:00Z",
+                    "limit": 10,
+                },
+            )
+
+        assert payload["total_hits"] == 1
+        assert [result["title"] for result in payload["results"]] == ["Midday run"]
+
+    @pytest.mark.asyncio
+    async def test_search_activities_reports_total_hits_beyond_limited_results(
+        self,
+        authenticated_lifespan_client,
+        clean_database: AsyncConnection,
+    ) -> None:
+        earlier_journal_id = await self._insert_journal(
+            clean_database,
+            title="Earlier run",
+            content="Steady aerobic session",
+            start=datetime(2024, 3, 8, 7, 0, tzinfo=UTC),
+        )
+        await self._insert_fitness_data(
+            clean_database,
+            journal_id=earlier_journal_id,
+            distance=8000,
+            elevation_gain=60,
+            duration=2400,
+            calories=500,
+        )
+        await self._insert_jogging_data(clean_database, journal_id=earlier_journal_id)
+
+        later_journal_id = await self._insert_journal(
+            clean_database,
+            title="Later run",
+            content="Progression finish",
+            start=datetime(2024, 3, 9, 7, 0, tzinfo=UTC),
+        )
+        await self._insert_fitness_data(
+            clean_database,
+            journal_id=later_journal_id,
+            distance=10000,
+            elevation_gain=90,
+            duration=3000,
+            calories=620,
+        )
+        await self._insert_jogging_data(clean_database, journal_id=later_journal_id)
+
+        async with authenticated_lifespan_client() as authenticated_client:
+            session_id = await initialize_mcp_session(authenticated_client)
+            payload = await self._call_tool(
+                authenticated_client,
+                session_id,
+                "search_activities",
+                {"activity_type": "jogging", "limit": 1},
+            )
+
+        assert payload["total_hits"] == 2
+        assert [result["title"] for result in payload["results"]] == ["Later run"]
+
+    @pytest.mark.asyncio
+    async def test_get_activity_stats_returns_grouped_totals_and_personal_records(
+        self,
+        authenticated_lifespan_client,
+        clean_database: AsyncConnection,
+    ) -> None:
+        long_run_id = await self._insert_journal(
+            clean_database,
+            title="Long run",
+            content="Steady long effort",
+            start=datetime(2024, 1, 10, tzinfo=UTC),
+        )
+        await self._insert_fitness_data(
+            clean_database,
+            journal_id=long_run_id,
+            distance=18000,
+            elevation_gain=220,
+            duration=5400,
+            calories=1100,
+        )
+        await self._insert_jogging_data(
+            clean_database, journal_id=long_run_id, pace=300
+        )
+
+        recovery_run_id = await self._insert_journal(
+            clean_database,
+            title="Recovery run",
+            content="Easy shakeout",
+            start=datetime(2024, 1, 12, tzinfo=UTC),
+        )
+        await self._insert_fitness_data(
+            clean_database,
+            journal_id=recovery_run_id,
+            distance=7000,
+            elevation_gain=60,
+            duration=2100,
+            calories=450,
+        )
+        await self._insert_jogging_data(
+            clean_database, journal_id=recovery_run_id, pace=360
+        )
+
+        paddle_id = await self._insert_journal(
+            clean_database,
+            title="Lake paddle",
+            content="Flatwater technique session",
+            start=datetime(2024, 1, 20, tzinfo=UTC),
+        )
+        await self._insert_fitness_data(
+            clean_database,
+            journal_id=paddle_id,
+            distance=12000,
+            elevation_gain=10,
+            duration=4000,
+            calories=700,
+        )
+        await self._insert_outdoor_activity_data(
+            clean_database,
+            journal_id=paddle_id,
+            activity_type="Kayaking",
+        )
+        await self._insert_kayaking_data(clean_database, journal_id=paddle_id)
+
+        async with authenticated_lifespan_client() as authenticated_client:
+            session_id = await initialize_mcp_session(authenticated_client)
+            payload = await self._call_tool(
+                authenticated_client,
+                session_id,
+                "get_activity_stats",
+                {},
+            )
+
+        assert payload["total_activities"] == 3
+        assert payload["overall_totals"]["distance"] == 37000
+        assert payload["overall_totals"]["duration"] == 11500
+
+        stats_by_type = {
+            stat["activity_type"]: stat for stat in payload["activity_types"]
+        }
+        assert stats_by_type["jogging"]["count"] == 2
+        assert stats_by_type["jogging"]["total_distance"] == 25000
+        assert stats_by_type["kayaking"]["count"] == 1
+        assert stats_by_type["kayaking"]["total_distance"] == 12000
+
+        assert (
+            payload["personal_records"]["longest_distance"]["journal_title"]
+            == "Long run"
+        )
+        assert payload["personal_records"]["longest_distance"]["value"] == 18000
+
+    @pytest.mark.asyncio
+    async def test_analyze_activity_trends_returns_monthly_frequency_buckets(
+        self,
+        authenticated_lifespan_client,
+        clean_database: AsyncConnection,
+    ) -> None:
+        january_run_id = await self._insert_journal(
+            clean_database,
+            title="January run",
+            content="Base run",
+            start=datetime(2024, 1, 5, tzinfo=UTC),
+        )
+        await self._insert_fitness_data(
+            clean_database,
+            journal_id=january_run_id,
+            distance=10000,
+            elevation_gain=100,
+            duration=3200,
+            calories=650,
+        )
+        await self._insert_jogging_data(clean_database, journal_id=january_run_id)
+
+        february_paddle_id = await self._insert_journal(
+            clean_database,
+            title="February paddle",
+            content="Skills session",
+            start=datetime(2024, 2, 8, tzinfo=UTC),
+        )
+        await self._insert_fitness_data(
+            clean_database,
+            journal_id=february_paddle_id,
+            distance=14000,
+            elevation_gain=20,
+            duration=4300,
+            calories=750,
+        )
+        await self._insert_outdoor_activity_data(
+            clean_database,
+            journal_id=february_paddle_id,
+            activity_type="Kayaking",
+        )
+        await self._insert_kayaking_data(clean_database, journal_id=february_paddle_id)
+
+        february_ski_id = await self._insert_journal(
+            clean_database,
+            title="February ski",
+            content="Snowy trails",
+            start=datetime(2024, 2, 20, tzinfo=UTC),
+        )
+        await self._insert_fitness_data(
+            clean_database,
+            journal_id=february_ski_id,
+            distance=9000,
+            elevation_gain=180,
+            duration=3900,
+            calories=680,
+        )
+        await self._insert_outdoor_activity_data(
+            clean_database,
+            journal_id=february_ski_id,
+            activity_type="Cross-country skiing",
+        )
+        await self._insert_bushwalking_data(clean_database, journal_id=february_ski_id)
+        await self._insert_cross_country_skiing_data(
+            clean_database,
+            journal_id=february_ski_id,
+        )
+
+        async with authenticated_lifespan_client() as authenticated_client:
+            session_id = await initialize_mcp_session(authenticated_client)
+            payload = await self._call_tool(
+                authenticated_client,
+                session_id,
+                "analyze_activity_trends",
+                {"interval": "month"},
+            )
+
+        assert payload["interval"] == "month"
+        assert payload["total_activities"] == 3
+
+        periods = {period["period_start"]: period for period in payload["periods"]}
+        assert periods["2024-01-01"]["activity_count"] == 1
+        assert periods["2024-02-01"]["activity_count"] == 2
+        assert periods["2024-02-01"]["total_distance"] == 23000
+
+    @pytest.mark.asyncio
+    async def test_get_route_history_returns_usage_stats_and_entries(
+        self,
+        authenticated_lifespan_client,
+        clean_database: AsyncConnection,
+    ) -> None:
+        route_id = await self._insert_route(clean_database, name="Harbour Loop")
+
+        kayaking_journal_id = await self._insert_journal(
+            clean_database,
+            title="Harbour paddle",
+            content="Route session by kayak",
+            start=datetime(2024, 4, 1, tzinfo=UTC),
+        )
+        await self._insert_fitness_data(
+            clean_database,
+            journal_id=kayaking_journal_id,
+            distance=11000,
+            elevation_gain=10,
+            duration=3800,
+            calories=680,
+        )
+        await self._insert_outdoor_activity_data(
+            clean_database,
+            journal_id=kayaking_journal_id,
+            activity_type="Kayaking",
+        )
+        await self._insert_kayaking_data(
+            clean_database,
+            journal_id=kayaking_journal_id,
+            route_id=route_id,
+        )
+
+        bushwalk_journal_id = await self._insert_journal(
+            clean_database,
+            title="Harbour headland hike",
+            content="Route session on foot",
+            start=datetime(2024, 4, 3, tzinfo=UTC),
+        )
+        await self._insert_fitness_data(
+            clean_database,
+            journal_id=bushwalk_journal_id,
+            distance=9000,
+            elevation_gain=240,
+            duration=7600,
+            calories=820,
+        )
+        await self._insert_outdoor_activity_data(
+            clean_database,
+            journal_id=bushwalk_journal_id,
+            activity_type="Bushwalking",
+        )
+        await self._insert_bushwalking_data(
+            clean_database,
+            journal_id=bushwalk_journal_id,
+            route_id=route_id,
+        )
+
+        async with authenticated_lifespan_client() as authenticated_client:
+            session_id = await initialize_mcp_session(authenticated_client)
+            payload = await self._call_tool(
+                authenticated_client,
+                session_id,
+                "get_route_history",
+                {"route_id": route_id},
+            )
+
+        assert payload["route"]["id"] == route_id
+        assert payload["route"]["name"] == "Harbour Loop"
+        assert payload["usage_count"] == 2
+        assert set(payload["activity_types"]) == {"kayaking", "bushwalking"}
+        assert [entry["journal_title"] for entry in payload["entries"]] == [
+            "Harbour headland hike",
+            "Harbour paddle",
+        ]
+
+    @pytest.mark.asyncio
+    async def test_get_route_history_uses_route_matching_activity_type(
+        self,
+        authenticated_lifespan_client,
+        clean_database: AsyncConnection,
+    ) -> None:
+        target_route_id = await self._insert_route(clean_database, name="River Run")
+        other_route_id = await self._insert_route(clean_database, name="Sea Paddle")
+
+        mixed_activity_journal_id = await self._insert_journal(
+            clean_database,
+            title="Brick workout",
+            content="Run on one route, paddle on another",
+            start=datetime(2024, 4, 5, tzinfo=UTC),
+        )
+        await self._insert_fitness_data(
+            clean_database,
+            journal_id=mixed_activity_journal_id,
+            distance=15000,
+            elevation_gain=150,
+            duration=5400,
+            calories=900,
+        )
+        await self._insert_jogging_data(
+            clean_database,
+            journal_id=mixed_activity_journal_id,
+            route_id=target_route_id,
+        )
+        await self._insert_kayaking_data(
+            clean_database,
+            journal_id=mixed_activity_journal_id,
+            route_id=other_route_id,
+        )
+
+        async with authenticated_lifespan_client() as authenticated_client:
+            session_id = await initialize_mcp_session(authenticated_client)
+            payload = await self._call_tool(
+                authenticated_client,
+                session_id,
+                "get_route_history",
+                {"route_id": target_route_id},
+            )
+
+        assert payload["usage_count"] == 1
+        assert payload["activity_types"] == ["jogging"]
+        assert payload["entries"][0]["journal_title"] == "Brick workout"
+        assert payload["entries"][0]["activity_type"] == "jogging"

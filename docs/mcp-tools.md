@@ -208,7 +208,7 @@ Creates a new journal entry with types, type-specific data, relationships, and t
   - `title` (required): Journal entry title
   - `content` (required): Journal content in markdown format
   - `event_date_range` (required): Object with `start` and `end` datetime fields
-  - `types` (optional): Array of journal types (NOTE, EVENT, MOOD_RATING, PLAN, TRAVEL, PHOTO_ALBUM)
+  - `types` (optional): Array of journal types (for example NOTE, EVENT, MOOD_RATING, PLAN, TRAVEL, PHOTO_ALBUM, FITNESS, OUTDOOR_ACTIVITY, BUSHWALKING, JOGGING, ABSEILING_TRIP, CANYONING, CLIMBING, KAYAKING, CROSS_COUNTRY_SKIING)
   - `type_data` (optional): Object with type-specific data (e.g., `{"EVENT": {"calendar_id": "uuid"}}`)
   - `contact_relationships` (optional): Array of contact relationships (e.g., `[{"contact_id": 123, "relationship_type": "PARTICIPANT"}]`)
   - `tags` (optional): Array of tag names
@@ -328,14 +328,19 @@ Searches journals with filtering options.
 
 **Parameters:**
 - `query` (string, optional): Search query for full-text search
-- `types` (string, optional): Comma-separated list of journal types to filter by
+- `types` (string, optional): Comma-separated list of journal or activity types to filter by
 - `limit` (integer, optional): Maximum number of results (default: 20)
 
 **Returns:**
 AI-friendly search results including:
 - List of matching journals with excerpts
+- Resolved journal types for each result, including activity types
 - Search metadata (total hits, processing time)
 - Contextual summary for AI understanding
+
+**Notes:**
+- `query` and `types` filters can be combined
+- Activity searches can use types such as `fitness`, `jogging`, `bushwalking`, `kayaking`, `canyoning`, `climbing`, and `cross_country_skiing`
 
 **Example:**
 ```json
@@ -360,6 +365,65 @@ AI-friendly search results including:
   "summary": "Found 1 journal(s)"
 }
 ```
+
+### search_activities
+
+Searches fitness and outdoor activity journals with activity-specific filtering.
+
+**Parameters:**
+- `query` (string, optional): Search query for journal title/content
+- `activity_type` (string, optional): Effective activity type filter. Accepted values are `fitness`, `outdoor_activity`, `jogging`, `bushwalking`, `abseiling_trip`, `climbing`, `canyoning`, `kayaking`, and `cross_country_skiing`
+- `start_date` (string, optional): ISO date/datetime lower bound for the journal event range
+- `end_date` (string, optional): ISO date/datetime upper bound for the journal event range
+- `limit` (integer, optional): Maximum number of results (default: 20)
+
+**Returns:**
+- Journal search results limited to activity journals
+- Resolved effective activity type summaries for each result
+- Total hit count for the matched activity set
+
+### get_activity_stats
+
+Aggregates activity totals, per-type breakdowns, and personal records.
+
+**Parameters:**
+- `activity_type` (string, optional): Restrict analytics to one effective activity type
+- `start_date` (string, optional): ISO date/datetime lower bound for the journal event range
+- `end_date` (string, optional): ISO date/datetime upper bound for the journal event range
+
+**Returns:**
+- `overall_totals` for distance, duration, elevation gain, and calories
+- `activity_types` breakdown grouped by effective activity type
+- `personal_records` such as longest distance, longest duration, highest elevation gain, and most calories
+- Summary metadata describing the analysed activity set
+
+### analyze_activity_trends
+
+Builds time-bucketed activity analytics for trend analysis.
+
+**Parameters:**
+- `interval` (string): One of `day`, `week`, `month`, or `year`
+- `activity_type` (string, optional): Restrict analytics to one effective activity type
+- `start_date` (string, optional): ISO date/datetime lower bound for the journal event range
+- `end_date` (string, optional): ISO date/datetime upper bound for the journal event range
+
+**Returns:**
+- Ordered trend buckets with activity counts
+- Total distance, duration, and elevation gain per bucket
+- Total analysed activity count and contextual summary
+
+### get_route_history
+
+Returns the history of activity journals associated with a route.
+
+**Parameters:**
+- `route_id` (string): Route UUID
+
+**Returns:**
+- Route summary metadata
+- `usage_count` for all matching journals
+- Distinct activity types that used the route
+- Activity entries ordered newest-first with date range, distance, and duration
 
 ### delete_journal
 

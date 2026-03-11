@@ -1,6 +1,6 @@
 # Iteration 4.5: Journal System - Fitness & Activity Types
 
-**Status:** 🟡 IN PROGRESS (6/7 tasks complete; ITER4.5-006 is complete and ITER4.5-007 analytics/MCP remains pending)
+**Status:** 🟢 COMPLETE (7/7 tasks complete; activity analytics, MCP tools, UI, and routes are delivered)
 **Dependencies:** Iteration 4 (Journal Core & Base Types)
 **Goal:** Add comprehensive fitness and outdoor activity tracking with specialized activity types
 
@@ -395,7 +395,7 @@ This iteration extends the journal system with fitness and outdoor activity type
 - [x] Write integration tests for type data persistence
 - [x] **Write API integration tests for type creation, updates, removal and validation**
 - [x] Update frontend TypeScript types (`frontend/src/types/journals.ts`)
-- [ ] **Write MCP scheme updates and integration tests for new types** (deferred to ITER4.5-007)
+- [x] **Write MCP schema updates and integration tests for new types** (completed in ITER4.5-007)
 
 **Implementation Notes:**
 - KAYAKING: `journal_kayaking_data` table with `route_id` (UUID FK) and `water_type` (string)
@@ -444,27 +444,50 @@ This iteration extends the journal system with fitness and outdoor activity type
 - Add markers for start/end points
 - Support zoom and pan interactions
 
-### ITER4.5-007: Activity MCP Tools & Analytics 🟡 PLANNED
+### ITER4.5-007: Activity MCP Tools & Analytics ✅ COMPLETED
 **Description:** Add activity-specific MCP tools and analytics
 **Strategy:** Single task for MCP and analytics
 **Specification Reference:** [MCP Tools](../journal-system-specification.md#mcp-tools)
+**Completed:** 2026-03-11
 
 **PR Size:** ~5 files (MCP tools, analytics, tests)
 
 **Acceptance Criteria:**
-- [ ] Create activity-specific MCP tools in `backend/app/mcp/journals/`:
+- [x] Create activity-specific MCP tools in `backend/app/mcp/domains/journals/`:
   - `get_activity_stats()` - Statistics for fitness activities (total distance, elevation, duration by type)
   - `search_activities()` - Search activities with type filtering
   - `analyze_activity_trends()` - Activity pattern analysis
   - `get_route_history()` - History of activities on specific route
-- [ ] Implement activity analytics:
+- [x] Implement activity analytics:
   - Total distance, elevation, duration by activity type
   - Activity frequency over time
   - Personal records (longest distance, highest elevation, etc.)
   - Route usage statistics
-- [ ] Add activity filtering to existing search tools
-- [ ] Write MCP integration tests
-- [ ] Document activity MCP tools in `docs/mcp-tools.md`
+- [x] Add activity filtering to existing search tools
+- [x] Write MCP integration tests
+- [x] Document activity MCP tools in `docs/mcp-tools.md`
+
+**Implementation Details:**
+- Added MCP response schemas for activity totals, per-type stats, personal records, trend buckets, and route history in `backend/app/mcp/domains/journals/schemas.py`
+- Extended journal MCP tool repository wiring to include kayaking, cross-country skiing, and route repositories in `backend/app/mcp/domains/journals/tools.py`
+- Implemented `search_journals()` query + type filtering so combined text/type searches work for activity journals and general journals
+- Added `search_activities()`, `get_activity_stats()`, `analyze_activity_trends()`, and `get_route_history()` to the journal MCP domain and registered them with the MCP server
+- Added mounted MCP integration coverage for journal/activity filtering, aggregated stats, monthly trend bucketing, and route history usage
+- Updated MCP response serialization to emit JSON-safe values for datetime fields
+
+**Quality Gates:**
+- ✅ Targeted MCP test slice passing: `uv run pytest tests/unit/mcp/domains/journals/test_tools.py tests/integration/mcp/test_journal_tools_integration.py`
+- ✅ Backend lint and type checks passing for touched files
+
+**Known Limitations / Deferred Follow-up:**
+- Period-over-period comparison analytics are still future work; the current MCP analytics expose bucketed trend data but do not yet calculate delta comparisons versus previous periods
+- Multi-type journal search currently reuses repository filtering for single-type queries and performs type-aware refinement in MCP for comma-separated multi-type queries; if search volume grows, move that refinement into repository SQL
+- Route usage analytics currently query route-aware activity tables directly because `SqlRouteRepository.check_usage_in_journals()` remains a stub; consider consolidating route usage detection in the route repository during a future iteration
+
+**Follow-up Work for Future Iterations:**
+- Add period-over-period delta summaries and rolling averages to activity analytics
+- Add repository-level support for multi-type journal filtering so MCP search scales without post-query refinement
+- Reuse route history aggregation in the routes domain/service layer so route analytics and route deletion checks share the same source of truth
 
 **Analytics Features:**
 - Activity type breakdown (pie chart data)
@@ -533,23 +556,25 @@ This iteration extends the journal system with fitness and outdoor activity type
 - ✅ Type dependency resolution working for complex types (CANYONING)
 - ✅ GPX track display with interactive map rendering
 - ✅ Activity-specific UI forms/editors for all types
-- 🔄 Activity statistics UI complete; analytics deferred to ITER4.5-007
-- 🔄 MCP tools for activity management deferred to ITER4.5-007
+- ✅ Activity statistics UI complete and backed by MCP analytics
+- ✅ MCP tools for activity management and analytics implemented
 - ✅ All implemented tests passing (unit, integration, frontend)
 - ✅ System in working state after each PR
 - ✅ Ready for Strava integration (Iteration 5)
 
 ## Next Steps
 
-**Immediate:** Finish remaining Iteration 4.5 work
-- Activity MCP tools and analytics for ITER4.5-007
-
-**Then:** Iteration 5 (Strava Integration)
+**Immediate:** Start Iteration 5 (Strava Integration)
 - Strava OAuth and API client
 - Activity data synchronization
 - Automatic FITNESS journal creation from Strava
 - GPX track import from Strava
 - Merge logic for duplicate detection
+
+**Follow-up backlog from Iteration 4.5:**
+- Period-over-period analytics deltas for MCP activity summaries
+- Repository-level multi-type journal filtering for MCP search performance
+- Shared route usage aggregation between route repository and MCP analytics
 
 **Then:** Iteration 6 (Immich Integration)
 - Photo display in activity journals

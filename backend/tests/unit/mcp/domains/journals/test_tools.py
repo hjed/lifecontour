@@ -6,14 +6,23 @@ Note: Full functionality testing with mocked services is done in integration tes
 These unit tests focus on tool registration and basic structure.
 """
 
-from datetime import time
-from unittest.mock import AsyncMock
+from datetime import UTC, datetime, time
+from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import pytest
 from fastmcp import Client, FastMCP
 
-from app.mcp.domains.journals.tools import _update_event_data, register_journal_tools
+from app.mcp.domains.journals.tools import (
+    _fetch_activity_overall_stats_row,
+    _fetch_activity_personal_record_row,
+    _fetch_activity_rows,
+    _fetch_activity_trend_rows,
+    _fetch_activity_type_stats_rows,
+    _parse_optional_datetime_filter,
+    _update_event_data,
+    register_journal_tools,
+)
 
 
 class TestJournalTools:
@@ -49,6 +58,10 @@ class TestJournalTools:
                 "update_journal_entry",
                 "get_journal",
                 "search_journals",
+                "search_activities",
+                "get_activity_stats",
+                "analyze_activity_trends",
+                "get_route_history",
                 "delete_journal",
                 "get_contact_journals",
                 "link_journal_to_contact",
@@ -147,6 +160,124 @@ class TestJournalTools:
             properties = get_tool.inputSchema.get("properties", {})
             assert "journal_id" in properties
             assert "include_children" in properties
+
+
+class TestDatetimeFilterParsing:
+    def test_normalizes_date_only_filters_to_utc_bounds(self) -> None:
+        assert _parse_optional_datetime_filter("2024-03-11", "start_date") == datetime(
+            2024, 3, 11, 0, 0, 0, tzinfo=UTC
+        )
+        assert _parse_optional_datetime_filter(
+            "2024-03-11", "end_date", is_end=True
+        ) == datetime(2024, 3, 11, 23, 59, 59, 999999, tzinfo=UTC)
+
+    def test_preserves_timezone_aware_datetime_filters(self) -> None:
+        assert _parse_optional_datetime_filter(
+            "2024-03-11T09:15:00Z", "start_date"
+        ) == datetime(2024, 3, 11, 9, 15, 0, tzinfo=UTC)
+
+
+class TestFetchActivityRows:
+    @pytest.mark.asyncio
+    async def test_applies_sql_limit_and_offset(self) -> None:
+        db_connection = AsyncMock()
+        result = MagicMock()
+        result.fetchall.return_value = []
+        db_connection.execute.return_value = result
+
+        await _fetch_activity_rows(
+            db_connection,
+            "user-123",
+            activity_type="jogging",
+            limit=5,
+            offset=10,
+        )
+
+        query = db_connection.execute.await_args.args[0]
+        params = db_connection.execute.await_args.args[1]
+
+        assert "LIMIT :limit OFFSET :offset" in str(query)
+        assert params["limit"] == 5
+        assert params["offset"] == 10
+
+
+class TestActivityAggregationQueries:
+    @pytest.mark.asyncio
+    async def test_fetches_overall_activity_stats_in_sql(self) -> None:
+        db_connection = AsyncMock()
+        result = MagicMock()
+        result.fetchone.return_value = (0, 0, 0, 0, 0)
+        db_connection.execute.return_value = result
+
+        await _fetch_activity_overall_stats_row(
+            db_connection,
+            "user-123",
+            activity_type="jogging",
+            start_date="2024-01-01",
+            end_date="2024-01-31",
+        )
+
+        query = db_connection.execute.await_args.args[0]
+        params = db_connection.execute.await_args.args[1]
+
+        assert "COUNT(*) AS total_activities" in str(query)
+        assert "COALESCE(SUM(distance), 0) AS total_distance" in str(query)
+        assert params["activity_type"] == "jogging"
+
+    @pytest.mark.asyncio
+    async def test_fetches_activity_type_breakdown_in_sql(self) -> None:
+        db_connection = AsyncMock()
+        result = MagicMock()
+        result.fetchall.return_value = []
+        db_connection.execute.return_value = result
+
+        await _fetch_activity_type_stats_rows(db_connection, "user-123")
+
+        query = db_connection.execute.await_args.args[0]
+
+        assert "GROUP BY activity_type" in str(query)
+        assert "ORDER BY activity_type" in str(query)
+        assert "COUNT(*) AS count" in str(query)
+
+    @pytest.mark.asyncio
+    async def test_fetches_personal_record_with_sql_ordering_and_limit(self) -> None:
+        db_connection = AsyncMock()
+        result = MagicMock()
+        result.fetchone.return_value = None
+        db_connection.execute.return_value = result
+
+        await _fetch_activity_personal_record_row(
+            db_connection,
+            "user-123",
+            metric_name="distance",
+        )
+
+        query = db_connection.execute.await_args.args[0]
+
+        assert "distance AS metric_value" in str(query)
+        assert "ORDER BY distance DESC" in str(query)
+        assert "LIMIT 1" in str(query)
+
+    @pytest.mark.asyncio
+    async def test_fetches_activity_trend_buckets_in_sql(self) -> None:
+        db_connection = AsyncMock()
+        result = MagicMock()
+        result.fetchall.return_value = []
+        db_connection.execute.return_value = result
+
+        await _fetch_activity_trend_rows(
+            db_connection,
+            "user-123",
+            interval="month",
+        )
+
+        query = db_connection.execute.await_args.args[0]
+        params = db_connection.execute.await_args.args[1]
+
+        assert "DATE_TRUNC(:interval_unit" in str(query)
+        assert "GROUP BY period_start" in str(query)
+        assert "ORDER BY period_start" in str(query)
+        assert params["interval_unit"] == "month"
 
 
 class TestUpdateEventData:

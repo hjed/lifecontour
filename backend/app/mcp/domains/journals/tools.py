@@ -7,6 +7,7 @@ Each tool is designed to return AI-friendly, contextual information.
 
 import dataclasses
 import json
+from datetime import UTC, date, datetime
 from datetime import time as dt_time
 from typing import Annotated, Any
 from uuid import UUID
@@ -35,6 +36,9 @@ from app.core.journal.adapters.sql.canyoning_data_repository import (
 from app.core.journal.adapters.sql.climbing_data_repository import (
     SqlClimbingDataRepository,
 )
+from app.core.journal.adapters.sql.cross_country_skiing_data_repository import (
+    SqlCrossCountrySkiingDataRepository,
+)
 from app.core.journal.adapters.sql.fitness_data_repository import (
     SqlFitnessDataRepository,
 )
@@ -46,6 +50,9 @@ from app.core.journal.adapters.sql.journal_contact_relationship_repository impor
 )
 from app.core.journal.adapters.sql.journal_repository import SqlJournalRepository
 from app.core.journal.adapters.sql.journal_tag_repository import SqlJournalTagRepository
+from app.core.journal.adapters.sql.kayaking_data_repository import (
+    SqlKayakingDataRepository,
+)
 from app.core.journal.adapters.sql.mood_data_repository import SqlMoodDataRepository
 from app.core.journal.adapters.sql.outdoor_activity_data_repository import (
     SqlOutdoorActivityDataRepository,
@@ -54,6 +61,7 @@ from app.core.journal.adapters.sql.photo_album_data_repository import (
     SqlPhotoAlbumDataRepository,
 )
 from app.core.journal.adapters.sql.plan_data_repository import SqlPlanDataRepository
+from app.core.journal.adapters.sql.route_repository import SqlRouteRepository
 from app.core.journal.adapters.sql.travel_data_repository import SqlTravelDataRepository
 from app.core.journal.models.abseiling_data import AbseilingData
 from app.core.journal.models.bushwalking_data import BushwalkingData
@@ -61,6 +69,7 @@ from app.core.journal.models.calendar import Calendar
 from app.core.journal.models.calendar_info import CalendarInfo
 from app.core.journal.models.canyoning_data import CanyoningData
 from app.core.journal.models.climbing_data import ClimbingData
+from app.core.journal.models.cross_country_skiing_data import CrossCountrySkiingData
 from app.core.journal.models.entities import Journal
 from app.core.journal.models.exceptions import (
     JournalNotFoundError,
@@ -76,6 +85,7 @@ from app.core.journal.models.journal_relationship_types import (
 )
 from app.core.journal.models.journal_tag import JournalTag
 from app.core.journal.models.journal_types import JournalType
+from app.core.journal.models.kayaking_data import KayakingData
 from app.core.journal.models.mood_data import MoodData
 from app.core.journal.models.outdoor_activity_data import OutdoorActivityData
 from app.core.journal.models.photo_album_data import PhotoAlbumData
@@ -86,9 +96,20 @@ from app.core.journal.services.journal_service import JournalService
 from app.infrastructure.events.outbox_event_publisher import OutboxEventPublisher
 from app.mcp.domains.journals.converters import JournalConverter
 from app.mcp.domains.journals.schemas import (
+    ActivityPersonalRecord,
+    ActivityStatsResponse,
+    ActivityTotals,
+    ActivityTrendPeriod,
+    ActivityTrendsResponse,
+    ActivityTypeStats,
+    EventDateRangeSchema,
     JournalCreateRequest,
     JournalSearchResponse,
+    JournalSearchResult,
     JournalUpdateRequest,
+    RouteHistoryEntry,
+    RouteHistoryResponse,
+    RouteSummary,
 )
 from app.mcp.shared.decorators import mcp_unified_error_handler
 from app.mcp.shared.dependencies import (
@@ -119,9 +140,49 @@ class _JournalToolRepositories:
     abseiling_data_repo: SqlAbseilingDataRepository
     canyoning_data_repo: SqlCanyoningDataRepository
     climbing_data_repo: SqlClimbingDataRepository
+    kayaking_data_repo: SqlKayakingDataRepository
+    cross_country_skiing_data_repo: SqlCrossCountrySkiingDataRepository
+    route_repo: SqlRouteRepository
     contact_relationship_repo: SqlJournalContactRelationshipRepository
     contact_repo: SqlContactRepository
     tag_repo: SqlJournalTagRepository
+
+
+@dataclasses.dataclass(frozen=True)
+class _ActivityJournalRow:
+    """Activity journal row enriched with resolved activity metrics."""
+
+    journal: Journal
+    activity_type: str
+    distance: int
+    duration: int
+    elevation_gain: int
+    calories: int
+
+
+_ACTIVITY_TYPE_PRECEDENCE: tuple[JournalType, ...] = (
+    JournalType.CANYONING,
+    JournalType.CROSS_COUNTRY_SKIING,
+    JournalType.KAYAKING,
+    JournalType.CLIMBING,
+    JournalType.ABSEILING_TRIP,
+    JournalType.BUSHWALKING,
+    JournalType.JOGGING,
+    JournalType.OUTDOOR_ACTIVITY,
+    JournalType.FITNESS,
+)
+
+_ROUTE_ACTIVITY_CASE = """
+    CASE
+        WHEN canyoning.route_id = :route_id THEN 'canyoning'
+        WHEN skiing.route_id = :route_id THEN 'cross_country_skiing'
+        WHEN kayaking.route_id = :route_id THEN 'kayaking'
+        WHEN climbing.route_id = :route_id THEN 'climbing'
+        WHEN bushwalking.route_id = :route_id THEN 'bushwalking'
+        WHEN jogging.route_id = :route_id THEN 'jogging'
+        ELSE NULL
+    END
+"""
 
 
 def _create_journal_tool_repositories(
@@ -143,6 +204,11 @@ def _create_journal_tool_repositories(
         abseiling_data_repo=SqlAbseilingDataRepository(db_connection),
         canyoning_data_repo=SqlCanyoningDataRepository(db_connection),
         climbing_data_repo=SqlClimbingDataRepository(db_connection),
+        kayaking_data_repo=SqlKayakingDataRepository(db_connection),
+        cross_country_skiing_data_repo=SqlCrossCountrySkiingDataRepository(
+            db_connection
+        ),
+        route_repo=SqlRouteRepository(db_connection),
         contact_relationship_repo=SqlJournalContactRelationshipRepository(
             db_connection
         ),
@@ -151,7 +217,9 @@ def _create_journal_tool_repositories(
     )
 
 
-def _journal_to_search_result(journal: Journal) -> Any:
+def _journal_to_search_result(
+    journal: Journal, *, types: list[str] | None = None, summary: str | None = None
+) -> JournalSearchResult:
     """
     Convert a Journal entity to a JournalSearchResult.
 
@@ -161,11 +229,6 @@ def _journal_to_search_result(journal: Journal) -> Any:
     Returns:
         JournalSearchResult with basic journal information
     """
-    from app.mcp.domains.journals.schemas import (
-        EventDateRangeSchema,
-        JournalSearchResult,
-    )
-
     return JournalSearchResult(
         id=journal.id or 0,
         title=journal.title,
@@ -176,11 +239,529 @@ def _journal_to_search_result(journal: Journal) -> Any:
             start=journal.event_date_range.start,
             end=journal.event_date_range.end,
         ),
-        types=[],
+        types=types or [],
         tags=[],
         highlighted={},
-        summary=f"Journal: {journal.title}",
+        summary=summary or f"Journal: {journal.title}",
     )
+
+
+def _parse_type_filters(types: str | None) -> list[str]:
+    """Parse and validate comma-separated journal types."""
+    if not types:
+        return []
+
+    parsed_types: list[str] = []
+    for raw_type in types.split(","):
+        normalized = raw_type.strip().lower()
+        if not normalized:
+            continue
+        try:
+            journal_type = JournalType(normalized)
+        except ValueError as exc:
+            allowed_types = ", ".join(
+                sorted(journal_type.value for journal_type in JournalType)
+            )
+            raise ValueError(
+                f"Invalid journal type '{raw_type.strip()}'. Must be one of: {allowed_types}"
+            ) from exc
+        if journal_type.value not in parsed_types:
+            parsed_types.append(journal_type.value)
+
+    return parsed_types
+
+
+def _parse_activity_type_filter(activity_type: str | None) -> str | None:
+    """Parse and validate an effective activity type filter."""
+    if activity_type is None:
+        return None
+
+    normalized = activity_type.strip().lower()
+    allowed_types = {journal_type.value for journal_type in _ACTIVITY_TYPE_PRECEDENCE}
+    if normalized not in allowed_types:
+        allowed = ", ".join(sorted(allowed_types))
+        raise ValueError(
+            f"Invalid activity_type '{activity_type}'. Must be one of: {allowed}"
+        )
+    return normalized
+
+
+def _parse_optional_datetime_filter(
+    value: str | None, field_name: str, *, is_end: bool = False
+) -> datetime | None:
+    """Validate ISO date/datetime filter strings and normalize to aware datetimes."""
+    if value is None:
+        return None
+
+    normalized = value.strip()
+    try:
+        if "T" not in normalized:
+            parsed_date = date.fromisoformat(normalized)
+            parsed_datetime = datetime.combine(
+                parsed_date,
+                dt_time.max if is_end else dt_time.min,
+                tzinfo=UTC,
+            )
+        else:
+            parsed_datetime = datetime.fromisoformat(normalized.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise ValueError(
+            f"Invalid {field_name} '{value}'. Must be a valid ISO date or datetime."
+        ) from exc
+
+    return (
+        parsed_datetime
+        if parsed_datetime.tzinfo
+        else parsed_datetime.replace(tzinfo=UTC)
+    )
+
+
+def _journal_from_row(row: Any) -> Journal:
+    """Build a journal entity from a SQL result row."""
+    return Journal(
+        id=row.id,
+        user_id=row.user_id,
+        title=row.title,
+        content=row.content,
+        event_date_range=EventDateRange(
+            start=row.event_date_range_start,
+            end=row.event_date_range_end,
+        ),
+        parent_id=row.parent_id,
+        order=row.journal_order,
+        created_at=row.created_at,
+        updated_at=row.updated_at,
+    )
+
+
+def _activity_row_from_row(row: Any) -> _ActivityJournalRow:
+    """Build an activity journal row from a SQL result row."""
+    return _ActivityJournalRow(
+        journal=_journal_from_row(row),
+        activity_type=row.activity_type,
+        distance=int(row.distance or 0),
+        duration=int(row.duration or 0),
+        elevation_gain=int(row.elevation_gain or 0),
+        calories=int(row.calories or 0),
+    )
+
+
+async def _fetch_types_for_journal(
+    journal_id: int, repos: _JournalToolRepositories
+) -> tuple[list[str], dict[str, Any]]:
+    """Fetch the concrete types and type-specific data for a journal."""
+    return await _fetch_journal_types_and_data(
+        journal_id,
+        repos.calendar_info_repo,
+        repos.mood_data_repo,
+        repos.plan_data_repo,
+        repos.travel_data_repo,
+        repos.photo_album_data_repo,
+        repos.fitness_data_repo,
+        repos.outdoor_activity_data_repo,
+        repos.bushwalking_data_repo,
+        repos.jogging_data_repo,
+        repos.abseiling_data_repo,
+        repos.canyoning_data_repo,
+        repos.climbing_data_repo,
+        repos.kayaking_data_repo,
+        repos.cross_country_skiing_data_repo,
+    )
+
+
+async def _build_search_results(
+    journals: list[Journal],
+    repos: _JournalToolRepositories,
+    *,
+    activity_rows_by_id: dict[int, _ActivityJournalRow] | None = None,
+) -> list[JournalSearchResult]:
+    """Build AI-friendly journal search results with concrete types included."""
+    results: list[JournalSearchResult] = []
+    for journal in journals:
+        if journal.id is None:
+            continue
+        types, _ = await _fetch_types_for_journal(journal.id, repos)
+        activity_row = (
+            activity_rows_by_id.get(journal.id)
+            if activity_rows_by_id is not None
+            else None
+        )
+        summary = None
+        if activity_row is not None:
+            activity_label = activity_row.activity_type.replace("_", " ")
+            summary = (
+                f"{activity_label.title()} activity '{journal.title}' covering "
+                f"{activity_row.distance}m in {activity_row.duration}s"
+            )
+        results.append(_journal_to_search_result(journal, types=types, summary=summary))
+    return results
+
+
+def _build_activity_query_filters(
+    user_id: str,
+    *,
+    search_query: str | None = None,
+    activity_type: str | None = None,
+    start_date: str | None = None,
+    end_date: str | None = None,
+) -> tuple[dict[str, Any], list[str]]:
+    """Build shared parameters and filters for activity journal queries."""
+    normalized_activity_type = _parse_activity_type_filter(activity_type)
+    start_date_filter = _parse_optional_datetime_filter(start_date, "start_date")
+    end_date_filter = _parse_optional_datetime_filter(end_date, "end_date", is_end=True)
+
+    params: dict[str, Any] = {"user_id": user_id}
+    where_clauses: list[str] = []
+
+    if search_query:
+        params["search_pattern"] = f"%{search_query}%"
+        where_clauses.append(
+            "(title ILIKE :search_pattern OR content ILIKE :search_pattern)"
+        )
+
+    if normalized_activity_type is not None:
+        params["activity_type"] = normalized_activity_type
+        where_clauses.append("activity_type = :activity_type")
+
+    if start_date_filter is not None:
+        params["start_date"] = start_date_filter
+        where_clauses.append("event_date_range_end >= :start_date")
+
+    if end_date_filter is not None:
+        params["end_date"] = end_date_filter
+        where_clauses.append("event_date_range_start <= :end_date")
+
+    return params, where_clauses
+
+
+def _build_activity_rows_query_sql(
+    where_clauses: list[str],
+    *,
+    select_sql: str,
+    include_ordering: bool,
+) -> str:
+    """Build activity journal SQL with optional shared filters and ordering."""
+    query_sql = f"""
+        WITH activity_rows AS (
+            SELECT
+                j.id,
+                j.user_id,
+                j.title,
+                j.content,
+                j.event_date_range_start,
+                j.event_date_range_end,
+                j.parent_id,
+                j."order" AS journal_order,
+                j.created_at,
+                j.updated_at,
+                COALESCE(f.distance, 0) AS distance,
+                COALESCE(f.duration, 0) AS duration,
+                COALESCE(f.elevation_gain, 0) AS elevation_gain,
+                COALESCE(f.calories, 0) AS calories,
+                CASE
+                    WHEN canyoning.journal_id IS NOT NULL THEN 'canyoning'
+                    WHEN skiing.journal_id IS NOT NULL THEN 'cross_country_skiing'
+                    WHEN kayaking.journal_id IS NOT NULL THEN 'kayaking'
+                    WHEN climbing.journal_id IS NOT NULL THEN 'climbing'
+                    WHEN abseiling.journal_id IS NOT NULL THEN 'abseiling_trip'
+                    WHEN bushwalking.journal_id IS NOT NULL THEN 'bushwalking'
+                    WHEN jogging.journal_id IS NOT NULL THEN 'jogging'
+                    WHEN outdoor_activity.journal_id IS NOT NULL THEN 'outdoor_activity'
+                    ELSE 'fitness'
+                END AS activity_type
+            FROM journals j
+            INNER JOIN journal_fitness_data f ON f.journal_id = j.id
+            LEFT JOIN journal_outdoor_activity_data outdoor_activity
+                ON outdoor_activity.journal_id = j.id
+            LEFT JOIN journal_bushwalking_data bushwalking
+                ON bushwalking.journal_id = j.id
+            LEFT JOIN journal_jogging_data jogging
+                ON jogging.journal_id = j.id
+            LEFT JOIN journal_abseiling_data abseiling
+                ON abseiling.journal_id = j.id
+            LEFT JOIN journal_canyoning_data canyoning
+                ON canyoning.journal_id = j.id
+            LEFT JOIN journal_climbing_data climbing
+                ON climbing.journal_id = j.id
+            LEFT JOIN journal_kayaking_data kayaking
+                ON kayaking.journal_id = j.id
+            LEFT JOIN journal_skiing_data skiing
+                ON skiing.journal_id = j.id
+            WHERE j.user_id = :user_id
+        )
+        {select_sql}
+        FROM activity_rows
+        """
+
+    if where_clauses:
+        query_sql += "\n        WHERE " + " AND ".join(where_clauses)
+
+    if include_ordering:
+        query_sql += "\n        ORDER BY event_date_range_start DESC, created_at DESC"
+
+    return query_sql
+
+
+async def _fetch_activity_rows(
+    db_connection: AsyncConnection,
+    user_id: str,
+    *,
+    search_query: str | None = None,
+    activity_type: str | None = None,
+    start_date: str | None = None,
+    end_date: str | None = None,
+    limit: int | None = None,
+    offset: int = 0,
+) -> list[_ActivityJournalRow]:
+    """Fetch activity journals with resolved effective activity types and metrics."""
+    params, where_clauses = _build_activity_query_filters(
+        user_id,
+        search_query=search_query,
+        activity_type=activity_type,
+        start_date=start_date,
+        end_date=end_date,
+    )
+    query_sql = _build_activity_rows_query_sql(
+        where_clauses,
+        select_sql="SELECT *",
+        include_ordering=True,
+    )
+
+    if limit is not None:
+        params["limit"] = limit
+        params["offset"] = offset
+        query_sql += "\n        LIMIT :limit OFFSET :offset"
+
+    result = await db_connection.execute(text(query_sql), params)
+    return [_activity_row_from_row(row) for row in result.fetchall()]
+
+
+async def _count_activity_rows(
+    db_connection: AsyncConnection,
+    user_id: str,
+    *,
+    search_query: str | None = None,
+    activity_type: str | None = None,
+    start_date: str | None = None,
+    end_date: str | None = None,
+) -> int:
+    """Count matching activity journals without materializing the full result set."""
+    params, where_clauses = _build_activity_query_filters(
+        user_id,
+        search_query=search_query,
+        activity_type=activity_type,
+        start_date=start_date,
+        end_date=end_date,
+    )
+    query_sql = _build_activity_rows_query_sql(
+        where_clauses,
+        select_sql="SELECT COUNT(*)",
+        include_ordering=False,
+    )
+
+    result = await db_connection.execute(text(query_sql), params)
+    row = result.fetchone()
+    if row is None:
+        return 0
+    count_value = row[0]
+    return int(count_value) if count_value is not None else 0
+
+
+async def _fetch_activity_overall_stats_row(
+    db_connection: AsyncConnection,
+    user_id: str,
+    *,
+    activity_type: str | None = None,
+    start_date: str | None = None,
+    end_date: str | None = None,
+) -> Any:
+    """Fetch overall activity aggregate totals without materializing activity rows."""
+    params, where_clauses = _build_activity_query_filters(
+        user_id,
+        activity_type=activity_type,
+        start_date=start_date,
+        end_date=end_date,
+    )
+    query_sql = _build_activity_rows_query_sql(
+        where_clauses,
+        select_sql="""
+        SELECT
+            COUNT(*) AS total_activities,
+            COALESCE(SUM(distance), 0) AS total_distance,
+            COALESCE(SUM(duration), 0) AS total_duration,
+            COALESCE(SUM(elevation_gain), 0) AS total_elevation_gain,
+            COALESCE(SUM(calories), 0) AS total_calories
+        """,
+        include_ordering=False,
+    )
+
+    result = await db_connection.execute(text(query_sql), params)
+    return result.fetchone()
+
+
+async def _fetch_activity_type_stats_rows(
+    db_connection: AsyncConnection,
+    user_id: str,
+    *,
+    activity_type: str | None = None,
+    start_date: str | None = None,
+    end_date: str | None = None,
+) -> list[Any]:
+    """Fetch grouped activity-type aggregates in SQL."""
+    params, where_clauses = _build_activity_query_filters(
+        user_id,
+        activity_type=activity_type,
+        start_date=start_date,
+        end_date=end_date,
+    )
+    query_sql = _build_activity_rows_query_sql(
+        where_clauses,
+        select_sql="""
+        SELECT
+            activity_type,
+            COUNT(*) AS count,
+            COALESCE(SUM(distance), 0) AS total_distance,
+            COALESCE(SUM(duration), 0) AS total_duration,
+            COALESCE(SUM(elevation_gain), 0) AS total_elevation_gain,
+            COALESCE(SUM(calories), 0) AS total_calories
+        """,
+        include_ordering=False,
+    )
+    query_sql += """
+        GROUP BY activity_type
+        ORDER BY activity_type
+    """
+
+    result = await db_connection.execute(text(query_sql), params)
+    return list(result.fetchall())
+
+
+async def _fetch_activity_personal_record_row(
+    db_connection: AsyncConnection,
+    user_id: str,
+    *,
+    metric_name: str,
+    activity_type: str | None = None,
+    start_date: str | None = None,
+    end_date: str | None = None,
+) -> Any:
+    """Fetch the top personal-record row for a metric in SQL."""
+    if metric_name not in {"distance", "duration", "elevation_gain", "calories"}:
+        raise ValueError(f"Unsupported activity metric '{metric_name}'")
+
+    params, where_clauses = _build_activity_query_filters(
+        user_id,
+        activity_type=activity_type,
+        start_date=start_date,
+        end_date=end_date,
+    )
+    query_sql = _build_activity_rows_query_sql(
+        where_clauses,
+        select_sql=f"""
+        SELECT
+            id AS journal_id,
+            title AS journal_title,
+            activity_type,
+            {metric_name} AS metric_value,
+            event_date_range_start,
+            created_at
+        """,
+        include_ordering=False,
+    )
+    query_sql += f"""
+        ORDER BY {metric_name} DESC, event_date_range_start DESC, created_at DESC
+        LIMIT 1
+    """
+
+    result = await db_connection.execute(text(query_sql), params)
+    return result.fetchone()
+
+
+async def _fetch_activity_trend_rows(
+    db_connection: AsyncConnection,
+    user_id: str,
+    *,
+    interval: str,
+    activity_type: str | None = None,
+    start_date: str | None = None,
+    end_date: str | None = None,
+) -> list[Any]:
+    """Fetch time-bucketed activity aggregates in SQL."""
+    params, where_clauses = _build_activity_query_filters(
+        user_id,
+        activity_type=activity_type,
+        start_date=start_date,
+        end_date=end_date,
+    )
+    params["interval_unit"] = interval
+    query_sql = _build_activity_rows_query_sql(
+        where_clauses,
+        select_sql="""
+        SELECT
+            DATE_TRUNC(:interval_unit, event_date_range_start AT TIME ZONE 'UTC')::date AS period_start,
+            COUNT(*) AS activity_count,
+            COALESCE(SUM(distance), 0) AS total_distance,
+            COALESCE(SUM(duration), 0) AS total_duration,
+            COALESCE(SUM(elevation_gain), 0) AS total_elevation_gain
+        """,
+        include_ordering=False,
+    )
+    query_sql += """
+        GROUP BY period_start
+        ORDER BY period_start
+    """
+
+    result = await db_connection.execute(text(query_sql), params)
+    return list(result.fetchall())
+
+
+async def _fetch_route_history_rows(
+    db_connection: AsyncConnection,
+    user_id: str,
+    route_id: UUID,
+) -> list[Any]:
+    """Fetch route usage rows across all route-aware activity tables."""
+    query = text(
+        f"""
+        SELECT
+            j.id,
+            j.user_id,
+            j.title,
+            j.content,
+            j.event_date_range_start,
+            j.event_date_range_end,
+            j.parent_id,
+            j."order" AS journal_order,
+            j.created_at,
+            j.updated_at,
+            f.distance,
+            f.duration,
+            {_ROUTE_ACTIVITY_CASE} AS activity_type
+        FROM journals j
+        LEFT JOIN journal_fitness_data f ON f.journal_id = j.id
+        LEFT JOIN journal_jogging_data jogging ON jogging.journal_id = j.id
+        LEFT JOIN journal_bushwalking_data bushwalking ON bushwalking.journal_id = j.id
+        LEFT JOIN journal_canyoning_data canyoning ON canyoning.journal_id = j.id
+        LEFT JOIN journal_climbing_data climbing ON climbing.journal_id = j.id
+        LEFT JOIN journal_kayaking_data kayaking ON kayaking.journal_id = j.id
+        LEFT JOIN journal_skiing_data skiing ON skiing.journal_id = j.id
+        WHERE j.user_id = :user_id
+          AND (
+              jogging.route_id = :route_id
+              OR bushwalking.route_id = :route_id
+              OR canyoning.route_id = :route_id
+              OR climbing.route_id = :route_id
+              OR kayaking.route_id = :route_id
+              OR skiing.route_id = :route_id
+          )
+        ORDER BY j.event_date_range_start DESC, j.created_at DESC
+        """
+    )
+    result = await db_connection.execute(
+        query,
+        {"user_id": user_id, "route_id": route_id},
+    )
+    return list(result.fetchall())
 
 
 async def _fetch_contact_relationships_with_names(
@@ -386,6 +967,26 @@ def _build_climbing_data(climbing_data: Any) -> dict[str, Any]:
     }
 
 
+def _build_kayaking_data(kayaking_data: Any) -> dict[str, Any]:
+    """Build kayaking data dictionary."""
+    return {
+        "route_id": str(kayaking_data.route_id) if kayaking_data.route_id else None,
+        "water_type": kayaking_data.water_type,
+    }
+
+
+def _build_cross_country_skiing_data(
+    cross_country_skiing_data: Any,
+) -> dict[str, Any]:
+    """Build cross-country skiing data dictionary."""
+    return {
+        "route_id": str(cross_country_skiing_data.route_id)
+        if cross_country_skiing_data.route_id
+        else None,
+        "snow_conditions": cross_country_skiing_data.snow_conditions,
+    }
+
+
 async def _fetch_journal_types_and_data(
     journal_id: int,
     calendar_info_repo: SqlCalendarInfoRepository,
@@ -400,6 +1001,8 @@ async def _fetch_journal_types_and_data(
     abseiling_data_repo: SqlAbseilingDataRepository,
     canyoning_data_repo: SqlCanyoningDataRepository,
     climbing_data_repo: SqlClimbingDataRepository,
+    kayaking_data_repo: SqlKayakingDataRepository,
+    cross_country_skiing_data_repo: SqlCrossCountrySkiingDataRepository,
 ) -> tuple[list[str], dict[str, Any]]:
     """
     Fetch all type-specific data for a journal.
@@ -418,6 +1021,8 @@ async def _fetch_journal_types_and_data(
         abseiling_data_repo: Abseiling data repository
         canyoning_data_repo: Canyoning data repository
         climbing_data_repo: Climbing data repository
+        kayaking_data_repo: Kayaking data repository
+        cross_country_skiing_data_repo: Cross-country skiing data repository
 
     Returns:
         Tuple of (types list, type_data dict)
@@ -496,6 +1101,20 @@ async def _fetch_journal_types_and_data(
         types.append(JournalType.CLIMBING.value)
         type_data[JournalType.CLIMBING.value] = _build_climbing_data(climbing_data)
 
+    kayaking_data = await kayaking_data_repo.find_by_journal_id(journal_id)
+    if kayaking_data:
+        types.append(JournalType.KAYAKING.value)
+        type_data[JournalType.KAYAKING.value] = _build_kayaking_data(kayaking_data)
+
+    cross_country_skiing_data = await cross_country_skiing_data_repo.find_by_journal_id(
+        journal_id
+    )
+    if cross_country_skiing_data:
+        types.append(JournalType.CROSS_COUNTRY_SKIING.value)
+        type_data[JournalType.CROSS_COUNTRY_SKIING.value] = (
+            _build_cross_country_skiing_data(cross_country_skiing_data)
+        )
+
     # If no types found, it's a NOTE
     if not types:
         types.append(JournalType.NOTE.value)
@@ -516,6 +1135,8 @@ async def _create_type_specific_data(
     abseiling_data_repo: SqlAbseilingDataRepository,
     canyoning_data_repo: SqlCanyoningDataRepository,
     climbing_data_repo: SqlClimbingDataRepository,
+    kayaking_data_repo: SqlKayakingDataRepository,
+    cross_country_skiing_data_repo: SqlCrossCountrySkiingDataRepository,
 ) -> None:
     """
     Create type-specific data row with default values for the given journal type.
@@ -533,6 +1154,8 @@ async def _create_type_specific_data(
         abseiling_data_repo: Repository for abseiling data
         canyoning_data_repo: Repository for canyoning data
         climbing_data_repo: Repository for climbing data
+        kayaking_data_repo: Repository for kayaking data
+        cross_country_skiing_data_repo: Repository for cross-country skiing data
     """
     if journal_type == JournalType.MOOD_RATING:
         mood_data = MoodData(journal_id=journal_id)
@@ -564,6 +1187,12 @@ async def _create_type_specific_data(
     elif journal_type == JournalType.CLIMBING:
         climbing_data = ClimbingData(journal_id=journal_id)
         await climbing_data_repo.save(climbing_data)
+    elif journal_type == JournalType.KAYAKING:
+        kayaking_data = KayakingData(journal_id=journal_id)
+        await kayaking_data_repo.save(kayaking_data)
+    elif journal_type == JournalType.CROSS_COUNTRY_SKIING:
+        cross_country_skiing_data = CrossCountrySkiingData(journal_id=journal_id)
+        await cross_country_skiing_data_repo.save(cross_country_skiing_data)
     # EVENT and PHOTO_ALBUM types require additional data (calendar_id, immich_album_id)
     # These will be created when the user provides type_data
 
@@ -792,6 +1421,38 @@ async def _update_climbing_data(
         await climbing_data_repo.save(validated_climbing)
 
 
+async def _update_kayaking_data(
+    journal_id: int,
+    type_data_dict: dict[str, Any],
+    kayaking_data_repo: SqlKayakingDataRepository,
+) -> None:
+    existing_kayaking = await kayaking_data_repo.find_by_journal_id(journal_id)
+    if existing_kayaking:
+        kayaking_updates: dict[str, Any] = {}
+        _parse_route_id(type_data_dict, kayaking_updates)
+        if "water_type" in type_data_dict:
+            kayaking_updates["water_type"] = type_data_dict["water_type"]
+        validated_kayaking = dataclasses.replace(existing_kayaking, **kayaking_updates)
+        await kayaking_data_repo.save(validated_kayaking)
+
+
+async def _update_cross_country_skiing_data(
+    journal_id: int,
+    type_data_dict: dict[str, Any],
+    cross_country_skiing_data_repo: SqlCrossCountrySkiingDataRepository,
+) -> None:
+    existing_skiing = await cross_country_skiing_data_repo.find_by_journal_id(
+        journal_id
+    )
+    if existing_skiing:
+        skiing_updates: dict[str, Any] = {}
+        _parse_route_id(type_data_dict, skiing_updates)
+        if "snow_conditions" in type_data_dict:
+            skiing_updates["snow_conditions"] = type_data_dict["snow_conditions"]
+        validated_skiing = dataclasses.replace(existing_skiing, **skiing_updates)
+        await cross_country_skiing_data_repo.save(validated_skiing)
+
+
 async def _update_type_specific_data(
     journal_type: JournalType,
     journal_id: int,
@@ -806,6 +1467,8 @@ async def _update_type_specific_data(
     abseiling_data_repo: SqlAbseilingDataRepository,
     canyoning_data_repo: SqlCanyoningDataRepository,
     climbing_data_repo: SqlClimbingDataRepository,
+    kayaking_data_repo: SqlKayakingDataRepository,
+    cross_country_skiing_data_repo: SqlCrossCountrySkiingDataRepository,
 ) -> None:
     """
     Update type-specific data for a journal type.
@@ -824,6 +1487,8 @@ async def _update_type_specific_data(
         abseiling_data_repo: Repository for abseiling data
         canyoning_data_repo: Repository for canyoning data
         climbing_data_repo: Repository for climbing data
+        kayaking_data_repo: Repository for kayaking data
+        cross_country_skiing_data_repo: Repository for cross-country skiing data
     """
     if not type_data_dict:
         return
@@ -854,6 +1519,14 @@ async def _update_type_specific_data(
         await _update_canyoning_data(journal_id, type_data_dict, canyoning_data_repo)
     elif journal_type == JournalType.CLIMBING:
         await _update_climbing_data(journal_id, type_data_dict, climbing_data_repo)
+    elif journal_type == JournalType.KAYAKING:
+        await _update_kayaking_data(journal_id, type_data_dict, kayaking_data_repo)
+    elif journal_type == JournalType.CROSS_COUNTRY_SKIING:
+        await _update_cross_country_skiing_data(
+            journal_id,
+            type_data_dict,
+            cross_country_skiing_data_repo,
+        )
 
 
 async def _persist_contact_relationships(
@@ -947,6 +1620,8 @@ async def _fetch_enrichment_data(
     abseiling_data_repo: SqlAbseilingDataRepository,
     canyoning_data_repo: SqlCanyoningDataRepository,
     climbing_data_repo: SqlClimbingDataRepository,
+    kayaking_data_repo: SqlKayakingDataRepository,
+    cross_country_skiing_data_repo: SqlCrossCountrySkiingDataRepository,
     contact_relationship_repo: SqlJournalContactRelationshipRepository,
     contact_repo: SqlContactRepository,
     tag_repo: SqlJournalTagRepository,
@@ -968,6 +1643,8 @@ async def _fetch_enrichment_data(
         abseiling_data_repo: Repository for abseiling data
         canyoning_data_repo: Repository for canyoning data
         climbing_data_repo: Repository for climbing data
+        kayaking_data_repo: Repository for kayaking data
+        cross_country_skiing_data_repo: Repository for cross-country skiing data
         contact_relationship_repo: Repository for contact relationships
         contact_repo: Repository for contacts
         tag_repo: Repository for tags
@@ -989,6 +1666,8 @@ async def _fetch_enrichment_data(
         abseiling_data_repo,
         canyoning_data_repo,
         climbing_data_repo,
+        kayaking_data_repo,
+        cross_country_skiing_data_repo,
     )
 
     contacts = await _fetch_contact_relationships_with_names(
@@ -1114,6 +1793,8 @@ def register_journal_tools(mcp: FastMCP[None]) -> None:
                             repos.abseiling_data_repo,
                             repos.canyoning_data_repo,
                             repos.climbing_data_repo,
+                            repos.kayaking_data_repo,
+                            repos.cross_country_skiing_data_repo,
                         )
 
                     # Update type-specific data if provided
@@ -1132,6 +1813,8 @@ def register_journal_tools(mcp: FastMCP[None]) -> None:
                             repos.abseiling_data_repo,
                             repos.canyoning_data_repo,
                             repos.climbing_data_repo,
+                            repos.kayaking_data_repo,
+                            repos.cross_country_skiing_data_repo,
                         )
                 except (ValueError, KeyError):
                     # Invalid type, skip
@@ -1164,6 +1847,8 @@ def register_journal_tools(mcp: FastMCP[None]) -> None:
             repos.abseiling_data_repo,
             repos.canyoning_data_repo,
             repos.climbing_data_repo,
+            repos.kayaking_data_repo,
+            repos.cross_country_skiing_data_repo,
             repos.contact_relationship_repo,
             repos.contact_repo,
             repos.tag_repo,
@@ -1275,6 +1960,8 @@ def register_journal_tools(mcp: FastMCP[None]) -> None:
                 repos.abseiling_data_repo,
                 repos.canyoning_data_repo,
                 repos.climbing_data_repo,
+                repos.kayaking_data_repo,
+                repos.cross_country_skiing_data_repo,
             )
 
             # Remove types that are not in the new list
@@ -1317,6 +2004,8 @@ def register_journal_tools(mcp: FastMCP[None]) -> None:
                                 repos.abseiling_data_repo,
                                 repos.canyoning_data_repo,
                                 repos.climbing_data_repo,
+                                repos.kayaking_data_repo,
+                                repos.cross_country_skiing_data_repo,
                             )
 
                     # Update type-specific data if provided
@@ -1335,6 +2024,8 @@ def register_journal_tools(mcp: FastMCP[None]) -> None:
                             repos.abseiling_data_repo,
                             repos.canyoning_data_repo,
                             repos.climbing_data_repo,
+                            repos.kayaking_data_repo,
+                            repos.cross_country_skiing_data_repo,
                         )
                 except (ValueError, KeyError):
                     # Invalid type, skip
@@ -1359,6 +2050,8 @@ def register_journal_tools(mcp: FastMCP[None]) -> None:
                         repos.abseiling_data_repo,
                         repos.canyoning_data_repo,
                         repos.climbing_data_repo,
+                        repos.kayaking_data_repo,
+                        repos.cross_country_skiing_data_repo,
                     )
                 except (ValueError, KeyError):
                     # Invalid type, skip
@@ -1408,6 +2101,8 @@ def register_journal_tools(mcp: FastMCP[None]) -> None:
             repos.abseiling_data_repo,
             repos.canyoning_data_repo,
             repos.climbing_data_repo,
+            repos.kayaking_data_repo,
+            repos.cross_country_skiing_data_repo,
             repos.contact_relationship_repo,
             repos.contact_repo,
             repos.tag_repo,
@@ -1491,6 +2186,8 @@ def register_journal_tools(mcp: FastMCP[None]) -> None:
             repos.abseiling_data_repo,
             repos.canyoning_data_repo,
             repos.climbing_data_repo,
+            repos.kayaking_data_repo,
+            repos.cross_country_skiing_data_repo,
         )
 
         # Fetch contact relationships and contact details
@@ -1559,35 +2256,358 @@ def register_journal_tools(mcp: FastMCP[None]) -> None:
         Raises:
             ValueError: If invalid filter values are provided
         """
-        # Get current user ID from auth context
         user_id = get_current_user_id()
+        repos = _create_journal_tool_repositories(db_connection)
+        type_filters = _parse_type_filters(types)
 
-        # Create repositories
-        journal_repo = SqlJournalRepository(db_connection)
+        if len(type_filters) <= 1:
+            journal_type = type_filters[0] if type_filters else None
+            total_hits = await repos.journal_repo.count_all(
+                user_id=user_id,
+                journal_type=journal_type,
+                search=query,
+            )
+            journals = await repos.journal_repo.get_all(
+                user_id=user_id,
+                limit=limit,
+                offset=0,
+                journal_type=journal_type,
+                search=query,
+            )
+            results = await _build_search_results(journals, repos)
+        else:
+            candidate_count = await repos.journal_repo.count_all(
+                user_id=user_id, search=query
+            )
+            if candidate_count == 0:
+                journals = []
+            else:
+                journals = await repos.journal_repo.get_all(
+                    user_id=user_id,
+                    limit=candidate_count,
+                    offset=0,
+                    search=query,
+                )
 
-        # Parse types filter
-        # type_list = None  # TODO: Use for filtering by types
-        # if types:
-        #     type_list = [t.strip() for t in types.split(",")]
+            filtered_journals: list[Journal] = []
+            results = []
+            requested_types = set(type_filters)
+            for journal in journals:
+                if journal.id is None:
+                    continue
+                journal_types, _ = await _fetch_types_for_journal(journal.id, repos)
+                if requested_types.isdisjoint(journal_types):
+                    continue
+                filtered_journals.append(journal)
+                results.append(
+                    _journal_to_search_result(
+                        journal,
+                        types=journal_types,
+                    )
+                )
 
-        # Get journals (simplified for now - will add search later)
-        journals = await journal_repo.get_all(
-            user_id=user_id,
-            limit=limit,
-            offset=0,
-        )
-
-        # Convert to search results
-        results = [_journal_to_search_result(journal) for journal in journals]
+            total_hits = len(filtered_journals)
+            results = results[:limit]
 
         response = JournalSearchResponse(
             results=results,
             query=query,
-            total_hits=len(results),
+            total_hits=total_hits,
             processing_time_ms=0,
-            summary=f"Found {len(results)} journal(s)",
+            summary=f"Found {total_hits} journal(s)",
         )
 
+        return MCPResponseBuilder.success_response(response)
+
+    @mcp.tool
+    @mcp_unified_error_handler("search_activities", "journal")
+    async def search_activities(
+        query: Annotated[
+            str | None,
+            Field(default=None, description="Optional search query for title/content"),
+        ] = None,
+        activity_type: Annotated[
+            str | None,
+            Field(
+                default=None,
+                description="Optional effective activity type filter",
+            ),
+        ] = None,
+        start_date: Annotated[
+            str | None,
+            Field(default=None, description="Optional ISO start date/datetime filter"),
+        ] = None,
+        end_date: Annotated[
+            str | None,
+            Field(default=None, description="Optional ISO end date/datetime filter"),
+        ] = None,
+        limit: Annotated[
+            int,
+            Field(default=20, description="Maximum number of results to return"),
+        ] = 20,
+        db_connection: AsyncConnection = mcp_depends(get_async_connection),
+    ) -> str:
+        """Search activity journals with effective activity-type filtering."""
+        user_id = get_current_user_id()
+        repos = _create_journal_tool_repositories(db_connection)
+        total_hits = await _count_activity_rows(
+            db_connection,
+            user_id,
+            search_query=query,
+            activity_type=activity_type,
+            start_date=start_date,
+            end_date=end_date,
+        )
+
+        activity_rows: list[_ActivityJournalRow] = []
+        if total_hits > 0:
+            activity_rows = await _fetch_activity_rows(
+                db_connection,
+                user_id,
+                search_query=query,
+                activity_type=activity_type,
+                start_date=start_date,
+                end_date=end_date,
+                limit=limit,
+                offset=0,
+            )
+
+        results = await _build_search_results(
+            [activity_row.journal for activity_row in activity_rows],
+            repos,
+            activity_rows_by_id={
+                activity_row.journal.id: activity_row
+                for activity_row in activity_rows
+                if activity_row.journal.id is not None
+            },
+        )
+        response = JournalSearchResponse(
+            results=results,
+            query=query,
+            total_hits=total_hits,
+            processing_time_ms=0,
+            summary=f"Found {total_hits} activity journal(s)",
+        )
+        return MCPResponseBuilder.success_response(response)
+
+    @mcp.tool
+    @mcp_unified_error_handler("get_activity_stats", "journal")
+    async def get_activity_stats(
+        activity_type: Annotated[
+            str | None,
+            Field(default=None, description="Optional effective activity type filter"),
+        ] = None,
+        start_date: Annotated[
+            str | None,
+            Field(default=None, description="Optional ISO start date/datetime filter"),
+        ] = None,
+        end_date: Annotated[
+            str | None,
+            Field(default=None, description="Optional ISO end date/datetime filter"),
+        ] = None,
+        db_connection: AsyncConnection = mcp_depends(get_async_connection),
+    ) -> str:
+        """Aggregate activity totals, breakdowns, and personal records."""
+        user_id = get_current_user_id()
+        overall_stats_row = await _fetch_activity_overall_stats_row(
+            db_connection,
+            user_id,
+            activity_type=activity_type,
+            start_date=start_date,
+            end_date=end_date,
+        )
+        activity_type_rows = await _fetch_activity_type_stats_rows(
+            db_connection,
+            user_id,
+            activity_type=activity_type,
+            start_date=start_date,
+            end_date=end_date,
+        )
+
+        overall_totals = ActivityTotals(
+            distance=int(getattr(overall_stats_row, "total_distance", 0) or 0),
+            duration=int(getattr(overall_stats_row, "total_duration", 0) or 0),
+            elevation_gain=int(
+                getattr(overall_stats_row, "total_elevation_gain", 0) or 0
+            ),
+            calories=int(getattr(overall_stats_row, "total_calories", 0) or 0),
+        )
+
+        activity_type_stats = [
+            ActivityTypeStats(
+                activity_type=row.activity_type,
+                count=int(row.count or 0),
+                total_distance=int(row.total_distance or 0),
+                total_duration=int(row.total_duration or 0),
+                total_elevation_gain=int(row.total_elevation_gain or 0),
+                total_calories=int(row.total_calories or 0),
+            )
+            for row in activity_type_rows
+        ]
+
+        async def build_personal_record(
+            metric_name: str,
+        ) -> ActivityPersonalRecord | None:
+            record_row = await _fetch_activity_personal_record_row(
+                db_connection,
+                user_id,
+                metric_name=metric_name,
+                activity_type=activity_type,
+                start_date=start_date,
+                end_date=end_date,
+            )
+            if record_row is None:
+                return None
+
+            return ActivityPersonalRecord(
+                activity_type=record_row.activity_type,
+                journal_id=int(record_row.journal_id),
+                journal_title=record_row.journal_title,
+                value=int(record_row.metric_value or 0),
+            )
+
+        personal_records = {
+            "longest_distance": await build_personal_record("distance"),
+            "longest_duration": await build_personal_record("duration"),
+            "highest_elevation_gain": await build_personal_record("elevation_gain"),
+            "most_calories": await build_personal_record("calories"),
+        }
+        total_activities = int(getattr(overall_stats_row, "total_activities", 0) or 0)
+
+        response = ActivityStatsResponse(
+            total_activities=total_activities,
+            overall_totals=overall_totals,
+            activity_types=activity_type_stats,
+            personal_records=personal_records,
+            summary=(
+                f"Analysed {total_activities} activity journal(s) across "
+                f"{len(activity_type_stats)} activity type(s)"
+            ),
+        )
+        return MCPResponseBuilder.success_response(response)
+
+    @mcp.tool
+    @mcp_unified_error_handler("analyze_activity_trends", "journal")
+    async def analyze_activity_trends(
+        interval: Annotated[
+            str,
+            Field(
+                default="month",
+                description="Trend interval: day, week, month, or year",
+            ),
+        ] = "month",
+        activity_type: Annotated[
+            str | None,
+            Field(default=None, description="Optional effective activity type filter"),
+        ] = None,
+        start_date: Annotated[
+            str | None,
+            Field(default=None, description="Optional ISO start date/datetime filter"),
+        ] = None,
+        end_date: Annotated[
+            str | None,
+            Field(default=None, description="Optional ISO end date/datetime filter"),
+        ] = None,
+        db_connection: AsyncConnection = mcp_depends(get_async_connection),
+    ) -> str:
+        """Analyse activity trends by day, week, month, or year buckets."""
+        normalized_interval = interval.strip().lower()
+        if normalized_interval not in {"day", "week", "month", "year"}:
+            raise ValueError("interval must be one of: day, week, month, year")
+
+        user_id = get_current_user_id()
+        trend_rows = await _fetch_activity_trend_rows(
+            db_connection,
+            user_id,
+            interval=normalized_interval,
+            activity_type=activity_type,
+            start_date=start_date,
+            end_date=end_date,
+        )
+
+        periods = [
+            ActivityTrendPeriod(
+                period_start=row.period_start.isoformat(),
+                activity_count=int(row.activity_count or 0),
+                total_distance=int(row.total_distance or 0),
+                total_duration=int(row.total_duration or 0),
+                total_elevation_gain=int(row.total_elevation_gain or 0),
+            )
+            for row in trend_rows
+        ]
+        total_activities = sum(period.activity_count for period in periods)
+
+        response = ActivityTrendsResponse(
+            interval=normalized_interval,
+            total_activities=total_activities,
+            periods=periods,
+            summary=(
+                f"Analysed {total_activities} activity journal(s) across "
+                f"{len(periods)} {normalized_interval} bucket(s)"
+            ),
+        )
+        return MCPResponseBuilder.success_response(response)
+
+    @mcp.tool
+    @mcp_unified_error_handler("get_route_history", "journal")
+    async def get_route_history(
+        route_id: Annotated[str, Field(description="Route UUID")],
+        db_connection: AsyncConnection = mcp_depends(get_async_connection),
+    ) -> str:
+        """Return route usage history across route-aware activity journals."""
+        user_id = get_current_user_id()
+        repos = _create_journal_tool_repositories(db_connection)
+
+        try:
+            route_uuid = UUID(route_id)
+        except ValueError as exc:
+            raise ValueError(
+                f"Invalid route_id '{route_id}'. Must be a valid UUID."
+            ) from exc
+
+        route = await repos.route_repo.find_by_id(route_uuid)
+        if route is None or route.user_id != user_id:
+            return MCPResponseBuilder.not_found_error_response("Route", route_id)
+
+        history_rows = await _fetch_route_history_rows(
+            db_connection, user_id, route_uuid
+        )
+        entries = [
+            RouteHistoryEntry(
+                journal_id=row.id,
+                journal_title=row.title,
+                activity_type=row.activity_type,
+                event_date_range=EventDateRangeSchema(
+                    start=row.event_date_range_start,
+                    end=row.event_date_range_end,
+                ),
+                distance=int(row.distance) if row.distance is not None else None,
+                duration=int(row.duration) if row.duration is not None else None,
+            )
+            for row in history_rows
+        ]
+        activity_types = sorted(
+            {
+                entry.activity_type
+                for entry in entries
+                if entry.activity_type is not None
+            }
+        )
+
+        response = RouteHistoryResponse(
+            route=RouteSummary(
+                id=str(route.id or route_uuid),
+                name=route.name,
+                description=route.description,
+            ),
+            usage_count=len(entries),
+            activity_types=activity_types,
+            entries=entries,
+            summary=(
+                f"Route '{route.name}' has been used {len(entries)} time(s) across "
+                f"{len(activity_types)} activity type(s)"
+            ),
+        )
         return MCPResponseBuilder.success_response(response)
 
     @mcp.tool
