@@ -6,14 +6,18 @@ Note: Full functionality testing with mocked services is done in integration tes
 These unit tests focus on tool registration and basic structure.
 """
 
-from datetime import time
+from datetime import UTC, datetime, time
 from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import pytest
 from fastmcp import Client, FastMCP
 
-from app.mcp.domains.journals.tools import _update_event_data, register_journal_tools
+from app.mcp.domains.journals.tools import (
+    _parse_optional_datetime_filter,
+    _update_event_data,
+    register_journal_tools,
+)
 
 
 class TestJournalTools:
@@ -151,6 +155,21 @@ class TestJournalTools:
             properties = get_tool.inputSchema.get("properties", {})
             assert "journal_id" in properties
             assert "include_children" in properties
+
+
+class TestDatetimeFilterParsing:
+    def test_normalizes_date_only_filters_to_utc_bounds(self) -> None:
+        assert _parse_optional_datetime_filter("2024-03-11", "start_date") == datetime(
+            2024, 3, 11, 0, 0, 0, tzinfo=UTC
+        )
+        assert _parse_optional_datetime_filter(
+            "2024-03-11", "end_date", is_end=True
+        ) == datetime(2024, 3, 11, 23, 59, 59, 999999, tzinfo=UTC)
+
+    def test_preserves_timezone_aware_datetime_filters(self) -> None:
+        assert _parse_optional_datetime_filter(
+            "2024-03-11T09:15:00Z", "start_date"
+        ) == datetime(2024, 3, 11, 9, 15, 0, tzinfo=UTC)
 
 
 class TestUpdateEventData:

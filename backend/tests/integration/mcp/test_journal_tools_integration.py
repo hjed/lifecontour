@@ -1107,6 +1107,62 @@ class TestActivityMcpToolsMountedIntegration:
         assert [result["title"] for result in payload["results"]] == ["River paddle"]
 
     @pytest.mark.asyncio
+    async def test_search_activities_applies_overlapping_date_range_filters(
+        self,
+        authenticated_lifespan_client,
+        clean_database: AsyncConnection,
+    ) -> None:
+        overlapping_journal_id = await self._insert_journal(
+            clean_database,
+            title="Midday run",
+            content="Tempo block through lunch",
+            start=datetime(2024, 3, 10, 10, 0, tzinfo=UTC),
+        )
+        await self._insert_fitness_data(
+            clean_database,
+            journal_id=overlapping_journal_id,
+            distance=9000,
+            elevation_gain=120,
+            duration=2700,
+            calories=580,
+        )
+        await self._insert_jogging_data(
+            clean_database, journal_id=overlapping_journal_id
+        )
+
+        later_journal_id = await self._insert_journal(
+            clean_database,
+            title="Afternoon run",
+            content="Later steady session",
+            start=datetime(2024, 3, 10, 14, 0, tzinfo=UTC),
+        )
+        await self._insert_fitness_data(
+            clean_database,
+            journal_id=later_journal_id,
+            distance=7000,
+            elevation_gain=90,
+            duration=2100,
+            calories=460,
+        )
+        await self._insert_jogging_data(clean_database, journal_id=later_journal_id)
+
+        async with authenticated_lifespan_client() as authenticated_client:
+            session_id = await initialize_mcp_session(authenticated_client)
+            payload = await self._call_tool(
+                authenticated_client,
+                session_id,
+                "search_activities",
+                {
+                    "start_date": "2024-03-10T11:00:00Z",
+                    "end_date": "2024-03-10T11:00:00Z",
+                    "limit": 10,
+                },
+            )
+
+        assert payload["total_hits"] == 1
+        assert [result["title"] for result in payload["results"]] == ["Midday run"]
+
+    @pytest.mark.asyncio
     async def test_get_activity_stats_returns_grouped_totals_and_personal_records(
         self,
         authenticated_lifespan_client,
@@ -1356,3 +1412,51 @@ class TestActivityMcpToolsMountedIntegration:
             "Harbour headland hike",
             "Harbour paddle",
         ]
+
+    @pytest.mark.asyncio
+    async def test_get_route_history_uses_route_matching_activity_type(
+        self,
+        authenticated_lifespan_client,
+        clean_database: AsyncConnection,
+    ) -> None:
+        target_route_id = await self._insert_route(clean_database, name="River Run")
+        other_route_id = await self._insert_route(clean_database, name="Sea Paddle")
+
+        mixed_activity_journal_id = await self._insert_journal(
+            clean_database,
+            title="Brick workout",
+            content="Run on one route, paddle on another",
+            start=datetime(2024, 4, 5, tzinfo=UTC),
+        )
+        await self._insert_fitness_data(
+            clean_database,
+            journal_id=mixed_activity_journal_id,
+            distance=15000,
+            elevation_gain=150,
+            duration=5400,
+            calories=900,
+        )
+        await self._insert_jogging_data(
+            clean_database,
+            journal_id=mixed_activity_journal_id,
+            route_id=target_route_id,
+        )
+        await self._insert_kayaking_data(
+            clean_database,
+            journal_id=mixed_activity_journal_id,
+            route_id=other_route_id,
+        )
+
+        async with authenticated_lifespan_client() as authenticated_client:
+            session_id = await initialize_mcp_session(authenticated_client)
+            payload = await self._call_tool(
+                authenticated_client,
+                session_id,
+                "get_route_history",
+                {"route_id": target_route_id},
+            )
+
+        assert payload["usage_count"] == 1
+        assert payload["activity_types"] == ["jogging"]
+        assert payload["entries"][0]["journal_title"] == "Brick workout"
+        assert payload["entries"][0]["activity_type"] == "jogging"

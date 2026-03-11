@@ -7,7 +7,7 @@ Each tool is designed to return AI-friendly, contextual information.
 
 import dataclasses
 import json
-from datetime import date, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from datetime import time as dt_time
 from typing import Annotated, Any
 from uuid import UUID
@@ -174,12 +174,12 @@ _ACTIVITY_TYPE_PRECEDENCE: tuple[JournalType, ...] = (
 
 _ROUTE_ACTIVITY_CASE = """
     CASE
-        WHEN canyoning.journal_id IS NOT NULL THEN 'canyoning'
-        WHEN skiing.journal_id IS NOT NULL THEN 'cross_country_skiing'
-        WHEN kayaking.journal_id IS NOT NULL THEN 'kayaking'
-        WHEN climbing.journal_id IS NOT NULL THEN 'climbing'
-        WHEN bushwalking.journal_id IS NOT NULL THEN 'bushwalking'
-        WHEN jogging.journal_id IS NOT NULL THEN 'jogging'
+        WHEN canyoning.route_id = :route_id THEN 'canyoning'
+        WHEN skiing.route_id = :route_id THEN 'cross_country_skiing'
+        WHEN kayaking.route_id = :route_id THEN 'kayaking'
+        WHEN climbing.route_id = :route_id THEN 'climbing'
+        WHEN bushwalking.route_id = :route_id THEN 'bushwalking'
+        WHEN jogging.route_id = :route_id THEN 'jogging'
         ELSE NULL
     END
 """
@@ -288,8 +288,8 @@ def _parse_activity_type_filter(activity_type: str | None) -> str | None:
 
 def _parse_optional_datetime_filter(
     value: str | None, field_name: str, *, is_end: bool = False
-) -> str | None:
-    """Validate ISO date/datetime filter strings and normalize to ISO format."""
+) -> datetime | None:
+    """Validate ISO date/datetime filter strings and normalize to aware datetimes."""
     if value is None:
         return None
 
@@ -300,6 +300,7 @@ def _parse_optional_datetime_filter(
             parsed_datetime = datetime.combine(
                 parsed_date,
                 dt_time.max if is_end else dt_time.min,
+                tzinfo=UTC,
             )
         else:
             parsed_datetime = datetime.fromisoformat(normalized.replace("Z", "+00:00"))
@@ -308,16 +309,11 @@ def _parse_optional_datetime_filter(
             f"Invalid {field_name} '{value}'. Must be a valid ISO date or datetime."
         ) from exc
 
-    return parsed_datetime.isoformat()
-
-
-def _resolve_effective_activity_type(types: list[str]) -> str | None:
-    """Resolve the most specific activity type from a journal's type list."""
-    resolved_types = set(types)
-    for journal_type in _ACTIVITY_TYPE_PRECEDENCE:
-        if journal_type.value in resolved_types:
-            return journal_type.value
-    return None
+    return (
+        parsed_datetime
+        if parsed_datetime.tzinfo
+        else parsed_datetime.replace(tzinfo=UTC)
+    )
 
 
 def _journal_from_row(row: Any) -> Journal:
@@ -429,11 +425,11 @@ async def _fetch_activity_rows(
 
     if start_date_filter is not None:
         params["start_date"] = start_date_filter
-        where_clauses.append("event_date_range_start >= :start_date")
+        where_clauses.append("event_date_range_end >= :start_date")
 
     if end_date_filter is not None:
         params["end_date"] = end_date_filter
-        where_clauses.append("event_date_range_end <= :end_date")
+        where_clauses.append("event_date_range_start <= :end_date")
 
     query_sql = """
         WITH activity_rows AS (
