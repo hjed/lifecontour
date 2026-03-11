@@ -80,8 +80,8 @@ The sequence reflects both user priority and technical dependency:
 **Strategy:** Split into 3 phases so the sync rules are locked down before hierarchy and UX work build on them.
 
 **Relevant documents:**
-- [Contacts Product Specification — Google Contacts Sync for Tags](../contacts-product-specification.md#google-contacts-sync-for-tags)
-- [Contacts Product Specification — Contact Tags](../contacts-product-specification.md#contact-tags)
+- [Contacts Product Specification — Google Contacts Sync for Tags](../product-specifications/contacts-product-specification.md#google-contacts-sync-for-tags)
+- [Contacts Product Specification — Contact Tags](../product-specifications/contacts-product-specification.md#contact-tags)
 - [Integration Architecture — Two-Way Sync (Google Contacts)](../architecture/integration-architecture.md#1-two-way-sync-google-contacts)
 - [Integration Architecture — Inbound Sync Flow (Pulling Data from External Systems)](../architecture/integration-architecture.md#inbound-sync-flow-pulling-data-from-external-systems)
 - [Testing Strategy — Three-Tier Testing Strategy](../architecture/testing-strategy.md#three-tier-testing-strategy)
@@ -133,8 +133,8 @@ The sequence reflects both user priority and technical dependency:
 **Strategy:** Split into 3 phases so hierarchy semantics land before navigation and list UX changes.
 
 **Relevant documents:**
-- [Contacts Product Specification — Contact Tags](../contacts-product-specification.md#contact-tags)
-- [Contacts Product Specification — Google Contacts Sync for Tags](../contacts-product-specification.md#google-contacts-sync-for-tags)
+- [Contacts Product Specification — Contact Tags](../product-specifications/contacts-product-specification.md#contact-tags)
+- [Contacts Product Specification — Google Contacts Sync for Tags](../product-specifications/contacts-product-specification.md#google-contacts-sync-for-tags)
 - [Domain Architecture — Contacts Domain](../architecture/domain-architecture.md#contacts-domain)
 - [Domain Architecture — Contacts Domain Adapters](../architecture/domain-architecture.md#contacts-domain-adapters)
 - [API Design — Pagination Guidelines](../architecture/api-design.md#pagination-guidelines)
@@ -187,8 +187,8 @@ The sequence reflects both user priority and technical dependency:
 **Strategy:** Split into 3 phases so backend safety rules land before UI flows and parity checks.
 
 **Relevant documents:**
-- [Contacts Product Specification — Contact Tags](../contacts-product-specification.md#contact-tags)
-- [Contacts Product Specification — MCP and AI-Agent Parity](../contacts-product-specification.md#mcp-and-ai-agent-parity)
+- [Contacts Product Specification — Contact Tags](../product-specifications/contacts-product-specification.md#contact-tags)
+- [Contacts Product Specification — MCP and AI-Agent Parity](../product-specifications/contacts-product-specification.md#mcp-and-ai-agent-parity)
 - [Domain Architecture — Contacts Domain](../architecture/domain-architecture.md#contacts-domain)
 - [API Design — MCP (Model Context Protocol) Guidelines](../architecture/api-design.md#mcp-model-context-protocol-guidelines)
 - [Frontend Design — Form Validation Guidelines](../architecture/frontend-design.md#form-validation-guidelines)
@@ -241,7 +241,7 @@ The sequence reflects both user priority and technical dependency:
 **Strategy:** Split into 2 phases so structure changes land before polish and breakpoint hardening.
 
 **Relevant documents:**
-- [Contacts Product Specification — Contact Layout Improvements](../contacts-product-specification.md#contact-layout-improvements)
+- [Contacts Product Specification — Contact Layout Improvements](../product-specifications/contacts-product-specification.md#contact-layout-improvements)
 - [Frontend Design — Responsive Layout Guidelines](../architecture/frontend-design.md#responsive-layout-guidelines)
 - [Frontend Design — Accessibility Guidelines](../architecture/frontend-design.md#accessibility-guidelines)
 - [Frontend Design — Spacing and Layout](../architecture/frontend-design.md#spacing-and-layout)
@@ -280,8 +280,8 @@ The sequence reflects both user priority and technical dependency:
 **Strategy:** Split into 4 phases so the data model, contracts, UI, and sync semantics can land independently.
 
 **Relevant documents:**
-- [Contacts Product Specification — Important Dates](../contacts-product-specification.md#important-dates)
-- [Contacts Product Specification — MCP and AI-Agent Parity](../contacts-product-specification.md#mcp-and-ai-agent-parity)
+- [Contacts Product Specification — Important Dates](../product-specifications/contacts-product-specification.md#important-dates)
+- [Contacts Product Specification — MCP and AI-Agent Parity](../product-specifications/contacts-product-specification.md#mcp-and-ai-agent-parity)
 - [Database Design — Migration Strategy](../architecture/database-design.md#migration-strategy)
 - [Database Design — Iterative Schema Evolution](../architecture/database-design.md#iterative-schema-evolution)
 - [API Design — Input Validation Guidelines](../architecture/api-design.md#input-validation-guidelines)
@@ -348,9 +348,9 @@ The sequence reflects both user priority and technical dependency:
 **Strategy:** Split into 3 phases so model changes land before UI editing and search/MCP consumption.
 
 **Relevant documents:**
-- [Contacts Product Specification — Relationships](../contacts-product-specification.md#relationships)
-- [Contacts Product Specification — AI Interaction Summary](../contacts-product-specification.md#ai-interaction-summary)
-- [Contacts Product Specification — Global Search](../contacts-product-specification.md#global-search)
+- [Contacts Product Specification — Relationships](../product-specifications/contacts-product-specification.md#relationships)
+- [Contacts Product Specification — AI Interaction Summary](../product-specifications/contacts-product-specification.md#ai-interaction-summary)
+- [Contacts Product Specification — Global Search](../product-specifications/contacts-product-specification.md#global-search)
 - [Domain Architecture — Contacts Domain](../architecture/domain-architecture.md#contacts-domain)
 - [API Design — MCP (Model Context Protocol) Guidelines](../architecture/api-design.md#mcp-model-context-protocol-guidelines)
 - [Testing Strategy — API Integration Testing Guidelines](../architecture/testing-strategy.md#api-integration-testing-guidelines)
@@ -402,9 +402,9 @@ The sequence reflects both user priority and technical dependency:
 **Strategy:** Split into 4 phases so persistence, generation, UI/MCP exposure, and ranking signals can each merge safely.
 
 **Relevant documents:**
-- [Contacts Product Specification — AI Interaction Summary](../contacts-product-specification.md#ai-interaction-summary)
-- [Contacts Product Specification — Global Search](../contacts-product-specification.md#global-search)
-- [Contacts Product Specification — MCP and AI-Agent Parity](../contacts-product-specification.md#mcp-and-ai-agent-parity)
+- [Contacts Product Specification — AI Interaction Summary](../product-specifications/contacts-product-specification.md#ai-interaction-summary)
+- [Contacts Product Specification — Global Search](../product-specifications/contacts-product-specification.md#global-search)
+- [Contacts Product Specification — MCP and AI-Agent Parity](../product-specifications/contacts-product-specification.md#mcp-and-ai-agent-parity)
 - [Integration Architecture — Event-Driven Scheduling](../architecture/integration-architecture.md#2-event-driven-scheduling)
 - [Integration Architecture — Transactional Outbox Pattern](../architecture/integration-architecture.md#transactional-outbox-pattern)
 - [Database Design — MeiliSearch Integration](../architecture/database-design.md#meilisearch-integration)
@@ -470,8 +470,8 @@ The sequence reflects both user priority and technical dependency:
 **Strategy:** Split into 3 phases so header interactions, results UX, and final ranking integration remain reviewable.
 
 **Relevant documents:**
-- [Contacts Product Specification — Global Search](../contacts-product-specification.md#global-search)
-- [Contacts Product Specification — MCP and AI-Agent Parity](../contacts-product-specification.md#mcp-and-ai-agent-parity)
+- [Contacts Product Specification — Global Search](../product-specifications/contacts-product-specification.md#global-search)
+- [Contacts Product Specification — MCP and AI-Agent Parity](../product-specifications/contacts-product-specification.md#mcp-and-ai-agent-parity)
 - [Journal System Specification — Search and Filtering](../journal-system-specification.md#search-and-filtering)
 - [Database Design — MeiliSearch Integration](../architecture/database-design.md#meilisearch-integration)
 - [Frontend Design — Component Architecture](../architecture/frontend-design.md#component-architecture)
@@ -524,8 +524,8 @@ The sequence reflects both user priority and technical dependency:
 **Strategy:** Split into 3 phases so provenance capture lands before UI rendering and final mixed-source regressions.
 
 **Relevant documents:**
-- [Contacts Product Specification — Activity Feed](../contacts-product-specification.md#activity-feed)
-- [Contacts Product Specification — AI Interaction Summary](../contacts-product-specification.md#ai-interaction-summary)
+- [Contacts Product Specification — Activity Feed](../product-specifications/contacts-product-specification.md#activity-feed)
+- [Contacts Product Specification — AI Interaction Summary](../product-specifications/contacts-product-specification.md#ai-interaction-summary)
 - [Integration Architecture — Two-Way Sync (Google Contacts)](../architecture/integration-architecture.md#1-two-way-sync-google-contacts)
 - [Domain Architecture — Contacts Domain Adapters](../architecture/domain-architecture.md#contacts-domain-adapters)
 - [Database Design — Contact History Table](../architecture/database-design.md#contact-history-table)

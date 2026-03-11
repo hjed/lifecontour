@@ -24,6 +24,13 @@ The Personal CRM & Journal System is a Python FastAPI backend with Next.js front
 
 This document provides a high-level overview of the system architecture. For detailed information, refer to the following documents:
 
+## Product Specifications
+
+These product specifications describe the target product behaviour that active implementation and iteration plans should align to:
+
+- **[Contacts Product Specification](./product-specifications/contacts-product-specification.md)** - target behaviour for contact organisation, sync, search, summaries, and MCP parity
+- **[Journals Product Specification](./product-specifications/journals-product-specification.md)** - target behaviour for journal sync, merge, hierarchy, list navigation, summaries, and MCP parity
+
 ### 📋 **[Domain Architecture](./architecture/domain-architecture.md)**
 Detailed domain-driven design, component architecture, and project structure including:
 - Domain layer design and business logic
