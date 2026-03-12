@@ -9,6 +9,12 @@ param(
     [string]$ServiceName = ""
 )
 
+# Load workspace environment variables for docker isolation when running tests
+if ($Command -eq "test" -and (Test-Path "scripts\workspace_env.py")) {
+    $env_vars = python scripts\workspace_env.py ps1
+    $env_vars | ForEach-Object { Invoke-Expression $_ }
+}
+
 # Colors for output
 $Colors = @{
     Red = "Red"

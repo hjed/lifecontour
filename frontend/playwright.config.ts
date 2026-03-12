@@ -3,6 +3,8 @@ import {
   FRONTEND_TEST_PORT,
   FRONTEND_TEST_URL,
   SHOULD_REUSE_PLAYWRIGHT_WEB_SERVER,
+  BACKEND_TEST_PORT,
+  OAUTH_PUBLIC_TEST_PORT,
 } from './tests/e2e/utils/frontend-test-config';
 
 /**
@@ -59,7 +61,7 @@ export default defineConfig({
 
     /* Set environment variables for tests */
     extraHTTPHeaders: {
-      'X-Test-Backend-URL': 'http://localhost:8001',
+      'X-Test-Backend-URL': `http://localhost:${BACKEND_TEST_PORT}`,
     },
 
     /*
@@ -136,9 +138,9 @@ export default defineConfig({
     env: {
       ...process.env,
       PORT: FRONTEND_TEST_PORT,
-      BACKEND_URL: 'http://localhost:8001', // Use test backend port
-      NEXT_PUBLIC_API_URL: 'http://localhost:8001',
-      NEXT_PUBLIC_OAUTH_PROVIDER_URL: 'http://localhost:4446',
+      BACKEND_URL: `http://localhost:${BACKEND_TEST_PORT}`, // Use test backend port
+      NEXT_PUBLIC_API_URL: `http://localhost:${BACKEND_TEST_PORT}`,
+      NEXT_PUBLIC_OAUTH_PROVIDER_URL: `http://localhost:${OAUTH_PUBLIC_TEST_PORT}`,
     },
   },
 });

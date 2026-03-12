@@ -22,10 +22,28 @@ from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine, create_async_en
 from tests.integration.sse_helpers import reset_sse_starlette_appstatus_event
 
 # Constants
-CONTAINER_NAME_FILTER = "name=pms-postgres"
-BACKEND_POSTGRES_CONTAINER = "pms-postgres"
 DOCKER_COMPOSE_FILE = "docker-compose.yml"
 MAX_DB_STARTUP_RETRIES = 30
+
+
+def get_workspace_env() -> dict[str, str]:
+    import json
+    import subprocess
+    import typing
+    from pathlib import Path
+
+    project_root = Path(__file__).parent.parent.parent.parent
+    script = project_root / "scripts" / "workspace_env.py"
+    result = subprocess.run(
+        ["python3", str(script), "json"], check=True, capture_output=True, text=True
+    )
+    return typing.cast(dict[str, str], json.loads(result.stdout))
+
+
+workspace_env = get_workspace_env()
+CONTAINER_PREFIX = workspace_env.get("CONTAINER_PREFIX", "pms")
+CONTAINER_NAME_FILTER = f"name={CONTAINER_PREFIX}-postgres"
+BACKEND_POSTGRES_CONTAINER = f"{CONTAINER_PREFIX}-postgres"
 
 
 @dataclass
@@ -43,7 +61,7 @@ class DatabaseConfig:
         """Create database config from environment variables with defaults."""
         return cls(
             host=os.getenv("TEST_DB_HOST", "localhost"),
-            port=os.getenv("TEST_DB_PORT", "5433"),
+            port=os.getenv("TEST_DB_PORT", workspace_env.get("DB_TEST_PORT", "5433")),
             user=os.getenv("TEST_DB_USER", "postgres"),
             password=os.getenv("TEST_DB_PASSWORD", "postgres"),
             name=os.getenv("TEST_DB_NAME", "personal_management_test"),
@@ -213,27 +231,6 @@ class DockerManager:
         except subprocess.CalledProcessError:
             return None
 
-    def _sync_database_connection_details(self, container_name: str) -> None:
-        """Synchronize DB config with the running Postgres container's published port."""
-        result = subprocess.run(
-            ["docker", "port", container_name, "5432/tcp"],
-            capture_output=True,
-            text=True,
-            check=True,
-        )
-
-        port_mappings = [
-            line.strip() for line in result.stdout.splitlines() if line.strip()
-        ]
-        if not port_mappings:
-            raise RuntimeError(
-                f"Could not determine published Postgres port for {container_name}"
-            )
-
-        published_port = port_mappings[0].rsplit(":", 1)[-1]
-        self.db_config.host = "localhost"
-        self.db_config.port = published_port
-
     def start_database(self) -> None:
         """Start Docker PostgreSQL container for testing."""
         try:
@@ -255,6 +252,7 @@ class DockerManager:
                     ],
                     cwd=self.project_root,
                     check=True,
+                    env={**os.environ, **workspace_env},
                 )
             else:
                 print("Test database container already running")
@@ -266,7 +264,6 @@ class DockerManager:
                 self.get_container_name(CONTAINER_NAME_FILTER)
                 or BACKEND_POSTGRES_CONTAINER
             )
-            self._sync_database_connection_details(container_name)
 
             # Reset the test DB to avoid partially-migrated state from previous runs.
             self._reset_test_database(container_name)
@@ -293,6 +290,7 @@ class DockerManager:
                 ],
                 cwd=self.project_root,
                 check=True,
+                env={**os.environ, **workspace_env},
             )
             print("Test database stopped")
         except subprocess.CalledProcessError as e:
@@ -690,9 +688,13 @@ def test_settings():
         debug=True,
         database_url=get_test_database_url(),  # Use the same database URL as other integration tests
         redis_url=os.getenv(
-            "REDIS_URL", "redis://localhost:6380"
+            "REDIS_URL",
+            "redis://localhost:" + workspace_env.get("REDIS_TEST_PORT", "6380"),
         ),  # Use test Redis port
-        meilisearch_url=os.getenv("MEILISEARCH_URL", "http://localhost:7701"),
+        meilisearch_url=os.getenv(
+            "MEILISEARCH_URL",
+            "http://localhost:" + workspace_env.get("MEILI_TEST_PORT", "7701"),
+        ),
         meilisearch_api_key=os.getenv("MEILISEARCH_API_KEY", "test_master_key"),
         allowed_hosts=["*"],  # Allow all hosts for testing
         cors_origins=["*"],

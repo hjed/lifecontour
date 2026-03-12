@@ -102,6 +102,18 @@ async def test_google_contacts_full_sync():
 3. **E2E Tests**: Validate complete system integration
 4. **Run All**: Comprehensive validation before deployment
 
+### Test Execution Concurrency
+
+To support multi-worktree local development without port or container name clashes, the testing environments (E2E and Backend Integration) dynamically allocate Docker resources:
+
+- **Dynamic Ports & Container Names**: A Python script (`scripts/workspace_env.py`) deterministically hashes the absolute workspace path to generate a unique integer offset.
+- **Isolation**: Container names are prefixed with `pms_test_{offset}-` and host ports are shifted by `{offset} * 10`. For example, `DB_PORT` becomes `5433 + (offset * 10)`.
+- **CI Compatibility**: In environments where `CI=true` or `GITHUB_ACTIONS=true` is set, the offset always evaluates to `0`, ensuring CI workflows run reliably on the standard default ports.
+
+**Execution:**
+Simply run `pnpm test:e2e` in `frontend/` or `python scripts/run_integration_tests.py` in `backend/` from any concurrent worktrees. The testing frameworks and `docker-compose.yml` automatically ingest these derived parameters to avoid collisions.
+
+
 ## Backend Testing with pytest
 
 ### pytest Configuration Guidelines
