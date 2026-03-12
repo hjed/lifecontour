@@ -9,6 +9,8 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from core_shared.models.base import Base
 
+_DB_NOW = "now()"
+
 
 class ExternalEventLinkSyncCapability(StrEnum):
     """Supported sync capability for an external event link."""
@@ -51,13 +53,13 @@ class JournalExternalEventLink(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
-        server_default=text("now()"),
+        server_default=text(_DB_NOW),
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
-        server_default=text("now()"),
-        onupdate=text("now()"),
+        server_default=text(_DB_NOW),
+        onupdate=text(_DB_NOW),
     )
 
     __table_args__ = (

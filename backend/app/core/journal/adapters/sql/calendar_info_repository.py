@@ -1,6 +1,5 @@
 """SQL implementation of CalendarInfoRepository."""
 
-from dataclasses import replace
 from typing import Any
 from uuid import UUID
 
@@ -20,7 +19,17 @@ def project_calendar_info_to_linked_calendar(
     calendar_id: UUID,
 ) -> CalendarInfo:
     """Project legacy calendar info onto a linked calendar ID."""
-    return replace(calendar_info, calendar_id=calendar_id)
+    return CalendarInfo(
+        journal_id=calendar_info.journal_id,
+        calendar_id=calendar_id,
+        start_time=calendar_info.start_time,
+        end_time=calendar_info.end_time,
+        is_all_day=calendar_info.is_all_day,
+        location=calendar_info.location,
+        sync_invitees=calendar_info.sync_invitees,
+        created_at=calendar_info.created_at,
+        updated_at=calendar_info.updated_at,
+    )
 
 
 class SqlCalendarInfoRepository(CalendarInfoRepository):
