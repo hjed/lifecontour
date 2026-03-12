@@ -6,6 +6,7 @@ a database connection.
 """
 
 from datetime import UTC, datetime
+from uuid import UUID
 
 from core_shared.models import (
     ExternalEventLinkSyncCapability,
@@ -152,9 +153,10 @@ class TestJournalExternalEventLink:
         """Test creating JournalExternalEventLink instance."""
         now = datetime.now(UTC)
 
+        cal_id = UUID("00000000-0000-0000-0000-000000000123")
         link = JournalExternalEventLink(
             journal_id=123,
-            calendar_id="00000000-0000-0000-0000-000000000123",
+            calendar_id=cal_id,
             external_event_id="google-event-123",
             external_version="etag-abc",
             sync_capability=ExternalEventLinkSyncCapability.BIDIRECTIONAL.value,
@@ -164,7 +166,7 @@ class TestJournalExternalEventLink:
         )
 
         assert link.journal_id == 123
-        assert str(link.calendar_id) == "00000000-0000-0000-0000-000000000123"
+        assert link.calendar_id == cal_id
         assert link.external_event_id == "google-event-123"
         assert link.external_version == "etag-abc"
         assert (
@@ -174,9 +176,10 @@ class TestJournalExternalEventLink:
 
     def test_journal_external_event_link_repr(self) -> None:
         """Test JournalExternalEventLink string representation."""
+        cal_id = UUID("00000000-0000-0000-0000-000000000123")
         link = JournalExternalEventLink(
             journal_id=123,
-            calendar_id="00000000-0000-0000-0000-000000000123",
+            calendar_id=cal_id,
             external_event_id="google-event-123",
             sync_capability=ExternalEventLinkSyncCapability.OUTBOUND.value,
             sync_status=ExternalEventLinkSyncStatus.PENDING.value,
@@ -184,7 +187,7 @@ class TestJournalExternalEventLink:
 
         repr_str = repr(link)
         assert "JournalExternalEventLink(journal_id=123" in repr_str
-        assert "calendar_id='00000000-0000-0000-0000-000000000123'" in repr_str
+        assert "calendar_id=UUID('00000000-0000-0000-0000-000000000123')" in repr_str
         assert "sync_capability='outbound'" in repr_str
         assert "sync_status='pending'" in repr_str
 

@@ -2,6 +2,7 @@
 
 from datetime import datetime
 from enum import StrEnum
+from uuid import UUID
 
 from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, Uuid, text
 from sqlalchemy.orm import Mapped, mapped_column
@@ -37,8 +38,8 @@ class JournalExternalEventLink(Base):
         primary_key=True,
         nullable=False,
     )
-    calendar_id: Mapped[str] = mapped_column(
-        Uuid,
+    calendar_id: Mapped[UUID] = mapped_column(
+        Uuid(as_uuid=True),
         ForeignKey("calendars.id", ondelete="CASCADE"),
         primary_key=True,
         nullable=False,

@@ -53,11 +53,11 @@ def upgrade() -> None:
         sa.PrimaryKeyConstraint("journal_id", "calendar_id"),
         sa.CheckConstraint(
             "sync_capability IN ('outbound', 'bidirectional')",
-            name="sync_capability_valid",
+            name="ck_journal_external_event_links_sync_capability",
         ),
         sa.CheckConstraint(
             "sync_status IN ('pending', 'synced', 'conflicted', 'cancelled', 'errored')",
-            name="sync_status_valid",
+            name="ck_journal_external_event_links_sync_status",
         ),
     )
     op.create_index(

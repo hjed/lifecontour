@@ -199,7 +199,7 @@ class SqlCalendarInfoRepository(CalendarInfoRepository):
             for row in linked_result.fetchall()
         ]
 
-        return [*primary_events, *linked_events]
+        return sorted([*primary_events, *linked_events], key=lambda ci: ci.journal_id)
 
     async def _ensure_external_event_link(self, calendar_info: CalendarInfo) -> None:
         """Ensure the compatibility link row exists for legacy EVENT storage."""
@@ -223,7 +223,7 @@ class SqlCalendarInfoRepository(CalendarInfoRepository):
                     :sync_status
                 )
                 ON CONFLICT (journal_id, calendar_id)
-                DO UPDATE SET updated_at = now()
+                DO NOTHING
                 """
             ),
             {
