@@ -4,7 +4,16 @@ from datetime import datetime
 from enum import StrEnum
 from uuid import UUID
 
-from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, Uuid, text
+from sqlalchemy import (
+    CheckConstraint,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Uuid,
+    text,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from core_shared.models.base import Base
@@ -67,6 +76,14 @@ class JournalExternalEventLink(Base):
             "ix_journal_external_event_links_calendar_lookup",
             "calendar_id",
             "journal_id",
+        ),
+        CheckConstraint(
+            "sync_capability IN ('outbound', 'bidirectional')",
+            name="ck_journal_external_event_links_sync_capability",
+        ),
+        CheckConstraint(
+            "sync_status IN ('pending', 'synced', 'conflicted', 'cancelled', 'errored')",
+            name="ck_journal_external_event_links_sync_status",
         ),
     )
 
