@@ -1,0 +1,943 @@
+
+> personal-management-frontend@0.1.0 test /home/hjed/Projects/personal-management-system/frontend
+> jest "src/components/journals/__tests__/JournalCreateForm.test.tsx"
+
+FAIL src/components/journals/__tests__/JournalCreateForm.test.tsx (10.37 s)
+  JournalCreateForm
+    Rendering
+      ✓ renders all required form fields (254 ms)
+      ✓ renders type selector checkboxes (83 ms)
+      ✓ renders cancel button (63 ms)
+    Validation
+      ✓ shows error when title is empty (161 ms)
+      ✓ allows submission with valid title and date range (240 ms)
+      ✓ prevents submission when EVENT is selected but calendar ID is missing (224 ms)
+      ✓ prevents submission when PHOTO_ALBUM is selected but Immich Album ID is missing (196 ms)
+    Type Selection
+      ✓ allows selecting multiple types (143 ms)
+      ✓ allows deselecting types (103 ms)
+    All Journal Type Options
+      ✓ renders all 15 journal type checkboxes (74 ms)
+    Inline Editors in Create Mode
+      ✓ shows event type editor when EVENT is selected (96 ms)
+      ✓ shows mood rating type editor when MOOD_RATING is selected (91 ms)
+      ✓ shows photo album type editor when PHOTO_ALBUM is selected (106 ms)
+      ✓ shows plan type editor when PLAN is selected (86 ms)
+      ✓ shows travel type editor when TRAVEL is selected (94 ms)
+      ✓ shows abseiling type editor when ABSEILING_TRIP is selected (119 ms)
+      ✓ shows canyoning type editor when CANYONING is selected (165 ms)
+      ✓ shows climbing type editor when CLIMBING is selected (129 ms)
+      ✓ shows kayaking type editor when KAYAKING is selected (110 ms)
+      ✓ shows cross-country skiing type editor when CROSS_COUNTRY_SKIING is selected (126 ms)
+      ✕ uses unique route control ids when multiple route-based editors are selected (255 ms)
+      ✓ hides editor when type is deselected (118 ms)
+      ✓ editor inputs are enabled in create mode (no Edit button required) (86 ms)
+      ✓ mood rating editor initialises with default values in create mode (89 ms)
+    Type Dependency Information
+      ✓ renders selected type details inside a structured panel with dependency badges (147 ms)
+      ✕ shows dependency info when CANYONING is selected (176 ms)
+      ✕ shows dependency info when BUSHWALKING is selected (147 ms)
+      ✓ does not show dependency info for NOTE which has no dependencies (77 ms)
+      ✕ hides dependency info when type is deselected (157 ms)
+    Form Submission
+      ✓ submits form with correct data (224 ms)
+      ✓ includes mood data in type_data when MOOD_RATING is selected (180 ms)
+      ✓ includes photo album data in type_data when PHOTO_ALBUM is selected (402 ms)
+      ✓ includes event data in type_data when EVENT is selected (440 ms)
+      ✓ includes plan type_data key when PLAN is selected (179 ms)
+      ✕ includes canyoning data in type_data when CANYONING is selected (1688 ms)
+      ✕ includes abseiling data in type_data when ABSEILING_TRIP is selected (1325 ms)
+      ✕ submits the latest abseiling type_data after a same-tick edit and submit (1286 ms)
+
+  ● JournalCreateForm › Inline Editors in Create Mode › uses unique route control ids when multiple route-based editors are selected
+
+    expect(received).toHaveLength(expected)
+
+    Expected length: 2
+    Received length: 1
+    Received array:  [null]
+
+      331 |       );
+      332 |
+    > 333 |       expect(routeIds).toHaveLength(2);
+          |                        ^
+      334 |       expect(new Set(routeIds).size).toBe(2);
+      335 |     });
+      336 |
+
+      at Object.toHaveLength (src/components/journals/__tests__/JournalCreateForm.test.tsx:333:24)
+
+  ● JournalCreateForm › Type Dependency Information › shows dependency info when CANYONING is selected
+
+    TestingLibraryElementError: Found multiple elements with the text: /automatically adds/i
+
+    Here are the matching elements:
+
+    Ignored nodes: comments, script, style
+    [36m<p[39m
+      [33mclass[39m=[32m"text-muted-foreground text-xs font-medium tracking-wide uppercase"[39m
+    [36m>[39m
+      [0mAutomatically adds[0m
+    [36m</p>[39m
+
+    Ignored nodes: comments, script, style
+    [36m<p[39m
+      [33mclass[39m=[32m"text-muted-foreground text-xs font-medium tracking-wide uppercase"[39m
+    [36m>[39m
+      [0mAutomatically adds[0m
+    [36m</p>[39m
+
+    Ignored nodes: comments, script, style
+    [36m<p[39m
+      [33mclass[39m=[32m"text-muted-foreground text-xs font-medium tracking-wide uppercase"[39m
+    [36m>[39m
+      [0mAutomatically adds[0m
+    [36m</p>[39m
+
+    Ignored nodes: comments, script, style
+    [36m<p[39m
+      [33mclass[39m=[32m"text-muted-foreground text-xs font-medium tracking-wide uppercase"[39m
+    [36m>[39m
+      [0mAutomatically adds[0m
+    [36m</p>[39m
+
+    (If this is intentional, then use the `*AllBy*` variant of the query (like `queryAllByText`, `getAllByText`, or `findAllByText`)).
+
+    Ignored nodes: comments, script, style
+    [36m<body>[39m
+      [36m<div>[39m
+        [36m<form[39m
+          [33mclass[39m=[32m"space-y-6"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"grid gap-2"[39m
+            [33mdata-slot[39m=[32m"form-item"[39m
+          [36m>[39m
+            [36m<label[39m
+              [33mclass[39m=[32m"flex items-center gap-2 text-sm leading-none font-medium select-none group-data-[disabled=true]:pointer-events-none group-data-[disabled=true]:opacity-50 peer-disabled:cursor-not-allowed peer-disabled:opacity-50 data-[error=true]:text-destructive"[39m
+              [33mdata-error[39m=[32m"false"[39m
+              [33mdata-slot[39m=[32m"form-label"[39m
+              [33mfor[39m=[32m":rgc:-form-item"[39m
+            [36m>[39m
+              [0mTitle[0m
+            [36m</label>[39m
+            [36m<input[39m
+              [33maria-describedby[39m=[32m":rgc:-form-item-description"[39m
+              [33maria-invalid[39m=[32m"false"[39m
+              [33mclass[39m=[32m"file:text-foreground placeholder:text-muted-foreground selection:bg-primary selection:text-primary-foreground dark:bg-input/30 border-input flex h-9 w-full min-w-0 rounded-md border bg-transparent px-3 py-1 text-base shadow-xs transition-[color,box-shadow] outline-none file:inline-flex file:h-7 file:border-0 file:bg-transparent file:text-sm file:font-medium disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50 md:text-sm focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive"[39m
+              [33mdata-slot[39m=[32m"form-control"[39m
+              [33mid[39m=[32m":rgc:-form-item"[39m
+              [33mname[39m=[32m"title"[39m
+              [33mplaceholder[39m=[32m"Enter journal title"[39m
+              [33mvalue[39m=[32m""[39m
+            [36m/>[39m
+          [36m</div>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"grid gap-2"[39m
+            [33mdata-slot[39m=[32m"form-item"[39m
+          [36m>[39m
+            [36m<label[39m
+              [33mclass[39m=[32m"flex items-center gap-2 text-sm leading-none font-medium select-none group-data-[disabled=true]:pointer-events-none group-data-[disabled=true]:opacity-50 peer-disabled:cursor-not-allowed peer-disabled:opacity-50 data-[error=true]:text-destructive"[39m
+              [33mdata-error[39m=[32m"false"[39m
+              [33mdata-slot[39m=[32m"form-label"[39m
+              [33mfor[39m=[32m":rgd:-form-item"[39m
+            [36m>[39m
+              [0mDate Range[0m
+            [36m</label>[39m
+            [36m<input[39m
+              [33maria-describedby[39m=[32m":rgd:-form-item-description"[39m
+              [33maria-invalid[39m=[32m"false"[39m
+              [33mclass[39m=[32m"file:text-foreground placeholder:text-muted-foreground selection:bg-primary selection:text-primary-foreground dark:bg-input/30 border-input flex h-9 w-full min-w-0 rounded-md border bg-transparent px-3 py-1 text-base shadow-xs transition-[color,box-shadow] outline-none file:inline-flex file:h-7 file:border-0 file:bg-transparent file:text-sm file:font-medium disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50 md:text-sm focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive"[39m
+              [33mdata-slot[39m=[32m"form-control"[39m
+              [33mid[39m=[32m":rgd:-form-item"[39m
+              [33mtype[39m=[32m"date"[39m
+              [33mvalue[39m=[32m"2026-03-13"[39m
+            [36m/>[39m
+            [36m<p[39m
+              [33mclass[39m=[32m"text-muted-foreground text-sm"[39m
+              [33mdata-slot[39m=[32m"form-description"[39m
+              [33mid[39m=[32m":rgd:-form-item-description"[39m
+            [36m>[39m
+              [0mSelect the date or date range for this journal entry[0m
+            [36m</p>[39m
+          [36m</div>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"grid gap-2"[39m
+            [33mdata-slot[39m=[32m"form-item"[39m
+          [36m>[39m
+            [36m<label[39m
+              [33mclass[39m=[32m"flex items-center gap-2 text-sm leading-none font-medium select-none group-data-[disabled=true]:pointer-events-none group-data-[disabled=true]:opacity-50 peer-disabled:cursor-not-allowed peer-disabled:opacity-50 data-[error=true]:text-destructive"[39m
+              [33mdata-error[39m=[32m"false"[39m
+              [33mdata-slot[39m=[32m"form-label"[39m
+              [33mfor[39m=[32m":rge:-form-item"[39m
+            [36m>[39m
+              [0mContent[0m
+            [36m</label>[39m
+            [36m<textarea[39m
+              [33maria-describedby[39m=[32m":rge:-form-item-description"[39m
+              [33maria-invalid[39m=[32m"false"[39m
+              [33mclass[39m=[32m"border-input placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-ring/50 aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive dark:bg-input/30 flex field-sizing-content w-full rounded-md border bg-transparent px-3 py-2 text-base shadow-xs transition-[color,box-shadow] outline-none focus-visible:ring-[3px] disabled:cursor-not-allowed disabled:opacity-50 md:text-sm min-h-[200px]"[39m
+              [33mdata-slot[39m=[32m"form-control"[39m
+              [33mid[39m=[32m":rge:-form-item"[39m
+              [33mname[39m=[32m"content"[39m
+              [33mplaceholder[39m=[32m"Write your journal entry..."[39m
+            [36m/>[39m
+          [36m</div>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"grid gap-2"[39m
+            [33mdata-slot[39m=[32m"form-item"[39m
+          [36m>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"mb-4"[39m
+            [36m>[39m
+              [36m<label[39m
+                [33mclass[39m=[32m"flex items-center gap-2 text-sm leading-none font-medium select-none group-data-[disabled=true]:pointer-events-none group-data-[disabled=true]:opacity-50 peer-disabled:cursor-not-allowed peer-disabled:opacity-50 data-[error=true]:text-destructive"[39m
+                [33mdata-error[39m=[32m"false"[39m
+                [33mdata-slot[39m=[32m"form-label"[39m
+                [33mfor[39m=[32m":rgf:-form-item"[39m
+              [36m>[39m
+                [0mJournal Types[0m
+              [36m</label>[39m
+              [36m<p[39m
+                [33mclass[39m=[32m"text-muted-foreground text-sm"[39m
+                [33mdata-slot[39m=[32m"form-description"[39m
+                [33mid[39m=[32m":rgf:-form-item-description"[39m
+              [36m>[39m
+                [0mSelect one or more types for this journal entry[0m
+              [36m</p>[39m
+            [36m</div>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"space-y-2"[39m
+            [36m>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"gap-2 flex flex-row items-start space-y-0 space-x-3"[39m
+                [33mdata-slot[39m=[32m"form-item"[39m
+              [36m>[39m
+                [36m<but...
+
+      416 |       await user.click(canyoningCheckbox);
+      417 |
+    > 418 |       expect(screen.getByText(/automatically adds/i)).toBeInTheDocument();
+          |                     ^
+      419 |     });
+      420 |
+      421 |     it('shows dependency info when BUSHWALKING is selected', async () => {
+
+      at Object.getElementError (node_modules/.pnpm/@testing-library+dom@10.4.0/node_modules/@testing-library/dom/dist/config.js:37:19)
+      at getElementError (node_modules/.pnpm/@testing-library+dom@10.4.0/node_modules/@testing-library/dom/dist/query-helpers.js:20:35)
+      at getMultipleElementsFoundError (node_modules/.pnpm/@testing-library+dom@10.4.0/node_modules/@testing-library/dom/dist/query-helpers.js:23:10)
+      at node_modules/.pnpm/@testing-library+dom@10.4.0/node_modules/@testing-library/dom/dist/query-helpers.js:55:13
+      at node_modules/.pnpm/@testing-library+dom@10.4.0/node_modules/@testing-library/dom/dist/query-helpers.js:95:19
+      at Object.getByText (src/components/journals/__tests__/JournalCreateForm.test.tsx:418:21)
+
+  ● JournalCreateForm › Type Dependency Information › shows dependency info when BUSHWALKING is selected
+
+    TestingLibraryElementError: Found multiple elements with the text: /automatically adds/i
+
+    Here are the matching elements:
+
+    Ignored nodes: comments, script, style
+    [36m<p[39m
+      [33mclass[39m=[32m"text-muted-foreground text-xs font-medium tracking-wide uppercase"[39m
+    [36m>[39m
+      [0mAutomatically adds[0m
+    [36m</p>[39m
+
+    Ignored nodes: comments, script, style
+    [36m<p[39m
+      [33mclass[39m=[32m"text-muted-foreground text-xs font-medium tracking-wide uppercase"[39m
+    [36m>[39m
+      [0mAutomatically adds[0m
+    [36m</p>[39m
+
+    (If this is intentional, then use the `*AllBy*` variant of the query (like `queryAllByText`, `getAllByText`, or `findAllByText`)).
+
+    Ignored nodes: comments, script, style
+    [36m<body>[39m
+      [36m<div>[39m
+        [36m<form[39m
+          [33mclass[39m=[32m"space-y-6"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"grid gap-2"[39m
+            [33mdata-slot[39m=[32m"form-item"[39m
+          [36m>[39m
+            [36m<label[39m
+              [33mclass[39m=[32m"flex items-center gap-2 text-sm leading-none font-medium select-none group-data-[disabled=true]:pointer-events-none group-data-[disabled=true]:opacity-50 peer-disabled:cursor-not-allowed peer-disabled:opacity-50 data-[error=true]:text-destructive"[39m
+              [33mdata-error[39m=[32m"false"[39m
+              [33mdata-slot[39m=[32m"form-label"[39m
+              [33mfor[39m=[32m":rh9:-form-item"[39m
+            [36m>[39m
+              [0mTitle[0m
+            [36m</label>[39m
+            [36m<input[39m
+              [33maria-describedby[39m=[32m":rh9:-form-item-description"[39m
+              [33maria-invalid[39m=[32m"false"[39m
+              [33mclass[39m=[32m"file:text-foreground placeholder:text-muted-foreground selection:bg-primary selection:text-primary-foreground dark:bg-input/30 border-input flex h-9 w-full min-w-0 rounded-md border bg-transparent px-3 py-1 text-base shadow-xs transition-[color,box-shadow] outline-none file:inline-flex file:h-7 file:border-0 file:bg-transparent file:text-sm file:font-medium disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50 md:text-sm focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive"[39m
+              [33mdata-slot[39m=[32m"form-control"[39m
+              [33mid[39m=[32m":rh9:-form-item"[39m
+              [33mname[39m=[32m"title"[39m
+              [33mplaceholder[39m=[32m"Enter journal title"[39m
+              [33mvalue[39m=[32m""[39m
+            [36m/>[39m
+          [36m</div>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"grid gap-2"[39m
+            [33mdata-slot[39m=[32m"form-item"[39m
+          [36m>[39m
+            [36m<label[39m
+              [33mclass[39m=[32m"flex items-center gap-2 text-sm leading-none font-medium select-none group-data-[disabled=true]:pointer-events-none group-data-[disabled=true]:opacity-50 peer-disabled:cursor-not-allowed peer-disabled:opacity-50 data-[error=true]:text-destructive"[39m
+              [33mdata-error[39m=[32m"false"[39m
+              [33mdata-slot[39m=[32m"form-label"[39m
+              [33mfor[39m=[32m":rha:-form-item"[39m
+            [36m>[39m
+              [0mDate Range[0m
+            [36m</label>[39m
+            [36m<input[39m
+              [33maria-describedby[39m=[32m":rha:-form-item-description"[39m
+              [33maria-invalid[39m=[32m"false"[39m
+              [33mclass[39m=[32m"file:text-foreground placeholder:text-muted-foreground selection:bg-primary selection:text-primary-foreground dark:bg-input/30 border-input flex h-9 w-full min-w-0 rounded-md border bg-transparent px-3 py-1 text-base shadow-xs transition-[color,box-shadow] outline-none file:inline-flex file:h-7 file:border-0 file:bg-transparent file:text-sm file:font-medium disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50 md:text-sm focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive"[39m
+              [33mdata-slot[39m=[32m"form-control"[39m
+              [33mid[39m=[32m":rha:-form-item"[39m
+              [33mtype[39m=[32m"date"[39m
+              [33mvalue[39m=[32m"2026-03-13"[39m
+            [36m/>[39m
+            [36m<p[39m
+              [33mclass[39m=[32m"text-muted-foreground text-sm"[39m
+              [33mdata-slot[39m=[32m"form-description"[39m
+              [33mid[39m=[32m":rha:-form-item-description"[39m
+            [36m>[39m
+              [0mSelect the date or date range for this journal entry[0m
+            [36m</p>[39m
+          [36m</div>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"grid gap-2"[39m
+            [33mdata-slot[39m=[32m"form-item"[39m
+          [36m>[39m
+            [36m<label[39m
+              [33mclass[39m=[32m"flex items-center gap-2 text-sm leading-none font-medium select-none group-data-[disabled=true]:pointer-events-none group-data-[disabled=true]:opacity-50 peer-disabled:cursor-not-allowed peer-disabled:opacity-50 data-[error=true]:text-destructive"[39m
+              [33mdata-error[39m=[32m"false"[39m
+              [33mdata-slot[39m=[32m"form-label"[39m
+              [33mfor[39m=[32m":rhb:-form-item"[39m
+            [36m>[39m
+              [0mContent[0m
+            [36m</label>[39m
+            [36m<textarea[39m
+              [33maria-describedby[39m=[32m":rhb:-form-item-description"[39m
+              [33maria-invalid[39m=[32m"false"[39m
+              [33mclass[39m=[32m"border-input placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-ring/50 aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive dark:bg-input/30 flex field-sizing-content w-full rounded-md border bg-transparent px-3 py-2 text-base shadow-xs transition-[color,box-shadow] outline-none focus-visible:ring-[3px] disabled:cursor-not-allowed disabled:opacity-50 md:text-sm min-h-[200px]"[39m
+              [33mdata-slot[39m=[32m"form-control"[39m
+              [33mid[39m=[32m":rhb:-form-item"[39m
+              [33mname[39m=[32m"content"[39m
+              [33mplaceholder[39m=[32m"Write your journal entry..."[39m
+            [36m/>[39m
+          [36m</div>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"grid gap-2"[39m
+            [33mdata-slot[39m=[32m"form-item"[39m
+          [36m>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"mb-4"[39m
+            [36m>[39m
+              [36m<label[39m
+                [33mclass[39m=[32m"flex items-center gap-2 text-sm leading-none font-medium select-none group-data-[disabled=true]:pointer-events-none group-data-[disabled=true]:opacity-50 peer-disabled:cursor-not-allowed peer-disabled:opacity-50 data-[error=true]:text-destructive"[39m
+                [33mdata-error[39m=[32m"false"[39m
+                [33mdata-slot[39m=[32m"form-label"[39m
+                [33mfor[39m=[32m":rhc:-form-item"[39m
+              [36m>[39m
+                [0mJournal Types[0m
+              [36m</label>[39m
+              [36m<p[39m
+                [33mclass[39m=[32m"text-muted-foreground text-sm"[39m
+                [33mdata-slot[39m=[32m"form-description"[39m
+                [33mid[39m=[32m":rhc:-form-item-description"[39m
+              [36m>[39m
+                [0mSelect one or more types for this journal entry[0m
+              [36m</p>[39m
+            [36m</div>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"space-y-2"[39m
+            [36m>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"gap-2 flex flex-row items-start space-y-0 space-x-3"[39m
+                [33mdata-slot[39m=[32m"form-item"[39m
+              [36m>[39m
+                [36m<but...
+
+      426 |       await user.click(bushwalkingCheckbox);
+      427 |
+    > 428 |       expect(screen.getByText(/automatically adds/i)).toBeInTheDocument();
+          |                     ^
+      429 |     });
+      430 |
+      431 |     it('does not show dependency info for NOTE which has no dependencies', async () => {
+
+      at Object.getElementError (node_modules/.pnpm/@testing-library+dom@10.4.0/node_modules/@testing-library/dom/dist/config.js:37:19)
+      at getElementError (node_modules/.pnpm/@testing-library+dom@10.4.0/node_modules/@testing-library/dom/dist/query-helpers.js:20:35)
+      at getMultipleElementsFoundError (node_modules/.pnpm/@testing-library+dom@10.4.0/node_modules/@testing-library/dom/dist/query-helpers.js:23:10)
+      at node_modules/.pnpm/@testing-library+dom@10.4.0/node_modules/@testing-library/dom/dist/query-helpers.js:55:13
+      at node_modules/.pnpm/@testing-library+dom@10.4.0/node_modules/@testing-library/dom/dist/query-helpers.js:95:19
+      at Object.getByText (src/components/journals/__tests__/JournalCreateForm.test.tsx:428:21)
+
+  ● JournalCreateForm › Type Dependency Information › hides dependency info when type is deselected
+
+    TestingLibraryElementError: Found multiple elements with the text: /automatically adds/i
+
+    Here are the matching elements:
+
+    Ignored nodes: comments, script, style
+    [36m<p[39m
+      [33mclass[39m=[32m"text-muted-foreground text-xs font-medium tracking-wide uppercase"[39m
+    [36m>[39m
+      [0mAutomatically adds[0m
+    [36m</p>[39m
+
+    Ignored nodes: comments, script, style
+    [36m<p[39m
+      [33mclass[39m=[32m"text-muted-foreground text-xs font-medium tracking-wide uppercase"[39m
+    [36m>[39m
+      [0mAutomatically adds[0m
+    [36m</p>[39m
+
+    Ignored nodes: comments, script, style
+    [36m<p[39m
+      [33mclass[39m=[32m"text-muted-foreground text-xs font-medium tracking-wide uppercase"[39m
+    [36m>[39m
+      [0mAutomatically adds[0m
+    [36m</p>[39m
+
+    Ignored nodes: comments, script, style
+    [36m<p[39m
+      [33mclass[39m=[32m"text-muted-foreground text-xs font-medium tracking-wide uppercase"[39m
+    [36m>[39m
+      [0mAutomatically adds[0m
+    [36m</p>[39m
+
+    (If this is intentional, then use the `*AllBy*` variant of the query (like `queryAllByText`, `getAllByText`, or `findAllByText`)).
+
+    Ignored nodes: comments, script, style
+    [36m<body>[39m
+      [36m<div>[39m
+        [36m<form[39m
+          [33mclass[39m=[32m"space-y-6"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"grid gap-2"[39m
+            [33mdata-slot[39m=[32m"form-item"[39m
+          [36m>[39m
+            [36m<label[39m
+              [33mclass[39m=[32m"flex items-center gap-2 text-sm leading-none font-medium select-none group-data-[disabled=true]:pointer-events-none group-data-[disabled=true]:opacity-50 peer-disabled:cursor-not-allowed peer-disabled:opacity-50 data-[error=true]:text-destructive"[39m
+              [33mdata-error[39m=[32m"false"[39m
+              [33mdata-slot[39m=[32m"form-label"[39m
+              [33mfor[39m=[32m":rin:-form-item"[39m
+            [36m>[39m
+              [0mTitle[0m
+            [36m</label>[39m
+            [36m<input[39m
+              [33maria-describedby[39m=[32m":rin:-form-item-description"[39m
+              [33maria-invalid[39m=[32m"false"[39m
+              [33mclass[39m=[32m"file:text-foreground placeholder:text-muted-foreground selection:bg-primary selection:text-primary-foreground dark:bg-input/30 border-input flex h-9 w-full min-w-0 rounded-md border bg-transparent px-3 py-1 text-base shadow-xs transition-[color,box-shadow] outline-none file:inline-flex file:h-7 file:border-0 file:bg-transparent file:text-sm file:font-medium disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50 md:text-sm focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive"[39m
+              [33mdata-slot[39m=[32m"form-control"[39m
+              [33mid[39m=[32m":rin:-form-item"[39m
+              [33mname[39m=[32m"title"[39m
+              [33mplaceholder[39m=[32m"Enter journal title"[39m
+              [33mvalue[39m=[32m""[39m
+            [36m/>[39m
+          [36m</div>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"grid gap-2"[39m
+            [33mdata-slot[39m=[32m"form-item"[39m
+          [36m>[39m
+            [36m<label[39m
+              [33mclass[39m=[32m"flex items-center gap-2 text-sm leading-none font-medium select-none group-data-[disabled=true]:pointer-events-none group-data-[disabled=true]:opacity-50 peer-disabled:cursor-not-allowed peer-disabled:opacity-50 data-[error=true]:text-destructive"[39m
+              [33mdata-error[39m=[32m"false"[39m
+              [33mdata-slot[39m=[32m"form-label"[39m
+              [33mfor[39m=[32m":rio:-form-item"[39m
+            [36m>[39m
+              [0mDate Range[0m
+            [36m</label>[39m
+            [36m<input[39m
+              [33maria-describedby[39m=[32m":rio:-form-item-description"[39m
+              [33maria-invalid[39m=[32m"false"[39m
+              [33mclass[39m=[32m"file:text-foreground placeholder:text-muted-foreground selection:bg-primary selection:text-primary-foreground dark:bg-input/30 border-input flex h-9 w-full min-w-0 rounded-md border bg-transparent px-3 py-1 text-base shadow-xs transition-[color,box-shadow] outline-none file:inline-flex file:h-7 file:border-0 file:bg-transparent file:text-sm file:font-medium disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50 md:text-sm focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive"[39m
+              [33mdata-slot[39m=[32m"form-control"[39m
+              [33mid[39m=[32m":rio:-form-item"[39m
+              [33mtype[39m=[32m"date"[39m
+              [33mvalue[39m=[32m"2026-03-13"[39m
+            [36m/>[39m
+            [36m<p[39m
+              [33mclass[39m=[32m"text-muted-foreground text-sm"[39m
+              [33mdata-slot[39m=[32m"form-description"[39m
+              [33mid[39m=[32m":rio:-form-item-description"[39m
+            [36m>[39m
+              [0mSelect the date or date range for this journal entry[0m
+            [36m</p>[39m
+          [36m</div>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"grid gap-2"[39m
+            [33mdata-slot[39m=[32m"form-item"[39m
+          [36m>[39m
+            [36m<label[39m
+              [33mclass[39m=[32m"flex items-center gap-2 text-sm leading-none font-medium select-none group-data-[disabled=true]:pointer-events-none group-data-[disabled=true]:opacity-50 peer-disabled:cursor-not-allowed peer-disabled:opacity-50 data-[error=true]:text-destructive"[39m
+              [33mdata-error[39m=[32m"false"[39m
+              [33mdata-slot[39m=[32m"form-label"[39m
+              [33mfor[39m=[32m":rip:-form-item"[39m
+            [36m>[39m
+              [0mContent[0m
+            [36m</label>[39m
+            [36m<textarea[39m
+              [33maria-describedby[39m=[32m":rip:-form-item-description"[39m
+              [33maria-invalid[39m=[32m"false"[39m
+              [33mclass[39m=[32m"border-input placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-ring/50 aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive dark:bg-input/30 flex field-sizing-content w-full rounded-md border bg-transparent px-3 py-2 text-base shadow-xs transition-[color,box-shadow] outline-none focus-visible:ring-[3px] disabled:cursor-not-allowed disabled:opacity-50 md:text-sm min-h-[200px]"[39m
+              [33mdata-slot[39m=[32m"form-control"[39m
+              [33mid[39m=[32m":rip:-form-item"[39m
+              [33mname[39m=[32m"content"[39m
+              [33mplaceholder[39m=[32m"Write your journal entry..."[39m
+            [36m/>[39m
+          [36m</div>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"grid gap-2"[39m
+            [33mdata-slot[39m=[32m"form-item"[39m
+          [36m>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"mb-4"[39m
+            [36m>[39m
+              [36m<label[39m
+                [33mclass[39m=[32m"flex items-center gap-2 text-sm leading-none font-medium select-none group-data-[disabled=true]:pointer-events-none group-data-[disabled=true]:opacity-50 peer-disabled:cursor-not-allowed peer-disabled:opacity-50 data-[error=true]:text-destructive"[39m
+                [33mdata-error[39m=[32m"false"[39m
+                [33mdata-slot[39m=[32m"form-label"[39m
+                [33mfor[39m=[32m":riq:-form-item"[39m
+              [36m>[39m
+                [0mJournal Types[0m
+              [36m</label>[39m
+              [36m<p[39m
+                [33mclass[39m=[32m"text-muted-foreground text-sm"[39m
+                [33mdata-slot[39m=[32m"form-description"[39m
+                [33mid[39m=[32m":riq:-form-item-description"[39m
+              [36m>[39m
+                [0mSelect one or more types for this journal entry[0m
+              [36m</p>[39m
+            [36m</div>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"space-y-2"[39m
+            [36m>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"gap-2 flex flex-row items-start space-y-0 space-x-3"[39m
+                [33mdata-slot[39m=[32m"form-item"[39m
+              [36m>[39m
+                [36m<but...
+
+      445 |       const canyoningCheckbox = screen.getByLabelText(/^canyoning$/i);
+      446 |       await user.click(canyoningCheckbox);
+    > 447 |       expect(screen.getByText(/automatically adds/i)).toBeInTheDocument();
+          |                     ^
+      448 |
+      449 |       await user.click(canyoningCheckbox);
+      450 |       expect(screen.queryByText(/automatically adds/i)).not.toBeInTheDocument();
+
+      at Object.getElementError (node_modules/.pnpm/@testing-library+dom@10.4.0/node_modules/@testing-library/dom/dist/config.js:37:19)
+      at getElementError (node_modules/.pnpm/@testing-library+dom@10.4.0/node_modules/@testing-library/dom/dist/query-helpers.js:20:35)
+      at getMultipleElementsFoundError (node_modules/.pnpm/@testing-library+dom@10.4.0/node_modules/@testing-library/dom/dist/query-helpers.js:23:10)
+      at node_modules/.pnpm/@testing-library+dom@10.4.0/node_modules/@testing-library/dom/dist/query-helpers.js:55:13
+      at node_modules/.pnpm/@testing-library+dom@10.4.0/node_modules/@testing-library/dom/dist/query-helpers.js:95:19
+      at Object.getByText (src/components/journals/__tests__/JournalCreateForm.test.tsx:447:21)
+
+  ● JournalCreateForm › Form Submission › includes canyoning data in type_data when CANYONING is selected
+
+    expect(jest.fn()).toHaveBeenCalledWith(...expected)
+
+    Expected: ObjectContaining {"type_data": ObjectContaining {"canyoning": ObjectContaining {"french_grade": "v3a2IV**", "water_guage_level": 8, "water_guage_name": "Kowmung"}}, "types": ["canyoning"]}
+    Received: {"content": "", "event_date_range": {"end": "2026-03-13T23:22:58.954Z", "start": "2026-03-13T23:22:58.954Z"}, "title": "Canyon Journal", "type_data": {"abseiling_trip": {}, "bushwalking": {}, "canyoning": {"french_grade": "v3a2IV**", "water_guage_level": 8, "water_guage_name": "Kowmung"}, "fitness": {}, "outdoor_activity": {}}, "types": ["canyoning", "bushwalking", "abseiling_trip", "outdoor_activity", "fitness"]}
+
+    Number of calls: 1
+
+    Ignored nodes: comments, script, style
+    [36m<html>[39m
+      [36m<head />[39m
+      [36m<body>[39m
+        [36m<div>[39m
+          [36m<form[39m
+            [33mclass[39m=[32m"space-y-6"[39m
+          [36m>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"grid gap-2"[39m
+              [33mdata-slot[39m=[32m"form-item"[39m
+            [36m>[39m
+              [36m<label[39m
+                [33mclass[39m=[32m"flex items-center gap-2 text-sm leading-none font-medium select-none group-data-[disabled=true]:pointer-events-none group-data-[disabled=true]:opacity-50 peer-disabled:cursor-not-allowed peer-disabled:opacity-50 data-[error=true]:text-destructive"[39m
+                [33mdata-error[39m=[32m"false"[39m
+                [33mdata-slot[39m=[32m"form-label"[39m
+                [33mfor[39m=[32m":rmj:-form-item"[39m
+              [36m>[39m
+                [0mTitle[0m
+              [36m</label>[39m
+              [36m<input[39m
+                [33maria-describedby[39m=[32m":rmj:-form-item-description"[39m
+                [33maria-invalid[39m=[32m"false"[39m
+                [33mclass[39m=[32m"file:text-foreground placeholder:text-muted-foreground selection:bg-primary selection:text-primary-foreground dark:bg-input/30 border-input flex h-9 w-full min-w-0 rounded-md border bg-transparent px-3 py-1 text-base shadow-xs transition-[color,box-shadow] outline-none file:inline-flex file:h-7 file:border-0 file:bg-transparent file:text-sm file:font-medium disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50 md:text-sm focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive"[39m
+                [33mdata-slot[39m=[32m"form-control"[39m
+                [33mid[39m=[32m":rmj:-form-item"[39m
+                [33mname[39m=[32m"title"[39m
+                [33mplaceholder[39m=[32m"Enter journal title"[39m
+                [33mvalue[39m=[32m"Canyon Journal"[39m
+              [36m/>[39m
+            [36m</div>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"grid gap-2"[39m
+              [33mdata-slot[39m=[32m"form-item"[39m
+            [36m>[39m
+              [36m<label[39m
+                [33mclass[39m=[32m"flex items-center gap-2 text-sm leading-none font-medium select-none group-data-[disabled=true]:pointer-events-none group-data-[disabled=true]:opacity-50 peer-disabled:cursor-not-allowed peer-disabled:opacity-50 data-[error=true]:text-destructive"[39m
+                [33mdata-error[39m=[32m"false"[39m
+                [33mdata-slot[39m=[32m"form-label"[39m
+                [33mfor[39m=[32m":rmk:-form-item"[39m
+              [36m>[39m
+                [0mDate Range[0m
+              [36m</label>[39m
+              [36m<input[39m
+                [33maria-describedby[39m=[32m":rmk:-form-item-description"[39m
+                [33maria-invalid[39m=[32m"false"[39m
+                [33mclass[39m=[32m"file:text-foreground placeholder:text-muted-foreground selection:bg-primary selection:text-primary-foreground dark:bg-input/30 border-input flex h-9 w-full min-w-0 rounded-md border bg-transparent px-3 py-1 text-base shadow-xs transition-[color,box-shadow] outline-none file:inline-flex file:h-7 file:border-0 file:bg-transparent file:text-sm file:font-medium disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50 md:text-sm focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive"[39m
+                [33mdata-slot[39m=[32m"form-control"[39m
+                [33mid[39m=[32m":rmk:-form-item"[39m
+                [33mtype[39m=[32m"date"[39m
+                [33mvalue[39m=[32m"2026-03-13"[39m
+              [36m/>[39m
+              [36m<p[39m
+                [33mclass[39m=[32m"text-muted-foreground text-sm"[39m
+                [33mdata-slot[39m=[32m"form-description"[39m
+                [33mid[39m=[32m":rmk:-form-item-description"[39m
+              [36m>[39m
+                [0mSelect the date or date range for this journal entry[0m
+              [36m</p>[39m
+            [36m</div>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"grid gap-2"[39m
+              [33mdata-slot[39m=[32m"form-item"[39m
+            [36m>[39m
+              [36m<label[39m
+                [33mclass[39m=[32m"flex items-center gap-2 text-sm leading-none font-medium select-none group-data-[disabled=true]:pointer-events-none group-data-[disabled=true]:opacity-50 peer-disabled:cursor-not-allowed peer-disabled:opacity-50 data-[error=true]:text-destructive"[39m
+                [33mdata-error[39m=[32m"false"[39m
+                [33mdata-slot[39m=[32m"form-label"[39m
+                [33mfor[39m=[32m":rml:-form-item"[39m
+              [36m>[39m
+                [0mContent[0m
+              [36m</label>[39m
+              [36m<textarea[39m
+                [33maria-describedby[39m=[32m":rml:-form-item-description"[39m
+                [33maria-invalid[39m=[32m"false"[39m
+                [33mclass[39m=[32m"border-input placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-ring/50 aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive dark:bg-input/30 flex field-sizing-content w-full rounded-md border bg-transparent px-3 py-2 text-base shadow-xs transition-[color,box-shadow] outline-none focus-visible:ring-[3px] disabled:cursor-not-allowed disabled:opacity-50 md:text-sm min-h-[200px]"[39m
+                [33mdata-slot[39m=[32m"form-control"[39m
+                [33mid[39m=[32m":rml:-form-item"[39m
+                [33mname[39m=[32m"content"[39m
+                [33mplaceholder[39m=[32m"Write your journal entry..."[39m
+              [36m/>[39m
+            [36m</div>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"grid gap-2"[39m
+              [33mdata-slot[39m=[32m"form-item"[39m
+            [36m>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"mb-4"[39m
+              [36m>[39m
+                [36m<label[39m
+                  [33mclass[39m=[32m"flex items-center gap-2 text-sm leading-none font-medium select-none group-data-[disabled=true]:pointer-events-none group-data-[disabled=true]:opacity-50 peer-disabled:cursor-not-allowed peer-disabled:opacity-50 data-[error=true]:text-destructive"[39m
+                  [33mdata-error[39m=[32m"false"[39m
+                  [33mdata-slot[39m=[32m"form-label"[39m
+                  [33mfor[39m=[32m":rmm:-form-item"[39m
+                [36m>[39m
+                  [0mJournal Types[0m
+                [36m</label>[39m
+                [36m<p[39m
+                  [33mclass[39m=[32m"text-muted-foreground text-sm"[39m
+                  [33mdata-slot[39m=[32m"form-description"[39m
+                  [33mid[39m=[32m":rmm:-form-item-description"[39m
+                [36m>[39m
+                  [0mSelect one or more types for this journal entry[0m
+                [36m</p>[39m
+              [36m</div>[39m
+              [36m<div[39m
+                [33mclass[...
+
+      627 |
+      628 |       await waitFor(() => {
+    > 629 |         expect(mockMutateAsync).toHaveBeenCalledWith(
+          |                                 ^
+      630 |           expect.objectContaining({
+      631 |             types: [JournalType.CANYONING],
+      632 |             type_data: expect.objectContaining({
+
+      at toHaveBeenCalledWith (src/components/journals/__tests__/JournalCreateForm.test.tsx:629:33)
+      at runWithExpensiveErrorDiagnosticsDisabled (node_modules/.pnpm/@testing-library+dom@10.4.0/node_modules/@testing-library/dom/dist/config.js:47:12)
+      at checkCallback (node_modules/.pnpm/@testing-library+dom@10.4.0/node_modules/@testing-library/dom/dist/wait-for.js:124:77)
+      at checkRealTimersCallback (node_modules/.pnpm/@testing-library+dom@10.4.0/node_modules/@testing-library/dom/dist/wait-for.js:118:16)
+      at Timeout.task [as _onTimeout] (node_modules/.pnpm/jsdom@26.1.0/node_modules/jsdom/lib/jsdom/browser/Window.js:579:19)
+
+  ● JournalCreateForm › Form Submission › includes abseiling data in type_data when ABSEILING_TRIP is selected
+
+    expect(jest.fn()).toHaveBeenCalledWith(...expected)
+
+    Expected: ObjectContaining {"type_data": ObjectContaining {"abseiling_trip": ObjectContaining {"number_of_abseils": 4, "total_length": 120}}, "types": ["abseiling_trip"]}
+    Received: {"content": "", "event_date_range": {"end": "2026-03-13T23:23:00.643Z", "start": "2026-03-13T23:23:00.643Z"}, "title": "Abseil Journal", "type_data": {"abseiling_trip": {"number_of_abseils": 4, "total_length": 120}, "fitness": {}, "outdoor_activity": {}}, "types": ["abseiling_trip", "outdoor_activity", "fitness"]}
+
+    Number of calls: 1
+
+    Ignored nodes: comments, script, style
+    [36m<html>[39m
+      [36m<head />[39m
+      [36m<body>[39m
+        [36m<div>[39m
+          [36m<form[39m
+            [33mclass[39m=[32m"space-y-6"[39m
+          [36m>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"grid gap-2"[39m
+              [33mdata-slot[39m=[32m"form-item"[39m
+            [36m>[39m
+              [36m<label[39m
+                [33mclass[39m=[32m"flex items-center gap-2 text-sm leading-none font-medium select-none group-data-[disabled=true]:pointer-events-none group-data-[disabled=true]:opacity-50 peer-disabled:cursor-not-allowed peer-disabled:opacity-50 data-[error=true]:text-destructive"[39m
+                [33mdata-error[39m=[32m"false"[39m
+                [33mdata-slot[39m=[32m"form-label"[39m
+                [33mfor[39m=[32m":rng:-form-item"[39m
+              [36m>[39m
+                [0mTitle[0m
+              [36m</label>[39m
+              [36m<input[39m
+                [33maria-describedby[39m=[32m":rng:-form-item-description"[39m
+                [33maria-invalid[39m=[32m"false"[39m
+                [33mclass[39m=[32m"file:text-foreground placeholder:text-muted-foreground selection:bg-primary selection:text-primary-foreground dark:bg-input/30 border-input flex h-9 w-full min-w-0 rounded-md border bg-transparent px-3 py-1 text-base shadow-xs transition-[color,box-shadow] outline-none file:inline-flex file:h-7 file:border-0 file:bg-transparent file:text-sm file:font-medium disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50 md:text-sm focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive"[39m
+                [33mdata-slot[39m=[32m"form-control"[39m
+                [33mid[39m=[32m":rng:-form-item"[39m
+                [33mname[39m=[32m"title"[39m
+                [33mplaceholder[39m=[32m"Enter journal title"[39m
+                [33mvalue[39m=[32m"Abseil Journal"[39m
+              [36m/>[39m
+            [36m</div>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"grid gap-2"[39m
+              [33mdata-slot[39m=[32m"form-item"[39m
+            [36m>[39m
+              [36m<label[39m
+                [33mclass[39m=[32m"flex items-center gap-2 text-sm leading-none font-medium select-none group-data-[disabled=true]:pointer-events-none group-data-[disabled=true]:opacity-50 peer-disabled:cursor-not-allowed peer-disabled:opacity-50 data-[error=true]:text-destructive"[39m
+                [33mdata-error[39m=[32m"false"[39m
+                [33mdata-slot[39m=[32m"form-label"[39m
+                [33mfor[39m=[32m":rnh:-form-item"[39m
+              [36m>[39m
+                [0mDate Range[0m
+              [36m</label>[39m
+              [36m<input[39m
+                [33maria-describedby[39m=[32m":rnh:-form-item-description"[39m
+                [33maria-invalid[39m=[32m"false"[39m
+                [33mclass[39m=[32m"file:text-foreground placeholder:text-muted-foreground selection:bg-primary selection:text-primary-foreground dark:bg-input/30 border-input flex h-9 w-full min-w-0 rounded-md border bg-transparent px-3 py-1 text-base shadow-xs transition-[color,box-shadow] outline-none file:inline-flex file:h-7 file:border-0 file:bg-transparent file:text-sm file:font-medium disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50 md:text-sm focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive"[39m
+                [33mdata-slot[39m=[32m"form-control"[39m
+                [33mid[39m=[32m":rnh:-form-item"[39m
+                [33mtype[39m=[32m"date"[39m
+                [33mvalue[39m=[32m"2026-03-13"[39m
+              [36m/>[39m
+              [36m<p[39m
+                [33mclass[39m=[32m"text-muted-foreground text-sm"[39m
+                [33mdata-slot[39m=[32m"form-description"[39m
+                [33mid[39m=[32m":rnh:-form-item-description"[39m
+              [36m>[39m
+                [0mSelect the date or date range for this journal entry[0m
+              [36m</p>[39m
+            [36m</div>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"grid gap-2"[39m
+              [33mdata-slot[39m=[32m"form-item"[39m
+            [36m>[39m
+              [36m<label[39m
+                [33mclass[39m=[32m"flex items-center gap-2 text-sm leading-none font-medium select-none group-data-[disabled=true]:pointer-events-none group-data-[disabled=true]:opacity-50 peer-disabled:cursor-not-allowed peer-disabled:opacity-50 data-[error=true]:text-destructive"[39m
+                [33mdata-error[39m=[32m"false"[39m
+                [33mdata-slot[39m=[32m"form-label"[39m
+                [33mfor[39m=[32m":rni:-form-item"[39m
+              [36m>[39m
+                [0mContent[0m
+              [36m</label>[39m
+              [36m<textarea[39m
+                [33maria-describedby[39m=[32m":rni:-form-item-description"[39m
+                [33maria-invalid[39m=[32m"false"[39m
+                [33mclass[39m=[32m"border-input placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-ring/50 aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive dark:bg-input/30 flex field-sizing-content w-full rounded-md border bg-transparent px-3 py-2 text-base shadow-xs transition-[color,box-shadow] outline-none focus-visible:ring-[3px] disabled:cursor-not-allowed disabled:opacity-50 md:text-sm min-h-[200px]"[39m
+                [33mdata-slot[39m=[32m"form-control"[39m
+                [33mid[39m=[32m":rni:-form-item"[39m
+                [33mname[39m=[32m"content"[39m
+                [33mplaceholder[39m=[32m"Write your journal entry..."[39m
+              [36m/>[39m
+            [36m</div>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"grid gap-2"[39m
+              [33mdata-slot[39m=[32m"form-item"[39m
+            [36m>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"mb-4"[39m
+              [36m>[39m
+                [36m<label[39m
+                  [33mclass[39m=[32m"flex items-center gap-2 text-sm leading-none font-medium select-none group-data-[disabled=true]:pointer-events-none group-data-[disabled=true]:opacity-50 peer-disabled:cursor-not-allowed peer-disabled:opacity-50 data-[error=true]:text-destructive"[39m
+                  [33mdata-error[39m=[32m"false"[39m
+                  [33mdata-slot[39m=[32m"form-label"[39m
+                  [33mfor[39m=[32m":rnj:-form-item"[39m
+                [36m>[39m
+                  [0mJournal Types[0m
+                [36m</label>[39m
+                [36m<p[39m
+                  [33mclass[39m=[32m"text-muted-foreground text-sm"[39m
+                  [33mdata-slot[39m=[32m"form-description"[39m
+                  [33mid[39m=[32m":rnj:-form-item-description"[39m
+                [36m>[39m
+                  [0mSelect one or more types for this journal entry[0m
+                [36m</p>[39m
+              [36m</div>[39m
+              [36m<div[39m
+                [33mclass[...
+
+      658 |
+      659 |       await waitFor(() => {
+    > 660 |         expect(mockMutateAsync).toHaveBeenCalledWith(
+          |                                 ^
+      661 |           expect.objectContaining({
+      662 |             types: [JournalType.ABSEILING_TRIP],
+      663 |             type_data: expect.objectContaining({
+
+      at toHaveBeenCalledWith (src/components/journals/__tests__/JournalCreateForm.test.tsx:660:33)
+      at runWithExpensiveErrorDiagnosticsDisabled (node_modules/.pnpm/@testing-library+dom@10.4.0/node_modules/@testing-library/dom/dist/config.js:47:12)
+      at checkCallback (node_modules/.pnpm/@testing-library+dom@10.4.0/node_modules/@testing-library/dom/dist/wait-for.js:124:77)
+      at checkRealTimersCallback (node_modules/.pnpm/@testing-library+dom@10.4.0/node_modules/@testing-library/dom/dist/wait-for.js:118:16)
+      at Timeout.task [as _onTimeout] (node_modules/.pnpm/jsdom@26.1.0/node_modules/jsdom/lib/jsdom/browser/Window.js:579:19)
+
+  ● JournalCreateForm › Form Submission › submits the latest abseiling type_data after a same-tick edit and submit
+
+    expect(jest.fn()).toHaveBeenCalledWith(...expected)
+
+    Expected: ObjectContaining {"type_data": ObjectContaining {"abseiling_trip": ObjectContaining {"number_of_abseils": 7, "total_length": 210}}, "types": ["abseiling_trip"]}
+    Received: {"content": "", "event_date_range": {"end": "2026-03-13T23:23:01.969Z", "start": "2026-03-13T23:23:01.969Z"}, "title": "Immediate Abseil Journal", "type_data": {"abseiling_trip": {"number_of_abseils": 7, "total_length": 210}, "fitness": {}, "outdoor_activity": {}}, "types": ["abseiling_trip", "outdoor_activity", "fitness"]}
+
+    Number of calls: 1
+
+    Ignored nodes: comments, script, style
+    [36m<html>[39m
+      [36m<head />[39m
+      [36m<body>[39m
+        [36m<div>[39m
+          [36m<form[39m
+            [33mclass[39m=[32m"space-y-6"[39m
+          [36m>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"grid gap-2"[39m
+              [33mdata-slot[39m=[32m"form-item"[39m
+            [36m>[39m
+              [36m<label[39m
+                [33mclass[39m=[32m"flex items-center gap-2 text-sm leading-none font-medium select-none group-data-[disabled=true]:pointer-events-none group-data-[disabled=true]:opacity-50 peer-disabled:cursor-not-allowed peer-disabled:opacity-50 data-[error=true]:text-destructive"[39m
+                [33mdata-error[39m=[32m"false"[39m
+                [33mdata-slot[39m=[32m"form-label"[39m
+                [33mfor[39m=[32m":ro4:-form-item"[39m
+              [36m>[39m
+                [0mTitle[0m
+              [36m</label>[39m
+              [36m<input[39m
+                [33maria-describedby[39m=[32m":ro4:-form-item-description"[39m
+                [33maria-invalid[39m=[32m"false"[39m
+                [33mclass[39m=[32m"file:text-foreground placeholder:text-muted-foreground selection:bg-primary selection:text-primary-foreground dark:bg-input/30 border-input flex h-9 w-full min-w-0 rounded-md border bg-transparent px-3 py-1 text-base shadow-xs transition-[color,box-shadow] outline-none file:inline-flex file:h-7 file:border-0 file:bg-transparent file:text-sm file:font-medium disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50 md:text-sm focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive"[39m
+                [33mdata-slot[39m=[32m"form-control"[39m
+                [33mid[39m=[32m":ro4:-form-item"[39m
+                [33mname[39m=[32m"title"[39m
+                [33mplaceholder[39m=[32m"Enter journal title"[39m
+                [33mvalue[39m=[32m"Immediate Abseil Journal"[39m
+              [36m/>[39m
+            [36m</div>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"grid gap-2"[39m
+              [33mdata-slot[39m=[32m"form-item"[39m
+            [36m>[39m
+              [36m<label[39m
+                [33mclass[39m=[32m"flex items-center gap-2 text-sm leading-none font-medium select-none group-data-[disabled=true]:pointer-events-none group-data-[disabled=true]:opacity-50 peer-disabled:cursor-not-allowed peer-disabled:opacity-50 data-[error=true]:text-destructive"[39m
+                [33mdata-error[39m=[32m"false"[39m
+                [33mdata-slot[39m=[32m"form-label"[39m
+                [33mfor[39m=[32m":ro5:-form-item"[39m
+              [36m>[39m
+                [0mDate Range[0m
+              [36m</label>[39m
+              [36m<input[39m
+                [33maria-describedby[39m=[32m":ro5:-form-item-description"[39m
+                [33maria-invalid[39m=[32m"false"[39m
+                [33mclass[39m=[32m"file:text-foreground placeholder:text-muted-foreground selection:bg-primary selection:text-primary-foreground dark:bg-input/30 border-input flex h-9 w-full min-w-0 rounded-md border bg-transparent px-3 py-1 text-base shadow-xs transition-[color,box-shadow] outline-none file:inline-flex file:h-7 file:border-0 file:bg-transparent file:text-sm file:font-medium disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50 md:text-sm focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive"[39m
+                [33mdata-slot[39m=[32m"form-control"[39m
+                [33mid[39m=[32m":ro5:-form-item"[39m
+                [33mtype[39m=[32m"date"[39m
+                [33mvalue[39m=[32m"2026-03-13"[39m
+              [36m/>[39m
+              [36m<p[39m
+                [33mclass[39m=[32m"text-muted-foreground text-sm"[39m
+                [33mdata-slot[39m=[32m"form-description"[39m
+                [33mid[39m=[32m":ro5:-form-item-description"[39m
+              [36m>[39m
+                [0mSelect the date or date range for this journal entry[0m
+              [36m</p>[39m
+            [36m</div>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"grid gap-2"[39m
+              [33mdata-slot[39m=[32m"form-item"[39m
+            [36m>[39m
+              [36m<label[39m
+                [33mclass[39m=[32m"flex items-center gap-2 text-sm leading-none font-medium select-none group-data-[disabled=true]:pointer-events-none group-data-[disabled=true]:opacity-50 peer-disabled:cursor-not-allowed peer-disabled:opacity-50 data-[error=true]:text-destructive"[39m
+                [33mdata-error[39m=[32m"false"[39m
+                [33mdata-slot[39m=[32m"form-label"[39m
+                [33mfor[39m=[32m":ro6:-form-item"[39m
+              [36m>[39m
+                [0mContent[0m
+              [36m</label>[39m
+              [36m<textarea[39m
+                [33maria-describedby[39m=[32m":ro6:-form-item-description"[39m
+                [33maria-invalid[39m=[32m"false"[39m
+                [33mclass[39m=[32m"border-input placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-ring/50 aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive dark:bg-input/30 flex field-sizing-content w-full rounded-md border bg-transparent px-3 py-2 text-base shadow-xs transition-[color,box-shadow] outline-none focus-visible:ring-[3px] disabled:cursor-not-allowed disabled:opacity-50 md:text-sm min-h-[200px]"[39m
+                [33mdata-slot[39m=[32m"form-control"[39m
+                [33mid[39m=[32m":ro6:-form-item"[39m
+                [33mname[39m=[32m"content"[39m
+                [33mplaceholder[39m=[32m"Write your journal entry..."[39m
+              [36m/>[39m
+            [36m</div>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"grid gap-2"[39m
+              [33mdata-slot[39m=[32m"form-item"[39m
+            [36m>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"mb-4"[39m
+              [36m>[39m
+                [36m<label[39m
+                  [33mclass[39m=[32m"flex items-center gap-2 text-sm leading-none font-medium select-none group-data-[disabled=true]:pointer-events-none group-data-[disabled=true]:opacity-50 peer-disabled:cursor-not-allowed peer-disabled:opacity-50 data-[error=true]:text-destructive"[39m
+                  [33mdata-error[39m=[32m"false"[39m
+                  [33mdata-slot[39m=[32m"form-label"[39m
+                  [33mfor[39m=[32m":ro7:-form-item"[39m
+                [36m>[39m
+                  [0mJournal Types[0m
+                [36m</label>[39m
+                [36m<p[39m
+                  [33mclass[39m=[32m"text-muted-foreground text-sm"[39m
+                  [33mdata-slot[39m=[32m"form-description"[39m
+                  [33mid[39m=[32m":ro7:-form-item-description"[39m
+                [36m>[39m
+                  [0mSelect one or more types for this journal entry[0m
+                [36m</p>[39m
+              [36m</div>[39m
+              [36m<div[39m
+                [...
+
+      705 |
+      706 |         await waitFor(() => {
+    > 707 |           expect(mockMutateAsync).toHaveBeenCalledWith(
+          |                                   ^
+      708 |             expect.objectContaining({
+      709 |               types: [JournalType.ABSEILING_TRIP],
+      710 |               type_data: expect.objectContaining({
+
+      at toHaveBeenCalledWith (src/components/journals/__tests__/JournalCreateForm.test.tsx:707:35)
+      at runWithExpensiveErrorDiagnosticsDisabled (node_modules/.pnpm/@testing-library+dom@10.4.0/node_modules/@testing-library/dom/dist/config.js:47:12)
+      at checkCallback (node_modules/.pnpm/@testing-library+dom@10.4.0/node_modules/@testing-library/dom/dist/wait-for.js:124:77)
+      at checkRealTimersCallback (node_modules/.pnpm/@testing-library+dom@10.4.0/node_modules/@testing-library/dom/dist/wait-for.js:118:16)
+      at Timeout.task [as _onTimeout] (node_modules/.pnpm/jsdom@26.1.0/node_modules/jsdom/lib/jsdom/browser/Window.js:579:19)
+
+Test Suites: 1 failed, 1 total
+Tests:       7 failed, 30 passed, 37 total
+Snapshots:   0 total
+Time:        10.836 s, estimated 15 s
+Ran all test suites matching src/components/journals/__tests__/JournalCreateForm.test.tsx.
+ ELIFECYCLE  Test failed. See above for more details.

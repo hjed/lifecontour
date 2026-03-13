@@ -1,7 +1,7 @@
 """refactor_route_to_journal_child
 
 Revision ID: a2ab27a2cdf7
-Revises: 0028
+Revises: 0030
 Create Date: 2026-03-13 22:32:45.919712
 
 """

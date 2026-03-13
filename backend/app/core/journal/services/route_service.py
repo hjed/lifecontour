@@ -93,7 +93,7 @@ class RouteService:
         logger.info(
             "Route created",
             route_id=str(saved_route.id),
-            user_id=saved_route.journal_id,
+            journal_id=saved_route.journal_id,
             name=saved_route.name,
         )
 
@@ -208,13 +208,10 @@ class RouteService:
         journal_id: int,
     ) -> list[Route]:
         """
-        Get all routes for a user with pagination.
+        Get all routes for a journal.
 
         Args:
-            user_id: The user ID to filter by
-            limit: Maximum number of routes to return
-            offset: Number of routes to skip
-            name: Optional case-insensitive partial route name filter
+            journal_id: The journal ID to get routes for
 
         Returns:
             List of routes

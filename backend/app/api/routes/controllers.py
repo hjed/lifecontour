@@ -25,6 +25,8 @@ from app.api.routes.schemas import (
     RouteResponse,
     RouteUpdateRequest,
 )
+from core_shared.models.journals import JournalNotFoundError, RouteNotFoundError
+from app.core.journal.services.journal_service import JournalService
 from app.core.journal.services.route_service import RouteService
 from app.infrastructure.auth.models import SessionUser
 
@@ -40,6 +42,7 @@ async def list_routes(
     journal_id: int,
     request: Request,
     route_service: FromDishka[RouteService],
+    journal_service: FromDishka[JournalService],
     user: FromDishka[SessionUser],  # Require authentication
     page: int = Query(default=1, description="Page number", ge=1),
     limit: int = Query(default=20, description="Items per page", ge=1, le=100),
@@ -56,6 +59,11 @@ async def list_routes(
     """
     pagination = PaginationParams(page=page, limit=limit)
     base_url = get_request_base_url(request)
+
+    # Verify journal ownership first
+    journal = await journal_service.get_journal(journal_id)
+    if not journal or journal.user_id != user.id:
+        raise JournalNotFoundError(journal_id)
 
     # Get routes for the authenticated user
     routes = await route_service.get_routes_by_journal(journal_id)
@@ -101,6 +109,7 @@ async def get_route(
     route_id: str,
     request: Request,
     route_service: FromDishka[RouteService],
+    journal_service: FromDishka[JournalService],
     user: FromDishka[SessionUser],  # Require authentication
 ) -> RouteResponse:
     """
@@ -109,6 +118,11 @@ async def get_route(
     Returns a single route resource following JSON API specification.
     """
     base_url = get_request_base_url(request)
+
+    # Verify journal ownership first
+    journal = await journal_service.get_journal(journal_id)
+    if not journal or journal.user_id != user.id:
+        raise JournalNotFoundError(journal_id)
 
     # Parse UUID
     try:
@@ -136,6 +150,7 @@ async def create_route(
     request: Request,
     route_request: RouteCreateRequest,
     route_service: FromDishka[RouteService],
+    journal_service: FromDishka[JournalService],
     connection: FromDishka[AsyncConnection],
     user: FromDishka[SessionUser],  # Require authentication
 ) -> RouteResponse:
@@ -145,6 +160,11 @@ async def create_route(
     Creates a new route for the authenticated user and returns the created resource.
     """
     base_url = get_request_base_url(request)
+
+    # Verify journal ownership first
+    journal = await journal_service.get_journal(journal_id)
+    if not journal or journal.user_id != user.id:
+        raise JournalNotFoundError(journal_id)
 
     # Convert request to domain entity
     route = RouteRequestConverter.from_create_request(
@@ -168,6 +188,7 @@ async def update_route(
     request: Request,
     route_request: RouteUpdateRequest,
     route_service: FromDishka[RouteService],
+    journal_service: FromDishka[JournalService],
     connection: FromDishka[AsyncConnection],
     user: FromDishka[SessionUser],  # Require authentication
 ) -> RouteResponse:
@@ -177,6 +198,11 @@ async def update_route(
     Updates the route with the provided data and returns the updated resource.
     """
     base_url = get_request_base_url(request)
+
+    # Verify journal ownership first
+    journal = await journal_service.get_journal(journal_id)
+    if not journal or journal.user_id != user.id:
+        raise JournalNotFoundError(journal_id)
 
     # Parse UUID
     try:
@@ -211,6 +237,7 @@ async def delete_route(
     journal_id: int,
     route_id: str,
     route_service: FromDishka[RouteService],
+    journal_service: FromDishka[JournalService],
     connection: FromDishka[AsyncConnection],
     user: FromDishka[SessionUser],  # Require authentication
 ) -> None:
@@ -224,6 +251,10 @@ async def delete_route(
         RouteNotFoundError: If route doesn't exist
         RouteInUseError: If route is referenced by journals
     """
+    # Verify journal ownership first
+    journal = await journal_service.get_journal(journal_id)
+    if not journal or journal.user_id != user.id:
+        raise JournalNotFoundError(journal_id)
     # Parse UUID
     try:
         route_uuid = UUID(route_id)

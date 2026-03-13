@@ -113,7 +113,7 @@ export function JournalRoutesEditor({
           // Create Mode: Render pending routes
           pendingRoutes.map((route, index) => (
             <div
-              key={index}
+              key={`${route.name}-${index}`}
               className='bg-muted/30 flex items-center justify-between rounded border p-2 text-sm'
             >
               <span className='truncate font-medium'>{route.name}</span>

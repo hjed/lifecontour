@@ -41,7 +41,6 @@ async function fillAndSubmitJournal(
 }
 
 // Removed createRoute and selectRouteInEditor as they are obsolete
-// Removed createRoute and selectRouteInEditor as they are obsolete
 // Routes are now created by uploading GPX files during journal creation
 
 /** Assert the selected type panel and its dependency badges in the create form. */

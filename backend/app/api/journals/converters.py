@@ -133,21 +133,6 @@ class JournalConverter:
         )
 
     @staticmethod
-    def _convert_routes(routes: list[Route] | None) -> list[dict[str, Any]]:
-        """Convert routes to dictionaries."""
-        if not routes:
-            return []
-
-        return [
-            {
-                "id": str(route.id),
-                "name": route.name,
-                "description": route.description,
-            }
-            for route in routes
-        ]
-
-    @staticmethod
     def _convert_parent(parent: Journal | None) -> dict[str, str] | None:
         """Convert parent journal to summary."""
         if not parent:

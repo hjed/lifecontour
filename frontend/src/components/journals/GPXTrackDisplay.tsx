@@ -4,6 +4,7 @@ import { useMemo } from 'react';
 import dynamic from 'next/dynamic';
 import { Card } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
+import { toast } from 'sonner';
 
 const GPXTrackMap = dynamic(() => import('./GPXTrackMap'), {
   ssr: false,
@@ -41,6 +42,20 @@ export function GPXTrackDisplay({
       try {
         const parser = new DOMParser();
         const xmlDoc = parser.parseFromString(gpxString, 'text/xml');
+
+        const parserError = xmlDoc.querySelector('parsererror');
+        if (parserError) {
+          console.error(
+            'Failed to parse GPX data for route',
+            route.id,
+            parserError.textContent
+          );
+          toast.error(
+            `Contains invalid GPX data in route ${route.attributes.name}`
+          );
+          continue;
+        }
+
         const trkpts = xmlDoc.getElementsByTagName('trkpt');
         const coordinates: Coordinate[] = [];
 

@@ -1847,36 +1847,6 @@ class TestJournalTypeDataValidation:
             "Empty/whitespace activity_type should return 400 not 500"
         )
 
-    async def test_update_bushwalking_with_invalid_uuid_returns_400(
-        self, integration_api_client
-    ):
-        """Updating BUSHWALKING with an invalid route_id UUID should return 400."""
-        create_data = create_journal_request_data(
-            title="UUID Validation Test",
-            content="Test content",
-            types=["BUSHWALKING"],
-        )
-        create_response = await integration_api_client.post(
-            "/api/journals", json=create_data
-        )
-        assert create_response.status_code == 201
-        journal_id = create_response.json()["data"]["id"]
-
-        update_data = {
-            "data": {
-                "type": "journal-type-data",
-                "attributes": {"route_id": "not-a-valid-uuid"},
-            }
-        }
-        response = await integration_api_client.put(
-            f"/api/journals/{journal_id}/types/BUSHWALKING/data",
-            json=update_data,
-        )
-
-        assert response.status_code == 400, (
-            "Invalid UUID route_id should return 400 not 500"
-        )
-
     async def test_update_bushwalking_with_invalid_track_grading_returns_400(
         self, integration_api_client
     ):
@@ -1905,36 +1875,6 @@ class TestJournalTypeDataValidation:
 
         assert response.status_code == 400, (
             "Invalid track_grading should return 400 not 500"
-        )
-
-    async def test_update_jogging_with_invalid_uuid_returns_400(
-        self, integration_api_client
-    ):
-        """Updating JOGGING with an invalid route_id UUID should return 400."""
-        create_data = create_journal_request_data(
-            title="Jogging UUID Validation Test",
-            content="Test content",
-            types=["JOGGING"],
-        )
-        create_response = await integration_api_client.post(
-            "/api/journals", json=create_data
-        )
-        assert create_response.status_code == 201
-        journal_id = create_response.json()["data"]["id"]
-
-        update_data = {
-            "data": {
-                "type": "journal-type-data",
-                "attributes": {"route_id": "not-a-valid-uuid"},
-            }
-        }
-        response = await integration_api_client.put(
-            f"/api/journals/{journal_id}/types/JOGGING/data",
-            json=update_data,
-        )
-
-        assert response.status_code == 400, (
-            "Invalid UUID route_id should return 400 not 500"
         )
 
     async def test_update_abseiling_trip_with_negative_number_of_abseils_returns_400(
@@ -1997,36 +1937,6 @@ class TestJournalTypeDataValidation:
             "Invalid French canyon grade should return 400 not 500"
         )
 
-    async def test_update_canyoning_with_invalid_uuid_returns_400(
-        self, integration_api_client
-    ):
-        """Updating CANYONING with an invalid route_id UUID should return 400."""
-        create_data = create_journal_request_data(
-            title="Canyoning UUID Validation Test",
-            content="Test content",
-            types=["CANYONING"],
-        )
-        create_response = await integration_api_client.post(
-            "/api/journals", json=create_data
-        )
-        assert create_response.status_code == 201
-        journal_id = create_response.json()["data"]["id"]
-
-        update_data = {
-            "data": {
-                "type": "journal-type-data",
-                "attributes": {"route_id": "not-a-valid-uuid"},
-            }
-        }
-        response = await integration_api_client.put(
-            f"/api/journals/{journal_id}/types/CANYONING/data",
-            json=update_data,
-        )
-
-        assert response.status_code == 400, (
-            "Invalid UUID route_id should return 400 not 500"
-        )
-
     async def test_update_climbing_with_invalid_climbing_type_returns_400(
         self, integration_api_client
     ):
@@ -2055,36 +1965,6 @@ class TestJournalTypeDataValidation:
 
         assert response.status_code == 400, (
             "Invalid climbing_type should return 400 not 500"
-        )
-
-    async def test_update_climbing_with_invalid_uuid_returns_400(
-        self, integration_api_client
-    ):
-        """Updating CLIMBING with an invalid route_id UUID should return 400."""
-        create_data = create_journal_request_data(
-            title="Climbing UUID Validation Test",
-            content="Test content",
-            types=["CLIMBING"],
-        )
-        create_response = await integration_api_client.post(
-            "/api/journals", json=create_data
-        )
-        assert create_response.status_code == 201
-        journal_id = create_response.json()["data"]["id"]
-
-        update_data = {
-            "data": {
-                "type": "journal-type-data",
-                "attributes": {"route_id": "not-a-valid-uuid"},
-            }
-        }
-        response = await integration_api_client.put(
-            f"/api/journals/{journal_id}/types/CLIMBING/data",
-            json=update_data,
-        )
-
-        assert response.status_code == 400, (
-            "Invalid UUID route_id should return 400 not 500"
         )
 
     async def test_update_climbing_with_negative_grade_returns_400(
@@ -2348,100 +2228,6 @@ class TestJournalTypeDataValidation:
         climbing_data = response.json()["data"]["attributes"]["type_data"]["climbing"]
         assert "grade" not in climbing_data
         assert "length" not in climbing_data
-
-    async def test_create_bushwalking_with_invalid_route_id_returns_400(
-        self, integration_api_client
-    ):
-        """Creating BUSHWALKING with an invalid route_id UUID should return 400."""
-        create_data = create_journal_request_data(
-            title="Bushwalking Create UUID Validation Test",
-            content="Test content",
-            types=["BUSHWALKING"],
-            type_data={"BUSHWALKING": {"route_id": "not-a-valid-uuid"}},
-        )
-
-        response = await integration_api_client.post("/api/journals", json=create_data)
-
-        assert response.status_code == 400, (
-            "Invalid create-time bushwalking route_id should return 400 not 500"
-        )
-
-    async def test_create_jogging_with_invalid_route_id_returns_400(
-        self, integration_api_client
-    ):
-        """Creating JOGGING with an invalid route_id UUID should return 400."""
-        create_data = create_journal_request_data(
-            title="Jogging Create UUID Validation Test",
-            content="Test content",
-            types=["JOGGING"],
-            type_data={"JOGGING": {"route_id": "not-a-valid-uuid"}},
-        )
-
-        response = await integration_api_client.post("/api/journals", json=create_data)
-
-        assert response.status_code == 400, (
-            "Invalid create-time jogging route_id should return 400 not 500"
-        )
-
-    async def test_update_kayaking_with_invalid_uuid_returns_400(
-        self, integration_api_client
-    ):
-        """Updating KAYAKING with an invalid route_id UUID should return 400."""
-        create_data = create_journal_request_data(
-            title="Kayaking UUID Validation Test",
-            content="Test content",
-            types=["KAYAKING"],
-        )
-        create_response = await integration_api_client.post(
-            "/api/journals", json=create_data
-        )
-        assert create_response.status_code == 201
-        journal_id = create_response.json()["data"]["id"]
-
-        update_data = {
-            "data": {
-                "type": "journal-type-data",
-                "attributes": {"route_id": "not-a-valid-uuid"},
-            }
-        }
-        response = await integration_api_client.put(
-            f"/api/journals/{journal_id}/types/KAYAKING/data",
-            json=update_data,
-        )
-
-        assert response.status_code == 400, (
-            "Invalid UUID route_id should return 400 not 500"
-        )
-
-    async def test_update_cross_country_skiing_with_invalid_uuid_returns_400(
-        self, integration_api_client
-    ):
-        """Updating CROSS_COUNTRY_SKIING with an invalid route_id UUID should return 400."""
-        create_data = create_journal_request_data(
-            title="Cross Country Skiing UUID Validation Test",
-            content="Test content",
-            types=["CROSS_COUNTRY_SKIING"],
-        )
-        create_response = await integration_api_client.post(
-            "/api/journals", json=create_data
-        )
-        assert create_response.status_code == 201
-        journal_id = create_response.json()["data"]["id"]
-
-        update_data = {
-            "data": {
-                "type": "journal-type-data",
-                "attributes": {"route_id": "not-a-valid-uuid"},
-            }
-        }
-        response = await integration_api_client.put(
-            f"/api/journals/{journal_id}/types/CROSS_COUNTRY_SKIING/data",
-            json=update_data,
-        )
-
-        assert response.status_code == 400, (
-            "Invalid UUID route_id should return 400 not 500"
-        )
 
     async def test_update_kayaking_with_invalid_water_type_returns_400(
         self, integration_api_client

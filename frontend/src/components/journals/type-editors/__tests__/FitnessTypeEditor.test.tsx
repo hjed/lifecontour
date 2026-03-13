@@ -95,6 +95,6 @@ describe('FitnessTypeEditor', () => {
     expect(screen.queryByTestId('activity-stats-grid')).not.toBeInTheDocument();
 
     // Should show GPX upload since it's createMode
-    expect(screen.getByTestId('gpx-file-input')).toBeInTheDocument();
+    expect(screen.getByTestId('gpx-multi-file-input')).toBeInTheDocument();
   });
 });

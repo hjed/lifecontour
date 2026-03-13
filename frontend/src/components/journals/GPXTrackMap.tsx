@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo } from 'react';
+import React, { useEffect, useMemo } from 'react';
 
 import {
   MapContainer,
@@ -83,7 +83,7 @@ export default function GPXTrackMap({ tracks }: GPXTrackMapProps) {
           i === 0 ? 'hsl(var(--primary))' : `hsl(${hues[hueIndex]}, 80%, 45%)`;
 
         return (
-          <div key={i}>
+          <React.Fragment key={i}>
             <Polyline
               positions={positions}
               pathOptions={{ color, weight: 4 }}
@@ -112,7 +112,7 @@ export default function GPXTrackMap({ tracks }: GPXTrackMapProps) {
                 }}
               />
             )}
-          </div>
+          </React.Fragment>
         );
       })}
 

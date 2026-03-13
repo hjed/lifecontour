@@ -318,24 +318,6 @@ describe('JournalCreateForm', () => {
       ).toBeInTheDocument();
     });
 
-    it('uses unique route control ids when multiple route-based editors are selected', async () => {
-      const user = userEvent.setup();
-      renderWithClient(<JournalCreateForm />);
-
-      await user.click(screen.getByLabelText(/^bushwalking$/i));
-      await user.click(screen.getByLabelText(/^canyoning$/i));
-
-      const routeComboboxes = screen.getAllByRole('combobox', {
-        name: /route/i,
-      });
-      const routeIds = routeComboboxes.map(combobox =>
-        combobox.getAttribute('id')
-      );
-
-      expect(routeIds).toHaveLength(2);
-      expect(new Set(routeIds).size).toBe(2);
-    });
-
     it('hides editor when type is deselected', async () => {
       const user = userEvent.setup();
       renderWithClient(<JournalCreateForm />);
@@ -417,7 +399,9 @@ describe('JournalCreateForm', () => {
       const canyoningCheckbox = screen.getByLabelText(/^canyoning$/i);
       await user.click(canyoningCheckbox);
 
-      expect(screen.getByText(/automatically adds/i)).toBeInTheDocument();
+      expect(screen.getAllByText(/automatically adds/i).length).toBeGreaterThan(
+        0
+      );
     });
 
     it('shows dependency info when BUSHWALKING is selected', async () => {
@@ -427,7 +411,9 @@ describe('JournalCreateForm', () => {
       const bushwalkingCheckbox = screen.getByLabelText(/^bushwalking$/i);
       await user.click(bushwalkingCheckbox);
 
-      expect(screen.getByText(/automatically adds/i)).toBeInTheDocument();
+      expect(screen.getAllByText(/automatically adds/i).length).toBeGreaterThan(
+        0
+      );
     });
 
     it('does not show dependency info for NOTE which has no dependencies', async () => {
@@ -446,10 +432,15 @@ describe('JournalCreateForm', () => {
 
       const canyoningCheckbox = screen.getByLabelText(/^canyoning$/i);
       await user.click(canyoningCheckbox);
-      expect(screen.getByText(/automatically adds/i)).toBeInTheDocument();
+
+      expect(
+        screen.getByTestId('selected-type-panel-CANYONING')
+      ).toBeInTheDocument();
 
       await user.click(canyoningCheckbox);
-      expect(screen.queryByText(/automatically adds/i)).not.toBeInTheDocument();
+      expect(
+        screen.queryByTestId('selected-type-panel-CANYONING')
+      ).not.toBeInTheDocument();
     });
   });
 
@@ -630,7 +621,7 @@ describe('JournalCreateForm', () => {
       await waitFor(() => {
         expect(mockMutateAsync).toHaveBeenCalledWith(
           expect.objectContaining({
-            types: [JournalType.CANYONING],
+            types: expect.arrayContaining([JournalType.CANYONING]),
             type_data: expect.objectContaining({
               [JournalType.CANYONING]: expect.objectContaining({
                 french_grade: 'v3a2IV**',
@@ -661,7 +652,7 @@ describe('JournalCreateForm', () => {
       await waitFor(() => {
         expect(mockMutateAsync).toHaveBeenCalledWith(
           expect.objectContaining({
-            types: [JournalType.ABSEILING_TRIP],
+            types: expect.arrayContaining([JournalType.ABSEILING_TRIP]),
             type_data: expect.objectContaining({
               [JournalType.ABSEILING_TRIP]: expect.objectContaining({
                 number_of_abseils: 4,
@@ -708,7 +699,7 @@ describe('JournalCreateForm', () => {
         await waitFor(() => {
           expect(mockMutateAsync).toHaveBeenCalledWith(
             expect.objectContaining({
-              types: [JournalType.ABSEILING_TRIP],
+              types: expect.arrayContaining([JournalType.ABSEILING_TRIP]),
               type_data: expect.objectContaining({
                 [JournalType.ABSEILING_TRIP]: expect.objectContaining({
                   number_of_abseils: 7,

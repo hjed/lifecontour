@@ -486,7 +486,6 @@ async def _enrich_journal_data(
 async def list_journal_tags(
     request: Request,
     tag_repo: FromDishka[JournalTagRepository],
-    route_repo: FromDishka[RouteRepository],
     user: FromDishka[SessionUser],  # Require authentication
 ) -> JournalTagListResponse:
     """
@@ -527,7 +526,6 @@ async def create_journal_tag(
     request: Request,
     tag_request: JournalTagCreateRequest,
     tag_repo: FromDishka[JournalTagRepository],
-    route_repo: FromDishka[RouteRepository],
     connection: FromDishka[AsyncConnection],
     user: FromDishka[SessionUser],  # Require authentication
 ) -> JournalTagResponse:
@@ -596,7 +594,6 @@ async def create_journal_tag(
 async def delete_journal_tag(
     tag_id: str,
     tag_repo: FromDishka[JournalTagRepository],
-    route_repo: FromDishka[RouteRepository],
     connection: FromDishka[AsyncConnection],
     user: FromDishka[SessionUser],  # Require authentication
 ) -> None:
