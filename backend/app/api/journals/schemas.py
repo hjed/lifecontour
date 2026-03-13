@@ -23,7 +23,6 @@ DISPLAY_ORDER_DESC = "Display order"
 BOOKING_REFERENCE_DESC = "Booking reference"
 RESOURCE_TYPE_DESC = "Resource type"
 RESOURCE_LINKS_DESC = "Resource links"
-ROUTE_ID_DESC = "UUID of the associated route"
 CALENDAR_NAME_DESC = "Calendar name"
 CALENDAR_COLOR_DESC = "Calendar color (hex code)"
 
@@ -216,10 +215,6 @@ class OutdoorActivityDataSchema(BaseModel):
 class BushwalkingDataSchema(BaseModel):
     """Bushwalking data for BUSHWALKING type journals."""
 
-    route_id: str | None = Field(
-        default=None,
-        description=ROUTE_ID_DESC,
-    )
     track_grading: str | None = Field(
         default=None,
         description="Australian Track Grading System grade (Grade 1-5)",
@@ -229,10 +224,6 @@ class BushwalkingDataSchema(BaseModel):
 class JoggingDataSchema(BaseModel):
     """Jogging data for JOGGING type journals."""
 
-    route_id: str | None = Field(
-        default=None,
-        description=ROUTE_ID_DESC,
-    )
     pace: int | None = Field(
         default=None,
         description="Pace in seconds per kilometre (non-negative)",
@@ -258,10 +249,6 @@ class AbseilingDataSchema(BaseModel):
 class CanyoningDataSchema(BaseModel):
     """Canyoning data for CANYONING type journals."""
 
-    route_id: str | None = Field(
-        default=None,
-        description=ROUTE_ID_DESC,
-    )
     french_grade: str | None = Field(
         default=None,
         description="French canyoning grade (e.g. v3a2IV**)",
@@ -291,10 +278,6 @@ class CanyoningDataSchema(BaseModel):
 class ClimbingDataSchema(BaseModel):
     """Climbing data for CLIMBING type journals."""
 
-    route_id: str | None = Field(
-        default=None,
-        description=ROUTE_ID_DESC,
-    )
     climbing_type: str | None = Field(
         default=None,
         description="Type of climbing (sport, trad, bouldering)",
@@ -314,10 +297,6 @@ class ClimbingDataSchema(BaseModel):
 class KayakingDataSchema(BaseModel):
     """Kayaking data for KAYAKING type journals."""
 
-    route_id: str | None = Field(
-        default=None,
-        description=ROUTE_ID_DESC,
-    )
     water_type: str | None = Field(
         default=None,
         description="Type of water (e.g. river, lake, sea)",
@@ -327,10 +306,6 @@ class KayakingDataSchema(BaseModel):
 class CrossCountrySkiingDataSchema(BaseModel):
     """Cross-country skiing data for CROSS_COUNTRY_SKIING type journals."""
 
-    route_id: str | None = Field(
-        default=None,
-        description=ROUTE_ID_DESC,
-    )
     snow_conditions: str | None = Field(
         default=None,
         description="Description of snow conditions",
@@ -463,6 +438,7 @@ class JournalRelationships(BaseModel):
     calendar: dict[str, Any] | None = Field(
         default=None, description="Related calendar"
     )
+    routes: dict[str, Any] | None = Field(default=None, description="Related routes")
 
 
 class JournalResource(BaseModel):

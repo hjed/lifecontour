@@ -37,13 +37,6 @@ from app.api.journals.converters import (
     JournalRequestConverter,
     TypeDataConverter,
 )
-from app.api.journals.gpx_schemas import (
-    GPXCoordinateSchema,
-    GPXStatisticsSchema,
-    GPXTrackDataAttributes,
-    GPXTrackDataResource,
-    GPXTrackDataResponse,
-)
 from app.api.journals.schemas import (
     JournalAttributes,
     JournalContactAddRequest,
@@ -77,10 +70,10 @@ from app.core.journal.models.repositories import (
     OutdoorActivityDataRepository,
     PhotoAlbumDataRepository,
     PlanDataRepository,
+    RouteRepository,
     TravelDataRepository,
 )
 from app.core.journal.services.journal_service import JournalService
-from app.core.journal.utils.gpx_parser import parse_gpx_track
 from app.core.search.exceptions import SearchServiceUnavailableError
 from app.infrastructure.auth.models import SessionUser
 from app.infrastructure.search.search_service import SearchService
@@ -336,6 +329,7 @@ async def _enrich_journal_data(
     fitness_data_repo: FitnessDataRepository,
     contact_relationship_repo: JournalContactRelationshipRepository,
     tag_repo: JournalTagRepository,
+    route_repo: RouteRepository,
     outdoor_activity_data_repo: OutdoorActivityDataRepository,
     bushwalking_data_repo: BushwalkingDataRepository,
     jogging_data_repo: JoggingDataRepository,
@@ -350,6 +344,7 @@ async def _enrich_journal_data(
     list[Any],
     list[Any],
     Any,
+    list[Any],
 ]:
     """
     Fetch all enrichment data for a journal.
@@ -480,7 +475,10 @@ async def _enrich_journal_data(
     # Fetch tags
     tags = await tag_repo.get_tags_for_journal(journal_id)
 
-    return types, type_data, contacts, tags, calendar
+    # Fetch routes
+    routes = await route_repo.find_by_journal_id(journal_id)
+
+    return types, type_data, contacts, tags, calendar, routes
 
 
 @router.get("/tags")
@@ -488,6 +486,7 @@ async def _enrich_journal_data(
 async def list_journal_tags(
     request: Request,
     tag_repo: FromDishka[JournalTagRepository],
+    route_repo: FromDishka[RouteRepository],
     user: FromDishka[SessionUser],  # Require authentication
 ) -> JournalTagListResponse:
     """
@@ -528,6 +527,7 @@ async def create_journal_tag(
     request: Request,
     tag_request: JournalTagCreateRequest,
     tag_repo: FromDishka[JournalTagRepository],
+    route_repo: FromDishka[RouteRepository],
     connection: FromDishka[AsyncConnection],
     user: FromDishka[SessionUser],  # Require authentication
 ) -> JournalTagResponse:
@@ -596,6 +596,7 @@ async def create_journal_tag(
 async def delete_journal_tag(
     tag_id: str,
     tag_repo: FromDishka[JournalTagRepository],
+    route_repo: FromDishka[RouteRepository],
     connection: FromDishka[AsyncConnection],
     user: FromDishka[SessionUser],  # Require authentication
 ) -> None:
@@ -626,7 +627,6 @@ async def delete_journal_tag(
     """
     from uuid import UUID
 
-    from fastapi import HTTPException
     from sqlalchemy import text
 
     # Convert string ID to UUID
@@ -694,6 +694,7 @@ async def list_journals(
     skiing_data_repo: FromDishka[CrossCountrySkiingDataRepository],
     contact_relationship_repo: FromDishka[JournalContactRelationshipRepository],
     tag_repo: FromDishka[JournalTagRepository],
+    route_repo: FromDishka[RouteRepository],
     user: FromDishka[SessionUser],  # Require authentication
     page: Annotated[int, Query(description="Page number", ge=1)] = 1,
     limit: Annotated[int, Query(description="Items per page", ge=1, le=100)] = 20,
@@ -753,7 +754,7 @@ async def list_journals(
     journal_resources = []
     for journal in journals:
         # Enrich journal with types, contacts, tags, etc.
-        types, type_data, _, _, _ = await _enrich_journal_data(
+        types, type_data, _, _, _, routes = await _enrich_journal_data(
             journal,
             calendar_info_repo,
             calendar_repo,
@@ -764,6 +765,7 @@ async def list_journals(
             fitness_data_repo,
             contact_relationship_repo,
             tag_repo,
+            route_repo,
             outdoor_activity_data_repo,
             bushwalking_data_repo,
             jogging_data_repo,
@@ -775,7 +777,7 @@ async def list_journals(
         )
 
         resource = JournalConverter.to_resource(
-            journal, base_url, types=types, type_data=type_data
+            journal, base_url, types=types, type_data=type_data, routes=routes
         )
         journal_resources.append(resource)
 
@@ -939,6 +941,7 @@ async def get_journal(
     skiing_data_repo: FromDishka[CrossCountrySkiingDataRepository],
     contact_relationship_repo: FromDishka[JournalContactRelationshipRepository],
     tag_repo: FromDishka[JournalTagRepository],
+    route_repo: FromDishka[RouteRepository],
     user: FromDishka[SessionUser],  # Require authentication
 ) -> JournalResponse:
     """
@@ -953,7 +956,7 @@ async def get_journal(
         raise JournalNotFoundError(journal_id)
 
     # Fetch all enrichment data
-    types, type_data, contacts, tags, calendar = await _enrich_journal_data(
+    types, type_data, contacts, tags, calendar, routes = await _enrich_journal_data(
         journal,
         calendar_info_repo,
         calendar_repo,
@@ -964,6 +967,7 @@ async def get_journal(
         fitness_data_repo,
         contact_relationship_repo,
         tag_repo,
+        route_repo,
         outdoor_activity_data_repo,
         bushwalking_data_repo,
         jogging_data_repo,
@@ -1281,9 +1285,6 @@ async def _process_journal_type_data(
                             detail=f"{field} must be an integer",
                         ) from exc
 
-        if "gpx_track_data" in fitness_payload:
-            fitness_data.gpx_track_data = fitness_payload["gpx_track_data"]
-
         if "strava_activity_id" in fitness_payload:
             fitness_data.strava_activity_id = fitness_payload["strava_activity_id"]
 
@@ -1322,10 +1323,6 @@ async def _process_journal_type_data(
 
         if "track_grading" in bushwalking_payload:
             bushwalking_data.track_grading = bushwalking_payload["track_grading"]
-        if "route_id" in bushwalking_payload:
-            bushwalking_data.route_id = _parse_optional_uuid(
-                bushwalking_payload["route_id"], "route_id"
-            )
 
         await bushwalking_data_repo.save(bushwalking_data)
 
@@ -1352,10 +1349,6 @@ async def _process_journal_type_data(
                         status_code=400,
                         detail="pace must be an integer (seconds per km)",
                     ) from exc
-        if "route_id" in jogging_payload:
-            jogging_data.route_id = _parse_optional_uuid(
-                jogging_payload["route_id"], "route_id"
-            )
 
         await jogging_data_repo.save(jogging_data)
 
@@ -1464,6 +1457,7 @@ async def create_journal(
     skiing_data_repo: FromDishka[CrossCountrySkiingDataRepository],
     contact_relationship_repo: FromDishka[JournalContactRelationshipRepository],
     tag_repo: FromDishka[JournalTagRepository],
+    route_repo: FromDishka[RouteRepository],
     connection: FromDishka[AsyncConnection],
     user: FromDishka[SessionUser],  # Require authentication
 ) -> JournalResponse:
@@ -1540,7 +1534,7 @@ async def create_journal(
             )
 
     # Fetch all enrichment data
-    types, type_data, contacts, tags, calendar = await _enrich_journal_data(
+    types, type_data, contacts, tags, calendar, routes = await _enrich_journal_data(
         created_journal,
         calendar_info_repo,
         calendar_repo,
@@ -1551,6 +1545,7 @@ async def create_journal(
         fitness_data_repo,
         contact_relationship_repo,
         tag_repo,
+        route_repo,
         outdoor_activity_data_repo,
         bushwalking_data_repo,
         jogging_data_repo,
@@ -1592,6 +1587,7 @@ async def update_journal(
     skiing_data_repo: FromDishka[CrossCountrySkiingDataRepository],
     contact_relationship_repo: FromDishka[JournalContactRelationshipRepository],
     tag_repo: FromDishka[JournalTagRepository],
+    route_repo: FromDishka[RouteRepository],
     connection: FromDishka[AsyncConnection],
     user: FromDishka[SessionUser],  # Require authentication
 ) -> JournalResponse:
@@ -1632,7 +1628,7 @@ async def update_journal(
     )
 
     # Fetch all enrichment data
-    types, type_data, contacts, tags, calendar = await _enrich_journal_data(
+    types, type_data, contacts, tags, calendar, routes = await _enrich_journal_data(
         saved_journal,
         calendar_info_repo,
         calendar_repo,
@@ -1643,6 +1639,7 @@ async def update_journal(
         fitness_data_repo,
         contact_relationship_repo,
         tag_repo,
+        route_repo,
         outdoor_activity_data_repo,
         bushwalking_data_repo,
         jogging_data_repo,
@@ -1684,6 +1681,7 @@ async def partial_update_journal(
     skiing_data_repo: FromDishka[CrossCountrySkiingDataRepository],
     contact_relationship_repo: FromDishka[JournalContactRelationshipRepository],
     tag_repo: FromDishka[JournalTagRepository],
+    route_repo: FromDishka[RouteRepository],
     connection: FromDishka[AsyncConnection],
     user: FromDishka[SessionUser],  # Require authentication
 ) -> JournalResponse:
@@ -1770,7 +1768,7 @@ async def partial_update_journal(
     )
 
     # Fetch all enrichment data
-    types, type_data, contacts, tags, calendar = await _enrich_journal_data(
+    types, type_data, contacts, tags, calendar, routes = await _enrich_journal_data(
         saved_journal,
         calendar_info_repo,
         calendar_repo,
@@ -1781,6 +1779,7 @@ async def partial_update_journal(
         fitness_data_repo,
         contact_relationship_repo,
         tag_repo,
+        route_repo,
         outdoor_activity_data_repo,
         bushwalking_data_repo,
         jogging_data_repo,
@@ -1843,6 +1842,7 @@ async def add_type_to_journal(
     skiing_data_repo: FromDishka[CrossCountrySkiingDataRepository],
     contact_relationship_repo: FromDishka[JournalContactRelationshipRepository],
     tag_repo: FromDishka[JournalTagRepository],
+    route_repo: FromDishka[RouteRepository],
     connection: FromDishka[AsyncConnection],
     user: FromDishka[SessionUser],  # Require authentication
 ) -> JournalResponse:
@@ -1900,7 +1900,7 @@ async def add_type_to_journal(
         raise JournalNotFoundError(journal_id)
 
     # Fetch all enrichment data
-    types, type_data, contacts, tags, calendar = await _enrich_journal_data(
+    types, type_data, contacts, tags, calendar, routes = await _enrich_journal_data(
         updated_journal,
         calendar_info_repo,
         calendar_repo,
@@ -1911,6 +1911,7 @@ async def add_type_to_journal(
         fitness_data_repo,
         contact_relationship_repo,
         tag_repo,
+        route_repo,
         outdoor_activity_data_repo,
         bushwalking_data_repo,
         jogging_data_repo,
@@ -1952,6 +1953,7 @@ async def remove_type_from_journal(
     skiing_data_repo: FromDishka[CrossCountrySkiingDataRepository],
     contact_relationship_repo: FromDishka[JournalContactRelationshipRepository],
     tag_repo: FromDishka[JournalTagRepository],
+    route_repo: FromDishka[RouteRepository],
     connection: FromDishka[AsyncConnection],
     user: FromDishka[SessionUser],  # Require authentication
 ) -> JournalResponse:
@@ -2006,7 +2008,7 @@ async def remove_type_from_journal(
         raise JournalNotFoundError(journal_id)
 
     # Fetch all enrichment data
-    types, type_data, contacts, tags, calendar = await _enrich_journal_data(
+    types, type_data, contacts, tags, calendar, routes = await _enrich_journal_data(
         updated_journal,
         calendar_info_repo,
         calendar_repo,
@@ -2017,6 +2019,7 @@ async def remove_type_from_journal(
         fitness_data_repo,
         contact_relationship_repo,
         tag_repo,
+        route_repo,
         outdoor_activity_data_repo,
         bushwalking_data_repo,
         jogging_data_repo,
@@ -2138,8 +2141,6 @@ async def _update_fitness_type_data(
         fitness_data.duration = attrs["duration"]
     if "calories" in attrs:
         fitness_data.calories = attrs["calories"]
-    if "gpx_track_data" in attrs:
-        fitness_data.gpx_track_data = attrs["gpx_track_data"]
     if "strava_activity_id" in attrs:
         fitness_data.strava_activity_id = attrs["strava_activity_id"]
 
@@ -2402,6 +2403,7 @@ async def update_type_data(
     skiing_data_repo: FromDishka[CrossCountrySkiingDataRepository],
     contact_relationship_repo: FromDishka[JournalContactRelationshipRepository],
     tag_repo: FromDishka[JournalTagRepository],
+    route_repo: FromDishka[RouteRepository],
     connection: FromDishka[AsyncConnection],
     user: FromDishka[SessionUser],  # Require authentication
 ) -> JournalResponse:
@@ -2495,7 +2497,7 @@ async def update_type_data(
         raise JournalNotFoundError(journal_id)
 
     # Fetch all enrichment data
-    types, type_data, contacts, tags, calendar = await _enrich_journal_data(
+    types, type_data, contacts, tags, calendar, routes = await _enrich_journal_data(
         updated_journal,
         calendar_info_repo,
         calendar_repo,
@@ -2506,6 +2508,7 @@ async def update_type_data(
         fitness_data_repo,
         contact_relationship_repo,
         tag_repo,
+        route_repo,
         outdoor_activity_data_repo,
         bushwalking_data_repo,
         jogging_data_repo,
@@ -2548,6 +2551,7 @@ async def add_contact_to_journal(
     skiing_data_repo: FromDishka[CrossCountrySkiingDataRepository],
     contact_relationship_repo: FromDishka[JournalContactRelationshipRepository],
     tag_repo: FromDishka[JournalTagRepository],
+    route_repo: FromDishka[RouteRepository],
     connection: FromDishka[AsyncConnection],
     user: FromDishka[SessionUser],  # Require authentication
 ) -> JournalResponse:
@@ -2598,7 +2602,7 @@ async def add_contact_to_journal(
         raise JournalNotFoundError(journal_id)
 
     # Fetch all enrichment data
-    types, type_data, contacts, tags, calendar = await _enrich_journal_data(
+    types, type_data, contacts, tags, calendar, routes = await _enrich_journal_data(
         updated_journal,
         calendar_info_repo,
         calendar_repo,
@@ -2609,6 +2613,7 @@ async def add_contact_to_journal(
         fitness_data_repo,
         contact_relationship_repo,
         tag_repo,
+        route_repo,
         outdoor_activity_data_repo,
         bushwalking_data_repo,
         jogging_data_repo,
@@ -2651,6 +2656,7 @@ async def remove_contact_from_journal(
     skiing_data_repo: FromDishka[CrossCountrySkiingDataRepository],
     contact_relationship_repo: FromDishka[JournalContactRelationshipRepository],
     tag_repo: FromDishka[JournalTagRepository],
+    route_repo: FromDishka[RouteRepository],
     connection: FromDishka[AsyncConnection],
     user: FromDishka[SessionUser],  # Require authentication
 ) -> JournalResponse:
@@ -2696,7 +2702,7 @@ async def remove_contact_from_journal(
         raise JournalNotFoundError(journal_id)
 
     # Fetch all enrichment data
-    types, type_data, contacts, tags, calendar = await _enrich_journal_data(
+    types, type_data, contacts, tags, calendar, routes = await _enrich_journal_data(
         updated_journal,
         calendar_info_repo,
         calendar_repo,
@@ -2707,6 +2713,7 @@ async def remove_contact_from_journal(
         fitness_data_repo,
         contact_relationship_repo,
         tag_repo,
+        route_repo,
         outdoor_activity_data_repo,
         bushwalking_data_repo,
         jogging_data_repo,
@@ -2748,6 +2755,7 @@ async def add_tag_to_journal(
     skiing_data_repo: FromDishka[CrossCountrySkiingDataRepository],
     contact_relationship_repo: FromDishka[JournalContactRelationshipRepository],
     tag_repo: FromDishka[JournalTagRepository],
+    route_repo: FromDishka[RouteRepository],
     connection: FromDishka[AsyncConnection],
     user: FromDishka[SessionUser],  # Require authentication
 ) -> JournalResponse:
@@ -2785,7 +2793,7 @@ async def add_tag_to_journal(
         raise JournalNotFoundError(journal_id)
 
     # Fetch all enrichment data
-    types, type_data, contacts, tags, calendar = await _enrich_journal_data(
+    types, type_data, contacts, tags, calendar, routes = await _enrich_journal_data(
         updated_journal,
         calendar_info_repo,
         calendar_repo,
@@ -2796,6 +2804,7 @@ async def add_tag_to_journal(
         fitness_data_repo,
         contact_relationship_repo,
         tag_repo,
+        route_repo,
         outdoor_activity_data_repo,
         bushwalking_data_repo,
         jogging_data_repo,
@@ -2837,6 +2846,7 @@ async def remove_tag_from_journal(
     skiing_data_repo: FromDishka[CrossCountrySkiingDataRepository],
     contact_relationship_repo: FromDishka[JournalContactRelationshipRepository],
     tag_repo: FromDishka[JournalTagRepository],
+    route_repo: FromDishka[RouteRepository],
     connection: FromDishka[AsyncConnection],
     user: FromDishka[SessionUser],  # Require authentication
 ) -> JournalResponse:
@@ -2869,7 +2879,7 @@ async def remove_tag_from_journal(
         raise JournalNotFoundError(journal_id)
 
     # Fetch all enrichment data
-    types, type_data, contacts, tags, calendar = await _enrich_journal_data(
+    types, type_data, contacts, tags, calendar, routes = await _enrich_journal_data(
         updated_journal,
         calendar_info_repo,
         calendar_repo,
@@ -2880,6 +2890,7 @@ async def remove_tag_from_journal(
         fitness_data_repo,
         contact_relationship_repo,
         tag_repo,
+        route_repo,
         outdoor_activity_data_repo,
         bushwalking_data_repo,
         jogging_data_repo,
@@ -2895,64 +2906,3 @@ async def remove_tag_from_journal(
     )
 
     return JournalResponse(data=journal_resource)
-
-
-@router.get(
-    "/{journal_id}/gpx",
-    responses={404: {"description": "Journal or GPX track data not found"}},
-)
-@inject
-async def get_journal_gpx(
-    journal_id: int,
-    journal_service: FromDishka[JournalService],
-    fitness_data_repo: FromDishka[FitnessDataRepository],
-    user: FromDishka[SessionUser],  # Require authentication
-) -> GPXTrackDataResponse:
-    """
-    Get parsed GPX track data for a journal.
-
-    Parses the raw GPX XML stored in the journal's fitness data and returns
-    extracted coordinates and computed statistics ready for map rendering.
-
-    Returns 404 if the journal doesn't exist, has no FITNESS type, or has
-    no GPX track data.
-    """
-    journal = await journal_service.get_journal(journal_id)
-    if not journal or journal.user_id != user.id:
-        raise JournalNotFoundError(journal_id)
-
-    fitness_data = await fitness_data_repo.find_by_journal_id(journal_id)
-    if not fitness_data or not fitness_data.gpx_track_data:
-        raise HTTPException(
-            status_code=404,
-            detail=f"GPX track data not found for journal with ID {journal_id}",
-        )
-
-    result = parse_gpx_track(fitness_data.gpx_track_data)
-
-    coordinate_schemas = [
-        GPXCoordinateSchema(
-            latitude=coord.latitude,
-            longitude=coord.longitude,
-            elevation=coord.elevation,
-        )
-        for coord in result.coordinates
-    ]
-
-    statistics_schema = GPXStatisticsSchema(
-        distance_2d=result.statistics.distance_2d,
-        distance_3d=result.statistics.distance_3d,
-        elevation_gain=result.statistics.elevation_gain,
-        elevation_loss=result.statistics.elevation_loss,
-        duration_seconds=result.statistics.duration_seconds,
-    )
-
-    return GPXTrackDataResponse(
-        data=GPXTrackDataResource(
-            id=str(journal_id),
-            attributes=GPXTrackDataAttributes(
-                coordinates=coordinate_schemas,
-                statistics=statistics_schema,
-            ),
-        )
-    )

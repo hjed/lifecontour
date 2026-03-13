@@ -1,7 +1,6 @@
 """SQL implementation of BushwalkingDataRepository."""
 
 from typing import Any
-from uuid import UUID
 
 from core_shared.models.journals import BushwalkingData
 from sqlalchemy import text
@@ -21,7 +20,6 @@ class SqlBushwalkingDataRepository(BushwalkingDataRepository):
         """Convert a database row to a BushwalkingData entity."""
         return BushwalkingData(
             journal_id=row.journal_id,
-            route_id=UUID(str(row.route_id)) if row.route_id is not None else None,
             track_grading=row.track_grading,
             created_at=row.created_at,
             updated_at=row.updated_at,
@@ -31,7 +29,7 @@ class SqlBushwalkingDataRepository(BushwalkingDataRepository):
         """Find bushwalking data by journal ID."""
         query = text(
             """
-            SELECT journal_id, route_id, track_grading, created_at, updated_at
+            SELECT journal_id, track_grading, created_at, updated_at
             FROM journal_bushwalking_data
             WHERE journal_id = :journal_id
             """
@@ -57,23 +55,21 @@ class SqlBushwalkingDataRepository(BushwalkingDataRepository):
         query = text(
             """
             INSERT INTO journal_bushwalking_data (
-                journal_id, route_id, track_grading
+                journal_id, track_grading
             )
             VALUES (
-                :journal_id, :route_id, :track_grading
+                :journal_id, :track_grading
             )
             ON CONFLICT (journal_id) DO UPDATE SET
-                route_id = EXCLUDED.route_id,
                 track_grading = EXCLUDED.track_grading,
                 updated_at = now()
-            RETURNING journal_id, route_id, track_grading, created_at, updated_at
+            RETURNING journal_id, track_grading, created_at, updated_at
             """
         )
         result = await self.conn.execute(
             query,
             {
                 "journal_id": data.journal_id,
-                "route_id": str(data.route_id) if data.route_id is not None else None,
                 "track_grading": data.track_grading,
             },
         )

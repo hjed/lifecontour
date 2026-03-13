@@ -1,6 +1,5 @@
 """SQL implementation of RouteRepository using SQLAlchemy Core."""
 
-from typing import Any
 from uuid import UUID
 
 from core_shared.models.route import Route
@@ -21,7 +20,7 @@ class SqlRouteRepository(RouteRepository):
         """Find a route by ID."""
         query = text(
             """
-            SELECT id, user_id, name, description, gpx_data, created_at, updated_at
+            SELECT id, journal_id, name, description, gpx_data, created_at, updated_at
             FROM routes
             WHERE id = :route_id
         """
@@ -34,7 +33,7 @@ class SqlRouteRepository(RouteRepository):
 
         return Route(
             id=row.id,
-            user_id=row.user_id,
+            journal_id=row.journal_id,
             name=row.name,
             description=row.description,
             gpx_data=row.gpx_data,
@@ -48,15 +47,15 @@ class SqlRouteRepository(RouteRepository):
             # Insert new route
             query = text(
                 """
-                INSERT INTO routes (user_id, name, description, gpx_data)
-                VALUES (:user_id, :name, :description, :gpx_data)
+                INSERT INTO routes (journal_id, name, description, gpx_data)
+                VALUES (:journal_id, :name, :description, :gpx_data)
                 RETURNING id, created_at, updated_at
             """
             )
             result = await self.conn.execute(
                 query,
                 {
-                    "user_id": route.user_id,
+                    "journal_id": route.journal_id,
                     "name": route.name,
                     "description": route.description,
                     "gpx_data": route.gpx_data,
@@ -72,7 +71,7 @@ class SqlRouteRepository(RouteRepository):
             query = text(
                 """
                 UPDATE routes
-                SET user_id = :user_id,
+                SET journal_id = :journal_id,
                     name = :name,
                     description = :description,
                     gpx_data = :gpx_data,
@@ -85,7 +84,7 @@ class SqlRouteRepository(RouteRepository):
                 query,
                 {
                     "id": route.id,
-                    "user_id": route.user_id,
+                    "journal_id": route.journal_id,
                     "name": route.name,
                     "description": route.description,
                     "gpx_data": route.gpx_data,
@@ -104,46 +103,21 @@ class SqlRouteRepository(RouteRepository):
         # Note: We don't raise an error if the route doesn't exist
         # This is consistent with the integration test expectations
 
-    def _build_route_filters(
-        self, user_id: str, name: str | None = None
-    ) -> tuple[list[str], dict[str, Any]]:
-        """Build shared WHERE clauses and parameters for route listing queries."""
-        where_clauses = ["user_id = :user_id"]
-        params: dict[str, Any] = {"user_id": user_id}
-
-        if name:
-            where_clauses.append("name ILIKE :name_pattern")
-            params["name_pattern"] = f"%{name}%"
-
-        return where_clauses, params
-
-    async def get_all(
-        self,
-        user_id: str,
-        limit: int = 100,
-        offset: int = 0,
-        name: str | None = None,
-    ) -> list[Route]:
-        """Get all routes for a user with pagination."""
-        where_clauses, params = self._build_route_filters(user_id, name)
+    async def find_by_journal_id(self, journal_id: int) -> list[Route]:
+        """Get all routes associated with a specific journal."""
         query = text(
             """
-            SELECT id, user_id, name, description, gpx_data, created_at, updated_at
+            SELECT id, journal_id, name, description, gpx_data, created_at, updated_at
             FROM routes
-            WHERE """
-            + " AND ".join(where_clauses)
-            + """
-            ORDER BY name ASC, created_at DESC
-            LIMIT :limit OFFSET :offset
+            WHERE journal_id = :journal_id
+            ORDER BY created_at ASC
         """
         )
-        params["limit"] = limit
-        params["offset"] = offset
-        result = await self.conn.execute(query, params)
+        result = await self.conn.execute(query, {"journal_id": journal_id})
         return [
             Route(
                 id=row.id,
-                user_id=row.user_id,
+                journal_id=row.journal_id,
                 name=row.name,
                 description=row.description,
                 gpx_data=row.gpx_data,
@@ -152,40 +126,3 @@ class SqlRouteRepository(RouteRepository):
             )
             for row in result.fetchall()
         ]
-
-    async def get_count(self, user_id: str, name: str | None = None) -> int:
-        """Get total count of routes for a user."""
-        where_clauses, params = self._build_route_filters(user_id, name)
-        query = text(
-            """
-            SELECT COUNT(*)
-            FROM routes
-            WHERE """
-            + " AND ".join(where_clauses)
-        )
-        result = await self.conn.execute(query, params)
-        row = result.fetchone()
-        return row[0] if row else 0
-
-    async def check_usage_in_journals(self, route_id: UUID) -> bool:
-        """
-        Check if a route is referenced by any journal entries.
-
-        Routes are referenced by activity-specific data tables (journal_bushwalking_data,
-        journal_kayaking_data, journal_climbing_data, journal_skiing_data, journal_jogging_data),
-        NOT by the journals table itself.
-
-        Note: This will be properly implemented in future iterations when activity-specific
-        tables are added. For now, returns False to allow route deletion.
-
-        Returns:
-            True if route is in use by any activity-specific journal data, False otherwise
-        """
-        # TODO: Check activity-specific tables when they are implemented:
-        # - journal_bushwalking_data.route_id
-        # - journal_kayaking_data.route_id
-        # - journal_climbing_data.route_id
-        # - journal_skiing_data.route_id
-        # - journal_jogging_data.route_id
-        # - journal_canyoning_data.route_id
-        return False

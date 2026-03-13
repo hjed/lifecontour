@@ -1,25 +1,15 @@
 import { render, screen, fireEvent } from '@testing-library/react';
 import { JoggingTypeEditor } from '../JoggingTypeEditor';
 
-jest.mock('@/components/routes/RouteSelector', () => ({
-  RouteSelector: () => <div data-testid='mock-route-selector' />,
-}));
-
-// Mock useRoute to avoid requiring a QueryClientProvider in unit tests
-jest.mock('@/lib/api/routes', () => ({
-  useRoute: () => ({ data: undefined }),
-}));
-
 describe('JoggingTypeEditor', () => {
   beforeEach(() => {
     jest.clearAllMocks();
   });
 
-  it('renders pace and route selector in create mode', () => {
+  it('renders pace selector in create mode', () => {
     render(<JoggingTypeEditor createMode={true} />);
 
     expect(screen.getByTestId('pace-input')).toBeInTheDocument();
-    expect(screen.getByTestId('mock-route-selector')).toBeInTheDocument();
   });
 
   it('formats initial pace correctly from seconds', () => {
@@ -44,14 +34,8 @@ describe('JoggingTypeEditor', () => {
   });
 
   it('renders view mode with formatted pace', () => {
-    render(
-      <JoggingTypeEditor
-        createMode={false}
-        data={{ pace: 330, route_id: 'r123' }}
-      />
-    );
+    render(<JoggingTypeEditor createMode={false} data={{ pace: 330 }} />);
 
     expect(screen.getByText('5:30 /km')).toBeInTheDocument();
-    expect(screen.getByText('r123')).toBeInTheDocument();
   });
 });

@@ -61,7 +61,7 @@ async def test_journal(
 async def test_route(route_repository: SqlRouteRepository) -> Route:
     """Create a test route."""
     route = Route(
-        user_id="test-user-123",
+        journal_id=999,
         name="Kosciuszko Ski Trail",
         description="Cross-country ski trail through Kosciuszko NP",
     )
@@ -87,7 +87,6 @@ class TestCrossCountrySkiingDataRepositorySave:
 
         assert saved.journal_id == test_journal.id
         assert saved.snow_conditions == "packed powder"
-        assert saved.route_id is None
         assert saved.created_at is not None
         assert saved.updated_at is not None
 
@@ -102,7 +101,6 @@ class TestCrossCountrySkiingDataRepositorySave:
         saved = await skiing_repository.save(data)
 
         assert saved.journal_id == test_journal.id
-        assert saved.route_id is None
         assert saved.snow_conditions is None
         assert saved.created_at is not None
         assert saved.updated_at is not None
@@ -116,13 +114,11 @@ class TestCrossCountrySkiingDataRepositorySave:
         """Test creating skiing data with a route reference."""
         data = CrossCountrySkiingData(
             journal_id=test_journal.id,  # type: ignore[arg-type]
-            route_id=test_route.id,
             snow_conditions="groomed trails",
         )
 
         saved = await skiing_repository.save(data)
 
-        assert saved.route_id == test_route.id
         assert saved.snow_conditions == "groomed trails"
 
     async def test_save_updates_existing_data(
@@ -186,14 +182,12 @@ class TestCrossCountrySkiingDataRepositoryFind:
         """Test that route_id is correctly persisted and retrieved."""
         data = CrossCountrySkiingData(
             journal_id=test_journal.id,  # type: ignore[arg-type]
-            route_id=test_route.id,
         )
         await skiing_repository.save(data)
 
         found = await skiing_repository.find_by_journal_id(test_journal.id)  # type: ignore[arg-type]
 
         assert found is not None
-        assert found.route_id == test_route.id
 
 
 @pytest.mark.integration

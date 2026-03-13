@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useMemo } from 'react';
 import dynamic from 'next/dynamic';
 import { Card } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -17,60 +17,57 @@ interface GPXTrackDisplayProps {
 }
 
 import { Coordinate } from '@/types/journals';
-
-interface GPXData {
-  coordinates: Coordinate[];
-  statistics?: unknown;
-}
+import { useRoutes } from '@/lib/api/routes';
 
 export function GPXTrackDisplay({
   journalId,
   className,
   'data-testid': testId,
 }: GPXTrackDisplayProps) {
-  const [data, setData] = useState<GPXData | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const {
+    data: routesResponse,
+    isLoading,
+    error: apiError,
+  } = useRoutes(journalId);
+  const tracks = useMemo(() => {
+    if (!routesResponse?.data) return [];
 
-  useEffect(() => {
-    let isMounted = true;
+    const parsedTracks: Coordinate[][] = [];
 
-    async function fetchGPX() {
+    for (const route of routesResponse.data) {
+      const gpxString = route.attributes.gpx_data;
+      if (!gpxString) continue;
+
       try {
-        setLoading(true);
-        setError(null); // Clear any previous error before each fetch
-        const res = await fetch(`/api/journals/${journalId}/gpx`, {
-          credentials: 'include',
-        });
-        if (!res.ok) {
-          if (res.status === 404) {
-            // It's normal to not have GPX track data sometimes
-            if (isMounted) setData(null);
-            return;
+        const parser = new DOMParser();
+        const xmlDoc = parser.parseFromString(gpxString, 'text/xml');
+        const trkpts = xmlDoc.getElementsByTagName('trkpt');
+        const coordinates: Coordinate[] = [];
+
+        for (let i = 0; i < trkpts.length; i++) {
+          const pt = trkpts[i];
+          const lat = pt.getAttribute('lat');
+          const lon = pt.getAttribute('lon');
+          if (lat && lon) {
+            coordinates.push({
+              latitude: parseFloat(lat),
+              longitude: parseFloat(lon),
+            });
           }
-          throw new Error('Failed to fetch GPX data');
         }
 
-        const json = await res.json();
-        if (isMounted && json.data?.attributes) {
-          setData(json.data.attributes);
+        if (coordinates.length > 0) {
+          parsedTracks.push(coordinates);
         }
       } catch (err) {
-        console.error('Error fetching GPX data:', err);
-        if (isMounted) setError('Could not load track data');
-      } finally {
-        if (isMounted) setLoading(false);
+        console.error('Failed to parse GPX data for route', route.id, err);
       }
     }
 
-    fetchGPX();
+    return parsedTracks;
+  }, [routesResponse?.data]);
 
-    return () => {
-      isMounted = false;
-    };
-  }, [journalId]);
-
-  if (loading) {
+  if (isLoading) {
     return (
       <Skeleton
         className='h-[300px] w-full'
@@ -79,7 +76,7 @@ export function GPXTrackDisplay({
     );
   }
 
-  if (error || !data?.coordinates?.length) {
+  if (apiError || tracks.length === 0) {
     return null; // Return nothing if no valid data
   }
 
@@ -88,11 +85,8 @@ export function GPXTrackDisplay({
       <Card
         className={`relative z-0 h-[350px] overflow-hidden border ${className || ''}`}
       >
-        <GPXTrackMap coordinates={data.coordinates} />
+        <GPXTrackMap tracks={tracks} />
       </Card>
-      {/* If stats exists from the GPX endpoint, we could render an ActivityStats here,
-          but ActivityStats expects FitnessData shape. We can adapt it if needed, or
-          leave it to the JournalTypeDataDisplay to show stats from the main journal type payload. */}
     </div>
   );
 }

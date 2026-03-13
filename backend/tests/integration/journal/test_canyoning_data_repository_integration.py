@@ -61,7 +61,7 @@ async def test_journal(
 async def test_route(route_repository: SqlRouteRepository) -> Route:
     """Create a test route."""
     route = Route(
-        user_id="test-user-123",
+        journal_id=999,
         name="Claustral Canyon Route",
         description="Classic Blue Mountains canyon",
     )
@@ -111,7 +111,6 @@ class TestCanyoningDataRepositorySave:
         saved = await canyoning_repository.save(data)
 
         assert saved.journal_id == test_journal.id
-        assert saved.route_id is None
         assert saved.french_grade is None
         assert saved.water_guage_name is None
         assert saved.water_guage_level is None
@@ -130,13 +129,11 @@ class TestCanyoningDataRepositorySave:
         """Test creating canyoning data with a route reference."""
         data = CanyoningData(
             journal_id=test_journal.id,  # type: ignore[arg-type]
-            route_id=test_route.id,
             french_grade="v4a3II",
         )
 
         saved = await canyoning_repository.save(data)
 
-        assert saved.route_id == test_route.id
         assert saved.french_grade == "v4a3II"
 
     async def test_save_updates_existing_data(
@@ -209,14 +206,12 @@ class TestCanyoningDataRepositoryFind:
         """Test that route_id is correctly persisted and retrieved."""
         data = CanyoningData(
             journal_id=test_journal.id,  # type: ignore[arg-type]
-            route_id=test_route.id,
         )
         await canyoning_repository.save(data)
 
         found = await canyoning_repository.find_by_journal_id(test_journal.id)  # type: ignore[arg-type]
 
         assert found is not None
-        assert found.route_id == test_route.id
 
 
 @pytest.mark.integration

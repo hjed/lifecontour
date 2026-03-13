@@ -7,7 +7,6 @@ This entity stores fitness activity data including heart rate, distance,
 elevation, duration, calories, GPX tracks, and Strava integration.
 """
 
-import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from datetime import datetime
 
@@ -36,7 +35,6 @@ class FitnessData:
         elevation_loss: Elevation loss in meters (nullable)
         duration: Duration in seconds (nullable)
         calories: Calories burned (nullable)
-        gpx_track_data: GPX track data as XML text (nullable)
         strava_activity_id: Strava activity ID for integration (nullable)
         created_at: Creation timestamp
         updated_at: Last update timestamp
@@ -50,7 +48,6 @@ class FitnessData:
     elevation_loss: int | None = None
     duration: int | None = None
     calories: int | None = None
-    gpx_track_data: str | None = None
     strava_activity_id: str | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None
@@ -65,7 +62,6 @@ class FitnessData:
         self._validate_elevation_loss()
         self._validate_duration()
         self._validate_calories()
-        self._validate_gpx_track_data()
         self._validate_strava_activity_id()
 
     def _validate_journal_id(self) -> None:
@@ -123,30 +119,6 @@ class FitnessData:
             raise FitnessDataValidationError(
                 "calories", "Calories must be non-negative"
             )
-
-    def _validate_gpx_track_data(self) -> None:
-        """Validate GPX track data is valid XML with <gpx> root element if provided."""
-        if self.gpx_track_data is not None:
-            if not self.gpx_track_data.strip():
-                raise FitnessDataValidationError(
-                    "gpx_track_data", "GPX data cannot be empty"
-                )
-
-            # Validate XML format
-            try:
-                root = ET.fromstring(self.gpx_track_data)
-            except ET.ParseError as e:
-                raise FitnessDataValidationError(
-                    "gpx_track_data", "GPX data must be valid XML"
-                ) from e
-
-            # Validate <gpx> root element
-            # Remove namespace if present for comparison
-            tag_name = root.tag.split("}")[-1] if "}" in root.tag else root.tag
-            if tag_name != "gpx":
-                raise FitnessDataValidationError(
-                    "gpx_track_data", "GPX data must have <gpx> root element"
-                )
 
     def _validate_strava_activity_id(self) -> None:
         """Validate Strava activity ID if provided."""

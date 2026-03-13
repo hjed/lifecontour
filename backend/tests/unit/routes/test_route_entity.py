@@ -14,10 +14,10 @@ class TestRoute:
     def test_create_route_minimal(self):
         """Test creating route with minimal required fields."""
         route = Route(
-            user_id="test_user",
+            journal_id=1,
             name="Mount Kosciuszko Summit Track",
         )
-        assert route.user_id == "test_user"
+        assert route.journal_id == 1
         assert route.name == "Mount Kosciuszko Summit Track"
         assert route.id is None
         assert route.description is None
@@ -43,7 +43,7 @@ class TestRoute:
 
         route = Route(
             id=route_id,
-            user_id="test_user",
+            journal_id=1,
             name="Mount Kosciuszko Summit Track",
             description="Main walking track to the summit of Australia's highest mountain",
             gpx_data=gpx_data,
@@ -52,7 +52,7 @@ class TestRoute:
         )
 
         assert route.id == route_id
-        assert route.user_id == "test_user"
+        assert route.journal_id == 1
         assert route.name == "Mount Kosciuszko Summit Track"
         assert (
             route.description
@@ -65,29 +65,28 @@ class TestRoute:
     def test_route_name_required(self):
         """Test that route name is required."""
         with pytest.raises(ValueError, match="Route name is required"):
-            Route(user_id="test_user", name="")
+            Route(journal_id=1, name="")
 
     def test_route_name_max_length(self):
         """Test that route name cannot exceed 200 characters."""
         long_name = "A" * 201
         with pytest.raises(ValueError, match="Route name cannot exceed 200 characters"):
-            Route(user_id="test_user", name=long_name)
+            Route(journal_id=1, name=long_name)
 
-    def test_route_user_id_required(self):
+    def test_route_journal_id_required(self):
         """Test that user_id is required."""
-        with pytest.raises(ValueError, match="User ID is required"):
-            Route(user_id="", name="Test Route")
+        with pytest.raises(ValueError, match="Journal ID must be a positive integer"):
+            Route(journal_id=0, name="Test Route")
 
-    def test_route_user_id_max_length(self):
+    def test_route_journal_id_validation(self):
         """Test that user_id cannot exceed 50 characters."""
-        long_user_id = "A" * 51
-        with pytest.raises(ValueError, match="User ID cannot exceed 50 characters"):
-            Route(user_id=long_user_id, name="Test Route")
+        with pytest.raises(ValueError, match="Journal ID must be a positive integer"):
+            Route(journal_id=-1, name="Test Route")
 
     def test_route_gpx_data_optional(self):
         """Test that GPX data is optional."""
         route = Route(
-            user_id="test_user",
+            journal_id=1,
             name="Test Route",
             gpx_data=None,
         )
@@ -102,7 +101,7 @@ class TestRoute:
   </trk>
 </gpx>"""
         route = Route(
-            user_id="test_user",
+            journal_id=1,
             name="Test Route",
             gpx_data=valid_gpx,
         )
@@ -113,7 +112,7 @@ class TestRoute:
         invalid_gpx = "This is not XML"
         with pytest.raises(ValueError, match="GPX data must be valid XML"):
             Route(
-                user_id="test_user",
+                journal_id=1,
                 name="Test Route",
                 gpx_data=invalid_gpx,
             )
@@ -128,7 +127,7 @@ class TestRoute:
             ValueError, match="GPX data must contain a <gpx> root element"
         ):
             Route(
-                user_id="test_user",
+                journal_id=1,
                 name="Test Route",
                 gpx_data=invalid_gpx,
             )
@@ -136,7 +135,7 @@ class TestRoute:
     def test_route_description_optional(self):
         """Test that description is optional."""
         route = Route(
-            user_id="test_user",
+            journal_id=1,
             name="Test Route",
             description=None,
         )

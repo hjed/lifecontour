@@ -10,7 +10,6 @@ KAYAKING requires OUTDOOR_ACTIVITY and FITNESS types.
 
 from dataclasses import dataclass
 from datetime import datetime
-from uuid import UUID
 
 from .exceptions import KayakingDataValidationError
 
@@ -31,14 +30,12 @@ class KayakingData:
 
     Attributes:
         journal_id: Foreign key to the journal (primary key in DB)
-        route_id: UUID reference to a route (from the routes domain) (nullable)
-        water_type: Type of water body (e.g., "river", "sea", "lake") (nullable)
+        water_type: Type of water (e.g., river, sea, lake) (nullable)
         created_at: Creation timestamp
         updated_at: Last update timestamp
     """
 
     journal_id: int
-    route_id: UUID | None = None
     water_type: str | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None

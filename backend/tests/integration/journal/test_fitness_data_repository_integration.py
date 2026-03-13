@@ -56,7 +56,6 @@ def create_test_fitness_data(
     elevation_loss: int | None = 90,
     duration: int | None = 1800,
     calories: int | None = 350,
-    gpx_track_data: str | None = None,
     strava_activity_id: str | None = None,
 ) -> FitnessData:
     """Helper function to create test fitness data."""
@@ -69,7 +68,6 @@ def create_test_fitness_data(
         elevation_loss=elevation_loss,
         duration=duration,
         calories=calories,
-        gpx_track_data=gpx_track_data,
         strava_activity_id=strava_activity_id,
     )
 
@@ -117,36 +115,9 @@ class TestFitnessDataRepositorySave:
         assert saved.elevation_loss is None
         assert saved.duration is None
         assert saved.calories is None
-        assert saved.gpx_track_data is None
         assert saved.strava_activity_id is None
         assert saved.created_at is not None
         assert saved.updated_at is not None
-
-    async def test_save_with_gpx_data(
-        self,
-        fitness_data_repository: SqlFitnessDataRepository,
-        test_journal: Journal,
-    ):
-        """Test creating fitness data with GPX track data."""
-        gpx_data = """<?xml version="1.0" encoding="UTF-8"?>
-<gpx version="1.1" creator="Test">
-  <trk>
-    <name>Test Track</name>
-    <trkseg>
-      <trkpt lat="51.5" lon="-0.1">
-        <ele>10</ele>
-      </trkpt>
-    </trkseg>
-  </trk>
-</gpx>"""
-        fitness_data = create_test_fitness_data(
-            journal_id=test_journal.id,  # type: ignore[arg-type]
-            gpx_track_data=gpx_data,
-        )
-
-        saved = await fitness_data_repository.save(fitness_data)
-
-        assert saved.gpx_track_data == gpx_data
 
     async def test_save_with_strava_activity_id(
         self,

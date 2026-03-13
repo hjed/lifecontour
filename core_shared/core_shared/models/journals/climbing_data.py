@@ -11,7 +11,6 @@ CLIMBING requires OUTDOOR_ACTIVITY and FITNESS types.
 
 from dataclasses import dataclass
 from datetime import datetime
-from uuid import UUID
 
 from .constants import VALID_CLIMBING_TYPES
 from .exceptions import ClimbingDataValidationError
@@ -33,8 +32,7 @@ class ClimbingData:
 
     Attributes:
         journal_id: Foreign key to the journal (primary key in DB)
-        route_id: UUID reference to a route (from the routes domain) (nullable)
-        climbing_type: Discipline - "sport", "trad", or "bouldering" (nullable)
+        climbing_type: Type of climbing (sport, trad, bouldering) (nullable)
         grade: Numeric climbing grade (nullable, non-negative)
         length: Route length in metres (nullable, non-negative)
         created_at: Creation timestamp
@@ -42,7 +40,6 @@ class ClimbingData:
     """
 
     journal_id: int
-    route_id: UUID | None = None
     climbing_type: str | None = None
     grade: int | None = None
     length: int | None = None

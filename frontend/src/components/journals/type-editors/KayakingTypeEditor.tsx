@@ -7,10 +7,9 @@ import { Input } from '@/components/ui/input';
 import type { KayakingData } from '@/types/journals';
 import {
   compactSummaryItems,
-  buildRouteSummaryItem,
-  RouteBackedTypeEditorLayout,
-} from './RouteBackedTypeEditorLayout';
-import { useRouteBackedTypeEditor } from './useRouteBackedTypeEditor';
+  GenericTypeEditorLayout,
+} from './GenericTypeEditorLayout';
+import { useTypeEditorState } from './useTypeEditorState';
 
 interface KayakingTypeEditorProps {
   readonly journalId?: string;
@@ -34,38 +33,33 @@ export function KayakingTypeEditor({
   onChange,
 }: KayakingTypeEditorProps) {
   const baseId = useId();
-  const routeFieldId = `${baseId}-route`;
   const waterTypeFieldId = `${baseId}-water-type`;
 
   const {
-    initialData,
-    routeName,
     isEditing,
     editData,
     setEditData,
     handleEdit,
     handleSave,
     handleCancel,
-  } = useRouteBackedTypeEditor({
-    data,
-    defaultData: DEFAULT_DATA,
+  } = useTypeEditorState({
+    initialData: data ?? DEFAULT_DATA,
     onSave,
     createMode,
     onChange,
   });
 
   const summaryItems = compactSummaryItems(
-    buildRouteSummaryItem(initialData.route_id, routeName),
-    initialData.water_type
+    data?.water_type
       ? {
           label: 'Water Type',
-          value: initialData.water_type,
+          value: data.water_type,
         }
       : null
   );
 
   return (
-    <RouteBackedTypeEditorLayout
+    <GenericTypeEditorLayout
       className={className}
       testId={testId || 'kayaking-type-editor'}
       createMode={createMode}
@@ -73,12 +67,6 @@ export function KayakingTypeEditor({
       emptyMessage='No kayaking details provided.'
       summaryItems={summaryItems}
       summaryTestId='kayaking-summary'
-      routeFieldId={routeFieldId}
-      routeValue={editData.route_id}
-      onRouteChange={routeId =>
-        setEditData(previous => ({ ...previous, route_id: routeId }))
-      }
-      routePlaceholder='Select a paddling route...'
       onEdit={handleEdit}
       onSave={handleSave}
       onCancel={handleCancel}
@@ -102,6 +90,6 @@ export function KayakingTypeEditor({
           data-testid='water-type-input'
         />
       </div>
-    </RouteBackedTypeEditorLayout>
+    </GenericTypeEditorLayout>
   );
 }

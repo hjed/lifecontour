@@ -718,7 +718,7 @@ async def _fetch_route_history_rows(
 ) -> list[Any]:
     """Fetch route usage rows across all route-aware activity tables."""
     query = text(
-        f"""
+        """
         SELECT
             j.id,
             j.user_id,
@@ -732,24 +732,12 @@ async def _fetch_route_history_rows(
             j.updated_at,
             f.distance,
             f.duration,
-            {_ROUTE_ACTIVITY_CASE} AS activity_type
+            'ROUTE' AS activity_type
         FROM journals j
+        INNER JOIN routes r ON r.journal_id = j.id
         LEFT JOIN journal_fitness_data f ON f.journal_id = j.id
-        LEFT JOIN journal_jogging_data jogging ON jogging.journal_id = j.id
-        LEFT JOIN journal_bushwalking_data bushwalking ON bushwalking.journal_id = j.id
-        LEFT JOIN journal_canyoning_data canyoning ON canyoning.journal_id = j.id
-        LEFT JOIN journal_climbing_data climbing ON climbing.journal_id = j.id
-        LEFT JOIN journal_kayaking_data kayaking ON kayaking.journal_id = j.id
-        LEFT JOIN journal_skiing_data skiing ON skiing.journal_id = j.id
         WHERE j.user_id = :user_id
-          AND (
-              jogging.route_id = :route_id
-              OR bushwalking.route_id = :route_id
-              OR canyoning.route_id = :route_id
-              OR climbing.route_id = :route_id
-              OR kayaking.route_id = :route_id
-              OR skiing.route_id = :route_id
-          )
+          AND r.id = :route_id
         ORDER BY j.event_date_range_start DESC, j.created_at DESC
         """
     )
@@ -2562,7 +2550,11 @@ def register_journal_tools(mcp: FastMCP[None]) -> None:
             ) from exc
 
         route = await repos.route_repo.find_by_id(route_uuid)
-        if route is None or route.user_id != user_id:
+        if route is None:
+            return MCPResponseBuilder.not_found_error_response("Route", route_id)
+
+        journal = await repos.journal_repo.find_by_id(route.journal_id)
+        if journal is None or journal.user_id != user_id:
             return MCPResponseBuilder.not_found_error_response("Route", route_id)
 
         history_rows = await _fetch_route_history_rows(

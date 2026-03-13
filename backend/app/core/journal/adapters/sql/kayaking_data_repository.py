@@ -1,7 +1,6 @@
 """SQL implementation of KayakingDataRepository."""
 
 from typing import Any
-from uuid import UUID
 
 from core_shared.models.journals import KayakingData
 from sqlalchemy import text
@@ -21,7 +20,6 @@ class SqlKayakingDataRepository(KayakingDataRepository):
         """Convert a database row to a KayakingData entity."""
         return KayakingData(
             journal_id=row.journal_id,
-            route_id=UUID(str(row.route_id)) if row.route_id is not None else None,
             water_type=row.water_type,
             created_at=row.created_at,
             updated_at=row.updated_at,
@@ -31,7 +29,7 @@ class SqlKayakingDataRepository(KayakingDataRepository):
         """Find kayaking data by journal ID."""
         query = text(
             """
-            SELECT journal_id, route_id, water_type,
+            SELECT journal_id, water_type,
                    created_at, updated_at
             FROM journal_kayaking_data
             WHERE journal_id = :journal_id
@@ -58,16 +56,15 @@ class SqlKayakingDataRepository(KayakingDataRepository):
         query = text(
             """
             INSERT INTO journal_kayaking_data (
-                journal_id, route_id, water_type
+                journal_id, water_type
             )
             VALUES (
-                :journal_id, :route_id, :water_type
+                :journal_id, :water_type
             )
             ON CONFLICT (journal_id) DO UPDATE SET
-                route_id = EXCLUDED.route_id,
                 water_type = EXCLUDED.water_type,
                 updated_at = now()
-            RETURNING journal_id, route_id, water_type,
+            RETURNING journal_id, water_type,
                       created_at, updated_at
             """
         )
@@ -75,7 +72,6 @@ class SqlKayakingDataRepository(KayakingDataRepository):
             query,
             {
                 "journal_id": data.journal_id,
-                "route_id": str(data.route_id) if data.route_id is not None else None,
                 "water_type": data.water_type,
             },
         )

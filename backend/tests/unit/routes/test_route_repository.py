@@ -23,7 +23,7 @@ class TestRouteRepository:
         """Create a sample route for testing."""
         return Route(
             id=uuid4(),
-            user_id="test_user",
+            journal_id=1,
             name="Test Route",
             description="A test route",
         )
@@ -58,7 +58,7 @@ class TestRouteRepository:
         """Test save updates an existing route."""
         updated_route = Route(
             id=sample_route.id,
-            user_id=sample_route.user_id,
+            journal_id=sample_route.journal_id,
             name="Updated Route Name",
             description=sample_route.description,
         )
@@ -78,57 +78,14 @@ class TestRouteRepository:
 
         mock_repository.delete.assert_called_once_with(route_id)
 
-    async def test_get_all_returns_routes_for_user(self, mock_repository, sample_route):
-        """Test get_all returns all routes for a user."""
+    async def test_find_by_journal_id_returns_routes(
+        self, mock_repository, sample_route
+    ):
+        """Test find_by_journal_id returns all routes for a journal."""
         routes = [sample_route]
-        mock_repository.get_all.return_value = routes
+        mock_repository.find_by_journal_id.return_value = routes
 
-        result = await mock_repository.get_all("test_user", limit=100, offset=0)
+        result = await mock_repository.find_by_journal_id(1)
 
         assert result == routes
-        mock_repository.get_all.assert_called_once_with(
-            "test_user", limit=100, offset=0
-        )
-
-    async def test_get_all_with_pagination(self, mock_repository):
-        """Test get_all supports pagination."""
-        mock_repository.get_all.return_value = []
-
-        await mock_repository.get_all("test_user", limit=50, offset=10)
-
-        mock_repository.get_all.assert_called_once_with(
-            "test_user", limit=50, offset=10
-        )
-
-    async def test_check_usage_in_journals_returns_true_when_used(
-        self, mock_repository
-    ):
-        """Test check_usage_in_journals returns True when route is used."""
-        route_id = uuid4()
-        mock_repository.check_usage_in_journals.return_value = True
-
-        result = await mock_repository.check_usage_in_journals(route_id)
-
-        assert result is True
-        mock_repository.check_usage_in_journals.assert_called_once_with(route_id)
-
-    async def test_check_usage_in_journals_returns_false_when_not_used(
-        self, mock_repository
-    ):
-        """Test check_usage_in_journals returns False when route is not used."""
-        route_id = uuid4()
-        mock_repository.check_usage_in_journals.return_value = False
-
-        result = await mock_repository.check_usage_in_journals(route_id)
-
-        assert result is False
-        mock_repository.check_usage_in_journals.assert_called_once_with(route_id)
-
-    async def test_get_count_returns_total_routes(self, mock_repository):
-        """Test get_count returns total number of routes for a user."""
-        mock_repository.get_count.return_value = 5
-
-        result = await mock_repository.get_count("test_user")
-
-        assert result == 5
-        mock_repository.get_count.assert_called_once_with("test_user")
+        mock_repository.find_by_journal_id.assert_called_once_with(1)

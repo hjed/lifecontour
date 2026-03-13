@@ -1,12 +1,8 @@
 'use client';
 
 import { useId } from 'react';
-import { Map as MapIcon, Compass } from 'lucide-react';
+import { Compass } from 'lucide-react';
 import { Label } from '@/components/ui/label';
-import { cn } from '@/lib/utils';
-import type { BushwalkingData } from '@/types/journals';
-import { TypeEditorActions } from './TypeEditorActions';
-import { RouteSelector } from '@/components/routes/RouteSelector';
 import {
   Select,
   SelectContent,
@@ -14,7 +10,10 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { useRouteBackedTypeEditor } from './useRouteBackedTypeEditor';
+import { cn } from '@/lib/utils';
+import type { BushwalkingData } from '@/types/journals';
+import { TypeEditorActions } from './TypeEditorActions';
+import { useTypeEditorState } from './useTypeEditorState';
 
 interface BushwalkingTypeEditorProps {
   readonly journalId?: string;
@@ -71,27 +70,23 @@ export function BushwalkingTypeEditor({
   journalId: _journalId,
 }: BushwalkingTypeEditorProps) {
   const baseId = useId();
-  const routeFieldId = `${baseId}-route`;
   const trackGradingFieldId = `${baseId}-track-grading`;
   const {
-    initialData,
-    routeName,
     isEditing,
     editData,
     setEditData,
     handleEdit,
     handleSave,
     handleCancel,
-  } = useRouteBackedTypeEditor({
-    data,
-    defaultData: DEFAULT_DATA,
+  } = useTypeEditorState({
+    initialData: data ?? DEFAULT_DATA,
     onSave,
     createMode,
     onChange,
   });
 
   if (!isEditing && !createMode) {
-    const hasData = initialData.route_id || initialData.track_grading;
+    const hasData = data?.track_grading;
 
     if (!hasData) {
       return (
@@ -110,7 +105,7 @@ export function BushwalkingTypeEditor({
     }
 
     const selectedGrade = AUSTRALIAN_TRACK_GRADES.find(
-      g => g.grade === initialData.track_grading
+      g => g.grade === data?.track_grading
     );
 
     return (
@@ -119,27 +114,19 @@ export function BushwalkingTypeEditor({
         data-testid={testId || 'bushwalking-type-editor'}
       >
         <div className='grid grid-cols-2 gap-4'>
-          {initialData.track_grading && (
+          {data?.track_grading && (
             <div className='col-span-2'>
               <span className='text-muted-foreground font-medium'>
                 Track Grading:{' '}
               </span>
               <span className='font-semibold'>
-                {selectedGrade?.label ?? `Grade ${initialData.track_grading}`}
+                {selectedGrade?.label ?? `Grade ${data.track_grading}`}
               </span>
               {selectedGrade && (
                 <p className='text-muted-foreground mt-1 text-xs'>
                   {selectedGrade.description}
                 </p>
               )}
-            </div>
-          )}
-          {initialData.route_id && (
-            <div className='col-span-2'>
-              <span className='text-muted-foreground font-medium'>Route: </span>
-              <span data-testid='bushwalking-route-display'>
-                {routeName ?? initialData.route_id}
-              </span>
             </div>
           )}
         </div>
@@ -159,25 +146,6 @@ export function BushwalkingTypeEditor({
       data-testid={testId || 'bushwalking-type-editor'}
     >
       <div className='grid grid-cols-1 gap-6 md:grid-cols-2'>
-        {/* Route Selector */}
-        <div className='space-y-2'>
-          <Label htmlFor={routeFieldId} className='flex items-center gap-2'>
-            <MapIcon
-              className='text-muted-foreground h-4 w-4'
-              aria-hidden='true'
-            />
-            Route
-          </Label>
-          <RouteSelector
-            id={routeFieldId}
-            value={editData.route_id ?? null}
-            onChange={routeId =>
-              setEditData(previous => ({ ...previous, route_id: routeId }))
-            }
-            placeholder='Select a route...'
-          />
-        </div>
-
         {/* Track Grading Dropdown */}
         <div className='space-y-2'>
           <Label

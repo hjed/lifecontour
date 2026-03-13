@@ -9,8 +9,6 @@ French Canyon Grading System:
   - Stars: * to *** (quality/beauty, optional)
 """
 
-from uuid import UUID, uuid4
-
 import pytest
 from core_shared.models.journals import CanyoningData, CanyoningDataValidationError
 
@@ -24,7 +22,6 @@ class TestCanyoningData:
         data = CanyoningData(journal_id=1)
 
         assert data.journal_id == 1
-        assert data.route_id is None
         assert data.french_grade is None
         assert data.water_guage_name is None
         assert data.water_guage_level is None
@@ -34,19 +31,10 @@ class TestCanyoningData:
         assert data.created_at is None
         assert data.updated_at is None
 
-    def test_create_canyoning_data_with_route(self):
-        """Test creating canyoning data with a route ID."""
-        route_id = uuid4()
-        data = CanyoningData(journal_id=1, route_id=route_id)
-
-        assert data.route_id == route_id
-
     def test_create_canyoning_data_with_all_fields(self):
         """Test creating canyoning data with all optional fields populated."""
-        route_id = uuid4()
         data = CanyoningData(
             journal_id=3,
-            route_id=route_id,
             french_grade="v3a2IV**",
             water_guage_name="Claustral Brook Gauge",
             water_guage_level=42,
@@ -56,7 +44,6 @@ class TestCanyoningData:
         )
 
         assert data.journal_id == 3
-        assert data.route_id == route_id
         assert data.french_grade == "v3a2IV**"
         assert data.water_guage_name == "Claustral Brook Gauge"
         assert data.water_guage_level == 42
@@ -142,10 +129,3 @@ class TestCanyoningData:
         data = CanyoningData(journal_id=1, french_grade=None)
 
         assert data.french_grade is None
-
-    def test_route_id_is_uuid(self):
-        """Test that route_id must be a UUID."""
-        route_id = UUID("12345678-1234-5678-1234-567812345678")
-        data = CanyoningData(journal_id=1, route_id=route_id)
-
-        assert isinstance(data.route_id, UUID)

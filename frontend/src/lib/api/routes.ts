@@ -14,23 +14,23 @@ import {
   RouteFilters,
 } from '@/types/routes';
 import { JsonApiErrorResponse } from '@/types/api';
-import {
-  API_ENDPOINTS,
-  ERROR_MESSAGES,
-  SUCCESS_MESSAGES,
-} from '@/lib/constants';
+import { ERROR_MESSAGES, SUCCESS_MESSAGES } from '@/lib/constants';
 
 // Query Keys
 export const routeKeys = {
-  all: ['routes'] as const,
-  lists: () => [...routeKeys.all, 'list'] as const,
-  list: (filters: RouteFilters) => [...routeKeys.lists(), filters] as const,
-  details: () => [...routeKeys.all, 'detail'] as const,
-  detail: (id: string) => [...routeKeys.details(), id] as const,
+  all: (journalId: string) => ['journals', journalId, 'routes'] as const,
+  lists: (journalId: string) => [...routeKeys.all(journalId), 'list'] as const,
+  list: (journalId: string, filters: RouteFilters) =>
+    [...routeKeys.lists(journalId), filters] as const,
+  details: (journalId: string) =>
+    [...routeKeys.all(journalId), 'detail'] as const,
+  detail: (journalId: string, id: string) =>
+    [...routeKeys.details(journalId), id] as const,
 };
 
 // API Functions
 async function fetchRoutes(
+  journalId: string,
   filters: RouteFilters = {}
 ): Promise<RouteListResponse> {
   const params = new URLSearchParams();
@@ -39,9 +39,8 @@ async function fetchRoutes(
   if (filters.page) params.append('page', filters.page.toString());
   if (filters.limit) params.append('limit', filters.limit.toString());
 
-  const url = params.toString()
-    ? `${API_ENDPOINTS.ROUTES.BASE}?${params.toString()}`
-    : API_ENDPOINTS.ROUTES.BASE;
+  const baseUrl = `/api/journals/${journalId}/routes`;
+  const url = params.toString() ? `${baseUrl}?${params.toString()}` : baseUrl;
 
   const response = await fetch(url, {
     credentials: 'include',
@@ -57,8 +56,11 @@ async function fetchRoutes(
   return response.json();
 }
 
-async function fetchRoute(id: string): Promise<RouteResponse> {
-  const response = await fetch(API_ENDPOINTS.ROUTES.BY_ID(id), {
+async function fetchRoute(
+  journalId: string,
+  routeId: string
+): Promise<RouteResponse> {
+  const response = await fetch(`/api/journals/${journalId}/routes/${routeId}`, {
     credentials: 'include',
   });
 
@@ -72,13 +74,16 @@ async function fetchRoute(id: string): Promise<RouteResponse> {
   return response.json();
 }
 
-async function createRoute(data: RouteFormData): Promise<RouteResponse> {
+async function createRoute(
+  journalId: string,
+  data: RouteFormData
+): Promise<RouteResponse> {
   const requestData = {
     type: 'routes' as const,
     attributes: data,
   };
 
-  const response = await fetch(API_ENDPOINTS.ROUTES.BASE, {
+  const response = await fetch(`/api/journals/${journalId}/routes`, {
     method: 'POST',
     credentials: 'include',
     headers: {
@@ -99,22 +104,23 @@ async function createRoute(data: RouteFormData): Promise<RouteResponse> {
 
 // React Query Hooks
 export function useRoutes(
+  journalId: string,
   filters: RouteFilters = {},
   options: { enabled?: boolean } = {}
 ) {
   return useQuery({
-    queryKey: routeKeys.list(filters),
-    queryFn: () => fetchRoutes(filters),
+    queryKey: routeKeys.list(journalId, filters),
+    queryFn: () => fetchRoutes(journalId, filters),
     staleTime: 5 * 60 * 1000, // 5 minutes
-    enabled: options.enabled,
+    enabled: !!journalId && (options.enabled ?? true),
   });
 }
 
-export function useRoute(id: string) {
+export function useRoute(journalId: string, routeId: string) {
   return useQuery({
-    queryKey: routeKeys.detail(id),
-    queryFn: () => fetchRoute(id),
-    enabled: !!id,
+    queryKey: routeKeys.detail(journalId, routeId),
+    queryFn: () => fetchRoute(journalId, routeId),
+    enabled: !!journalId && !!routeId,
     staleTime: 5 * 60 * 1000, // 5 minutes
   });
 }
@@ -123,9 +129,17 @@ export function useCreateRoute() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: createRoute,
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: routeKeys.all });
+    mutationFn: ({
+      journalId,
+      data,
+    }: {
+      journalId: string;
+      data: RouteFormData;
+    }) => createRoute(journalId, data),
+    onSuccess: (_, variables) => {
+      queryClient.invalidateQueries({
+        queryKey: routeKeys.all(variables.journalId),
+      });
       toast.success(SUCCESS_MESSAGES.CREATE_SUCCESS);
     },
     onError: (error: Error) => {

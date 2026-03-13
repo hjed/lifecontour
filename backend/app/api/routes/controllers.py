@@ -29,7 +29,7 @@ from app.core.journal.services.route_service import RouteService
 from app.infrastructure.auth.models import SessionUser
 
 router = APIRouter(
-    prefix="/routes",
+    prefix="/journals/{journal_id}/routes",
     tags=["routes"],
 )
 
@@ -37,6 +37,7 @@ router = APIRouter(
 @router.get("")
 @inject
 async def list_routes(
+    journal_id: int,
     request: Request,
     route_service: FromDishka[RouteService],
     user: FromDishka[SessionUser],  # Require authentication
@@ -57,27 +58,33 @@ async def list_routes(
     base_url = get_request_base_url(request)
 
     # Get routes for the authenticated user
-    routes = await route_service.get_routes_for_user(
-        user_id=user.id,
-        limit=pagination.limit,
-        offset=pagination.offset,
-        name=name,
-    )
+    routes = await route_service.get_routes_by_journal(journal_id)
 
-    # Get total count for pagination
-    total_count = await route_service.get_route_count(user_id=user.id, name=name)
+    if name:
+        routes = [r for r in routes if name.lower() in r.name.lower()]
+
+    total_count = len(routes)
+
+    # Apply pagination in memory (since routes per journal are few)
+    routes = routes[pagination.offset : pagination.offset + pagination.limit]
 
     # Convert to resources
     route_resources = [RouteConverter.to_resource(route, base_url) for route in routes]
 
     # Create pagination metadata and links
     meta = create_pagination_meta(total_count, page, limit)
+    base_link_url = f"{base_url}/api/journals/{journal_id}/routes"
+
+    additional_params: dict[str, str | list[str]] = {}
+    if name:
+        additional_params["name"] = name
+
     links = create_pagination_links(
-        f"{base_url}/api/routes",
+        base_link_url,
         page,
         limit,
         total_count,
-        additional_params={"name": name} if name else None,
+        additional_params=additional_params if additional_params else None,
     )
 
     return RouteListResponse(
@@ -90,6 +97,7 @@ async def list_routes(
 @router.get("/{route_id}")
 @inject
 async def get_route(
+    journal_id: int,
     route_id: str,
     request: Request,
     route_service: FromDishka[RouteService],
@@ -112,7 +120,7 @@ async def get_route(
     route = await route_service.get_route(route_uuid)
 
     # Verify route belongs to user
-    if route.user_id != user.id:
+    if route.journal_id != journal_id:
         raise RouteNotFoundError(route_id)
 
     # Convert to resource
@@ -124,6 +132,7 @@ async def get_route(
 @router.post("", status_code=status.HTTP_201_CREATED)
 @inject
 async def create_route(
+    journal_id: int,
     request: Request,
     route_request: RouteCreateRequest,
     route_service: FromDishka[RouteService],
@@ -139,7 +148,7 @@ async def create_route(
 
     # Convert request to domain entity
     route = RouteRequestConverter.from_create_request(
-        route_request.data, user_id=user.id
+        route_request.data, journal_id=journal_id
     )
 
     # Create the route
@@ -154,6 +163,7 @@ async def create_route(
 @router.put("/{route_id}")
 @inject
 async def update_route(
+    journal_id: int,
     route_id: str,
     request: Request,
     route_request: RouteUpdateRequest,
@@ -176,7 +186,7 @@ async def update_route(
 
     # Verify route exists and belongs to user
     existing_route = await route_service.get_route(route_uuid)
-    if existing_route.user_id != user.id:
+    if existing_route.journal_id != journal_id:
         raise RouteNotFoundError(route_id)
 
     # Convert request to domain entity with changed fields
@@ -198,6 +208,7 @@ async def update_route(
 @router.delete("/{route_id}", status_code=status.HTTP_204_NO_CONTENT)
 @inject
 async def delete_route(
+    journal_id: int,
     route_id: str,
     route_service: FromDishka[RouteService],
     connection: FromDishka[AsyncConnection],
@@ -221,7 +232,7 @@ async def delete_route(
 
     # Verify route exists and belongs to user
     existing_route = await route_service.get_route(route_uuid)
-    if existing_route.user_id != user.id:
+    if existing_route.journal_id != journal_id:
         raise RouteNotFoundError(route_id)
 
     # Delete the route (will check for usage)

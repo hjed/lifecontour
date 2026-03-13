@@ -1,7 +1,6 @@
 """SQL implementation of CanyoningDataRepository."""
 
 from typing import Any
-from uuid import UUID
 
 from core_shared.models.journals import CanyoningData
 from sqlalchemy import text
@@ -21,7 +20,6 @@ class SqlCanyoningDataRepository(CanyoningDataRepository):
         """Convert a database row to a CanyoningData entity."""
         return CanyoningData(
             journal_id=row.journal_id,
-            route_id=UUID(str(row.route_id)) if row.route_id is not None else None,
             french_grade=row.french_grade,
             water_guage_name=row.water_guage_name,
             water_guage_level=row.water_guage_level,
@@ -36,7 +34,7 @@ class SqlCanyoningDataRepository(CanyoningDataRepository):
         """Find canyoning data by journal ID."""
         query = text(
             """
-            SELECT journal_id, route_id, french_grade, water_guage_name,
+            SELECT journal_id, french_grade, water_guage_name,
                    water_guage_level, is_vertical, is_night_canyon, is_white_water,
                    created_at, updated_at
             FROM journal_canyoning_data
@@ -64,15 +62,14 @@ class SqlCanyoningDataRepository(CanyoningDataRepository):
         query = text(
             """
             INSERT INTO journal_canyoning_data (
-                journal_id, route_id, french_grade, water_guage_name,
+                journal_id, french_grade, water_guage_name,
                 water_guage_level, is_vertical, is_night_canyon, is_white_water
             )
             VALUES (
-                :journal_id, :route_id, :french_grade, :water_guage_name,
+                :journal_id, :french_grade, :water_guage_name,
                 :water_guage_level, :is_vertical, :is_night_canyon, :is_white_water
             )
             ON CONFLICT (journal_id) DO UPDATE SET
-                route_id = EXCLUDED.route_id,
                 french_grade = EXCLUDED.french_grade,
                 water_guage_name = EXCLUDED.water_guage_name,
                 water_guage_level = EXCLUDED.water_guage_level,
@@ -80,7 +77,7 @@ class SqlCanyoningDataRepository(CanyoningDataRepository):
                 is_night_canyon = EXCLUDED.is_night_canyon,
                 is_white_water = EXCLUDED.is_white_water,
                 updated_at = now()
-            RETURNING journal_id, route_id, french_grade, water_guage_name,
+            RETURNING journal_id, french_grade, water_guage_name,
                       water_guage_level, is_vertical, is_night_canyon, is_white_water,
                       created_at, updated_at
             """
@@ -89,7 +86,6 @@ class SqlCanyoningDataRepository(CanyoningDataRepository):
             query,
             {
                 "journal_id": data.journal_id,
-                "route_id": str(data.route_id) if data.route_id is not None else None,
                 "french_grade": data.french_grade,
                 "water_guage_name": data.water_guage_name,
                 "water_guage_level": data.water_guage_level,

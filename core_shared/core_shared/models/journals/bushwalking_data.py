@@ -18,7 +18,6 @@ Australian Track Grading System:
 
 from dataclasses import dataclass
 from datetime import datetime
-from uuid import UUID
 
 from .constants import VALID_TRACK_GRADES
 from .exceptions import BushwalkingDataValidationError
@@ -40,14 +39,12 @@ class BushwalkingData:
 
     Attributes:
         journal_id: Foreign key to the journal (primary key in DB)
-        route_id: UUID reference to a route (from the routes domain) (nullable)
         track_grading: Australian Track Grading System grade (Grade 1-5) (nullable)
         created_at: Creation timestamp
         updated_at: Last update timestamp
     """
 
     journal_id: int
-    route_id: UUID | None = None
     track_grading: str | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None

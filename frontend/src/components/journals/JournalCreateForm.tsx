@@ -41,6 +41,7 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Checkbox } from '@/components/ui/checkbox';
 import { useCreateJournal } from '@/lib/api/journals';
+import { useCreateRoute } from '@/lib/api/routes';
 import {
   JournalType,
   type AbseilingData,
@@ -201,9 +202,17 @@ function TypeCheckboxField({ control, option }: TypeCheckboxFieldProps) {
             <Checkbox
               checked={field.value?.includes(option.value)}
               onCheckedChange={checked => {
-                const newValue = checked
-                  ? [...field.value, option.value]
-                  : field.value?.filter(v => v !== option.value);
+                let newValue: JournalType[];
+                if (checked) {
+                  const deps = TYPE_DEPENDENCIES[option.value] || [];
+                  newValue = Array.from(
+                    new Set([...(field.value || []), option.value, ...deps])
+                  );
+                } else {
+                  newValue = (field.value || []).filter(
+                    v => v !== option.value
+                  );
+                }
                 field.onChange(newValue);
               }}
             />
@@ -323,8 +332,13 @@ interface JournalCreateFormProps {
 
 export function JournalCreateForm({ onCancel }: JournalCreateFormProps = {}) {
   const router = useRouter();
-  const { mutateAsync: createJournal, isPending } = useCreateJournal();
+  const { mutateAsync: createJournal, isPending: isCreatingJournal } =
+    useCreateJournal();
+  const { mutateAsync: createRoute, isPending: isCreatingRoute } =
+    useCreateRoute();
   const [typeData, setTypeData] = useState<TypeDataState>({});
+
+  const isPending = isCreatingJournal || isCreatingRoute;
 
   const form = useForm<FormValues>({
     resolver: zodResolver(formSchema),
@@ -455,6 +469,16 @@ export function JournalCreateForm({ onCancel }: JournalCreateFormProps = {}) {
         return;
       }
 
+      // Extract pending routes to upload them separately since backend doesn't accept them in JournalCreateData
+      let pendingRoutes: { name: string; gpx_data: string }[] = [];
+      const fitnessData = submittedTypeData[JournalType.FITNESS] as
+        | FitnessData
+        | undefined;
+      if (fitnessData?.pending_routes) {
+        pendingRoutes = [...fitnessData.pending_routes];
+        delete fitnessData.pending_routes;
+      }
+
       const result = await createJournal({
         title: values.title,
         content: values.content,
@@ -467,6 +491,24 @@ export function JournalCreateForm({ onCancel }: JournalCreateFormProps = {}) {
           type_data: submittedTypeData,
         }),
       });
+
+      // Upload pending routes sequentially now that we have a journal ID
+      for (const route of pendingRoutes) {
+        try {
+          await createRoute({
+            journalId: result.data.id,
+            data: {
+              name: route.name,
+              gpx_data: route.gpx_data,
+            },
+          });
+        } catch (error) {
+          console.error(
+            `Failed to upload GPX track limit: ${route.name}`,
+            error
+          );
+        }
+      }
 
       router.push(`/journals/${result.data.id}` as Route);
     } catch (error) {

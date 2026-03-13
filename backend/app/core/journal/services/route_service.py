@@ -84,7 +84,7 @@ class RouteService:
         # Publish creation event
         event = RouteCreated(
             str(saved_route.id),
-            saved_route.user_id,
+            saved_route.journal_id,
             saved_route.name,
             transaction=transaction,
         )
@@ -93,7 +93,7 @@ class RouteService:
         logger.info(
             "Route created",
             route_id=str(saved_route.id),
-            user_id=saved_route.user_id,
+            user_id=saved_route.journal_id,
             name=saved_route.name,
         )
 
@@ -176,11 +176,6 @@ class RouteService:
         if route is None:
             raise RouteNotFoundError(str(route_id))
 
-        # Check if route is in use
-        is_in_use = await self.route_repo.check_usage_in_journals(route_id)
-        if is_in_use:
-            raise RouteInUseError(str(route_id))
-
         # Delete the route
         await self.route_repo.delete(route_id)
 
@@ -208,12 +203,9 @@ class RouteService:
             raise RouteNotFoundError(str(route_id))
         return route
 
-    async def get_routes_for_user(
+    async def get_routes_by_journal(
         self,
-        user_id: str,
-        limit: int = 50,
-        offset: int = 0,
-        name: str | None = None,
+        journal_id: int,
     ) -> list[Route]:
         """
         Get all routes for a user with pagination.
@@ -227,17 +219,4 @@ class RouteService:
         Returns:
             List of routes
         """
-        return await self.route_repo.get_all(user_id, limit, offset, name)
-
-    async def get_route_count(self, user_id: str, name: str | None = None) -> int:
-        """
-        Get count of routes for a user.
-
-        Args:
-            user_id: The user ID to count routes for
-            name: Optional case-insensitive partial route name filter
-
-        Returns:
-            Total count of routes
-        """
-        return await self.route_repo.get_count(user_id, name)
+        return await self.route_repo.find_by_journal_id(journal_id)

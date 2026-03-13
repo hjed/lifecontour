@@ -1,7 +1,6 @@
 """SQL implementation of ClimbingDataRepository."""
 
 from typing import Any
-from uuid import UUID
 
 from core_shared.models.journals import ClimbingData
 from sqlalchemy import text
@@ -21,7 +20,6 @@ class SqlClimbingDataRepository(ClimbingDataRepository):
         """Convert a database row to a ClimbingData entity."""
         return ClimbingData(
             journal_id=row.journal_id,
-            route_id=UUID(str(row.route_id)) if row.route_id is not None else None,
             climbing_type=row.climbing_type,
             grade=row.grade,
             length=row.length,
@@ -33,7 +31,7 @@ class SqlClimbingDataRepository(ClimbingDataRepository):
         """Find climbing data by journal ID."""
         query = text(
             """
-            SELECT journal_id, route_id, climbing_type, grade, length,
+            SELECT journal_id, climbing_type, grade, length,
                    created_at, updated_at
             FROM journal_climbing_data
             WHERE journal_id = :journal_id
@@ -60,18 +58,17 @@ class SqlClimbingDataRepository(ClimbingDataRepository):
         query = text(
             """
             INSERT INTO journal_climbing_data (
-                journal_id, route_id, climbing_type, grade, length
+                journal_id, climbing_type, grade, length
             )
             VALUES (
-                :journal_id, :route_id, :climbing_type, :grade, :length
+                :journal_id, :climbing_type, :grade, :length
             )
             ON CONFLICT (journal_id) DO UPDATE SET
-                route_id = EXCLUDED.route_id,
                 climbing_type = EXCLUDED.climbing_type,
                 grade = EXCLUDED.grade,
                 length = EXCLUDED.length,
                 updated_at = now()
-            RETURNING journal_id, route_id, climbing_type, grade, length,
+            RETURNING journal_id, climbing_type, grade, length,
                       created_at, updated_at
             """
         )
@@ -79,7 +76,6 @@ class SqlClimbingDataRepository(ClimbingDataRepository):
             query,
             {
                 "journal_id": data.journal_id,
-                "route_id": str(data.route_id) if data.route_id is not None else None,
                 "climbing_type": data.climbing_type,
                 "grade": data.grade,
                 "length": data.length,

@@ -67,7 +67,7 @@ class RouteRequestConverter:
     """Converter for API requests to Route domain entities."""
 
     @staticmethod
-    def from_create_request(data: RouteCreateData, user_id: str) -> Route:
+    def from_create_request(data: RouteCreateData, journal_id: int) -> Route:
         """
         Convert API create request to Route domain entity.
 
@@ -83,7 +83,7 @@ class RouteRequestConverter:
         """
         try:
             return Route(
-                user_id=user_id,
+                journal_id=journal_id,
                 name=data.attributes.name,
                 description=data.attributes.description,
                 gpx_data=data.attributes.gpx_data,
@@ -146,7 +146,7 @@ class RouteRequestConverter:
         try:
             updated_route = Route(
                 id=existing_route.id,
-                user_id=existing_route.user_id,
+                journal_id=existing_route.journal_id,
                 name=data.attributes.name,
                 description=data.attributes.description,
                 gpx_data=data.attributes.gpx_data,

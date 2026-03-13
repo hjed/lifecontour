@@ -1,7 +1,5 @@
 """Unit tests for CrossCountrySkiingData entity (CROSS_COUNTRY_SKIING type)."""
 
-from uuid import UUID, uuid4
-
 import pytest
 from core_shared.models.journals import (
     CrossCountrySkiingData,
@@ -18,17 +16,9 @@ class TestCrossCountrySkiingData:
         data = CrossCountrySkiingData(journal_id=1)
 
         assert data.journal_id == 1
-        assert data.route_id is None
         assert data.snow_conditions is None
         assert data.created_at is None
         assert data.updated_at is None
-
-    def test_create_skiing_data_with_route(self):
-        """Test creating skiing data with a route ID."""
-        route_id = uuid4()
-        data = CrossCountrySkiingData(journal_id=1, route_id=route_id)
-
-        assert data.route_id == route_id
 
     def test_create_skiing_data_with_snow_conditions(self):
         """Test creating skiing data with snow conditions."""
@@ -38,15 +28,12 @@ class TestCrossCountrySkiingData:
 
     def test_create_skiing_data_with_all_fields(self):
         """Test creating skiing data with all optional fields populated."""
-        route_id = uuid4()
         data = CrossCountrySkiingData(
             journal_id=2,
-            route_id=route_id,
             snow_conditions="groomed trails",
         )
 
         assert data.journal_id == 2
-        assert data.route_id == route_id
         assert data.snow_conditions == "groomed trails"
 
     def test_snow_conditions_various_values(self):
@@ -80,10 +67,3 @@ class TestCrossCountrySkiingData:
             CrossCountrySkiingData(journal_id=1, snow_conditions="")
 
         assert "snow_conditions" in str(exc_info.value)
-
-    def test_route_id_is_uuid(self):
-        """Test that route_id must be a UUID."""
-        route_id = UUID("12345678-1234-5678-1234-567812345678")
-        data = CrossCountrySkiingData(journal_id=1, route_id=route_id)
-
-        assert isinstance(data.route_id, UUID)

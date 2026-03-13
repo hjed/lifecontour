@@ -1,41 +1,14 @@
 import { act, fireEvent, render, screen } from '@testing-library/react';
 import { CanyoningTypeEditor } from '../CanyoningTypeEditor';
 
-jest.mock('@/components/routes/RouteSelector', () => ({
-  RouteSelector: ({
-    id,
-    value,
-    onChange,
-  }: {
-    id?: string;
-    value?: string | null;
-    onChange: (routeId: string | null) => void;
-  }) => (
-    <button
-      type='button'
-      data-testid='mock-route-selector'
-      data-route-selector-id={id}
-      data-route-value={value ?? ''}
-      onClick={() => onChange('route-123')}
-    >
-      Select route
-    </button>
-  ),
-}));
-
-jest.mock('@/lib/api/routes', () => ({
-  useRoute: () => ({ data: undefined }),
-}));
-
 describe('CanyoningTypeEditor', () => {
   beforeEach(() => {
     jest.clearAllMocks();
   });
 
-  it('renders route, grade, gauge fields, and flags in create mode', () => {
+  it('renders grade, gauge fields, and flags in create mode', () => {
     render(<CanyoningTypeEditor createMode={true} />);
 
-    expect(screen.getByTestId('mock-route-selector')).toBeInTheDocument();
     expect(screen.getByTestId('french-grade-input')).toBeInTheDocument();
     expect(screen.getByTestId('water-gauge-name-input')).toBeInTheDocument();
     expect(screen.getByTestId('water-gauge-level-input')).toBeInTheDocument();
@@ -74,7 +47,7 @@ describe('CanyoningTypeEditor', () => {
     expect(screen.getByText(/use format v3a2iv\*\*/i)).toBeInTheDocument();
   });
 
-  it('preserves both route and gauge updates when they are batched together', () => {
+  it('preserves gauge updates when typing', () => {
     const handleChange = jest.fn();
 
     render(<CanyoningTypeEditor createMode={true} onChange={handleChange} />);
@@ -82,7 +55,6 @@ describe('CanyoningTypeEditor', () => {
     handleChange.mockClear();
 
     act(() => {
-      fireEvent.click(screen.getByTestId('mock-route-selector'));
       fireEvent.change(screen.getByTestId('water-gauge-name-input'), {
         target: { value: 'Kowmung Gauge' },
       });
@@ -90,7 +62,6 @@ describe('CanyoningTypeEditor', () => {
 
     expect(handleChange).toHaveBeenLastCalledWith(
       expect.objectContaining({
-        route_id: 'route-123',
         water_guage_name: 'Kowmung Gauge',
       })
     );
@@ -136,7 +107,6 @@ describe('CanyoningTypeEditor', () => {
       <CanyoningTypeEditor
         createMode={false}
         data={{
-          route_id: 'route-123',
           french_grade: 'v3a2IV**',
           water_guage_name: 'Kowmung Gauge',
           water_guage_level: 8,
@@ -151,7 +121,6 @@ describe('CanyoningTypeEditor', () => {
     expect(screen.getByText(/Kowmung Gauge/i)).toBeInTheDocument();
     expect(screen.getByText(/Vertical/i)).toBeInTheDocument();
     expect(screen.getByText(/White Water/i)).toBeInTheDocument();
-    expect(screen.getByText('route-123')).toBeInTheDocument();
   });
 
   it('renders the empty read-only state when no canyoning data exists', () => {

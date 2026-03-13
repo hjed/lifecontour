@@ -1,24 +1,16 @@
 'use client';
 
-import { useMemo, useRef } from 'react';
-import {
-  Activity,
-  Flame,
-  Heart,
-  Ruler,
-  Timer,
-  Upload,
-  Mountain,
-} from 'lucide-react';
+import { useMemo } from 'react';
+import { Activity, Flame, Heart, Ruler, Timer, Mountain } from 'lucide-react';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
-import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import type { FitnessData } from '@/types/journals';
 import { useTypeEditorState } from './useTypeEditorState';
 import { TypeEditorActions } from './TypeEditorActions';
 import { ActivityStats } from '../ActivityStats';
 import { GPXTrackDisplay } from '../GPXTrackDisplay';
+import { JournalRoutesEditor } from '../JournalRoutesEditor';
 
 interface FitnessTypeEditorProps {
   readonly journalId?: string;
@@ -69,18 +61,10 @@ export function FitnessTypeEditor({
     onChange,
   });
 
-  const fileInputRef = useRef<HTMLInputElement>(null);
-
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    try {
-      const content = await file.text();
-      setEditData(previous => ({ ...previous, gpx_track_data: content }));
-    } catch (error) {
-      console.error('Failed to read GPX file', error);
-    }
+  const handlePendingRoutesChange = (
+    routes: { name: string; gpx_data: string }[]
+  ) => {
+    setEditData(previous => ({ ...previous, pending_routes: routes }));
   };
 
   const updateNumberField = (field: keyof FitnessData, value: string) => {
@@ -235,47 +219,14 @@ export function FitnessTypeEditor({
       ) : (
         <ActivityStats data={initialData} />
       )}
-
-      {/* GPX Track Upload */}
-      {isEditing && (
-        <div className='space-y-2'>
-          <Label className='flex items-center gap-2'>
-            <Upload
-              className='text-muted-foreground h-4 w-4'
-              aria-hidden='true'
-            />
-            GPX Track File
-          </Label>
-
-          <div className='flex items-center gap-4'>
-            <Button
-              type='button'
-              variant='outline'
-              onClick={() => fileInputRef.current?.click()}
-              data-testid='gpx-upload-btn'
-            >
-              Select .gpx file
-            </Button>
-            <Input
-              type='file'
-              accept='.gpx'
-              className='hidden'
-              ref={fileInputRef}
-              onChange={handleFileUpload}
-              data-testid='gpx-file-input'
-            />
-            {editData.gpx_track_data ? (
-              <span className='max-w-[200px] truncate text-sm text-green-600'>
-                GPX data attached
-              </span>
-            ) : (
-              <span className='text-muted-foreground text-sm'>
-                No file selected
-              </span>
-            )}
-          </div>
-        </div>
-      )}
+      {/* GPX Tracks Manager */}
+      <JournalRoutesEditor
+        createMode={createMode}
+        journalId={journalId}
+        pendingRoutes={editData.pending_routes}
+        onPendingRoutesChange={handlePendingRoutesChange}
+        isEditing={isEditing}
+      />
 
       {/* Edit/Save/Cancel buttons */}
       {!createMode && (
