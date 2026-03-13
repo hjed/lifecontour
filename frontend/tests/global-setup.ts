@@ -16,6 +16,11 @@ import {
   FRONTEND_TEST_PORT,
   FRONTEND_TEST_URL,
   getFrontendCorsOrigins,
+  CONTAINER_PREFIX,
+  BACKEND_TEST_PORT,
+  OAUTH_ADMIN_TEST_PORT,
+  MEILI_TEST_PORT,
+  workspaceEnv,
 } from './e2e/utils/frontend-test-config';
 
 type Logger = Pick<Console, 'log' | 'error'>;
@@ -44,8 +49,8 @@ function getProjectRoot(currentWorkingDirectory: string): string {
  */
 async function waitForService(
   url: string,
-  maxAttempts = 30,
-  interval = 2000
+  maxAttempts = 120,
+  interval = 3000
 ): Promise<void> {
   console.log(`Waiting for service: ${url}`);
 
@@ -146,6 +151,7 @@ function printServiceLogs(dockerComposeCmd: string, projectRoot: string): void {
 function getDockerTestEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   return {
     ...env,
+    ...workspaceEnv,
     FRONTEND_URL: FRONTEND_TEST_URL,
     FRONTEND_PORT: FRONTEND_TEST_PORT,
     CORS_ORIGINS: getFrontendCorsOrigins(),
@@ -158,7 +164,7 @@ function hasExpectedBackendConfig(
 ): boolean {
   try {
     const result = execSync(
-      "docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' pms-backend",
+      `docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' ${CONTAINER_PREFIX}-backend`,
       {
         encoding: 'utf8',
         stdio: 'pipe',
@@ -177,7 +183,7 @@ async function hasExpectedOAuthClientRedirect(
 ): Promise<boolean> {
   try {
     const response = await fetch(
-      'http://localhost:4447/admin/clients/test-client-id'
+      `http://localhost:${OAUTH_ADMIN_TEST_PORT}/admin/clients/test-client-id`
     );
 
     if (!response.ok) {
@@ -199,14 +205,14 @@ async function hasExpectedOAuthClientRedirect(
 function removeExistingContainers(): void {
   // All container_name values used by test-profile services in docker-compose.yml
   const containerNames = [
-    'pms-postgres',
-    'pms-redis',
-    'pms-meilisearch',
-    'pms-oauth',
-    'pms-oauth-login-consent',
-    'pms-oauth-init',
-    'pms-backend',
-    'pms-google-worker',
+    `${CONTAINER_PREFIX}-postgres`,
+    `${CONTAINER_PREFIX}-redis`,
+    `${CONTAINER_PREFIX}-meilisearch`,
+    `${CONTAINER_PREFIX}-oauth`,
+    `${CONTAINER_PREFIX}-oauth-login-consent`,
+    `${CONTAINER_PREFIX}-oauth-init`,
+    `${CONTAINER_PREFIX}-backend`,
+    `${CONTAINER_PREFIX}-google-worker`,
   ];
 
   console.log(
@@ -344,7 +350,9 @@ async function verifyCoreServiceHealth(
   projectRoot: string
 ): Promise<void> {
   dependencies.logger.log('🔍 Checking backend API readiness...');
-  await dependencies.waitForService('http://localhost:8001/api/health/ready');
+  await dependencies.waitForService(
+    `http://localhost:${BACKEND_TEST_PORT}/api/health/ready`
+  );
 
   dependencies.execCommand(
     `${dockerComposeCmd} --profile test exec -T backend alembic upgrade head`,
@@ -353,10 +361,14 @@ async function verifyCoreServiceHealth(
   );
 
   dependencies.logger.log('🔍 Re-checking backend API readiness...');
-  await dependencies.waitForService('http://localhost:8001/api/health/ready');
+  await dependencies.waitForService(
+    `http://localhost:${BACKEND_TEST_PORT}/api/health/ready`
+  );
 
   dependencies.logger.log('🔍 Checking OAuth provider health...');
-  await dependencies.waitForService('http://localhost:4447/health/ready');
+  await dependencies.waitForService(
+    `http://localhost:${OAUTH_ADMIN_TEST_PORT}/health/ready`
+  );
 }
 
 function handleGlobalSetupFailure(
@@ -426,7 +438,9 @@ export async function runGlobalSetup(
     await verifyCoreServiceHealth(dependencies, dockerComposeCmd, projectRoot);
 
     dependencies.logger.log('🔍 Checking MeiliSearch health...');
-    await dependencies.waitForService('http://localhost:7701/health');
+    await dependencies.waitForService(
+      `http://localhost:${MEILI_TEST_PORT}/health`
+    );
 
     dependencies.logger.log('✅ All services are ready!');
     dependencies.logger.log('🎉 Global setup completed successfully!');

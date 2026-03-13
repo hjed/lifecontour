@@ -6,6 +6,26 @@ import sys
 import time
 from pathlib import Path
 
+_WORKSPACE_ENV_CACHE: dict[str, str] | None = None
+
+
+def get_workspace_env() -> dict[str, str]:
+    global _WORKSPACE_ENV_CACHE
+    if _WORKSPACE_ENV_CACHE is not None:
+        return _WORKSPACE_ENV_CACHE
+    import json
+    import subprocess
+    import typing
+    from pathlib import Path
+
+    project_root = Path(__file__).parent.parent.parent
+    script = project_root / "scripts" / "workspace_env.py"
+    result = subprocess.run(
+        ["python3", str(script), "json"], check=True, capture_output=True, text=True
+    )
+    _WORKSPACE_ENV_CACHE = typing.cast(dict[str, str], json.loads(result.stdout))
+    return _WORKSPACE_ENV_CACHE
+
 
 def get_docker_compose_cmd() -> list[str]:
     """Get the appropriate docker compose command."""
@@ -53,6 +73,8 @@ def run_command(
         return result
     except subprocess.CalledProcessError as e:
         print(f"Command failed: {e}")
+        if e.stdout:
+            print(e.stdout)
         if e.stderr:
             print(f"Error: {e.stderr}")
         if check:
@@ -88,7 +110,7 @@ def start_test_services() -> bool:
             "docker",
             "ps",
             "--filter",
-            "name=pms-postgres",
+            f"name={get_workspace_env().get('CONTAINER_PREFIX', 'pms')}-postgres",
             "--format",
             "{{.Names}}",
         ],
@@ -100,15 +122,21 @@ def start_test_services() -> bool:
             "docker",
             "ps",
             "--filter",
-            "name=pms-meilisearch",
+            f"name={get_workspace_env().get('CONTAINER_PREFIX', 'pms')}-meilisearch",
             "--format",
             "{{.Names}}",
         ],
         check=False,
     )
 
-    postgres_running = "pms-postgres" in postgres_result.stdout
-    meilisearch_running = "pms-meilisearch" in meilisearch_result.stdout
+    postgres_running = (
+        f"{get_workspace_env().get('CONTAINER_PREFIX', 'pms')}-postgres"
+        in postgres_result.stdout
+    )
+    meilisearch_running = (
+        f"{get_workspace_env().get('CONTAINER_PREFIX', 'pms')}-meilisearch"
+        in meilisearch_result.stdout
+    )
 
     if postgres_running and meilisearch_running:
         print("✓ Test services already running")
@@ -117,10 +145,15 @@ def start_test_services() -> bool:
     # Start the containers (run from project root)
     docker_compose_cmd = get_docker_compose_cmd()
     project_root = Path(__file__).parent.parent.parent
+    import os
+
+    env = os.environ.copy()
+    env.update(get_workspace_env())
     run_command(
         docker_compose_cmd
         + ["--profile", "test-backend", "--env-file", ".env.test", "up", "-d"],
         cwd=project_root,
+        env=env,
     )
 
     # Wait for services to be ready
@@ -136,7 +169,7 @@ def start_test_services() -> bool:
                 "docker",
                 "ps",
                 "--filter",
-                "name=pms-postgres",
+                f"name={get_workspace_env().get('CONTAINER_PREFIX', 'pms')}-postgres",
                 "--format",
                 "{{.Names}}",
             ],
@@ -175,7 +208,11 @@ def start_test_services() -> bool:
     for i in range(max_retries):
         try:
             result = run_command(
-                ["curl", "-f", "http://localhost:7701/health"],
+                [
+                    "curl",
+                    "-f",
+                    f"http://localhost:{get_workspace_env().get('MEILI_TEST_PORT', '7701')}/health",
+                ],
                 check=False,
             )
             if result.returncode == 0:
@@ -200,10 +237,15 @@ def stop_test_services() -> None:
     print("Stopping test services...")
     docker_compose_cmd = get_docker_compose_cmd()
     project_root = Path(__file__).parent.parent.parent
+    import os
+
+    env = os.environ.copy()
+    env.update(get_workspace_env())
     run_command(
         docker_compose_cmd + ["--profile", "test-backend", "down", "-v"],
         cwd=project_root,
         check=False,
+        env=env,
     )
     print("✓ Test services stopped")
 
@@ -216,17 +258,19 @@ def run_tests() -> bool:
     import os
 
     test_env = os.environ.copy()
+    workspace_env = get_workspace_env()
+    test_env.update(workspace_env)
     test_env.update(
         {
-            "MEILISEARCH_URL": "http://localhost:7701",
+            "MEILISEARCH_URL": f"http://localhost:{workspace_env.get('MEILI_TEST_PORT', '7701')}",
             "MEILISEARCH_API_KEY": "test_master_key",
-            "DATABASE_URL": "postgresql://postgres:postgres@localhost:5433/personal_management_test",
+            "DATABASE_URL": f"postgresql://postgres:postgres@localhost:{workspace_env.get('DB_TEST_PORT', '5433')}/personal_management_test",
         }
     )
 
     # Run only integration tests
     cmd = [
-        "python",
+        sys.executable,
         "-m",
         "pytest",
         "tests/integration/",

@@ -3,6 +3,10 @@ import {
   FRONTEND_TEST_PORT,
   FRONTEND_TEST_URL,
   getFrontendCorsOrigins,
+  workspaceEnv,
+  BACKEND_TEST_PORT,
+  OAUTH_ADMIN_TEST_PORT,
+  MEILI_TEST_PORT,
 } from '../../../tests/e2e/utils/frontend-test-config';
 
 describe('runGlobalSetup', () => {
@@ -27,6 +31,7 @@ describe('runGlobalSetup', () => {
   const logger = { log: jest.fn(), error: jest.fn() };
   const expectedDockerEnv: NodeJS.ProcessEnv = {
     ...testEnv,
+    ...workspaceEnv,
     FRONTEND_URL: FRONTEND_TEST_URL,
     FRONTEND_PORT: FRONTEND_TEST_PORT,
     CORS_ORIGINS: getFrontendCorsOrigins(),
@@ -67,19 +72,19 @@ describe('runGlobalSetup', () => {
     );
     expect(waitForService).toHaveBeenNthCalledWith(
       1,
-      'http://localhost:8001/api/health/ready'
+      `http://localhost:${BACKEND_TEST_PORT}/api/health/ready`
     );
     expect(waitForService).toHaveBeenNthCalledWith(
       2,
-      'http://localhost:8001/api/health/ready'
+      `http://localhost:${BACKEND_TEST_PORT}/api/health/ready`
     );
     expect(waitForService).toHaveBeenNthCalledWith(
       3,
-      'http://localhost:4447/health/ready'
+      `http://localhost:${OAUTH_ADMIN_TEST_PORT}/health/ready`
     );
     expect(waitForService).toHaveBeenNthCalledWith(
       4,
-      'http://localhost:7701/health'
+      `http://localhost:${MEILI_TEST_PORT}/health`
     );
   });
 
@@ -124,19 +129,19 @@ describe('runGlobalSetup', () => {
     );
     expect(waitForService).toHaveBeenNthCalledWith(
       1,
-      'http://localhost:8001/api/health/ready'
+      `http://localhost:${BACKEND_TEST_PORT}/api/health/ready`
     );
     expect(waitForService).toHaveBeenNthCalledWith(
       2,
-      'http://localhost:8001/api/health/ready'
+      `http://localhost:${BACKEND_TEST_PORT}/api/health/ready`
     );
     expect(waitForService).toHaveBeenNthCalledWith(
       3,
-      'http://localhost:4447/health/ready'
+      `http://localhost:${OAUTH_ADMIN_TEST_PORT}/health/ready`
     );
     expect(waitForService).toHaveBeenNthCalledWith(
       4,
-      'http://localhost:7701/health'
+      `http://localhost:${MEILI_TEST_PORT}/health`
     );
   });
 

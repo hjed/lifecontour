@@ -20,7 +20,7 @@ services:
 
   database:
     image: postgres:15-alpine
-    container_name: pms-postgres
+    container_name: ${CONTAINER_PREFIX:-pms}-postgres
     profiles: [dev, test, test-backend, prod]
     environment:
       POSTGRES_DB: ${DB_NAME:-personal_management}
@@ -42,7 +42,7 @@ services:
 
   redis:
     image: redis:7-alpine
-    container_name: pms-redis
+    container_name: ${CONTAINER_PREFIX:-pms}-redis
     profiles: [dev, test, test-backend, prod]
     command: redis-server --appendonly yes
     volumes:
@@ -60,7 +60,7 @@ services:
 
   meilisearch:
     image: getmeili/meilisearch:v1.2
-    container_name: pms-meilisearch
+    container_name: ${CONTAINER_PREFIX:-pms}-meilisearch
     profiles: [dev, test, test-backend, prod]
     environment:
       - MEILI_MASTER_KEY=${MEILI_MASTER_KEY:-dev_master_key_change_in_production}
@@ -86,7 +86,7 @@ services:
 
   jaeger:
     image: jaegertracing/all-in-one:1.52
-    container_name: pms-jaeger
+    container_name: ${CONTAINER_PREFIX:-pms}-jaeger
     profiles: [dev]
     environment:
       - COLLECTOR_OTLP_ENABLED=true
@@ -103,7 +103,7 @@ services:
 
   oauth-provider:
     image: oryd/hydra:v2.2.0
-    container_name: pms-oauth
+    container_name: ${CONTAINER_PREFIX:-pms}-oauth
     profiles: [dev, test, prod]
     environment:
       - DSN=${OAUTH_DSN:-sqlite://file::memory:?cache=shared}
@@ -133,7 +133,7 @@ services:
 
   oauth-login-consent:
     image: node:18-alpine
-    container_name: pms-oauth-login-consent
+    container_name: ${CONTAINER_PREFIX:-pms}-oauth-login-consent
     profiles: [dev, test]
     working_dir: /app
     volumes:
@@ -152,7 +152,7 @@ services:
 
   oauth-init:
     image: curlimages/curl:latest
-    container_name: pms-oauth-init
+    container_name: ${CONTAINER_PREFIX:-pms}-oauth-init
     profiles: [dev, test]
     networks:
       - personal-management
@@ -185,7 +185,7 @@ services:
       args:
         BUILD_ENV: ${BUILD_ENV:-development}
         INSTALL_DEV_DEPS: ${INSTALL_DEV_DEPS:-true}
-    container_name: pms-backend
+    container_name: ${CONTAINER_PREFIX:-pms}-backend
     profiles: [dev, test, prod]
     environment:
       DATABASE_URL: postgresql://${DB_USER:-postgres}:${DB_PASSWORD:-postgres}@database:5432/${DB_NAME:-personal_management}
@@ -247,7 +247,7 @@ services:
       args:
         BUILD_ENV: ${BUILD_ENV:-development}
         NODE_ENV: ${NODE_ENV:-development}
-    container_name: pms-frontend
+    container_name: ${CONTAINER_PREFIX:-pms}-frontend
     profiles: [dev, prod]
     environment:
       - NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL:-http://localhost:8000}
@@ -282,7 +282,7 @@ services:
     build:
       context: .
       dockerfile: integration_workers/google_contacts/Dockerfile
-    container_name: pms-google-worker
+    container_name: ${CONTAINER_PREFIX:-pms}-google-worker
     profiles: [dev, test, prod]
     environment:
       DATABASE_URL: postgresql://${DB_USER:-postgres}:${DB_PASSWORD:-postgres}@database:5432/${DB_NAME:-personal_management}
@@ -323,7 +323,7 @@ services:
     build:
       context: ./docker/nginx
       dockerfile: Dockerfile
-    container_name: pms-nginx
+    container_name: ${CONTAINER_PREFIX:-pms}-nginx
     profiles: [prod]
     ports:
       - "80:80"
@@ -370,5 +370,5 @@ volumes:
 
 networks:
   personal-management:
-    driver: bridge
     name: personal-management
+    driver: bridge

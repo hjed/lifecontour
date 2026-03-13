@@ -5,6 +5,11 @@
 
 set -e
 
+# Load workspace environment variables for docker isolation (opt-in)
+if [[ "${USE_WORKSPACE_ENV:-0}" == "1" ]] && [[ -f "scripts/workspace_env.py" ]]; then
+    eval "$(python3 scripts/workspace_env.py export)"
+fi
+
 # Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -14,19 +19,27 @@ NC='\033[0m' # No Color
 
 # Helper functions
 log_info() {
-    echo -e "${BLUE}[INFO]${NC} $1"
+    local msg="$1"
+    echo -e "${BLUE}[INFO]${NC} $msg"
+    return 0
 }
 
 log_success() {
-    echo -e "${GREEN}[SUCCESS]${NC} $1"
+    local msg="$1"
+    echo -e "${GREEN}[SUCCESS]${NC} $msg"
+    return 0
 }
 
 log_warning() {
-    echo -e "${YELLOW}[WARNING]${NC} $1"
+    local msg="$1"
+    echo -e "${YELLOW}[WARNING]${NC} $msg"
+    return 0
 }
 
 log_error() {
-    echo -e "${RED}[ERROR]${NC} $1"
+    local msg="$1"
+    echo -e "${RED}[ERROR]${NC} $msg" >&2
+    return 0
 }
 
 # Check if command exists
