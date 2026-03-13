@@ -547,7 +547,7 @@ The remaining work for Iteration 2 focuses on bringing the implementation in lin
      - Created integration tests in `integration_workers/google/tests/integration/test_retry_integration.py` (3 passing tests verifying retry configuration and ARQ job enqueuing)
      - Reorganized worker tests to match backend structure: `tests/unit/` and `tests/integration/`
      - Added CI jobs for worker unit and integration tests in `.github/workflows/ci.yml`
-   - 🔲 **TODO:** Introduce clear separation of transient vs permanent failures in `sync_google` and `push_local_contacts_to_google`.
+   - 🔲 **TODO:** Introduce clear separation of transient vs permanent failures in `sync_google_contacts` and `push_local_contacts_to_google`.
    - 🔲 **TODO:** Ensure failed jobs surface clear, structured errors (including `job_id`, `user_id`, `integration_source`, and `google_account_email`) in logs and API responses, plumbed through `TaskQueueService.get_job_status` in `backend/app/core/integrations/task_queue_service.py` and the corresponding JSON-API controllers in `backend/app/api/integrations/controllers.py`.
    - ✅ **COMPLETED:** Keep tasks strictly idempotent under retries by relying on `SyncMetadataRepository` in `backend/app/core/integrations/adapters/sql/sync_metadata_repository.py` and the existing locking/idempotency patterns used by the Google Contacts worker and outbox event processor.
    - **Testing:**

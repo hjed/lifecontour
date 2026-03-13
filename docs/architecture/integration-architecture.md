@@ -210,18 +210,18 @@ Uses ARQ's `cron_jobs` feature for automatic, scheduled synchronization:
 from arq.cron import cron
 
 class GoogleWorkerSettings:
-    functions = [sync_google, push_local_contacts_to_google]
+    functions = [sync_google_contacts, push_local_contacts_to_google]
 
     # Periodic sync configuration
     cron_jobs = [
         # Sync every 6 hours at :00 minutes
-        cron(sync_google, hour={0, 6, 12, 18}, minute=0),
+        cron(sync_google_contacts, hour={0, 6, 12, 18}, minute=0),
 
         # Alternative: Daily sync at 2 AM
-        # cron(sync_google, hour=2, minute=0),
+        # cron(sync_google_contacts, hour=2, minute=0),
 
         # Alternative: Hourly sync
-        # cron(sync_google, minute=0),
+        # cron(sync_google_contacts, minute=0),
     ]
 
     # ... other settings ...
@@ -249,7 +249,7 @@ class GoogleWorkerSettings:
     # Generate cron schedule from environment variable
     cron_jobs = [
         cron(
-            sync_google,
+            sync_google_contacts,
             hour=set(range(0, 24, settings.sync_interval_hours)),
             minute=0
         )
@@ -679,7 +679,7 @@ from arq.connections import RedisSettings
 import asyncio
 
 class WorkerSettings:
-    functions = [sync_google, sync_contact_batch]
+    functions = [sync_google_contacts, sync_contact_batch]
 
     # Retry Strategy
     max_tries = 5                    # Total attempts (1 initial + 4 retries)
@@ -837,7 +837,7 @@ The system supports bidirectional synchronization:
 │                                                                     │
 │  1. Periodic/Manual Trigger                                        │
 │     ↓                                                               │
-│  2. sync_google(ctx, email, sync_type)                   │
+│  2. sync_google_contacts(ctx, email, sync_type)                   │
 │     ↓                                                               │
 │  3. Fetch contacts from Google API                                 │
 │     ↓                                                               │
@@ -876,7 +876,7 @@ The system supports bidirectional synchronization:
 ```python
 # In integration_workers/google/worker.py
 
-async def sync_google(
+async def sync_google_contacts(
     ctx: dict[str, Any],
     google_account_email: str,
     sync_type: str = "smart"

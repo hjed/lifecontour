@@ -69,7 +69,7 @@ environment:
 **How Periodic Sync Works**:
 1. ARQ cron job triggers `periodic_sync_all_accounts` at configured intervals
 2. Function queries database for all active Google integrations
-3. Enqueues individual `sync_google` tasks for each account
+3. Enqueues individual `sync_google_contacts` tasks for each account
 4. Each account syncs independently using "smart" sync strategy
 
 ### Sync Types
@@ -112,7 +112,7 @@ docker compose --profile prod up -d google-worker
 
 The worker provides three ARQ tasks:
 
-### 1. `sync_google`
+### 1. `sync_google_contacts`
 
 Syncs contacts from Google to local database.
 
@@ -124,7 +124,7 @@ Syncs contacts from Google to local database.
 **Example**:
 ```python
 await redis.enqueue_job(
-    "sync_google",
+    "sync_google_contacts",
     "user@example.com",
     123,
     "smart"

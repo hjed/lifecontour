@@ -373,7 +373,7 @@ async def _run_google_worker(
     job_id: str,
 ) -> None:
     arq_worker = Worker(
-        functions=[worker_module.sync_google],
+        functions=[worker_module.sync_google_contacts],
         redis_pool=redis_pool,
         queue_name=ARQ_QUEUE_NAME,
         burst=True,
@@ -383,7 +383,7 @@ async def _run_google_worker(
     )
 
     with patch.dict(
-        worker_module.GoogleAPIClient._get_service.__globals__,
+        worker_module.GoogleAPIClient._get_people_service.__globals__,
         {"build": MagicMock(return_value=_build_mock_google_service())},
     ):
         await arq_worker.async_run()

@@ -58,7 +58,7 @@ async def test_trigger_google_sync_enqueues_task(client, mock_arq_client):
     response = await client.post("/api/integrations/google/sync")
     assert response.status_code == 202
     mock_arq_client.enqueue_job.assert_called_once_with(
-        'sync_google',
+        'sync_google_contacts',
         user_id=123
     )
 ```

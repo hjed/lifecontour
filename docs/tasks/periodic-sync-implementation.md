@@ -7,7 +7,7 @@ This document outlines the implementation plan for adding automatic periodic syn
 ## Problem Statement
 
 **Current State:**
-- ✅ Workers CAN pull data from external systems (e.g., `sync_google` task)
+- ✅ Workers CAN pull data from external systems (e.g., `sync_google_contacts` task)
 - ✅ Workers create OutboxEvent records for each fetched entity
 - ✅ OutboxProcessor (in main app) processes events and creates/updates local entities
 - ✅ Complete inbound sync flow is implemented and working
@@ -43,7 +43,7 @@ Use ARQ's built-in cron scheduling rather than external schedulers (e.g., Kubern
 **Test-First Approach** (per ai-guidelines.md lines 39-48):
 
 #### 1.1 Write Tests First ✅ COMPLETED
-- [x] Create `integration_workers/google/tests/unit/test_periodic_sync.py`
+- [x] Create `integration_workers/google_contacts/tests/unit/test_periodic_sync.py`
 - [x] Test: Verify `WorkerSettings` has `enable_periodic_sync` and `sync_interval_hours` attributes
 - [x] Test: Verify default values (periodic sync disabled by default)
 - [x] Test: Verify `cron_jobs` is present when `enable_periodic_sync=True`
@@ -58,7 +58,7 @@ Use ARQ's built-in cron scheduling rather than external schedulers (e.g., Kubern
 - [x] Add environment variables to `WorkerSettings`:
   - `enable_periodic_sync: bool = False` (default: disabled)
   - `sync_interval_hours: int = 6` (default: 6 hours)
-- [x] Add `cron_jobs` to `GoogleWorkerSettings`
+- [x] Add `cron_jobs` to `GoogleContactsWorkerSettings`
 - [x] Generate cron schedule based on `sync_interval_hours`
 - [x] Created wrapper function `periodic_sync_all_accounts(ctx)` for ARQ cron compatibility
 - [x] Added `periodic_sync_all_accounts` to functions list
@@ -68,13 +68,13 @@ Use ARQ's built-in cron scheduling rather than external schedulers (e.g., Kubern
 **ARQ Cron Design Constraint Discovered:**
 - ARQ cron jobs can ONLY call functions with a single `ctx` parameter
 - Cannot pass additional arguments like `google_account_email`, `user_id`, `sync_type`
-- Original `sync_google(ctx, google_account_email, user_id, sync_type)` cannot be called directly
+- Original `sync_google_contacts(ctx, google_account_email, user_id, sync_type)` cannot be called directly
 
 **Solution - Wrapper Function Pattern:**
 Created `periodic_sync_all_accounts(ctx)` that:
 1. Takes only `ctx` parameter (ARQ requirement)
 2. Queries database for all active Google integrations
-3. Enqueues individual `sync_google` tasks for each account using `ctx['redis'].enqueue_job()`
+3. Enqueues individual `sync_google_contacts` tasks for each account using `ctx['redis'].enqueue_job()`
 4. Returns summary of accounts found and jobs enqueued
 
 **Benefits:**
@@ -88,7 +88,7 @@ Created `periodic_sync_all_accounts(ctx)` that:
 - [x] Run tests: All 45 tests passing (5 new + 40 existing)
 - [x] Fixed Docker container issue (prometheus_client dependency)
 - [x] Verified no regressions in existing functionality
-- [x] Worker successfully starts with 3 functions: `sync_google`, `push_local_contacts_to_google`, `periodic_sync_all_accounts`
+- [x] Worker successfully starts with 3 functions: `sync_google_contacts`, `push_local_contacts_to_google`, `periodic_sync_all_accounts`
 
 **Acceptance Criteria:**
 - [x] Tests pass for cron configuration (5/5 tests passing)
@@ -108,10 +108,10 @@ Created `periodic_sync_all_accounts(ctx)` that:
 - [x] Test: Verify failed periodic syncs are logged with error details
 
 **Implementation Details:**
-Created `integration_workers/google/tests/unit/test_periodic_sync_monitoring.py` with 5 test cases:
+Created `integration_workers/google_contacts/tests/unit/test_periodic_sync_monitoring.py` with 5 test cases:
 
 1. **test_periodic_sync_logs_trigger_type**: Verifies periodic syncs log "periodic" markers
-2. **test_sync_google_accepts_trigger_type**: Verifies function signature compatibility
+2. **test_sync_google_contacts_accepts_trigger_type**: Verifies function signature compatibility
 3. **test_periodic_sync_logs_metrics**: Verifies metrics (accounts_found, jobs_enqueued) are logged
 4. **test_periodic_sync_logs_errors**: Verifies error handling and logging
 5. **test_periodic_sync_enqueues_with_smart_sync_type**: Verifies "smart" sync type is used
@@ -125,7 +125,7 @@ Created `integration_workers/google/tests/unit/test_periodic_sync_monitoring.py`
 - No regressions in existing functionality
 
 #### 2.2 Implement Monitoring ✅ COMPLETED
-- [x] ~~Add `trigger_type` parameter to `sync_google` task~~ (Not needed - wrapper pattern handles this)
+- [x] ~~Add `trigger_type` parameter to `sync_google_contacts` task~~ (Not needed - wrapper pattern handles this)
 - [x] Log periodic sync start/completion with structured logging
 - [x] Record sync metrics (accounts_found, jobs_enqueued, errors)
 - [ ] Add health check for periodic sync status (Optional - deferred)
@@ -167,7 +167,7 @@ All logging uses structured logging from `core_shared.logging` with JSON formatt
 - [x] Document environment variables in comments
 
 **Implementation Details:**
-Added to `docker-compose.yml` under `google-worker` service:
+Added to `docker-compose.yml` under `google-contacts-worker` service:
 ```yaml
 # Periodic sync configuration
 ENABLE_PERIODIC_SYNC: ${ENABLE_PERIODIC_SYNC:-false}  # Disabled by default
@@ -180,7 +180,7 @@ Includes comprehensive inline comments explaining:
 - Sync interval examples (1, 6, 12, 24 hours)
 
 #### 3.2 Update Documentation ✅ COMPLETED
-- [x] Created `integration_workers/google/README.md` with:
+- [x] Created `integration_workers/google_contacts/README.md` with:
   - Periodic sync configuration instructions
   - Environment variable reference table
   - Example cron schedules
@@ -208,8 +208,8 @@ Includes comprehensive inline comments explaining:
 **Test-First Approach**:
 
 #### 4.1 Write Unit Tests ✅ COMPLETED
-- [x] Created `integration_workers/google/tests/unit/test_periodic_sync.py` (5 tests)
-- [x] Created `integration_workers/google/tests/unit/test_periodic_sync_monitoring.py` (5 tests)
+- [x] Created `integration_workers/google_contacts/tests/unit/test_periodic_sync.py` (5 tests)
+- [x] Created `integration_workers/google_contacts/tests/unit/test_periodic_sync_monitoring.py` (5 tests)
 - [x] Test: Worker settings configuration
 - [x] Test: Cron jobs configuration
 - [x] Test: Periodic sync logging and metrics
@@ -236,7 +236,7 @@ Created comprehensive unit tests with 10 test cases covering:
 - ✅ All linting and formatting checks passing
 
 #### 4.2 Write Integration Tests ✅ COMPLETED
-- [x] Created `integration_workers/google/tests/integration/test_periodic_sync_integration.py`
+- [x] Created `integration_workers/google_contacts/tests/integration/test_periodic_sync_integration.py`
 - [x] Test: `periodic_sync_all_accounts` queries active Google integrations
 - [x] Test: Individual sync jobs are enqueued for each account
 - [x] Test: Function handles no active accounts gracefully

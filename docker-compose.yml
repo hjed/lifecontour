@@ -290,7 +290,7 @@ services:
       REDIS_HOST: redis  # For integration tests
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-dev-google-client-id}
       GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-dev-google-client-secret}
-      ENCRYPTION_KEY: ${ENCRYPTION_KEY:-dev-encryption-key-change-in-production}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:-KzC1vYhL3bQpT_x5Ue8q0Wl1MvX-oVwYwK9cQx7lKHg=}
       LOG_LEVEL: ${WORKER_LOG_LEVEL:-DEBUG}
       WORKER_ID: google-worker
       MAX_CONCURRENT_JOBS: ${MAX_CONCURRENT_JOBS:-3}

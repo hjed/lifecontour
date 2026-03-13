@@ -101,7 +101,7 @@ class TaskQueueService:
 
             # Enqueue the sync job
             job = await pool.enqueue_job(
-                "sync_google",
+                "sync_google_contacts",
                 google_account_email,
                 user_id,
                 sync_type,

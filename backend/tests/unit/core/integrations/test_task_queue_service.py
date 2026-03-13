@@ -110,7 +110,7 @@ class TestTaskQueueService:
             # Verify job was enqueued correctly
             mock_create_pool.assert_called_once_with(service.redis_settings)
             mock_pool.enqueue_job.assert_called_once_with(
-                "sync_google",
+                "sync_google_contacts",
                 "test@example.com",
                 123,
                 "smart",

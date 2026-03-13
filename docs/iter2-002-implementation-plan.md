@@ -25,7 +25,7 @@ This document outlines the implementation plan for ITER2-002: Google Contacts In
 ### 4. Sync Triggers
 - **Primary**: Periodic ARQ cron jobs for all connected users
 - **Secondary**: User-initiated sync via API endpoint
-- **Both use**: Same `sync_google` ARQ task for consistency
+- **Both use**: Same `sync_google_contacts` ARQ task for consistency
 
 ## Implementation Slices
 
@@ -66,7 +66,7 @@ This document outlines the implementation plan for ITER2-002: Google Contacts In
 **Goal**: Move to background tasks with intelligent sync decisions
 
 **Key Components**:
-- `sync_google(ctx, user_id)` ARQ task
+- `sync_google_contacts(ctx, user_id)` ARQ task
 - Session-per-task database pattern
 - Smart sync strategy (check token, choose sync type)
 - Handle expired tokens (HTTP 410 → full sync)

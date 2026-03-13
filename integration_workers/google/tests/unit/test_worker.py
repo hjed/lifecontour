@@ -113,7 +113,7 @@ class TestGoogleWorker:
     ):
         """Test successful full sync of Google Contacts."""
         # Import the worker function
-        from worker import sync_google
+        from worker import sync_google_contacts
 
         # Mock the dependencies
         with (
@@ -124,7 +124,7 @@ class TestGoogleWorker:
             ),
         ):
             # Execute the sync task with session_factory in ctx
-            result = await sync_google(
+            result = await sync_google_contacts(
                 ctx={"session_factory": mock_session_factory},
                 google_account_email="test@example.com",
                 user_id=1,
@@ -151,7 +151,7 @@ class TestGoogleWorker:
             "sync_token": "existing_sync_token"
         }
 
-        from worker import sync_google
+        from worker import sync_google_contacts
 
         with (
             patch("worker.GoogleAuthService", return_value=mock_google_auth_service),
@@ -160,7 +160,7 @@ class TestGoogleWorker:
                 return_value=mock_google_client,
             ),
         ):
-            result = await sync_google(
+            result = await sync_google_contacts(
                 ctx={"session_factory": mock_session_factory},
                 google_account_email="test@example.com",
                 user_id=1,
@@ -184,7 +184,7 @@ class TestGoogleWorker:
         mock_result.scalar.return_value = "existing_sync_token"
         mock_session.execute.return_value = mock_result
 
-        from worker import sync_google
+        from worker import sync_google_contacts
 
         with (
             patch("worker.GoogleAuthService", return_value=mock_google_auth_service),
@@ -193,7 +193,7 @@ class TestGoogleWorker:
                 return_value=mock_google_client,
             ),
         ):
-            result = await sync_google(
+            result = await sync_google_contacts(
                 ctx={"session_factory": mock_session_factory},
                 google_account_email="test@example.com",
                 user_id=1,
@@ -219,7 +219,7 @@ class TestGoogleWorker:
         # Mock client to raise auth error when list_connections is called
         mock_google_client.list_connections.side_effect = Exception("Auth failed")
 
-        from worker import sync_google
+        from worker import sync_google_contacts
 
         with (
             patch("worker.GoogleAuthService", return_value=mock_google_auth_service),
@@ -228,7 +228,7 @@ class TestGoogleWorker:
                 return_value=mock_google_client,
             ),
         ):
-            result = await sync_google(
+            result = await sync_google_contacts(
                 ctx={"session_factory": mock_session_factory},
                 google_account_email="test@example.com",
                 user_id=1,
@@ -249,7 +249,7 @@ class TestGoogleWorker:
         # Mock API client to raise error
         mock_google_client.list_connections.side_effect = Exception("API error")
 
-        from worker import sync_google
+        from worker import sync_google_contacts
 
         with (
             patch("worker.GoogleAuthService", return_value=mock_google_auth_service),
@@ -258,7 +258,7 @@ class TestGoogleWorker:
                 return_value=mock_google_client,
             ),
         ):
-            result = await sync_google(
+            result = await sync_google_contacts(
                 ctx={"session_factory": mock_session_factory},
                 google_account_email="test@example.com",
                 user_id=1,

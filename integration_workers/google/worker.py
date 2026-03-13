@@ -1191,7 +1191,7 @@ async def periodic_sync_all_accounts(ctx: dict[str, Any]) -> dict[str, Any]:
                 try:
                     # Enqueue individual sync job using ARQ pool from context
                     job = await ctx["redis"].enqueue_job(
-                        "sync_google",
+                        "sync_google_contacts",
                         google_account_email,
                         user_id,
                         "smart",  # Use smart sync for periodic syncs
@@ -1256,7 +1256,7 @@ async def periodic_sync_all_accounts(ctx: dict[str, Any]) -> dict[str, Any]:
         }
 
 
-async def sync_google(
+async def sync_google_contacts(
     ctx: dict[str, Any],
     google_account_email: str,
     user_id: str | int,
@@ -1709,7 +1709,7 @@ class GoogleWorkerSettings(WorkerSettingsBase):
 
     # Task functions
     functions = [
-        sync_google,
+        sync_google_contacts,
         push_local_contacts_to_google,
         periodic_sync_all_accounts,  # Wrapper for periodic cron syncs
     ]
