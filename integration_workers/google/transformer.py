@@ -20,6 +20,7 @@ from core_shared.models.contacts.entities import (
 from core_shared.models.contacts.value_objects import TagName
 
 from api_models import GooglePerson
+from group_translator import GoogleGroupNameTranslator
 
 logger = structlog.get_logger()
 
@@ -31,6 +32,17 @@ class GoogleContactTransformer:
     Handles the conversion of Google's contact format to our domain model,
     including proper mapping of names, contact methods, addresses, and metadata.
     """
+
+    def __init__(self, translator: GoogleGroupNameTranslator | None = None) -> None:
+        """
+        Initialize the transformer.
+
+        Args:
+            translator: Translator for Google Contact Groups. If None, an empty one is used.
+        """
+        self.translator = translator or GoogleGroupNameTranslator(
+            reserved_group_ids=[], group_mapping={}
+        )
 
     def transform_person(self, google_person: GooglePerson) -> Contact:
         """
@@ -57,12 +69,21 @@ class GoogleContactTransformer:
         if not first_name:
             first_name = "Unknown"
 
+        is_favourite = False
+        for membership in google_person.memberships:
+            group_info = getattr(membership, "contact_group_membership", None)
+            if group_info:
+                group_id = self._extract_group_id(group_info)
+                if group_id == "starred":
+                    is_favourite = True
+                    break
+
         contact = Contact(
             first_name=first_name,
             last_name=last_name,
             middle_name=middle_name,
             nick_name=nick_name,
-            is_favourite=False,
+            is_favourite=is_favourite,
         )
 
         contact.methods.extend(
@@ -316,21 +337,47 @@ class GoogleContactTransformer:
 
     def _create_tag_from_membership(self, membership: Any) -> Tag | None:
         """Create a tag from a Google membership, if possible."""
-        group_name = self._extract_membership_group_name(membership)
-        if not group_name:
+        group_info = getattr(membership, "contact_group_membership", None)
+        if not group_info:
+            return None
+
+        group_id = self._extract_group_id(group_info)
+        resource_name = self._extract_resource_name(group_info)
+
+        if self.translator.is_reserved(group_id):
+            return None
+
+        fallback_name = self._extract_membership_group_name(membership)
+        translated_name = self.translator.translate(
+            resource_name, fallback_name=fallback_name
+        )
+
+        if not translated_name:
             return None
 
         try:
-            sanitized_name = self._sanitize_tag_name(str(group_name))
+            sanitized_name = self._sanitize_tag_name(str(translated_name))
             if sanitized_name:
                 return Tag(name=TagName(sanitized_name))
         except ValueError:
             logger.debug(
                 "Skipping invalid contact group name for tag",
-                group_name=group_name,
+                group_name=translated_name,
             )
 
         return None
+
+    def _extract_group_id(self, group_info: Any) -> str | None:
+        """Extract the contact group ID."""
+        if isinstance(group_info, dict):
+            return group_info.get("contactGroupId")
+        return getattr(group_info, "contact_group_id", None)
+
+    def _extract_resource_name(self, group_info: Any) -> str | None:
+        """Extract the contact group resource name."""
+        if isinstance(group_info, dict):
+            return group_info.get("contactGroupResourceName")
+        return getattr(group_info, "contact_group_resource_name", None)
 
     def _extract_membership_group_name(self, membership: Any) -> str | None:
         """Extract the contact group name or identifier from a membership."""

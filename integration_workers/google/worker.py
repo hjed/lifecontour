@@ -79,6 +79,9 @@ class WorkerSettings(BaseSettings):
     enable_periodic_sync: bool = False
     sync_interval_hours: int = 6
 
+    # Reserved google groups to ignore (by default just myContacts)
+    google_reserved_groups: list[str] = ["myContacts"]
+
 
 # Global settings instance
 settings = WorkerSettings()  # type: ignore[call-arg]
@@ -812,6 +815,48 @@ def _process_contacts_batch(
     return serialized_contacts
 
 
+async def _create_transformer(
+    client: GoogleContactsAPIClient,
+) -> GoogleContactTransformer:
+    """
+    Create a GoogleContactTransformer with a populated name translator.
+
+    Fetches contact groups to build the translation mapping.
+    """
+    group_mapping = {}
+    try:
+        groups_data = await client.list_contact_groups(page_size=1000)
+        from api_models import ListContactGroupsResponse
+
+        groups_response = ListContactGroupsResponse(**groups_data)
+
+        if (
+            hasattr(groups_response, "contact_groups")
+            and groups_response.contact_groups
+        ):
+            for group in groups_response.contact_groups:
+                if group.resource_name and group.name:
+                    group_mapping[group.resource_name] = group.name
+
+        logger.info(
+            "Successfully built contact group translation mapping",
+            groups_count=len(group_mapping),
+        )
+    except Exception as e:
+        logger.error(
+            "Failed to fetch contact groups for translation, proceeding with empty mapping",
+            error=str(e),
+        )
+
+    from group_translator import GoogleGroupNameTranslator
+
+    translator = GoogleGroupNameTranslator(
+        reserved_group_ids=settings.google_reserved_groups, group_mapping=group_mapping
+    )
+
+    return GoogleContactTransformer(translator=translator)
+
+
 async def _perform_full_sync(
     session: AsyncSession,
     client: GoogleAPIClient,
@@ -840,7 +885,7 @@ async def _perform_full_sync(
 
     page_token = None
     total_processed = 0
-    transformer = GoogleContactTransformer()
+    transformer = await _create_transformer(client)
 
     while True:
         # Check if job has been cancelled
@@ -968,7 +1013,7 @@ async def _perform_incremental_sync(
     total_processed = 0
 
     # Transform and serialize contacts, handling per-item failures
-    transformer = GoogleContactTransformer()
+    transformer = await _create_transformer(client)
     serialized_contacts = _process_contacts_batch(
         contacts_response.connections,
         transformer,
