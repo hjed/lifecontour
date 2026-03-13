@@ -202,5 +202,11 @@ dev = [
 ]
 
 [tool.alembic]
-script_location = "%(here)/migrations"
-file_template = "4d_%%(rev)_%%(slug)s.py"
+script_location = "%(here)/app/migrations"
+file_template = "4d_%%(rev)s_%%(slug)s.py"
+
+[[tool.alembic.post_write_hooks]]
+name = "ruff"
+type = "console_scripts"
+entrypoint = "ruff"
+options = "check --fix REVISION_SCRIPT_FILENAME"

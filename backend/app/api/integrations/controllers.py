@@ -432,15 +432,16 @@ async def get_google_status(
                     WHERE user_id = :user_id
                 """)
                 result = await conn.execute(stmt, {"user_id": str(user.id)})
-                row = result.fetchone()
-                if row:
+                rows = result.fetchall()
+                for row in rows:
                     scopes = row.granted_scopes or ""
-                    # If scopes don't include calendar, they need to re-consent
+                    # If any connected account doesn't have calendar scopes, they need to re-consent
                     if (
                         "calendar.events" not in scopes
                         or "calendar.readonly" not in scopes
                     ):
                         needs_reconsent = True
+                        break
 
                 repo = SyncJobRepository(conn)
 
