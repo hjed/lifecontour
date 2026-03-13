@@ -44,7 +44,7 @@ The worker uses ARQ (Async Redis Queue) for task processing and supports:
 | `GOOGLE_CLIENT_SECRET` | *required* | Google OAuth client secret |
 | `ENCRYPTION_KEY` | *required* | Key for encrypting OAuth tokens |
 | `LOG_LEVEL` | `INFO` | Logging level (DEBUG, INFO, WARNING, ERROR) |
-| `WORKER_ID` | `google-contacts-worker` | Unique worker identifier |
+| `WORKER_ID` | `google-worker` | Unique worker identifier |
 | `MAX_CONCURRENT_JOBS` | `5` | Maximum concurrent ARQ jobs |
 | `ENABLE_PERIODIC_SYNC` | `false` | Enable automatic periodic syncing |
 | `SYNC_INTERVAL_HOURS` | `6` | Hours between periodic syncs |
@@ -88,13 +88,13 @@ Periodic syncs always use **`smart`** strategy for efficiency.
 
 ```bash
 # Start with Docker Compose
-docker compose --profile dev up google-contacts-worker
+docker compose --profile dev up google-worker
 
 # View logs
-docker compose logs -f google-contacts-worker
+docker compose logs -f google-worker
 
 # Run tests
-docker compose exec google-contacts-worker pytest tests/unit/ -v
+docker compose exec google-worker pytest tests/unit/ -v
 ```
 
 ### Production
@@ -105,7 +105,7 @@ export ENABLE_PERIODIC_SYNC=true
 export SYNC_INTERVAL_HOURS=6
 
 # Start worker
-docker compose --profile prod up -d google-contacts-worker
+docker compose --profile prod up -d google-worker
 ```
 
 ## Tasks

@@ -34,7 +34,16 @@ class TestOutboxEventProcessor:
     @pytest.fixture
     def mock_connection(self) -> AsyncMock:
         """Create mock database connection."""
-        return AsyncMock(spec=AsyncConnection)
+        from contextlib import asynccontextmanager
+
+        conn = AsyncMock(spec=AsyncConnection)
+
+        @asynccontextmanager
+        async def mock_begin_nested():
+            yield conn
+
+        conn.begin_nested = mock_begin_nested
+        return conn
 
     @pytest.fixture
     def processor(
@@ -84,7 +93,7 @@ class TestOutboxEventProcessor:
             id=uuid4(),
             event_type="contact.created",
             event_data={
-                "integration_source": "google_contacts",
+                "integration_source": "google",
                 "external_id": "people/c123456789",
                 "contact_data": sample_contact_event_data,
                 "sync_timestamp": datetime.now(UTC).isoformat(),
@@ -107,7 +116,7 @@ class TestOutboxEventProcessor:
             id=uuid4(),
             event_type="contact.updated",
             event_data={
-                "integration_source": "google_contacts",
+                "integration_source": "google",
                 "external_id": "people/c123456789",
                 "contact_data": updated_data,
                 "sync_timestamp": datetime.now(UTC).isoformat(),
@@ -125,7 +134,7 @@ class TestOutboxEventProcessor:
             id=uuid4(),
             event_type="sync.completed",
             event_data={
-                "integration_source": "google_contacts",
+                "integration_source": "google",
                 "google_account_email": "user@example.com",
                 "metrics": {
                     "contacts_processed": 5,
@@ -168,6 +177,7 @@ class TestOutboxEventProcessor:
             ],
         )
         mock_contact_service.create_contact.return_value = expected_contact
+        mock_contact_service.get_contact_by_email.return_value = None
 
         # Mock external reference service to return None (no existing reference)
         mock_external_ref_service = AsyncMock()
@@ -259,7 +269,7 @@ class TestOutboxEventProcessor:
 
         # Verify existing contact was looked up
         mock_contact_service.find_contact_by_external_reference.assert_called_once_with(
-            integration_source="google_contacts",
+            integration_source="google",
             external_id="people/c123456789",
             transaction=mock_connection,
         )
@@ -324,6 +334,7 @@ class TestOutboxEventProcessor:
     ):
         """Test handling contact service errors during contact creation."""
         # Mock contact service to raise an error
+        mock_contact_service.get_contact_by_email.return_value = None
         mock_contact_service.create_contact.side_effect = Exception("Database error")
 
         # Mock external reference service
@@ -378,7 +389,7 @@ class TestOutboxEventProcessor:
             id=uuid4(),
             event_type="contact.created",
             event_data={
-                "integration_source": "google_contacts",
+                "integration_source": "google",
                 "external_id": "people/invalid",
                 "contact_data": {"invalid": "data"},  # Missing required fields
                 "sync_timestamp": datetime.now(UTC).isoformat(),
@@ -440,7 +451,7 @@ class TestOutboxEventProcessor:
             id=uuid4(),
             event_type="contact.created",
             event_data={
-                "integration_source": "google_contacts",
+                "integration_source": "google",
                 "external_id": "people/invalid",
                 "contact_data": {"invalid": "data"},
                 "sync_timestamp": datetime.now(UTC).isoformat(),

@@ -20,7 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.infrastructure.events.outbox_repository import OutboxRepository
 
-INTEGRATION_SOURCE = "google_contacts"
+INTEGRATION_SOURCE = "google"
 MAX_RETRY_COUNT = 3
 
 

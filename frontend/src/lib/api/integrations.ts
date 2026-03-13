@@ -8,7 +8,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import {
-  GoogleContactsStatusResponse,
+  GoogleStatusResponse,
   SyncJobResponse,
   SyncJobListResponse,
   IntegrationHealthResponse,
@@ -32,7 +32,7 @@ const EXTENDED_POLL_INTERVAL = 10000; // 10 seconds
 // Query Keys
 export const integrationKeys = {
   all: ['integrations'] as const,
-  googleContacts: () => [...integrationKeys.all, 'google-contacts'] as const,
+  googleContacts: () => [...integrationKeys.all, 'google'] as const,
   googleContactsStatus: () =>
     [...integrationKeys.googleContacts(), 'status'] as const,
   syncJobs: () => [...integrationKeys.all, 'sync-jobs'] as const,
@@ -75,14 +75,14 @@ async function handleApiResponse<T>(response: Response): Promise<T> {
 }
 
 // API Functions
-export async function fetchGoogleContactsStatus(): Promise<GoogleContactsStatusResponse> {
+export async function fetchGoogleStatus(): Promise<GoogleStatusResponse> {
   const response = await fetch('/api/integrations/google/contacts/status', {
     credentials: 'include',
   });
-  return handleApiResponse<GoogleContactsStatusResponse>(response);
+  return handleApiResponse<GoogleStatusResponse>(response);
 }
 
-export async function triggerGoogleContactsSync(
+export async function triggerGoogleSync(
   syncType: SyncType = 'smart'
 ): Promise<SyncJobResponse> {
   const requestData: SyncTriggerRequest = { sync_type: syncType };
@@ -169,20 +169,20 @@ export async function cancelSyncJob(jobId: string): Promise<void> {
 }
 
 // React Query Hooks
-export function useGoogleContactsStatus() {
+export function useGoogleStatus() {
   return useQuery({
     queryKey: integrationKeys.googleContactsStatus(),
-    queryFn: fetchGoogleContactsStatus,
+    queryFn: fetchGoogleStatus,
     staleTime: 30 * 1000, // 30 seconds
     refetchInterval: 60 * 1000, // 1 minute
   });
 }
 
-export function useGoogleContactsSync() {
+export function useGoogleSync() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: triggerGoogleContactsSync,
+    mutationFn: triggerGoogleSync,
     onSuccess: data => {
       // Invalidate status and sync history queries
       queryClient.invalidateQueries({
@@ -273,7 +273,7 @@ export function useCancelSyncJob() {
 /**
  * Initiate Google Contacts OAuth authorization flow.
  */
-export function useGoogleContactsOAuthAuthorize() {
+export function useGoogleOAuthAuthorize() {
   return useMutation<OAuthAuthorizeResponse, Error, OAuthAuthorizeRequest>({
     mutationFn: async (request: OAuthAuthorizeRequest) => {
       const response = await fetch(
@@ -303,7 +303,7 @@ export function useGoogleContactsOAuthAuthorize() {
 /**
  * Handle Google Contacts OAuth callback.
  */
-export function useGoogleContactsOAuthCallback() {
+export function useGoogleOAuthCallback() {
   const queryClient = useQueryClient();
 
   return useMutation<OAuthCallbackResponse, Error, OAuthCallbackRequest>({
@@ -344,7 +344,7 @@ export function useGoogleContactsOAuthCallback() {
 /**
  * Disconnect Google Contacts OAuth integration.
  */
-export function useGoogleContactsOAuthDisconnect() {
+export function useGoogleOAuthDisconnect() {
   const queryClient = useQueryClient();
 
   return useMutation<OAuthDisconnectResponse, Error, void>({

@@ -12,7 +12,7 @@ from arq import create_pool
 from arq.connections import ArqRedis, RedisSettings
 from arq.jobs import Job, JobDef, JobStatus
 from core_shared.integration_constants import (
-    GOOGLE_CONTACTS_ARQ_QUEUE_NAME as ARQ_QUEUE_NAME,
+    GOOGLE_ARQ_QUEUE_NAME as ARQ_QUEUE_NAME,
 )
 from core_shared.logging import get_logger
 from core_shared.metrics import queue_depth
@@ -39,7 +39,7 @@ class TaskQueueService:
         redis_settings: RedisSettings,
         settings: Settings,
         db_manager: IntegrationDatabaseManager,
-        worker_type: str = "google_contacts",
+        worker_type: str = "google",
     ):
         """
         Initialize the task queue service.
@@ -49,7 +49,7 @@ class TaskQueueService:
             redis_settings: Redis settings for ARQ
             settings: Application settings
             db_manager: Database manager for persisting sync jobs
-            worker_type: Type of worker for metrics labeling (default: "google_contacts")
+            worker_type: Type of worker for metrics labeling (default: "google")
         """
         self.redis_pool = redis_pool
         self.redis_settings = redis_settings
@@ -70,7 +70,7 @@ class TaskQueueService:
             await self._arq_pool.close()
             self._arq_pool = None
 
-    async def enqueue_google_contacts_sync(
+    async def enqueue_google_sync(
         self, google_account_email: str, user_id: str | int, sync_type: str = "smart"
     ) -> str:
         """
@@ -113,7 +113,7 @@ class TaskQueueService:
             if not job:
                 raise JobEnqueueError(
                     message="Failed to enqueue job - no job returned",
-                    integration_source="google_contacts",
+                    integration_source="google",
                     reason="ARQ pool returned None",
                 )
 
@@ -137,7 +137,7 @@ class TaskQueueService:
                     await repo.create(
                         job_id=job_id,
                         user_id=str(user_id),
-                        integration_source="google_contacts",
+                        integration_source="google",
                         sync_type=sync_type,
                         status="queued",
                     )

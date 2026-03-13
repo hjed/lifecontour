@@ -4,6 +4,7 @@ Authentication providers for Dishka dependency injection.
 Provides authentication-related services and user session management.
 """
 
+import pydantic
 import structlog
 from dishka import Provider, Scope, provide
 from fastapi import HTTPException, Request, status
@@ -62,7 +63,7 @@ class AuthProvider(Provider):
 
         try:
             return SessionUser.model_validate(user_data)
-        except Exception as e:
+        except pydantic.ValidationError as e:
             logger.warning("Invalid user session data", error=str(e))
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
@@ -95,6 +96,6 @@ class AuthProvider(Provider):
 
         try:
             return SessionUser.model_validate(user_data)
-        except Exception as e:
+        except pydantic.ValidationError as e:
             logger.warning("Invalid user session data", error=e, user_data=user_data)
             return None

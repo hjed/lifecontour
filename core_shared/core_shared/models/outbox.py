@@ -103,7 +103,7 @@ class OutboxEvent(Base):
 
         Args:
             contact_data: Contact data from external system in our Contacts format
-            integration_source: Source integration (e.g., 'google_contacts')
+            integration_source: Source integration (e.g., 'google')
             external_id: External system's contact ID
             sync_type: Type of sync operation ('created', 'updated', 'deleted')
             etag: External system's version identifier (e.g., Google ETag)
@@ -132,7 +132,7 @@ class OutboxEvent(Base):
         Create an outbox event for sync completion.
 
         Args:
-            integration_source: Source integration (e.g., 'google_contacts')
+            integration_source: Source integration (e.g., 'google')
             google_account_email: Google account that was synced
             metrics: Sync metrics and results
 

@@ -57,7 +57,7 @@ class TestTaskQueueService:
         )
 
     @pytest.mark.asyncio
-    async def test_enqueue_google_contacts_sync_success(
+    async def test_enqueue_google_sync_success(
         self, service: TaskQueueService, mock_redis_pool: AsyncMock
     ):
         """Test successful job enqueueing."""
@@ -103,7 +103,7 @@ class TestTaskQueueService:
             mock_redis_pool.expire = AsyncMock()
 
             # Enqueue job
-            job_id = await service.enqueue_google_contacts_sync(
+            job_id = await service.enqueue_google_sync(
                 google_account_email="test@example.com", user_id=123, sync_type="smart"
             )
 
@@ -128,9 +128,7 @@ class TestTaskQueueService:
             mock_redis_pool.expire.assert_called_once_with("user_jobs:123", 86400)
 
     @pytest.mark.asyncio
-    async def test_enqueue_google_contacts_sync_failure(
-        self, service: TaskQueueService
-    ):
+    async def test_enqueue_google_sync_failure(self, service: TaskQueueService):
         """Test job enqueueing failure."""
         with patch(
             "app.core.integrations.task_queue_service.create_pool"
@@ -139,7 +137,7 @@ class TestTaskQueueService:
 
             # Should raise exception
             with pytest.raises(Exception) as exc_info:
-                await service.enqueue_google_contacts_sync(
+                await service.enqueue_google_sync(
                     google_account_email="test@example.com",
                     user_id=123,
                     sync_type="smart",
@@ -289,9 +287,7 @@ class TestTaskQueueService:
         assert (
             mock_redis_pool.ping.call_count == 2
         )  # Called twice for connectivity and response time
-        mock_redis_pool.queued_jobs.assert_called_once_with(
-            queue_name="google_contacts"
-        )
+        mock_redis_pool.queued_jobs.assert_called_once_with(queue_name="google")
 
         # Verify health response
         assert health["status"] == "healthy"

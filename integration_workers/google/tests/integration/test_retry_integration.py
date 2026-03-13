@@ -109,13 +109,13 @@ class TestARQRetryIntegration:
     @pytest.mark.asyncio
     async def test_worker_settings_configuration(self):
         """Test that the worker settings are correctly configured."""
-        from worker import GoogleContactsWorkerSettings, retry_delay_func
+        from worker import GoogleWorkerSettings, retry_delay_func
 
         # Verify worker settings
-        assert GoogleContactsWorkerSettings.max_tries == 5
-        assert GoogleContactsWorkerSettings.retry_delay == retry_delay_func
-        assert GoogleContactsWorkerSettings.job_timeout == 600
-        assert GoogleContactsWorkerSettings.queue_name == "google_contacts"
+        assert GoogleWorkerSettings.max_tries == 5
+        assert GoogleWorkerSettings.retry_delay == retry_delay_func
+        assert GoogleWorkerSettings.job_timeout == 600
+        assert GoogleWorkerSettings.queue_name == "google"
 
     @pytest.mark.asyncio
     async def test_retry_delay_exponential_backoff(self):
@@ -235,5 +235,8 @@ class TestARQRetryIntegration:
             try:
                 await worker_task
             except asyncio.CancelledError:
-                # Ignore CancelledError from task we cancelled ourselves during cleanup
-                pass
+                # If worker_task is cancelled, that's expected. If the test run was cancelled
+                # (meaning the exception was raised into us, not just returned from worker_task),
+                # we should re-raise. We can tell because worker_task.cancelled() is true.
+                if not worker_task.cancelled():
+                    raise

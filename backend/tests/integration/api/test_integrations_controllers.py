@@ -102,14 +102,14 @@ class TestIntegrationsControllers:
         with suppress(Exception):
             anyio.run(test_container.close)
 
-    def test_trigger_google_contacts_sync_success(self, client: TestClient):
+    def test_trigger_google_sync_success(self, client: TestClient):
         """Test successful Google Contacts sync trigger."""
         with (
             patch(
                 "app.infrastructure.auth.oauth_service.OAuthService.get_connected_google_account_email"
             ) as mock_get_google_account_email,
             patch(
-                "app.core.integrations.task_queue_service.TaskQueueService.enqueue_google_contacts_sync"
+                "app.core.integrations.task_queue_service.TaskQueueService.enqueue_google_sync"
             ) as mock_enqueue,
             patch(
                 "app.core.integrations.task_queue_service.TaskQueueService.get_sync_job_details"
@@ -157,7 +157,7 @@ class TestIntegrationsControllers:
                 job_id="test-job-123", user_id="123"
             )
 
-    def test_trigger_google_contacts_sync_requires_connected_google_account(
+    def test_trigger_google_sync_requires_connected_google_account(
         self, client: TestClient
     ):
         """Test sync trigger fails early when the user has no connected Google account."""
@@ -166,7 +166,7 @@ class TestIntegrationsControllers:
                 "app.infrastructure.auth.oauth_service.OAuthService.get_connected_google_account_email"
             ) as mock_get_google_account_email,
             patch(
-                "app.core.integrations.task_queue_service.TaskQueueService.enqueue_google_contacts_sync"
+                "app.core.integrations.task_queue_service.TaskQueueService.enqueue_google_sync"
             ) as mock_enqueue,
         ):
             mock_get_google_account_email.side_effect = ValueError(
@@ -185,14 +185,14 @@ class TestIntegrationsControllers:
             )
             mock_enqueue.assert_not_called()
 
-    def test_trigger_google_contacts_sync_failure(self, client: TestClient):
+    def test_trigger_google_sync_failure(self, client: TestClient):
         """Test Google Contacts sync trigger failure."""
         with (
             patch(
                 "app.infrastructure.auth.oauth_service.OAuthService.get_connected_google_account_email"
             ) as mock_get_google_account_email,
             patch(
-                "app.core.integrations.task_queue_service.TaskQueueService.enqueue_google_contacts_sync"
+                "app.core.integrations.task_queue_service.TaskQueueService.enqueue_google_sync"
             ) as mock_enqueue,
         ):
             mock_get_google_account_email.return_value = "connected@gmail.com"
@@ -281,7 +281,7 @@ class TestIntegrationsControllers:
                         "response_time_ms": 2.5,
                         "queue_length": 0,
                     },
-                    "google_contacts_worker": {
+                    "google_worker": {
                         "status": "healthy",
                         "recent_jobs": 0,
                         "worker_version": "1.0.0",
@@ -325,7 +325,7 @@ class TestIntegrationsControllers:
                         "status": "unhealthy",
                         "error": "Connection refused",
                     },
-                    "google_contacts_worker": {
+                    "google_worker": {
                         "status": "unhealthy",
                         "error": "Worker not responding",
                     },
@@ -369,7 +369,7 @@ class TestIntegrationsControllers:
                 attributes["redis"]["errorMessage"] or ""
             )
 
-    def test_get_google_contacts_status_disconnected(self, client: TestClient):
+    def test_get_google_status_disconnected(self, client: TestClient):
         """Test Google Contacts status endpoint returns disconnected state."""
         # Make request
         response = client.get("/api/integrations/google/contacts/status")
@@ -380,7 +380,7 @@ class TestIntegrationsControllers:
 
         # Verify JSON API structure
         assert "data" in data
-        assert data["data"]["id"] == "google-contacts"
+        assert data["data"]["id"] == "google"
         assert data["data"]["type"] == "integration-status"
 
         # Verify attributes (using camelCase as per JSON API)
@@ -391,10 +391,10 @@ class TestIntegrationsControllers:
         assert attributes["lastSync"] is None
 
     # OAuth Integration Tests
-    def test_google_contacts_oauth_authorize_success(self, client: TestClient):
+    def test_google_oauth_authorize_success(self, client: TestClient):
         """Test successful Google Contacts OAuth authorization initiation."""
         with patch(
-            "app.infrastructure.auth.oauth_service.OAuthService.get_google_contacts_authorization_url"
+            "app.infrastructure.auth.oauth_service.OAuthService.get_google_authorization_url"
         ) as mock_auth_url:
             # Mock successful authorization URL generation with state parameter
             mock_auth_url.return_value = "https://accounts.google.com/oauth/authorize?client_id=test&redirect_uri=test&scope=contacts&state=test_state_123"
@@ -418,10 +418,10 @@ class TestIntegrationsControllers:
             # Verify service was called
             mock_auth_url.assert_called_once()
 
-    def test_google_contacts_oauth_authorize_missing_provider(self, client: TestClient):
+    def test_google_oauth_authorize_missing_provider(self, client: TestClient):
         """Test OAuth authorization when Google provider is not configured."""
         with patch(
-            "app.infrastructure.auth.oauth_service.OAuthService.get_google_contacts_authorization_url"
+            "app.infrastructure.auth.oauth_service.OAuthService.get_google_authorization_url"
         ) as mock_auth_url:
             # Mock provider not configured error
             from fastapi import HTTPException
@@ -443,11 +443,11 @@ class TestIntegrationsControllers:
             assert len(data["errors"]) > 0
             assert "Google OAuth provider not configured" in data["errors"][0]["detail"]
 
-    def test_google_contacts_oauth_callback_success(self, client: TestClient):
+    def test_google_oauth_callback_success(self, client: TestClient):
         """Test successful Google Contacts OAuth callback."""
         with (
             patch(
-                "app.infrastructure.auth.oauth_service.OAuthService.handle_google_contacts_callback"
+                "app.infrastructure.auth.oauth_service.OAuthService.handle_google_callback"
             ) as mock_callback,
             patch(
                 "app.infrastructure.auth.oauth_service.OAuthService.get_google_user_email"
@@ -482,10 +482,10 @@ class TestIntegrationsControllers:
             mock_get_email.assert_called_once_with("test_access_token")
             mock_store_tokens.assert_called_once()
 
-    def test_google_contacts_oauth_callback_invalid_code(self, client: TestClient):
+    def test_google_oauth_callback_invalid_code(self, client: TestClient):
         """Test OAuth callback with invalid authorization code."""
         with patch(
-            "app.infrastructure.auth.oauth_service.OAuthService.handle_google_contacts_callback"
+            "app.infrastructure.auth.oauth_service.OAuthService.handle_google_callback"
         ) as mock_callback:
             # Mock invalid code error
             mock_callback.side_effect = ValueError("Invalid authorization code")
@@ -503,10 +503,10 @@ class TestIntegrationsControllers:
             assert len(data["errors"]) > 0
             assert "Invalid authorization code" in data["errors"][0]["detail"]
 
-    def test_google_contacts_oauth_disconnect_success(self, client: TestClient):
+    def test_google_oauth_disconnect_success(self, client: TestClient):
         """Test Google Contacts OAuth disconnect successfully deletes tokens."""
         with patch(
-            "app.infrastructure.auth.oauth_service.OAuthService.disconnect_google_contacts"
+            "app.infrastructure.auth.oauth_service.OAuthService.disconnect_google"
         ) as mock_disconnect:
             # Mock successful disconnect (returns True)
             mock_disconnect.return_value = True
@@ -525,10 +525,10 @@ class TestIntegrationsControllers:
             # Verify service was called
             mock_disconnect.assert_called_once()
 
-    def test_google_contacts_oauth_disconnect_no_tokens(self, client: TestClient):
+    def test_google_oauth_disconnect_no_tokens(self, client: TestClient):
         """Test Google Contacts OAuth disconnect when no tokens exist."""
         with patch(
-            "app.infrastructure.auth.oauth_service.OAuthService.disconnect_google_contacts"
+            "app.infrastructure.auth.oauth_service.OAuthService.disconnect_google"
         ) as mock_disconnect:
             # Mock no tokens found (returns False)
             mock_disconnect.return_value = False

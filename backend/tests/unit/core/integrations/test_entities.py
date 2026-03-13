@@ -20,7 +20,7 @@ class TestSyncMetadata:
         now = datetime.now()
         sync_metadata = SyncMetadata(
             internal_id=123,
-            integration_source="google_contacts",
+            integration_source="google",
             external_id="ext_123",
             last_synced_at=now,
             version_hash="abc123",
@@ -28,7 +28,7 @@ class TestSyncMetadata:
         )
 
         assert sync_metadata.internal_id == 123
-        assert sync_metadata.integration_source == "google_contacts"
+        assert sync_metadata.integration_source == "google"
         assert sync_metadata.external_id == "ext_123"
         assert sync_metadata.last_synced_at == now
         assert sync_metadata.version_hash == "abc123"
@@ -42,7 +42,7 @@ class TestSyncMetadata:
         now = datetime.now()
         sync_metadata = SyncMetadata(
             internal_id=123,
-            integration_source="google_contacts",
+            integration_source="google",
             external_id="ext_123",
             last_synced_at=now,
             version_hash="abc123",

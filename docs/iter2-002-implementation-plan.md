@@ -34,7 +34,7 @@ This document outlines the implementation plan for ITER2-002: Google Contacts In
 
 **Key Components**:
 - `GoogleAuthService`: Manage encrypted OAuth tokens
-- `GoogleContactsAPIClient`: Wrapper around `google-api-python-client` with credential management
+- `GoogleAPIClient`: Wrapper around `google-api-python-client` with credential management
 - Worker secrets configuration for Google API credentials
 - Official library: `google-api-python-client google-auth-httplib2 google-auth-oauthlib`
 
@@ -46,7 +46,7 @@ This document outlines the implementation plan for ITER2-002: Google Contacts In
 **Key Components**:
 - Pydantic models for Google Contact API responses
 - Data transformer (Google → core_shared models)
-- `GoogleContactsService.full_sync()` with pagination
+- `GoogleService.full_sync()` with pagination
 - `UserGoogleIntegration` model to store sync_token
 
 **Deliverable**: Service that can fetch all contacts and return sync_token
@@ -57,7 +57,7 @@ This document outlines the implementation plan for ITER2-002: Google Contacts In
 **Key Components**:
 - `SyncMetadata` model (item_id, external_id, version_hash as ETag)
 - Persistence logic for full_sync results
-- `GoogleContactsService.incremental_sync()` using sync_token
+- `GoogleService.incremental_sync()` using sync_token
 - Handle created/updated/deleted contacts with soft-deletion
 
 **Deliverable**: Complete sync persistence with incremental updates

@@ -17,7 +17,7 @@ async def test_sync_google_contacts_accepts_job_timeout():
 
     with (
         patch("worker.GoogleAuthService", return_value=mock_auth_service),
-        patch("worker.GoogleContactsAPIClient", return_value=mock_contacts_client),
+        patch("worker.GoogleAPIClient", return_value=mock_contacts_client),
     ):
         # This simulates how ARQ might call the function, passing job metadata as kwargs
         # Specifically, we want to ensure it doesn't fail with TypeError for unexpected kwargs

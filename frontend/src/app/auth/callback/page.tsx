@@ -19,7 +19,7 @@ import {
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useAuth } from '@/lib/auth/AuthProvider';
-import { useGoogleContactsOAuthCallback } from '@/lib/api/integrations';
+import { useGoogleOAuthCallback } from '@/lib/api/integrations';
 
 // Component that uses useSearchParams - needs to be wrapped in Suspense
 function CallbackContent() {
@@ -28,7 +28,7 @@ function CallbackContent() {
   const { refreshSession } = useAuth();
   const [error, setError] = useState<string | null>(null);
   const processedRef = useRef(false);
-  const oauthCallback = useGoogleContactsOAuthCallback();
+  const oauthCallback = useGoogleOAuthCallback();
 
   useEffect(() => {
     const processCallback = async () => {

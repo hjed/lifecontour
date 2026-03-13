@@ -32,7 +32,7 @@ from core_shared import SyncMetadata, SyncStatus
 # Track sync state for a contact
 sync_record = SyncMetadata(
     internal_id=123,
-    integration_source="google_contacts",
+    integration_source="google",
     external_id="person/abc123",
     last_synced_at=datetime.utcnow(),
     version_hash="sha256_hash_of_data",
@@ -84,7 +84,7 @@ cd backend
 uv pip install -e ../core_shared
 
 # Install in worker environment
-cd integration_workers/google_contacts
+cd integration_workers/google
 uv pip install -e ../../core_shared
 ```
 

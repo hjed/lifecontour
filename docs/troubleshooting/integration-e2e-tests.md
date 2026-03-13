@@ -53,7 +53,7 @@ test.describe.skip('Integration Error Handling', () => {
    ```python
    # backend/app/api/integrations/controllers.py
    @router.post("/google/contacts/sync")
-   async def trigger_google_contacts_sync(user: FromDishka[SessionUser]):
+   async def trigger_google_sync(user: FromDishka[SessionUser]):
        # TODO: Connect to actual ARQ worker
        # TODO: Implement real sync job triggering
        pass

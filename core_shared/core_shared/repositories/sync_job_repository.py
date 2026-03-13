@@ -40,7 +40,7 @@ class SyncJobRepository:
         Args:
             job_id: ARQ job ID
             user_id: User who initiated the sync
-            integration_source: Integration source (e.g., 'google_contacts')
+            integration_source: Integration source (e.g., 'google')
             sync_type: Type of sync ('smart' or 'full')
             status: Initial status (default: 'queued')
 

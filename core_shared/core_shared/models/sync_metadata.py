@@ -47,7 +47,7 @@ class SyncMetadata(Base):
     integration_source: Mapped[str] = mapped_column(
         String(50),
         nullable=False,
-        comment="Name of the integration source (e.g., 'google_contacts', 'immich')",
+        comment="Name of the integration source (e.g., 'google', 'immich')",
     )
     external_id: Mapped[str] = mapped_column(
         String(255), nullable=False, comment="External system's ID for this entity"

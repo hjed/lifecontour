@@ -43,7 +43,7 @@ class ExternalReference(Base):
     external_system: Mapped[str] = mapped_column(
         String(50),
         nullable=False,
-        comment="Name of the external system (e.g., 'google_contacts', 'immich')",
+        comment="Name of the external system (e.g., 'google', 'immich')",
     )
     external_entity_type: Mapped[str] = mapped_column(
         String(50),

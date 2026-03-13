@@ -1,4 +1,4 @@
-"""Integration tests for full sync flow."""
+"""Integration tests for incremental sync flow using sync_token."""
 
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
@@ -12,15 +12,15 @@ from worker import sync_google_contacts
 
 
 @pytest.mark.asyncio
-class TestFullSyncIntegration:
-    """Integration test for full sync flow handling."""
+class TestIncrementalSyncIntegration:
+    """Integration test for incremental sync flow handling using sync_token."""
 
-    async def test_full_sync_processes_all_pages_and_saves_token(self, db_session):
-        """Test that sync_google_contacts does a full sync with multiple pages."""
+    async def test_incremental_sync_uses_contacts_sync_token(self, db_session):
+        """Test that sync_google_contacts picks up contacts_sync_token and performs incremental sync."""
         now = datetime.now(UTC)
         future_expiry = now + timedelta(hours=1)
-        test_email = "full_sync_test@example.com"
-        test_user = "2"
+        test_email = "incremental_test@example.com"
+        test_user = "1"
 
         # Encrypt the dummy tokens so GoogleAuthService can decrypt them
         fernet_key = Fernet.generate_key()
@@ -28,7 +28,7 @@ class TestFullSyncIntegration:
         encrypted_token = fernet.encrypt(b"access_token")
         encrypted_refresh = fernet.encrypt(b"refresh_token")
 
-        # Insert user authentication data
+        # Insert user authentication data (so auth works or bypasses)
         await db_session.execute(
             text(
                 """
@@ -50,6 +50,28 @@ class TestFullSyncIntegration:
                 "now": now,
             },
         )
+
+        # Insert user sync integration data
+        await db_session.execute(
+            text(
+                """
+                INSERT INTO user_google_integration (user_id, google_account_email,
+                                              contacts_sync_token,
+                                              created_at, updated_at)
+                VALUES
+                    (:user_id, :email, :sync_token,
+                     :now, :now)
+                ON CONFLICT (user_id, google_account_email) DO UPDATE SET
+                    contacts_sync_token = EXCLUDED.contacts_sync_token
+                """
+            ),
+            {
+                "user_id": test_user,
+                "email": test_email,
+                "sync_token": "valid_incremental_sync_token",
+                "now": now,
+            },
+        )
         await db_session.commit()
 
         @asynccontextmanager
@@ -59,33 +81,20 @@ class TestFullSyncIntegration:
         ctx = {
             "session_factory": mock_session_factory,
             "redis": None,
-            "job_id": "test_job_full_123",
+            "job_id": "test_job_456",
         }
 
-        # We mock googleapiclient.discovery.build instead of GoogleContactsAPIClient
+        # We mock googleapiclient.discovery.build instead of GoogleAPIClient
         # so that GoogleAuthService.get_access_token() is actually called and tested.
-        call_count = {"count": 0}
-
-        def mock_list_execute():
-            if call_count["count"] == 0:
-                call_count["count"] += 1
-                return {
-                    "connections": [
-                        {"resourceName": "people/full_sync_1", "etag": "etag_1"}
-                    ],
-                    "nextPageToken": "page_2_token",
-                }
-            else:
-                return {
-                    "connections": [
-                        {"resourceName": "people/full_sync_2", "etag": "etag_2"}
-                    ],
-                    "nextSyncToken": "new_sync_token_after_full_sync",
-                }
-
         mock_connections = MagicMock()
         mock_list = MagicMock()
-        mock_list.execute.side_effect = mock_list_execute
+        mock_list.execute.return_value = {
+            "connections": [
+                {"resourceName": "people/updated123", "etag": "updated_etag"}
+            ],
+            "nextSyncToken": "new_sync_token_after_incremental",
+            "nextPageToken": None,
+        }
         mock_connections.list.return_value = mock_list
 
         mock_people = MagicMock()
@@ -99,7 +108,7 @@ class TestFullSyncIntegration:
                 "worker.settings.encryption_key.get_secret_value",
                 return_value=fernet_key.decode(),
             ),
-            patch("google_contacts_client.build", return_value=mock_service),
+            patch("google_client.build", return_value=mock_service),
         ):
             result = await sync_google_contacts(
                 ctx=ctx,
@@ -108,13 +117,17 @@ class TestFullSyncIntegration:
                 sync_type="smart",
             )
 
-            # Since sync_type is 'smart' and we supplied NO sync_token
-            # it should have called list_connections twice
-            assert mock_connections.list.call_count == 2
-
+            # Since sync_type is 'smart' and we supplied a valid sync_token
+            # it should have called list_connections with that specific sync_token
+            mock_connections.list.assert_called_with(
+                resourceName="people/me",
+                pageSize=100,
+                personFields="names,emailAddresses,phoneNumbers,addresses,organizations,birthdays,metadata",
+                syncToken="valid_incremental_sync_token",
+            )
             # Result should show at least some metrics
             assert result is not None
-            assert result.get("contacts_created") == 2
+            assert result.get("contacts_updated") == 1
 
             # Validate that the token was updated in db
             result_db = await db_session.execute(
@@ -124,13 +137,4 @@ class TestFullSyncIntegration:
                 {"email": test_email},
             )
             next_token = result_db.scalar()
-            assert next_token == "new_sync_token_after_full_sync"
-
-            # Check if outbox events were created
-            result_outbox = await db_session.execute(
-                text(
-                    "SELECT count(*) FROM outbox_events WHERE (event_data::jsonb)->>'external_id' IN ('people/full_sync_1', 'people/full_sync_2')"
-                )
-            )
-            outbox_count = result_outbox.scalar()
-            assert outbox_count == 2
+            assert next_token == "new_sync_token_after_incremental"

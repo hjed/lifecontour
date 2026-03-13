@@ -80,6 +80,12 @@ class TestOutboxProcessor:
         async def mock_begin():
             yield mock_conn
 
+        @asynccontextmanager
+        async def mock_begin_nested():
+            yield mock_conn
+
+        mock_conn.begin_nested = mock_begin_nested
+
         mock_engine = AsyncMock()
         mock_engine.begin = mock_begin
 
@@ -128,6 +134,12 @@ class TestOutboxProcessor:
         async def mock_begin():
             yield mock_conn
 
+        @asynccontextmanager
+        async def mock_begin_nested():
+            yield mock_conn
+
+        mock_conn.begin_nested = mock_begin_nested
+
         mock_engine = AsyncMock()
         mock_engine.begin = mock_begin
 
@@ -166,6 +178,12 @@ class TestOutboxProcessor:
         @asynccontextmanager
         async def mock_begin():
             yield mock_conn
+
+        @asynccontextmanager
+        async def mock_begin_nested():
+            yield mock_conn
+
+        mock_conn.begin_nested = mock_begin_nested
 
         mock_engine = AsyncMock()
         mock_engine.begin = mock_begin
@@ -222,6 +240,12 @@ class TestOutboxProcessor:
         @asynccontextmanager
         async def mock_begin():
             yield mock_conn
+
+        @asynccontextmanager
+        async def mock_begin_nested():
+            yield mock_conn
+
+        mock_conn.begin_nested = mock_begin_nested
 
         mock_engine = AsyncMock()
         mock_engine.begin = mock_begin
@@ -329,6 +353,12 @@ class TestOutboxProcessor:
         async def mock_begin():
             yield mock_conn
 
+        @asynccontextmanager
+        async def mock_begin_nested():
+            yield mock_conn
+
+        mock_conn.begin_nested = mock_begin_nested
+
         mock_engine = AsyncMock()
         mock_engine.begin = mock_begin
 
@@ -433,7 +463,7 @@ class TestOutboxProcessor:
             event_type="contact.created",
             aggregate_id=42,
             event_data={
-                "integration_source": "google_contacts",
+                "integration_source": "google",
                 "external_id": "people/c123",
                 "contact_data": {
                     "first_name": "Test",
@@ -458,6 +488,12 @@ class TestOutboxProcessor:
         @asynccontextmanager
         async def mock_begin():
             yield mock_conn
+
+        @asynccontextmanager
+        async def mock_begin_nested():
+            yield mock_conn
+
+        mock_conn.begin_nested = mock_begin_nested
 
         mock_engine = AsyncMock()
         mock_engine.begin = mock_begin
@@ -514,7 +550,7 @@ class TestOutboxProcessor:
                 event_type="contact.created",
                 aggregate_id=42,
                 event_data={
-                    "integration_source": "google_contacts",
+                    "integration_source": "google",
                     "external_id": "people/c123",
                     "contact_data": {},
                     "sync_timestamp": "2024-01-01T10:00:00Z",
@@ -543,6 +579,12 @@ class TestOutboxProcessor:
         @asynccontextmanager
         async def mock_begin():
             yield mock_conn
+
+        @asynccontextmanager
+        async def mock_begin_nested():
+            yield mock_conn
+
+        mock_conn.begin_nested = mock_begin_nested
 
         mock_engine = AsyncMock()
         mock_engine.begin = mock_begin

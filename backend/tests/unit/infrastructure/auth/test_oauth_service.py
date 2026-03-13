@@ -446,7 +446,7 @@ class TestOAuthService:
             assert result == mock_user_info
 
 
-class TestOAuthServiceGoogleContacts:
+class TestOAuthServiceGoogle:
     """Test OAuth service Google Contacts integration functionality."""
 
     @pytest.fixture
@@ -471,7 +471,7 @@ class TestOAuthServiceGoogleContacts:
         """Create mock database connection."""
         return AsyncMock()
 
-    async def test_get_google_contacts_authorization_url_success(
+    async def test_get_google_authorization_url_success(
         self, oauth_service_with_google, mock_request
     ):
         """Test successful Google Contacts authorization URL generation."""
@@ -486,7 +486,7 @@ class TestOAuthServiceGoogleContacts:
                 "url": "https://accounts.google.com/oauth/authorize?client_id=test&state=encoded_state"
             }
 
-            await oauth_service_with_google.get_google_contacts_authorization_url(
+            await oauth_service_with_google.get_google_authorization_url(
                 mock_request, redirect_uri
             )
 
@@ -498,25 +498,25 @@ class TestOAuthServiceGoogleContacts:
             assert "code_verifier" in call_args[1]
             assert (
                 call_args[1]["scope"]
-                == "openid email profile https://www.googleapis.com/auth/contacts.readonly"
+                == "openid email profile https://www.googleapis.com/auth/contacts.readonly https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/calendar.readonly"
             )
             assert call_args[1]["access_type"] == "offline"
             assert call_args[1]["prompt"] == "consent"
 
-    async def test_is_google_contacts_connected_no_tokens(
+    async def test_is_google_connected_no_tokens(
         self, oauth_service_with_google, mock_connection
     ):
-        """Test is_google_contacts_connected returns False when no tokens exist."""
+        """Test is_google_connected returns False when no tokens exist."""
         # Arrange
         user_id = "test-user-123"
 
         # Mock database query to return no results
         mock_result = Mock()
-        mock_result.fetchone.return_value = None
+        mock_result.scalars.return_value.all.return_value = []
         mock_connection.execute = AsyncMock(return_value=mock_result)
 
         # Act
-        result = await oauth_service_with_google.is_google_contacts_connected(
+        result = await oauth_service_with_google.is_google_connected(
             user_id, mock_connection
         )
 
@@ -524,23 +524,20 @@ class TestOAuthServiceGoogleContacts:
         assert result is False
         mock_connection.execute.assert_called_once()
 
-    async def test_is_google_contacts_connected_with_valid_tokens(
+    async def test_is_google_connected_with_valid_tokens(
         self, oauth_service_with_google, mock_connection
     ):
-        """Test is_google_contacts_connected returns True when valid tokens exist."""
+        """Test is_google_connected returns True when valid tokens exist."""
         # Arrange
         user_id = "test-user-123"
 
         # Mock database query to return a token record
         mock_result = Mock()
-        mock_result.fetchone.return_value = {
-            "user_id": user_id,
-            "google_account_email": "test@gmail.com",
-        }
+        mock_result.scalars.return_value.all.return_value = ["test@gmail.com"]
         mock_connection.execute = AsyncMock(return_value=mock_result)
 
         # Act
-        result = await oauth_service_with_google.is_google_contacts_connected(
+        result = await oauth_service_with_google.is_google_connected(
             user_id, mock_connection
         )
 
@@ -597,7 +594,7 @@ class TestOAuthServiceGoogleContacts:
                 "test-user-123", mock_connection
             )
 
-    async def test_get_google_contacts_authorization_url_no_provider(self):
+    async def test_get_google_authorization_url_no_provider(self):
         """Test Google Contacts authorization URL when Google provider not configured."""
         settings = Settings()  # No Google provider
         oauth_service = OAuthService(settings)
@@ -605,14 +602,14 @@ class TestOAuthServiceGoogleContacts:
         mock_request.session = {}
 
         with pytest.raises(HTTPException) as exc_info:
-            await oauth_service.get_google_contacts_authorization_url(
+            await oauth_service.get_google_authorization_url(
                 mock_request, "https://example.com/callback"
             )
 
         assert exc_info.value.status_code == 400
         assert "Google OAuth provider not configured" in str(exc_info.value.detail)
 
-    async def test_handle_google_contacts_callback_success(
+    async def test_handle_google_callback_success(
         self, oauth_service_with_google, mock_request
     ):
         """Test successful Google Contacts OAuth callback handling."""
@@ -650,13 +647,11 @@ class TestOAuthServiceGoogleContacts:
                 mock_client.post = AsyncMock(return_value=mock_response)
                 mock_client_class.return_value = mock_client
 
-                result = (
-                    await oauth_service_with_google.handle_google_contacts_callback(
-                        mock_request,
-                        "test_code",
-                        "encoded_state",
-                        "https://example.com/callback",
-                    )
+                result = await oauth_service_with_google.handle_google_callback(
+                    mock_request,
+                    "test_code",
+                    "encoded_state",
+                    "https://example.com/callback",
                 )
 
                 # Verify HTTP request was made correctly
@@ -678,7 +673,7 @@ class TestOAuthServiceGoogleContacts:
                 # Verify result
                 assert result == mock_token_data
 
-    async def test_handle_google_contacts_callback_invalid_state(
+    async def test_handle_google_callback_invalid_state(
         self, oauth_service_with_google, mock_request
     ):
         """Test Google Contacts callback with invalid state."""
@@ -688,7 +683,7 @@ class TestOAuthServiceGoogleContacts:
             mock_decode_state.side_effect = Exception("Invalid state")
 
             with pytest.raises(HTTPException) as exc_info:
-                await oauth_service_with_google.handle_google_contacts_callback(
+                await oauth_service_with_google.handle_google_callback(
                     mock_request,
                     "test_code",
                     "invalid_state",
@@ -698,7 +693,7 @@ class TestOAuthServiceGoogleContacts:
             assert exc_info.value.status_code == 400
             assert "Invalid state parameter" in str(exc_info.value.detail)
 
-    async def test_handle_google_contacts_callback_csrf_mismatch(
+    async def test_handle_google_callback_csrf_mismatch(
         self, oauth_service_with_google, mock_request
     ):
         """Test Google Contacts callback with CSRF token mismatch."""
@@ -714,7 +709,7 @@ class TestOAuthServiceGoogleContacts:
             }
 
             with pytest.raises(HTTPException) as exc_info:
-                await oauth_service_with_google.handle_google_contacts_callback(
+                await oauth_service_with_google.handle_google_callback(
                     mock_request,
                     "test_code",
                     "encoded_state",
@@ -724,7 +719,7 @@ class TestOAuthServiceGoogleContacts:
             assert exc_info.value.status_code == 400
             assert "Invalid CSRF token" in str(exc_info.value.detail)
 
-    async def test_disconnect_google_contacts_success(
+    async def test_disconnect_google_success(
         self, oauth_service_with_google, mock_connection
     ):
         """Test Google Contacts disconnect successfully deletes tokens."""
@@ -737,7 +732,7 @@ class TestOAuthServiceGoogleContacts:
         mock_connection.execute = AsyncMock(return_value=mock_result)
 
         # Act
-        result = await oauth_service_with_google.disconnect_google_contacts(
+        result = await oauth_service_with_google.disconnect_google(
             user_id, mock_connection
         )
 
@@ -745,7 +740,7 @@ class TestOAuthServiceGoogleContacts:
         assert result is True
         mock_connection.execute.assert_called_once()
 
-    async def test_disconnect_google_contacts_no_tokens(
+    async def test_disconnect_google_no_tokens(
         self, oauth_service_with_google, mock_connection
     ):
         """Test Google Contacts disconnect returns False when no tokens exist."""
@@ -758,7 +753,7 @@ class TestOAuthServiceGoogleContacts:
         mock_connection.execute = AsyncMock(return_value=mock_result)
 
         # Act
-        result = await oauth_service_with_google.disconnect_google_contacts(
+        result = await oauth_service_with_google.disconnect_google(
             user_id, mock_connection
         )
 

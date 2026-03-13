@@ -19,9 +19,9 @@ from pydantic import BaseModel
 
 from app.api.integrations.schemas import (
     ComponentHealthAttributes,
-    GoogleContactsStatusAttributes,
-    GoogleContactsStatusData,
-    GoogleContactsStatusJsonApiResponse,
+    GoogleStatusAttributes,
+    GoogleStatusData,
+    GoogleStatusJsonApiResponse,
     IntegrationHealthAttributes,
     IntegrationHealthData,
     IntegrationHealthJsonApiResponse,
@@ -92,7 +92,7 @@ class IntegrationStatusResponse(BaseModel):
     },
 )
 @inject
-async def trigger_google_contacts_sync(
+async def trigger_google_sync(
     request: SyncJobRequest,
     user: FromDishka[SessionUser],
     oauth_service: FromDishka[OAuthService],
@@ -120,7 +120,7 @@ async def trigger_google_contacts_sync(
             sync_type = SyncType.FULL.value
 
         # Enqueue the sync job
-        job_id = await task_queue_service.enqueue_google_contacts_sync(
+        job_id = await task_queue_service.enqueue_google_sync(
             google_account_email=google_account_email,
             user_id=user.id,
             sync_type=sync_type,
@@ -204,12 +204,12 @@ async def list_sync_jobs(
                 ) from e
 
         # Get sync jobs from the task queue service
-        # Filter by google_contacts integration source since this endpoint is specific to Google Contacts
+        # Filter by google integration source since this endpoint is specific to Google Contacts
         jobs, total = await task_queue_service.list_sync_jobs(
             user_id=user.id,
             status=status,
             sync_type=sync_type,
-            integration_source="google_contacts",
+            integration_source="google",
             date_from=date_from_dt,
             date_to=date_to_dt,
             limit=limit,
@@ -395,11 +395,11 @@ async def cancel_sync_job(
 
 @router.get("/google/contacts/status")
 @inject
-async def get_google_contacts_status(
+async def get_google_status(
     user: FromDishka[SessionUser],
     oauth_service: FromDishka[OAuthService],
     db_manager: FromDishka[IntegrationDatabaseManager],
-) -> GoogleContactsStatusJsonApiResponse:
+) -> GoogleStatusJsonApiResponse:
     """
     Get the current status of Google Contacts integration.
 
@@ -411,26 +411,45 @@ async def get_google_contacts_status(
         last_sync = None
         sync_count = 0
         is_connected = False
+        needs_reconsent = False
 
         async with db_manager.get_session() as session:
             conn = await session.connection()
 
             # Check if user has Google Contacts connected
-            is_connected = await oauth_service.is_google_contacts_connected(
-                user.id, conn
-            )
+            is_connected = await oauth_service.is_google_connected(user.id, conn)
 
             # Build status based on connection state
             status = "active" if is_connected else "disconnected"
 
             if is_connected:
+                # Check for calendar scopes to determine if re-consent is needed
+                from sqlalchemy import text
+
+                stmt = text("""
+                    SELECT granted_scopes
+                    FROM user_google_auth
+                    WHERE user_id = :user_id
+                """)
+                result = await conn.execute(stmt, {"user_id": str(user.id)})
+                rows = result.fetchall()
+                for row in rows:
+                    scopes = row.granted_scopes or ""
+                    # If any connected account doesn't have calendar scopes, they need to re-consent
+                    if (
+                        "calendar.events" not in scopes
+                        or "calendar.readonly" not in scopes
+                    ):
+                        needs_reconsent = True
+                        break
+
                 repo = SyncJobRepository(conn)
 
                 # Get the most recent completed sync
                 completed_syncs, total_count = await repo.list_by_user(
                     user_id=str(user.id),
                     status="completed",
-                    integration_source="google_contacts",
+                    integration_source="google",
                     limit=1,
                     offset=0,
                 )
@@ -443,15 +462,16 @@ async def get_google_contacts_status(
                 # Get total count of completed syncs
                 sync_count = total_count
 
-        return GoogleContactsStatusJsonApiResponse(
-            data=GoogleContactsStatusData(
-                id="google-contacts",
+        return GoogleStatusJsonApiResponse(
+            data=GoogleStatusData(
+                id="google",
                 type="integration-status",
-                attributes=GoogleContactsStatusAttributes(
+                attributes=GoogleStatusAttributes(
                     connected=is_connected,
                     last_sync=last_sync,
                     sync_count=sync_count,
                     status=status,
+                    needs_reconsent=needs_reconsent,
                 ),
             )
         )
@@ -463,11 +483,11 @@ async def get_google_contacts_status(
             exc_info=True,
         )
         # Return disconnected status on error
-        return GoogleContactsStatusJsonApiResponse(
-            data=GoogleContactsStatusData(
-                id="google-contacts",
+        return GoogleStatusJsonApiResponse(
+            data=GoogleStatusData(
+                id="google",
                 type="integration-status",
-                attributes=GoogleContactsStatusAttributes(
+                attributes=GoogleStatusAttributes(
                     connected=False,
                     status="error",
                     error_message=str(e),
@@ -498,7 +518,7 @@ async def get_integrations_health(
 
         services = health_status.get("services", {})
         redis_service = services.get("redis", {})
-        worker_service = services.get("google_contacts_worker", {})
+        worker_service = services.get("google_worker", {})
 
         return IntegrationHealthJsonApiResponse(
             data=IntegrationHealthData(
@@ -553,7 +573,7 @@ async def get_integrations_health(
     },
 )
 @inject
-async def google_contacts_oauth_authorize(
+async def google_oauth_authorize(
     request_data: OAuthAuthorizeRequest,
     request: Request,
     user: FromDishka[SessionUser],
@@ -574,7 +594,7 @@ async def google_contacts_oauth_authorize(
         base_url = str(request.base_url).rstrip("/")
         callback_url = f"{base_url}/auth/callback"
 
-        authorization_url = await oauth_service.get_google_contacts_authorization_url(
+        authorization_url = await oauth_service.get_google_authorization_url(
             request, callback_url
         )
 
@@ -633,7 +653,7 @@ async def google_contacts_oauth_authorize(
     },
 )
 @inject
-async def google_contacts_oauth_callback(
+async def google_oauth_callback(
     callback_data: OAuthCallbackRequest,
     request: Request,
     user: FromDishka[SessionUser],
@@ -652,7 +672,7 @@ async def google_contacts_oauth_callback(
         base_url = str(request.base_url).rstrip("/")
         callback_url = f"{base_url}/auth/callback"
 
-        token_data = await oauth_service.handle_google_contacts_callback(
+        token_data = await oauth_service.handle_google_callback(
             request, callback_data.code, callback_data.state, callback_url
         )
 
@@ -669,6 +689,11 @@ async def google_contacts_oauth_callback(
             raise ValueError("No refresh token in OAuth response")
 
         expires_in = token_data.get("expires_in", 3600)
+        granted_scopes = token_data.get("scope")
+        if not granted_scopes:
+            from app.infrastructure.auth.oauth_service import GOOGLE_SCOPE
+
+            granted_scopes = " ".join(GOOGLE_SCOPE)
 
         await google_token_service.store_tokens(
             user_id=user.id,
@@ -676,13 +701,14 @@ async def google_contacts_oauth_callback(
             access_token=access_token,
             refresh_token=refresh_token,
             expires_in=expires_in,
+            granted_scopes=granted_scopes,
         )
 
         # Get redirect URL from session
         redirect_url = request.session.pop("integration_redirect_url", "/integrations")
 
         logger.info(
-            "Google Contacts OAuth callback successful and tokens stored",
+            "Google OAuth callback successful and tokens stored",
             user_id=user.id,
             google_email=google_email,
             has_access_token=bool(access_token),
@@ -727,7 +753,7 @@ async def google_contacts_oauth_callback(
     },
 )
 @inject
-async def google_contacts_oauth_disconnect(
+async def google_oauth_disconnect(
     user: FromDishka[SessionUser],
     oauth_service: FromDishka[OAuthService],
     db_manager: FromDishka[IntegrationDatabaseManager],
@@ -744,9 +770,7 @@ async def google_contacts_oauth_disconnect(
             connection = await session.connection()
 
             # Disconnect the Google Contacts integration
-            success = await oauth_service.disconnect_google_contacts(
-                user.id, connection
-            )
+            success = await oauth_service.disconnect_google(user.id, connection)
 
             # Commit the transaction
             await session.commit()

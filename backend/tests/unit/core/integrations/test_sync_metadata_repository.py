@@ -38,7 +38,7 @@ class TestSyncMetadataRepository:
         mock_row = MagicMock()
         mock_row.id = 1
         mock_row.internal_id = 123
-        mock_row.integration_source = "google_contacts"
+        mock_row.integration_source = "google"
         mock_row.external_id = "people/c123"
         mock_row.last_synced_at = datetime.now(UTC)
         mock_row.version_hash = "abc123"
@@ -53,13 +53,13 @@ class TestSyncMetadataRepository:
         mock_connection.execute = AsyncMock(return_value=mock_result)
 
         # Execute
-        result = await repository.find_and_lock("google_contacts", "people/c123")
+        result = await repository.find_and_lock("google", "people/c123")
 
         # Verify
         assert result is not None
         assert result.id == 1
         assert result.internal_id == 123
-        assert result.integration_source == "google_contacts"
+        assert result.integration_source == "google"
         assert result.external_id == "people/c123"
         assert result.version_hash == "abc123"
 
@@ -79,7 +79,7 @@ class TestSyncMetadataRepository:
         mock_connection.execute = AsyncMock(return_value=mock_result)
 
         # Execute
-        result = await repository.find_and_lock("google_contacts", "people/c123")
+        result = await repository.find_and_lock("google", "people/c123")
 
         # Verify
         assert result is None
@@ -93,7 +93,7 @@ class TestSyncMetadataRepository:
         mock_row = MagicMock()
         mock_row.id = 1
         mock_row.internal_id = 123
-        mock_row.integration_source = "google_contacts"
+        mock_row.integration_source = "google"
         mock_row.external_id = "people/c123"
         mock_row.last_synced_at = datetime.now(UTC)
         mock_row.version_hash = "abc123"
@@ -108,7 +108,7 @@ class TestSyncMetadataRepository:
         mock_connection.execute = AsyncMock(return_value=mock_result)
 
         # Execute
-        result = await repository.find_by_external_id("google_contacts", "people/c123")
+        result = await repository.find_by_external_id("google", "people/c123")
 
         # Verify
         assert result is not None
@@ -129,7 +129,7 @@ class TestSyncMetadataRepository:
         mock_row = MagicMock()
         mock_row.id = 1
         mock_row.internal_id = 123
-        mock_row.integration_source = "google_contacts"
+        mock_row.integration_source = "google"
         mock_row.external_id = "people/c123"
         mock_row.last_synced_at = datetime.now(UTC)
         mock_row.version_hash = "new_hash"
@@ -146,7 +146,7 @@ class TestSyncMetadataRepository:
         # Execute
         result = await repository.upsert(
             internal_id=123,
-            integration_source="google_contacts",
+            integration_source="google",
             external_id="people/c123",
             version_hash="new_hash",
         )
@@ -170,7 +170,7 @@ class TestSyncMetadataRepository:
         existing = SyncMetadata(
             id=1,
             internal_id=123,
-            integration_source="google_contacts",
+            integration_source="google",
             external_id="people/c123",
             last_synced_at=datetime.now(UTC),
             version_hash="same_hash",
@@ -187,7 +187,7 @@ class TestSyncMetadataRepository:
         existing = SyncMetadata(
             id=1,
             internal_id=123,
-            integration_source="google_contacts",
+            integration_source="google",
             external_id="people/c123",
             last_synced_at=datetime.now(UTC),
             version_hash="old_hash",
@@ -206,7 +206,7 @@ class TestSyncMetadataRepository:
         mock_row = MagicMock()
         mock_row.id = 1
         mock_row.internal_id = 123
-        mock_row.integration_source = "google_contacts"
+        mock_row.integration_source = "google"
         mock_row.external_id = "people/c123"
         mock_row.last_synced_at = datetime.now(UTC)
         mock_row.version_hash = "hash"
@@ -223,7 +223,7 @@ class TestSyncMetadataRepository:
         # Execute
         result = await repository.upsert(
             internal_id=123,
-            integration_source="google_contacts",
+            integration_source="google",
             external_id="people/c123",
             version_hash="hash",
             sync_status=SyncStatus.FAILED,

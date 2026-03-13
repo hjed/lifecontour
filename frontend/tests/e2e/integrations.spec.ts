@@ -144,7 +144,7 @@ test.describe('Integration Management - Authenticated User', () => {
 
     // Wait for page to load
     await authenticatedPage.waitForSelector(
-      '[data-testid="google-contacts-integration"]'
+      '[data-testid="google-integration"]'
     );
 
     // Check if connect or disconnect button is present

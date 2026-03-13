@@ -16,7 +16,7 @@ import pytest
 sys.path.insert(0, "/core_shared")
 
 
-class TestGoogleContactsWorker:
+class TestGoogleWorker:
     """Test cases for Google Contacts worker sync logic."""
 
     @pytest.fixture
@@ -27,7 +27,7 @@ class TestGoogleContactsWorker:
         mock_row.id = 1
         mock_row.job_id = "test-job-id"
         mock_row.user_id = "1"
-        mock_row.integration_source = "google_contacts"
+        mock_row.integration_source = "google"
         mock_row.sync_type = "full"
         mock_row.status = "running"
         mock_row.created_at = datetime.now(UTC)
@@ -87,7 +87,7 @@ class TestGoogleContactsWorker:
         return mock_service
 
     @pytest.fixture
-    def mock_google_contacts_client(self):
+    def mock_google_client(self):
         """Mock Google Contacts API client."""
         mock_client = AsyncMock()
         mock_client.list_connections.return_value = {
@@ -109,7 +109,7 @@ class TestGoogleContactsWorker:
         self,
         mock_session_factory,
         mock_google_auth_service,
-        mock_google_contacts_client,
+        mock_google_client,
     ):
         """Test successful full sync of Google Contacts."""
         # Import the worker function
@@ -119,8 +119,8 @@ class TestGoogleContactsWorker:
         with (
             patch("worker.GoogleAuthService", return_value=mock_google_auth_service),
             patch(
-                "worker.GoogleContactsAPIClient",
-                return_value=mock_google_contacts_client,
+                "worker.GoogleAPIClient",
+                return_value=mock_google_client,
             ),
         ):
             # Execute the sync task with session_factory in ctx
@@ -142,7 +142,7 @@ class TestGoogleContactsWorker:
         self,
         mock_session_factory,
         mock_google_auth_service,
-        mock_google_contacts_client,
+        mock_google_client,
     ):
         """Test successful incremental sync of Google Contacts."""
         # Mock existing sync token
@@ -156,8 +156,8 @@ class TestGoogleContactsWorker:
         with (
             patch("worker.GoogleAuthService", return_value=mock_google_auth_service),
             patch(
-                "worker.GoogleContactsAPIClient",
-                return_value=mock_google_contacts_client,
+                "worker.GoogleAPIClient",
+                return_value=mock_google_client,
             ),
         ):
             result = await sync_google_contacts(
@@ -175,7 +175,7 @@ class TestGoogleContactsWorker:
         self,
         mock_session_factory,
         mock_google_auth_service,
-        mock_google_contacts_client,
+        mock_google_client,
     ):
         """Test smart sync chooses incremental when sync token exists."""
         # Mock existing sync token
@@ -189,8 +189,8 @@ class TestGoogleContactsWorker:
         with (
             patch("worker.GoogleAuthService", return_value=mock_google_auth_service),
             patch(
-                "worker.GoogleContactsAPIClient",
-                return_value=mock_google_contacts_client,
+                "worker.GoogleAPIClient",
+                return_value=mock_google_client,
             ),
         ):
             result = await sync_google_contacts(
@@ -203,7 +203,7 @@ class TestGoogleContactsWorker:
             assert result["status"] == "success"
             # Should have used incremental sync - check that sync_token was passed
             # Note: The actual call might have page_size and page_token as well
-            calls = mock_google_contacts_client.list_connections.call_args_list
+            calls = mock_google_client.list_connections.call_args_list
             assert len(calls) > 0
             # Check that at least one call had sync_token as a keyword argument
             assert any("sync_token" in call.kwargs for call in calls)
@@ -213,21 +213,19 @@ class TestGoogleContactsWorker:
         self,
         mock_session_factory,
         mock_google_auth_service,
-        mock_google_contacts_client,
+        mock_google_client,
     ):
         """Test sync handles authentication errors gracefully."""
         # Mock client to raise auth error when list_connections is called
-        mock_google_contacts_client.list_connections.side_effect = Exception(
-            "Auth failed"
-        )
+        mock_google_client.list_connections.side_effect = Exception("Auth failed")
 
         from worker import sync_google_contacts
 
         with (
             patch("worker.GoogleAuthService", return_value=mock_google_auth_service),
             patch(
-                "worker.GoogleContactsAPIClient",
-                return_value=mock_google_contacts_client,
+                "worker.GoogleAPIClient",
+                return_value=mock_google_client,
             ),
         ):
             result = await sync_google_contacts(
@@ -245,21 +243,19 @@ class TestGoogleContactsWorker:
         self,
         mock_session_factory,
         mock_google_auth_service,
-        mock_google_contacts_client,
+        mock_google_client,
     ):
         """Test sync handles Google API errors gracefully."""
         # Mock API client to raise error
-        mock_google_contacts_client.list_connections.side_effect = Exception(
-            "API error"
-        )
+        mock_google_client.list_connections.side_effect = Exception("API error")
 
         from worker import sync_google_contacts
 
         with (
             patch("worker.GoogleAuthService", return_value=mock_google_auth_service),
             patch(
-                "worker.GoogleContactsAPIClient",
-                return_value=mock_google_contacts_client,
+                "worker.GoogleAPIClient",
+                return_value=mock_google_client,
             ),
         ):
             result = await sync_google_contacts(
@@ -415,7 +411,7 @@ class TestGoogleContactsWorker:
         assert mock_session.add.call_count == 1
 
 
-class TestGoogleContactsAPIClient:
+class TestGoogleAPIClient:
     """Test cases for Google Contacts API client create/update methods."""
 
     @pytest.fixture
@@ -434,7 +430,7 @@ class TestGoogleContactsAPIClient:
     @pytest.mark.asyncio
     async def test_create_contact_success(self, mock_auth_service, mock_google_service):
         """Test successful contact creation in Google."""
-        from google_contacts_client import GoogleContactsAPIClient
+        from google_client import GoogleAPIClient
 
         # Mock the service response
         mock_google_service.people().createContact().execute.return_value = {
@@ -451,7 +447,7 @@ class TestGoogleContactsAPIClient:
         }
 
         # Create client
-        client = GoogleContactsAPIClient(
+        client = GoogleAPIClient(
             auth_service=mock_auth_service,
             google_account_email="test@example.com",
             google_client_id="client_id",
@@ -460,7 +456,9 @@ class TestGoogleContactsAPIClient:
         )
 
         # Mock the service
-        with patch.object(client, "_get_service", return_value=mock_google_service):
+        with patch.object(
+            client, "_get_people_service", return_value=mock_google_service
+        ):
             # Reset mock call count after setup
             mock_google_service.people().createContact.reset_mock()
 
@@ -487,7 +485,7 @@ class TestGoogleContactsAPIClient:
     @pytest.mark.asyncio
     async def test_update_contact_success(self, mock_auth_service, mock_google_service):
         """Test successful contact update in Google with ETag."""
-        from google_contacts_client import GoogleContactsAPIClient
+        from google_client import GoogleAPIClient
 
         # Mock the service response
         mock_google_service.people().updateContact().execute.return_value = {
@@ -504,7 +502,7 @@ class TestGoogleContactsAPIClient:
         }
 
         # Create client
-        client = GoogleContactsAPIClient(
+        client = GoogleAPIClient(
             auth_service=mock_auth_service,
             google_account_email="test@example.com",
             google_client_id="client_id",
@@ -513,7 +511,9 @@ class TestGoogleContactsAPIClient:
         )
 
         # Mock the service
-        with patch.object(client, "_get_service", return_value=mock_google_service):
+        with patch.object(
+            client, "_get_people_service", return_value=mock_google_service
+        ):
             # Reset mock call count after setup
             mock_google_service.people().updateContact.reset_mock()
 
@@ -552,7 +552,7 @@ class TestGoogleContactsAPIClient:
         """Test update contact handles 400 with failedPrecondition (ETag conflict)."""
         from googleapiclient.errors import HttpError
 
-        from google_contacts_client import GoogleContactsAPIClient
+        from google_client import GoogleAPIClient
 
         # Mock 400 error response with failedPrecondition
         mock_response = MagicMock()
@@ -564,7 +564,7 @@ class TestGoogleContactsAPIClient:
         mock_google_service.people().updateContact().execute.side_effect = mock_error
 
         # Create client
-        client = GoogleContactsAPIClient(
+        client = GoogleAPIClient(
             auth_service=mock_auth_service,
             google_account_email="test@example.com",
             google_client_id="client_id",
@@ -573,7 +573,9 @@ class TestGoogleContactsAPIClient:
         )
 
         # Mock the service
-        with patch.object(client, "_get_service", return_value=mock_google_service):
+        with patch.object(
+            client, "_get_people_service", return_value=mock_google_service
+        ):
             contact_data = {
                 "names": [{"givenName": "John", "familyName": "Doe"}],
             }
@@ -595,10 +597,10 @@ class TestGoogleContactsAPIClient:
         self, mock_auth_service, mock_google_service
     ):
         """Test that updating with empty contact_data raises ValueError."""
-        from google_contacts_client import GoogleContactsAPIClient
+        from google_client import GoogleAPIClient
 
         # Create client
-        client = GoogleContactsAPIClient(
+        client = GoogleAPIClient(
             auth_service=mock_auth_service,
             google_account_email="test@example.com",
             google_client_id="client_id",
@@ -607,7 +609,9 @@ class TestGoogleContactsAPIClient:
         )
 
         # Mock the service
-        with patch.object(client, "_get_service", return_value=mock_google_service):
+        with patch.object(
+            client, "_get_people_service", return_value=mock_google_service
+        ):
             # Empty contact data (only metadata/resourceName/etag)
             contact_data = {
                 "metadata": {"sources": [{"etag": "some_etag"}]},
@@ -623,6 +627,66 @@ class TestGoogleContactsAPIClient:
 
             # Verify error message
             assert "No fields to update" in str(exc_info.value)
+
+    @pytest.mark.asyncio
+    async def test_list_calendars_success(self, mock_auth_service, mock_google_service):
+        """Test successful fetching of calendars."""
+        from google_client import GoogleAPIClient
+
+        mock_list = mock_google_service.calendarList.return_value.list
+        mock_list.return_value.execute.return_value = {
+            "items": [{"id": "cal1", "summary": "Primary"}],
+            "nextPageToken": "token123",
+        }
+
+        client = GoogleAPIClient(
+            auth_service=mock_auth_service,
+            google_account_email="test@example.com",
+            google_client_id="client_id",
+            google_client_secret="client_secret",
+            user_id=1,
+        )
+
+        with patch.object(
+            client, "_get_calendar_service", return_value=mock_google_service
+        ):
+            result = await client.list_calendars(page_token="token123")
+
+            assert len(result["items"]) == 1
+            assert result["items"][0]["id"] == "cal1"
+            mock_list.assert_called_once_with(maxResults=250, pageToken="token123")
+
+    @pytest.mark.asyncio
+    async def test_list_events_success(self, mock_auth_service, mock_google_service):
+        """Test successful fetching of events."""
+        from google_client import GoogleAPIClient
+
+        mock_list = mock_google_service.events.return_value.list
+        mock_list.return_value.execute.return_value = {
+            "items": [{"id": "ev1", "summary": "Meeting"}],
+            "nextSyncToken": "syncToken456",
+        }
+
+        client = GoogleAPIClient(
+            auth_service=mock_auth_service,
+            google_account_email="test@example.com",
+            google_client_id="client_id",
+            google_client_secret="client_secret",
+            user_id=1,
+        )
+
+        with patch.object(
+            client, "_get_calendar_service", return_value=mock_google_service
+        ):
+            result = await client.list_events(
+                calendar_id="primary", sync_token="syncToken456"
+            )
+
+            assert len(result["items"]) == 1
+            assert result["items"][0]["id"] == "ev1"
+            mock_list.assert_called_once_with(
+                calendarId="primary", maxResults=2500, syncToken="syncToken456"
+            )
 
 
 class TestDetectLocalChanges:
@@ -675,7 +739,7 @@ class TestDetectLocalChanges:
 
         # Execute
         contacts = await find_contacts_to_push(
-            session=mock_session, integration_source="google_contacts"
+            session=mock_session, integration_source="google"
         )
 
         # Verify
@@ -714,7 +778,7 @@ class TestDetectLocalChanges:
 
         # Execute
         contacts = await find_contacts_to_push(
-            session=mock_session, integration_source="google_contacts"
+            session=mock_session, integration_source="google"
         )
 
         # Verify
@@ -738,7 +802,7 @@ class TestDetectLocalChanges:
 
         # Execute
         contacts = await find_contacts_to_push(
-            session=mock_session, integration_source="google_contacts"
+            session=mock_session, integration_source="google"
         )
 
         # Verify
@@ -787,7 +851,7 @@ class TestDetectLocalChanges:
 
         # Execute
         contacts = await find_contacts_to_push(
-            session=mock_session, integration_source="google_contacts"
+            session=mock_session, integration_source="google"
         )
 
         # Verify
@@ -1146,7 +1210,7 @@ class TestPushSyncLogic:
                     internal_id=20,
                     external_id="people/c_metadata_test",
                     etag="etag_metadata",
-                    integration_source="google_contacts",
+                    integration_source="google",
                 )
 
 

@@ -26,7 +26,7 @@ app/core/integrations/
 │   ├── base_service.py     # Common integration logic
 │   ├── task_queue.py       # ARQ setup and configuration
 │   └── exceptions.py       # Integration-specific exceptions
-├── google_contacts/
+├── google/
 │   ├── __init__.py
 │   ├── models.py           # Google-specific sync metadata
 │   ├── service.py          # Business logic for Google Contacts sync
@@ -60,7 +60,7 @@ app/core/integrations/
 
 ```
 integration_workers/
-├── google_contacts/
+├── google/
 │   ├── requirements.txt    # Google-specific dependencies
 │   ├── worker.py          # ARQ worker process
 │   └── Dockerfile         # Optional: for container isolation
@@ -152,7 +152,7 @@ from core_shared import SyncMetadata, SyncStatus
 
 class SyncMetadata(Base):
     internal_id: int               # FK to internal entity
-    integration_source: str        # 'google_contacts', 'immich', etc.
+    integration_source: str        # 'google', 'immich', etc.
     external_id: str              # External system's ID
     last_synced_at: datetime
     version_hash: str             # SHA-256 hash for change detection
@@ -170,7 +170,7 @@ from core_shared import ExternalReference
 class ExternalReference(Base):
     internal_entity_type: str     # 'contact', 'journal_entry', etc.
     internal_entity_id: int       # ID of internal entity
-    external_system: str          # 'google_contacts', 'immich', etc.
+    external_system: str          # 'google', 'immich', etc.
     external_entity_type: str     # 'person', 'photo', 'album', etc.
     external_entity_id: str       # External system's ID
     reference_data: Optional[str] # Additional metadata as JSON
@@ -209,7 +209,7 @@ Uses ARQ's `cron_jobs` feature for automatic, scheduled synchronization:
 ```python
 from arq.cron import cron
 
-class GoogleContactsWorkerSettings:
+class GoogleWorkerSettings:
     functions = [sync_google_contacts, push_local_contacts_to_google]
 
     # Periodic sync configuration
@@ -245,7 +245,7 @@ class WorkerSettings(BaseSettings):
         description="Hours between automatic syncs"
     )
 
-class GoogleContactsWorkerSettings:
+class GoogleWorkerSettings:
     # Generate cron schedule from environment variable
     cron_jobs = [
         cron(
@@ -280,7 +280,7 @@ async def trigger_sync(
     task_queue_service: TaskQueueService
 ):
     """Manually trigger Google Contacts sync."""
-    job_id = await task_queue_service.enqueue_google_contacts_sync(
+    job_id = await task_queue_service.enqueue_google_sync(
         google_account_email=user.email,
         user_id=user.id,
         sync_type="smart"
@@ -462,9 +462,9 @@ services:
       - ./core_shared:/app/core_shared:ro
     depends_on: [db, redis]
 
-  google-contacts-worker:
-    build: ./integration_workers/google_contacts
-    env_file: ./integration_workers/google_contacts/.env
+  google-worker:
+    build: ./integration_workers/google
+    env_file: ./integration_workers/google/.env
     environment:
       - DATABASE_URL=postgresql://postgres:postgres@db:5432/personal_management
       - REDIS_URL=redis://redis:6379
@@ -532,9 +532,9 @@ services:
       - REDIS_URL=redis://redis:6379
     depends_on: [db, redis]
 
-  google-contacts-worker:
-    build: ./integration_workers/google_contacts
-    env_file: ./integration_workers/google_contacts/.env
+  google-worker:
+    build: ./integration_workers/google
+    env_file: ./integration_workers/google/.env
     environment:
       - DATABASE_URL=postgresql://...
       - REDIS_URL=redis://redis:6379
@@ -551,7 +551,7 @@ services:
 
 #### Worker-Specific Environment Files
 ```bash
-# integration_workers/google_contacts/.env
+# integration_workers/google/.env
 GOOGLE_CLIENT_ID=your-google-client-id
 GOOGLE_CLIENT_SECRET=your-google-client-secret
 GOOGLE_REDIRECT_URI=http://localhost:8000/auth/google/callback
@@ -763,7 +763,7 @@ async def sync_contact_with_outbox(contact_data: dict):
                 aggregate_id=contact.id,
                 event_data={
                     'contact_id': str(contact.id),
-                    'integration_source': 'google_contacts',
+                    'integration_source': 'google',
                     'sync_timestamp': datetime.utcnow().isoformat()
                 }
             )
@@ -874,7 +874,7 @@ The system supports bidirectional synchronization:
 #### Implementation: Worker Side (Inbound Sync)
 
 ```python
-# In integration_workers/google_contacts/worker.py
+# In integration_workers/google/worker.py
 
 async def sync_google_contacts(
     ctx: dict[str, Any],
@@ -908,7 +908,7 @@ async def sync_google_contacts(
             event_data={
                 'google_account_email': google_account_email,
                 'person_data': person.to_dict(),  # Full Google Person object
-                'integration_source': 'google_contacts',
+                'integration_source': 'google',
                 'external_id': person.resource_name
             },
             retry_count=0,
@@ -1006,7 +1006,7 @@ class OutboxEventProcessor:
         await self._create_sync_metadata(
             contact_id=contact.id,
             external_id=external_id,
-            integration_source='google_contacts',
+            integration_source='google',
             version_hash=calculate_hash(person_data)
         )
 
@@ -1087,7 +1087,7 @@ def add_trace_context(logger, method_name, event_dict):
 async def sync_task(external_id: str):
     job_id = str(uuid.uuid4())
     job_id_var.set(job_id)
-    worker_id_var.set('google-contacts-worker')
+    worker_id_var.set('google-worker')
 
     logger = structlog.get_logger()
     logger.info("Starting sync task", external_id=external_id)
@@ -1121,13 +1121,13 @@ queue_depth = Gauge(
 )
 
 # Usage in worker
-@job_duration.labels(worker_type='google_contacts', job_type='sync', status='success').time()
+@job_duration.labels(worker_type='google', job_type='sync', status='success').time()
 async def sync_contact(contact_id: str):
     try:
         # ... sync logic ...
-        job_total.labels(worker_type='google_contacts', job_type='sync', status='success').inc()
+        job_total.labels(worker_type='google', job_type='sync', status='success').inc()
     except Exception:
-        job_total.labels(worker_type='google_contacts', job_type='sync', status='error').inc()
+        job_total.labels(worker_type='google', job_type='sync', status='error').inc()
         raise
 ```
 
@@ -1210,7 +1210,7 @@ class WorkerSettings(BaseSettings):
     google_client_secret: SecretStr
 
     # Operational settings
-    worker_id: str = "google-contacts-worker"
+    worker_id: str = "google-worker"
     log_level: str = "INFO"
     max_concurrent_jobs: int = 5
 
@@ -1226,7 +1226,7 @@ class WorkerSettings(BaseSettings):
         return cls(**secrets)
 
 # Usage
-settings = WorkerSettings.from_secrets_manager("prod/google-contacts-worker")
+settings = WorkerSettings.from_secrets_manager("prod/google-worker")
 ```
 
 #### Docker Secrets Integration
@@ -1234,7 +1234,7 @@ settings = WorkerSettings.from_secrets_manager("prod/google-contacts-worker")
 # docker-compose.prod.yml
 version: '3.8'
 services:
-  google-contacts-worker:
+  google-worker:
     image: personal-mgmt/google-worker:latest
     secrets:
       - google_client_secret
@@ -1278,7 +1278,7 @@ async def sync_all_contacts(job_id: UUID):
     """Long-running sync with progress tracking."""
     progress = JobProgress(
         job_id=job_id,
-        worker_type='google_contacts',
+        worker_type='google',
         status=JobStatus.RUNNING,
         current_step='Fetching contact list'
     )

@@ -22,19 +22,20 @@ export type IntegrationStatus =
 export type HealthStatus = 'healthy' | 'degraded' | 'unhealthy';
 
 // Google Contacts Integration Status
-export interface GoogleContactsStatusAttributes {
+export interface GoogleStatusAttributes {
   connected: boolean;
   lastSync: string | null;
   syncCount: number;
   status: IntegrationStatus;
   errorMessage?: string;
+  needsReconsent?: boolean;
 }
 
-export interface GoogleContactsStatusResponse {
+export interface GoogleStatusResponse {
   data: {
     id: string;
     type: 'integration-status';
-    attributes: GoogleContactsStatusAttributes;
+    attributes: GoogleStatusAttributes;
   };
 }
 
@@ -113,7 +114,7 @@ export interface IntegrationUIState {
 }
 
 // Integration Settings Types
-export interface GoogleContactsSettings {
+export interface GoogleSettings {
   autoSync: boolean;
   syncInterval: number; // minutes
   syncOnStartup: boolean;
@@ -121,7 +122,7 @@ export interface GoogleContactsSettings {
 }
 
 export interface IntegrationSettings {
-  googleContacts: GoogleContactsSettings;
+  googleContacts: GoogleSettings;
 }
 
 // Error Types

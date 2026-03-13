@@ -195,7 +195,7 @@ docker_logs() {
 docker_restart() {
     if [ -z "$2" ]; then
         log_error "Please specify a service name to restart"
-        log_info "Available services: database, redis, meilisearch, jaeger, oauth-provider, oauth-login-consent, backend, frontend, google-contacts-worker"
+        log_info "Available services: database, redis, meilisearch, jaeger, oauth-provider, oauth-login-consent, backend, frontend, google-worker"
         exit 1
     fi
 
@@ -258,8 +258,8 @@ docker_rebuild_prod() {
     docker compose --profile prod down
 
     # Rebuild images with no cache
-    log_info "Rebuilding backend, frontend, nginx, and google-contacts-worker images (no cache)..."
-    docker compose --profile prod build --no-cache backend frontend nginx google-contacts-worker
+    log_info "Rebuilding backend, frontend, nginx, and google-worker images (no cache)..."
+    docker compose --profile prod build --no-cache backend frontend nginx google-worker
 
     log_success "Production Docker images rebuilt successfully!"
     log_info "Use 'docker compose --profile prod up -d' to start the services with new images"
@@ -269,7 +269,7 @@ docker_rebuild_prod() {
 docker_rebuild_service() {
     if [ -z "$2" ]; then
         log_error "Please specify a service name to rebuild"
-        log_info "Services: backend, frontend, nginx, google-contacts-worker"
+        log_info "Services: backend, frontend, nginx, google-worker"
         exit 1
     fi
 

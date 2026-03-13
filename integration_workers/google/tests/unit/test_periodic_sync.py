@@ -98,12 +98,12 @@ class TestPeriodicSyncConfiguration:
 
             importlib.reload(worker)
 
-            # Verify GoogleContactsWorkerSettings has cron_jobs
-            assert hasattr(worker.GoogleContactsWorkerSettings, "cron_jobs"), (
-                "GoogleContactsWorkerSettings should have cron_jobs attribute"
+            # Verify GoogleWorkerSettings has cron_jobs
+            assert hasattr(worker.GoogleWorkerSettings, "cron_jobs"), (
+                "GoogleWorkerSettings should have cron_jobs attribute"
             )
 
-            cron_jobs = worker.GoogleContactsWorkerSettings.cron_jobs
+            cron_jobs = worker.GoogleWorkerSettings.cron_jobs
             assert isinstance(cron_jobs, list), "cron_jobs should be a list"
             assert len(cron_jobs) > 0, "cron_jobs should not be empty when enabled"
 
@@ -127,8 +127,8 @@ class TestPeriodicSyncConfiguration:
             importlib.reload(worker)
 
             # Verify cron_jobs is empty or not present
-            if hasattr(worker.GoogleContactsWorkerSettings, "cron_jobs"):
-                cron_jobs = worker.GoogleContactsWorkerSettings.cron_jobs
+            if hasattr(worker.GoogleWorkerSettings, "cron_jobs"):
+                cron_jobs = worker.GoogleWorkerSettings.cron_jobs
                 assert len(cron_jobs) == 0, (
                     "cron_jobs should be empty when periodic sync is disabled"
                 )

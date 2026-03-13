@@ -29,8 +29,11 @@ OAUTH_REDIRECT_URI_MISMATCH = "OAuth redirect URI mismatch"
 
 # OAuth scopes
 OAUTH_BASIC_SCOPE = "openid email profile"
-GOOGLE_CONTACTS_SCOPE = (
-    "openid email profile https://www.googleapis.com/auth/contacts.readonly"
+GOOGLE_SCOPE = (
+    "openid email profile "
+    "https://www.googleapis.com/auth/contacts.readonly "
+    "https://www.googleapis.com/auth/calendar.events "
+    "https://www.googleapis.com/auth/calendar.readonly"
 )
 
 
@@ -55,7 +58,7 @@ class OAuthService:
             csrf_token: CSRF token for state validation
             flow_type: Type of OAuth flow. Valid values are:
                 - 'auth': for authentication flows (default)
-                - 'integration': for integration flows (e.g., Google Contacts sync)
+                - 'integration': for integration flows (e.g., Google sync)
 
         Returns:
             Base64-encoded JSON state parameter
@@ -590,7 +593,7 @@ class OAuthService:
             provider_data=user_data,
         )
 
-    async def get_google_contacts_authorization_url(
+    async def get_google_authorization_url(
         self, request: Request, redirect_uri: str
     ) -> str:
         """
@@ -601,7 +604,7 @@ class OAuthService:
             redirect_uri: OAuth callback URI
 
         Returns:
-            Authorization URL for Google Contacts integration
+            Authorization URL for Google integration
 
         Raises:
             HTTPException: If Google provider not configured
@@ -632,13 +635,13 @@ class OAuthService:
             redirect_uri,
             state=encoded_state,
             code_verifier=code_verifier,
-            scope=GOOGLE_CONTACTS_SCOPE,
+            scope=GOOGLE_SCOPE,
             access_type="offline",  # Request refresh token
             prompt="consent",  # Force consent to get refresh token
         )
 
         logger.info(
-            "Generated Google Contacts OAuth authorization URL",
+            "Generated Google OAuth authorization URL",
             redirect_uri=redirect_uri,
             has_state=bool(encoded_state),
             has_csrf_token=bool(csrf_token),
@@ -646,7 +649,7 @@ class OAuthService:
 
         return str(authorization_url["url"])
 
-    async def handle_google_contacts_callback(
+    async def handle_google_callback(
         self, request: Request, code: str, state: str, redirect_uri: str
     ) -> dict[str, Any]:
         """
@@ -845,11 +848,11 @@ class OAuthService:
                 detail="Failed to get Google user information",
             ) from e
 
-    async def disconnect_google_contacts(
+    async def disconnect_google(
         self, user_id: str, connection: AsyncConnection
     ) -> bool:
         """
-        Disconnect Google Contacts integration for a user.
+        Disconnect Google integration for a user.
 
         This removes the stored OAuth tokens from the database. Note that this
         does not revoke the tokens with Google - the tokens will remain valid
@@ -877,50 +880,50 @@ class OAuthService:
 
             if deleted_count > 0:
                 logger.info(
-                    "Google Contacts OAuth tokens deleted",
+                    "Google OAuth tokens deleted",
                     user_id=user_id,
                     deleted_count=deleted_count,
                 )
                 return True
             else:
                 logger.info(
-                    "No Google Contacts OAuth tokens found to delete",
+                    "No Google OAuth tokens found to delete",
                     user_id=user_id,
                 )
                 return False
 
         except Exception as e:
             logger.error(
-                "Failed to disconnect Google Contacts",
+                "Failed to disconnect Google",
                 user_id=user_id,
                 error=str(e),
             )
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Failed to disconnect Google Contacts integration",
+                detail="Failed to disconnect Google integration",
             ) from e
 
-    async def is_google_contacts_connected(
+    async def is_google_connected(
         self, user_id: str, connection: AsyncConnection
     ) -> bool:
         """
-        Check if Google Contacts integration is connected for a user.
+        Check if Google integration is connected for a user.
 
         Args:
             user_id: User ID to check connection status for
             connection: Database connection for querying token storage
 
         Returns:
-            True if user has Google Contacts tokens stored, False otherwise
+            True if user has Google tokens stored, False otherwise
         """
         try:
-            google_account_emails = await self._get_google_contacts_account_emails(
+            google_account_emails = await self._get_google_account_emails(
                 user_id, connection
             )
             has_tokens = len(google_account_emails) > 0
 
             logger.debug(
-                "Google Contacts connection check",
+                "Google connection check",
                 user_id=user_id,
                 has_tokens=has_tokens,
             )
@@ -929,7 +932,7 @@ class OAuthService:
 
         except Exception as e:
             logger.error(
-                "Failed to check Google Contacts connection",
+                "Failed to check Google connection",
                 user_id=user_id,
                 error=str(e),
                 exc_info=True,
@@ -941,21 +944,19 @@ class OAuthService:
         self, user_id: str, connection: AsyncConnection
     ) -> str:
         """Return the single connected Google account email for a user."""
-        google_account_emails = await self._get_google_contacts_account_emails(
+        google_account_emails = await self._get_google_account_emails(
             user_id, connection
         )
 
         if not google_account_emails:
-            raise ValueError(f"No Google Contacts connection found for user {user_id}")
+            raise ValueError(f"No Google connection found for user {user_id}")
 
         if len(google_account_emails) > 1:
-            raise ValueError(
-                f"Multiple Google Contacts connections found for user {user_id}"
-            )
+            raise ValueError(f"Multiple Google connections found for user {user_id}")
 
         return google_account_emails[0]
 
-    async def _get_google_contacts_account_emails(
+    async def _get_google_account_emails(
         self, user_id: str, connection: AsyncConnection
     ) -> list[str]:
         """Return all connected Google account emails for a user."""

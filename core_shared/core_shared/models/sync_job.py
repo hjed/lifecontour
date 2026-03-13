@@ -66,7 +66,7 @@ class SyncJob(Base):
     integration_source: Mapped[str] = mapped_column(
         String(50),
         nullable=False,
-        comment="Integration source (e.g., 'google_contacts')",
+        comment="Integration source (e.g., 'google')",
     )
 
     # Sync configuration

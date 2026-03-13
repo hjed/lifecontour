@@ -88,8 +88,8 @@ function Invoke-DockerRebuildProd {
     docker compose --profile prod down
 
     # Rebuild images with no cache
-    Write-Info "Rebuilding backend, frontend, nginx, and google-contacts-worker images (no cache)..."
-    docker compose --profile prod build --no-cache backend frontend nginx google-contacts-worker
+    Write-Info "Rebuilding backend, frontend, nginx, and google-worker images (no cache)..."
+    docker compose --profile prod build --no-cache backend frontend nginx google-worker
 
     Write-Success "Production Docker images rebuilt successfully!"
     Write-Info "Use 'docker compose --profile prod up -d' to start the services with new images"
@@ -101,7 +101,7 @@ function Invoke-DockerRebuildService {
 
     if ([string]::IsNullOrEmpty($Service)) {
         Write-Error "Please specify a service name to rebuild"
-        Write-Info "Services: backend, frontend, nginx, google-contacts-worker"
+        Write-Info "Services: backend, frontend, nginx, google-worker"
         exit 1
     }
 

@@ -269,7 +269,7 @@ jobs:
     needs: changes
     defaults:
       run:
-        working-directory: ./integration_workers/google_contacts
+        working-directory: ./integration_workers/google
     if: |
       github.event_name == 'workflow_call' ||
       github.event_name == 'push' ||
@@ -299,7 +299,7 @@ jobs:
     needs: changes
     defaults:
       run:
-        working-directory: ./integration_workers/google_contacts
+        working-directory: ./integration_workers/google
     if: |
       github.event_name == 'workflow_call' ||
       github.event_name == 'push' ||
