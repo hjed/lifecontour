@@ -200,3 +200,7 @@ dev = [
     "ruff>=0.11.12",
     "types-authlib>=1.5.0.20250516",
 ]
+
+[tool.alembic]
+script_location = "%(here)/migrations"
+file_template = "4d_%%(rev)_%%(slug)s.py"

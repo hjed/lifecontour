@@ -498,7 +498,7 @@ class TestOAuthServiceGoogle:
             assert "code_verifier" in call_args[1]
             assert (
                 call_args[1]["scope"]
-                == "openid email profile https://www.googleapis.com/auth/contacts.readonly"
+                == "openid email profile https://www.googleapis.com/auth/contacts.readonly https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/calendar.readonly"
             )
             assert call_args[1]["access_type"] == "offline"
             assert call_args[1]["prompt"] == "consent"
@@ -512,7 +512,7 @@ class TestOAuthServiceGoogle:
 
         # Mock database query to return no results
         mock_result = Mock()
-        mock_result.fetchone.return_value = None
+        mock_result.scalars.return_value.all.return_value = []
         mock_connection.execute = AsyncMock(return_value=mock_result)
 
         # Act
@@ -533,10 +533,7 @@ class TestOAuthServiceGoogle:
 
         # Mock database query to return a token record
         mock_result = Mock()
-        mock_result.fetchone.return_value = {
-            "user_id": user_id,
-            "google_account_email": "test@gmail.com",
-        }
+        mock_result.scalars.return_value.all.return_value = ["test@gmail.com"]
         mock_connection.execute = AsyncMock(return_value=mock_result)
 
         # Act

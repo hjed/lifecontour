@@ -411,6 +411,7 @@ async def get_google_status(
         last_sync = None
         sync_count = 0
         is_connected = False
+        needs_reconsent = False
 
         async with db_manager.get_session() as session:
             conn = await session.connection()
@@ -422,6 +423,25 @@ async def get_google_status(
             status = "active" if is_connected else "disconnected"
 
             if is_connected:
+                # Check for calendar scopes to determine if re-consent is needed
+                from sqlalchemy import text
+
+                stmt = text("""
+                    SELECT granted_scopes
+                    FROM user_google_auth
+                    WHERE user_id = :user_id
+                """)
+                result = await conn.execute(stmt, {"user_id": str(user.id)})
+                row = result.fetchone()
+                if row:
+                    scopes = row.granted_scopes or ""
+                    # If scopes don't include calendar, they need to re-consent
+                    if (
+                        "calendar.events" not in scopes
+                        or "calendar.readonly" not in scopes
+                    ):
+                        needs_reconsent = True
+
                 repo = SyncJobRepository(conn)
 
                 # Get the most recent completed sync
@@ -450,6 +470,7 @@ async def get_google_status(
                     last_sync=last_sync,
                     sync_count=sync_count,
                     status=status,
+                    needs_reconsent=needs_reconsent,
                 ),
             )
         )
@@ -667,6 +688,7 @@ async def google_oauth_callback(
             raise ValueError("No refresh token in OAuth response")
 
         expires_in = token_data.get("expires_in", 3600)
+        granted_scopes = token_data.get("scope")
 
         await google_token_service.store_tokens(
             user_id=user.id,
@@ -674,6 +696,7 @@ async def google_oauth_callback(
             access_token=access_token,
             refresh_token=refresh_token,
             expires_in=expires_in,
+            granted_scopes=granted_scopes,
         )
 
         # Get redirect URL from session

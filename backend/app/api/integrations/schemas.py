@@ -100,6 +100,11 @@ class GoogleStatusAttributes(BaseModel):
         description="Error message if status is error",
         serialization_alias="errorMessage",
     )
+    needs_reconsent: bool = Field(
+        default=False,
+        description="Whether the user needs to re-consent to grant required scopes",
+        serialization_alias="needsReconsent",
+    )
 
     model_config = {"populate_by_name": True}
 

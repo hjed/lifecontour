@@ -1,6 +1,6 @@
 """Rename google_contacts to google in sync metadata
 
-Revision ID: 285cd30b6c39
+Revision ID: 0029
 Revises: 0028
 Create Date: 2026-03-13 07:40:20.805231
 

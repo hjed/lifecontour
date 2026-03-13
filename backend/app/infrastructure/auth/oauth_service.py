@@ -880,27 +880,27 @@ class OAuthService:
 
             if deleted_count > 0:
                 logger.info(
-                    "Google Contacts OAuth tokens deleted",
+                    "Google OAuth tokens deleted",
                     user_id=user_id,
                     deleted_count=deleted_count,
                 )
                 return True
             else:
                 logger.info(
-                    "No Google Contacts OAuth tokens found to delete",
+                    "No Google OAuth tokens found to delete",
                     user_id=user_id,
                 )
                 return False
 
         except Exception as e:
             logger.error(
-                "Failed to disconnect Google Contacts",
+                "Failed to disconnect Google",
                 user_id=user_id,
                 error=str(e),
             )
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Failed to disconnect Google Contacts integration",
+                detail="Failed to disconnect Google integration",
             ) from e
 
     async def is_google_connected(
@@ -923,7 +923,7 @@ class OAuthService:
             has_tokens = len(google_account_emails) > 0
 
             logger.debug(
-                "Google Contacts connection check",
+                "Google connection check",
                 user_id=user_id,
                 has_tokens=has_tokens,
             )
@@ -932,7 +932,7 @@ class OAuthService:
 
         except Exception as e:
             logger.error(
-                "Failed to check Google Contacts connection",
+                "Failed to check Google connection",
                 user_id=user_id,
                 error=str(e),
                 exc_info=True,

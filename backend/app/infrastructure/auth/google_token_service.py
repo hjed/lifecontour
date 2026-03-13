@@ -62,6 +62,7 @@ class GoogleTokenService:
         access_token: str,
         refresh_token: str,
         expires_in: int,
+        granted_scopes: str | None = None,
     ) -> None:
         """
         Store Google OAuth tokens for a user.
@@ -72,6 +73,7 @@ class GoogleTokenService:
             access_token: OAuth access token
             refresh_token: OAuth refresh token
             expires_in: Token expiration time in seconds
+            granted_scopes: Space-separated list of granted OAuth scopes
 
         Raises:
             TokenStorageError: If storage operation fails
@@ -88,18 +90,21 @@ class GoogleTokenService:
             stmt = text("""
                 INSERT INTO user_google_auth (
                     user_id, google_account_email, encrypted_access_token,
-                    encrypted_refresh_token, expires_at, created_at, updated_at
+                    encrypted_refresh_token, expires_at, created_at, updated_at,
+                    granted_scopes
                 )
                 VALUES (
                     :user_id, :google_account_email, :encrypted_access_token,
-                    :encrypted_refresh_token, :expires_at, :created_at, :updated_at
+                    :encrypted_refresh_token, :expires_at, :created_at, :updated_at,
+                    :granted_scopes
                 )
                 ON CONFLICT (user_id, google_account_email)
                 DO UPDATE SET
                     encrypted_access_token = EXCLUDED.encrypted_access_token,
                     encrypted_refresh_token = EXCLUDED.encrypted_refresh_token,
                     expires_at = EXCLUDED.expires_at,
-                    updated_at = EXCLUDED.updated_at
+                    updated_at = EXCLUDED.updated_at,
+                    granted_scopes = EXCLUDED.granted_scopes
             """)
 
             now = datetime.now(UTC)
@@ -113,6 +118,7 @@ class GoogleTokenService:
                     "expires_at": expires_at,
                     "created_at": now,
                     "updated_at": now,
+                    "granted_scopes": granted_scopes,
                 },
             )
 
