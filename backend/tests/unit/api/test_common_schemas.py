@@ -129,7 +129,7 @@ class TestCreatePaginationLinksWithParams:
 
         # Check that all parameters are included
         assert links.self is not None
-        assert "q=search term" in links.self
+        assert "q=search+term" in links.self
         assert "entity_types=contact" in links.self
         assert "entity_types=task" in links.self
         assert "sort=created_at" in links.self

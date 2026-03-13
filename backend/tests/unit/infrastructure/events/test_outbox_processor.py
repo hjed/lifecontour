@@ -80,6 +80,12 @@ class TestOutboxProcessor:
         async def mock_begin():
             yield mock_conn
 
+        @asynccontextmanager
+        async def mock_begin_nested():
+            yield mock_conn
+
+        mock_conn.begin_nested = mock_begin_nested
+
         mock_engine = AsyncMock()
         mock_engine.begin = mock_begin
 
@@ -128,6 +134,12 @@ class TestOutboxProcessor:
         async def mock_begin():
             yield mock_conn
 
+        @asynccontextmanager
+        async def mock_begin_nested():
+            yield mock_conn
+
+        mock_conn.begin_nested = mock_begin_nested
+
         mock_engine = AsyncMock()
         mock_engine.begin = mock_begin
 
@@ -166,6 +178,12 @@ class TestOutboxProcessor:
         @asynccontextmanager
         async def mock_begin():
             yield mock_conn
+
+        @asynccontextmanager
+        async def mock_begin_nested():
+            yield mock_conn
+
+        mock_conn.begin_nested = mock_begin_nested
 
         mock_engine = AsyncMock()
         mock_engine.begin = mock_begin
@@ -222,6 +240,12 @@ class TestOutboxProcessor:
         @asynccontextmanager
         async def mock_begin():
             yield mock_conn
+
+        @asynccontextmanager
+        async def mock_begin_nested():
+            yield mock_conn
+
+        mock_conn.begin_nested = mock_begin_nested
 
         mock_engine = AsyncMock()
         mock_engine.begin = mock_begin
@@ -328,6 +352,12 @@ class TestOutboxProcessor:
         @asynccontextmanager
         async def mock_begin():
             yield mock_conn
+
+        @asynccontextmanager
+        async def mock_begin_nested():
+            yield mock_conn
+
+        mock_conn.begin_nested = mock_begin_nested
 
         mock_engine = AsyncMock()
         mock_engine.begin = mock_begin
@@ -459,6 +489,12 @@ class TestOutboxProcessor:
         async def mock_begin():
             yield mock_conn
 
+        @asynccontextmanager
+        async def mock_begin_nested():
+            yield mock_conn
+
+        mock_conn.begin_nested = mock_begin_nested
+
         mock_engine = AsyncMock()
         mock_engine.begin = mock_begin
 
@@ -543,6 +579,12 @@ class TestOutboxProcessor:
         @asynccontextmanager
         async def mock_begin():
             yield mock_conn
+
+        @asynccontextmanager
+        async def mock_begin_nested():
+            yield mock_conn
+
+        mock_conn.begin_nested = mock_begin_nested
 
         mock_engine = AsyncMock()
         mock_engine.begin = mock_begin
