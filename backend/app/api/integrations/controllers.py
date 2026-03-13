@@ -690,6 +690,10 @@ async def google_oauth_callback(
 
         expires_in = token_data.get("expires_in", 3600)
         granted_scopes = token_data.get("scope")
+        if not granted_scopes:
+            from app.infrastructure.auth.oauth_service import GOOGLE_SCOPE
+
+            granted_scopes = " ".join(GOOGLE_SCOPE)
 
         await google_token_service.store_tokens(
             user_id=user.id,
@@ -704,7 +708,7 @@ async def google_oauth_callback(
         redirect_url = request.session.pop("integration_redirect_url", "/integrations")
 
         logger.info(
-            "Google Contacts OAuth callback successful and tokens stored",
+            "Google OAuth callback successful and tokens stored",
             user_id=user.id,
             google_email=google_email,
             has_access_token=bool(access_token),

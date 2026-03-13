@@ -401,10 +401,11 @@ class GoogleAPIClient:
                 request_params["pageToken"] = page_token
             if sync_token:
                 request_params["syncToken"] = sync_token
-            if time_min:
-                request_params["timeMin"] = time_min
-            if updated_min:
-                request_params["updatedMin"] = updated_min
+            else:
+                if time_min:
+                    request_params["timeMin"] = time_min
+                if updated_min:
+                    request_params["updatedMin"] = updated_min
 
             logger.info(
                 "Fetching Google Calendar events",

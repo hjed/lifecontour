@@ -28,6 +28,7 @@ export interface GoogleStatusAttributes {
   syncCount: number;
   status: IntegrationStatus;
   errorMessage?: string;
+  needsReconsent?: boolean;
 }
 
 export interface GoogleStatusResponse {

@@ -1,6 +1,6 @@
 """add granted_scopes to user_google_auth
 
-Revision ID: 8d687ded575d
+Revision ID: 0030
 Revises: 0029
 Create Date: 2026-03-13 22:29:47.389164
 
