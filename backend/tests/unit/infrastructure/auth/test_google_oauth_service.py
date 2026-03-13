@@ -89,7 +89,7 @@ class TestGoogleOAuthProvider:
         redirect_uri = "http://localhost:3000/integrations/google/callback"
 
         # Test with contacts scope for integration
-        auth_url = await oauth_service.get_google_contacts_authorization_url(
+        auth_url = await oauth_service.get_google_authorization_url(
             mock_request, redirect_uri
         )
 
@@ -157,7 +157,7 @@ class TestGoogleOAuthCallback:
             mock_client.post = AsyncMock(return_value=mock_response)
             mock_client_class.return_value = mock_client
 
-            token_data = await oauth_service.handle_google_contacts_callback(
+            token_data = await oauth_service.handle_google_callback(
                 mock_request,
                 "test_code",
                 encoded_state,
@@ -175,7 +175,7 @@ class TestGoogleOAuthCallback:
         mock_request.session = {"oauth_state": "valid_state"}
 
         with pytest.raises(HTTPException) as exc_info:
-            await oauth_service.handle_google_contacts_callback(
+            await oauth_service.handle_google_callback(
                 mock_request,
                 "test_code",
                 "invalid_state",
@@ -192,7 +192,7 @@ class TestGoogleOAuthCallback:
         mock_request.session = {}  # No oauth_state in session
 
         with pytest.raises(HTTPException) as exc_info:
-            await oauth_service.handle_google_contacts_callback(
+            await oauth_service.handle_google_callback(
                 mock_request,
                 "test_code",
                 "test_state",
@@ -223,7 +223,7 @@ class TestGoogleOAuthCallback:
         mock_request.session = {"oauth_csrf_token": csrf_token}  # No code_verifier
 
         with pytest.raises(HTTPException) as exc_info:
-            await oauth_service.handle_google_contacts_callback(
+            await oauth_service.handle_google_callback(
                 mock_request,
                 "test_code",
                 encoded_state,

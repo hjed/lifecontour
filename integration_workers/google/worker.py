@@ -19,7 +19,7 @@ from core_shared.database.engine import create_session_factory
 # Import integration exceptions from core_shared
 from core_shared.exceptions import JobCancelledException
 from core_shared.integration_constants import (
-    GOOGLE_CONTACTS_ARQ_QUEUE_NAME as ARQ_QUEUE_NAME,
+    GOOGLE_ARQ_QUEUE_NAME as ARQ_QUEUE_NAME,
 )
 
 # Import shared observability modules
@@ -44,7 +44,7 @@ from api_models import ListConnectionsResponse
 
 # Import worker-specific services
 from google_auth_service import GoogleAuthService
-from google_contacts_client import GoogleContactsAPIClient
+from google_client import GoogleAPIClient
 from transformer import GoogleContactTransformer
 
 
@@ -71,7 +71,7 @@ class WorkerSettings(BaseSettings):
     encryption_key: SecretStr
 
     # Worker configuration
-    worker_id: str = "google-contacts-worker"
+    worker_id: str = "google-worker"
     log_level: str = "INFO"
     max_concurrent_jobs: int = 5
 
@@ -93,7 +93,7 @@ configure_logging(
 logger = get_logger(__name__)
 
 # Initialize metrics collector for this worker
-metrics_collector = MetricsCollector(worker_type="google_contacts")
+metrics_collector = MetricsCollector(worker_type="google")
 
 
 async def startup(ctx: dict[str, Any]) -> None:
@@ -132,7 +132,7 @@ async def shutdown(ctx: dict[str, Any]) -> None:
 
 
 async def find_contacts_to_push(
-    session: AsyncSession, integration_source: str = "google_contacts"
+    session: AsyncSession, integration_source: str = "google"
 ) -> list[dict[str, Any]]:
     """
     Find contacts that need to be pushed to Google.
@@ -143,7 +143,7 @@ async def find_contacts_to_push(
 
     Args:
         session: Database session
-        integration_source: Integration source name (default: "google_contacts")
+        integration_source: Integration source name (default: "google")
 
     Returns:
         List of contact dictionaries with sync action ("create" or "update")
@@ -494,7 +494,7 @@ def _transform_contact_to_google_person(contact: dict[str, Any]) -> dict[str, An
 
 async def _create_contact_in_google(
     session: AsyncSession,
-    client: GoogleContactsAPIClient,
+    client: GoogleAPIClient,
     contact: dict[str, Any],
     person_data: dict[str, Any],
     google_account_email: str,
@@ -514,7 +514,7 @@ async def _create_contact_in_google(
         internal_id=contact["id"],
         external_id=result["resourceName"],
         etag=result.get("etag"),
-        integration_source="google_contacts",
+        integration_source="google",
     )
 
     logger.info(
@@ -528,7 +528,7 @@ async def _create_contact_in_google(
 
 async def _update_contact_in_google(
     session: AsyncSession,
-    client: GoogleContactsAPIClient,
+    client: GoogleAPIClient,
     contact: dict[str, Any],
     person_data: dict[str, Any],
     google_account_email: str,
@@ -556,7 +556,7 @@ async def _update_contact_in_google(
         internal_id=contact["id"],
         external_id=result["resourceName"],
         etag=result.get("etag"),
-        integration_source="google_contacts",
+        integration_source="google",
     )
 
     logger.info(
@@ -611,7 +611,7 @@ def _handle_http_error(
 
 async def _push_single_contact(
     session: AsyncSession,
-    client: GoogleContactsAPIClient,
+    client: GoogleAPIClient,
     contact: dict[str, Any],
     google_account_email: str,
     metrics: dict[str, int],
@@ -654,7 +654,7 @@ async def _push_single_contact(
 
 async def push_contacts_to_google(
     session: AsyncSession,
-    client: GoogleContactsAPIClient,
+    client: GoogleAPIClient,
     contacts: list[dict[str, Any]],
     google_account_email: str,
 ) -> dict[str, Any]:
@@ -814,7 +814,7 @@ def _process_contacts_batch(
 
 async def _perform_full_sync(
     session: AsyncSession,
-    client: GoogleContactsAPIClient,
+    client: GoogleAPIClient,
     google_account_email: str,
     metrics: dict[str, Any],
     user_id: str | int,
@@ -870,7 +870,7 @@ async def _perform_full_sync(
                 # Create outbox event for contact sync
                 outbox_event = OutboxEvent.create_contact_sync_event(
                     contact_data=contact_data,
-                    integration_source="google_contacts",
+                    integration_source="google",
                     external_id=google_person.resource_name,
                     sync_type="created",
                     etag=google_person.etag,
@@ -913,7 +913,7 @@ async def _perform_full_sync(
 
 async def _perform_incremental_sync(
     session: AsyncSession,
-    client: GoogleContactsAPIClient,
+    client: GoogleAPIClient,
     google_account_email: str,
     metrics: dict[str, Any],
     user_id: str | int,
@@ -982,7 +982,7 @@ async def _perform_incremental_sync(
             # Create outbox event for contact sync
             outbox_event = OutboxEvent.create_contact_sync_event(
                 contact_data=contact_data,
-                integration_source="google_contacts",
+                integration_source="google",
                 external_id=google_person.resource_name,
                 sync_type="updated",
                 etag=google_person.etag,
@@ -1191,7 +1191,7 @@ async def periodic_sync_all_accounts(ctx: dict[str, Any]) -> dict[str, Any]:
                 try:
                     # Enqueue individual sync job using ARQ pool from context
                     job = await ctx["redis"].enqueue_job(
-                        "sync_google_contacts",
+                        "sync_google",
                         google_account_email,
                         user_id,
                         "smart",  # Use smart sync for periodic syncs
@@ -1256,7 +1256,7 @@ async def periodic_sync_all_accounts(ctx: dict[str, Any]) -> dict[str, Any]:
         }
 
 
-async def sync_google_contacts(
+async def sync_google(
     ctx: dict[str, Any],
     google_account_email: str,
     user_id: str | int,
@@ -1329,7 +1329,7 @@ async def sync_google_contacts(
                 google_client_secret=settings.google_client_secret.get_secret_value(),
             )
 
-            client = GoogleContactsAPIClient(
+            client = GoogleAPIClient(
                 auth_service=auth_service,
                 google_account_email=google_account_email,
                 google_client_id=settings.google_client_id,
@@ -1382,7 +1382,7 @@ async def sync_google_contacts(
 
             # Create sync completion event
             completion_event = OutboxEvent.create_sync_completed_event(
-                integration_source="google_contacts",
+                integration_source="google",
                 google_account_email=google_account_email,
                 metrics=metrics,
             )
@@ -1561,7 +1561,7 @@ async def push_local_contacts_to_google(
                 google_client_secret=settings.google_client_secret.get_secret_value(),
             )
 
-            client = GoogleContactsAPIClient(
+            client = GoogleAPIClient(
                 auth_service=auth_service,
                 google_account_email=google_account_email,
                 google_client_id=settings.google_client_id,
@@ -1571,7 +1571,7 @@ async def push_local_contacts_to_google(
 
             # Find contacts that need to be pushed
             contacts_to_push = await find_contacts_to_push(
-                session=session, integration_source="google_contacts"
+                session=session, integration_source="google"
             )
 
             if not contacts_to_push:
@@ -1704,12 +1704,12 @@ def retry_delay_func(retry_count: int) -> float:
 
 
 # ARQ Worker Settings
-class GoogleContactsWorkerSettings(WorkerSettingsBase):
+class GoogleWorkerSettings(WorkerSettingsBase):
     """ARQ worker configuration."""
 
     # Task functions
     functions = [
-        sync_google_contacts,
+        sync_google,
         push_local_contacts_to_google,
         periodic_sync_all_accounts,  # Wrapper for periodic cron syncs
     ]
@@ -1763,4 +1763,4 @@ class GoogleContactsWorkerSettings(WorkerSettingsBase):
 if __name__ == "__main__":
     # Run the worker
     logger.info("Starting Google Contacts ARQ worker", worker_id=settings.worker_id)
-    run_worker(GoogleContactsWorkerSettings)
+    run_worker(GoogleWorkerSettings)

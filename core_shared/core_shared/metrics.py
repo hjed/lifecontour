@@ -89,7 +89,7 @@ class MetricsCollector:
         Initialize metrics collector.
 
         Args:
-            worker_type: Type of worker (e.g., 'google_contacts', 'strava')
+            worker_type: Type of worker (e.g., 'google', 'strava')
         """
         self.worker_type = worker_type
 

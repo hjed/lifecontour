@@ -14,11 +14,11 @@ COPY ./core_shared/ /core_shared/
 RUN pip install -e /core_shared/
 
 # Copy worker pyproject.toml and install dependencies
-COPY ./integration_workers/google_contacts/pyproject.toml .
+COPY ./integration_workers/google/pyproject.toml .
 RUN pip install --no-cache-dir .
 
 # Copy worker code
-COPY ./integration_workers/google_contacts/ .
+COPY ./integration_workers/google/ .
 
 # Create non-root user
 RUN useradd --create-home --shell /bin/bash worker

@@ -76,7 +76,7 @@ class TestIntegrationHealthService:
         # Verify individual service statuses
         services = health["services"]
         assert services["redis"]["status"] == "healthy"
-        assert services["google_contacts_worker"]["status"] == "healthy"
+        assert services["google_worker"]["status"] == "healthy"
         assert services["google_api"]["status"] == "healthy"
 
     @pytest.mark.asyncio
@@ -133,9 +133,7 @@ class TestIntegrationHealthService:
         # Verify Redis calls
         mock_redis_pool.ping.assert_called_once()
         mock_redis_pool.info.assert_called_once()
-        mock_redis_pool.queued_jobs.assert_called_once_with(
-            queue_name="google_contacts"
-        )
+        mock_redis_pool.queued_jobs.assert_called_once_with(queue_name="google")
 
     @pytest.mark.asyncio
     async def test_check_redis_health_failure(
@@ -298,9 +296,7 @@ class TestIntegrationHealthService:
 
         # Verify count
         assert count == 5
-        mock_redis_pool.queued_jobs.assert_called_once_with(
-            queue_name="google_contacts"
-        )
+        mock_redis_pool.queued_jobs.assert_called_once_with(queue_name="google")
 
     @pytest.mark.asyncio
     async def test_get_recent_job_count_failure(

@@ -24,7 +24,7 @@ tests/
 ### All Tests
 ```bash
 # From the project root
-docker compose exec google-contacts-worker pytest tests/ -v
+docker compose exec google-worker pytest tests/ -v
 
 # Or from within the worker directory
 pytest tests/ -v
@@ -32,17 +32,17 @@ pytest tests/ -v
 
 ### Unit Tests Only
 ```bash
-docker compose exec google-contacts-worker pytest tests/unit/ -v
+docker compose exec google-worker pytest tests/unit/ -v
 ```
 
 ### Integration Tests Only
 ```bash
-docker compose exec google-contacts-worker pytest tests/integration/ -v
+docker compose exec google-worker pytest tests/integration/ -v
 ```
 
 ### Specific Test File
 ```bash
-docker compose exec google-contacts-worker pytest tests/unit/test_retry_strategy.py -v
+docker compose exec google-worker pytest tests/unit/test_retry_strategy.py -v
 ```
 
 ## Test Categories
@@ -129,7 +129,7 @@ async def test_with_redis(redis_pool):
 ### Tests can't find modules
 Make sure you're running tests from within the Docker container:
 ```bash
-docker compose exec google-contacts-worker pytest tests/
+docker compose exec google-worker pytest tests/
 ```
 
 ### Redis connection errors in integration tests

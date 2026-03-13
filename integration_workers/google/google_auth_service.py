@@ -1,7 +1,7 @@
 """
 Google authentication service for managing OAuth tokens in worker.
 
-Migrated from backend/app/core/integrations/google_contacts/service.py
+Migrated from backend/app/core/integrations/google/service.py
 and adapted for worker environment with simplified dependencies.
 """
 

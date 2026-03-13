@@ -44,7 +44,7 @@ The worker uses ARQ (Async Redis Queue) for task processing and supports:
 | `GOOGLE_CLIENT_SECRET` | *required* | Google OAuth client secret |
 | `ENCRYPTION_KEY` | *required* | Key for encrypting OAuth tokens |
 | `LOG_LEVEL` | `INFO` | Logging level (DEBUG, INFO, WARNING, ERROR) |
-| `WORKER_ID` | `google-contacts-worker` | Unique worker identifier |
+| `WORKER_ID` | `google-worker` | Unique worker identifier |
 | `MAX_CONCURRENT_JOBS` | `5` | Maximum concurrent ARQ jobs |
 | `ENABLE_PERIODIC_SYNC` | `false` | Enable automatic periodic syncing |
 | `SYNC_INTERVAL_HOURS` | `6` | Hours between periodic syncs |
@@ -69,7 +69,7 @@ environment:
 **How Periodic Sync Works**:
 1. ARQ cron job triggers `periodic_sync_all_accounts` at configured intervals
 2. Function queries database for all active Google integrations
-3. Enqueues individual `sync_google_contacts` tasks for each account
+3. Enqueues individual `sync_google` tasks for each account
 4. Each account syncs independently using "smart" sync strategy
 
 ### Sync Types
@@ -88,13 +88,13 @@ Periodic syncs always use **`smart`** strategy for efficiency.
 
 ```bash
 # Start with Docker Compose
-docker compose --profile dev up google-contacts-worker
+docker compose --profile dev up google-worker
 
 # View logs
-docker compose logs -f google-contacts-worker
+docker compose logs -f google-worker
 
 # Run tests
-docker compose exec google-contacts-worker pytest tests/unit/ -v
+docker compose exec google-worker pytest tests/unit/ -v
 ```
 
 ### Production
@@ -105,14 +105,14 @@ export ENABLE_PERIODIC_SYNC=true
 export SYNC_INTERVAL_HOURS=6
 
 # Start worker
-docker compose --profile prod up -d google-contacts-worker
+docker compose --profile prod up -d google-worker
 ```
 
 ## Tasks
 
 The worker provides three ARQ tasks:
 
-### 1. `sync_google_contacts`
+### 1. `sync_google`
 
 Syncs contacts from Google to local database.
 
@@ -124,7 +124,7 @@ Syncs contacts from Google to local database.
 **Example**:
 ```python
 await redis.enqueue_job(
-    "sync_google_contacts",
+    "sync_google",
     "user@example.com",
     123,
     "smart"

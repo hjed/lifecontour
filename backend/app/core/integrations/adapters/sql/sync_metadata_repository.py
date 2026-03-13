@@ -36,7 +36,7 @@ class SyncMetadataRepository:
         The lock is held until the transaction commits or rolls back.
 
         Args:
-            integration_source: Integration source (e.g., 'google_contacts')
+            integration_source: Integration source (e.g., 'google')
             external_id: External entity ID
 
         Returns:
@@ -85,7 +85,7 @@ class SyncMetadataRepository:
         Find sync metadata without locking (for read-only operations).
 
         Args:
-            integration_source: Integration source (e.g., 'google_contacts')
+            integration_source: Integration source (e.g., 'google')
             external_id: External entity ID
 
         Returns:

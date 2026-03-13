@@ -123,7 +123,7 @@ personal-management-system/
 │   │   ├── migrations/          # SQL queries and migrations
 │   │   └── mcp/                 # MCP server implementation
 │   ├── integration_workers/     # Background worker processes
-│   │   ├── google_contacts/     # Google Contacts worker
+│   │   ├── google/     # Google Contacts worker
 │   │   ├── immich/              # Immich worker
 │   │   ├── strava/              # Strava worker
 │   │   └── firefly_iii/         # Firefly III worker

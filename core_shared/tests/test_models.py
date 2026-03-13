@@ -55,7 +55,7 @@ class TestSyncMetadata:
 
         sync_metadata = SyncMetadata(
             internal_id=123,
-            integration_source="google_contacts",
+            integration_source="google",
             external_id="person/abc123",
             last_synced_at=now,
             version_hash="sha256_hash_of_data",
@@ -67,7 +67,7 @@ class TestSyncMetadata:
         )
 
         assert sync_metadata.internal_id == 123
-        assert sync_metadata.integration_source == "google_contacts"
+        assert sync_metadata.integration_source == "google"
         assert sync_metadata.external_id == "person/abc123"
         assert sync_metadata.last_synced_at == now
         assert sync_metadata.version_hash == "sha256_hash_of_data"
@@ -80,7 +80,7 @@ class TestSyncMetadata:
         sync_metadata = SyncMetadata(
             id=1,
             internal_id=123,
-            integration_source="google_contacts",
+            integration_source="google",
             external_id="person/abc123",
             last_synced_at=datetime.now(UTC),
             version_hash="hash123",
@@ -89,7 +89,7 @@ class TestSyncMetadata:
 
         repr_str = repr(sync_metadata)
         assert "SyncMetadata(id=1" in repr_str
-        assert "integration_source='google_contacts'" in repr_str
+        assert "integration_source='google'" in repr_str
         assert "external_id='person/abc123'" in repr_str
         assert "sync_status='success'" in repr_str
 

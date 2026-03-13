@@ -42,7 +42,7 @@ test.describe('Integrations Page UI (mocked API)', () => {
         route.fulfill(
           json({
             data: {
-              id: 'google-contacts',
+              id: 'google',
               type: 'integration-status',
               attributes: {
                 connected: false,
@@ -115,7 +115,7 @@ test.describe('Integrations Page UI (mocked API)', () => {
         route.fulfill(
           json({
             data: {
-              id: 'google-contacts',
+              id: 'google',
               type: 'integration-status',
               attributes: {
                 connected,

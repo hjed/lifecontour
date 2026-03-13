@@ -18,12 +18,12 @@ import {
 import { format } from 'date-fns';
 import { enAU } from 'date-fns/locale';
 import {
-  useGoogleContactsStatus,
-  useGoogleContactsSync,
+  useGoogleStatus,
+  useGoogleSync,
   useIntegrationHealth,
   useSyncHistory,
-  useGoogleContactsOAuthAuthorize,
-  useGoogleContactsOAuthDisconnect,
+  useGoogleOAuthAuthorize,
+  useGoogleOAuthDisconnect,
 } from '@/lib/api/integrations';
 import {
   SyncType,
@@ -357,7 +357,7 @@ function IntegrationsPageContent() {
     data: statusData,
     isLoading: statusLoading,
     error: statusError,
-  } = useGoogleContactsStatus();
+  } = useGoogleStatus();
 
   const {
     data: healthData,
@@ -375,13 +375,13 @@ function IntegrationsPageContent() {
     mutate: triggerSync,
     isPending: syncLoading,
     error: syncError,
-  } = useGoogleContactsSync();
+  } = useGoogleSync();
 
   const { mutate: authorizeOAuth, isPending: oauthLoading } =
-    useGoogleContactsOAuthAuthorize();
+    useGoogleOAuthAuthorize();
 
   const { mutate: disconnectOAuth, isPending: disconnectLoading } =
-    useGoogleContactsOAuthDisconnect();
+    useGoogleOAuthDisconnect();
 
   const status = statusData?.data?.attributes;
 
@@ -428,7 +428,7 @@ function IntegrationsPageContent() {
       <div className='grid gap-6 lg:grid-cols-3'>
         {/* Google Contacts Integration */}
         <div className='lg:col-span-2'>
-          <Card data-testid='google-contacts-integration'>
+          <Card data-testid='google-integration'>
             <CardHeader>
               <CardTitle className='flex items-center gap-2'>
                 <Users className='h-5 w-5 text-blue-500' />

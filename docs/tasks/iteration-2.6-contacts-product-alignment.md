@@ -80,9 +80,9 @@ The sequence reflects both user priority and technical dependency:
 **Strategy:** Split into 3 phases so the sync rules are locked down before hierarchy and UX work build on them.
 
 **Relevant documents:**
-- [Contacts Product Specification — Google Contacts Sync for Tags](../product-specifications/contacts-product-specification.md#google-contacts-sync-for-tags)
+- [Contacts Product Specification — Google Contacts Sync for Tags](../product-specifications/contacts-product-specification.md#google-sync-for-tags)
 - [Contacts Product Specification — Contact Tags](../product-specifications/contacts-product-specification.md#contact-tags)
-- [Integration Architecture — Two-Way Sync (Google Contacts)](../architecture/integration-architecture.md#1-two-way-sync-google-contacts)
+- [Integration Architecture — Two-Way Sync (Google Contacts)](../architecture/integration-architecture.md#1-two-way-sync-google)
 - [Integration Architecture — Inbound Sync Flow (Pulling Data from External Systems)](../architecture/integration-architecture.md#inbound-sync-flow-pulling-data-from-external-systems)
 - [Testing Strategy — Three-Tier Testing Strategy](../architecture/testing-strategy.md#three-tier-testing-strategy)
 
@@ -134,7 +134,7 @@ The sequence reflects both user priority and technical dependency:
 
 **Relevant documents:**
 - [Contacts Product Specification — Contact Tags](../product-specifications/contacts-product-specification.md#contact-tags)
-- [Contacts Product Specification — Google Contacts Sync for Tags](../product-specifications/contacts-product-specification.md#google-contacts-sync-for-tags)
+- [Contacts Product Specification — Google Contacts Sync for Tags](../product-specifications/contacts-product-specification.md#google-sync-for-tags)
 - [Domain Architecture — Contacts Domain](../architecture/domain-architecture.md#contacts-domain)
 - [Domain Architecture — Contacts Domain Adapters](../architecture/domain-architecture.md#contacts-domain-adapters)
 - [API Design — Pagination Guidelines](../architecture/api-design.md#pagination-guidelines)
@@ -526,7 +526,7 @@ The sequence reflects both user priority and technical dependency:
 **Relevant documents:**
 - [Contacts Product Specification — Activity Feed](../product-specifications/contacts-product-specification.md#activity-feed)
 - [Contacts Product Specification — AI Interaction Summary](../product-specifications/contacts-product-specification.md#ai-interaction-summary)
-- [Integration Architecture — Two-Way Sync (Google Contacts)](../architecture/integration-architecture.md#1-two-way-sync-google-contacts)
+- [Integration Architecture — Two-Way Sync (Google Contacts)](../architecture/integration-architecture.md#1-two-way-sync-google)
 - [Domain Architecture — Contacts Domain Adapters](../architecture/domain-architecture.md#contacts-domain-adapters)
 - [Database Design — Contact History Table](../architecture/database-design.md#contact-history-table)
 - [API Design — Error Handling Guidelines](../architecture/api-design.md#error-handling-guidelines)

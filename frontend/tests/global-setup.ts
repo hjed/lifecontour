@@ -253,7 +253,7 @@ function areServicesRunning(
       'backend',
       'meilisearch',
       'redis',
-      'google-contacts-worker',
+      'google-worker',
     ];
 
     return expectedServices.every(service => runningServices.has(service));

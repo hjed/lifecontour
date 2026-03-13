@@ -64,14 +64,14 @@ class TestPeriodicSyncLogging:
         )
 
     @pytest.mark.asyncio
-    async def test_sync_google_contacts_accepts_trigger_type(self):
-        """Test that sync_google_contacts accepts trigger_type parameter."""
+    async def test_sync_google_accepts_trigger_type(self):
+        """Test that sync_google accepts trigger_type parameter."""
         import inspect
 
-        from worker import sync_google_contacts
+        from worker import sync_google
 
         # Get function signature
-        sig = inspect.signature(sync_google_contacts)
+        sig = inspect.signature(sync_google)
 
         # Verify trigger_type parameter exists or can be added
         # For now, we'll verify the function signature
@@ -185,6 +185,6 @@ class TestPeriodicSyncLogging:
         # Verify enqueue_job was called with 'smart' sync type
         mock_redis.enqueue_job.assert_called_once()
         call_args = mock_redis.enqueue_job.call_args
-        assert call_args[0][0] == "sync_google_contacts"  # Function name
+        assert call_args[0][0] == "sync_google"  # Function name
         assert call_args[0][3] == "smart"  # sync_type parameter
         assert call_args.kwargs["_queue_name"] == worker.ARQ_QUEUE_NAME

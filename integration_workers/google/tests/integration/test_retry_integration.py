@@ -109,13 +109,13 @@ class TestARQRetryIntegration:
     @pytest.mark.asyncio
     async def test_worker_settings_configuration(self):
         """Test that the worker settings are correctly configured."""
-        from worker import GoogleContactsWorkerSettings, retry_delay_func
+        from worker import GoogleWorkerSettings, retry_delay_func
 
         # Verify worker settings
-        assert GoogleContactsWorkerSettings.max_tries == 5
-        assert GoogleContactsWorkerSettings.retry_delay == retry_delay_func
-        assert GoogleContactsWorkerSettings.job_timeout == 600
-        assert GoogleContactsWorkerSettings.queue_name == "google_contacts"
+        assert GoogleWorkerSettings.max_tries == 5
+        assert GoogleWorkerSettings.retry_delay == retry_delay_func
+        assert GoogleWorkerSettings.job_timeout == 600
+        assert GoogleWorkerSettings.queue_name == "google"
 
     @pytest.mark.asyncio
     async def test_retry_delay_exponential_backoff(self):

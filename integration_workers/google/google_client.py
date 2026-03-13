@@ -2,7 +2,7 @@
 Google Contacts API client for worker.
 
 Simplified version of the core client adapted for worker environment.
-Migrated from backend/app/core/integrations/google_contacts/client.py
+Migrated from backend/app/core/integrations/google/client.py
 """
 
 from typing import Any, cast
@@ -13,11 +13,11 @@ from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 
 from google_auth_service import GoogleAuthService, GoogleAuthTokensNotFoundError
-
+from calendar_models import GoogleCalendar, GoogleEvent
 logger = structlog.get_logger()
 
 
-class GoogleContactsAPIClient:
+class GoogleAPIClient:
     """Client for Google People API operations."""
 
     def __init__(
@@ -43,46 +43,57 @@ class GoogleContactsAPIClient:
         self.google_client_id = google_client_id
         self.google_client_secret = google_client_secret
         self.user_id = user_id
-        self._service: Any | None = None
+        self._people_service: Any | None = None
+        self._calendar_service: Any | None = None
 
-    async def _get_service(self) -> Any:
+    async def _get_credentials(self) -> OAuth2Credentials:
+        """Get OAuth2 credentials for Google API."""
+        try:
+            access_token = await self.auth_service.get_access_token(
+                self.user_id, self.google_account_email
+            )
+            return OAuth2Credentials(
+                token=access_token,
+                client_id=self.google_client_id,
+                client_secret=self.google_client_secret,
+            )
+        except GoogleAuthTokensNotFoundError as e:
+            logger.error(
+                "No Google auth tokens found",
+                google_account_email=self.google_account_email,
+                error=str(e),
+            )
+            raise GoogleAuthTokensNotFoundError(
+                f"Google OAuth tokens not found for {self.google_account_email}. "
+                "Please authenticate with Google first."
+            ) from e
+
+    async def _get_people_service(self) -> Any:
         """Get or create Google People API service with authentication."""
-        if self._service is None:
-            try:
-                # Get access token
-                access_token = await self.auth_service.get_access_token(
-                    self.user_id, self.google_account_email
-                )
+        if self._people_service is None:
+            credentials = await self._get_credentials()
+            self._people_service = build(
+                "people", "v1", credentials=credentials, cache_discovery=False
+            )
+            logger.info(
+                "Created Google People API service",
+                google_account_email=self.google_account_email,
+            )
+        return self._people_service
 
-                # Create credentials
-                credentials = OAuth2Credentials(
-                    token=access_token,
-                    client_id=self.google_client_id,
-                    client_secret=self.google_client_secret,
-                )
+    async def _get_calendar_service(self) -> Any:
+        """Get or create Google Calendar API service with authentication."""
+        if self._calendar_service is None:
+            credentials = await self._get_credentials()
+            self._calendar_service = build(
+                "calendar", "v3", credentials=credentials, cache_discovery=False
+            )
+            logger.info(
+                "Created Google Calendar API service",
+                google_account_email=self.google_account_email,
+            )
+        return self._calendar_service
 
-                # Build the service
-                self._service = build(
-                    "people", "v1", credentials=credentials, cache_discovery=False
-                )
-
-                logger.info(
-                    "Created Google People API service",
-                    google_account_email=self.google_account_email,
-                )
-
-            except GoogleAuthTokensNotFoundError as e:
-                logger.error(
-                    "No Google auth tokens found",
-                    google_account_email=self.google_account_email,
-                    error=str(e),
-                )
-                raise GoogleAuthTokensNotFoundError(
-                    f"Google OAuth tokens not found for {self.google_account_email}. "
-                    "Please authenticate with Google first."
-                ) from e
-
-        return self._service
 
     async def list_connections(
         self,
@@ -106,7 +117,7 @@ class GoogleContactsAPIClient:
             GoogleAuthTokensNotFoundError: If authentication tokens are missing
         """
         try:
-            service = await self._get_service()
+            service = await self._get_people_service()
 
             # Build request parameters
             request_params = {
@@ -165,7 +176,7 @@ class GoogleContactsAPIClient:
             GoogleAuthTokensNotFoundError: If authentication tokens are missing
         """
         try:
-            service = await self._get_service()
+            service = await self._get_people_service()
 
             logger.info(
                 "Fetching Google contact",
@@ -217,7 +228,7 @@ class GoogleContactsAPIClient:
             GoogleAuthTokensNotFoundError: If authentication tokens are missing
         """
         try:
-            service = await self._get_service()
+            service = await self._get_people_service()
 
             logger.info(
                 "Creating Google contact",
@@ -274,7 +285,7 @@ class GoogleContactsAPIClient:
             GoogleAuthTokensNotFoundError: If authentication tokens are missing
         """
         try:
-            service = await self._get_service()
+            service = await self._get_people_service()
 
             logger.info(
                 "Updating Google contact",
@@ -340,4 +351,101 @@ class GoogleContactsAPIClient:
                     error=str(e),
                     status_code=e.resp.status,
                 )
+            raise e
+
+    # Calendar API Operations
+
+    async def list_calendars(
+        self,
+        page_token: str | None = None,
+        sync_token: str | None = None,
+    ) -> dict[str, Any]:
+        """
+        List calendars from Google Calendar API.
+        """
+        try:
+            service = await self._get_calendar_service()
+            request_params = {"maxResults": 250}
+            if page_token:
+                request_params["pageToken"] = page_token
+            if sync_token:
+                request_params["syncToken"] = sync_token
+
+            logger.info("Fetching Google calendars", google_account_email=self.google_account_email)
+            result = service.calendarList().list(**request_params).execute()
+            return cast(dict[str, Any], result)
+        except HttpError as e:
+            logger.error("Error fetching Google calendars", error=str(e))
+            raise e
+
+    async def list_events(
+        self,
+        calendar_id: str = "primary",
+        page_token: str | None = None,
+        sync_token: str | None = None,
+        time_min: str | None = None,
+        updated_min: str | None = None,
+    ) -> dict[str, Any]:
+        """
+        List events for a specific calendar.
+        """
+        try:
+            service = await self._get_calendar_service()
+            request_params = {
+                "calendarId": calendar_id,
+                "maxResults": 2500,
+            }
+            if page_token:
+                request_params["pageToken"] = page_token
+            if sync_token:
+                request_params["syncToken"] = sync_token
+            if time_min:
+                request_params["timeMin"] = time_min
+            if updated_min:
+                request_params["updatedMin"] = updated_min
+
+            logger.info("Fetching Google Calendar events", google_account_email=self.google_account_email, calendar_id=calendar_id)
+            result = service.events().list(**request_params).execute()
+            return cast(dict[str, Any], result)
+        except HttpError as e:
+            logger.error("Error fetching events", error=str(e))
+            raise e
+
+    async def get_event(self, event_id: str, calendar_id: str = "primary") -> dict[str, Any]:
+        """Get a specific event."""
+        try:
+            service = await self._get_calendar_service()
+            result = service.events().get(calendarId=calendar_id, eventId=event_id).execute()
+            return cast(dict[str, Any], result)
+        except HttpError as e:
+            logger.error("Error fetching event", error=str(e))
+            raise e
+
+    async def create_event(self, event_data: dict[str, Any], calendar_id: str = "primary") -> dict[str, Any]:
+        """Create a new event."""
+        try:
+            service = await self._get_calendar_service()
+            result = service.events().insert(calendarId=calendar_id, body=event_data).execute()
+            return cast(dict[str, Any], result)
+        except HttpError as e:
+            logger.error("Error creating event", error=str(e))
+            raise e
+
+    async def update_event(self, event_id: str, event_data: dict[str, Any], calendar_id: str = "primary") -> dict[str, Any]:
+        """Update an existing event."""
+        try:
+            service = await self._get_calendar_service()
+            result = service.events().update(calendarId=calendar_id, eventId=event_id, body=event_data).execute()
+            return cast(dict[str, Any], result)
+        except HttpError as e:
+            logger.error("Error updating event", error=str(e))
+            raise e
+
+    async def delete_event(self, event_id: str, calendar_id: str = "primary") -> None:
+        """Delete an event."""
+        try:
+            service = await self._get_calendar_service()
+            service.events().delete(calendarId=calendar_id, eventId=event_id).execute()
+        except HttpError as e:
+            logger.error("Error deleting event", error=str(e))
             raise e

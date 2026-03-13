@@ -145,7 +145,7 @@ disallow_incomplete_defs = false
 
 # Specific override for pytest async generator fixture typing issue
 [[tool.mypy.overrides]]
-module = "tests.integration.google_contacts.test_google_contacts_client"
+module = "tests.integration.google.test_google_client"
 disable_error_code = ["misc"]
 
 [tool.pytest.ini_options]

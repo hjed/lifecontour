@@ -28,9 +28,9 @@ from app.core.integrations.task_queue_service import ARQ_QUEUE_NAME, TaskQueueSe
 
 TEST_REDIS_DATABASE = 15
 WORKER_DIRECTORY = (
-    Path(__file__).resolve().parents[5] / "integration_workers" / "google_contacts"
+    Path(__file__).resolve().parents[5] / "integration_workers" / "google"
 )
-WORKER_TEST_MODULE_PREFIX = "google_contacts_worker_test_"
+WORKER_TEST_MODULE_PREFIX = "google_worker_test_"
 WORKER_ENVIRONMENT_VARIABLES = (
     "DATABASE_URL",
     "REDIS_URL",
@@ -76,7 +76,7 @@ def _worker_environment_overrides(
         "GOOGLE_CLIENT_ID": "test-client-id",
         "GOOGLE_CLIENT_SECRET": "test-client-secret",
         "ENCRYPTION_KEY": encryption_key,
-        "WORKER_ID": "google-contacts-e2e-test-worker",
+        "WORKER_ID": "google-e2e-test-worker",
         "LOG_LEVEL": "INFO",
     }
 
@@ -365,7 +365,7 @@ async def _authenticated_client_with_savepoint_db_manager(
     await test_container.close()
 
 
-async def _run_google_contacts_worker(
+async def _run_google_worker(
     *,
     worker_module,
     redis_pool,
@@ -373,7 +373,7 @@ async def _run_google_contacts_worker(
     job_id: str,
 ) -> None:
     arq_worker = Worker(
-        functions=[worker_module.sync_google_contacts],
+        functions=[worker_module.sync_google],
         redis_pool=redis_pool,
         queue_name=ARQ_QUEUE_NAME,
         burst=True,
@@ -383,7 +383,7 @@ async def _run_google_contacts_worker(
     )
 
     with patch.dict(
-        worker_module.GoogleContactsAPIClient._get_service.__globals__,
+        worker_module.GoogleAPIClient._get_service.__globals__,
         {"build": MagicMock(return_value=_build_mock_google_service())},
     ):
         await arq_worker.async_run()
@@ -413,7 +413,7 @@ async def _run_outbox_processor(connection: AsyncConnection) -> None:
         await OutboxProcessor().process_events()
 
 
-async def _assert_google_contacts_sync_side_effects(
+async def _assert_google_sync_side_effects(
     connection: AsyncConnection, *, job_id: str, google_account_email: str
 ) -> None:
     sync_job = (
@@ -499,7 +499,7 @@ async def _assert_google_contacts_sync_side_effects(
             {"contact_id": contact_row.id},
         )
     ).one()
-    assert external_reference == ("google_contacts", "people/c123456789")
+    assert external_reference == ("google", "people/c123456789")
 
     sync_token = (
         await connection.execute(
@@ -532,7 +532,7 @@ async def _assert_google_contacts_sync_side_effects(
 
 
 @pytest.mark.asyncio
-async def test_google_contacts_sync_flow_runs_through_arq_and_outbox(
+async def test_google_sync_flow_runs_through_arq_and_outbox(
     async_connection: AsyncConnection,
     clean_database,
     test_settings,
@@ -571,7 +571,7 @@ async def test_google_contacts_sync_flow_runs_through_arq_and_outbox(
             now=now,
         )
 
-        job_id = await service.enqueue_google_contacts_sync(
+        job_id = await service.enqueue_google_sync(
             google_account_email=test_email,
             user_id=test_user_id,
             sync_type="smart",
@@ -585,14 +585,14 @@ async def test_google_contacts_sync_flow_runs_through_arq_and_outbox(
         ).one()
         assert queued_job == ("queued", "smart")
 
-        await _run_google_contacts_worker(
+        await _run_google_worker(
             worker_module=worker,
             redis_pool=redis_pool,
             db_manager=db_manager,
             job_id=job_id,
         )
 
-        await _assert_google_contacts_sync_side_effects(
+        await _assert_google_sync_side_effects(
             async_connection,
             job_id=job_id,
             google_account_email=test_email,
@@ -604,7 +604,7 @@ async def test_google_contacts_sync_flow_runs_through_arq_and_outbox(
 
 
 @pytest.mark.asyncio
-async def test_google_contacts_sync_flow_runs_from_http_endpoint(
+async def test_google_sync_flow_runs_from_http_endpoint(
     async_connection: AsyncConnection,
     clean_database,
     test_settings,
@@ -669,14 +669,14 @@ async def test_google_contacts_sync_flow_runs_from_http_endpoint(
         ).one()
         assert queued_job == ("queued", "smart")
 
-        await _run_google_contacts_worker(
+        await _run_google_worker(
             worker_module=worker,
             redis_pool=redis_pool,
             db_manager=db_manager,
             job_id=job_id,
         )
 
-        await _assert_google_contacts_sync_side_effects(
+        await _assert_google_sync_side_effects(
             async_connection,
             job_id=job_id,
             google_account_email=google_account_email,

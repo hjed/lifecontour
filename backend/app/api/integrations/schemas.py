@@ -77,7 +77,7 @@ class IntegrationStatusResponse(BaseModel):
     )
 
 
-class GoogleContactsStatusAttributes(BaseModel):
+class GoogleStatusAttributes(BaseModel):
     """Attributes for Google Contacts integration status (JSON API format)."""
 
     connected: bool = Field(description="Whether the integration is connected")
@@ -104,22 +104,22 @@ class GoogleContactsStatusAttributes(BaseModel):
     model_config = {"populate_by_name": True}
 
 
-class GoogleContactsStatusData(BaseModel):
+class GoogleStatusData(BaseModel):
     """JSON API data wrapper for Google Contacts status."""
 
-    id: str = Field(default="google-contacts", description="Resource identifier")
+    id: str = Field(default="google", description="Resource identifier")
     type: str = Field(
         default="integration-status", description="Resource type for JSON API"
     )
-    attributes: GoogleContactsStatusAttributes = Field(
+    attributes: GoogleStatusAttributes = Field(
         description="Integration status attributes"
     )
 
 
-class GoogleContactsStatusJsonApiResponse(BaseModel):
+class GoogleStatusJsonApiResponse(BaseModel):
     """JSON API response for Google Contacts integration status."""
 
-    data: GoogleContactsStatusData = Field(description="JSON API data object")
+    data: GoogleStatusData = Field(description="JSON API data object")
 
 
 class HealthResponse(BaseModel):

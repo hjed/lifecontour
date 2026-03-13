@@ -1505,7 +1505,7 @@ class ContactService:
         Find a contact by external reference.
 
         Args:
-            integration_source: Name of the integration source (e.g., 'google_contacts')
+            integration_source: Name of the integration source (e.g., 'google')
             external_id: External system's ID for the contact
             transaction: Database transaction (for consistency)
 

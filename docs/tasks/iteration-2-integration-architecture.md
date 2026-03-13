@@ -50,7 +50,7 @@ This iteration implements a production-ready integration architecture and lays t
 - [x] Add Google API `client_id` and `client_secret` to worker secrets management
 - [x] Create `UserGoogleAuth` DB model (user_id, access_token, refresh_token encrypted, expires_at)
 - [x] Implement `GoogleAuthService` for CRUD operations on UserGoogleAuth tokens with encryption
-- [x] Implement `GoogleContactsAPIClient` using official `google-api-python-client` library
+- [x] Implement `GoogleAPIClient` using official `google-api-python-client` library
 - [x] Add automatic token refresh logic handling 401 responses via GoogleAuthService
 - [x] Write integration test confirming successful token refresh on 401 response
 
@@ -58,7 +58,7 @@ This iteration implements a production-ready integration architecture and lays t
 - **UserGoogleAuth Model:** Database model with encrypted OAuth token storage supporting multiple Google accounts per user
 - **EncryptionService:** Fernet-based symmetric encryption for secure token storage with proper key management
 - **GoogleAuthService:** CRUD operations with SELECT FOR UPDATE for concurrency safety and automatic token refresh
-- **GoogleContactsAPIClient:** httpx.Auth subclass with automatic token refresh on 401 responses
+- **GoogleAPIClient:** httpx.Auth subclass with automatic token refresh on 401 responses
 - **Database Migration:** Migration 0005 with proper indexes and constraints
 - **Testing:** 13 comprehensive integration tests covering all functionality including token refresh verification
 
@@ -66,19 +66,19 @@ This iteration implements a production-ready integration architecture and lays t
 **PR Size:** ~8 files (API models, transformer, service, tests)
 
 **Acceptance Criteria:**
-- [x] Create `integrations/google_contacts` package structure
+- [x] Create `integrations/google` package structure
 - [x] Define Pydantic models for Google Contact API response structure
 - [x] Create data transformer mapping Google Contact models to core_shared contact models
 - [x] Create `UserGoogleIntegration` DB model to store user_id and sync_token
-- [x] Implement `GoogleContactsService.full_sync(user_id)` returning (List[Contact], next_sync_token)
+- [x] Implement `GoogleService.full_sync(user_id)` returning (List[Contact], next_sync_token)
 - [x] Write unit tests for full_sync mocking API client and verifying pagination/token extraction
 
 **Implementation Details:**
-- **Package Structure:** Complete `app/core/integrations/google_contacts/` package with proper module organization
+- **Package Structure:** Complete `app/core/integrations/google/` package with proper module organization
 - **API Models:** Comprehensive Pydantic models for Google People API responses with proper field aliases and validation
 - **Data Transformer:** `GoogleContactTransformer` with robust data mapping, sanitization, and error handling
 - **Database Model:** `UserGoogleIntegration` model with sync token storage and database migration (0006)
-- **Contacts Service:** `GoogleContactsService.full_sync()` with pagination support, error handling, and sync state management
+- **Contacts Service:** `GoogleService.full_sync()` with pagination support, error handling, and sync state management
 - **Testing:** 24 comprehensive unit tests covering all functionality including edge cases and error scenarios
 
 #### Slice 3: Idempotent Persistence & Incremental Sync Logic 🟡 ✅ COMPLETED
@@ -87,7 +87,7 @@ This iteration implements a production-ready integration architecture and lays t
 **Acceptance Criteria:**
 - [x] Use existing `SyncMetadata` DB model from core_shared (item_id, external_id, version_hash as ETag, last_synced_at)
 - [x] Implement persistence logic to save contacts and SyncMetadata from full_sync results with idempotent operations
-- [x] Implement `GoogleContactsService.incremental_sync(user_id, sync_token)` for efficient updates using Google's sync tokens
+- [x] Implement `GoogleService.incremental_sync(user_id, sync_token)` for efficient updates using Google's sync tokens
 - [x] Add logic to handle created, updated, and soft-deleted contacts in incremental_sync with automatic fallback to full sync
 - [x] Write comprehensive unit tests for incremental_sync covering create, update, delete, and error scenarios
 
@@ -182,7 +182,7 @@ The integration architecture foundation and core Google Contacts sync functional
    - Added comprehensive error handling with proper exception chaining
 
 2. **Core Integration Cleanup** ✅
-   - Removed Google Contacts services from core (GoogleContactsService, GoogleAuthService, etc.)
+   - Removed Google Contacts services from core (GoogleService, GoogleAuthService, etc.)
    - Kept only transformer and API models needed for outbox processing
    - Updated dependency injection to remove Google Contacts providers
    - Added new integration services (TaskQueueService, HealthService, OutboxEventProcessor)
@@ -225,14 +225,14 @@ The integration architecture foundation and core Google Contacts sync functional
 
 **Acceptance Criteria:**
 - [x] Add logic to detect locally created/updated contacts since last sync
-- [x] Add `create_contact` and `update_contact` methods to GoogleContactsAPIClient
+- [x] Add `create_contact` and `update_contact` methods to GoogleAPIClient
 - [x] Implement push logic using ETag from SyncMetadata in If-Match header for updates
 - [x] Handle `412 Precondition Failed` errors by logging conflicts and skipping updates
 - [x] Update SyncMetadata with new ETag from Google API response after successful push
 - [x] Create comprehensive integration tests mocking API for two-way sync, conflicts, token expiration
 
 **Implementation Details (2026-01-04):**
-- Added `create_contact()` and `update_contact()` methods to GoogleContactsAPIClient with ETag support
+- Added `create_contact()` and `update_contact()` methods to GoogleAPIClient with ETag support
 - Implemented `find_contacts_to_push()` to detect locally created/updated contacts
 - Added `push_contacts_to_google()` with conflict resolution handling 412/400 errors
 - Created `push_local_contacts_to_google()` ARQ task for bidirectional sync
@@ -530,7 +530,7 @@ The integration architecture foundation and core Google Contacts sync functional
 **Files Ready:**
 - `frontend/tests/e2e/integrations.spec.ts` - Remove `.skip` to re-enable test suites
 - `backend/app/api/integrations/controllers.py` - Endpoints fully functional with real ARQ integration
-- `integration_workers/google_contacts/worker.py` - Contains complete sync logic with outbox pattern
+- `integration_workers/google/worker.py` - Contains complete sync logic with outbox pattern
 
 ## Next Steps (Revised Plan Aligned with Integration Architecture)
 
@@ -539,15 +539,15 @@ The integration architecture foundation and core Google Contacts sync functional
 The remaining work for Iteration 2 focuses on bringing the implementation in line with `docs/architecture/integration-architecture.md`, with each step independently testable (unit, integration, and e2e):
 
 1. **ITER2-005 Phase 2 – Retry & Error Handling (Google Contacts worker)** 🟡 PARTIALLY COMPLETED
-   - ✅ **COMPLETED:** Configure ARQ retry strategy on the Google Contacts worker (`integration_workers/google_contacts/worker.py::GoogleContactsWorkerSettings`) using exponential backoff with jitter (as per the architecture doc), replacing the fixed `retry_delay = 60` with a `retry_delay_func` function.
+   - ✅ **COMPLETED:** Configure ARQ retry strategy on the Google Contacts worker (`integration_workers/google/worker.py::GoogleWorkerSettings`) using exponential backoff with jitter (as per the architecture doc), replacing the fixed `retry_delay = 60` with a `retry_delay_func` function.
      - Implemented `retry_delay_func()` with exponential backoff: 60s → 120s → 240s → 480s → 900s (capped)
      - Added ±20% jitter to prevent thundering herd problem
      - Configured `max_tries = 5` (1 initial attempt + 4 retries)
-     - Created comprehensive unit tests in `integration_workers/google_contacts/tests/unit/test_retry_strategy.py` (8 tests, all passing)
-     - Created integration tests in `integration_workers/google_contacts/tests/integration/test_retry_integration.py` (3 passing tests verifying retry configuration and ARQ job enqueuing)
+     - Created comprehensive unit tests in `integration_workers/google/tests/unit/test_retry_strategy.py` (8 tests, all passing)
+     - Created integration tests in `integration_workers/google/tests/integration/test_retry_integration.py` (3 passing tests verifying retry configuration and ARQ job enqueuing)
      - Reorganized worker tests to match backend structure: `tests/unit/` and `tests/integration/`
      - Added CI jobs for worker unit and integration tests in `.github/workflows/ci.yml`
-   - 🔲 **TODO:** Introduce clear separation of transient vs permanent failures in `sync_google_contacts` and `push_local_contacts_to_google`.
+   - 🔲 **TODO:** Introduce clear separation of transient vs permanent failures in `sync_google` and `push_local_contacts_to_google`.
    - 🔲 **TODO:** Ensure failed jobs surface clear, structured errors (including `job_id`, `user_id`, `integration_source`, and `google_account_email`) in logs and API responses, plumbed through `TaskQueueService.get_job_status` in `backend/app/core/integrations/task_queue_service.py` and the corresponding JSON-API controllers in `backend/app/api/integrations/controllers.py`.
    - ✅ **COMPLETED:** Keep tasks strictly idempotent under retries by relying on `SyncMetadataRepository` in `backend/app/core/integrations/adapters/sql/sync_metadata_repository.py` and the existing locking/idempotency patterns used by the Google Contacts worker and outbox event processor.
    - **Testing:**
@@ -558,7 +558,7 @@ The remaining work for Iteration 2 focuses on bringing the implementation in lin
 
 2. **ITER2-005 Phase 3 – Observability & Monitoring (shared patterns + Google Contacts)** ✅ COMPLETED
    - ✅ Introduced shared observability helpers (`core_shared.logging` and `core_shared.metrics`) implementing structured logging and Prometheus metrics patterns from the architecture doc
-   - ✅ Wired observability into `backend/app/core/integrations/task_queue_service.py`, `backend/app/core/integrations/health_service.py`, and `integration_workers/google_contacts/worker.py`
+   - ✅ Wired observability into `backend/app/core/integrations/task_queue_service.py`, `backend/app/core/integrations/health_service.py`, and `integration_workers/google/worker.py`
    - ✅ Updated Google Contacts worker and `TaskQueueService` to use shared logging configuration (trace/job/worker IDs) and emit golden-signal metrics (`job_duration`, `job_total`, `queue_depth`)
    - ✅ Added `/api/metrics` endpoint for Prometheus scraping
    - ✅ Implemented job progress tracking and cancellation support:
@@ -567,7 +567,7 @@ The remaining work for Iteration 2 focuses on bringing the implementation in lin
      - Worker cancellation checks in `_perform_full_sync()` and `_perform_incremental_sync()`
      - Graceful handling of cancelled jobs without marking as failed
    - ✅ Added comprehensive test coverage (metrics endpoint, job cancellation scenarios)
-   - Wire metrics into the main FastAPI app’s `/metrics` endpoint (or equivalent) so they can be scraped in dev/prod, and ensure the integration health endpoints plus `get_google_contacts_status` in `backend/app/api/integrations/controllers.py` consume the same underlying status/metrics data.
+   - Wire metrics into the main FastAPI app’s `/metrics` endpoint (or equivalent) so they can be scraped in dev/prod, and ensure the integration health endpoints plus `get_google_status` in `backend/app/api/integrations/controllers.py` consume the same underlying status/metrics data.
    - Implement long-running job progress tracking and cancellation using the existing `SyncJob` model (progress field) plus explicit "cancel job" APIs that workers honour between batches (via `TaskQueueService` and the Google Contacts job handlers).
    - **Testing:**
      - Unit tests for logging and metrics helpers (correct labels, safe defaults, no global state leaks).
@@ -575,7 +575,7 @@ The remaining work for Iteration 2 focuses on bringing the implementation in lin
      - E2E tests exercising job progress display and cancellation from the `/integrations` UI.
 
 3. **ITER2-005 Phase 4 – Security & Configuration (workers)**
-   - Harden worker configuration by centralising `WorkerSettings` for the Google Contacts worker in `integration_workers/google_contacts/worker.py` (database URL, Redis URL, Google credentials, operational limits) and documenting how it is configured via environment variables and, optionally, secrets managers / Docker secrets.
+   - Harden worker configuration by centralising `WorkerSettings` for the Google Contacts worker in `integration_workers/google/worker.py` (database URL, Redis URL, Google credentials, operational limits) and documenting how it is configured via environment variables and, optionally, secrets managers / Docker secrets.
    - Review and ensure encryption-at-rest for any remaining sensitive integration data beyond the existing token storage (re-using `EncryptionService` and the Google auth service used by the worker), and verify that no secrets are logged by either the worker or API.
    - Add security-focused logging for integration operations (who triggered a job, which resources were touched, and high-level outcome) without leaking sensitive payloads, and ensure `TaskQueueService` user-job ownership checks are consistently applied on all job status and cancellation routes.
    - **Testing:**
@@ -585,7 +585,7 @@ The remaining work for Iteration 2 focuses on bringing the implementation in lin
 
 4. **ITER2-006 Phases 2–3 – Integration Management UI & UX Enhancements**
    - Extend the existing `/integrations` dashboard to surface the new observability data: queue health, recent failures, retry counts, and per-job progress, with the ability to cancel running jobs (backed by `TaskQueueService` APIs and Google Contacts worker status).
-   - Replace the TODO-based mock implementation in `backend/app/api/integrations/controllers.py::get_google_contacts_status` with real data from `SyncJobRepository` and/or integration health endpoints so the UI shows accurate connection status, last sync time, and sync counts.
+   - Replace the TODO-based mock implementation in `backend/app/api/integrations/controllers.py::get_google_status` with real data from `SyncJobRepository` and/or integration health endpoints so the UI shows accurate connection status, last sync time, and sync counts.
    - Add configuration views for Google Contacts (e.g. connected accounts, last sync timestamps) and prepare the layout for future integrations.
    - Add in-app documentation and troubleshooting flows for common integration issues (auth failures, quota errors, schema mismatches).
    - **Testing:**
@@ -594,7 +594,7 @@ The remaining work for Iteration 2 focuses on bringing the implementation in lin
      - E2E tests in `frontend/tests/e2e/integrations.spec.ts` covering connection, sync trigger, progress display, cancellation, and error handling; remove any remaining `.skip` flags as these flows stabilise.
 
 5. **ITER2-006 – Clean up remaining integration TODOs (back-end foundations)** ✅ COMPLETE
-   - ✅ Complete the organizations/company/job-title mapping TODO in `backend/app/core/integrations/google_contacts/transformer.py::GoogleContactTransformer.transform_person`, and add/extend unit tests to lock in the behaviour.
+   - ✅ Complete the organizations/company/job-title mapping TODO in `backend/app/core/integrations/google/transformer.py::GoogleContactTransformer.transform_person`, and add/extend unit tests to lock in the behaviour.
 
    **Implementation Summary:**
    - Added `company` and `job_title` fields to Contact entity and database (migration 0014)

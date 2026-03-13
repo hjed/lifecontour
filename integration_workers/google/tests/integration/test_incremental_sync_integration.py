@@ -8,7 +8,7 @@ import pytest
 from cryptography.fernet import Fernet
 from sqlalchemy import text
 
-from worker import sync_google_contacts
+from worker import sync_google
 
 
 @pytest.mark.asyncio
@@ -16,7 +16,7 @@ class TestIncrementalSyncIntegration:
     """Integration test for incremental sync flow handling using sync_token."""
 
     async def test_incremental_sync_uses_contacts_sync_token(self, db_session):
-        """Test that sync_google_contacts picks up contacts_sync_token and performs incremental sync."""
+        """Test that sync_google picks up contacts_sync_token and performs incremental sync."""
         now = datetime.now(UTC)
         future_expiry = now + timedelta(hours=1)
         test_email = "incremental_test@example.com"
@@ -84,7 +84,7 @@ class TestIncrementalSyncIntegration:
             "job_id": "test_job_456",
         }
 
-        # We mock googleapiclient.discovery.build instead of GoogleContactsAPIClient
+        # We mock googleapiclient.discovery.build instead of GoogleAPIClient
         # so that GoogleAuthService.get_access_token() is actually called and tested.
         mock_connections = MagicMock()
         mock_list = MagicMock()
@@ -108,9 +108,9 @@ class TestIncrementalSyncIntegration:
                 "worker.settings.encryption_key.get_secret_value",
                 return_value=fernet_key.decode(),
             ),
-            patch("google_contacts_client.build", return_value=mock_service),
+            patch("google_client.build", return_value=mock_service),
         ):
-            result = await sync_google_contacts(
+            result = await sync_google(
                 ctx=ctx,
                 google_account_email=test_email,
                 user_id=test_user,

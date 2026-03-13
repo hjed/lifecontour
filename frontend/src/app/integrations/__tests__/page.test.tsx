@@ -16,13 +16,13 @@ import IntegrationsPage from '../page';
 
 // Mock the API hooks
 jest.mock('@/lib/api/integrations', () => ({
-  useGoogleContactsStatus: jest.fn(),
-  useGoogleContactsSync: jest.fn(),
+  useGoogleStatus: jest.fn(),
+  useGoogleSync: jest.fn(),
   useIntegrationHealth: jest.fn(),
   useSyncHistory: jest.fn(),
-  useGoogleContactsOAuthAuthorize: jest.fn(),
-  useGoogleContactsOAuthCallback: jest.fn(),
-  useGoogleContactsOAuthDisconnect: jest.fn(),
+  useGoogleOAuthAuthorize: jest.fn(),
+  useGoogleOAuthCallback: jest.fn(),
+  useGoogleOAuthDisconnect: jest.fn(),
 }));
 
 // Mock toast
@@ -46,29 +46,23 @@ jest.mock('@/components/auth/AuthGuard', () => ({
 
 // Import the mocked functions
 import {
-  useGoogleContactsStatus,
-  useGoogleContactsSync,
+  useGoogleStatus,
+  useGoogleSync,
   useIntegrationHealth,
   useSyncHistory,
-  useGoogleContactsOAuthAuthorize,
-  useGoogleContactsOAuthCallback,
-  useGoogleContactsOAuthDisconnect,
+  useGoogleOAuthAuthorize,
+  useGoogleOAuthCallback,
+  useGoogleOAuthDisconnect,
 } from '@/lib/api/integrations';
 
 // Get typed mocked functions
-const mockUseGoogleContactsStatus = jest.mocked(useGoogleContactsStatus);
-const mockUseGoogleContactsSync = jest.mocked(useGoogleContactsSync);
+const mockUseGoogleStatus = jest.mocked(useGoogleStatus);
+const mockUseGoogleSync = jest.mocked(useGoogleSync);
 const mockUseIntegrationHealth = jest.mocked(useIntegrationHealth);
 const mockUseSyncHistory = jest.mocked(useSyncHistory);
-const mockUseGoogleContactsOAuthAuthorize = jest.mocked(
-  useGoogleContactsOAuthAuthorize
-);
-const mockUseGoogleContactsOAuthCallback = jest.mocked(
-  useGoogleContactsOAuthCallback
-);
-const mockUseGoogleContactsOAuthDisconnect = jest.mocked(
-  useGoogleContactsOAuthDisconnect
-);
+const mockUseGoogleOAuthAuthorize = jest.mocked(useGoogleOAuthAuthorize);
+const mockUseGoogleOAuthCallback = jest.mocked(useGoogleOAuthCallback);
+const mockUseGoogleOAuthDisconnect = jest.mocked(useGoogleOAuthDisconnect);
 
 function createWrapper() {
   const queryClient = new QueryClient({
@@ -90,10 +84,10 @@ describe('IntegrationsPage', () => {
     jest.clearAllMocks();
 
     // Default mock implementations
-    mockUseGoogleContactsStatus.mockReturnValue({
+    mockUseGoogleStatus.mockReturnValue({
       data: {
         data: {
-          id: 'google-contacts',
+          id: 'google',
           type: 'integration-status',
           attributes: {
             connected: true,
@@ -107,7 +101,7 @@ describe('IntegrationsPage', () => {
       error: null,
     } as any);
 
-    mockUseGoogleContactsSync.mockReturnValue({
+    mockUseGoogleSync.mockReturnValue({
       mutate: jest.fn(),
       isPending: false,
       error: null,
@@ -154,19 +148,19 @@ describe('IntegrationsPage', () => {
     } as any);
 
     // Default OAuth mock implementations
-    mockUseGoogleContactsOAuthAuthorize.mockReturnValue({
+    mockUseGoogleOAuthAuthorize.mockReturnValue({
       mutate: jest.fn(),
       isPending: false,
       error: null,
     } as any);
 
-    mockUseGoogleContactsOAuthCallback.mockReturnValue({
+    mockUseGoogleOAuthCallback.mockReturnValue({
       mutateAsync: jest.fn(),
       isPending: false,
       error: null,
     } as any);
 
-    mockUseGoogleContactsOAuthDisconnect.mockReturnValue({
+    mockUseGoogleOAuthDisconnect.mockReturnValue({
       mutate: jest.fn(),
       isPending: false,
       error: null,
@@ -187,9 +181,7 @@ describe('IntegrationsPage', () => {
     const wrapper = createWrapper();
     render(<IntegrationsPage />, { wrapper });
 
-    expect(
-      screen.getByTestId('google-contacts-integration')
-    ).toBeInTheDocument();
+    expect(screen.getByTestId('google-integration')).toBeInTheDocument();
     expect(screen.getByText('Google Contacts')).toBeInTheDocument();
   });
 
@@ -211,7 +203,7 @@ describe('IntegrationsPage', () => {
 
   it('should trigger sync when sync button is clicked', async () => {
     const mockMutate = jest.fn();
-    mockUseGoogleContactsSync.mockReturnValue({
+    mockUseGoogleSync.mockReturnValue({
       mutate: mockMutate,
       isPending: false,
       error: null,
@@ -244,7 +236,7 @@ describe('IntegrationsPage', () => {
   });
 
   it('should show loading state when data is loading', () => {
-    mockUseGoogleContactsStatus.mockReturnValue({
+    mockUseGoogleStatus.mockReturnValue({
       data: undefined,
       isLoading: true,
       error: null,
@@ -257,7 +249,7 @@ describe('IntegrationsPage', () => {
   });
 
   it('should show error state when there is an error', () => {
-    mockUseGoogleContactsStatus.mockReturnValue({
+    mockUseGoogleStatus.mockReturnValue({
       data: undefined,
       isLoading: false,
       error: new Error('Failed to fetch status'),
@@ -270,10 +262,10 @@ describe('IntegrationsPage', () => {
   });
 
   it('should show disconnected state when integration is not connected', () => {
-    mockUseGoogleContactsStatus.mockReturnValue({
+    mockUseGoogleStatus.mockReturnValue({
       data: {
         data: {
-          id: 'google-contacts',
+          id: 'google',
           type: 'integration-status',
           attributes: {
             connected: false,
@@ -304,7 +296,7 @@ describe('IntegrationsPage', () => {
   });
 
   it('should show sync progress when sync is running', () => {
-    mockUseGoogleContactsSync.mockReturnValue({
+    mockUseGoogleSync.mockReturnValue({
       mutate: jest.fn(),
       isPending: true,
       error: null,

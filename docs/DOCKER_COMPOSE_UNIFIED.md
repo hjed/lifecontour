@@ -151,7 +151,7 @@ Each profile uses environment variables from `.env` files:
 - **oauth-init**: OAuth client initialization
 - **backend**: FastAPI (development mode)
 - **frontend**: Next.js (development mode)
-- **google-contacts-worker**: Integration worker
+- **google-worker**: Integration worker
 
 ### Test Profile
 - All core services
@@ -170,7 +170,7 @@ Each profile uses environment variables from `.env` files:
 - **oauth-provider**: Hydra OAuth2/OIDC
 - **backend**: FastAPI (production build)
 - **frontend**: Next.js (production build)
-- **google-contacts-worker**: Integration worker
+- **google-worker**: Integration worker
 - **nginx**: Reverse proxy
 
 ## Volume Management

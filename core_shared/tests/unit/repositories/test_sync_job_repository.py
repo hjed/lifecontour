@@ -34,7 +34,7 @@ class TestSyncJobRepositoryGetRecentFailures:
         mock_row.id = 1
         mock_row.job_id = "job-123"
         mock_row.user_id = "user-123"
-        mock_row.integration_source = "google_contacts"
+        mock_row.integration_source = "google"
         mock_row.sync_type = "smart"
         mock_row.status = "failed"
         mock_row.created_at = now
@@ -54,7 +54,7 @@ class TestSyncJobRepositoryGetRecentFailures:
 
         # Execute
         failures = await repository.get_recent_failures(
-            integration_source="google_contacts", hours=24, limit=10
+            integration_source="google", hours=24, limit=10
         )
 
         # Verify
@@ -76,7 +76,7 @@ class TestSyncJobRepositoryGetRecentFailures:
 
         # Execute
         failures = await repository.get_recent_failures(
-            integration_source="google_contacts", hours=24, limit=10
+            integration_source="google", hours=24, limit=10
         )
 
         # Verify
@@ -107,7 +107,7 @@ class TestSyncJobRepositoryGetJobStatistics:
 
         # Execute
         stats = await repository.get_job_statistics(
-            integration_source="google_contacts", hours=24
+            integration_source="google", hours=24
         )
 
         # Verify
@@ -132,7 +132,7 @@ class TestSyncJobRepositoryGetJobStatistics:
 
         # Execute
         stats = await repository.get_job_statistics(
-            integration_source="google_contacts", hours=24
+            integration_source="google", hours=24
         )
 
         # Verify

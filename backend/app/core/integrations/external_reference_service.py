@@ -47,7 +47,7 @@ class ExternalReferenceService:
         Args:
             internal_entity_type: Type of internal entity (e.g., 'contact')
             internal_entity_id: ID of the internal entity
-            external_system: Name of external system (e.g., 'google_contacts')
+            external_system: Name of external system (e.g., 'google')
             external_entity_type: Type of external entity (e.g., 'person')
             external_entity_id: External system's ID for the entity
             reference_data: Optional additional reference data

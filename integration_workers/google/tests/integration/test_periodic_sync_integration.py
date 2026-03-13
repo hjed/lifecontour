@@ -66,12 +66,12 @@ class TestPeriodicSyncIntegration:
 
         ctx = {"session_factory": mock_session_factory, "redis": redis_pool}
 
-        # Mock the sync_google_contacts function to track calls
-        with patch("worker.sync_google_contacts", new_callable=AsyncMock) as mock_sync:
+        # Mock the sync_google function to track calls
+        with patch("worker.sync_google", new_callable=AsyncMock) as mock_sync:
             # Call periodic_sync_all_accounts
             await periodic_sync_all_accounts(ctx)
 
-            # Verify sync_google_contacts was NOT called directly
+            # Verify sync_google was NOT called directly
             # (it should be enqueued to Redis instead)
             mock_sync.assert_not_called()
 

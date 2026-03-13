@@ -84,7 +84,7 @@ class TestOutboxEventProcessor:
             id=uuid4(),
             event_type="contact.created",
             event_data={
-                "integration_source": "google_contacts",
+                "integration_source": "google",
                 "external_id": "people/c123456789",
                 "contact_data": sample_contact_event_data,
                 "sync_timestamp": datetime.now(UTC).isoformat(),
@@ -107,7 +107,7 @@ class TestOutboxEventProcessor:
             id=uuid4(),
             event_type="contact.updated",
             event_data={
-                "integration_source": "google_contacts",
+                "integration_source": "google",
                 "external_id": "people/c123456789",
                 "contact_data": updated_data,
                 "sync_timestamp": datetime.now(UTC).isoformat(),
@@ -125,7 +125,7 @@ class TestOutboxEventProcessor:
             id=uuid4(),
             event_type="sync.completed",
             event_data={
-                "integration_source": "google_contacts",
+                "integration_source": "google",
                 "google_account_email": "user@example.com",
                 "metrics": {
                     "contacts_processed": 5,
@@ -259,7 +259,7 @@ class TestOutboxEventProcessor:
 
         # Verify existing contact was looked up
         mock_contact_service.find_contact_by_external_reference.assert_called_once_with(
-            integration_source="google_contacts",
+            integration_source="google",
             external_id="people/c123456789",
             transaction=mock_connection,
         )
@@ -378,7 +378,7 @@ class TestOutboxEventProcessor:
             id=uuid4(),
             event_type="contact.created",
             event_data={
-                "integration_source": "google_contacts",
+                "integration_source": "google",
                 "external_id": "people/invalid",
                 "contact_data": {"invalid": "data"},  # Missing required fields
                 "sync_timestamp": datetime.now(UTC).isoformat(),
@@ -440,7 +440,7 @@ class TestOutboxEventProcessor:
             id=uuid4(),
             event_type="contact.created",
             event_data={
-                "integration_source": "google_contacts",
+                "integration_source": "google",
                 "external_id": "people/invalid",
                 "contact_data": {"invalid": "data"},
                 "sync_timestamp": datetime.now(UTC).isoformat(),

@@ -11,7 +11,7 @@ The system's Isolated Worker Architecture requires a specialized testing approac
 #### 1. Worker Unit Tests
 **Scope**: Individual integration worker logic in isolation
 **Location**: `integration_workers/{integration_name}/tests/`
-**Execution**: `cd integration_workers/google_contacts && pytest`
+**Execution**: `cd integration_workers/google && pytest`
 
 **Characteristics**:
 - Test worker's internal logic and business rules
@@ -22,10 +22,10 @@ The system's Isolated Worker Architecture requires a specialized testing approac
 
 **Example**:
 ```python
-# integration_workers/google_contacts/tests/test_sync_service.py
+# integration_workers/google/tests/test_sync_service.py
 @pytest.fixture
 def mock_google_client():
-    return Mock(spec=GoogleContactsClient)
+    return Mock(spec=GoogleClient)
 
 @pytest.fixture
 def mock_db_session():
@@ -58,7 +58,7 @@ async def test_trigger_google_sync_enqueues_task(client, mock_arq_client):
     response = await client.post("/api/integrations/google/sync")
     assert response.status_code == 202
     mock_arq_client.enqueue_job.assert_called_once_with(
-        'sync_google_contacts',
+        'sync_google',
         user_id=123
     )
 ```
@@ -77,8 +77,8 @@ async def test_trigger_google_sync_enqueues_task(client, mock_arq_client):
 
 **Example**:
 ```python
-# tests/e2e/test_google_contacts_sync.py
-async def test_google_contacts_full_sync():
+# tests/e2e/test_google_sync.py
+async def test_google_full_sync():
     # 1. Trigger sync via API
     response = await api_client.post("/api/integrations/google/sync")
     assert response.status_code == 202
@@ -91,7 +91,7 @@ async def test_google_contacts_full_sync():
     assert len(contacts) > 0
 
     # 4. Verify sync metadata
-    sync_data = await db.execute("SELECT * FROM sync_metadata WHERE integration_source = 'google_contacts'")
+    sync_data = await db.execute("SELECT * FROM sync_metadata WHERE integration_source = 'google'")
     assert len(sync_data) > 0
 ```
 

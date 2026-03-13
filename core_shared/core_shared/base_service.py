@@ -48,7 +48,7 @@ class BaseIntegrationService(ABC, Generic[TExternalEntity, TInternalEntity]):
         Initialize the integration service.
 
         Args:
-            integration_source: Name of the integration source (e.g., 'google_contacts')
+            integration_source: Name of the integration source (e.g., 'google')
         """
         self.integration_source = integration_source
 

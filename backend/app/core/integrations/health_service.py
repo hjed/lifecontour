@@ -11,7 +11,7 @@ from typing import Any
 import aiohttp
 from arq.connections import ArqRedis
 from core_shared.integration_constants import (
-    GOOGLE_CONTACTS_ARQ_QUEUE_NAME as ARQ_QUEUE_NAME,
+    GOOGLE_ARQ_QUEUE_NAME as ARQ_QUEUE_NAME,
 )
 from core_shared.logging import get_logger
 from core_shared.repositories import SyncJobRepository
@@ -85,7 +85,7 @@ class IntegrationHealthService:
             "timestamp": datetime.now(UTC).isoformat(),
             "services": {
                 "redis": redis_health,
-                "google_contacts_worker": worker_health,
+                "google_worker": worker_health,
                 "google_api": external_api_health,
             },
             "queue_metrics": {
@@ -255,7 +255,7 @@ class IntegrationHealthService:
                 conn = await session.connection()
                 repo = SyncJobRepository(conn)
                 stats = await repo.get_job_statistics(
-                    integration_source="google_contacts", hours=24
+                    integration_source="google", hours=24
                 )
                 return stats
         except Exception as e:
@@ -277,7 +277,7 @@ class IntegrationHealthService:
                 conn = await session.connection()
                 repo = SyncJobRepository(conn)
                 failures = await repo.get_recent_failures(
-                    integration_source="google_contacts", hours=24, limit=limit
+                    integration_source="google", hours=24, limit=limit
                 )
 
                 # Convert to dict format for API response

@@ -13,14 +13,14 @@ import React, { ReactNode } from 'react';
 import { renderHook, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import {
-  useGoogleContactsSync,
-  useGoogleContactsStatus,
+  useGoogleSync,
+  useGoogleStatus,
   useSyncJobStatus,
   useIntegrationHealth,
-  fetchGoogleContactsStatus,
+  fetchGoogleStatus,
   fetchSyncJobStatus,
   fetchIntegrationHealth,
-  triggerGoogleContactsSync,
+  triggerGoogleSync,
 } from '../integrations';
 
 // Mock fetch globally
@@ -56,11 +56,11 @@ describe('Integration API Functions', () => {
     mockFetch.mockClear();
   });
 
-  describe('fetchGoogleContactsStatus', () => {
+  describe('fetchGoogleStatus', () => {
     it('should fetch Google Contacts integration status', async () => {
       const mockResponse = {
         data: {
-          id: 'google-contacts',
+          id: 'google',
           type: 'integration-status',
           attributes: {
             connected: true,
@@ -76,7 +76,7 @@ describe('Integration API Functions', () => {
         json: async () => mockResponse,
       } as Response);
 
-      const result = await fetchGoogleContactsStatus();
+      const result = await fetchGoogleStatus();
 
       expect(mockFetch).toHaveBeenCalledWith(
         '/api/integrations/google/contacts/status',
@@ -104,13 +104,11 @@ describe('Integration API Functions', () => {
         json: async () => mockError,
       } as Response);
 
-      await expect(fetchGoogleContactsStatus()).rejects.toThrow(
-        'HTTP 401: undefined'
-      );
+      await expect(fetchGoogleStatus()).rejects.toThrow('HTTP 401: undefined');
     });
   });
 
-  describe('triggerGoogleContactsSync', () => {
+  describe('triggerGoogleSync', () => {
     it('should trigger smart sync by default', async () => {
       const mockResponse = {
         data: {
@@ -129,7 +127,7 @@ describe('Integration API Functions', () => {
         json: async () => mockResponse,
       } as Response);
 
-      const result = await triggerGoogleContactsSync();
+      const result = await triggerGoogleSync();
 
       expect(mockFetch).toHaveBeenCalledWith(
         '/api/integrations/google/contacts/sync',
@@ -161,7 +159,7 @@ describe('Integration API Functions', () => {
         json: async () => mockResponse,
       } as Response);
 
-      const result = await triggerGoogleContactsSync('full');
+      const result = await triggerGoogleSync('full');
 
       expect(mockFetch).toHaveBeenCalledWith(
         '/api/integrations/google/contacts/sync',
@@ -245,11 +243,11 @@ describe('Integration React Query Hooks', () => {
     mockFetch.mockClear();
   });
 
-  describe('useGoogleContactsStatus', () => {
+  describe('useGoogleStatus', () => {
     it('should fetch and return Google Contacts status', async () => {
       const mockResponse = {
         data: {
-          id: 'google-contacts',
+          id: 'google',
           type: 'integration-status',
           attributes: {
             connected: true,
@@ -266,7 +264,7 @@ describe('Integration React Query Hooks', () => {
       } as Response);
 
       const wrapper = createWrapper();
-      const { result } = renderHook(() => useGoogleContactsStatus(), {
+      const { result } = renderHook(() => useGoogleStatus(), {
         wrapper,
       });
 
@@ -278,7 +276,7 @@ describe('Integration React Query Hooks', () => {
     });
   });
 
-  describe('useGoogleContactsSync', () => {
+  describe('useGoogleSync', () => {
     it('should trigger sync and return job data', async () => {
       const mockResponse = {
         data: {
@@ -298,7 +296,7 @@ describe('Integration React Query Hooks', () => {
       } as Response);
 
       const wrapper = createWrapper();
-      const { result } = renderHook(() => useGoogleContactsSync(), { wrapper });
+      const { result } = renderHook(() => useGoogleSync(), { wrapper });
 
       result.current.mutate('smart');
 
