@@ -235,5 +235,8 @@ class TestARQRetryIntegration:
             try:
                 await worker_task
             except asyncio.CancelledError:
-                # Ignore CancelledError from task we cancelled ourselves during cleanup
-                pass
+                # If worker_task is cancelled, that's expected. If the test run was cancelled
+                # (meaning the exception was raised into us, not just returned from worker_task),
+                # we should re-raise. We can tell because worker_task.cancelled() is true.
+                if not worker_task.cancelled():
+                    raise

@@ -1,9 +1,7 @@
 from typing import Any
 
-import pytest
-from pydantic import ValidationError
-
 from calendar_models import GoogleCalendar, GoogleEvent, GoogleEventStartEnd
+
 
 def test_google_calendar_parsing() -> None:
     raw_api_response: dict[str, Any] = {
@@ -18,7 +16,7 @@ def test_google_calendar_parsing() -> None:
         "foregroundColor": "#000000",
         "selected": True,
         "accessRole": "owner",
-        "primary": True
+        "primary": True,
     }
 
     calendar = GoogleCalendar(
@@ -26,7 +24,7 @@ def test_google_calendar_parsing() -> None:
         summary=raw_api_response["summary"],
         description=raw_api_response.get("description"),
         primary=raw_api_response.get("primary", False),
-        access_role=raw_api_response.get("accessRole")
+        access_role=raw_api_response.get("accessRole"),
     )
 
     assert calendar.id == "user@example.com"
@@ -48,14 +46,8 @@ def test_google_event_parsing() -> None:
         "summary": "Meeting with team",
         "description": "Discuss project status",
         "location": "Conference Room A",
-        "start": {
-            "dateTime": "2024-01-10T10:00:00Z",
-            "timeZone": "UTC"
-        },
-        "end": {
-            "dateTime": "2024-01-10T11:00:00Z",
-            "timeZone": "UTC"
-        }
+        "start": {"dateTime": "2024-01-10T10:00:00Z", "timeZone": "UTC"},
+        "end": {"dateTime": "2024-01-10T11:00:00Z", "timeZone": "UTC"},
     }
 
     start_data = raw_api_response.get("start", {})
@@ -72,7 +64,7 @@ def test_google_event_parsing() -> None:
         location=raw_api_response.get("location"),
         start=GoogleEventStartEnd(**start_data) if start_data else None,
         end=GoogleEventStartEnd(**end_data) if end_data else None,
-        etag=raw_api_response.get("etag")
+        etag=raw_api_response.get("etag"),
     )
 
     assert event.id == "event_123"
@@ -88,12 +80,8 @@ def test_google_event_all_day_parsing() -> None:
     raw_api_response: dict[str, Any] = {
         "id": "event_456",
         "summary": "Holiday",
-        "start": {
-            "date": "2024-12-25"
-        },
-        "end": {
-            "date": "2024-12-26"
-        }
+        "start": {"date": "2024-12-25"},
+        "end": {"date": "2024-12-26"},
     }
 
     start_data = raw_api_response.get("start", {})

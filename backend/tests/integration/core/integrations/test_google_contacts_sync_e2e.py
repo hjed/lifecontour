@@ -61,7 +61,9 @@ class _NoCommitConnectionProxy:
         self._connection = connection
 
     async def commit(self) -> None:
-        return None
+        import asyncio
+
+        await asyncio.sleep(0)
 
     def __getattr__(self, name: str):
         return getattr(self._connection, name)

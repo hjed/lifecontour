@@ -19,6 +19,9 @@ depends_on: str | Sequence[str] | None = None
 
 def upgrade() -> None:
     """Upgrade database schema."""
+    op.drop_constraint(
+        "ck_sync_metadata_integration_source", "sync_metadata", type_="check"
+    )
     op.execute(
         "UPDATE sync_metadata SET integration_source = 'google' WHERE integration_source = 'google_contacts'"
     )
@@ -28,10 +31,18 @@ def upgrade() -> None:
     op.execute(
         "UPDATE sync_jobs SET integration_source = 'google' WHERE integration_source = 'google_contacts'"
     )
+    op.create_check_constraint(
+        "ck_sync_metadata_integration_source",
+        "sync_metadata",
+        "integration_source IN ('google', 'immich', 'strava', 'firefly_iii')",
+    )
 
 
 def downgrade() -> None:
     """Downgrade database schema."""
+    op.drop_constraint(
+        "ck_sync_metadata_integration_source", "sync_metadata", type_="check"
+    )
     op.execute(
         "UPDATE sync_metadata SET integration_source = 'google_contacts' WHERE integration_source = 'google'"
     )
@@ -40,4 +51,9 @@ def downgrade() -> None:
     )
     op.execute(
         "UPDATE sync_jobs SET integration_source = 'google_contacts' WHERE integration_source = 'google'"
+    )
+    op.create_check_constraint(
+        "ck_sync_metadata_integration_source",
+        "sync_metadata",
+        "integration_source IN ('google_contacts', 'immich', 'strava', 'firefly_iii')",
     )

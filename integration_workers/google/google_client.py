@@ -13,7 +13,7 @@ from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 
 from google_auth_service import GoogleAuthService, GoogleAuthTokensNotFoundError
-from calendar_models import GoogleCalendar, GoogleEvent
+
 logger = structlog.get_logger()
 
 
@@ -93,7 +93,6 @@ class GoogleAPIClient:
                 google_account_email=self.google_account_email,
             )
         return self._calendar_service
-
 
     async def list_connections(
         self,
@@ -371,7 +370,10 @@ class GoogleAPIClient:
             if sync_token:
                 request_params["syncToken"] = sync_token
 
-            logger.info("Fetching Google calendars", google_account_email=self.google_account_email)
+            logger.info(
+                "Fetching Google calendars",
+                google_account_email=self.google_account_email,
+            )
             result = service.calendarList().list(**request_params).execute()
             return cast(dict[str, Any], result)
         except HttpError as e:
@@ -404,38 +406,58 @@ class GoogleAPIClient:
             if updated_min:
                 request_params["updatedMin"] = updated_min
 
-            logger.info("Fetching Google Calendar events", google_account_email=self.google_account_email, calendar_id=calendar_id)
+            logger.info(
+                "Fetching Google Calendar events",
+                google_account_email=self.google_account_email,
+                calendar_id=calendar_id,
+            )
             result = service.events().list(**request_params).execute()
             return cast(dict[str, Any], result)
         except HttpError as e:
             logger.error("Error fetching events", error=str(e))
             raise e
 
-    async def get_event(self, event_id: str, calendar_id: str = "primary") -> dict[str, Any]:
+    async def get_event(
+        self, event_id: str, calendar_id: str = "primary"
+    ) -> dict[str, Any]:
         """Get a specific event."""
         try:
             service = await self._get_calendar_service()
-            result = service.events().get(calendarId=calendar_id, eventId=event_id).execute()
+            result = (
+                service.events().get(calendarId=calendar_id, eventId=event_id).execute()
+            )
             return cast(dict[str, Any], result)
         except HttpError as e:
             logger.error("Error fetching event", error=str(e))
             raise e
 
-    async def create_event(self, event_data: dict[str, Any], calendar_id: str = "primary") -> dict[str, Any]:
+    async def create_event(
+        self, event_data: dict[str, Any], calendar_id: str = "primary"
+    ) -> dict[str, Any]:
         """Create a new event."""
         try:
             service = await self._get_calendar_service()
-            result = service.events().insert(calendarId=calendar_id, body=event_data).execute()
+            result = (
+                service.events()
+                .insert(calendarId=calendar_id, body=event_data)
+                .execute()
+            )
             return cast(dict[str, Any], result)
         except HttpError as e:
             logger.error("Error creating event", error=str(e))
             raise e
 
-    async def update_event(self, event_id: str, event_data: dict[str, Any], calendar_id: str = "primary") -> dict[str, Any]:
+    async def update_event(
+        self, event_id: str, event_data: dict[str, Any], calendar_id: str = "primary"
+    ) -> dict[str, Any]:
         """Update an existing event."""
         try:
             service = await self._get_calendar_service()
-            result = service.events().update(calendarId=calendar_id, eventId=event_id, body=event_data).execute()
+            result = (
+                service.events()
+                .update(calendarId=calendar_id, eventId=event_id, body=event_data)
+                .execute()
+            )
             return cast(dict[str, Any], result)
         except HttpError as e:
             logger.error("Error updating event", error=str(e))

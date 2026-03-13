@@ -456,7 +456,9 @@ class TestGoogleAPIClient:
         )
 
         # Mock the service
-        with patch.object(client, "_get_people_service", return_value=mock_google_service):
+        with patch.object(
+            client, "_get_people_service", return_value=mock_google_service
+        ):
             # Reset mock call count after setup
             mock_google_service.people().createContact.reset_mock()
 
@@ -509,7 +511,9 @@ class TestGoogleAPIClient:
         )
 
         # Mock the service
-        with patch.object(client, "_get_people_service", return_value=mock_google_service):
+        with patch.object(
+            client, "_get_people_service", return_value=mock_google_service
+        ):
             # Reset mock call count after setup
             mock_google_service.people().updateContact.reset_mock()
 
@@ -569,7 +573,9 @@ class TestGoogleAPIClient:
         )
 
         # Mock the service
-        with patch.object(client, "_get_people_service", return_value=mock_google_service):
+        with patch.object(
+            client, "_get_people_service", return_value=mock_google_service
+        ):
             contact_data = {
                 "names": [{"givenName": "John", "familyName": "Doe"}],
             }
@@ -603,7 +609,9 @@ class TestGoogleAPIClient:
         )
 
         # Mock the service
-        with patch.object(client, "_get_people_service", return_value=mock_google_service):
+        with patch.object(
+            client, "_get_people_service", return_value=mock_google_service
+        ):
             # Empty contact data (only metadata/resourceName/etag)
             contact_data = {
                 "metadata": {"sources": [{"etag": "some_etag"}]},
@@ -620,7 +628,6 @@ class TestGoogleAPIClient:
             # Verify error message
             assert "No fields to update" in str(exc_info.value)
 
-
     @pytest.mark.asyncio
     async def test_list_calendars_success(self, mock_auth_service, mock_google_service):
         """Test successful fetching of calendars."""
@@ -629,7 +636,7 @@ class TestGoogleAPIClient:
         mock_list = mock_google_service.calendarList.return_value.list
         mock_list.return_value.execute.return_value = {
             "items": [{"id": "cal1", "summary": "Primary"}],
-            "nextPageToken": "token123"
+            "nextPageToken": "token123",
         }
 
         client = GoogleAPIClient(
@@ -640,14 +647,14 @@ class TestGoogleAPIClient:
             user_id=1,
         )
 
-        with patch.object(client, "_get_calendar_service", return_value=mock_google_service):
+        with patch.object(
+            client, "_get_calendar_service", return_value=mock_google_service
+        ):
             result = await client.list_calendars(page_token="token123")
 
             assert len(result["items"]) == 1
             assert result["items"][0]["id"] == "cal1"
-            mock_list.assert_called_once_with(
-                maxResults=250, pageToken="token123"
-            )
+            mock_list.assert_called_once_with(maxResults=250, pageToken="token123")
 
     @pytest.mark.asyncio
     async def test_list_events_success(self, mock_auth_service, mock_google_service):
@@ -657,7 +664,7 @@ class TestGoogleAPIClient:
         mock_list = mock_google_service.events.return_value.list
         mock_list.return_value.execute.return_value = {
             "items": [{"id": "ev1", "summary": "Meeting"}],
-            "nextSyncToken": "syncToken456"
+            "nextSyncToken": "syncToken456",
         }
 
         client = GoogleAPIClient(
@@ -668,8 +675,12 @@ class TestGoogleAPIClient:
             user_id=1,
         )
 
-        with patch.object(client, "_get_calendar_service", return_value=mock_google_service):
-            result = await client.list_events(calendar_id="primary", sync_token="syncToken456")
+        with patch.object(
+            client, "_get_calendar_service", return_value=mock_google_service
+        ):
+            result = await client.list_events(
+                calendar_id="primary", sync_token="syncToken456"
+            )
 
             assert len(result["items"]) == 1
             assert result["items"][0]["id"] == "ev1"

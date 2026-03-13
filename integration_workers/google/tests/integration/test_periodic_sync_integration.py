@@ -44,16 +44,16 @@ class TestPeriodicSyncIntegration:
                                               encrypted_access_token, encrypted_refresh_token,
                                               expires_at, created_at, updated_at)
                 VALUES
-                    ('user1', 'active1@example.com', :token, :refresh,
+                    ('user1', 'active1@example.com', :dummy_access, :refresh,
                      :expiry, :now, :now),
-                    ('user2', 'active2@example.com', :token, :refresh,
+                    ('user2', 'active2@example.com', :dummy_access, :refresh,
                      :expiry, :now, :now)
                 ON CONFLICT (user_id, google_account_email) DO NOTHING
             """
             ),
             {
-                "token": b"encrypted_token_data",  # Dummy encrypted token
-                "refresh": b"encrypted_refresh_data",  # Dummy encrypted refresh token
+                "dummy_access": b"encrypted_data_1",  # Dummy encrypted auth string
+                "refresh": b"encrypted_data_2",  # Dummy encrypted refresh string
                 "expiry": datetime.now(UTC),
                 "now": datetime.now(UTC),
             },
@@ -92,14 +92,14 @@ class TestPeriodicSyncIntegration:
                                               encrypted_access_token, encrypted_refresh_token,
                                               expires_at, created_at, updated_at)
                 VALUES
-                    ('user10', 'test@example.com', :token, :refresh,
+                    ('user10', 'test@example.com', :dummy_access, :refresh,
                      :expiry, :now, :now)
                 ON CONFLICT (user_id, google_account_email) DO NOTHING
             """
             ),
             {
-                "token": b"encrypted_token_data",
-                "refresh": b"encrypted_refresh_data",
+                "dummy_access": b"encrypted_data_1",
+                "refresh": b"encrypted_data_2",
                 "expiry": datetime.now(UTC),
                 "now": datetime.now(UTC),
             },

@@ -186,8 +186,8 @@ function SyncHistorySection({
   if (historyLoading) {
     content = (
       <div className='space-y-2'>
-        {new Array(3).fill(null).map((_, i) => (
-          <Skeleton key={`skeleton-${i}`} className='h-16 w-full' />
+        {[1, 2, 3].map(val => (
+          <Skeleton key={`skeleton-${val}`} className='h-16 w-full' />
         ))}
       </div>
     );

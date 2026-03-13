@@ -24,7 +24,7 @@ import {
 } from '../integrations';
 
 // Mock fetch globally
-global.fetch = jest.fn();
+globalThis.fetch = jest.fn() as unknown as typeof fetch;
 const mockFetch = fetch as jest.MockedFunction<typeof fetch>;
 
 // Mock toast

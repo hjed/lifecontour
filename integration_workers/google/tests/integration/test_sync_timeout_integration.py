@@ -32,5 +32,7 @@ async def test_sync_google_accepts_job_timeout():
             assert result is not None
         except TypeError as e:
             if "_job_timeout" in str(e):
-                pytest.fail(f"sync_google_contacts failed to accept _job_timeout kwarg: {e}")
+                pytest.fail(
+                    f"sync_google_contacts failed to accept _job_timeout kwarg: {e}"
+                )
             raise
