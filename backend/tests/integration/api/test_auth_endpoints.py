@@ -29,6 +29,8 @@ def test_settings(db_config):
         microsoft_client_secret="test_microsoft_client_secret",
         discord_client_id="test_discord_client_id",
         discord_client_secret="test_discord_client_secret",
+        google_client_id="test_google_client_id",
+        google_client_secret="test_google_client_secret",
     )
 
 
@@ -203,6 +205,26 @@ class TestAuthEndpoints:
         # Check that it's redirecting to Discord
         location = response.headers["location"]
         assert "discord.com" in location
+
+    def test_authorize_google_provider(self, test_settings):
+        """Test OAuth authorization with Google provider."""
+        client = self._create_oauth_test_client(test_settings)
+
+        response = client.get("/api/auth/authorize/google", follow_redirects=False)
+
+        # Should redirect to Google OAuth
+        assert response.status_code == 307
+        assert "location" in response.headers
+
+        # Check that it's redirecting to Google and requesting correct scopes
+        location = response.headers["location"]
+        import urllib.parse
+
+        decoded_location = urllib.parse.unquote(location)
+        assert "accounts.google.com/o/oauth2" in decoded_location
+        assert "contacts.readonly" in decoded_location
+        assert "calendar.events" in decoded_location
+        assert "calendar.readonly" in decoded_location
 
     def test_authorize_with_redirect_url(self, test_settings):
         """Test OAuth authorization with custom redirect URL."""
