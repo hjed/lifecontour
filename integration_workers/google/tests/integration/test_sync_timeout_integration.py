@@ -8,7 +8,7 @@ from worker import sync_google_contacts
 
 
 @pytest.mark.asyncio
-async def test_sync_google_accepts_job_timeout():
+async def test_sync_google_contacts_accepts_job_timeout():
     """Test that sync_google_contacts can be called with a _job_timeout kwarg, as passed by arq."""
 
     mock_session_factory = AsyncMock()

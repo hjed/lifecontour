@@ -105,7 +105,7 @@ class TestGoogleWorker:
         return mock_client
 
     @pytest.mark.asyncio
-    async def test_sync_google_full_sync_success(
+    async def test_sync_google_contacts_full_sync_success(
         self,
         mock_session_factory,
         mock_google_auth_service,
@@ -138,7 +138,7 @@ class TestGoogleWorker:
             assert result["contacts_processed"] > 0
 
     @pytest.mark.asyncio
-    async def test_sync_google_incremental_sync_success(
+    async def test_sync_google_contacts_incremental_sync_success(
         self,
         mock_session_factory,
         mock_google_auth_service,
@@ -171,7 +171,7 @@ class TestGoogleWorker:
             assert result["google_account_email"] == "test@example.com"
 
     @pytest.mark.asyncio
-    async def test_sync_google_smart_sync_chooses_incremental(
+    async def test_sync_google_contacts_smart_sync_chooses_incremental(
         self,
         mock_session_factory,
         mock_google_auth_service,
@@ -209,7 +209,7 @@ class TestGoogleWorker:
             assert any("sync_token" in call.kwargs for call in calls)
 
     @pytest.mark.asyncio
-    async def test_sync_google_handles_auth_error(
+    async def test_sync_google_contacts_handles_auth_error(
         self,
         mock_session_factory,
         mock_google_auth_service,
@@ -239,7 +239,7 @@ class TestGoogleWorker:
             assert "Auth failed" in result["error"]
 
     @pytest.mark.asyncio
-    async def test_sync_google_handles_api_error(
+    async def test_sync_google_contacts_handles_api_error(
         self,
         mock_session_factory,
         mock_google_auth_service,

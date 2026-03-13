@@ -64,7 +64,7 @@ class TestPeriodicSyncLogging:
         )
 
     @pytest.mark.asyncio
-    async def test_sync_google_accepts_trigger_type(self):
+    async def test_sync_google_contacts_accepts_trigger_type(self):
         """Test that sync_google_contacts accepts trigger_type parameter."""
         import inspect
 

@@ -1,6 +1,7 @@
 ---
-description: How to create and name database migrations
+description: How to create and name alembic database migrations
 ---
+
 # Creating Database Migrations
 
 When creating new database migrations using Alembic, you must follow the project's sequential naming convention.

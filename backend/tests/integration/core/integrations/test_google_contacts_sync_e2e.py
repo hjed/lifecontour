@@ -367,7 +367,7 @@ async def _authenticated_client_with_savepoint_db_manager(
     await test_container.close()
 
 
-async def _run_google_worker(
+async def _run_google_contacts_worker(
     *,
     worker_module,
     redis_pool,
@@ -587,7 +587,7 @@ async def test_google_sync_flow_runs_through_arq_and_outbox(
         ).one()
         assert queued_job == ("queued", "smart")
 
-        await _run_google_worker(
+        await _run_google_contacts_worker(
             worker_module=worker,
             redis_pool=redis_pool,
             db_manager=db_manager,
@@ -671,7 +671,7 @@ async def test_google_sync_flow_runs_from_http_endpoint(
         ).one()
         assert queued_job == ("queued", "smart")
 
-        await _run_google_worker(
+        await _run_google_contacts_worker(
             worker_module=worker,
             redis_pool=redis_pool,
             db_manager=db_manager,
