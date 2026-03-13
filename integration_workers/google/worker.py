@@ -816,7 +816,7 @@ def _process_contacts_batch(
 
 
 async def _create_transformer(
-    client: GoogleContactsAPIClient,
+    client: GoogleAPIClient,
 ) -> GoogleContactTransformer:
     """
     Create a GoogleContactTransformer with a populated name translator.

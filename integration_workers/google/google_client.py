@@ -182,7 +182,7 @@ class GoogleAPIClient:
             GoogleAuthTokensNotFoundError: If authentication tokens are missing
         """
         try:
-            service = await self._get_service()
+            service = await self._get_people_service()
 
             request_params: dict[str, Any] = {"pageSize": min(page_size, 1000)}
 

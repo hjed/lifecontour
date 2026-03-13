@@ -137,7 +137,7 @@ class TestReservedGroupsIntegration:
                 "worker.settings.encryption_key.get_secret_value",
                 return_value=fernet_key.decode(),
             ),
-            patch("google_contacts_client.build", return_value=mock_service),
+            patch("google_client.build", return_value=mock_service),
         ):
             result = await sync_google_contacts(
                 ctx=ctx,

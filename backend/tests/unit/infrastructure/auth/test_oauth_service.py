@@ -572,7 +572,7 @@ class TestOAuthServiceGoogle:
         mock_result.scalars.return_value = mock_scalars
         mock_connection.execute = AsyncMock(return_value=mock_result)
 
-        with pytest.raises(ValueError, match="No Google Contacts connection found"):
+        with pytest.raises(ValueError, match="No Google connection found"):
             await oauth_service_with_google.get_connected_google_account_email(
                 "test-user-123", mock_connection
             )
@@ -587,9 +587,7 @@ class TestOAuthServiceGoogle:
         mock_result.scalars.return_value = mock_scalars
         mock_connection.execute = AsyncMock(return_value=mock_result)
 
-        with pytest.raises(
-            ValueError, match="Multiple Google Contacts connections found"
-        ):
+        with pytest.raises(ValueError, match="Multiple Google connections found"):
             await oauth_service_with_google.get_connected_google_account_email(
                 "test-user-123", mock_connection
             )

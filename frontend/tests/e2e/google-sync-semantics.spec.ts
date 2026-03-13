@@ -15,6 +15,7 @@ test.describe('ITER2.6-001 Phase 1: Google Contacts Sync Semantics', () => {
         lastName: 'Contact',
         email: 'starred@example.com',
         isFavourite: true,
+        tags: ['Family'],
       },
     ]);
     const contactId = contacts[0].id;

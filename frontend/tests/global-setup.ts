@@ -357,8 +357,7 @@ async function verifyCoreServiceHealth(
   dependencies.execCommand(
     `${dockerComposeCmd} --profile test exec -T backend alembic upgrade head`,
     'Ensuring backend database schema is up to date',
-    projectRoot,
-    { ignoreError: true }
+    projectRoot
   );
 
   dependencies.logger.log('🔍 Re-checking backend API readiness...');
