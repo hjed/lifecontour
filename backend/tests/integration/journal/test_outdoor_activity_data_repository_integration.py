@@ -4,15 +4,13 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 import pytest_asyncio
+from core_shared.models.journals import EventDateRange, Journal, OutdoorActivityData
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core.journal.adapters.sql.journal_repository import SqlJournalRepository
 from app.core.journal.adapters.sql.outdoor_activity_data_repository import (
     SqlOutdoorActivityDataRepository,
 )
-from app.core.journal.models.entities import Journal
-from app.core.journal.models.outdoor_activity_data import OutdoorActivityData
-from app.core.journal.models.value_objects import EventDateRange
 
 
 @pytest_asyncio.fixture

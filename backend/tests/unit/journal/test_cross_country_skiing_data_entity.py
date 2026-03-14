@@ -3,9 +3,10 @@
 from uuid import UUID, uuid4
 
 import pytest
-
-from app.core.journal.models.cross_country_skiing_data import CrossCountrySkiingData
-from app.core.journal.models.exceptions import CrossCountrySkiingDataValidationError
+from core_shared.models.journals import (
+    CrossCountrySkiingData,
+    CrossCountrySkiingDataValidationError,
+)
 
 
 @pytest.mark.unit

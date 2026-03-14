@@ -1,9 +1,10 @@
 """Unit tests for OutdoorActivityData entity (OUTDOOR_ACTIVITY type)."""
 
 import pytest
-
-from app.core.journal.models.exceptions import OutdoorActivityDataValidationError
-from app.core.journal.models.outdoor_activity_data import OutdoorActivityData
+from core_shared.models.journals import (
+    OutdoorActivityData,
+    OutdoorActivityDataValidationError,
+)
 
 
 @pytest.mark.unit

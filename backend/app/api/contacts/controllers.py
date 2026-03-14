@@ -9,6 +9,7 @@ from datetime import datetime
 
 import structlog
 from core_shared.models.contacts.exceptions import ContactValidationError
+from core_shared.models.journals import Journal
 from dishka.integrations.fastapi import FromDishka, inject
 from fastapi import APIRouter, Query, Request, status
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
@@ -53,7 +54,6 @@ from app.core.contacts.models.exceptions import (
 )
 from app.core.contacts.services import ContactService
 from app.core.contacts.services.contact_history_service import ContactHistoryService
-from app.core.journal.models.entities import Journal
 from app.core.journal.models.repositories import (
     AbseilingDataRepository,
     BushwalkingDataRepository,
@@ -811,7 +811,7 @@ async def get_contact_journals(
     Returns a paginated list of journals that have a relationship with the specified contact.
     Optionally filter by relationship type (PARTICIPANT, INVITEE, MENTION, ABOUT).
     """
-    from app.core.journal.models.journal_contact_relationship import (
+    from core_shared.models.journals import (
         JournalContactRelationshipType,
     )
 

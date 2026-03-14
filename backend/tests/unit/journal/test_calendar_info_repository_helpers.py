@@ -4,11 +4,11 @@ from datetime import UTC, datetime, time
 from uuid import uuid4
 
 import pytest
+from core_shared.models.journals import CalendarInfo
 
 from app.core.journal.adapters.sql.calendar_info_repository import (
     project_calendar_info_to_linked_calendar,
 )
-from app.core.journal.models.calendar_info import CalendarInfo
 
 
 @pytest.mark.unit

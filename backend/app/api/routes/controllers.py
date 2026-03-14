@@ -7,6 +7,7 @@ Controllers act as adapters between HTTP and domain services.
 
 from uuid import UUID
 
+from core_shared.models.journals import RouteNotFoundError
 from dishka.integrations.fastapi import FromDishka, inject
 from fastapi import APIRouter, Query, Request, status
 from sqlalchemy.ext.asyncio import AsyncConnection
@@ -24,7 +25,6 @@ from app.api.routes.schemas import (
     RouteResponse,
     RouteUpdateRequest,
 )
-from app.core.journal.models.exceptions import RouteNotFoundError
 from app.core.journal.services.route_service import RouteService
 from app.infrastructure.auth.models import SessionUser
 

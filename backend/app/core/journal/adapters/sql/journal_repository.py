@@ -3,13 +3,11 @@
 from datetime import UTC, datetime
 from typing import Any
 
+from core_shared.models.journals import EventDateRange, Journal, JournalNotFoundError
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
-from app.core.journal.models.entities import Journal
-from app.core.journal.models.exceptions import JournalNotFoundError
 from app.core.journal.models.repositories import JournalRepository
-from app.core.journal.models.value_objects import EventDateRange
 
 # Module-level constant for journal type to table mapping
 # Supports both uppercase (MOOD_RATING) and lowercase (mood_rating) type names

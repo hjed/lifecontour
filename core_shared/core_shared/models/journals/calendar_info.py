@@ -36,8 +36,8 @@ class CalendarInfo:
         updated_at: Last update timestamp
     """
 
-    journal_id: int
     calendar_id: UUID
+    journal_id: int | None = None
     start_time: time | None = None
     end_time: time | None = None
     is_all_day: bool = False
@@ -54,8 +54,8 @@ class CalendarInfo:
         self._validate_location()
 
     def _validate_journal_id(self) -> None:
-        """Validate journal_id is positive."""
-        if self.journal_id <= 0:
+        """Validate journal_id is positive if provided."""
+        if self.journal_id is not None and self.journal_id <= 0:
             raise CalendarInfoValidationError(
                 "journal_id", "Journal ID must be a positive integer"
             )

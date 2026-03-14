@@ -4,6 +4,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 import pytest_asyncio
+from core_shared.models.journals import EventDateRange, Journal, KayakingData
 from core_shared.models.route import Route
 from sqlalchemy.ext.asyncio import AsyncConnection
 
@@ -12,9 +13,6 @@ from app.core.journal.adapters.sql.kayaking_data_repository import (
     SqlKayakingDataRepository,
 )
 from app.core.journal.adapters.sql.route_repository import SqlRouteRepository
-from app.core.journal.models.entities import Journal
-from app.core.journal.models.kayaking_data import KayakingData
-from app.core.journal.models.value_objects import EventDateRange
 
 
 @pytest_asyncio.fixture

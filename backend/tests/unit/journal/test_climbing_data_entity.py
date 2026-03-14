@@ -3,9 +3,7 @@
 from uuid import UUID, uuid4
 
 import pytest
-
-from app.core.journal.models.climbing_data import ClimbingData
-from app.core.journal.models.exceptions import ClimbingDataValidationError
+from core_shared.models.journals import ClimbingData, ClimbingDataValidationError
 
 
 @pytest.mark.unit

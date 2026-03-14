@@ -147,7 +147,7 @@ test.describe('Contact Inline Editing', () => {
     await expect(nicknameField).toBeVisible();
     await nicknameField.click({ force: true });
 
-    const input = page.locator('[data-testid="nickname-field-input"]');
+    const input = page.locator('[data-testid="nickname-field"] input');
     await expect(input).toBeVisible();
     await input.clear();
     await input.fill('UpdatedNickname');

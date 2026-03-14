@@ -3,18 +3,18 @@
 from datetime import datetime
 
 import pytest
+from core_shared.models.journals import (
+    EventDateRange,
+    Journal,
+    JournalCycleError,
+    JournalMaxDepthExceededError,
+    JournalNotFoundError,
+    JournalType,
+)
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core.journal.adapters.sql.journal_repository import SqlJournalRepository
-from app.core.journal.models.entities import Journal
-from app.core.journal.models.exceptions import (
-    JournalCycleError,
-    JournalMaxDepthExceededError,
-    JournalNotFoundError,
-)
-from app.core.journal.models.journal_types import JournalType
-from app.core.journal.models.value_objects import EventDateRange
 from app.core.journal.services.journal_service import JournalService
 from app.infrastructure.events.outbox_event_publisher import OutboxEventPublisher
 

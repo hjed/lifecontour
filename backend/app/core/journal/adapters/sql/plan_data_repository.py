@@ -3,15 +3,16 @@
 from datetime import UTC, datetime
 from uuid import UUID
 
+from core_shared.models.journals import (
+    PlanData,
+    PlanDataValidationError,
+    PlanDocument,
+    PlanDocumentValidationError,
+)
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncConnection
 
-from app.core.journal.models.exceptions import (
-    PlanDataValidationError,
-    PlanDocumentValidationError,
-)
-from app.core.journal.models.plan_data import PlanData, PlanDocument
 from app.core.journal.models.repositories import PlanDataRepository
 
 

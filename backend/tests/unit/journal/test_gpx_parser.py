@@ -5,8 +5,8 @@ extract coordinates, and calculate track statistics.
 """
 
 import pytest
+from core_shared.models.journals import GPXParsingError
 
-from app.core.journal.models.exceptions import GPXParsingError
 from app.core.journal.utils.gpx_parser import (
     GPXCoordinate,
     GPXStatistics,

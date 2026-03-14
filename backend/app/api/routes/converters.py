@@ -10,10 +10,10 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from core_shared.models import Route
+from core_shared.models.journals import RouteValidationError
 
 from app.api.common.schemas import JsonApiLinks
 from app.api.routes.schemas import RouteResource, RouteResponseAttributes
-from app.core.journal.models.exceptions import RouteValidationError
 
 if TYPE_CHECKING:
     from app.api.routes.schemas import RouteCreateData, RouteUpdateData

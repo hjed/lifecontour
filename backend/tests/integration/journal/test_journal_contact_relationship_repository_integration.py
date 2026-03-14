@@ -4,17 +4,15 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 import pytest_asyncio
+from core_shared.models.journals import (
+    JournalContactRelationship,
+    JournalContactRelationshipType,
+)
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core.journal.adapters.sql.journal_contact_relationship_repository import (
     SqlJournalContactRelationshipRepository,
-)
-from app.core.journal.models.journal_contact_relationship import (
-    JournalContactRelationship,
-)
-from app.core.journal.models.journal_relationship_types import (
-    JournalContactRelationshipType,
 )
 
 

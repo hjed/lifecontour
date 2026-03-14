@@ -3,16 +3,14 @@
 from uuid import uuid4
 
 import pytest
-
-from app.core.journal.models.constants import (
+from core_shared.models.journals import (
     MAX_PLAN_DOCUMENT_TITLE_LENGTH,
     MAX_PLAN_DOCUMENT_URL_LENGTH,
-)
-from app.core.journal.models.exceptions import (
+    PlanData,
     PlanDataValidationError,
+    PlanDocument,
     PlanDocumentValidationError,
 )
-from app.core.journal.models.plan_data import PlanData, PlanDocument
 
 
 @pytest.mark.unit

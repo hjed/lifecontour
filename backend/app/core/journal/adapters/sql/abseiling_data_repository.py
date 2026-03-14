@@ -2,10 +2,10 @@
 
 from typing import Any
 
+from core_shared.models.journals import AbseilingData
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
-from app.core.journal.models.abseiling_data import AbseilingData
 from app.core.journal.models.repositories import AbseilingDataRepository
 
 

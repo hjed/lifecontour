@@ -2,12 +2,11 @@
 
 from datetime import UTC, datetime
 
+from core_shared.models.journals import PhotoAlbumData, PhotoAlbumDataValidationError
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncConnection
 
-from app.core.journal.models.exceptions import PhotoAlbumDataValidationError
-from app.core.journal.models.photo_album_data import PhotoAlbumData
 from app.core.journal.models.repositories import PhotoAlbumDataRepository
 
 

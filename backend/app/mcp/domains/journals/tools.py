@@ -13,6 +13,30 @@ from typing import Annotated, Any
 from uuid import UUID
 
 import structlog
+from core_shared.models.journals import (
+    AbseilingData,
+    BushwalkingData,
+    Calendar,
+    CalendarInfo,
+    CanyoningData,
+    ClimbingData,
+    CrossCountrySkiingData,
+    EventDateRange,
+    FitnessData,
+    JoggingData,
+    Journal,
+    JournalContactRelationship,
+    JournalContactRelationshipType,
+    JournalNotFoundError,
+    JournalType,
+    JournalValidationError,
+    KayakingData,
+    MoodData,
+    OutdoorActivityData,
+    PhotoAlbumData,
+    PlanData,
+    TravelData,
+)
 from fastmcp import FastMCP
 from pydantic import BaseModel, Field
 from sqlalchemy import text
@@ -63,35 +87,7 @@ from app.core.journal.adapters.sql.photo_album_data_repository import (
 from app.core.journal.adapters.sql.plan_data_repository import SqlPlanDataRepository
 from app.core.journal.adapters.sql.route_repository import SqlRouteRepository
 from app.core.journal.adapters.sql.travel_data_repository import SqlTravelDataRepository
-from app.core.journal.models.abseiling_data import AbseilingData
-from app.core.journal.models.bushwalking_data import BushwalkingData
-from app.core.journal.models.calendar import Calendar
-from app.core.journal.models.calendar_info import CalendarInfo
-from app.core.journal.models.canyoning_data import CanyoningData
-from app.core.journal.models.climbing_data import ClimbingData
-from app.core.journal.models.cross_country_skiing_data import CrossCountrySkiingData
-from app.core.journal.models.entities import Journal
-from app.core.journal.models.exceptions import (
-    JournalNotFoundError,
-    JournalValidationError,
-)
-from app.core.journal.models.fitness_data import FitnessData
-from app.core.journal.models.jogging_data import JoggingData
-from app.core.journal.models.journal_contact_relationship import (
-    JournalContactRelationship,
-)
-from app.core.journal.models.journal_relationship_types import (
-    JournalContactRelationshipType,
-)
 from app.core.journal.models.journal_tag import JournalTag
-from app.core.journal.models.journal_types import JournalType
-from app.core.journal.models.kayaking_data import KayakingData
-from app.core.journal.models.mood_data import MoodData
-from app.core.journal.models.outdoor_activity_data import OutdoorActivityData
-from app.core.journal.models.photo_album_data import PhotoAlbumData
-from app.core.journal.models.plan_data import PlanData
-from app.core.journal.models.travel_data import TravelData
-from app.core.journal.models.value_objects import EventDateRange
 from app.core.journal.services.journal_service import JournalService
 from app.infrastructure.events.outbox_event_publisher import OutboxEventPublisher
 from app.mcp.domains.journals.converters import JournalConverter

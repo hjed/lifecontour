@@ -4,16 +4,16 @@ from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-
-from app.core.journal.models.entities import Journal
-from app.core.journal.models.exceptions import (
+from core_shared.models.journals import (
+    EventDateRange,
+    Journal,
     JournalCycleError,
     JournalMaxDepthExceededError,
     JournalNotFoundError,
+    JournalType,
     JournalValidationError,
 )
-from app.core.journal.models.journal_types import JournalType
-from app.core.journal.models.value_objects import EventDateRange
+
 from app.core.journal.services.journal_service import JournalService
 
 

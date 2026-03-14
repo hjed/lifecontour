@@ -1,9 +1,7 @@
 """Unit tests for FitnessData entity (FITNESS type)."""
 
 import pytest
-
-from app.core.journal.models.exceptions import FitnessDataValidationError
-from app.core.journal.models.fitness_data import FitnessData
+from core_shared.models.journals import FitnessData, FitnessDataValidationError
 
 
 @pytest.mark.unit

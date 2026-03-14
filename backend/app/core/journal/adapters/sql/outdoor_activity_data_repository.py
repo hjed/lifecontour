@@ -2,10 +2,10 @@
 
 from typing import Any
 
+from core_shared.models.journals import OutdoorActivityData
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
-from app.core.journal.models.outdoor_activity_data import OutdoorActivityData
 from app.core.journal.models.repositories import OutdoorActivityDataRepository
 
 

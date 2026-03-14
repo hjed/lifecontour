@@ -8,8 +8,8 @@ reducing duplication and ensuring consistent response structures.
 from datetime import datetime
 from typing import Any
 
-from app.core.journal.models.calendar import Calendar
-from app.core.journal.models.entities import Journal
+from core_shared.models.journals import Calendar, Journal
+
 from app.core.journal.models.journal_tag import JournalTag
 from app.mcp.domains.journals.schemas import (
     CalendarSchema,

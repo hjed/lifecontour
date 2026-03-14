@@ -5,15 +5,15 @@ from uuid import UUID
 
 import structlog
 from core_shared.models import Route
-from sqlalchemy.exc import IntegrityError
-from sqlalchemy.ext.asyncio import AsyncConnection
-
-from app.core.journal.models.events import RouteCreated, RouteDeleted, RouteUpdated
-from app.core.journal.models.exceptions import (
+from core_shared.models.journals import (
     RouteInUseError,
     RouteNotFoundError,
     RouteValidationError,
 )
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncConnection
+
+from app.core.journal.models.events import RouteCreated, RouteDeleted, RouteUpdated
 from app.core.journal.models.repositories import RouteRepository
 from app.infrastructure.events.outbox_event_publisher import OutboxEventPublisher
 

@@ -1,14 +1,12 @@
 """SQL implementation of JournalContactRelationshipRepository."""
 
+from core_shared.models.journals import (
+    JournalContactRelationship,
+    JournalContactRelationshipType,
+)
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
-from app.core.journal.models.journal_contact_relationship import (
-    JournalContactRelationship,
-)
-from app.core.journal.models.journal_relationship_types import (
-    JournalContactRelationshipType,
-)
 from app.core.journal.models.repositories import JournalContactRelationshipRepository
 
 

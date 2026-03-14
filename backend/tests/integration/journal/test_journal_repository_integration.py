@@ -4,13 +4,11 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 import pytest_asyncio
+from core_shared.models.journals import EventDateRange, Journal, JournalNotFoundError
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core.journal.adapters.sql.journal_repository import SqlJournalRepository
-from app.core.journal.models.entities import Journal
-from app.core.journal.models.exceptions import JournalNotFoundError
-from app.core.journal.models.value_objects import EventDateRange
 
 
 @pytest_asyncio.fixture

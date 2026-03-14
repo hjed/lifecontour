@@ -3,9 +3,7 @@
 from uuid import UUID, uuid4
 
 import pytest
-
-from app.core.journal.models.exceptions import KayakingDataValidationError
-from app.core.journal.models.kayaking_data import KayakingData
+from core_shared.models.journals import KayakingData, KayakingDataValidationError
 
 
 @pytest.mark.unit
