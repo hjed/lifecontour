@@ -42,6 +42,10 @@ class GoogleEventTransformer:
         if is_all_day and end_is_all_day and end_dt > start_dt:
             end_dt = end_dt - timedelta(days=1)
 
+        # Validate that end_dt >= start_dt to avoid JournalValidationError
+        if end_dt < start_dt:
+            return None
+
         date_range = EventDateRange(start=start_dt, end=end_dt)
 
         journal = Journal(
@@ -54,8 +58,8 @@ class GoogleEventTransformer:
         calendar_info = CalendarInfo(
             journal_id=None,
             calendar_id=calendar_id,
-            start_time=None if is_all_day else start_dt.time() if start_dt else None,
-            end_time=None if is_all_day else end_dt.time() if end_dt else None,
+            start_time=None if is_all_day else start_dt.time().replace(tzinfo=None) if start_dt else None,
+            end_time=None if is_all_day else end_dt.time().replace(tzinfo=None) if end_dt else None,
             is_all_day=is_all_day,
             location=google_event.location,
         )

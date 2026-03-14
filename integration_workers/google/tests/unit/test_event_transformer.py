@@ -126,7 +126,7 @@ class TestGoogleEventTransformer:
 
         # Assert
         assert journal.event_date_range is not None
-        assert journal.event_date_range.start.isoformat(timespec='seconds') == "2023-10-27T10:00:00+00:00"
+        assert journal.event_date_range.start.isoformat(timespec="seconds") == "2023-10-27T10:00:00+00:00"
 
     def test_transform_to_google_event_payload_maps_timed_events(self) -> None:
         # Arrange
