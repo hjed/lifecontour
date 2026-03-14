@@ -40,11 +40,12 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 # Import from the installed core_shared package
-from api_models import ListConnectionsResponse
+from api_models import ListConnectionsResponse, ListContactGroupsResponse
 
 # Import worker-specific services
 from google_auth_service import GoogleAuthService
 from google_client import GoogleAPIClient
+from group_translator import GoogleGroupNameTranslator
 from transformer import GoogleContactTransformer
 
 
@@ -826,7 +827,6 @@ async def _create_transformer(
     group_mapping = {}
     try:
         groups_data = await client.list_contact_groups(page_size=1000)
-        from api_models import ListContactGroupsResponse
 
         groups_response = ListContactGroupsResponse(**groups_data)
 
@@ -847,8 +847,6 @@ async def _create_transformer(
             "Failed to fetch contact groups for translation, proceeding with empty mapping",
             error=str(e),
         )
-
-    from group_translator import GoogleGroupNameTranslator
 
     translator = GoogleGroupNameTranslator(
         reserved_group_ids=settings.google_reserved_groups, group_mapping=group_mapping
