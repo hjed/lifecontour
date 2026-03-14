@@ -2,7 +2,12 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any
 
-from core_shared.models.journals import CalendarInfo, EventDateRange, Journal
+from core_shared.models.journals import (
+    CalendarInfo,
+    EventDateRange,
+    Journal,
+    JournalValidationError,
+)
 
 from calendar_models import GoogleEvent, GoogleEventStartEnd
 
@@ -48,12 +53,18 @@ class GoogleEventTransformer:
 
         date_range = EventDateRange(start=start_dt, end=end_dt)
 
-        journal = Journal(
-            user_id=user_id,
-            title=google_event.summary or "Untitled Event",
-            content=google_event.description or "No description provided.",
-            event_date_range=date_range,
-        )
+        summary = (google_event.summary or "").strip() or "Untitled Event"
+        description = (google_event.description or "").strip() or "No description provided."
+
+        try:
+            journal = Journal(
+                user_id=user_id,
+                title=summary,
+                content=description,
+                event_date_range=date_range,
+            )
+        except JournalValidationError:
+            return None
 
         if is_all_day:
             start_time = None

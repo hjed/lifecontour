@@ -5,8 +5,6 @@ from typing import Any
 from core_shared.models.journals import CalendarInfo, EventDateRange, Journal
 
 from calendar_models import GoogleEvent
-
-# We will import the GoogleEventTransformer once we implement it.
 from event_transformer import GoogleEventTransformer
 
 
