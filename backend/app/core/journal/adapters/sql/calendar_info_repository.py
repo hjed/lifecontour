@@ -216,11 +216,15 @@ class SqlCalendarInfoRepository(CalendarInfoRepository):
             for row in linked_result.fetchall()
         ]
 
-        import typing
+        def get_sort_key(ci: CalendarInfo) -> int:
+            assert ci.journal_id is not None, (
+                "CalendarInfo from DB must have a journal_id"
+            )
+            return ci.journal_id
 
         return sorted(
             [*primary_events, *linked_events],
-            key=lambda ci: typing.cast(int, ci.journal_id),
+            key=get_sort_key,
         )
 
     async def _ensure_external_event_link(self, calendar_info: CalendarInfo) -> None:

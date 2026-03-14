@@ -43,7 +43,6 @@ class Journal:
         """Validate journal properties."""
         self._validate_user_id()
         self._validate_title()
-        self._validate_content()
 
     def _validate_user_id(self) -> None:
         """Validate user_id is not empty."""
@@ -59,11 +58,6 @@ class Journal:
             raise JournalValidationError(
                 "title", f"Title cannot exceed {MAX_TITLE_LENGTH} characters"
             )
-
-    def _validate_content(self) -> None:
-        """Validate content is not empty."""
-        if not self.content or not self.content.strip():
-            raise JournalValidationError("content", "Content is required")
 
     @property
     def is_child(self) -> bool:

@@ -54,7 +54,7 @@ class GoogleEventTransformer:
         date_range = EventDateRange(start=start_dt, end=end_dt)
 
         summary = (google_event.summary or "").strip() or "Untitled Event"
-        description = (google_event.description or "").strip() or "No description provided."
+        description = (google_event.description or "").strip()
 
         try:
             journal = Journal(
