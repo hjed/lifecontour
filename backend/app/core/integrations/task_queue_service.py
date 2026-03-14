@@ -35,10 +35,10 @@ class TaskQueueService:
 
     def __init__(
         self,
-        redis_pool: ArqRedis,
         redis_settings: RedisSettings,
         settings: Settings,
         db_manager: IntegrationDatabaseManager,
+        redis_pool: ArqRedis | None = None,
         worker_type: str = "google",
     ):
         """
@@ -150,6 +150,85 @@ class TaskQueueService:
                 google_account_email=google_account_email,
                 user_id=user_id,
                 sync_type=sync_type,
+                error=str(e),
+            )
+            raise
+
+    async def broadcast_journal_event(
+        self, event_type: str, event_data: dict[str, Any]
+    ) -> str:
+        """
+        Broadcast a journal domain event to all registered integration queues.
+
+        This enables the event-driven outbound sync architecture where integration
+        workers decide independently if they need to sync the event based on
+        their own configurations (e.g. is the calendar synced to Google?).
+
+        Args:
+            event_type: Type of the event (e.g., 'JournalCreated', 'JournalUpdated')
+            event_data: Event payload containing journal entry data and changes
+
+        Returns:
+            Job ID for tracking the job status (from the last enqueued job)
+
+        Raises:
+            JobEnqueueError: If job enqueueing fails
+        """
+        logger.info(
+            "Broadcasting journal event to integrations",
+            event_type=event_type,
+            journal_id=event_data.get("journal_id") or event_data.get("id"),
+        )
+
+        try:
+            pool = self.redis_pool
+            if pool is None:
+                pool = await self._get_arq_pool()
+
+            # For now, we only have one integration queue (Google)
+            # Future integrations would be added to this list
+            integration_queues = [ARQ_QUEUE_NAME]
+            last_job_id = ""
+
+            for queue_name in integration_queues:
+                job = await pool.enqueue_job(
+                    "process_journal_event",
+                    event_type,
+                    event_data,
+                    _job_timeout=self.settings.task_queue_job_timeout_seconds,
+                    _defer_until=None,
+                    _queue_name=queue_name,
+                )
+
+                if not job:
+                    logger.error(
+                        "Failed to enqueue journal event broadcast",
+                        event_type=event_type,
+                        queue_name=queue_name,
+                    )
+                    continue
+
+                last_job_id = job.job_id
+                logger.debug(
+                    "Successfully enqueued journal event to worker",
+                    job_id=job.job_id,
+                    event_type=event_type,
+                    queue_name=queue_name,
+                )
+
+            if not last_job_id:
+                raise JobEnqueueError(
+                    message="Failed to broadcast event to any integration queue",
+                    integration_source="system",
+                    reason="ARQ pool returned None for all queues",
+                )
+
+            return last_job_id
+
+        except Exception as e:
+            logger.error(
+                "Failed to broadcast journal event",
+                event_type=event_type,
                 error=str(e),
             )
             raise
@@ -370,10 +449,13 @@ class TaskQueueService:
 
         try:
             # Check Redis connectivity
-            await self.redis_pool.ping()
+            pool = self.redis_pool
+            if pool is None:
+                pool = await self._get_arq_pool()
+            await pool.ping()
 
             # Get queue statistics using ARQ's API
-            queued_jobs = await self.redis_pool.queued_jobs(queue_name=ARQ_QUEUE_NAME)
+            queued_jobs = await pool.queued_jobs(queue_name=ARQ_QUEUE_NAME)
             queue_length = len(queued_jobs)
 
             # Update queue depth metric
@@ -381,7 +463,10 @@ class TaskQueueService:
 
             # Check if Redis is responsive
             start_time = datetime.now(UTC)
-            await self.redis_pool.ping()
+            pool = self.redis_pool
+            if pool is None:
+                pool = await self._get_arq_pool()
+            await pool.ping()
             end_time = datetime.now(UTC)
             response_time_ms = (end_time - start_time).total_seconds() * 1000
 
@@ -437,9 +522,12 @@ class TaskQueueService:
         try:
             # Store association with configurable expiration
             key = f"user_jobs:{user_id}"
-            await self.redis_pool.hset(key, job_id, "enqueued")  # type: ignore
+            pool = self.redis_pool
+            if pool is None:
+                pool = await self._get_arq_pool()
+            await pool.hset(key, job_id, "enqueued")  # type: ignore
             expiry_seconds = self.settings.task_queue_user_job_expiry_hours * 3600
-            await self.redis_pool.expire(key, expiry_seconds)
+            await pool.expire(key, expiry_seconds)
             logger.debug("Stored user-job association", user_id=user_id, job_id=job_id)
         except Exception as e:
             logger.warning(
@@ -463,7 +551,10 @@ class TaskQueueService:
         """
         try:
             key = f"user_jobs:{user_id}"
-            result = await self.redis_pool.hexists(key, job_id)  # type: ignore
+            pool = self.redis_pool
+            if pool is None:
+                pool = await self._get_arq_pool()
+            result = await pool.hexists(key, job_id)  # type: ignore
             owns_job = bool(result) if result is not None else False
             logger.debug(
                 "Verified user-job ownership",

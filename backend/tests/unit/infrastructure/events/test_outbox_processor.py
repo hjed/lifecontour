@@ -631,3 +631,79 @@ class TestOutboxProcessor:
         assert mock_repository.mark_as_processed.call_count == 2
         mock_repository.mark_as_processed.assert_any_call("contact-event")
         mock_repository.mark_as_processed.assert_any_call("search-event")
+
+    @pytest.mark.asyncio
+    async def test_process_journal_events(self, processor, mock_search_indexer):
+        """Test processing journal events routes to TaskQueueService."""
+        # Arrange
+        events = [
+            OutboxEvent(
+                id=1,
+                event_id="journal-event",
+                event_type="JournalUpdated",
+                aggregate_id=42,
+                event_data={"id": "j1", "changed_fields": ["title"]},
+                occurred_at=datetime(2024, 1, 1, 10, 0, 0),
+                processed_at=None,
+                retry_count=0,
+                created_at=datetime(2024, 1, 1, 10, 0, 0),
+            )
+        ]
+
+        mock_conn = AsyncMock()
+
+        @asynccontextmanager
+        async def mock_begin():
+            yield mock_conn
+
+        @asynccontextmanager
+        async def mock_begin_nested():
+            yield mock_conn
+
+        mock_conn.begin_nested = mock_begin_nested
+
+        mock_engine = AsyncMock()
+        mock_engine.begin = mock_begin
+
+        mock_repository = MagicMock()
+        mock_repository.get_unprocessed_events = AsyncMock(return_value=events)
+        mock_repository.mark_as_processed = AsyncMock()
+
+        mock_task_queue_service = AsyncMock()
+        mock_task_queue_service.broadcast_journal_event = AsyncMock()
+        mock_task_queue_service.close = AsyncMock()
+
+        with (
+            patch(
+                "app.infrastructure.events.outbox_processor.get_async_database_engine",
+                return_value=mock_engine,
+            ),
+            patch(
+                "app.infrastructure.events.outbox_processor.OutboxRepository",
+                return_value=mock_repository,
+            ),
+            patch(
+                "app.infrastructure.events.outbox_processor.SearchIndexer",
+                return_value=mock_search_indexer,
+            ),
+            patch(
+                "app.core.integrations.task_queue_service.TaskQueueService",
+                return_value=mock_task_queue_service,
+            ),
+            patch("app.infrastructure.config.get_settings"),
+            patch("app.core.integrations.task_queue.get_redis_settings"),
+            patch("app.core.integrations.database.get_database_manager"),
+        ):
+            # Act
+            await processor.process_events()
+
+        # Assert
+        # Journal event should go to TaskQueueService AND SearchIndexer
+        mock_task_queue_service.broadcast_journal_event.assert_called_once_with(
+            "JournalUpdated", {"id": "j1", "changed_fields": ["title"]}
+        )
+        mock_task_queue_service.close.assert_called_once()
+        mock_search_indexer.process_event.assert_called_once_with(events[0])
+
+        assert mock_repository.mark_as_processed.call_count == 1
+        mock_repository.mark_as_processed.assert_called_once_with("journal-event")

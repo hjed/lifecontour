@@ -122,6 +122,14 @@ class OutboxProcessor:
                 # Process other events with the search indexer
                 await search_indexer.process_event(event)
 
+            # Additionally route journal events to integration workers
+            if event.event_type in (
+                "JournalCreated",
+                "JournalUpdated",
+                "JournalDeleted",
+            ):
+                await self._process_journal_event(event)
+
             # Mark as processed
             await repository.mark_as_processed(event.event_id)
 
@@ -212,6 +220,40 @@ class OutboxProcessor:
             event_type=event.event_type,
             result=result,
         )
+
+    async def _process_journal_event(self, event: Any) -> None:
+        """
+        Broadcast journal events to all integrations.
+
+        Args:
+            event: Journal sync event (JournalCreated, JournalUpdated, JournalDeleted)
+        """
+        # Import here to avoid circular dependencies
+        from app.core.integrations.database import get_database_manager
+        from app.core.integrations.task_queue import get_redis_settings
+        from app.core.integrations.task_queue_service import TaskQueueService
+        from app.infrastructure.config import get_settings
+
+        settings = get_settings()
+        redis_settings = get_redis_settings(settings)
+        db_manager = get_database_manager(settings)
+
+        task_queue = TaskQueueService(
+            redis_pool=None,  # Automatically created
+            redis_settings=redis_settings,
+            settings=settings,
+            db_manager=db_manager,
+        )
+
+        try:
+            await task_queue.broadcast_journal_event(event.event_type, event.event_data)
+            logger.info(
+                "Broadcasted journal sync event to workers",
+                event_id=event.event_id,
+                event_type=event.event_type,
+            )
+        finally:
+            await task_queue.close()
 
     async def get_failed_events_summary(self) -> dict[str, Any]:
         """

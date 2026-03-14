@@ -32,7 +32,7 @@ def mock_event_publisher():
 @pytest.fixture
 def mock_transaction():
     """Create a mock database transaction."""
-    return MagicMock()
+    return AsyncMock()
 
 
 @pytest.fixture
@@ -234,6 +234,10 @@ class TestJournalServiceCRUD:
         journal = create_test_journal(journal_id=1)
 
         mock_journal_repo.find_by_id.return_value = journal
+
+        mock_result = MagicMock()
+        mock_result.fetchall.return_value = []
+        mock_transaction.execute.return_value = mock_result
 
         # Act
         await journal_service.delete_journal(1, mock_transaction)

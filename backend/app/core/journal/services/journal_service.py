@@ -12,6 +12,7 @@ from core_shared.models.journals import (
     JournalType,
     JournalValidationError,
 )
+from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncConnection
 
@@ -192,11 +193,29 @@ class JournalService:
         if journal is None:
             raise JournalNotFoundError(journal_id)
 
+        # Fetch external event IDs before deletion so workers know what to delete
+        stmt = text("""
+            SELECT external_event_id
+            FROM journal_external_event_links
+            WHERE journal_id = :journal_id AND external_event_id IS NOT NULL
+        """)
+        result = await transaction.execute(stmt, {"journal_id": journal_id})
+        external_identifiers = {}
+        # We currently only support Google calendar syncing, so we hardcode the key.
+        # If multiple external_event_ids exist for the same journal, this will take the last one.
+        for row in result.fetchall():
+            external_identifiers["google"] = row.external_event_id
+
         # Delete the journal
         await self.journal_repo.delete(journal_id)
 
         # Publish deletion event
-        event = JournalDeleted(journal_id, transaction=transaction)
+        event = JournalDeleted(
+            journal_id,
+            user_id=journal.user_id,
+            external_identifiers=external_identifiers,
+            transaction=transaction,
+        )
         await self.event_publisher.publish(event)
 
         logger.info("Journal deleted", journal_id=journal_id)

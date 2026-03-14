@@ -44,6 +44,7 @@ class GoogleEventTransformer:
         is_all_day = start_is_all_day or end_is_all_day
 
         from datetime import timedelta
+
         if is_all_day and end_is_all_day and end_dt > start_dt:
             end_dt = end_dt - timedelta(days=1)
 
@@ -114,6 +115,7 @@ class GoogleEventTransformer:
                     if time_data.time_zone:
                         try:
                             from zoneinfo import ZoneInfo
+
                             tz = ZoneInfo(time_data.time_zone)
                             dt = dt.replace(tzinfo=tz)
                         except Exception:
@@ -149,13 +151,18 @@ class GoogleEventTransformer:
 
         if calendar_info.is_all_day:
             from datetime import timedelta
+
             payload["start"] = {"date": start_dt.strftime("%Y-%m-%d")}
             payload["end"] = {"date": (end_dt + timedelta(days=1)).strftime("%Y-%m-%d")}
         else:
             if calendar_info.start_time is not None:
-                start_dt = datetime.combine(start_dt.date(), calendar_info.start_time, tzinfo=UTC)
+                start_dt = datetime.combine(
+                    start_dt.date(), calendar_info.start_time, tzinfo=UTC
+                )
             if calendar_info.end_time is not None:
-                end_dt = datetime.combine(end_dt.date(), calendar_info.end_time, tzinfo=UTC)
+                end_dt = datetime.combine(
+                    end_dt.date(), calendar_info.end_time, tzinfo=UTC
+                )
 
             # Format datetime as ISO 8601. Add 'Z' manually if UTC, else Google handles offsets.
             # Our backend expects UTC.

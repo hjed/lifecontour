@@ -7,7 +7,7 @@ It runs as a separate process from the main FastAPI application.
 """
 
 import random
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from arq import run_worker
@@ -1559,6 +1559,331 @@ async def sync_google_contacts(
         }
 
 
+async def process_journal_event(
+    ctx: dict[str, Any], event_type: str, event_data: dict[str, Any]
+) -> dict[str, Any]:
+    """
+    Process a single journal event for Google Calendar synchronization.
+
+    This ARQ task receives domain events (JournalCreated, JournalUpdated)
+    and pushes them to Google Calendar if the journal's calendar is synced.
+
+    Args:
+        ctx: ARQ context dictionary
+        event_type: The type of the event (JournalCreated, JournalUpdated)
+        event_data: The event payload containing journal_id and changed_fields
+
+    Returns:
+        Task result dictionary with sync status
+    """
+    job_id = ctx.get("job_id", "unknown")
+    set_job_id(job_id)
+    set_worker_id(settings.worker_id)
+
+    # Extract journal ID from event logic
+    journal_id = event_data.get("journal_id")
+    if not journal_id:
+        logger.error(
+            "Journal event missing journal_id", event_type=event_type, job_id=job_id
+        )
+        return {"status": "error", "error": "Missing journal_id"}
+
+    logger.info(
+        "Processing journal event",
+        job_id=job_id,
+        event_type=event_type,
+        journal_id=journal_id,
+    )
+
+    started_at = datetime.now(UTC)
+    session_factory = ctx["session_factory"]
+
+    try:
+        journal_id = event_data["journal_id"]
+        action = event_data.get("action")
+
+        if action == "DELETED":
+            user_id = event_data.get("user_id")
+            if not user_id:
+                logger.error("JournalDeleted event missing user_id", journal_id=journal_id)
+                return {"status": "error", "reason": "Missing user_id for deletion"}
+
+            external_identifiers = event_data.get("external_identifiers", {})
+            google_event_id = external_identifiers.get("google")
+
+            if not google_event_id:
+                logger.debug("Ignoring JournalDeleted: No Google event ID found in payload")
+                return {"status": "ignored", "reason": "no_external_id_for_provider"}
+
+            # Use a dummy calendar ID since we don't have it, but wait! The Google Client delete_event needs calendar_id = 'primary'
+            # Let's get the authorization
+            async with session_factory() as session:
+                auth_stmt = text("""
+                    SELECT google_account_email
+                    FROM user_google_integration
+                    WHERE user_id = :user_id
+                    LIMIT 1
+                """)
+                auth_result = await session.execute(auth_stmt, {"user_id": str(user_id)})
+                auth_row = auth_result.fetchone()
+
+                if not auth_row:
+                    logger.warning(
+                        "No Google integration found for user", user_id=user_id
+                    )
+                    return {"status": "error", "reason": "auth_not_found"}
+
+                google_account_email = auth_row.google_account_email
+
+                auth_service = GoogleAuthService(
+                    session=session,
+                    encryption_key=settings.encryption_key.get_secret_value(),
+                    google_client_id=settings.google_client_id,
+                    google_client_secret=settings.google_client_secret.get_secret_value(),
+                )
+                client = GoogleAPIClient(
+                    auth_service=auth_service,
+                    google_account_email=google_account_email,
+                    google_client_id=settings.google_client_id,
+                    google_client_secret=settings.google_client_secret.get_secret_value(),
+                    user_id=user_id,
+                )
+
+                # Assume calendar_id 'primary' because we might not know it, or maybe delete_event doesn't need it?
+                # Actually our GoogleAPIClient uses 'primary' by default anyway in this implementation! Wait, does it?
+                try:
+                    await client.delete_event(google_event_id)
+                    logger.info("Deleted journal event from Google Calendar", journal_id=journal_id)
+                    return {
+                        "status": "success",
+                        "action": "delete",
+                        "external_event_id": google_event_id,
+                    }
+                except Exception as e:
+                    logger.error("Failed to delete journal event from Google Calendar", error=str(e))
+                    return {"status": "error", "reason": str(e)}
+
+        async with session_factory() as session:
+            # Fetch the journal, calendar, and sync metadata
+            stmt = text("""
+                SELECT
+                    j.id as journal_id,
+                    j.title,
+                    j.content,
+                    j.event_date_range_start,
+                    j.event_date_range_end,
+                    j.user_id,
+                    jci.is_all_day,
+                    jci.location,
+                    jci.calendar_id,
+                    c.is_synced_to_google,
+                    jeel.external_event_id,
+                    jeel.sync_status
+                FROM journals j
+                LEFT JOIN journal_calendar_info jci ON j.id = jci.journal_id
+                LEFT JOIN calendars c ON jci.calendar_id = c.id
+                LEFT JOIN journal_external_event_links jeel ON
+                    j.id = jeel.journal_id AND jci.calendar_id = jeel.calendar_id
+                WHERE j.id = :journal_id
+            """)
+            result = await session.execute(stmt, {"journal_id": journal_id})
+            row = result.fetchone()
+
+            if not row:
+                logger.info("Journal not found", journal_id=journal_id)
+                return {"status": "ignored", "reason": "journal_not_found"}
+
+            # Only EVENT journals have schedule info. If no calendar, it's not an EVENT journal.
+            if not row.calendar_id:
+                logger.info(
+                    "Journal is not an EVENT or has no calendar", journal_id=journal_id
+                )
+                return {"status": "ignored", "reason": "not_event_journal"}
+
+            if not row.is_synced_to_google:
+                logger.info(
+                    "Journal's calendar is not synced to Google",
+                    journal_id=journal_id,
+                    calendar_id=row.calendar_id,
+                )
+                return {"status": "ignored", "reason": "calendar_not_synced"}
+
+            # Check for no-op on JournalUpdated
+            if event_type == "JournalUpdated":
+                changed_fields = event_data.get("changed_fields", {})
+                sync_relevant_fields = {
+                    "title",
+                    "content",
+                    "event_date_range",
+                    "calendar_info",
+                }
+                if not any(
+                    field in changed_fields
+                    for set_field in sync_relevant_fields
+                    for field in (
+                        set_field,
+                        f"{set_field}_start",
+                        f"{set_field}_end",
+                        f"{set_field}_location",
+                        f"{set_field}_is_all_day",
+                    )
+                ):
+                    # Need to check sub-fields just in case, or simply check the main ones if we send them accurately
+                    # But the simplest way is to see if any key in changed_fields matches our list or starts with them
+                    if not any(
+                        k.startswith(tuple(sync_relevant_fields))
+                        for k in changed_fields.keys()
+                    ):
+                        logger.info(
+                            "No sync-relevant fields changed", journal_id=journal_id
+                        )
+                        return {"status": "ignored", "reason": "no_op_update"}
+
+            # Fetch user's Google auth info
+            auth_stmt = text("""
+                SELECT google_account_email
+                FROM user_google_integration
+                WHERE user_id = :user_id
+                LIMIT 1
+            """)
+            auth_result = await session.execute(auth_stmt, {"user_id": row.user_id})
+            auth_row = auth_result.fetchone()
+
+            if not auth_row:
+                logger.warning(
+                    "No Google integration found for user",
+                    user_id=row.user_id,
+                    journal_id=journal_id,
+                )
+                return {"status": "ignored", "reason": "no_google_integration"}
+
+            google_account_email = auth_row.google_account_email
+
+            auth_service = GoogleAuthService(
+                session=session,
+                encryption_key=settings.encryption_key.get_secret_value(),
+                google_client_id=settings.google_client_id,
+                google_client_secret=settings.google_client_secret.get_secret_value(),
+            )
+            client = GoogleAPIClient(
+                auth_service=auth_service,
+                google_account_email=google_account_email,
+                google_client_id=settings.google_client_id,
+                google_client_secret=settings.google_client_secret.get_secret_value(),
+                user_id=row.user_id,
+            )
+
+            # Build event payload
+            event_payload = {
+                "summary": row.title or "Untitled Event",
+                "description": row.content or "",
+            }
+            if row.location:
+                event_payload["location"] = row.location
+
+            if row.is_all_day:
+                start_date = row.event_date_range_start.date().isoformat()
+                end_date = row.event_date_range_end.date() + timedelta(days=1)
+                event_payload["start"] = {"date": start_date}
+                event_payload["end"] = {"date": end_date.isoformat()}
+            else:
+                event_payload["start"] = {
+                    "dateTime": row.event_date_range_start.isoformat()
+                }
+                event_payload["end"] = {
+                    "dateTime": row.event_date_range_end.isoformat()
+                }
+
+            external_event_id = row.external_event_id
+
+            # Action logic
+            action = "create" if not external_event_id else "update"
+            api_result = None
+
+            try:
+                if action == "create":
+                    api_result = await client.create_event(event_payload)
+                    external_event_id = api_result.get("id")
+                elif action == "update":
+                    api_result = await client.update_event(
+                        external_event_id, event_payload
+                    )
+
+                # Update JournalExternalEventLink on success
+                link_stmt = text("""
+                    INSERT INTO journal_external_event_links (
+                        journal_id, calendar_id, external_event_id, external_version,
+                        sync_capability, sync_status, created_at, updated_at
+                    ) VALUES (
+                        :journal_id, :calendar_id, :external_event_id, :external_version,
+                        'outbound', 'synced', now(), now()
+                    )
+                    ON CONFLICT (journal_id, calendar_id) DO UPDATE SET
+                        external_event_id = EXCLUDED.external_event_id,
+                        external_version = EXCLUDED.external_version,
+                        sync_status = 'synced',
+                        updated_at = now()
+                """)
+                await session.execute(
+                    link_stmt,
+                    {
+                        "journal_id": journal_id,
+                        "calendar_id": row.calendar_id,
+                        "external_event_id": external_event_id,
+                        "external_version": api_result.get("etag")
+                        if api_result
+                        else None,
+                    },
+                )
+                await session.commit()
+
+                duration = (datetime.now(UTC) - started_at).total_seconds()
+                logger.info(
+                    "Successfully pushed journal event to Google",
+                    journal_id=journal_id,
+                    action=action,
+                )
+                return {
+                    "status": "success",
+                    "action": action,
+                    "journal_id": journal_id,
+                    "external_event_id": external_event_id,
+                    "duration_seconds": duration,
+                }
+
+            except Exception as e:
+                # Update link status to errored on failure
+                link_stmt = text("""
+                    INSERT INTO journal_external_event_links (
+                        journal_id, calendar_id, sync_capability, sync_status, created_at, updated_at
+                    ) VALUES (
+                        :journal_id, :calendar_id, 'outbound', 'errored', now(), now()
+                    )
+                    ON CONFLICT (journal_id, calendar_id) DO UPDATE SET
+                        sync_status = 'errored',
+                        updated_at = now()
+                """)
+                await session.execute(
+                    link_stmt,
+                    {
+                        "journal_id": journal_id,
+                        "calendar_id": row.calendar_id,
+                    },
+                )
+                await session.commit()
+                raise e
+
+    except Exception as e:
+        logger.error(
+            "Process journal event failed",
+            job_id=job_id,
+            journal_id=journal_id,
+            error=str(e),
+            error_type=type(e).__name__,
+        )
+        raise e
+
+
 async def push_local_contacts_to_google(
     ctx: dict[str, Any], google_account_email: str, user_id: str | int = 1
 ) -> dict[str, Any]:
@@ -1766,6 +2091,7 @@ class GoogleWorkerSettings(WorkerSettingsBase):
     functions = [
         sync_google_contacts,
         push_local_contacts_to_google,
+        process_journal_event,
         periodic_sync_all_accounts,  # Wrapper for periodic cron syncs
     ]
 
