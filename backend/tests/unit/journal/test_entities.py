@@ -170,31 +170,31 @@ class TestJournal:
 
         assert len(journal.title) == MAX_TITLE_LENGTH
 
-    def test_empty_content_raises_error(self):
-        """Test that empty content raises error."""
+    def test_empty_content_is_allowed(self):
+        """Test that empty content is allowed."""
         now = datetime.now(UTC)
         date_range = EventDateRange(start=now, end=now)
 
-        with pytest.raises(JournalValidationError, match="Content is required"):
-            Journal(
-                user_id="test-user-123",
-                title="Title",
-                content="",
-                event_date_range=date_range,
-            )
+        journal = Journal(
+            user_id="test-user-123",
+            title="Title",
+            content="",
+            event_date_range=date_range,
+        )
+        assert journal.content == ""
 
-    def test_whitespace_content_raises_error(self):
-        """Test that whitespace-only content raises error."""
+    def test_whitespace_content_is_allowed(self):
+        """Test that whitespace-only content is allowed."""
         now = datetime.now(UTC)
         date_range = EventDateRange(start=now, end=now)
 
-        with pytest.raises(JournalValidationError, match="Content is required"):
-            Journal(
-                user_id="test-user-123",
-                title="Title",
-                content="   \n\t  ",
-                event_date_range=date_range,
-            )
+        journal = Journal(
+            user_id="test-user-123",
+            title="Title",
+            content="   \n\t  ",
+            event_date_range=date_range,
+        )
+        assert journal.content == "   \n\t  "
 
     def test_empty_user_id_raises_error(self):
         """Test that empty user_id raises error."""
