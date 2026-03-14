@@ -152,13 +152,12 @@ class TestJournalTagRepositoryIntegration:
 
     async def test_get_tags_for_journal(self, tag_repo, async_connection):
         """Test getting tags assigned to a journal."""
+        from core_shared.models.journals import EventDateRange, Journal
         from sqlalchemy import text
 
         from app.core.journal.adapters.sql.journal_repository import (
             SqlJournalRepository,
         )
-        from app.core.journal.models.entities import Journal
-        from app.core.journal.models.value_objects import EventDateRange
 
         # Create a journal
         journal_repo = SqlJournalRepository(async_connection)
@@ -207,11 +206,11 @@ class TestJournalTagRepositoryIntegration:
 
     async def test_assign_tag_to_journal(self, tag_repo, async_connection):
         """Test assigning a tag to a journal using the repository method."""
+        from core_shared.models.journals import EventDateRange, Journal
+
         from app.core.journal.adapters.sql.journal_repository import (
             SqlJournalRepository,
         )
-        from app.core.journal.models.entities import Journal
-        from app.core.journal.models.value_objects import EventDateRange
 
         # Create a journal
         journal_repo = SqlJournalRepository(async_connection)
@@ -239,13 +238,12 @@ class TestJournalTagRepositoryIntegration:
 
     async def test_remove_tag_from_journal(self, tag_repo, async_connection):
         """Test removing a tag from a journal using the repository method."""
+        from core_shared.models.journals import EventDateRange, Journal
         from sqlalchemy import text
 
         from app.core.journal.adapters.sql.journal_repository import (
             SqlJournalRepository,
         )
-        from app.core.journal.models.entities import Journal
-        from app.core.journal.models.value_objects import EventDateRange
 
         # Create a journal
         journal_repo = SqlJournalRepository(async_connection)

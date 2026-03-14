@@ -14,6 +14,29 @@ from core_shared.models.contacts.exceptions import (
     ContactDomainError,
     ContactValidationError,
 )
+from core_shared.models.journals import (
+    CalendarInfoValidationError,
+    CalendarNotFoundError,
+    CalendarValidationError,
+    GPXParsingError,
+    JournalCycleError,
+    JournalDomainError,
+    JournalMaxDepthExceededError,
+    JournalNotFoundError,
+    JournalTypeDependencyError,
+    JournalValidationError,
+    MoodDataValidationError,
+    PhotoAlbumDataValidationError,
+    PlanDataValidationError,
+    PlanDocumentValidationError,
+    RouteInUseError,
+    RouteNotFoundError,
+    RouteValidationError,
+    TravelAccommodationValidationError,
+    TravelDataValidationError,
+    TravelFlightValidationError,
+    TravelTransportationValidationError,
+)
 from fastapi import HTTPException, Request, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, Response
@@ -37,29 +60,6 @@ from app.core.contacts.models.exceptions import (
     PrimaryMethodConflictError,
     TagNotFoundError,
     TooManyTagsError,
-)
-from app.core.journal.models.exceptions import (
-    CalendarInfoValidationError,
-    CalendarNotFoundError,
-    CalendarValidationError,
-    GPXParsingError,
-    JournalCycleError,
-    JournalDomainError,
-    JournalMaxDepthExceededError,
-    JournalNotFoundError,
-    JournalTypeDependencyError,
-    JournalValidationError,
-    MoodDataValidationError,
-    PhotoAlbumDataValidationError,
-    PlanDataValidationError,
-    PlanDocumentValidationError,
-    RouteInUseError,
-    RouteNotFoundError,
-    RouteValidationError,
-    TravelAccommodationValidationError,
-    TravelDataValidationError,
-    TravelFlightValidationError,
-    TravelTransportationValidationError,
 )
 from app.core.search.exceptions import SearchDomainError
 from app.infrastructure.auth.exceptions import (

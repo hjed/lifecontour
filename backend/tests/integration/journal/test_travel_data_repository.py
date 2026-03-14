@@ -4,15 +4,15 @@ from datetime import date, datetime
 from uuid import uuid4
 
 import pytest
-from sqlalchemy.ext.asyncio import AsyncConnection
-
-from app.core.journal.adapters.sql.travel_data_repository import SqlTravelDataRepository
-from app.core.journal.models.travel_data import (
+from core_shared.models.journals import (
     TravelAccommodation,
     TravelData,
     TravelFlight,
     TravelTransportation,
 )
+from sqlalchemy.ext.asyncio import AsyncConnection
+
+from app.core.journal.adapters.sql.travel_data_repository import SqlTravelDataRepository
 
 
 @pytest.mark.integration

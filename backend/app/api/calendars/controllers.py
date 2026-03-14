@@ -5,6 +5,7 @@ Minimal calendar management endpoints for creating calendars.
 Full calendar CRUD operations are planned for Iteration 7.
 """
 
+from core_shared.models.journals import Calendar
 from dishka import FromDishka
 from dishka.integrations.fastapi import inject
 from fastapi import APIRouter, Request, status
@@ -18,7 +19,6 @@ from app.api.journals.schemas import (
     CalendarUpdateRequest,
 )
 from app.core.journal.adapters.sql.calendar_repository import CalendarRepository
-from app.core.journal.models.calendar import Calendar
 from app.infrastructure.auth.models import SessionUser
 
 # Default color for calendars (blue)
@@ -201,7 +201,7 @@ async def update_calendar(
         calendar.google_calendar_id = attrs.google_calendar_id
 
     # Re-trigger domain validation
-    from app.core.journal.models.exceptions import CalendarValidationError
+    from core_shared.models.journals import CalendarValidationError
 
     try:
         calendar.__post_init__()

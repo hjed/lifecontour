@@ -3,32 +3,33 @@
 from abc import ABC, abstractmethod
 from uuid import UUID
 
-from core_shared.models.route import Route
-
-from .abseiling_data import AbseilingData
-from .bushwalking_data import BushwalkingData
-from .calendar import Calendar
-from .calendar_info import CalendarInfo
-from .canyoning_data import CanyoningData
-from .climbing_data import ClimbingData
-from .cross_country_skiing_data import CrossCountrySkiingData
-from .entities import Journal
-from .fitness_data import FitnessData
-from .jogging_data import JoggingData
-from .journal_contact_relationship import JournalContactRelationship
-from .journal_relationship_types import JournalContactRelationshipType
-from .journal_tag import JournalTag
-from .kayaking_data import KayakingData
-from .mood_data import MoodData
-from .outdoor_activity_data import OutdoorActivityData
-from .photo_album_data import PhotoAlbumData
-from .plan_data import PlanData, PlanDocument
-from .travel_data import (
+from core_shared.models.journals import (
+    AbseilingData,
+    BushwalkingData,
+    Calendar,
+    CalendarInfo,
+    CanyoningData,
+    ClimbingData,
+    CrossCountrySkiingData,
+    FitnessData,
+    JoggingData,
+    Journal,
+    JournalContactRelationship,
+    JournalContactRelationshipType,
+    KayakingData,
+    MoodData,
+    OutdoorActivityData,
+    PhotoAlbumData,
+    PlanData,
+    PlanDocument,
     TravelAccommodation,
     TravelData,
     TravelFlight,
     TravelTransportation,
 )
+from core_shared.models.route import Route
+
+from .journal_tag import JournalTag
 
 
 class JournalRepository(ABC):

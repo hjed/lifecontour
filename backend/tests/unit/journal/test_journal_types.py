@@ -1,8 +1,7 @@
 """Unit tests for JournalType enum."""
 
 import pytest
-
-from app.core.journal.models.journal_types import JournalType
+from core_shared.models.journals import JournalType
 
 
 @pytest.mark.unit

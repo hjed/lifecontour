@@ -3,10 +3,10 @@
 from typing import Any
 from uuid import UUID
 
+from core_shared.models.journals import JoggingData
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
-from app.core.journal.models.jogging_data import JoggingData
 from app.core.journal.models.repositories import JoggingDataRepository
 
 

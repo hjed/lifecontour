@@ -4,6 +4,7 @@ from datetime import UTC, datetime, time, timedelta
 
 import pytest
 import pytest_asyncio
+from core_shared.models.journals import Calendar, CalendarInfo, EventDateRange, Journal
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
@@ -12,10 +13,6 @@ from app.core.journal.adapters.sql.calendar_info_repository import (
 )
 from app.core.journal.adapters.sql.calendar_repository import SqlCalendarRepository
 from app.core.journal.adapters.sql.journal_repository import SqlJournalRepository
-from app.core.journal.models.calendar import Calendar
-from app.core.journal.models.calendar_info import CalendarInfo
-from app.core.journal.models.entities import Journal
-from app.core.journal.models.value_objects import EventDateRange
 
 
 @pytest_asyncio.fixture

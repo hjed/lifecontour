@@ -4,25 +4,20 @@ from datetime import date, datetime
 from uuid import uuid4
 
 import pytest
-
-from app.core.journal.models.constants import (
+from core_shared.models.journals import (
     MAX_ACCOMMODATION_NAME_LENGTH,
     MAX_AIRLINE_LENGTH,
     MAX_BOOKING_REFERENCE_LENGTH,
     MAX_FLIGHT_NUMBER_LENGTH,
     MAX_TRANSPORTATION_TYPE_LENGTH,
-)
-from app.core.journal.models.exceptions import (
-    TravelAccommodationValidationError,
-    TravelDataValidationError,
-    TravelFlightValidationError,
-    TravelTransportationValidationError,
-)
-from app.core.journal.models.travel_data import (
     TravelAccommodation,
+    TravelAccommodationValidationError,
     TravelData,
+    TravelDataValidationError,
     TravelFlight,
+    TravelFlightValidationError,
     TravelTransportation,
+    TravelTransportationValidationError,
 )
 
 

@@ -3,11 +3,10 @@
 from typing import Any
 from uuid import UUID
 
+from core_shared.models.journals import Calendar, CalendarNotFoundError
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
-from app.core.journal.models.calendar import Calendar
-from app.core.journal.models.exceptions import CalendarNotFoundError
 from app.core.journal.models.repositories import CalendarRepository
 
 

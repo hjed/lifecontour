@@ -12,9 +12,7 @@ French Canyon Grading System:
 from uuid import UUID, uuid4
 
 import pytest
-
-from app.core.journal.models.canyoning_data import CanyoningData
-from app.core.journal.models.exceptions import CanyoningDataValidationError
+from core_shared.models.journals import CanyoningData, CanyoningDataValidationError
 
 
 @pytest.mark.unit

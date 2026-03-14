@@ -3,11 +3,13 @@
 from datetime import UTC, datetime, timedelta
 
 import pytest
-
-from app.core.journal.models.constants import MAX_HIERARCHY_DEPTH, MAX_TITLE_LENGTH
-from app.core.journal.models.entities import Journal
-from app.core.journal.models.exceptions import JournalValidationError
-from app.core.journal.models.value_objects import EventDateRange
+from core_shared.models.journals import (
+    MAX_HIERARCHY_DEPTH,
+    MAX_TITLE_LENGTH,
+    EventDateRange,
+    Journal,
+    JournalValidationError,
+)
 
 
 @pytest.mark.unit

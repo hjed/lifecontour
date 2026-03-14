@@ -3,10 +3,11 @@
 from uuid import uuid4
 
 import pytest
-
-from app.core.journal.models.calendar import Calendar
-from app.core.journal.models.constants import MAX_CALENDAR_NAME_LENGTH
-from app.core.journal.models.exceptions import CalendarValidationError
+from core_shared.models.journals import (
+    MAX_CALENDAR_NAME_LENGTH,
+    Calendar,
+    CalendarValidationError,
+)
 
 
 @pytest.mark.unit

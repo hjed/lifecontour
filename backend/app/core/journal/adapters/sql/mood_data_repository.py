@@ -2,10 +2,10 @@
 
 from typing import Any
 
+from core_shared.models.journals import MoodData
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
-from app.core.journal.models.mood_data import MoodData
 from app.core.journal.models.repositories import MoodDataRepository
 
 

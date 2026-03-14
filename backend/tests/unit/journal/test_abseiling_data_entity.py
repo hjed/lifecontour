@@ -1,9 +1,7 @@
 """Unit tests for AbseilingData entity (ABSEILING_TRIP type)."""
 
 import pytest
-
-from app.core.journal.models.abseiling_data import AbseilingData
-from app.core.journal.models.exceptions import AbseilingDataValidationError
+from core_shared.models.journals import AbseilingData, AbseilingDataValidationError
 
 
 @pytest.mark.unit

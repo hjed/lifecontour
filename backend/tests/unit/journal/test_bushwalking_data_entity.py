@@ -3,9 +3,7 @@
 from uuid import UUID, uuid4
 
 import pytest
-
-from app.core.journal.models.bushwalking_data import BushwalkingData
-from app.core.journal.models.exceptions import BushwalkingDataValidationError
+from core_shared.models.journals import BushwalkingData, BushwalkingDataValidationError
 
 
 @pytest.mark.unit

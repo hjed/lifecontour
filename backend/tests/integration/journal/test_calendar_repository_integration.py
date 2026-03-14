@@ -4,11 +4,10 @@ from uuid import uuid4
 
 import pytest
 import pytest_asyncio
+from core_shared.models.journals import Calendar, CalendarNotFoundError
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core.journal.adapters.sql.calendar_repository import SqlCalendarRepository
-from app.core.journal.models.calendar import Calendar
-from app.core.journal.models.exceptions import CalendarNotFoundError
 
 
 @pytest_asyncio.fixture

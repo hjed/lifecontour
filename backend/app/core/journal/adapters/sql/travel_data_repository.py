@@ -3,23 +3,21 @@
 from datetime import UTC, datetime
 from uuid import UUID
 
+from core_shared.models.journals import (
+    TravelAccommodation,
+    TravelAccommodationValidationError,
+    TravelData,
+    TravelDataValidationError,
+    TravelFlight,
+    TravelFlightValidationError,
+    TravelTransportation,
+    TravelTransportationValidationError,
+)
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncConnection
 
-from app.core.journal.models.exceptions import (
-    TravelAccommodationValidationError,
-    TravelDataValidationError,
-    TravelFlightValidationError,
-    TravelTransportationValidationError,
-)
 from app.core.journal.models.repositories import TravelDataRepository
-from app.core.journal.models.travel_data import (
-    TravelAccommodation,
-    TravelData,
-    TravelFlight,
-    TravelTransportation,
-)
 
 
 class SqlTravelDataRepository(TravelDataRepository):

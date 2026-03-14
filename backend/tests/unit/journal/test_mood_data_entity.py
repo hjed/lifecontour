@@ -1,16 +1,15 @@
 """Unit tests for MoodData entity (MOOD_RATING type)."""
 
 import pytest
-
-from app.core.journal.models.constants import (
+from core_shared.models.journals import (
     MAX_ENERGY_LEVEL,
     MAX_MOOD_LABEL_LENGTH,
     MAX_MOOD_VALUE,
     MIN_ENERGY_LEVEL,
     MIN_MOOD_VALUE,
+    MoodData,
+    MoodDataValidationError,
 )
-from app.core.journal.models.exceptions import MoodDataValidationError
-from app.core.journal.models.mood_data import MoodData
 
 
 @pytest.mark.unit

@@ -1,12 +1,12 @@
 """Integration tests for PhotoAlbumDataRepository."""
 
 import pytest
+from core_shared.models.journals import PhotoAlbumData
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core.journal.adapters.sql.photo_album_data_repository import (
     SqlPhotoAlbumDataRepository,
 )
-from app.core.journal.models.photo_album_data import PhotoAlbumData
 
 
 @pytest.mark.integration

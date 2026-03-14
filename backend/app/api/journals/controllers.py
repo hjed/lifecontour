@@ -11,6 +11,14 @@ from typing import Annotated, Any
 from uuid import UUID
 
 import structlog
+from core_shared.models.journals import (
+    Journal,
+    JournalContactRelationship,
+    JournalContactRelationshipType,
+    JournalNotFoundError,
+    JournalType,
+    JournalValidationError,
+)
 from dishka.integrations.fastapi import FromDishka, inject
 from fastapi import APIRouter, HTTPException, Query, Request, status
 from meilisearch.errors import MeilisearchError
@@ -52,18 +60,6 @@ from app.api.journals.schemas import (
     JournalTypeDataUpdateRequest,
     JournalUpdateRequest,
 )
-from app.core.journal.models.entities import Journal
-from app.core.journal.models.exceptions import (
-    JournalNotFoundError,
-    JournalValidationError,
-)
-from app.core.journal.models.journal_contact_relationship import (
-    JournalContactRelationship,
-)
-from app.core.journal.models.journal_relationship_types import (
-    JournalContactRelationshipType,
-)
-from app.core.journal.models.journal_types import JournalType
 from app.core.journal.models.repositories import (
     AbseilingDataRepository,
     BushwalkingDataRepository,
@@ -189,65 +185,65 @@ async def _create_type_specific_data(
         kayaking_data_repo: Repository for kayaking data
         skiing_data_repo: Repository for cross-country skiing data
     """
-    from app.core.journal.models.journal_types import JournalType
+    from core_shared.models.journals import JournalType
 
     if journal_type == JournalType.MOOD_RATING:
-        from app.core.journal.models.mood_data import MoodData
+        from core_shared.models.journals import MoodData
 
         mood_data = MoodData(journal_id=journal_id)
         await mood_data_repo.save(mood_data)
     elif journal_type == JournalType.PLAN:
-        from app.core.journal.models.plan_data import PlanData
+        from core_shared.models.journals import PlanData
 
         plan_data = PlanData(journal_id=journal_id)
         await plan_data_repo.save(plan_data)
     elif journal_type == JournalType.TRAVEL:
-        from app.core.journal.models.travel_data import TravelData
+        from core_shared.models.journals import TravelData
 
         travel_data = TravelData(journal_id=journal_id)
         await travel_data_repo.save(travel_data)
     elif journal_type == JournalType.FITNESS:
-        from app.core.journal.models.fitness_data import FitnessData
+        from core_shared.models.journals import FitnessData
 
         fitness_data = FitnessData(journal_id=journal_id)
         await fitness_data_repo.save(fitness_data)
     elif journal_type == JournalType.OUTDOOR_ACTIVITY:
-        from app.core.journal.models.outdoor_activity_data import OutdoorActivityData
+        from core_shared.models.journals import OutdoorActivityData
 
         outdoor_activity_data = OutdoorActivityData(journal_id=journal_id)
         await outdoor_activity_data_repo.save(outdoor_activity_data)
     elif journal_type == JournalType.BUSHWALKING:
-        from app.core.journal.models.bushwalking_data import BushwalkingData
+        from core_shared.models.journals import BushwalkingData
 
         bushwalking_data = BushwalkingData(journal_id=journal_id)
         await bushwalking_data_repo.save(bushwalking_data)
     elif journal_type == JournalType.JOGGING:
-        from app.core.journal.models.jogging_data import JoggingData
+        from core_shared.models.journals import JoggingData
 
         jogging_data = JoggingData(journal_id=journal_id)
         await jogging_data_repo.save(jogging_data)
     elif journal_type == JournalType.ABSEILING_TRIP:
-        from app.core.journal.models.abseiling_data import AbseilingData
+        from core_shared.models.journals import AbseilingData
 
         abseiling_data = AbseilingData(journal_id=journal_id)
         await abseiling_data_repo.save(abseiling_data)
     elif journal_type == JournalType.CANYONING:
-        from app.core.journal.models.canyoning_data import CanyoningData
+        from core_shared.models.journals import CanyoningData
 
         canyoning_data = CanyoningData(journal_id=journal_id)
         await canyoning_data_repo.save(canyoning_data)
     elif journal_type == JournalType.CLIMBING:
-        from app.core.journal.models.climbing_data import ClimbingData
+        from core_shared.models.journals import ClimbingData
 
         climbing_data = ClimbingData(journal_id=journal_id)
         await climbing_data_repo.save(climbing_data)
     elif journal_type == JournalType.KAYAKING:
-        from app.core.journal.models.kayaking_data import KayakingData
+        from core_shared.models.journals import KayakingData
 
         kayaking_data = KayakingData(journal_id=journal_id)
         await kayaking_data_repo.save(kayaking_data)
     elif journal_type == JournalType.CROSS_COUNTRY_SKIING:
-        from app.core.journal.models.cross_country_skiing_data import (
+        from core_shared.models.journals import (
             CrossCountrySkiingData,
         )
 
@@ -297,7 +293,7 @@ async def _delete_type_specific_data(
         kayaking_data_repo: Repository for kayaking data
         skiing_data_repo: Repository for cross-country skiing data
     """
-    from app.core.journal.models.journal_types import JournalType
+    from core_shared.models.journals import JournalType
 
     if journal_type == JournalType.MOOD_RATING:
         await mood_data_repo.delete(journal_id)
@@ -1104,7 +1100,7 @@ async def _process_journal_type_data(
         from datetime import time as dt_time
         from uuid import UUID
 
-        from app.core.journal.models.calendar_info import CalendarInfo
+        from core_shared.models.journals import CalendarInfo
 
         event_data = normalized_type_data["event"]
 
@@ -1151,7 +1147,7 @@ async def _process_journal_type_data(
 
     # Process PHOTO_ALBUM type data
     if "photo_album" in normalized_type_data:
-        from app.core.journal.models.photo_album_data import PhotoAlbumData
+        from core_shared.models.journals import PhotoAlbumData
 
         photo_data = normalized_type_data["photo_album"]
         photo_album_data = PhotoAlbumData(
@@ -1164,7 +1160,7 @@ async def _process_journal_type_data(
     if "plan" in normalized_type_data and plan_data_repo:
         import uuid
 
-        from app.core.journal.models.plan_data import PlanData, PlanDocument
+        from core_shared.models.journals import PlanData, PlanDocument
 
         plan_payload = normalized_type_data["plan"]
         plan_data = await plan_data_repo.find_by_journal_id(journal_id)
@@ -1207,7 +1203,7 @@ async def _process_journal_type_data(
 
     # Process TRAVEL type data
     if "travel" in normalized_type_data and travel_data_repo:
-        from app.core.journal.models.travel_data import TravelData
+        from core_shared.models.journals import TravelData
 
         # Payload for travel currently empty in UI, but create data if valid
         travel_data = await travel_data_repo.find_by_journal_id(journal_id)
@@ -1217,7 +1213,7 @@ async def _process_journal_type_data(
 
     # Process MOOD_RATING type data
     if "mood_rating" in normalized_type_data and mood_data_repo:
-        from app.core.journal.models.mood_data import MoodData
+        from core_shared.models.journals import MoodData
 
         mood_payload = normalized_type_data["mood_rating"]
         mood_data = await mood_data_repo.find_by_journal_id(journal_id)
@@ -1253,7 +1249,7 @@ async def _process_journal_type_data(
 
     # Process FITNESS type data
     if "fitness" in normalized_type_data and fitness_data_repo:
-        from app.core.journal.models.fitness_data import FitnessData
+        from core_shared.models.journals import FitnessData
 
         fitness_payload = normalized_type_data["fitness"]
         fitness_data = await fitness_data_repo.find_by_journal_id(journal_id)
@@ -1295,7 +1291,7 @@ async def _process_journal_type_data(
 
     # Process OUTDOOR_ACTIVITY type data
     if "outdoor_activity" in normalized_type_data and outdoor_activity_data_repo:
-        from app.core.journal.models.outdoor_activity_data import OutdoorActivityData
+        from core_shared.models.journals import OutdoorActivityData
 
         outdoor_payload = normalized_type_data["outdoor_activity"]
         outdoor_data = await outdoor_activity_data_repo.find_by_journal_id(journal_id)
@@ -1317,7 +1313,7 @@ async def _process_journal_type_data(
 
     # Process BUSHWALKING type data
     if "bushwalking" in normalized_type_data and bushwalking_data_repo:
-        from app.core.journal.models.bushwalking_data import BushwalkingData
+        from core_shared.models.journals import BushwalkingData
 
         bushwalking_payload = normalized_type_data["bushwalking"]
         bushwalking_data = await bushwalking_data_repo.find_by_journal_id(journal_id)
@@ -1335,7 +1331,7 @@ async def _process_journal_type_data(
 
     # Process JOGGING type data
     if "jogging" in normalized_type_data and jogging_data_repo:
-        from app.core.journal.models.jogging_data import JoggingData
+        from core_shared.models.journals import JoggingData
 
         jogging_payload = normalized_type_data["jogging"]
         jogging_data = await jogging_data_repo.find_by_journal_id(journal_id)
@@ -1704,7 +1700,7 @@ async def partial_update_journal(
 
     # For partial update, merge with existing values
     # Only update fields that are provided in the request
-    from app.core.journal.models.value_objects import EventDateRange
+    from core_shared.models.journals import EventDateRange
 
     # Use existing values if not provided (use is not None to allow empty strings)
     title = (
@@ -1866,7 +1862,7 @@ async def add_type_to_journal(
     try:
         journal_type = _parse_journal_type(type_request.data.attributes.journal_type)
     except (ValueError, KeyError) as e:
-        from app.core.journal.models.exceptions import JournalValidationError
+        from core_shared.models.journals import JournalValidationError
 
         raise JournalValidationError(
             "journal_type",
@@ -1975,7 +1971,7 @@ async def remove_type_from_journal(
     try:
         jtype = _parse_journal_type(journal_type)
     except (ValueError, KeyError) as e:
-        from app.core.journal.models.exceptions import JournalValidationError
+        from core_shared.models.journals import JournalValidationError
 
         raise JournalValidationError(
             "journal_type", f"Invalid journal type: {journal_type}"
@@ -2661,7 +2657,7 @@ async def remove_contact_from_journal(
     """
     Remove a contact relationship from a journal.
     """
-    from app.core.journal.models.journal_relationship_types import (
+    from core_shared.models.journals import (
         JournalContactRelationshipType,
     )
 
@@ -2676,14 +2672,14 @@ async def remove_contact_from_journal(
     try:
         contact_id_int = int(contact_id)
     except ValueError as e:
-        from app.core.journal.models.exceptions import JournalValidationError
+        from core_shared.models.journals import JournalValidationError
 
         raise JournalValidationError("contact_id", "Invalid contact ID format") from e
 
     try:
         relationship_type_enum = JournalContactRelationshipType[relationship_type]
     except KeyError as e:
-        from app.core.journal.models.exceptions import JournalValidationError
+        from core_shared.models.journals import JournalValidationError
 
         raise JournalValidationError(
             "relationship_type", f"Invalid relationship type: {relationship_type}"
@@ -2760,7 +2756,7 @@ async def add_tag_to_journal(
     """
     from uuid import UUID
 
-    from app.core.journal.models.exceptions import JournalValidationError
+    from core_shared.models.journals import JournalValidationError
 
     base_url = get_request_base_url(request)
 
@@ -2849,7 +2845,7 @@ async def remove_tag_from_journal(
     """
     from uuid import UUID
 
-    from app.core.journal.models.exceptions import JournalValidationError
+    from core_shared.models.journals import JournalValidationError
 
     base_url = get_request_base_url(request)
 

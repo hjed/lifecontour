@@ -4,10 +4,11 @@ from datetime import time
 from uuid import uuid4
 
 import pytest
-
-from app.core.journal.models.calendar_info import CalendarInfo
-from app.core.journal.models.constants import MAX_LOCATION_LENGTH
-from app.core.journal.models.exceptions import CalendarInfoValidationError
+from core_shared.models.journals import (
+    MAX_LOCATION_LENGTH,
+    CalendarInfo,
+    CalendarInfoValidationError,
+)
 
 
 @pytest.mark.unit

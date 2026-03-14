@@ -11,11 +11,11 @@ from functools import wraps
 from typing import Any
 
 from core_shared.models.contacts.exceptions import ContactValidationError
+from core_shared.models.journals import JournalDomainError, JournalNotFoundError
 
 from app.core.contacts.models.exceptions import (
     ContactNotFoundError,
 )
-from app.core.journal.models.exceptions import JournalDomainError, JournalNotFoundError
 from app.mcp.shared.response_builders import MCPLogger, MCPResponseBuilder
 
 

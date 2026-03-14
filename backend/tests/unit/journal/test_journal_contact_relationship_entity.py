@@ -1,11 +1,8 @@
 """Unit tests for JournalContactRelationship entity."""
 
 import pytest
-
-from app.core.journal.models.journal_contact_relationship import (
+from core_shared.models.journals import (
     JournalContactRelationship,
-)
-from app.core.journal.models.journal_relationship_types import (
     JournalContactRelationshipType,
 )
 

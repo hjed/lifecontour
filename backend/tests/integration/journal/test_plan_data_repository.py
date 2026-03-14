@@ -3,10 +3,10 @@
 from uuid import uuid4
 
 import pytest
+from core_shared.models.journals import PlanData, PlanDocument
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core.journal.adapters.sql.plan_data_repository import SqlPlanDataRepository
-from app.core.journal.models.plan_data import PlanData, PlanDocument
 
 
 @pytest.mark.integration

@@ -11,6 +11,12 @@ from unittest.mock import AsyncMock, Mock
 
 import pytest
 import pytest_asyncio
+from core_shared.models.journals import (
+    EventDateRange,
+    Journal,
+    JournalContactRelationship,
+    JournalContactRelationshipType,
+)
 from dishka import Provider, Scope, make_async_container, provide
 from fastmcp import FastMCP
 from fastmcp.client import Client
@@ -29,14 +35,6 @@ from app.core.journal.adapters.sql.jogging_data_repository import (
 from app.core.journal.adapters.sql.outdoor_activity_data_repository import (
     SqlOutdoorActivityDataRepository,
 )
-from app.core.journal.models.entities import Journal
-from app.core.journal.models.journal_contact_relationship import (
-    JournalContactRelationship,
-)
-from app.core.journal.models.journal_relationship_types import (
-    JournalContactRelationshipType,
-)
-from app.core.journal.models.value_objects import EventDateRange
 from app.core.journal.services.journal_service import JournalService
 from app.infrastructure.events.outbox_event_publisher import OutboxEventPublisher
 from app.mcp.domains.journals.tools import (

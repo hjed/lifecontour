@@ -3,9 +3,7 @@
 from uuid import UUID, uuid4
 
 import pytest
-
-from app.core.journal.models.exceptions import JoggingDataValidationError
-from app.core.journal.models.jogging_data import JoggingData
+from core_shared.models.journals import JoggingData, JoggingDataValidationError
 
 
 @pytest.mark.unit

@@ -1,10 +1,11 @@
 """Unit tests for PhotoAlbumData entity (PHOTO_ALBUM type)."""
 
 import pytest
-
-from app.core.journal.models.constants import MAX_IMMICH_ALBUM_ID_LENGTH
-from app.core.journal.models.exceptions import PhotoAlbumDataValidationError
-from app.core.journal.models.photo_album_data import PhotoAlbumData
+from core_shared.models.journals import (
+    MAX_IMMICH_ALBUM_ID_LENGTH,
+    PhotoAlbumData,
+    PhotoAlbumDataValidationError,
+)
 
 
 @pytest.mark.unit

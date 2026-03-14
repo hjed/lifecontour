@@ -3,11 +3,18 @@
 from typing import Any
 
 import structlog
+from core_shared.models.journals import (
+    MAX_HIERARCHY_DEPTH,
+    Journal,
+    JournalCycleError,
+    JournalMaxDepthExceededError,
+    JournalNotFoundError,
+    JournalType,
+    JournalValidationError,
+)
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncConnection
 
-from app.core.journal.models.constants import MAX_HIERARCHY_DEPTH
-from app.core.journal.models.entities import Journal
 from app.core.journal.models.events import (
     JournalCreated,
     JournalDeleted,
@@ -15,13 +22,6 @@ from app.core.journal.models.events import (
     JournalTypeRemoved,
     JournalUpdated,
 )
-from app.core.journal.models.exceptions import (
-    JournalCycleError,
-    JournalMaxDepthExceededError,
-    JournalNotFoundError,
-    JournalValidationError,
-)
-from app.core.journal.models.journal_types import JournalType
 from app.core.journal.models.repositories import JournalRepository
 from app.infrastructure.events.outbox_event_publisher import OutboxEventPublisher
 

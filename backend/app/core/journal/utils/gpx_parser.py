@@ -10,8 +10,7 @@ from dataclasses import dataclass
 
 import gpxpy
 import gpxpy.gpx
-
-from app.core.journal.models.exceptions import GPXParsingError
+from core_shared.models.journals import GPXParsingError
 
 
 @dataclass(frozen=True)
