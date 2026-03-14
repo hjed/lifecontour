@@ -122,7 +122,7 @@ class GoogleAPIClient:
             request_params = {
                 "resourceName": "people/me",
                 "pageSize": min(page_size, 2000),  # Google's max limit
-                "personFields": "names,emailAddresses,phoneNumbers,addresses,organizations,birthdays,metadata",
+                "personFields": "names,emailAddresses,phoneNumbers,addresses,organizations,birthdays,metadata,memberships,biographies",
             }
 
             if page_token:
@@ -160,6 +160,69 @@ class GoogleAPIClient:
             )
             raise e
 
+    async def list_contact_groups(
+        self,
+        page_size: int = 1000,
+        page_token: str | None = None,
+        sync_token: str | None = None,
+    ) -> dict[str, Any]:
+        """
+        List contact groups from Google People API.
+
+        Args:
+            page_size: Number of contact groups to return per page (max 1000)
+            page_token: Token for pagination
+            sync_token: Token for incremental sync
+
+        Returns:
+            Google People API response with contact groups data
+
+        Raises:
+            HttpError: If API request fails
+            GoogleAuthTokensNotFoundError: If authentication tokens are missing
+        """
+        try:
+            service = await self._get_people_service()
+
+            request_params: dict[str, Any] = {
+                "pageSize": min(page_size, 1000),
+                "groupFields": "metadata,groupType,memberCount,name,formattedName",
+            }
+
+            if page_token:
+                request_params["pageToken"] = page_token
+            if sync_token:
+                request_params["syncToken"] = sync_token
+
+            logger.info(
+                "Fetching Google contact groups",
+                google_account_email=self.google_account_email,
+                page_size=page_size,
+                has_page_token=bool(page_token),
+                has_sync_token=bool(sync_token),
+            )
+
+            result = service.contactGroups().list(**request_params).execute()
+
+            logger.info(
+                "Successfully fetched Google contact groups",
+                google_account_email=self.google_account_email,
+                total_items=len(result.get("contactGroups", [])),
+                next_page_token=result.get("nextPageToken"),
+                next_sync_token=result.get("nextSyncToken"),
+            )
+
+            return cast(dict[str, Any], result)
+
+        except HttpError as e:
+            logger.error(
+                "Google API error while fetching contact groups",
+                google_account_email=self.google_account_email,
+                error=str(e),
+                status_code=e.resp.status,
+            )
+            raise e
+
     async def get_person(self, resource_name: str) -> dict[str, Any]:
         """
         Get a specific person from Google People API.
@@ -183,12 +246,11 @@ class GoogleAPIClient:
                 resource_name=resource_name,
             )
 
-            # Make the API call
             result = (
                 service.people()
                 .get(
                     resourceName=resource_name,
-                    personFields="names,emailAddresses,phoneNumbers,addresses,organizations,birthdays,metadata",
+                    personFields="names,emailAddresses,phoneNumbers,addresses,organizations,birthdays,metadata,memberships,biographies",
                 )
                 .execute()
             )
@@ -364,7 +426,7 @@ class GoogleAPIClient:
         """
         try:
             service = await self._get_calendar_service()
-            request_params = {"maxResults": 250}
+            request_params: dict[str, Any] = {"maxResults": 250}
             if page_token:
                 request_params["pageToken"] = page_token
             if sync_token:

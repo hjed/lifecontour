@@ -149,9 +149,16 @@ function printServiceLogs(dockerComposeCmd: string, projectRoot: string): void {
 }
 
 function getDockerTestEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const oauthUiPort = workspaceEnv.OAUTH_UI_TEST_PORT || '3002';
+  const oauthPublicPort = workspaceEnv.OAUTH_PUBLIC_TEST_PORT || '4446';
   return {
     ...env,
     ...workspaceEnv,
+    OAUTH_CONSENT_URL: `http://localhost:${oauthUiPort}/consent`,
+    OAUTH_LOGIN_URL: `http://localhost:${oauthUiPort}/login`,
+    OAUTH_UI_PORT: oauthUiPort,
+    OAUTH_AUTHORIZATION_URL: `http://localhost:${oauthPublicPort}/oauth2/auth`,
+    OAUTH_ISSUER: `http://localhost:${oauthPublicPort}`,
     FRONTEND_URL: FRONTEND_TEST_URL,
     FRONTEND_PORT: FRONTEND_TEST_PORT,
     CORS_ORIGINS: getFrontendCorsOrigins(),
@@ -347,7 +354,8 @@ async function ensureLocalDockerServices(
 async function verifyCoreServiceHealth(
   dependencies: GlobalSetupDependencies,
   dockerComposeCmd: string,
-  projectRoot: string
+  projectRoot: string,
+  dockerTestEnv: NodeJS.ProcessEnv
 ): Promise<void> {
   dependencies.logger.log('🔍 Checking backend API readiness...');
   await dependencies.waitForService(
@@ -355,9 +363,10 @@ async function verifyCoreServiceHealth(
   );
 
   dependencies.execCommand(
-    `${dockerComposeCmd} --profile test exec -T backend alembic upgrade head`,
+    `${dockerComposeCmd} --profile test --env-file .env.test exec -T backend alembic upgrade head`,
     'Ensuring backend database schema is up to date',
-    projectRoot
+    projectRoot,
+    { env: dockerTestEnv }
   );
 
   dependencies.logger.log('🔍 Re-checking backend API readiness...');
@@ -435,7 +444,12 @@ export async function runGlobalSetup(
       );
     }
 
-    await verifyCoreServiceHealth(dependencies, dockerComposeCmd, projectRoot);
+    await verifyCoreServiceHealth(
+      dependencies,
+      dockerComposeCmd,
+      projectRoot,
+      dockerTestEnv
+    );
 
     dependencies.logger.log('🔍 Checking MeiliSearch health...');
     await dependencies.waitForService(

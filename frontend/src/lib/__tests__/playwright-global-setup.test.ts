@@ -29,9 +29,16 @@ describe('runGlobalSetup', () => {
   const hasExpectedOAuthClientRedirect = jest.fn<Promise<boolean>, [string]>();
   const chdir = jest.fn();
   const logger = { log: jest.fn(), error: jest.fn() };
+  const oauthUiPort = workspaceEnv.OAUTH_UI_TEST_PORT || '3002';
+  const oauthPublicPort = workspaceEnv.OAUTH_PUBLIC_TEST_PORT || '4446';
   const expectedDockerEnv: NodeJS.ProcessEnv = {
     ...testEnv,
     ...workspaceEnv,
+    OAUTH_CONSENT_URL: `http://localhost:${oauthUiPort}/consent`,
+    OAUTH_LOGIN_URL: `http://localhost:${oauthUiPort}/login`,
+    OAUTH_UI_PORT: oauthUiPort,
+    OAUTH_AUTHORIZATION_URL: `http://localhost:${oauthPublicPort}/oauth2/auth`,
+    OAUTH_ISSUER: `http://localhost:${oauthPublicPort}`,
     FRONTEND_URL: FRONTEND_TEST_URL,
     FRONTEND_PORT: FRONTEND_TEST_PORT,
     CORS_ORIGINS: getFrontendCorsOrigins(),
@@ -66,9 +73,10 @@ describe('runGlobalSetup', () => {
     expect(removeExistingContainers).not.toHaveBeenCalled();
     expect(execCommand).toHaveBeenCalledTimes(1);
     expect(execCommand).toHaveBeenCalledWith(
-      'docker compose --profile test exec -T backend alembic upgrade head',
+      'docker compose --profile test --env-file .env.test exec -T backend alembic upgrade head',
       'Ensuring backend database schema is up to date',
-      '/workspace'
+      '/workspace',
+      { env: expectedDockerEnv }
     );
     expect(waitForService).toHaveBeenNthCalledWith(
       1,
@@ -123,9 +131,10 @@ describe('runGlobalSetup', () => {
     );
     expect(execCommand).toHaveBeenNthCalledWith(
       3,
-      'docker compose --profile test exec -T backend alembic upgrade head',
+      'docker compose --profile test --env-file .env.test exec -T backend alembic upgrade head',
       'Ensuring backend database schema is up to date',
-      '/workspace'
+      '/workspace',
+      { env: expectedDockerEnv }
     );
     expect(waitForService).toHaveBeenNthCalledWith(
       1,
@@ -181,9 +190,10 @@ describe('runGlobalSetup', () => {
     );
     expect(execCommand).toHaveBeenNthCalledWith(
       3,
-      'docker compose --profile test exec -T backend alembic upgrade head',
+      'docker compose --profile test --env-file .env.test exec -T backend alembic upgrade head',
       'Ensuring backend database schema is up to date',
-      '/workspace'
+      '/workspace',
+      { env: expectedDockerEnv }
     );
   });
 });

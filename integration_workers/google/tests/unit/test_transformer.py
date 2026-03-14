@@ -498,6 +498,73 @@ class TestGoogleContactTransformer:
         assert middle is None
         assert nick is None
 
+    def test_transform_person_starred_is_favourite(
+        self, transformer: GoogleContactTransformer
+    ) -> None:
+        """Test that the 'starred' group makes the contact a favourite and doesn't create a tag."""
+        person = GooglePerson(
+            resourceName="people/c123",
+            names=[GoogleName(givenName="Star", familyName="Person")],
+            memberships=[
+                GoogleMembership(
+                    contactGroupMembership=GoogleContactGroupMembership(
+                        contactGroupId="starred",
+                        contactGroupResourceName="contactGroups/starred",
+                    )
+                ),
+                GoogleMembership(
+                    contactGroupMembership=GoogleContactGroupMembership(
+                        contactGroupId="family",
+                        contactGroupResourceName="contactGroups/family",
+                    )
+                ),
+            ],
+        )
+
+        contact = transformer.transform_person(person)
+
+        assert contact.is_favourite is True
+        # "starred" should not become a tag
+        tag_names = [tag.name.value for tag in contact.tags]
+        assert "family" in tag_names
+        assert "starred" not in tag_names
+        assert len(contact.tags) == 1
+
+    def test_transform_person_ignores_reserved_groups(self) -> None:
+        """Test that reserved groups (like myContacts) are ignored and not converted to tags."""
+        from group_translator import GoogleGroupNameTranslator
+
+        translator = GoogleGroupNameTranslator(
+            reserved_group_ids=["myContacts"], group_mapping={}
+        )
+        transformer = GoogleContactTransformer(translator=translator)
+
+        person = GooglePerson(
+            resourceName="people/c123",
+            names=[GoogleName(givenName="Reserved", familyName="Person")],
+            memberships=[
+                GoogleMembership(
+                    contactGroupMembership=GoogleContactGroupMembership(
+                        contactGroupId="myContacts",
+                        contactGroupResourceName="contactGroups/myContacts",
+                    )
+                ),
+                GoogleMembership(
+                    contactGroupMembership=GoogleContactGroupMembership(
+                        contactGroupId="friends",
+                        contactGroupResourceName="contactGroups/friends",
+                    )
+                ),
+            ],
+        )
+
+        contact = transformer.transform_person(person)
+
+        tag_names = [tag.name.value for tag in contact.tags]
+        assert "friends" in tag_names
+        assert "myContacts" not in tag_names
+        assert len(contact.tags) == 1
+
 
 class TestOrganizationTransformation:
     """Tests for organization transformation to company and job_title fields."""

@@ -90,15 +90,15 @@ The sequence reflects both user priority and technical dependency:
 **PR Size:** ~4-6 files
 
 **Acceptance Criteria:**
-- [ ] Define backend-configurable reserved Google group rules.
-- [ ] Ignore `My Contacts` and map `Starred` to favourites.
-- [ ] Introduce a dedicated translation layer for Google group naming, including `/` flattening helpers, without relaxing internal `TagName` validation.
-- [ ] Add explicit fixtures/examples for reserved, ordinary, and hierarchical group names so later phases reuse the same rules.
+- [x] Define backend-configurable reserved Google group rules.
+- [x] Ignore `My Contacts` and map `Starred` to favourites.
+- [x] Introduce a dedicated translation layer for Google group naming, without relaxing internal `TagName` validation (hierarchical `/` handling will be deferred to ITER2.6-002).
+- [x] Add explicit fixtures/examples for reserved, ordinary, and hierarchical group names so later phases reuse the same rules.
 
 **Required Test Coverage:**
-- **Unit:** translation helpers, reserved-group filtering, favourite mapping.
-- **Integration:** worker/transformer configuration wiring using real settings and fixtures.
-- **E2E:** sync-trigger flow proving reserved groups do not surface as ordinary tags and `Starred` still surfaces as favourite behaviour.
+- [x] **Unit:** translation helpers, reserved-group filtering, favourite mapping.
+- [x] **Integration:** worker/transformer configuration wiring using real settings and fixtures.
+- [x] **E2E:** sync-trigger flow proving reserved groups do not surface as ordinary tags and `Starred` still surfaces as favourite behaviour.
 
 #### Phase 2: Google → Local Membership Semantics
 **PR Size:** ~5-7 files
@@ -145,6 +145,7 @@ The sequence reflects both user priority and technical dependency:
 
 **Acceptance Criteria:**
 - [ ] Tags can have one parent and that relationship is exposed consistently through backend schemas and frontend types.
+- [ ] Update `TagName` validation to support `/` as the delimiter for hierarchical tags.
 - [ ] Descendant resolution is implemented centrally rather than duplicated across API and UI.
 - [ ] Filtering by a parent tag includes contacts assigned to descendant tags.
 - [ ] Existing flat-tag behaviour continues to work for tags without parents.

@@ -195,3 +195,25 @@ class ListConnectionsResponse(BaseModel):
     next_sync_token: str | None = Field(default=None, alias="nextSyncToken")
     total_people: int | None = Field(default=None, alias="totalPeople")
     total_items: int | None = Field(default=None, alias="totalItems")
+
+
+class GoogleContactGroup(BaseModel):
+    """Google People API contact group structure."""
+
+    resource_name: str = Field(alias="resourceName")
+    etag: str | None = None
+    metadata: GoogleFieldMetadata = Field(default_factory=GoogleFieldMetadata)
+    group_type: str | None = Field(default=None, alias="groupType")
+    name: str | None = None
+    formatted_name: str | None = Field(default=None, alias="formattedName")
+
+
+class ListContactGroupsResponse(BaseModel):
+    """Google People API list contact groups response structure."""
+
+    contact_groups: list[GoogleContactGroup] = Field(
+        default_factory=list, alias="contactGroups"
+    )
+    next_page_token: str | None = Field(default=None, alias="nextPageToken")
+    next_sync_token: str | None = Field(default=None, alias="nextSyncToken")
+    total_items: int | None = Field(default=None, alias="totalItems")

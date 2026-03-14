@@ -1,8 +1,15 @@
 import '@testing-library/jest-dom';
 import type { AppRouterInstance } from 'next/dist/shared/lib/app-router-context.shared-runtime';
 
+// Increase default timeout (5000ms) to 15000ms to prevent CI flakiness
+jest.setTimeout(15000);
+
+import { configure } from '@testing-library/react';
+// Increase RTL's default async timeout from 1000ms to 5000ms to avoid CPU starvation failures in full suite runs
+configure({ asyncUtilTimeout: 5000 });
+
 // Mock ResizeObserver for Radix UI components
-global.ResizeObserver = jest.fn().mockImplementation(() => ({
+globalThis.ResizeObserver = jest.fn().mockImplementation(() => ({
   observe: jest.fn(),
   unobserve: jest.fn(),
   disconnect: jest.fn(),
