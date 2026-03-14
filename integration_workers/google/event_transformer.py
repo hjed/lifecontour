@@ -55,11 +55,18 @@ class GoogleEventTransformer:
             event_date_range=date_range,
         )
 
+        if is_all_day:
+            start_time = None
+            end_time = None
+        else:
+            start_time = start_dt.time().replace(tzinfo=None)
+            end_time = end_dt.time().replace(tzinfo=None)
+
         calendar_info = CalendarInfo(
             journal_id=None,
             calendar_id=calendar_id,
-            start_time=None if is_all_day else start_dt.time().replace(tzinfo=None) if start_dt else None,
-            end_time=None if is_all_day else end_dt.time().replace(tzinfo=None) if end_dt else None,
+            start_time=start_time,
+            end_time=end_time,
             is_all_day=is_all_day,
             location=google_event.location,
         )

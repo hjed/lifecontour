@@ -7,7 +7,10 @@ from core_shared.models import (
     ExternalEventLinkSyncCapability,
     ExternalEventLinkSyncStatus,
 )
-from core_shared.models.journals import CalendarInfo
+from core_shared.models.journals import (
+    CalendarInfo,
+    CalendarInfoValidationError,
+)
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
@@ -75,7 +78,9 @@ class SqlCalendarInfoRepository(CalendarInfoRepository):
     async def save(self, calendar_info: CalendarInfo) -> CalendarInfo:
         """Save calendar info (insert or update)."""
         if calendar_info.journal_id is None:
-            raise ValueError("journal_id must be set before saving CalendarInfo")
+            raise CalendarInfoValidationError(
+                "journal_id", "journal_id must be set before saving CalendarInfo"
+            )
 
         # Check if row exists
         existing = await self.find_by_journal_id(calendar_info.journal_id)
@@ -211,8 +216,11 @@ class SqlCalendarInfoRepository(CalendarInfoRepository):
             for row in linked_result.fetchall()
         ]
 
+        import typing
+
         return sorted(
-            [*primary_events, *linked_events], key=lambda ci: ci.journal_id or 0
+            [*primary_events, *linked_events],
+            key=lambda ci: typing.cast(int, ci.journal_id),
         )
 
     async def _ensure_external_event_link(self, calendar_info: CalendarInfo) -> None:
