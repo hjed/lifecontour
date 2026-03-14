@@ -474,7 +474,7 @@ class TestIntegrationsControllers:
             assert response.status_code == 200
             data = response.json()
             assert data["success"] is True
-            assert "Google Contacts connected successfully" in data["message"]
+            assert "Google integration connected successfully" in data["message"]
             assert data["redirect_url"] == "/integrations"
 
             # Verify services were called
@@ -542,7 +542,7 @@ class TestIntegrationsControllers:
             assert response.status_code == 200
             data = response.json()
             assert data["success"] is False
-            assert "No Google Contacts connection found" in data["message"]
+            assert "No Google integration connection found" in data["message"]
 
             # Verify service was called
             mock_disconnect.assert_called_once()

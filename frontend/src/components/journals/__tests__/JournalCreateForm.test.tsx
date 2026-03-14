@@ -50,6 +50,10 @@ jest.mock('next/navigation', () => ({
   }),
 }));
 
+// Ensure tests don't timeout during full test suite runs, as this component
+// renders many child components and can be slow in JSDOM.
+jest.setTimeout(15000);
+
 describe('JournalCreateForm', () => {
   beforeEach(() => {
     jest.clearAllMocks();
