@@ -39,15 +39,10 @@ describe('runGlobalSetup', () => {
     OAUTH_UI_PORT: oauthUiPort,
     OAUTH_AUTHORIZATION_URL: `http://localhost:${oauthPublicPort}/oauth2/auth`,
     OAUTH_ISSUER: `http://localhost:${oauthPublicPort}`,
+    OAUTH_PUBLIC_URL: `http://localhost:${oauthPublicPort}`,
     FRONTEND_URL: FRONTEND_TEST_URL,
     FRONTEND_PORT: FRONTEND_TEST_PORT,
     CORS_ORIGINS: getFrontendCorsOrigins(),
-    OAUTH_AUTHORIZATION_URL: 'http://localhost:4926/oauth2/auth',
-    OAUTH_CONSENT_URL: 'http://localhost:3002/consent',
-    OAUTH_ISSUER: 'http://localhost:4926',
-    OAUTH_LOGIN_URL: 'http://localhost:3002/login',
-    OAUTH_PUBLIC_URL: 'http://localhost:4926',
-    OAUTH_UI_PORT: '3002',
   };
 
   beforeEach(() => {

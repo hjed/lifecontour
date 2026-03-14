@@ -159,15 +159,10 @@ function getDockerTestEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
     OAUTH_UI_PORT: oauthUiPort,
     OAUTH_AUTHORIZATION_URL: `http://localhost:${oauthPublicPort}/oauth2/auth`,
     OAUTH_ISSUER: `http://localhost:${oauthPublicPort}`,
+    OAUTH_PUBLIC_URL: `http://localhost:${oauthPublicPort}`,
     FRONTEND_URL: FRONTEND_TEST_URL,
     FRONTEND_PORT: FRONTEND_TEST_PORT,
     CORS_ORIGINS: getFrontendCorsOrigins(),
-    OAUTH_AUTHORIZATION_URL: `http://localhost:${workspaceEnv.OAUTH_PUBLIC_TEST_PORT || '4446'}/oauth2/auth`,
-    OAUTH_UI_PORT: workspaceEnv.OAUTH_UI_TEST_PORT || '3002',
-    OAUTH_LOGIN_URL: `http://localhost:${workspaceEnv.OAUTH_UI_TEST_PORT || '3002'}/login`,
-    OAUTH_CONSENT_URL: `http://localhost:${workspaceEnv.OAUTH_UI_TEST_PORT || '3002'}/consent`,
-    OAUTH_PUBLIC_URL: `http://localhost:${workspaceEnv.OAUTH_PUBLIC_TEST_PORT || '4446'}`,
-    OAUTH_ISSUER: `http://localhost:${workspaceEnv.OAUTH_PUBLIC_TEST_PORT || '4446'}`,
   };
 }
 
