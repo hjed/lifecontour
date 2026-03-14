@@ -83,7 +83,7 @@ class TestGoogleEventTransformer:
         # All-day events in Google Calendar have 'date' fields.
         # When mapped to our backend, they should be mapped to the start of the day in UTC for EventDateRange.
         expected_start_dt = datetime(2023, 12, 25, tzinfo=UTC)
-        expected_end_dt = datetime(2023, 12, 26, tzinfo=UTC)
+        expected_end_dt = datetime(2023, 12, 25, tzinfo=UTC)
 
         assert journal.event_date_range == EventDateRange(
             start=expected_start_dt, end=expected_end_dt
@@ -186,7 +186,7 @@ class TestGoogleEventTransformer:
         assert payload["description"] == "Holiday"
         assert "location" not in payload  # Should be excluded if None
         assert payload["start"]["date"] == "2023-12-25"
-        assert payload["end"]["date"] == "2023-12-26"
+        assert payload["end"]["date"] == "2023-12-27"
         assert "dateTime" not in payload["start"]
         assert "dateTime" not in payload["end"]
 

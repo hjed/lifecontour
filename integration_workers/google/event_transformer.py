@@ -38,6 +38,10 @@ class GoogleEventTransformer:
 
         is_all_day = start_is_all_day or end_is_all_day
 
+        from datetime import timedelta
+        if is_all_day and end_is_all_day and end_dt > start_dt:
+            end_dt = end_dt - timedelta(days=1)
+
         date_range = EventDateRange(start=start_dt, end=end_dt)
 
         journal = Journal(
@@ -85,7 +89,15 @@ class GoogleEventTransformer:
                 # If the parsing didn't result in an aware datetime and timeZone is provided, we could attach it.
                 # However, fromisoformat with Z or +00:00 will handle aware. If missing entirely, assume UTC.
                 if dt.tzinfo is None:
-                    dt = dt.replace(tzinfo=UTC)
+                    if time_data.time_zone:
+                        try:
+                            from zoneinfo import ZoneInfo
+                            tz = ZoneInfo(time_data.time_zone)
+                            dt = dt.replace(tzinfo=tz)
+                        except Exception:
+                            dt = dt.replace(tzinfo=UTC)
+                    else:
+                        dt = dt.replace(tzinfo=UTC)
                 return dt.astimezone(UTC), False
             except ValueError:
                 return None, False
@@ -114,9 +126,15 @@ class GoogleEventTransformer:
         end_dt = journal.event_date_range.end
 
         if calendar_info.is_all_day:
+            from datetime import timedelta
             payload["start"] = {"date": start_dt.strftime("%Y-%m-%d")}
-            payload["end"] = {"date": end_dt.strftime("%Y-%m-%d")}
+            payload["end"] = {"date": (end_dt + timedelta(days=1)).strftime("%Y-%m-%d")}
         else:
+            if calendar_info.start_time is not None:
+                start_dt = datetime.combine(start_dt.date(), calendar_info.start_time, tzinfo=UTC)
+            if calendar_info.end_time is not None:
+                end_dt = datetime.combine(end_dt.date(), calendar_info.end_time, tzinfo=UTC)
+
             # Format datetime as ISO 8601. Add 'Z' manually if UTC, else Google handles offsets.
             # Our backend expects UTC.
             payload["start"] = {"dateTime": start_dt.isoformat().replace("+00:00", "Z")}
