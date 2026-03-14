@@ -50,22 +50,31 @@ export function JournalRoutesEditor({
 
     try {
       const newRoutes: { name: string; gpx_data: string }[] = [];
+      let errorCount = 0;
 
       for (const file of files) {
-        const content = await file.text();
-        const routeName = file.name.replace(/\.gpx$/i, '');
+        try {
+          const content = await file.text();
+          const routeName = file.name.replace(/\.gpx$/i, '');
 
-        if (createMode) {
-          newRoutes.push({ name: routeName, gpx_data: content });
-        } else if (journalId) {
-          // In edit mode, we send it directly to the API
-          await createRouteMutation.mutateAsync({
-            journalId,
-            data: {
-              name: routeName,
-              gpx_data: content,
-            },
-          });
+          if (createMode) {
+            newRoutes.push({ name: routeName, gpx_data: content });
+          } else if (journalId) {
+            // In edit mode, we send it directly to the API
+            await createRouteMutation.mutateAsync({
+              journalId,
+              data: {
+                name: routeName,
+                gpx_data: content,
+              },
+            });
+          }
+        } catch (error) {
+          console.error(
+            `Failed to read or upload GPX file: ${file.name}`,
+            error
+          );
+          errorCount++;
         }
       }
 
@@ -73,12 +82,13 @@ export function JournalRoutesEditor({
         onPendingRoutesChange([...pendingRoutes, ...newRoutes]);
       }
 
+      if (errorCount > 0) {
+        toast.error(`Failed to process ${errorCount} GPX file(s)`);
+      }
+
       if (fileInputRef.current) {
         fileInputRef.current.value = '';
       }
-    } catch (error) {
-      console.error('Failed to read or upload GPX file', error);
-      toast.error('Failed to process GPX file');
     } finally {
       setIsUploading(false);
     }

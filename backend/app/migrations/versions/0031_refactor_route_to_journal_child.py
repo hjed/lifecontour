@@ -1,6 +1,6 @@
-"""refactor_route_to_journal_child
+"""refactor route to journal child
 
-Revision ID: a2ab27a2cdf7
+Revision ID: 0031
 Revises: 0030
 Create Date: 2026-03-13 22:32:45.919712
 
@@ -12,7 +12,7 @@ import sqlalchemy as sa
 from alembic import op
 
 # revision identifiers, used by Alembic.
-revision: str = "a2ab27a2cdf7"
+revision: str = "0031"
 down_revision: str | None = "0030"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
@@ -30,8 +30,29 @@ def upgrade() -> None:
         ["id"],
         ondelete="CASCADE",
     )
-    # Clear existing routes to maintain data integrity before making it NOT NULL
-    op.execute("DELETE FROM routes")
+    # To preserve existing routes instead of deleting them, we create a
+    # placeholder journal to attach orphaned routes to per user before making journal_id NOT NULL.
+    op.execute(
+        """
+        INSERT INTO journals (user_id, title, content, event_date_range_start, event_date_range_end, "order", created_at, updated_at)
+        SELECT DISTINCT user_id, 'Archived Routes', '', CURRENT_DATE, CURRENT_DATE, 0, clock_timestamp(), clock_timestamp()
+        FROM routes
+        WHERE journal_id IS NULL AND user_id IS NOT NULL
+        """
+    )
+    op.execute(
+        """
+        UPDATE routes
+        SET journal_id = (
+            SELECT id FROM journals
+            WHERE title = 'Archived Routes' AND journals.user_id = routes.user_id
+            LIMIT 1
+        )
+        WHERE journal_id IS NULL AND user_id IS NOT NULL
+        """
+    )
+    # If there are any routes with both journal_id AND user_id as NULL, we have no secure way to keep them
+    op.execute("DELETE FROM routes WHERE journal_id IS NULL")
     op.alter_column("routes", "journal_id", nullable=False)
     op.drop_column("routes", "user_id")
 

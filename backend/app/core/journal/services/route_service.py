@@ -45,6 +45,32 @@ class RouteService:
         self.route_repo = route_repo
         self.event_publisher = event_publisher
 
+    async def get_routes_by_journal_paginated(
+        self,
+        journal_id: int,
+        name_filter: str | None = None,
+        limit: int = 20,
+        offset: int = 0,
+    ) -> tuple[list[Route], int]:
+        """
+        Get routes for a journal with filtering and pagination.
+
+        Args:
+            journal_id: ID of the journal
+            name_filter: Optional string to filter by name
+            limit: Maximum number of routes to return
+            offset: Offset for pagination
+
+        Returns:
+            Tuple of (list of routes, total count matching filters)
+        """
+        return await self.route_repo.find_by_journal_id_paginated(
+            journal_id=journal_id,
+            name_filter=name_filter,
+            limit=limit,
+            offset=offset,
+        )
+
     async def create_route(self, route: Route, transaction: AsyncConnection) -> Route:
         """
         Create a new route with validation.

@@ -1,5 +1,6 @@
 """SQL implementation of RouteRepository using SQLAlchemy Core."""
 
+from typing import Any
 from uuid import UUID
 
 from core_shared.models.route import Route
@@ -126,3 +127,55 @@ class SqlRouteRepository(RouteRepository):
             )
             for row in result.fetchall()
         ]
+
+    async def find_by_journal_id_paginated(
+        self,
+        journal_id: int,
+        name_filter: str | None = None,
+        limit: int = 20,
+        offset: int = 0,
+    ) -> tuple[list[Route], int]:
+        """Get routes for a journal with filtering and pagination."""
+        params: dict[str, Any] = {
+            "journal_id": journal_id,
+            "limit": limit,
+            "offset": offset,
+        }
+        name_clause = ""
+
+        if name_filter:
+            name_clause = " AND name ILIKE :name_filter"
+            params["name_filter"] = f"%{name_filter}%"
+
+        # Count query
+        count_query = text(
+            f"SELECT COUNT(*) FROM routes WHERE journal_id = :journal_id{name_clause}"
+        )
+        count_result = await self.conn.execute(count_query, params)
+        total_count = count_result.scalar() or 0
+
+        # Data query
+        query = text(
+            f"""
+            SELECT id, journal_id, name, description, gpx_data, created_at, updated_at
+            FROM routes
+            WHERE journal_id = :journal_id{name_clause}
+            ORDER BY created_at ASC
+            LIMIT :limit OFFSET :offset
+            """
+        )
+        result = await self.conn.execute(query, params)
+        routes = [
+            Route(
+                id=row.id,
+                journal_id=row.journal_id,
+                name=row.name,
+                description=row.description,
+                gpx_data=row.gpx_data,
+                created_at=row.created_at,
+                updated_at=row.updated_at,
+            )
+            for row in result.fetchall()
+        ]
+
+        return routes, total_count

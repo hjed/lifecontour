@@ -65,16 +65,13 @@ async def list_routes(
     if not journal or journal.user_id != user.id:
         raise JournalNotFoundError(journal_id)
 
-    # Get routes for the authenticated user
-    routes = await route_service.get_routes_by_journal(journal_id)
-
-    if name:
-        routes = [r for r in routes if name.lower() in r.name.lower()]
-
-    total_count = len(routes)
-
-    # Apply pagination in memory (since routes per journal are few)
-    routes = routes[pagination.offset : pagination.offset + pagination.limit]
+    # Get routes for the authenticated user, pushing filter and pagination to the database
+    routes, total_count = await route_service.get_routes_by_journal_paginated(
+        journal_id=journal_id,
+        name_filter=name,
+        limit=pagination.limit,
+        offset=pagination.offset,
+    )
 
     # Convert to resources
     route_resources = [RouteConverter.to_resource(route, base_url) for route in routes]

@@ -145,6 +145,7 @@ async function createRouteBackedComplexJournal(
 
   // Also verify that the GPX map rendered
   await page.getByTestId('type-section-trigger-fitness').click();
+  // Map renders on the journal detail view AFTER submission
   await expect(page.getByTestId('gpx-track-display')).toBeVisible();
   await expect(page.locator('.leaflet-container')).toBeVisible();
 }
@@ -391,9 +392,9 @@ test.describe('Journal Creation UI Flow', () => {
     await expect(page.getByTestId('stat-pace')).toHaveText('5:00 /km');
     await expect(page.getByTestId('stat-hr')).toHaveText('155 bpm');
 
-    // Verify map is rendered
-    await expect(page.getByTestId('gpx-track-display')).toBeVisible();
-    await expect(page.locator('.leaflet-container')).toBeVisible();
+    // Verify map renderer is not shown yet, instead the pending route is listed
+    await expect(page.getByTestId('gpx-track-display')).not.toBeVisible();
+    await expect(page.getByText('test-track')).toBeVisible();
   });
 
   test('should create an OUTDOOR_ACTIVITY journal and verify fields', async ({
@@ -485,9 +486,9 @@ test.describe('Journal Creation UI Flow', () => {
     await page.getByTestId('type-section-trigger-bushwalking').click();
     await page.getByTestId('type-section-trigger-fitness').click();
 
-    // Verify map is rendered showing the uploaded GPX
-    await expect(page.getByTestId('gpx-track-display')).toBeVisible();
-    await expect(page.locator('.leaflet-container')).toBeVisible();
+    // Verify map is not rendered yet, pending GPX track is shown instead
+    await expect(page.getByTestId('gpx-track-display')).not.toBeVisible();
+    await expect(page.getByText('E2E_Bushwalk_Track')).toBeVisible();
   });
 
   test('should create a JOGGING journal with a GPX track and verify display', async ({
@@ -522,9 +523,9 @@ test.describe('Journal Creation UI Flow', () => {
     await page.getByTestId('type-section-trigger-jogging').click();
     await page.getByTestId('type-section-trigger-fitness').click();
 
-    // Verify route map is displayed in read-only view
-    await expect(page.getByTestId('gpx-track-display')).toBeVisible();
-    await expect(page.locator('.leaflet-container')).toBeVisible();
+    // Verify route map is not displayed in create view, pending GPX track is shown instead
+    await expect(page.getByTestId('gpx-track-display')).not.toBeVisible();
+    await expect(page.getByText('E2E_Jogging_Track')).toBeVisible();
   });
 
   test('should create an ABSEILING_TRIP journal and verify dependencies and summary', async ({

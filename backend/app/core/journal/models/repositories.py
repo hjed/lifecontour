@@ -1064,6 +1064,28 @@ class RouteRepository(ABC):
         """
         pass
 
+    @abstractmethod
+    async def find_by_journal_id_paginated(
+        self,
+        journal_id: int,
+        name_filter: str | None = None,
+        limit: int = 20,
+        offset: int = 0,
+    ) -> tuple[list[Route], int]:
+        """
+        Get routes for a journal with filtering and pagination.
+
+        Args:
+            journal_id: The journal ID
+            name_filter: Optional name filter
+            limit: Maximum number of routes to return
+            offset: Number of routes to skip
+
+        Returns:
+            Tuple of (list of routes, total count matching filter)
+        """
+        pass
+
 
 class OutdoorActivityDataRepository(ABC):
     """
