@@ -78,10 +78,15 @@ class GoogleEventTransformer:
         elif time_data.date_time:
             # Timed event
             try:
-                dt_aware = datetime.fromisoformat(time_data.date_time)
-                # Convert to UTC
-                dt_utc = dt_aware.astimezone(UTC)
-                return dt_utc, False
+                date_time_str = time_data.date_time
+                if date_time_str.endswith("Z"):
+                    date_time_str = date_time_str[:-1] + "+00:00"
+                dt = datetime.fromisoformat(date_time_str)
+                # If the parsing didn't result in an aware datetime and timeZone is provided, we could attach it.
+                # However, fromisoformat with Z or +00:00 will handle aware. If missing entirely, assume UTC.
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=UTC)
+                return dt.astimezone(UTC), False
             except ValueError:
                 return None, False
 

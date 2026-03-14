@@ -142,10 +142,10 @@ The sequence reflects both product priority and technical dependency:
 **PR Size:** ~5-7 files
 
 **Acceptance Criteria:**
-- [ ] Map journal event fields to Google event fields and back using a dedicated translation layer.
-- [ ] Sync invitees outward as attendees where supported, while keeping participants local-only.
-- [ ] Treat recurrences as separate journals/occurrences rather than a single recurring journal object.
-- [ ] Keep unsupported sync fields such as reminders and calendar colour out of the write path for this iteration.
+- [x] Map journal event fields to Google event fields and back using a dedicated translation layer.
+- [x] Sync invitees outward as attendees where supported, while keeping participants local-only.
+- [x] Treat recurrences as separate journals/occurrences rather than a single recurring journal object.
+- [x] Keep unsupported sync fields such as reminders and calendar colour out of the write path for this iteration.
 
 **Required Test Coverage:**
 - **Unit:** transformation helpers for title, time range, location, attendees/invitees, and unsupported-field filtering.

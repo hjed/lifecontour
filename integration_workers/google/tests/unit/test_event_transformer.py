@@ -7,7 +7,6 @@ from core_shared.models.journals import CalendarInfo, EventDateRange, Journal
 from calendar_models import GoogleEvent
 
 # We will import the GoogleEventTransformer once we implement it.
-# For now, it will fail because the module doesn't exist.
 from event_transformer import GoogleEventTransformer
 
 
@@ -106,6 +105,28 @@ class TestGoogleEventTransformer:
 
         # Act & Assert
         assert transformer.transform_event(google_event, user_id, calendar_id) is None
+
+    def test_transform_event_handles_zulu_time(self) -> None:
+        # Arrange
+        google_event_dict: dict[str, Any] = {
+            "id": "event_zulu", "summary": "Zulu Meeting",
+            "start": {"dateTime": "2023-10-27T10:00:00Z"},
+            "end": {"dateTime": "2023-10-27T11:00:00Z"},
+            "status": "confirmed"
+        }
+        google_event = GoogleEvent.model_validate(google_event_dict)
+        transformer = GoogleEventTransformer()
+        user_id = "user_123"
+        calendar_id = uuid.uuid4()
+
+        # Act
+        result = transformer.transform_event(google_event, user_id, calendar_id)
+        assert result is not None
+        journal, calendar_info = result
+
+        # Assert
+        assert journal.event_date_range is not None
+        assert journal.event_date_range.start.isoformat(timespec='seconds') == "2023-10-27T10:00:00+00:00"
 
     def test_transform_to_google_event_payload_maps_timed_events(self) -> None:
         # Arrange
