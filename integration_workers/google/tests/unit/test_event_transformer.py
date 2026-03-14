@@ -49,8 +49,8 @@ class TestGoogleEventTransformer:
         # CalendarInfo properties
         assert calendar_info.location == "Conference Room A"
         assert calendar_info.is_all_day is False
-        assert calendar_info.start_time == expected_start_dt.time()
-        assert calendar_info.end_time == expected_end_dt.time()
+        assert calendar_info.start_time == expected_start_dt.time().replace(tzinfo=None)
+        assert calendar_info.end_time == expected_end_dt.time().replace(tzinfo=None)
         assert (
             calendar_info.calendar_id is not None
         )  # Usually gets populated later or requires a calendar ID
@@ -143,8 +143,8 @@ class TestGoogleEventTransformer:
 
         calendar_info = CalendarInfo(
             calendar_id=uuid.uuid4(),
-            start_time=start_dt.time(),
-            end_time=end_dt.time(),
+            start_time=start_dt.time().replace(tzinfo=None),
+            end_time=end_dt.time().replace(tzinfo=None),
             is_all_day=False,
             location="Room 404",
         )
@@ -205,8 +205,8 @@ class TestGoogleEventTransformer:
 
         calendar_info = CalendarInfo(
             calendar_id=uuid.uuid4(),
-            start_time=start_dt.time(),
-            end_time=end_dt.time(),
+            start_time=start_dt.time().replace(tzinfo=None),
+            end_time=end_dt.time().replace(tzinfo=None),
             is_all_day=False,
             sync_invitees=True,
         )
@@ -238,8 +238,8 @@ class TestGoogleEventTransformer:
 
         calendar_info = CalendarInfo(
             calendar_id=uuid.uuid4(),
-            start_time=start_dt.time(),
-            end_time=end_dt.time(),
+            start_time=start_dt.time().replace(tzinfo=None),
+            end_time=end_dt.time().replace(tzinfo=None),
             is_all_day=False,
             sync_invitees=False,
         )
