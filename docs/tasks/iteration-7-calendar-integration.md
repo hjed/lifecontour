@@ -128,15 +128,15 @@ The sequence reflects both product priority and technical dependency:
 **PR Size:** ~4-6 files
 
 **Acceptance Criteria:**
-- [ ] Extend the Google integration client for the calendar API operations needed by the approved sync scope: list calendars, list/get events, create/update/delete events.
-- [ ] Add or confirm the required Google Calendar OAuth scopes in the existing auth flow.
-- [ ] Define clear transformer-facing models for Google calendars and events.
-- [ ] Do not introduce webhook or worker orchestration in this phase.
+- [x] Extend the Google integration client for the calendar API operations needed by the approved sync scope: list calendars, list/get events, create/update/delete events.
+- [x] Add or confirm the required Google Calendar OAuth scopes in the existing auth flow.
+- [x] Define clear transformer-facing models for Google calendars and events.
+- [x] Do not introduce webhook or worker orchestration in this phase.
 
 **Required Test Coverage:**
-- **Unit:** response parsing and payload-shaping helpers for calendars and events.
-- **Integration:** mocked Google API client tests with real settings/configuration wiring.
-- **E2E:** authenticated journal or integration-management flow proving calendar-enabled configuration still works end to end.
+- **Unit:** response parsing and payload-shaping helpers for calendars and events. ✅ Covered in this branch.
+- **Integration:** mocked Google API client tests with real settings/configuration wiring. ✅ Covered in this branch.
+- **E2E:** authenticated journal or integration-management flow proving calendar-enabled configuration still works end to end. ✅ Covered in this branch.
 
 #### Phase 3: Event Transformation and Per-Link Payload Rules
 **PR Size:** ~5-7 files

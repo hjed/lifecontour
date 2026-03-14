@@ -163,7 +163,7 @@ class OAuthService:
                     client_secret=self.settings.google_client_secret,
                     authorize_url="https://accounts.google.com/o/oauth2/v2/auth",
                     access_token_url="https://oauth2.googleapis.com/token",
-                    client_kwargs={"scope": OAUTH_BASIC_SCOPE},
+                    client_kwargs={"scope": GOOGLE_SCOPE},
                     code_challenge_method="S256",
                 )
                 logger.info("Configured Google OAuth provider with PKCE")
