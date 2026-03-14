@@ -42,6 +42,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Checkbox } from '@/components/ui/checkbox';
 import { useCreateJournal } from '@/lib/api/journals';
 import { useCreateRoute } from '@/lib/api/routes';
+import { toast } from 'sonner';
 import {
   JournalType,
   type AbseilingData,
@@ -209,9 +210,29 @@ function TypeCheckboxField({ control, option }: TypeCheckboxFieldProps) {
                     new Set([...(field.value || []), option.value, ...deps])
                   );
                 } else {
-                  newValue = (field.value || []).filter(
+                  // Determine base remaining items
+                  let remaining = (field.value || []).filter(
                     v => v !== option.value
                   );
+
+                  // Re-evaluate what dependencies should be kept by checking the remaining types
+                  const depsToRemove = TYPE_DEPENDENCIES[option.value] || [];
+                  if (depsToRemove.length > 0) {
+                    const otherDeps = new Set<JournalType>();
+                    for (const type of remaining) {
+                      const deps = TYPE_DEPENDENCIES[type] || [];
+                      deps.forEach(d => otherDeps.add(d));
+                    }
+                    // Remove dependency if no other remaining type needs it
+                    // NOTE: This treats explicitly selected dependencies as implicit ones
+                    // and removes them if the parent is unchecked.
+                    remaining = remaining.filter(
+                      type =>
+                        !depsToRemove.includes(type) || otherDeps.has(type)
+                    );
+                  }
+
+                  newValue = remaining;
                 }
                 field.onChange(newValue);
               }}
@@ -493,6 +514,7 @@ export function JournalCreateForm({ onCancel }: JournalCreateFormProps = {}) {
       });
 
       // Upload pending routes sequentially now that we have a journal ID
+      let hadRouteUploadError = false;
       for (const route of pendingRoutes) {
         try {
           await createRoute({
@@ -501,13 +523,18 @@ export function JournalCreateForm({ onCancel }: JournalCreateFormProps = {}) {
               name: route.name,
               gpx_data: route.gpx_data,
             },
+            silent: true,
           });
         } catch (error) {
-          console.error(
-            `Failed to upload GPX track limit: ${route.name}`,
-            error
-          );
+          console.error(`Failed to upload GPX track: ${route.name}`, error);
+          toast.error(`Failed to upload GPX track: ${route.name}`);
+          hadRouteUploadError = true;
         }
+      }
+
+      if (hadRouteUploadError) {
+        // Return without redirecting so the user can see the error
+        return;
       }
 
       router.push(`/journals/${result.data.id}` as Route);

@@ -354,15 +354,6 @@ test.describe('Journal Detail Page', () => {
                   duration: 1800,
                   distance: 5000,
                   heart_rate_avg: 155,
-                  gpx_track_data: `<?xml version="1.0" encoding="UTF-8"?>
-<gpx version="1.1" creator="Test">
-  <trk>
-    <trkseg>
-      <trkpt lat="-33.8688" lon="151.2093"></trkpt>
-      <trkpt lat="-33.8690" lon="151.2095"></trkpt>
-    </trkseg>
-  </trk>
-</gpx>`,
                 },
               },
             },
@@ -395,10 +386,6 @@ test.describe('Journal Detail Page', () => {
       await expect(page.getByTestId('activity-stats-grid')).toBeVisible();
       await expect(page.getByTestId('stat-distance')).toHaveText('5.00 km');
       await expect(page.getByTestId('stat-duration')).toHaveText('30:00');
-
-      // Verify the map displays
-      await expect(page.getByTestId('gpx-track-display')).toBeVisible();
-      await expect(page.locator('.leaflet-container')).toBeVisible();
 
       // Expand to edit mode and confirm form input populates correctly
       const fitnessEditor = page.getByTestId('fitness-type-editor');

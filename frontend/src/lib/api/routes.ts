@@ -135,15 +135,20 @@ export function useCreateRoute() {
     }: {
       journalId: string;
       data: RouteFormData;
+      silent?: boolean;
     }) => createRoute(journalId, data),
     onSuccess: (_, variables) => {
       queryClient.invalidateQueries({
         queryKey: routeKeys.all(variables.journalId),
       });
-      toast.success(SUCCESS_MESSAGES.CREATE_SUCCESS);
+      if (!variables.silent) {
+        toast.success(SUCCESS_MESSAGES.CREATE_SUCCESS);
+      }
     },
-    onError: (error: Error) => {
-      toast.error(error.message);
+    onError: (error: Error, variables) => {
+      if (!variables.silent) {
+        toast.error(error.message);
+      }
     },
   });
 }

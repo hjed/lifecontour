@@ -169,18 +169,6 @@ _ACTIVITY_TYPE_PRECEDENCE: tuple[JournalType, ...] = (
     JournalType.FITNESS,
 )
 
-_ROUTE_ACTIVITY_CASE = """
-    CASE
-        WHEN canyoning.route_id = :route_id THEN 'canyoning'
-        WHEN skiing.route_id = :route_id THEN 'cross_country_skiing'
-        WHEN kayaking.route_id = :route_id THEN 'kayaking'
-        WHEN climbing.route_id = :route_id THEN 'climbing'
-        WHEN bushwalking.route_id = :route_id THEN 'bushwalking'
-        WHEN jogging.route_id = :route_id THEN 'jogging'
-        ELSE NULL
-    END
-"""
-
 
 def _create_journal_tool_repositories(
     db_connection: AsyncConnection,

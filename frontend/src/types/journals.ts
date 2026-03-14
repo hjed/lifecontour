@@ -128,7 +128,6 @@ export interface FitnessData {
   elevation_loss?: number | null;
   duration?: number | null;
   calories?: number | null;
-  gpx_track_data?: string | null;
   strava_activity_id?: string | null;
   // Frontend-only field for handling multiple GPX tracks during create mode
   pending_routes?: { name: string; gpx_data: string }[];

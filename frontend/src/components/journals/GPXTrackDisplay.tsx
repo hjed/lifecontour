@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo } from 'react';
+import { useMemo, useEffect } from 'react';
 import dynamic from 'next/dynamic';
 import { Card } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -30,10 +30,11 @@ export function GPXTrackDisplay({
     isLoading,
     error: apiError,
   } = useRoutes(journalId);
-  const tracks = useMemo(() => {
-    if (!routesResponse?.data) return [];
+  const { tracks, errors } = useMemo(() => {
+    if (!routesResponse?.data) return { tracks: [], errors: [] };
 
     const parsedTracks: Coordinate[][] = [];
+    const parseErrors: string[] = [];
 
     for (const route of routesResponse.data) {
       const gpxString = route.attributes.gpx_data;
@@ -50,7 +51,7 @@ export function GPXTrackDisplay({
             route.id,
             parserError.textContent
           );
-          toast.error(
+          parseErrors.push(
             `Contains invalid GPX data in route ${route.attributes.name}`
           );
           continue;
@@ -79,8 +80,14 @@ export function GPXTrackDisplay({
       }
     }
 
-    return parsedTracks;
+    return { tracks: parsedTracks, errors: parseErrors };
   }, [routesResponse?.data]);
+
+  useEffect(() => {
+    if (errors && errors.length > 0) {
+      errors.forEach(err => toast.error(err));
+    }
+  }, [errors]);
 
   if (isLoading) {
     return (

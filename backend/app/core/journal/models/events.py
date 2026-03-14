@@ -39,6 +39,7 @@ class JournalCreated(DomainEvent):
             event_type="JournalCreated",
             event_data={
                 "journal_id": journal_id,
+                "user_id": user_id,
                 "title": title,
             },
             transaction=transaction,
