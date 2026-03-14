@@ -1,7 +1,6 @@
-import pytest
-from unittest.mock import AsyncMock, patch, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
-from googleapiclient.errors import HttpError
+import pytest
 
 
 @pytest.fixture
@@ -26,7 +25,7 @@ async def test_get_event_success(mock_auth_service, mock_google_calendar_service
     mock_get = mock_google_calendar_service.events.return_value.get
     mock_get.return_value.execute.return_value = {
         "id": "event123",
-        "summary": "Existing Event"
+        "summary": "Existing Event",
     }
 
     client = GoogleAPIClient(
@@ -37,7 +36,9 @@ async def test_get_event_success(mock_auth_service, mock_google_calendar_service
         user_id=1,
     )
 
-    with patch.object(client, "_get_calendar_service", return_value=mock_google_calendar_service):
+    with patch.object(
+        client, "_get_calendar_service", return_value=mock_google_calendar_service
+    ):
         result = await client.get_event("event123", "primary")
 
         assert result["id"] == "event123"
@@ -53,7 +54,7 @@ async def test_create_event_success(mock_auth_service, mock_google_calendar_serv
     mock_insert = mock_google_calendar_service.events.return_value.insert
     mock_insert.return_value.execute.return_value = {
         "id": "new_event_1",
-        "summary": "New Event"
+        "summary": "New Event",
     }
 
     client = GoogleAPIClient(
@@ -64,7 +65,9 @@ async def test_create_event_success(mock_auth_service, mock_google_calendar_serv
         user_id=1,
     )
 
-    with patch.object(client, "_get_calendar_service", return_value=mock_google_calendar_service):
+    with patch.object(
+        client, "_get_calendar_service", return_value=mock_google_calendar_service
+    ):
         event_data = {"summary": "New Event"}
         result = await client.create_event(event_data, "primary")
 
@@ -81,7 +84,7 @@ async def test_update_event_success(mock_auth_service, mock_google_calendar_serv
     mock_update = mock_google_calendar_service.events.return_value.update
     mock_update.return_value.execute.return_value = {
         "id": "event123",
-        "summary": "Updated Event"
+        "summary": "Updated Event",
     }
 
     client = GoogleAPIClient(
@@ -92,12 +95,16 @@ async def test_update_event_success(mock_auth_service, mock_google_calendar_serv
         user_id=1,
     )
 
-    with patch.object(client, "_get_calendar_service", return_value=mock_google_calendar_service):
+    with patch.object(
+        client, "_get_calendar_service", return_value=mock_google_calendar_service
+    ):
         event_data = {"summary": "Updated Event"}
         result = await client.update_event("event123", event_data, "primary")
 
         assert result["summary"] == "Updated Event"
-        mock_update.assert_called_once_with(calendarId="primary", eventId="event123", body=event_data)
+        mock_update.assert_called_once_with(
+            calendarId="primary", eventId="event123", body=event_data
+        )
 
 
 @pytest.mark.asyncio
@@ -116,6 +123,8 @@ async def test_delete_event_success(mock_auth_service, mock_google_calendar_serv
         user_id=1,
     )
 
-    with patch.object(client, "_get_calendar_service", return_value=mock_google_calendar_service):
+    with patch.object(
+        client, "_get_calendar_service", return_value=mock_google_calendar_service
+    ):
         await client.delete_event("event123", "primary")
         mock_delete.assert_called_once_with(calendarId="primary", eventId="event123")

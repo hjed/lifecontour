@@ -7,14 +7,33 @@ Contains database session fixtures and migrations.
 import os
 from typing import Any
 
+import pytest
 import pytest_asyncio
+
+
+def get_workspace_env() -> dict[str, str]:
+    import json
+    import subprocess
+    from pathlib import Path
+
+    project_root = Path(__file__).parent.parent.parent.parent.parent
+    script = project_root / "scripts" / "workspace_env.py"
+    try:
+        result = subprocess.run(
+            ["python3", str(script), "json"], check=True, capture_output=True, text=True
+        )
+        return json.loads(result.stdout)
+    except Exception:
+        return {}
 
 
 def get_async_database_url() -> str:
     """Get the database URL and ensure it uses asyncpg driver."""
-    database_url = os.environ.get(
-        "DATABASE_URL", "postgresql+asyncpg://test:test@localhost:5432/test"
-    )
+    env = get_workspace_env()
+    db_port = env.get("DB_TEST_PORT", "5433")
+    default_url = f"postgresql+asyncpg://postgres:postgres@localhost:{db_port}/personal_management_test"
+
+    database_url = os.environ.get("DATABASE_URL", default_url)
     if database_url.startswith("postgresql://") and "+asyncpg" not in database_url:
         database_url = database_url.replace("postgresql://", "postgresql+asyncpg://", 1)
     return database_url
@@ -35,7 +54,7 @@ async def async_engine() -> Any:
     await engine.dispose()
 
 
-@pytest_asyncio.fixture(scope="session", autouse=True)
+@pytest.fixture(scope="session", autouse=True)
 def apply_migrations() -> None:
     """Apply Alembic migrations to the test database."""
     import subprocess
@@ -45,6 +64,9 @@ def apply_migrations() -> None:
 
     # We use the DATABASE_URL environment variable which is already set
     env = os.environ.copy()
+    env.pop("VIRTUAL_ENV", None)  # Prevent uv warning about mismatched environment
+    # Ensure alembic gets the correct dynamic database URL
+    env["DATABASE_URL"] = get_async_database_url()
 
     # Run alembic upgrade head
     subprocess.run(

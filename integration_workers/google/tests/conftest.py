@@ -20,7 +20,6 @@ os.environ.setdefault("LOG_LEVEL", "INFO")
 from typing import Any
 
 import pytest
-import pytest_asyncio
 
 
 @pytest.fixture
@@ -45,6 +44,3 @@ def valid_person_data() -> dict[str, Any]:
         "organizations": [{"name": "Example Corp", "title": "Software Engineer"}],
         "userDefined": [{"key": "custom_field", "value": "custom_value"}],
     }
-
-
-

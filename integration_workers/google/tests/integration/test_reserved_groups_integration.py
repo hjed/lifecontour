@@ -40,7 +40,11 @@ class TestReservedGroupsIntegration:
                 VALUES
                     (:user_id, :email, :token, :refresh,
                      :expiry, :now, :now)
-                ON CONFLICT (user_id, google_account_email) DO NOTHING
+                ON CONFLICT (user_id, google_account_email) DO UPDATE SET
+                    encrypted_access_token = EXCLUDED.encrypted_access_token,
+                    encrypted_refresh_token = EXCLUDED.encrypted_refresh_token,
+                    expires_at = EXCLUDED.expires_at,
+                    updated_at = EXCLUDED.updated_at
                 """
             ),
             {

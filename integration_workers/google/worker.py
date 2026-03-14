@@ -100,7 +100,7 @@ logger = get_logger(__name__)
 metrics_collector = MetricsCollector(worker_type="google")
 
 
-async def startup(ctx: dict[str, Any]) -> None:
+async def startup(ctx: dict[str, Any]) -> None:  # NOSONAR
     """
     Worker startup function.
 
@@ -824,19 +824,31 @@ async def _create_transformer(
 
     Fetches contact groups to build the translation mapping.
     """
-    group_mapping = {}
+    group_mapping: dict[str, str] = {}
     try:
-        groups_data = await client.list_contact_groups(page_size=1000)
+        page_token: str | None = None
+        while True:
+            groups_data = await client.list_contact_groups(
+                page_size=1000, page_token=page_token
+            )
+            groups_response = ListContactGroupsResponse(**groups_data)
 
-        groups_response = ListContactGroupsResponse(**groups_data)
+            if (
+                hasattr(groups_response, "contact_groups")
+                and groups_response.contact_groups
+            ):
+                for group in groups_response.contact_groups:
+                    name_to_use = group.formatted_name or group.name
+                    if group.resource_name and name_to_use:
+                        group_mapping[group.resource_name] = name_to_use
 
-        if (
-            hasattr(groups_response, "contact_groups")
-            and groups_response.contact_groups
-        ):
-            for group in groups_response.contact_groups:
-                if group.resource_name and group.name:
-                    group_mapping[group.resource_name] = group.name
+            if (
+                hasattr(groups_response, "next_page_token")
+                and groups_response.next_page_token
+            ):
+                page_token = groups_response.next_page_token
+            else:
+                break
 
         logger.info(
             "Successfully built contact group translation mapping",

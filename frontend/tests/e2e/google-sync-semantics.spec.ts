@@ -2,7 +2,7 @@ import { test, expect } from './fixtures';
 import { TestDataManager } from './data-management';
 
 test.describe('ITER2.6-001 Phase 1: Google Contacts Sync Semantics', () => {
-  test('sync-trigger flow proves reserved groups do not surface and Starred surfaces as favourite', async ({
+  test('UI correctly renders Contact from Google Sync ignoring reserved groups and surfacing Starred as favourite', async ({
     authenticatedPage,
     testCleanup,
   }) => {
@@ -38,14 +38,9 @@ test.describe('ITER2.6-001 Phase 1: Google Contacts Sync Semantics', () => {
 
     // Check if the favourite button is active/checked
     // The UI usually indicates this with aria-pressed="true" or a specific class/icon
-    const faveButton = card.locator(
-      'button[aria-label*="favourite" i], button[aria-pressed="true"]'
-    );
+    const faveButton = card.locator('button[aria-label*="favourite" i]');
     await expect(faveButton.first()).toBeVisible();
-    const isPressed = await faveButton.first().getAttribute('aria-pressed');
-    if (isPressed !== null) {
-      expect(isPressed).toBe('true');
-    }
+    await expect(faveButton.first()).toHaveAttribute('aria-pressed', 'true');
 
     // Verify no 'myContacts' tag is shown anywhere on the card
     await expect(card).not.toContainText(/myContacts/i);

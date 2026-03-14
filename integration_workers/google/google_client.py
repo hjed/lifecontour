@@ -122,7 +122,7 @@ class GoogleAPIClient:
             request_params = {
                 "resourceName": "people/me",
                 "pageSize": min(page_size, 2000),  # Google's max limit
-                "personFields": "names,emailAddresses,phoneNumbers,addresses,organizations,birthdays,metadata",
+                "personFields": "names,emailAddresses,phoneNumbers,addresses,organizations,birthdays,metadata,memberships,biographies",
             }
 
             if page_token:
@@ -184,7 +184,10 @@ class GoogleAPIClient:
         try:
             service = await self._get_people_service()
 
-            request_params: dict[str, Any] = {"pageSize": min(page_size, 1000)}
+            request_params: dict[str, Any] = {
+                "pageSize": min(page_size, 1000),
+                "groupFields": "metadata,groupType,memberCount,name,formattedName",
+            }
 
             if page_token:
                 request_params["pageToken"] = page_token
@@ -243,12 +246,11 @@ class GoogleAPIClient:
                 resource_name=resource_name,
             )
 
-            # Make the API call
             result = (
                 service.people()
                 .get(
                     resourceName=resource_name,
-                    personFields="names,emailAddresses,phoneNumbers,addresses,organizations,birthdays,metadata",
+                    personFields="names,emailAddresses,phoneNumbers,addresses,organizations,birthdays,metadata,memberships,biographies",
                 )
                 .execute()
             )
@@ -424,7 +426,7 @@ class GoogleAPIClient:
         """
         try:
             service = await self._get_calendar_service()
-            request_params = {"maxResults": 250}
+            request_params: dict[str, Any] = {"maxResults": 250}
             if page_token:
                 request_params["pageToken"] = page_token
             if sync_token:

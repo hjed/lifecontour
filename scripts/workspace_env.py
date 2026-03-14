@@ -35,6 +35,7 @@ def get_workspace_env():
         "REDIS_TEST_PORT": str(6380 + port_offset),
         "OAUTH_PUBLIC_TEST_PORT": str(4446 + port_offset),
         "OAUTH_ADMIN_TEST_PORT": str(4447 + port_offset),
+        "OAUTH_UI_TEST_PORT": str(3002 + port_offset),
         "DB_PORT": str(5433 + port_offset),
         "MEILI_PORT": str(7701 + port_offset),
         "REDIS_PORT": str(6380 + port_offset),
@@ -42,6 +43,7 @@ def get_workspace_env():
         "FRONTEND_PORT": str(3100 + port_offset),
         "OAUTH_PUBLIC_PORT": str(4446 + port_offset),
         "OAUTH_ADMIN_PORT": str(4447 + port_offset),
+        "OAUTH_UI_PORT": str(3002 + port_offset),
     }
     return env
 
