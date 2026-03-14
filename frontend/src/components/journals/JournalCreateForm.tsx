@@ -497,9 +497,10 @@ export function JournalCreateForm({ onCancel }: JournalCreateFormProps = {}) {
         | undefined;
       if (fitnessData?.pending_routes) {
         pendingRoutes = [...fitnessData.pending_routes];
-        submittedTypeData[JournalType.FITNESS] = { ...fitnessData };
-        delete (submittedTypeData[JournalType.FITNESS] as FitnessData)
-          .pending_routes;
+        // Remove pending_routes before submitting to prevent validation errors
+        // eslint-disable-next-line @typescript-eslint/no-unused-vars
+        const { pending_routes, ...sanitizedFitnessData } = fitnessData;
+        submittedTypeData['FITNESS'] = sanitizedFitnessData;
       }
 
       const result = await createJournal({

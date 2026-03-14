@@ -39,7 +39,8 @@ async function fetchRoutes(
   if (filters.page) params.append('page', filters.page.toString());
   if (filters.limit) params.append('limit', filters.limit.toString());
 
-  const baseUrl = `/api/journals/${journalId}/routes`;
+  const encJournalId = encodeURIComponent(journalId);
+  const baseUrl = `/api/journals/${encJournalId}/routes`;
   const url = params.toString() ? `${baseUrl}?${params.toString()}` : baseUrl;
 
   const response = await fetch(url, {
@@ -60,9 +61,14 @@ async function fetchRoute(
   journalId: string,
   routeId: string
 ): Promise<RouteResponse> {
-  const response = await fetch(`/api/journals/${journalId}/routes/${routeId}`, {
-    credentials: 'include',
-  });
+  const encJournalId = encodeURIComponent(journalId);
+  const encRouteId = encodeURIComponent(routeId);
+  const response = await fetch(
+    `/api/journals/${encJournalId}/routes/${encRouteId}`,
+    {
+      credentials: 'include',
+    }
+  );
 
   if (!response.ok) {
     const errorData: JsonApiErrorResponse = await response.json();
@@ -83,7 +89,8 @@ async function createRoute(
     attributes: data,
   };
 
-  const response = await fetch(`/api/journals/${journalId}/routes`, {
+  const encJournalId = encodeURIComponent(journalId);
+  const response = await fetch(`/api/journals/${encJournalId}/routes`, {
     method: 'POST',
     credentials: 'include',
     headers: {

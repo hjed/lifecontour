@@ -20,6 +20,51 @@ interface GPXTrackDisplayProps {
 import { Coordinate } from '@/types/journals';
 import { useRoutes } from '@/lib/api/routes';
 
+export interface ParsedTrack {
+  id: string;
+  coordinates: Coordinate[];
+}
+
+function parseGPXString(
+  gpxString: string,
+  routeId: string,
+  routeName: string
+): { track?: ParsedTrack; error?: string } {
+  const parser = new DOMParser();
+  const xmlDoc = parser.parseFromString(gpxString, 'text/xml');
+
+  const parserError = xmlDoc.querySelector('parsererror');
+  if (parserError) {
+    console.error(
+      'Failed to parse GPX data for route',
+      routeId,
+      parserError.textContent
+    );
+    return {
+      error: `Contains invalid GPX data in route ${routeName}`,
+    };
+  }
+
+  const trkpts = xmlDoc.getElementsByTagName('trkpt');
+  const coordinates: Coordinate[] = [];
+
+  for (const pt of Array.from(trkpts)) {
+    const lat = pt.getAttribute('lat');
+    const lon = pt.getAttribute('lon');
+    if (lat && lon) {
+      coordinates.push({
+        latitude: Number.parseFloat(lat),
+        longitude: Number.parseFloat(lon),
+      });
+    }
+  }
+
+  if (coordinates.length > 0) {
+    return { track: { id: routeId, coordinates } };
+  }
+  return {};
+}
+
 export function GPXTrackDisplay({
   journalId,
   className,
@@ -30,50 +75,27 @@ export function GPXTrackDisplay({
     isLoading,
     error: apiError,
   } = useRoutes(journalId);
+  const routesData = routesResponse?.data;
   const { tracks, errors } = useMemo(() => {
-    if (!routesResponse?.data) return { tracks: [], errors: [] };
+    if (!routesData) return { tracks: [], errors: [] };
 
-    const parsedTracks: Coordinate[][] = [];
+    const parsedTracks: ParsedTrack[] = [];
     const parseErrors: string[] = [];
 
-    for (const route of routesResponse.data) {
+    for (const route of routesData) {
       const gpxString = route.attributes.gpx_data;
       if (!gpxString) continue;
 
       try {
-        const parser = new DOMParser();
-        const xmlDoc = parser.parseFromString(gpxString, 'text/xml');
-
-        const parserError = xmlDoc.querySelector('parsererror');
-        if (parserError) {
-          console.error(
-            'Failed to parse GPX data for route',
-            route.id,
-            parserError.textContent
-          );
-          parseErrors.push(
-            `Contains invalid GPX data in route ${route.attributes.name}`
-          );
-          continue;
-        }
-
-        const trkpts = xmlDoc.getElementsByTagName('trkpt');
-        const coordinates: Coordinate[] = [];
-
-        for (let i = 0; i < trkpts.length; i++) {
-          const pt = trkpts[i];
-          const lat = pt.getAttribute('lat');
-          const lon = pt.getAttribute('lon');
-          if (lat && lon) {
-            coordinates.push({
-              latitude: parseFloat(lat),
-              longitude: parseFloat(lon),
-            });
-          }
-        }
-
-        if (coordinates.length > 0) {
-          parsedTracks.push(coordinates);
+        const { track, error } = parseGPXString(
+          gpxString,
+          route.id,
+          route.attributes.name
+        );
+        if (error) {
+          parseErrors.push(error);
+        } else if (track) {
+          parsedTracks.push(track);
         }
       } catch (err) {
         console.error('Failed to parse GPX data for route', route.id, err);
@@ -81,7 +103,7 @@ export function GPXTrackDisplay({
     }
 
     return { tracks: parsedTracks, errors: parseErrors };
-  }, [routesResponse?.data]);
+  }, [routesData]);
 
   const toastedErrorsRef = useRef<Set<string>>(new Set());
 

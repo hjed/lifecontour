@@ -36,7 +36,7 @@ export function JournalRoutesEditor({
   // API Hooks (only active if !createMode and journalId is present)
   const { data: routesData, isLoading: isLoadingRoutes } = useRoutes(
     journalId ?? '',
-    {},
+    { limit: 100 },
     { enabled: !createMode && !!journalId }
   );
 
@@ -105,6 +105,10 @@ export function JournalRoutesEditor({
   // If we're not editing and there are no routes (in either mode), don't show anything
   const hasLiveRoutes = routesData?.data && routesData.data.length > 0;
   const hasPendingRoutes = pendingRoutes.length > 0;
+
+  if (!createMode && !journalId) {
+    return null;
+  }
 
   if (!isEditing && !hasLiveRoutes && !hasPendingRoutes) {
     return null;

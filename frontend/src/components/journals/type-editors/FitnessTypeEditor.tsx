@@ -72,7 +72,7 @@ export function FitnessTypeEditor({
       setEditData(previous => ({ ...previous, [field]: null }));
       return;
     }
-    const parsedValue = parseInt(value, 10);
+    const parsedValue = Number.parseInt(value, 10);
     setEditData(previous => ({
       ...previous,
       [field]: Number.isNaN(parsedValue) ? null : parsedValue,

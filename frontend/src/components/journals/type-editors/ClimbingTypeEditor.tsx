@@ -66,18 +66,18 @@ export function ClimbingTypeEditor({
           value: data.climbing_type,
         }
       : null,
-    data?.grade != null
-      ? {
+    data?.grade == null
+      ? null
+      : {
           label: 'Grade',
           value: data.grade,
-        }
-      : null,
-    data?.length != null
-      ? {
+        },
+    data?.length == null
+      ? null
+      : {
           label: 'Length',
           value: `${data.length} m`,
         }
-      : null
   );
 
   return (

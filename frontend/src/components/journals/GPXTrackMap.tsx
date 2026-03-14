@@ -11,18 +11,18 @@ import {
 } from 'react-leaflet';
 import L from 'leaflet';
 
-import { Coordinate } from '@/types/journals';
+import type { ParsedTrack } from './GPXTrackDisplay';
 
 interface GPXTrackMapProps {
-  readonly tracks: Coordinate[][];
+  readonly tracks: ParsedTrack[];
 }
 
 // Helper to fit bounds to polyline
-function MapBounds({ tracks }: { readonly tracks: Coordinate[][] }) {
+function MapBounds({ tracks }: { readonly tracks: ParsedTrack[] }) {
   const map = useMap();
 
   useEffect(() => {
-    const allCoordinates = tracks.flat();
+    const allCoordinates = tracks.flatMap(t => t.coordinates);
     if (allCoordinates.length > 0) {
       const latLngs = allCoordinates.map(c =>
         L.latLng(c.latitude, c.longitude)
@@ -36,24 +36,27 @@ function MapBounds({ tracks }: { readonly tracks: Coordinate[][] }) {
 }
 
 export default function GPXTrackMap({ tracks }: GPXTrackMapProps) {
-  const allPositions = useMemo(
+  const mappedTracks = useMemo(
     () =>
-      tracks.map(track =>
-        track.map(c => [c.latitude, c.longitude] as [number, number])
-      ),
+      tracks.map(track => ({
+        id: track.id,
+        positions: track.coordinates.map(
+          c => [c.latitude, c.longitude] as [number, number]
+        ),
+      })),
     [tracks]
   );
 
   if (
     !tracks ||
     tracks.length === 0 ||
-    allPositions.length === 0 ||
-    allPositions[0].length === 0
+    mappedTracks.length === 0 ||
+    mappedTracks[0].positions.length === 0
   )
     return null;
 
   // Use the first point of the first track as the initial center
-  const centerPoint = allPositions[0][0];
+  const centerPoint = mappedTracks[0].positions[0];
 
   return (
     <MapContainer
@@ -67,7 +70,7 @@ export default function GPXTrackMap({ tracks }: GPXTrackMapProps) {
         url='https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png'
       />
 
-      {allPositions.map((positions, i) => {
+      {mappedTracks.map(({ id, positions }, i) => {
         if (positions.length === 0) return null;
         const startPoint = positions[0];
         const endPoint = positions[positions.length - 1];
@@ -83,7 +86,7 @@ export default function GPXTrackMap({ tracks }: GPXTrackMapProps) {
           i === 0 ? 'hsl(var(--primary))' : `hsl(${hues[hueIndex]}, 80%, 45%)`;
 
         return (
-          <React.Fragment key={i}>
+          <React.Fragment key={id}>
             <Polyline
               positions={positions}
               pathOptions={{ color, weight: 4 }}

@@ -338,13 +338,14 @@ async def _enrich_journal_data(
     climbing_data_repo: ClimbingDataRepository,
     kayaking_data_repo: KayakingDataRepository,
     skiing_data_repo: CrossCountrySkiingDataRepository,
+    include_routes: bool = False,
 ) -> tuple[
     list[str],
     dict[str, Any],
     list[Any],
     list[Any],
     Any,
-    list[Any],
+    list[Any] | None,
 ]:
     """
     Fetch all enrichment data for a journal.
@@ -476,7 +477,7 @@ async def _enrich_journal_data(
     tags = await tag_repo.get_tags_for_journal(journal_id)
 
     # Fetch routes
-    routes = await route_repo.find_by_journal_id(journal_id)
+    routes = await route_repo.find_by_journal_id(journal_id) if include_routes else None
 
     return types, type_data, contacts, tags, calendar, routes
 
@@ -751,7 +752,7 @@ async def list_journals(
     journal_resources = []
     for journal in journals:
         # Enrich journal with types, contacts, tags, etc.
-        types, type_data, _, _, _, routes = await _enrich_journal_data(
+        types, type_data, _, _, _, _ = await _enrich_journal_data(
             journal,
             calendar_info_repo,
             calendar_repo,
@@ -774,7 +775,7 @@ async def list_journals(
         )
 
         resource = JournalConverter.to_resource(
-            journal, base_url, types=types, type_data=type_data, routes=routes
+            journal, base_url, types=types, type_data=type_data
         )
         journal_resources.append(resource)
 
@@ -1429,20 +1430,19 @@ async def _process_journal_contact_relationships(
                     contact_id=contact_id,
                     relationship_type=relationship_type,
                 )
-                async with connection.begin_nested() as savepoint:
-                    try:
+                try:
+                    async with connection.begin_nested():
                         await contact_relationship_repo.create(relationship)
-                    except IntegrityError:
-                        # Log error and rollback this savepoint, but keep main transaction alive
-                        import structlog
+                except IntegrityError:
+                    # Log error and ignore, the context manager handles the rollback to the savepoint
+                    import structlog
 
-                        logger = structlog.get_logger()
-                        logger.warning(
-                            "Invalid journal contact relationship ignored",
-                            journal_id=journal_id,
-                            contact_id=contact_id,
-                        )
-                        await savepoint.rollback()
+                    logger = structlog.get_logger()
+                    logger.warning(
+                        "Invalid journal contact relationship ignored",
+                        journal_id=journal_id,
+                        contact_id=contact_id,
+                    )
 
         except (ValueError, KeyError, AttributeError):
             # Invalid contact relationship payload, skip
@@ -1570,6 +1570,7 @@ async def create_journal(
         climbing_data_repo,
         kayaking_data_repo,
         skiing_data_repo,
+        include_routes=True,
     )
 
     journal_resource = JournalConverter.to_resource(
@@ -1664,6 +1665,7 @@ async def update_journal(
         climbing_data_repo,
         kayaking_data_repo,
         skiing_data_repo,
+        include_routes=True,
     )
 
     journal_resource = JournalConverter.to_resource(
@@ -1804,6 +1806,7 @@ async def partial_update_journal(
         climbing_data_repo,
         kayaking_data_repo,
         skiing_data_repo,
+        include_routes=True,
     )
 
     journal_resource = JournalConverter.to_resource(
@@ -1936,6 +1939,7 @@ async def add_type_to_journal(
         climbing_data_repo,
         kayaking_data_repo,
         skiing_data_repo,
+        include_routes=True,
     )
 
     journal_resource = JournalConverter.to_resource(
@@ -2044,6 +2048,7 @@ async def remove_type_from_journal(
         climbing_data_repo,
         kayaking_data_repo,
         skiing_data_repo,
+        include_routes=True,
     )
 
     journal_resource = JournalConverter.to_resource(
@@ -2533,6 +2538,7 @@ async def update_type_data(
         climbing_data_repo,
         kayaking_data_repo,
         skiing_data_repo,
+        include_routes=True,
     )
 
     journal_resource = JournalConverter.to_resource(
@@ -2638,6 +2644,7 @@ async def add_contact_to_journal(
         climbing_data_repo,
         kayaking_data_repo,
         skiing_data_repo,
+        include_routes=True,
     )
 
     journal_resource = JournalConverter.to_resource(
@@ -2738,6 +2745,7 @@ async def remove_contact_from_journal(
         climbing_data_repo,
         kayaking_data_repo,
         skiing_data_repo,
+        include_routes=True,
     )
 
     journal_resource = JournalConverter.to_resource(
@@ -2829,6 +2837,7 @@ async def add_tag_to_journal(
         climbing_data_repo,
         kayaking_data_repo,
         skiing_data_repo,
+        include_routes=True,
     )
 
     journal_resource = JournalConverter.to_resource(
@@ -2915,6 +2924,7 @@ async def remove_tag_from_journal(
         climbing_data_repo,
         kayaking_data_repo,
         skiing_data_repo,
+        include_routes=True,
     )
 
     journal_resource = JournalConverter.to_resource(

@@ -141,17 +141,22 @@ class SqlRouteRepository(RouteRepository):
             "limit": limit,
             "offset": offset,
         }
+        count_params: dict[str, Any] = {
+            "journal_id": journal_id,
+        }
         name_clause = ""
 
         if name_filter:
             name_clause = " AND name ILIKE :name_filter"
-            params["name_filter"] = f"%{name_filter}%"
+            name_val = f"%{name_filter}%"
+            params["name_filter"] = name_val
+            count_params["name_filter"] = name_val
 
         # Count query
         count_query = text(
             f"SELECT COUNT(*) FROM routes WHERE journal_id = :journal_id{name_clause}"
         )
-        count_result = await self.conn.execute(count_query, params)
+        count_result = await self.conn.execute(count_query, count_params)
         total_count = count_result.scalar() or 0
 
         # Data query
