@@ -97,5 +97,10 @@ class AuthProvider(Provider):
         try:
             return SessionUser.model_validate(user_data)
         except pydantic.ValidationError as e:
-            logger.warning("Invalid user session data", error=e, user_data=user_data)
+            logger.warning(
+                "Invalid user session data",
+                error=str(e),
+                user_data=user_data,
+                exc_info=True,
+            )
             return None

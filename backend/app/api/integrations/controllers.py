@@ -2,7 +2,7 @@
 Integration API controllers for managing external service integrations.
 
 This module provides REST API endpoints for:
-- Google Contacts synchronization
+- Google integration synchronization
 - Integration health monitoring
 - Sync job management and status tracking
 """
@@ -100,10 +100,10 @@ async def trigger_google_sync(
     task_queue_service: FromDishka[TaskQueueService],
 ) -> SyncJobJsonApiResponse:
     """
-    Trigger a Google Contacts synchronization job.
+    Trigger a Google integration synchronization job.
 
     This endpoint queues a background sync job for the authenticated user's
-    Google Contacts. The job will run asynchronously in the worker.
+    Google integration. The job will run asynchronously in the worker.
     """
     try:
         async with db_manager.get_session() as session:
@@ -204,7 +204,7 @@ async def list_sync_jobs(
                 ) from e
 
         # Get sync jobs from the task queue service
-        # Filter by google integration source since this endpoint is specific to Google Contacts
+        # Filter by google integration source since this endpoint is specific to Google integration
         jobs, total = await task_queue_service.list_sync_jobs(
             user_id=user.id,
             status=status,
@@ -401,7 +401,7 @@ async def get_google_status(
     db_manager: FromDishka[IntegrationDatabaseManager],
 ) -> GoogleStatusJsonApiResponse:
     """
-    Get the current status of Google Contacts integration.
+    Get the current status of Google integration integration.
 
     Returns JSON API formatted response with connection status,
     last sync time, and sync count.
@@ -416,7 +416,7 @@ async def get_google_status(
         async with db_manager.get_session() as session:
             conn = await session.connection()
 
-            # Check if user has Google Contacts connected
+            # Check if user has Google integration connected
             is_connected = await oauth_service.is_google_connected(user.id, conn)
 
             # Build status based on connection state
@@ -424,24 +424,32 @@ async def get_google_status(
 
             if is_connected:
                 # Check for calendar scopes to determine if re-consent is needed
+                # Fetch specific account email
+                email = await oauth_service.get_connected_google_account_email(
+                    user.id, conn
+                )
+
                 from sqlalchemy import text
 
                 stmt = text("""
                     SELECT granted_scopes
                     FROM user_google_auth
-                    WHERE user_id = :user_id
+                    WHERE user_id = :user_id AND google_email = :email
                 """)
-                result = await conn.execute(stmt, {"user_id": str(user.id)})
-                rows = result.fetchall()
-                for row in rows:
-                    scopes = row.granted_scopes or ""
-                    # If any connected account doesn't have calendar scopes, they need to re-consent
+                result = await conn.execute(
+                    stmt, {"user_id": str(user.id), "email": email}
+                )
+                row = result.fetchone()
+                if row:
+                    scopes_str = row.granted_scopes or ""
+                    scopes = scopes_str.split()
+                    # If the connected account doesn't have calendar scopes, they need to re-consent
                     if (
-                        "calendar.events" not in scopes
-                        or "calendar.readonly" not in scopes
+                        "https://www.googleapis.com/auth/calendar.events" not in scopes
+                        or "https://www.googleapis.com/auth/calendar.readonly"
+                        not in scopes
                     ):
                         needs_reconsent = True
-                        break
 
                 repo = SyncJobRepository(conn)
 
@@ -477,7 +485,7 @@ async def get_google_status(
         )
     except Exception as e:
         logger.error(
-            "Failed to get Google Contacts status",
+            "Failed to get Google integration status",
             user_id=user.id,
             error=str(e),
             exc_info=True,
@@ -580,7 +588,7 @@ async def google_oauth_authorize(
     oauth_service: FromDishka[OAuthService],
 ) -> OAuthAuthorizeResponse:
     """
-    Initiate OAuth authorization flow for Google Contacts integration.
+    Initiate OAuth authorization flow for Google integration integration.
 
     This endpoint generates an OAuth authorization URL that the frontend
     can redirect to for connecting a Google account for contacts sync.
@@ -589,7 +597,7 @@ async def google_oauth_authorize(
         # Store the redirect URL in session for after OAuth completion
         request.session["integration_redirect_url"] = request_data.redirect_url
 
-        # Generate OAuth authorization URL for Google Contacts
+        # Generate OAuth authorization URL for Google integration
         # Use frontend callback URL for OAuth redirect
         base_url = str(request.base_url).rstrip("/")
         callback_url = f"{base_url}/auth/callback"
@@ -618,7 +626,7 @@ async def google_oauth_authorize(
         state = state_list[0]
 
         logger.info(
-            "Google Contacts OAuth authorization initiated",
+            "Google integration OAuth authorization initiated",
             user_id=user.id,
             redirect_url=request_data.redirect_url,
             has_state=True,
@@ -634,7 +642,7 @@ async def google_oauth_authorize(
         raise
     except Exception as e:
         logger.error(
-            "Failed to initiate Google Contacts OAuth",
+            "Failed to initiate Google integration OAuth",
             user_id=user.id,
             error=str(e),
             exc_info=True,
@@ -661,10 +669,10 @@ async def google_oauth_callback(
     google_token_service: FromDishka[GoogleTokenService],
 ) -> OAuthCallbackResponse:
     """
-    Handle OAuth callback for Google Contacts integration.
+    Handle OAuth callback for Google integration integration.
 
     This endpoint processes the OAuth callback and stores the tokens
-    for the authenticated user's Google Contacts integration.
+    for the authenticated user's Google integration integration.
     """
     try:
         # Handle the OAuth callback and store tokens
@@ -693,7 +701,7 @@ async def google_oauth_callback(
         if not granted_scopes:
             from app.infrastructure.auth.oauth_service import GOOGLE_SCOPE
 
-            granted_scopes = " ".join(GOOGLE_SCOPE)
+            granted_scopes = GOOGLE_SCOPE
 
         await google_token_service.store_tokens(
             user_id=user.id,
@@ -717,7 +725,7 @@ async def google_oauth_callback(
 
         return OAuthCallbackResponse(
             success=True,
-            message="Google Contacts connected successfully",
+            message="Google integration connected successfully",
             redirect_url=redirect_url,
         )
 
@@ -734,7 +742,7 @@ async def google_oauth_callback(
         ) from e
     except Exception as e:
         logger.error(
-            "Failed to handle Google Contacts OAuth callback",
+            "Failed to handle Google integration OAuth callback",
             user_id=user.id,
             error=str(e),
             exc_info=True,
@@ -759,17 +767,17 @@ async def google_oauth_disconnect(
     db_manager: FromDishka[IntegrationDatabaseManager],
 ) -> OAuthDisconnectResponse:
     """
-    Disconnect Google Contacts integration for the authenticated user.
+    Disconnect Google integration integration for the authenticated user.
 
     This endpoint removes the stored OAuth tokens and disconnects
-    the Google Contacts integration.
+    the Google integration integration.
     """
     try:
         # Get database connection
         async with db_manager.get_session() as session:
             connection = await session.connection()
 
-            # Disconnect the Google Contacts integration
+            # Disconnect the Google integration integration
             success = await oauth_service.disconnect_google(user.id, connection)
 
             # Commit the transaction
@@ -777,26 +785,26 @@ async def google_oauth_disconnect(
 
         if success:
             logger.info(
-                "Google Contacts OAuth disconnected successfully",
+                "Google integration OAuth disconnected successfully",
                 user_id=user.id,
             )
             return OAuthDisconnectResponse(
                 success=True,
-                message="Google Contacts disconnected successfully",
+                message="Google integration disconnected successfully",
             )
         else:
             logger.info(
-                "No Google Contacts connection found to disconnect",
+                "No Google integration connection found to disconnect",
                 user_id=user.id,
             )
             return OAuthDisconnectResponse(
                 success=False,
-                message="No Google Contacts connection found",
+                message="No Google integration connection found",
             )
 
     except ValueError as e:
         logger.error(
-            "Google Contacts disconnect validation error",
+            "Google integration disconnect validation error",
             user_id=user.id,
             error=str(e),
             exc_info=True,
@@ -807,12 +815,12 @@ async def google_oauth_disconnect(
         ) from e
     except Exception as e:
         logger.error(
-            "Failed to disconnect Google Contacts",
+            "Failed to disconnect Google integration",
             user_id=user.id,
             error=str(e),
             exc_info=True,
         )
         raise HTTPException(
             status_code=500,
-            detail="Failed to disconnect Google Contacts",
+            detail="Failed to disconnect Google integration",
         ) from e

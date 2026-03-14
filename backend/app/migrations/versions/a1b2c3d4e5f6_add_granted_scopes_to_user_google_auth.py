@@ -1,7 +1,7 @@
 """add granted_scopes to user_google_auth
 
-Revision ID: 0030
-Revises: 0029
+Revision ID: a1b2c3d4e5f6
+Revises: 285cd30b6c39
 Create Date: 2026-03-13 22:29:47.389164
 
 """
@@ -12,8 +12,8 @@ import sqlalchemy as sa
 from alembic import op
 
 # revision identifiers, used by Alembic.
-revision: str = "0030"
-down_revision: str | None = "0029"
+revision: str = "a1b2c3d4e5f6"
+down_revision: str | None = "285cd30b6c39"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
