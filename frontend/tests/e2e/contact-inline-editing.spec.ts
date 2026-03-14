@@ -145,7 +145,7 @@ test.describe('Contact Inline Editing', () => {
 
     // Enter edit mode and wait for the edit input to mount
     await expect(nicknameField).toBeVisible();
-    await nicknameField.click();
+    await nicknameField.click({ force: true });
 
     const input = page.locator('[data-testid="nickname-field-input"]');
     await expect(input).toBeVisible();

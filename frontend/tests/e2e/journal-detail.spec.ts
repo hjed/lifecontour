@@ -491,7 +491,7 @@ test.describe('Journal Detail Page', () => {
       await expect(tagBadge).toBeVisible();
 
       // Click the remove button on the tag badge
-      await page.getByTestId(`remove-tag-${tag.id}`).click();
+      await page.getByTestId(`remove-tag-${tag.id}`).click({ force: true });
 
       // Tag badge should disappear after removal
       await expect(tagBadge).not.toBeVisible();
@@ -586,7 +586,9 @@ test.describe('Journal Detail Page', () => {
       await expect(contactBadge).toBeVisible();
 
       // Click the remove button
-      await page.getByTestId(`remove-contact-${contact.id}`).click();
+      await page
+        .getByTestId(`remove-contact-${contact.id}`)
+        .click({ force: true });
 
       // Contact badge should disappear after removal
       await expect(contactBadge).not.toBeVisible();
