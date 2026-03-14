@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useEffect } from 'react';
+import { useMemo, useEffect, useRef } from 'react';
 import dynamic from 'next/dynamic';
 import { Card } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -83,9 +83,16 @@ export function GPXTrackDisplay({
     return { tracks: parsedTracks, errors: parseErrors };
   }, [routesResponse?.data]);
 
+  const toastedErrorsRef = useRef<Set<string>>(new Set());
+
   useEffect(() => {
     if (errors && errors.length > 0) {
-      errors.forEach(err => toast.error(err));
+      errors.forEach(err => {
+        if (!toastedErrorsRef.current.has(err)) {
+          toast.error(err);
+          toastedErrorsRef.current.add(err);
+        }
+      });
     }
   }, [errors]);
 

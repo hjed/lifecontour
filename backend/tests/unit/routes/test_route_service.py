@@ -6,7 +6,6 @@ from uuid import UUID, uuid4
 import pytest
 from core_shared.models import Route
 from core_shared.models.journals import (
-    RouteInUseError,
     RouteNotFoundError,
     RouteValidationError,
 )

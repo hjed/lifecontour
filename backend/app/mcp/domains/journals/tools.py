@@ -29,7 +29,6 @@ from core_shared.models.journals import (
     JournalContactRelationshipType,
     JournalNotFoundError,
     JournalType,
-    JournalValidationError,
     KayakingData,
     MoodData,
     OutdoorActivityData,
@@ -87,7 +86,6 @@ from app.core.journal.adapters.sql.photo_album_data_repository import (
 from app.core.journal.adapters.sql.plan_data_repository import SqlPlanDataRepository
 from app.core.journal.adapters.sql.route_repository import SqlRouteRepository
 from app.core.journal.adapters.sql.travel_data_repository import SqlTravelDataRepository
-
 from app.core.journal.models.journal_tag import JournalTag
 from app.core.journal.services.journal_service import JournalService
 from app.infrastructure.events.outbox_event_publisher import OutboxEventPublisher

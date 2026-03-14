@@ -6,7 +6,6 @@ from uuid import UUID
 import structlog
 from core_shared.models import Route
 from core_shared.models.journals import (
-    RouteInUseError,
     RouteNotFoundError,
     RouteValidationError,
 )

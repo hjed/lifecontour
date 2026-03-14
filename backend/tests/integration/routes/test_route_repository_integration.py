@@ -9,8 +9,9 @@ from core_shared.models.route import Route
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 if TYPE_CHECKING:
+    from core_shared.models.journals import Journal
+
     from app.core.journal.adapters.sql.journal_repository import SqlJournalRepository
-    from app.core.journal.models.entities import Journal
 
 from app.core.journal.adapters.sql.route_repository import SqlRouteRepository
 
@@ -37,8 +38,7 @@ async def test_journal(journal_repository: "SqlJournalRepository") -> "Journal":
     """Create a test journal."""
     from datetime import UTC, datetime, timedelta
 
-    from app.core.journal.models.entities import Journal
-    from app.core.journal.models.value_objects import EventDateRange
+    from core_shared.models.journals import EventDateRange, Journal
 
     now = datetime.now(UTC)
     journal = Journal(

@@ -497,7 +497,9 @@ export function JournalCreateForm({ onCancel }: JournalCreateFormProps = {}) {
         | undefined;
       if (fitnessData?.pending_routes) {
         pendingRoutes = [...fitnessData.pending_routes];
-        delete fitnessData.pending_routes;
+        submittedTypeData[JournalType.FITNESS] = { ...fitnessData };
+        delete (submittedTypeData[JournalType.FITNESS] as FitnessData)
+          .pending_routes;
       }
 
       const result = await createJournal({
@@ -514,7 +516,6 @@ export function JournalCreateForm({ onCancel }: JournalCreateFormProps = {}) {
       });
 
       // Upload pending routes sequentially now that we have a journal ID
-      let hadRouteUploadError = false;
       for (const route of pendingRoutes) {
         try {
           await createRoute({
@@ -527,14 +528,10 @@ export function JournalCreateForm({ onCancel }: JournalCreateFormProps = {}) {
           });
         } catch (error) {
           console.error(`Failed to upload GPX track: ${route.name}`, error);
-          toast.error(`Failed to upload GPX track: ${route.name}`);
-          hadRouteUploadError = true;
+          toast.error(
+            `Journal created, but failed to upload GPX track: ${route.name}`
+          );
         }
-      }
-
-      if (hadRouteUploadError) {
-        // Return without redirecting so the user can see the error
-        return;
       }
 
       router.push(`/journals/${result.data.id}` as Route);

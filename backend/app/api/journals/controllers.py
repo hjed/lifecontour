@@ -1399,6 +1399,7 @@ async def _process_journal_contact_relationships(
     journal_id: int,
     contacts_data: list[dict[str, Any]],
     contact_relationship_repo: JournalContactRelationshipRepository,
+    connection: AsyncConnection,
 ) -> None:
     """
     Process and create contact relationships for a journal.
@@ -1407,6 +1408,7 @@ async def _process_journal_contact_relationships(
         journal_id: The ID of the journal
         contacts_data: List of contact relationship data
         contact_relationship_repo: Repository for contact relationships
+        connection: Active database connection to manage savepoints
     """
     for contact_data in contacts_data:
         try:
@@ -1419,15 +1421,31 @@ async def _process_journal_contact_relationships(
                     attrs["relationship_type"]
                 ]
 
-                # Create the relationship
+                # Create the relationship using a nested transaction (savepoint)
+                # to prevent aborting the main transaction if
+                # a contact is missing or a unique constraint is violated.
                 relationship = JournalContactRelationship(
                     journal_id=journal_id,
                     contact_id=contact_id,
                     relationship_type=relationship_type,
                 )
-                await contact_relationship_repo.create(relationship)
-        except (ValueError, KeyError, AttributeError, IntegrityError):
-            # Invalid contact relationship, skip
+                async with connection.begin_nested() as savepoint:
+                    try:
+                        await contact_relationship_repo.create(relationship)
+                    except IntegrityError:
+                        # Log error and rollback this savepoint, but keep main transaction alive
+                        import structlog
+
+                        logger = structlog.get_logger()
+                        logger.warning(
+                            "Invalid journal contact relationship ignored",
+                            journal_id=journal_id,
+                            contact_id=contact_id,
+                        )
+                        await savepoint.rollback()
+
+        except (ValueError, KeyError, AttributeError):
+            # Invalid contact relationship payload, skip
             pass
 
 
@@ -1528,6 +1546,7 @@ async def create_journal(
                 journal_id,
                 contacts_data,
                 contact_relationship_repo,
+                connection,
             )
 
     # Fetch all enrichment data
