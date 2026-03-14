@@ -105,22 +105,6 @@ class TestJoggingDataRepositorySave:
         assert saved.created_at is not None
         assert saved.updated_at is not None
 
-    async def test_save_with_route_id(
-        self,
-        jogging_repository: SqlJoggingDataRepository,
-        test_journal: Journal,
-        test_route: Route,
-    ):
-        """Test creating jogging data with a route reference."""
-        data = JoggingData(
-            journal_id=test_journal.id,  # type: ignore[arg-type]
-            pace=300,  # 5 min/km
-        )
-
-        saved = await jogging_repository.save(data)
-
-        assert saved.pace == 300
-
     async def test_save_updates_existing_data(
         self,
         jogging_repository: SqlJoggingDataRepository,
@@ -172,22 +156,6 @@ class TestJoggingDataRepositoryFind:
         found = await jogging_repository.find_by_journal_id(99999)
 
         assert found is None
-
-    async def test_find_preserves_route_id(
-        self,
-        jogging_repository: SqlJoggingDataRepository,
-        test_journal: Journal,
-        test_route: Route,
-    ):
-        """Test that route_id is correctly persisted and retrieved."""
-        data = JoggingData(
-            journal_id=test_journal.id,  # type: ignore[arg-type]
-        )
-        await jogging_repository.save(data)
-
-        found = await jogging_repository.find_by_journal_id(test_journal.id)  # type: ignore[arg-type]
-
-        assert found is not None
 
 
 @pytest.mark.integration

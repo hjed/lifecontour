@@ -87,6 +87,7 @@ from app.core.journal.adapters.sql.photo_album_data_repository import (
 from app.core.journal.adapters.sql.plan_data_repository import SqlPlanDataRepository
 from app.core.journal.adapters.sql.route_repository import SqlRouteRepository
 from app.core.journal.adapters.sql.travel_data_repository import SqlTravelDataRepository
+
 from app.core.journal.models.journal_tag import JournalTag
 from app.core.journal.services.journal_service import JournalService
 from app.infrastructure.events.outbox_event_publisher import OutboxEventPublisher
@@ -886,7 +887,6 @@ def _build_fitness_data(fitness_data: Any) -> dict[str, Any]:
         "elevation_loss": fitness_data.elevation_loss,
         "duration": fitness_data.duration,
         "calories": fitness_data.calories,
-        "gpx_track_data": fitness_data.gpx_track_data,
         "strava_activity_id": fitness_data.strava_activity_id,
     }
 
@@ -905,9 +905,6 @@ def _build_outdoor_activity_data(outdoor_activity_data: Any) -> dict[str, Any]:
 def _build_bushwalking_data(bushwalking_data: Any) -> dict[str, Any]:
     """Build bushwalking data dictionary."""
     return {
-        "route_id": str(bushwalking_data.route_id)
-        if bushwalking_data.route_id
-        else None,
         "track_grading": bushwalking_data.track_grading,
     }
 
@@ -915,7 +912,6 @@ def _build_bushwalking_data(bushwalking_data: Any) -> dict[str, Any]:
 def _build_jogging_data(jogging_data: Any) -> dict[str, Any]:
     """Build jogging data dictionary."""
     return {
-        "route_id": str(jogging_data.route_id) if jogging_data.route_id else None,
         "pace": jogging_data.pace,
     }
 
@@ -931,7 +927,6 @@ def _build_abseiling_data(abseiling_data: Any) -> dict[str, Any]:
 def _build_canyoning_data(canyoning_data: Any) -> dict[str, Any]:
     """Build canyoning data dictionary."""
     return {
-        "route_id": str(canyoning_data.route_id) if canyoning_data.route_id else None,
         "french_grade": canyoning_data.french_grade,
         "water_guage_name": canyoning_data.water_guage_name,
         "water_guage_level": canyoning_data.water_guage_level,
@@ -944,7 +939,6 @@ def _build_canyoning_data(canyoning_data: Any) -> dict[str, Any]:
 def _build_climbing_data(climbing_data: Any) -> dict[str, Any]:
     """Build climbing data dictionary."""
     return {
-        "route_id": str(climbing_data.route_id) if climbing_data.route_id else None,
         "climbing_type": climbing_data.climbing_type,
         "grade": climbing_data.grade,
         "length": climbing_data.length,
@@ -954,7 +948,6 @@ def _build_climbing_data(climbing_data: Any) -> dict[str, Any]:
 def _build_kayaking_data(kayaking_data: Any) -> dict[str, Any]:
     """Build kayaking data dictionary."""
     return {
-        "route_id": str(kayaking_data.route_id) if kayaking_data.route_id else None,
         "water_type": kayaking_data.water_type,
     }
 
@@ -964,9 +957,6 @@ def _build_cross_country_skiing_data(
 ) -> dict[str, Any]:
     """Build cross-country skiing data dictionary."""
     return {
-        "route_id": str(cross_country_skiing_data.route_id)
-        if cross_country_skiing_data.route_id
-        else None,
         "snow_conditions": cross_country_skiing_data.snow_conditions,
     }
 
@@ -1278,7 +1268,6 @@ async def _update_fitness_data(
             "elevation_loss",
             "duration",
             "calories",
-            "gpx_track_data",
             "strava_activity_id",
         ]:
             if field in type_data_dict:
@@ -1307,19 +1296,6 @@ async def _update_outdoor_activity_data(
         await outdoor_activity_data_repo.save(validated_outdoor)
 
 
-def _parse_route_id(type_data_dict: dict[str, Any], updates: dict[str, Any]) -> None:
-    if "route_id" in type_data_dict:
-        route_id_val = type_data_dict["route_id"]
-        try:
-            updates["route_id"] = (
-                UUID(route_id_val) if isinstance(route_id_val, str) else route_id_val
-            )
-        except ValueError as e:
-            raise JournalValidationError(
-                "route_id", f"Invalid UUID format: {route_id_val}"
-            ) from e
-
-
 async def _update_bushwalking_data(
     journal_id: int,
     type_data_dict: dict[str, Any],
@@ -1330,7 +1306,6 @@ async def _update_bushwalking_data(
         bw_updates: dict[str, Any] = {}
         if "track_grading" in type_data_dict:
             bw_updates["track_grading"] = type_data_dict["track_grading"]
-        _parse_route_id(type_data_dict, bw_updates)
         validated_bushwalking = dataclasses.replace(existing_bushwalking, **bw_updates)
         await bushwalking_data_repo.save(validated_bushwalking)
 
@@ -1345,7 +1320,6 @@ async def _update_jogging_data(
         jog_updates: dict[str, Any] = {}
         if "pace" in type_data_dict:
             jog_updates["pace"] = type_data_dict["pace"]
-        _parse_route_id(type_data_dict, jog_updates)
         validated_jogging = dataclasses.replace(existing_jogging, **jog_updates)
         await jogging_data_repo.save(validated_jogging)
 
@@ -1374,7 +1348,6 @@ async def _update_canyoning_data(
     existing_canyoning = await canyoning_data_repo.find_by_journal_id(journal_id)
     if existing_canyoning:
         can_updates: dict[str, Any] = {}
-        _parse_route_id(type_data_dict, can_updates)
         for field in [
             "french_grade",
             "water_guage_name",
@@ -1397,7 +1370,6 @@ async def _update_climbing_data(
     existing_climbing = await climbing_data_repo.find_by_journal_id(journal_id)
     if existing_climbing:
         clb_updates: dict[str, Any] = {}
-        _parse_route_id(type_data_dict, clb_updates)
         for field in ["climbing_type", "grade", "length"]:
             if field in type_data_dict:
                 clb_updates[field] = type_data_dict[field]
@@ -1413,7 +1385,6 @@ async def _update_kayaking_data(
     existing_kayaking = await kayaking_data_repo.find_by_journal_id(journal_id)
     if existing_kayaking:
         kayaking_updates: dict[str, Any] = {}
-        _parse_route_id(type_data_dict, kayaking_updates)
         if "water_type" in type_data_dict:
             kayaking_updates["water_type"] = type_data_dict["water_type"]
         validated_kayaking = dataclasses.replace(existing_kayaking, **kayaking_updates)
@@ -1430,7 +1401,6 @@ async def _update_cross_country_skiing_data(
     )
     if existing_skiing:
         skiing_updates: dict[str, Any] = {}
-        _parse_route_id(type_data_dict, skiing_updates)
         if "snow_conditions" in type_data_dict:
             skiing_updates["snow_conditions"] = type_data_dict["snow_conditions"]
         validated_skiing = dataclasses.replace(existing_skiing, **skiing_updates)

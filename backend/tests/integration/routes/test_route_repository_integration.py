@@ -1,11 +1,16 @@
 """Integration tests for SqlRouteRepository with real database."""
 
+from typing import TYPE_CHECKING
 from uuid import uuid4
 
 import pytest
 import pytest_asyncio
 from core_shared.models.route import Route
 from sqlalchemy.ext.asyncio import AsyncConnection
+
+if TYPE_CHECKING:
+    from app.core.journal.adapters.sql.journal_repository import SqlJournalRepository
+    from app.core.journal.models.entities import Journal
 
 from app.core.journal.adapters.sql.route_repository import SqlRouteRepository
 
@@ -14,17 +19,48 @@ from app.core.journal.adapters.sql.route_repository import SqlRouteRepository
 async def route_repository(
     async_connection: AsyncConnection,
 ) -> SqlRouteRepository:
-    """Create a route repository for testing."""
     return SqlRouteRepository(async_connection)
 
 
+@pytest_asyncio.fixture
+async def journal_repository(
+    async_connection: AsyncConnection,
+) -> "SqlJournalRepository":
+    """Create a journal repository for testing."""
+    from app.core.journal.adapters.sql.journal_repository import SqlJournalRepository
+
+    return SqlJournalRepository(async_connection)
+
+
+@pytest_asyncio.fixture
+async def test_journal(journal_repository: "SqlJournalRepository") -> "Journal":
+    """Create a test journal."""
+    from datetime import UTC, datetime, timedelta
+
+    from app.core.journal.models.entities import Journal
+    from app.core.journal.models.value_objects import EventDateRange
+
+    now = datetime.now(UTC)
+    journal = Journal(
+        user_id="test-user-123",
+        title="Test Journal",
+        content="Test content",
+        event_date_range=EventDateRange(
+            start=now,
+            end=now + timedelta(hours=1),
+        ),
+    )
+    return await journal_repository.save(journal)
+
+
 def create_test_route(
-    journal_id: int = 1,
+    journal_id: int | None = 1,
     name: str = "Test Route",
     description: str | None = "A test route",
     gpx_data: str | None = None,
 ) -> Route:
     """Helper to create a test route."""
+    assert journal_id is not None
     return Route(
         journal_id=journal_id,
         name=name,
@@ -37,26 +73,28 @@ def create_test_route(
 class TestRouteRepositorySave:
     """Test route save operations."""
 
-    async def test_save_creates_new_route(self, route_repository: SqlRouteRepository):
+    async def test_save_creates_new_route(
+        self, route_repository: SqlRouteRepository, test_journal: "Journal"
+    ):
         """Test creating a new route."""
-        route = create_test_route()
+        route = create_test_route(journal_id=test_journal.id)
 
         saved = await route_repository.save(route)
 
         assert saved.id is not None
-        assert saved.journal_id == 1
+        assert saved.journal_id == test_journal.id
         assert saved.name == "Test Route"
         assert saved.description == "A test route"
         assert saved.created_at is not None
         assert saved.updated_at is not None
 
     async def test_save_updates_existing_route(
-        self, route_repository: SqlRouteRepository
+        self, route_repository: SqlRouteRepository, test_journal: "Journal"
     ):
         """Test updating an existing route."""
         import asyncio
 
-        route = create_test_route()
+        route = create_test_route(journal_id=test_journal.id)
         saved = await route_repository.save(route)
 
         # Save the original updated_at timestamp before updating
@@ -78,12 +116,14 @@ class TestRouteRepositorySave:
         assert original_updated_at is not None
         assert updated.updated_at > original_updated_at
 
-    async def test_save_route_with_gpx_data(self, route_repository: SqlRouteRepository):
+    async def test_save_route_with_gpx_data(
+        self, route_repository: SqlRouteRepository, test_journal: "Journal"
+    ):
         """Test saving a route with GPX data."""
         gpx_data = (
             '<?xml version="1.0"?><gpx version="1.1"><trk><name>Test</name></trk></gpx>'
         )
-        route = create_test_route(gpx_data=gpx_data)
+        route = create_test_route(journal_id=test_journal.id, gpx_data=gpx_data)
 
         saved = await route_repository.save(route)
 
@@ -95,9 +135,11 @@ class TestRouteRepositorySave:
 class TestRouteRepositoryFindById:
     """Test route find by ID operations."""
 
-    async def test_find_by_id_returns_route(self, route_repository: SqlRouteRepository):
+    async def test_find_by_id_returns_route(
+        self, route_repository: SqlRouteRepository, test_journal: "Journal"
+    ):
         """Test finding a route by ID."""
-        route = create_test_route()
+        route = create_test_route(journal_id=test_journal.id)
         saved = await route_repository.save(route)
 
         found = await route_repository.find_by_id(saved.id)  # type: ignore[arg-type]
@@ -119,9 +161,11 @@ class TestRouteRepositoryFindById:
 class TestRouteRepositoryDelete:
     """Test route delete operations."""
 
-    async def test_delete_removes_route(self, route_repository: SqlRouteRepository):
+    async def test_delete_removes_route(
+        self, route_repository: SqlRouteRepository, test_journal: "Journal"
+    ):
         """Test deleting a route."""
-        route = create_test_route()
+        route = create_test_route(journal_id=test_journal.id)
         saved = await route_repository.save(route)
 
         await route_repository.delete(saved.id)  # type: ignore[arg-type]

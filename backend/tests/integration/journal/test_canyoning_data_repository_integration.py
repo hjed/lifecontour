@@ -120,22 +120,6 @@ class TestCanyoningDataRepositorySave:
         assert saved.created_at is not None
         assert saved.updated_at is not None
 
-    async def test_save_with_route_id(
-        self,
-        canyoning_repository: SqlCanyoningDataRepository,
-        test_journal: Journal,
-        test_route: Route,
-    ):
-        """Test creating canyoning data with a route reference."""
-        data = CanyoningData(
-            journal_id=test_journal.id,  # type: ignore[arg-type]
-            french_grade="v4a3II",
-        )
-
-        saved = await canyoning_repository.save(data)
-
-        assert saved.french_grade == "v4a3II"
-
     async def test_save_updates_existing_data(
         self,
         canyoning_repository: SqlCanyoningDataRepository,
@@ -196,22 +180,6 @@ class TestCanyoningDataRepositoryFind:
         found = await canyoning_repository.find_by_journal_id(99999)
 
         assert found is None
-
-    async def test_find_preserves_route_id(
-        self,
-        canyoning_repository: SqlCanyoningDataRepository,
-        test_journal: Journal,
-        test_route: Route,
-    ):
-        """Test that route_id is correctly persisted and retrieved."""
-        data = CanyoningData(
-            journal_id=test_journal.id,  # type: ignore[arg-type]
-        )
-        await canyoning_repository.save(data)
-
-        found = await canyoning_repository.find_by_journal_id(test_journal.id)  # type: ignore[arg-type]
-
-        assert found is not None
 
 
 @pytest.mark.integration

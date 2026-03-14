@@ -105,22 +105,6 @@ class TestKayakingDataRepositorySave:
         assert saved.created_at is not None
         assert saved.updated_at is not None
 
-    async def test_save_with_route_id(
-        self,
-        kayaking_repository: SqlKayakingDataRepository,
-        test_journal: Journal,
-        test_route: Route,
-    ):
-        """Test creating kayaking data with a route reference."""
-        data = KayakingData(
-            journal_id=test_journal.id,  # type: ignore[arg-type]
-            water_type="lake",
-        )
-
-        saved = await kayaking_repository.save(data)
-
-        assert saved.water_type == "lake"
-
     async def test_save_updates_existing_data(
         self,
         kayaking_repository: SqlKayakingDataRepository,
@@ -172,22 +156,6 @@ class TestKayakingDataRepositoryFind:
         found = await kayaking_repository.find_by_journal_id(99999)
 
         assert found is None
-
-    async def test_find_preserves_route_id(
-        self,
-        kayaking_repository: SqlKayakingDataRepository,
-        test_journal: Journal,
-        test_route: Route,
-    ):
-        """Test that route_id is correctly persisted and retrieved."""
-        data = KayakingData(
-            journal_id=test_journal.id,  # type: ignore[arg-type]
-        )
-        await kayaking_repository.save(data)
-
-        found = await kayaking_repository.find_by_journal_id(test_journal.id)  # type: ignore[arg-type]
-
-        assert found is not None
 
 
 @pytest.mark.integration
