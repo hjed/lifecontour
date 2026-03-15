@@ -2483,11 +2483,36 @@ async def sync_calendar_events(
                             metrics["events_skipped"] += 1
                             continue
 
-                        # Transform to journal data
+                        # Handle cancellation: mark linked journal as cancelled
+                        if action == InboundSyncAction.CANCEL_JOURNAL:
+                            existing_journal_id = (
+                                existing_link.journal_id if existing_link else None
+                            )
+                            outbox_event = OutboxEvent.create_journal_sync_event(
+                                journal_data={},
+                                calendar_info_data={},
+                                integration_source="google",
+                                external_event_id=google_event.id,
+                                calendar_id=str(calendar_id),
+                                sync_action="cancelled",
+                                etag=google_event.etag,
+                                existing_journal_id=existing_journal_id,
+                                contact_relationships=[],
+                            )
+                            session.add(outbox_event)
+                            metrics["events_cancelled"] = (
+                                metrics.get("events_cancelled", 0) + 1
+                            )
+                            metrics["events_processed"] += 1
+                            continue
+
                         import uuid
 
                         transform_result = transformer.transform_event(
-                            google_event, str(user_id), uuid.UUID(str(calendar_id))
+                            google_event,
+                            str(user_id),
+                            uuid.UUID(str(calendar_id)),
+                            self_email=google_account_email,
                         )
                         if transform_result is None:
                             metrics["events_skipped"] += 1
@@ -2513,6 +2538,9 @@ async def sync_calendar_events(
                             "end_time": calendar_info.end_time.isoformat()
                             if calendar_info.end_time
                             else None,
+                            "event_state": calendar_info.event_state.value
+                            if hasattr(calendar_info.event_state, "value")
+                            else calendar_info.event_state,
                         }
 
                         # Extract attendee emails as contact relationships

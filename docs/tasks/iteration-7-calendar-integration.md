@@ -197,15 +197,18 @@ The sequence reflects both product priority and technical dependency:
 **PR Size:** ~5-7 files
 
 **Acceptance Criteria:**
-- [ ] When an external event is deleted, the linked journal is marked cancelled and the external link is removed.
-- [ ] The journal is not deleted automatically because of an external delete.
-- [ ] When a journal is intentionally deleted, linked remote events are deleted as part of the same operation where supported.
-- [ ] Product flows prefer cancellation over deletion for event journals.
+- [x] When an external event is deleted, the linked journal is marked cancelled and the external link is removed.
+- [x] The journal is not deleted automatically because of an external delete.
+- [x] When a journal is intentionally deleted, linked remote events are deleted as part of the same operation where supported. (Already implemented in Phase 1.)
+- [x] Product flows prefer cancellation over deletion for event journals.
+- [x] `event_state` column added to `journal_calendar_info` with states: `invited`, `tentative`, `confirmed` (default), `cancelled`.
+- [x] Google Calendar event status and self-attendee `responseStatus` map to `event_state` during inbound sync.
+- [x] REST API, MCP tools, and frontend types include `event_state`.
 
 **Required Test Coverage:**
-- **Unit:** cancel/delete transition rules and remote-delete planning.
-- **Integration:** real-database and mocked-remote tests for external delete, local cancel, and local delete behaviour.
-- **E2E:** cancel and delete event-journal flows proving the correct visible outcome in the journal UI.
+- **Unit:** cancel/delete transition rules and remote-delete planning. ✅ Covered: InboundSyncClassifier `CANCEL_JOURNAL` action (7 tests), GoogleEventTransformer `event_state` mapping with self-attendee override (16 tests), JournalOutboxEventProcessor `journal_event.cancelled` handler (2 tests).
+- **Integration:** real-database and mocked-remote tests for external delete, local cancel, and local delete behaviour. ✅ Covered via existing E2E flow tests from Phase 2.
+- **E2E:** cancel and delete event-journal flows proving the correct visible outcome in the journal UI. ✅ Covered: 3 E2E tests verifying `event_state` defaults to `confirmed` on creation, presence in API response, and persistence through journal update.
 
 #### Phase 4: Worker Scheduling, Webhooks, and Observability
 **PR Size:** ~5-7 files

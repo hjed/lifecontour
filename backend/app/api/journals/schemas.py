@@ -53,6 +53,10 @@ class CalendarInfoDataSchema(BaseModel):
     sync_invitees: bool = Field(
         default=False, description="Whether to sync invitees with calendar"
     )
+    event_state: str | None = Field(
+        default=None,
+        description="Event participation state (invited, tentative, confirmed, cancelled)",
+    )
 
 
 class MoodDataSchema(BaseModel):

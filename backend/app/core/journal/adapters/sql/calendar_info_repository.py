@@ -11,6 +11,7 @@ from core_shared.models.journals import (
     CalendarInfo,
     CalendarInfoValidationError,
 )
+from core_shared.models.journals.event_state import EventState
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
@@ -30,6 +31,7 @@ def project_calendar_info_to_linked_calendar(
         is_all_day=calendar_info.is_all_day,
         location=calendar_info.location,
         sync_invitees=calendar_info.sync_invitees,
+        event_state=calendar_info.event_state,
         created_at=calendar_info.created_at,
         updated_at=calendar_info.updated_at,
     )
@@ -52,6 +54,7 @@ class SqlCalendarInfoRepository(CalendarInfoRepository):
             is_all_day=row.is_all_day,
             location=row.location,
             sync_invitees=row.sync_invitees,
+            event_state=EventState(row.event_state),
             created_at=row.created_at,
             updated_at=row.updated_at,
         )
@@ -61,7 +64,7 @@ class SqlCalendarInfoRepository(CalendarInfoRepository):
         query = text(
             """
             SELECT journal_id, calendar_id, start_time, end_time,
-                   is_all_day, location, sync_invitees,
+                   is_all_day, location, sync_invitees, event_state,
                    created_at, updated_at
             FROM journal_calendar_info
             WHERE journal_id = :journal_id
@@ -103,14 +106,14 @@ class SqlCalendarInfoRepository(CalendarInfoRepository):
             """
             INSERT INTO journal_calendar_info (
                 journal_id, calendar_id, start_time, end_time,
-                is_all_day, location, sync_invitees
+                is_all_day, location, sync_invitees, event_state
             )
             VALUES (
                 :journal_id, :calendar_id, :start_time, :end_time,
-                :is_all_day, :location, :sync_invitees
+                :is_all_day, :location, :sync_invitees, :event_state
             )
             RETURNING journal_id, calendar_id, start_time, end_time,
-                      is_all_day, location, sync_invitees,
+                      is_all_day, location, sync_invitees, event_state,
                       created_at, updated_at
             """
         )
@@ -124,6 +127,7 @@ class SqlCalendarInfoRepository(CalendarInfoRepository):
                 "is_all_day": calendar_info.is_all_day,
                 "location": calendar_info.location,
                 "sync_invitees": calendar_info.sync_invitees,
+                "event_state": calendar_info.event_state.value,
             },
         )
         row = result.fetchone()
@@ -140,10 +144,11 @@ class SqlCalendarInfoRepository(CalendarInfoRepository):
                 is_all_day = :is_all_day,
                 location = :location,
                 sync_invitees = :sync_invitees,
+                event_state = :event_state,
                 updated_at = now()
             WHERE journal_id = :journal_id
             RETURNING journal_id, calendar_id, start_time, end_time,
-                      is_all_day, location, sync_invitees,
+                      is_all_day, location, sync_invitees, event_state,
                       created_at, updated_at
             """
         )
@@ -157,6 +162,7 @@ class SqlCalendarInfoRepository(CalendarInfoRepository):
                 "is_all_day": calendar_info.is_all_day,
                 "location": calendar_info.location,
                 "sync_invitees": calendar_info.sync_invitees,
+                "event_state": calendar_info.event_state.value,
             },
         )
         row = result.fetchone()
@@ -178,7 +184,7 @@ class SqlCalendarInfoRepository(CalendarInfoRepository):
         primary_query = text(
             """
             SELECT journal_id, calendar_id, start_time, end_time,
-                   is_all_day, location, sync_invitees,
+                   is_all_day, location, sync_invitees, event_state,
                    created_at, updated_at
             FROM journal_calendar_info
             WHERE calendar_id = :calendar_id
@@ -195,7 +201,7 @@ class SqlCalendarInfoRepository(CalendarInfoRepository):
         linked_query = text(
             """
             SELECT jci.journal_id, jci.calendar_id, jci.start_time, jci.end_time,
-                   jci.is_all_day, jci.location, jci.sync_invitees,
+                   jci.is_all_day, jci.location, jci.sync_invitees, jci.event_state,
                    jci.created_at, jci.updated_at,
                    jeel.calendar_id AS linked_calendar_id
             FROM journal_external_event_links jeel

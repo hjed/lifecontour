@@ -639,6 +639,163 @@ test.describe('Journal Detail Page', () => {
     });
   });
 
+  test.describe('Event State', () => {
+    test('should default event_state to confirmed on event journal creation', async ({
+      authenticatedPage,
+      testCleanup,
+    }) => {
+      const page = authenticatedPage;
+      const dataManager = new TestDataManager(page);
+
+      const calendars = await dataManager.createCalendars([
+        { name: 'EventStateTest', color: '#3B82F6' },
+      ]);
+      const calendar = calendars[0];
+
+      const journal = await dataManager.createJournal({
+        title: 'Event State Default Test',
+        content: 'Testing event_state defaults to confirmed.',
+        event_date_range: {
+          start: '2026-03-20T10:00:00Z',
+          end: '2026-03-20T11:00:00Z',
+        },
+        types: ['event'],
+        type_data: {
+          event: {
+            calendar_id: calendar.id,
+            is_all_day: false,
+            sync_invitees: false,
+          },
+        },
+      });
+
+      testCleanup(async () => await dataManager.cleanup());
+
+      // Fetch the journal via API and verify event_state
+      const response = await page.request.get(`/api/journals/${journal.id}`);
+      expect(response.ok()).toBe(true);
+
+      const responseData = await response.json();
+      const typeData = responseData.data.attributes.type_data;
+
+      expect(typeData).toBeDefined();
+      expect(typeData.event).toBeDefined();
+      expect(typeData.event.event_state).toBe('confirmed');
+    });
+
+    test('should return event_state in API response for event journal detail page', async ({
+      authenticatedPage,
+      testCleanup,
+    }) => {
+      const page = authenticatedPage;
+      const dataManager = new TestDataManager(page);
+
+      const calendars = await dataManager.createCalendars([
+        { name: 'EventStateAPITest', color: '#10B981' },
+      ]);
+      const calendar = calendars[0];
+
+      const journal = await dataManager.createJournal({
+        title: 'Event State API Test',
+        content: 'Verifying event_state in API response.',
+        event_date_range: {
+          start: '2026-03-20T14:00:00Z',
+          end: '2026-03-20T15:00:00Z',
+        },
+        types: ['event'],
+        type_data: {
+          event: {
+            calendar_id: calendar.id,
+            is_all_day: false,
+            sync_invitees: false,
+            start_time: '14:00:00',
+            end_time: '15:00:00',
+            location: 'Test Location',
+          },
+        },
+      });
+
+      testCleanup(async () => await dataManager.cleanup());
+
+      // Navigate to the detail page via browser (full stack E2E)
+      await page.goto(`/journals/${journal.id}`);
+      await page.waitForLoadState('networkidle');
+
+      // Verify the journal loaded successfully
+      await expect(page.getByTestId('journal-title-field')).toContainText(
+        journal.title
+      );
+
+      // Intercept the API call made by the page to check type_data
+      const apiResponse = await page.request.get(`/api/journals/${journal.id}`);
+      const apiData = await apiResponse.json();
+
+      // Verify event_state is present and defaults to confirmed
+      const eventData = apiData.data.attributes.type_data?.event;
+      expect(eventData).toBeDefined();
+      expect(eventData.event_state).toBe('confirmed');
+      expect(eventData.calendar_id).toBe(calendar.id);
+      expect(eventData.location).toBe('Test Location');
+    });
+
+    test('should persist event_state through journal update', async ({
+      authenticatedPage,
+      testCleanup,
+    }) => {
+      const page = authenticatedPage;
+      const dataManager = new TestDataManager(page);
+
+      const calendars = await dataManager.createCalendars([
+        { name: 'EventStateUpdateTest', color: '#F59E0B' },
+      ]);
+      const calendar = calendars[0];
+
+      const journal = await dataManager.createJournal({
+        title: 'Event State Update Test',
+        content: 'Testing event_state persists through updates.',
+        event_date_range: {
+          start: '2026-03-20T09:00:00Z',
+          end: '2026-03-20T10:00:00Z',
+        },
+        types: ['event'],
+        type_data: {
+          event: {
+            calendar_id: calendar.id,
+            is_all_day: false,
+            sync_invitees: false,
+          },
+        },
+      });
+
+      testCleanup(async () => await dataManager.cleanup());
+
+      // Update the journal title via API
+      const updateResponse = await page.request.patch(
+        `/api/journals/${journal.id}`,
+        {
+          data: {
+            data: {
+              type: 'journals',
+              id: journal.id,
+              attributes: {
+                title: 'Updated Event State Test',
+              },
+            },
+          },
+        }
+      );
+      expect(updateResponse.ok()).toBe(true);
+
+      // Verify event_state is still confirmed after update
+      const getResponse = await page.request.get(`/api/journals/${journal.id}`);
+      const getData = await getResponse.json();
+      const eventData = getData.data.attributes.type_data?.event;
+
+      expect(eventData).toBeDefined();
+      expect(eventData.event_state).toBe('confirmed');
+    });
+  });
+
   test.describe('Mood Rating Editor', () => {
     test('should edit mood label and save', async ({
       authenticatedPage,

@@ -657,3 +657,68 @@ class TestJournalOutboxEventProcessor:
         journal_arg = mock_journal_service.update_journal.call_args[0][0]
         assert journal_arg.title == "Team Meeting"
         assert journal_arg.content == "Weekly sync"
+
+
+class TestJournalOutboxEventProcessorCancelled:
+    """Tests for journal_event.cancelled processing."""
+
+    @pytest.fixture
+    def mock_connection(self) -> AsyncMock:
+        return AsyncMock(spec=AsyncConnection)
+
+    @pytest.fixture
+    def mock_journal_service(self) -> AsyncMock:
+        return AsyncMock()
+
+    @pytest.fixture
+    def processor(
+        self, mock_journal_service: AsyncMock, mock_connection: AsyncMock
+    ) -> JournalOutboxEventProcessor:
+        return JournalOutboxEventProcessor(
+            journal_service=mock_journal_service,
+            connection=mock_connection,
+        )
+
+    @pytest.mark.asyncio
+    async def test_cancelled_event_updates_link_and_calendar_info(
+        self,
+        processor: JournalOutboxEventProcessor,
+        mock_connection: AsyncMock,
+    ) -> None:
+        """Cancelled event should update link sync_status and calendar_info event_state."""
+        event = _make_outbox_event(
+            event_type="journal_event.cancelled",
+            sync_action="cancelled",
+            existing_journal_id=42,
+        )
+
+        mock_connection.execute.return_value = _mock_empty_result()
+
+        result = await processor.process_event(event)
+
+        assert result["status"] == "success"
+        assert result["event_type"] == "journal_event.cancelled"
+        assert result["journal_id"] == 42
+
+        # Should have called execute twice: once for link update, once for calendar_info update
+        assert mock_connection.execute.call_count == 2
+
+    @pytest.mark.asyncio
+    async def test_cancelled_event_without_journal_id_skips(
+        self,
+        processor: JournalOutboxEventProcessor,
+        mock_connection: AsyncMock,
+    ) -> None:
+        """Cancelled event without existing_journal_id should be skipped."""
+        event = _make_outbox_event(
+            event_type="journal_event.cancelled",
+            sync_action="cancelled",
+            existing_journal_id=None,
+        )
+
+        result = await processor.process_event(event)
+
+        assert result["status"] == "skipped"
+        assert result["reason"] == "no_existing_journal_id"
+        # Should not have called execute at all
+        mock_connection.execute.assert_not_called()
