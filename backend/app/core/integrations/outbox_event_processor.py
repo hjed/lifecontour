@@ -300,7 +300,7 @@ class OutboxEventProcessor:
 
         incoming_tag_names = {tag["name"] for tag in incoming_tags}
         existing_contact_tags = existing_contact_tags or []
-        existing_tag_names = {tag.name for tag in existing_contact_tags}
+        existing_tag_names = {str(tag.name) for tag in existing_contact_tags}
 
         # Determine which tags were previously synced
         previously_synced_tags = set()
@@ -354,7 +354,9 @@ class OutboxEventProcessor:
             else:
                 from core_shared.models.contacts.value_objects import TagName
 
-                resolved_tags.append(Tag(name=TagName(tag_name)))
+                new_tag = Tag(name=TagName(tag_name))
+                saved_tag = await self.tag_repo.save(new_tag)
+                resolved_tags.append(saved_tag)
 
         return resolved_tags
 
