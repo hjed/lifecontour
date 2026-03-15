@@ -121,6 +121,8 @@ class TestContactServiceIntegration:
             contact_id=0,  # Will be set when contact is saved
             is_primary=True,
         )
+        if contact.methods is None:
+            contact.methods = []
         contact.methods.append(email_method)
 
         # Add phone method
@@ -130,6 +132,8 @@ class TestContactServiceIntegration:
             contact_id=0,  # Will be set when contact is saved
             is_primary=True,
         )
+        if contact.methods is None:
+            contact.methods = []
         contact.methods.append(phone_method)
 
         # Add note
@@ -137,6 +141,8 @@ class TestContactServiceIntegration:
             content="Met at conference",
             contact_id=0,  # Will be set when contact is saved
         )
+        if contact.notes is None:
+            contact.notes = []
         contact.notes.append(note)
 
         # Act
@@ -284,6 +290,8 @@ class TestContactServiceIntegration:
             contact_id=saved_contact.id,
             is_primary=True,
         )
+        if updated_contact.methods is None:
+            updated_contact.methods = []
         updated_contact.methods.append(email_method)
 
         # Add phone method
@@ -293,6 +301,8 @@ class TestContactServiceIntegration:
             contact_id=saved_contact.id,
             is_primary=True,
         )
+        if updated_contact.methods is None:
+            updated_contact.methods = []
         updated_contact.methods.append(phone_method)
 
         # Add note
@@ -300,6 +310,8 @@ class TestContactServiceIntegration:
             content="Updated contact with new information",
             contact_id=saved_contact.id,
         )
+        if updated_contact.notes is None:
+            updated_contact.notes = []
         updated_contact.notes.append(note)
 
         # Update the contact using the service
@@ -475,9 +487,15 @@ class TestContactServiceIntegration:
             saved_contact.id, saved_client_tag.id, clean_database
         )
 
+        # Fetch full contact with all relations since update_contact uses replacement strategy
+        full_contact_to_update = await contact_service.get_contact_by_id(
+            saved_contact.id
+        )
+        assert full_contact_to_update is not None
+
         # Update contact
-        saved_contact.nick_name = "Johnny"
-        await contact_service.update_contact(saved_contact, clean_database)
+        full_contact_to_update.nick_name = "Johnny"
+        await contact_service.update_contact(full_contact_to_update, clean_database)
 
         # Verify final state
         final_contact = await contact_service.get_contact_by_id(saved_contact.id)

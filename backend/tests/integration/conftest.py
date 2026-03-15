@@ -729,7 +729,9 @@ def mock_search_service():
 
 
 @pytest.fixture
-def authenticated_search_client(test_settings, mock_search_service, test_user):
+def authenticated_search_client(
+    test_settings, mock_search_service, test_user, async_connection
+):
     """
     Create a test client with authentication and search service mocking.
 
@@ -787,11 +789,21 @@ def authenticated_search_client(test_settings, mock_search_service, test_user):
         mock_service_container["instance"] = mock_search_service(search_results)
         return mock_service_container["instance"]
 
+    class TestDatabaseProvider(Provider):
+        """Provides the test savepoint connection to the DI container."""
+
+        def __init__(self, connection: AsyncConnection):
+            super().__init__()
+            self.connection = connection
+
+        @provide(scope=Scope.REQUEST)
+        def get_connection(self) -> AsyncConnection:
+            return self.connection
+
     # Create app with test settings
     from dishka.integrations.fastapi import FastapiProvider
 
     from app.infrastructure.di.contacts import ContactProvider
-    from app.infrastructure.di.database import DatabaseProvider
     from app.infrastructure.di.infrastructure import InfrastructureProvider
     from app.infrastructure.di.integrations import IntegrationProvider
     from app.infrastructure.di.journal import JournalProvider
@@ -805,7 +817,7 @@ def authenticated_search_client(test_settings, mock_search_service, test_user):
     # ContactProvider also provides SearchService (duplicate in production code).
     # Later providers override earlier ones in Dishka.
     test_container = make_async_container(
-        DatabaseProvider(test_settings),
+        TestDatabaseProvider(async_connection),
         InfrastructureProvider(),
         ContactProvider(),
         JournalProvider(),

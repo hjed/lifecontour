@@ -128,6 +128,38 @@ class TestTagRepositoryIntegration:
         assert found_tag is None
 
     @pytest.mark.asyncio
+    async def test_find_by_names(self, tag_repo):
+        """Test finding multiple tags by name."""
+        # Arrange
+        tag1 = Tag(name=TagName("tag_a"))
+        tag2 = Tag(name=TagName("tag_b"))
+        tag3 = Tag(name=TagName("tag_c"))
+        await tag_repo.save(tag1)
+        await tag_repo.save(tag2)
+        await tag_repo.save(tag3)
+
+        # Act
+        results = await tag_repo.find_by_names(["tag_a", "tag_c", "nonexistent"])
+
+        # Assert
+        assert len(results) == 2
+        assert "tag_a" in results
+        assert "tag_c" in results
+        assert "nonexistent" not in results
+        assert str(results["tag_a"].name) == "tag_a"
+        assert str(results["tag_c"].name) == "tag_c"
+
+    @pytest.mark.asyncio
+    async def test_find_by_names_empty_list(self, tag_repo):
+        """Test finding tags with an empty list of names."""
+        # Act
+        results = await tag_repo.find_by_names([])
+
+        # Assert
+        assert isinstance(results, dict)
+        assert len(results) == 0
+
+    @pytest.mark.asyncio
     async def test_get_all_tags(self, tag_repo):
         """Test getting all tags."""
         # Arrange - Create multiple tags

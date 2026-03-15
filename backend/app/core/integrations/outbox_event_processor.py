@@ -10,19 +10,22 @@ This processor implements production-grade resilience patterns:
 3. Atomic operations with proper transaction handling
 """
 
+import json
 from collections.abc import Sequence
-from typing import Any
+from typing import Any, cast
 
 import structlog
-from core_shared.models.contacts.entities import Contact
+from core_shared.models.contacts.entities import Contact, Tag
 from core_shared.models.contacts.serialization import (
     ContactDeserializationError,
     deserialize_contact,
 )
+from core_shared.models.external_reference import ExternalReference
 from core_shared.models.outbox import OutboxEvent
 from core_shared.models.sync_metadata import SyncStatus
 from sqlalchemy.ext.asyncio import AsyncConnection
 
+from app.core.contacts.models.exceptions import DuplicateTagNameError
 from app.core.contacts.services.contact_service import ContactService
 from app.core.integrations.adapters.sql.sync_metadata_repository import (
     SyncMetadataRepository,
@@ -75,6 +78,9 @@ class OutboxEventProcessor:
         self.connection = connection
         self.external_reference_service = ExternalReferenceService(connection)
         self.sync_metadata_repo = SyncMetadataRepository(connection)
+        from app.core.contacts.adapters.sql.tag_repository import SqlTagRepository
+
+        self.tag_repo = SqlTagRepository(connection)
 
     async def process_event(self, event: OutboxEvent) -> dict[str, Any]:
         """
@@ -138,7 +144,16 @@ class OutboxEventProcessor:
     def _normalize_contact_data(self, contact_data: dict[str, Any]) -> dict[str, Any]:
         """Normalize inbound contact data before versioning and persistence."""
         normalized_contact_data = dict(contact_data)
-        methods = contact_data.get("methods")
+
+        # Strip explicit None lists so they are treated as "field omitted"
+        for list_field in ["methods", "addresses", "notes", "tags"]:
+            if (
+                list_field in normalized_contact_data
+                and normalized_contact_data[list_field] is None
+            ):
+                del normalized_contact_data[list_field]
+
+        methods = normalized_contact_data.get("methods")
         if isinstance(methods, Sequence) and not isinstance(methods, (str, bytes)):
             normalized_contact_data["methods"] = self._deduplicate_contact_methods(
                 methods
@@ -277,9 +292,184 @@ class OutboxEventProcessor:
 
         return matched_contact
 
+    def _parse_reference_data(
+        self, reference_data: str, reference_id: int | None = None
+    ) -> dict[str, Any] | None:
+        """Parse reference_data safely, expecting standard JSON format."""
+
+        if not reference_data:
+            return None
+
+        try:
+            ref_data = json.loads(reference_data)
+            if isinstance(ref_data, dict):
+                return ref_data
+        except json.JSONDecodeError as e:
+            logger.warning(
+                "Failed to parse reference_data as JSON",
+                error=str(e),
+                reference_id=reference_id,
+                reference_data_preview=reference_data[:200],
+            )
+        except Exception as e:
+            logger.warning(
+                "Unexpected error parsing reference_data",
+                error=str(e),
+                reference_id=reference_id,
+                reference_data_preview=reference_data[:200],
+            )
+
+        return None
+
+    def _extract_previously_synced_tags(
+        self, existing_reference_data: str | None, existing_reference_id: int | None
+    ) -> set[str]:
+        previously_synced_tags: set[str] = set()
+        if not existing_reference_data:
+            return previously_synced_tags
+
+        ref_data = self._parse_reference_data(
+            existing_reference_data, existing_reference_id
+        )
+        if isinstance(ref_data, dict) and "synced_tags" in ref_data:
+            synced = ref_data.get("synced_tags")
+            if isinstance(synced, list) and all(isinstance(x, str) for x in synced):
+                previously_synced_tags = set(synced)
+            else:
+                logger.warning(
+                    "synced_tags in reference_data is not a list of strings",
+                    reference_id=existing_reference_id,
+                    synced_value=synced,
+                )
+        return previously_synced_tags
+
+    async def _resolve_contact_tags(
+        self,
+        contact_data: dict[str, Any],
+        existing_reference_data: str | None = None,
+        existing_reference_id: int | None = None,
+        existing_contact_tags: list[Tag] | None = None,
+    ) -> list[Tag] | None:
+        """
+        Merge inbound tags with existing local tags based on sync history.
+        Preserves locally created tags that were never synced by the integration.
+        """
+
+        incoming_tags = contact_data.get("tags")
+        if incoming_tags is None:
+            return None
+
+        # Preserve incoming order while deduplicating
+        incoming_tag_names_ordered = []
+        for tag in incoming_tags:
+            tag_name = tag["name"]
+            if tag_name not in incoming_tag_names_ordered:
+                incoming_tag_names_ordered.append(tag_name)
+
+        incoming_tag_names_set = set(incoming_tag_names_ordered)
+
+        existing_contact_tags = existing_contact_tags or []
+        existing_tag_names = {str(tag.name) for tag in existing_contact_tags}
+
+        # Determine which tags were previously synced
+        previously_synced_tags = self._extract_previously_synced_tags(
+            existing_reference_data, existing_reference_id
+        )
+
+        # Tags that are purely local (never synced before)
+        local_only_tags = existing_tag_names - previously_synced_tags
+
+        # Stable order: inbound tags first, then local only
+        final_tag_names_ordered = list(incoming_tag_names_ordered)
+        for tag_name in sorted(local_only_tags):
+            if tag_name not in incoming_tag_names_set:
+                final_tag_names_ordered.append(tag_name)
+
+        if not final_tag_names_ordered:
+            return []
+
+        # Bulk lookup all required tags
+        found_tags_dict = await self.tag_repo.find_by_names(final_tag_names_ordered)
+
+        # Tags not yet in the DB need to be created.
+        # This happens outside the contact update transaction, but is safe because:
+        # - Tags are reusable, shared entities (not contact-specific)
+        # - Tag creation is idempotent (find_by_names will find them on retry)
+        # - Orphan tag rows (if contact update later fails) are harmless
+        resolved_tags = []
+        for tag_name in final_tag_names_ordered:
+            if tag_name in found_tags_dict:
+                resolved_tags.append(found_tags_dict[tag_name])
+            else:
+                from core_shared.models.contacts.value_objects import TagName
+
+                new_tag = Tag(name=TagName(tag_name))
+                try:
+                    saved_tag = await self.tag_repo.save(new_tag)
+                except DuplicateTagNameError:
+                    # Race condition: another worker created the same tag
+                    found_tag = await self.tag_repo.find_by_name(tag_name)
+                    if found_tag is None:
+                        raise
+                    saved_tag = found_tag
+                resolved_tags.append(saved_tag)
+
+        return resolved_tags
+
+    async def _update_synced_tags_reference(
+        self,
+        existing_ref: ExternalReference | None,
+        contact_data: dict[str, Any],
+    ) -> None:
+        if (
+            not existing_ref
+            or "tags" not in contact_data
+            or contact_data["tags"] is None
+        ):
+            return
+
+        incoming_tag_names = [tag_data["name"] for tag_data in contact_data["tags"]]
+
+        new_ref_data: dict[str, Any] = {}
+        if existing_ref.reference_data:
+            parsed = self._parse_reference_data(
+                existing_ref.reference_data, existing_ref.id
+            )
+            if parsed is not None:
+                new_ref_data = parsed
+
+        # Skip update if synced_tags already matches
+        if new_ref_data.get("synced_tags") == incoming_tag_names:
+            return
+
+        new_ref_data["synced_tags"] = incoming_tag_names
+        await self.external_reference_service.update_external_reference(
+            reference_id=existing_ref.id,
+            reference_data=json.dumps(new_ref_data),
+        )
+
+    async def _apply_resolved_tags_to_contact_data(
+        self,
+        contact_data: dict[str, Any],
+        updated_contact_data: Contact,
+        existing_ref: ExternalReference | None,
+        existing_tags: list[Tag],
+    ) -> None:
+        ref_data_str = existing_ref.reference_data if existing_ref else None
+        if "tags" in contact_data and contact_data["tags"] is not None:
+            resolved_tags = await self._resolve_contact_tags(
+                contact_data,
+                existing_reference_data=ref_data_str,
+                existing_reference_id=existing_ref.id if existing_ref else None,
+                existing_contact_tags=existing_tags,
+            )
+            updated_contact_data.tags = resolved_tags
+        else:
+            updated_contact_data.tags = None
+
     async def _process_contact_created(self, event: OutboxEvent) -> dict[str, Any]:
         """Process a contact.created event."""
-        event_data: dict[str, Any] = event.event_data  # type: ignore
+        event_data: dict[str, Any] = cast(dict[str, Any], event.event_data)
         integration_source: str = event_data["integration_source"]
         external_id: str = event_data["external_id"]
         contact_data = self._normalize_contact_data(event_data["contact_data"])
@@ -327,6 +517,17 @@ class OutboxEventProcessor:
         except ContactDeserializationError as e:
             raise PermanentOutboxEventProcessingError(str(e)) from e
 
+        # Resolve tags: deserialize_contact creates Tag objects without DB IDs.
+        # We need to look up or create real tags before saving the contact.
+        if contact.tags:
+            resolved_tags = await self._resolve_contact_tags(
+                contact_data,
+                existing_reference_data=None,
+                existing_reference_id=None,
+                existing_contact_tags=None,
+            )
+            contact.tags = resolved_tags
+
         # Reconcile to an existing local contact when there is a single clear email match.
         try:
             matched_contact = (
@@ -370,17 +571,24 @@ class OutboxEventProcessor:
             raise OutboxEventProcessingError("Created contact has no ID")
 
         try:
+            # Include synced_tags so the diff strategy can correctly
+            # remove previously-synced tags on the very first update.
+            initial_ref_data: dict[str, Any] = {
+                "resource_name": external_id,
+                "etag": event_data.get("etag"),
+                "sync_timestamp": event_data["sync_timestamp"],
+            }
+            if contact.tags:
+                initial_ref_data["synced_tags"] = [
+                    str(tag.name) for tag in contact.tags
+                ]
             await self.external_reference_service.create_external_reference(
                 internal_entity_type="contact",
                 internal_entity_id=created_contact.id,
                 external_system=integration_source,
                 external_entity_type="person",
                 external_entity_id=external_id,
-                reference_data={
-                    "resource_name": external_id,
-                    "etag": event_data.get("etag"),
-                    "sync_timestamp": event_data["sync_timestamp"],
-                },
+                reference_data=json.dumps(initial_ref_data),
             )
         except Exception as e:
             logger.warning(
@@ -442,7 +650,7 @@ class OutboxEventProcessor:
         2. Checks version hash for idempotency (skip if unchanged)
         3. Updates contact and sync metadata atomically
         """
-        event_data: dict[str, Any] = event.event_data  # type: ignore
+        event_data: dict[str, Any] = cast(dict[str, Any], event.event_data)
         integration_source: str = event_data["integration_source"]
         external_id: str = event_data["external_id"]
         contact_data = self._normalize_contact_data(event_data["contact_data"])
@@ -513,8 +721,35 @@ class OutboxEventProcessor:
         try:
             updated_contact_data = deserialize_contact(contact_data)
 
+            if existing_contact.id is None:
+                raise OutboxEventProcessingError("Existing contact has no ID")
+
             # Preserve the existing contact ID
             updated_contact_data.id = existing_contact.id
+
+            # Refetch full contact to ensure we have current tags
+            full_existing_contact = await self.contact_service.get_contact_by_id(
+                existing_contact.id
+            )
+            existing_tags = (
+                full_existing_contact.tags or [] if full_existing_contact else []
+            )
+
+            # Find existing integration reference
+            existing_ref = (
+                await self.external_reference_service.find_external_reference(
+                    internal_entity_type="contact",
+                    internal_entity_id=existing_contact.id,
+                    external_system=integration_source,
+                )
+            )
+
+            await self._apply_resolved_tags_to_contact_data(
+                contact_data,
+                updated_contact_data,
+                existing_ref,
+                existing_tags,
+            )
         except ContactDeserializationError as e:
             raise PermanentOutboxEventProcessingError(str(e)) from e
 
@@ -527,6 +762,19 @@ class OutboxEventProcessor:
             raise OutboxEventProcessingError(
                 f"Failed to update contact: {str(e)}"
             ) from e
+
+        # Update reference data with new synced tags.
+        # Non-fatal: if this fails the contact update is already committed,
+        # and synced_tags metadata will self-heal on the next sync cycle.
+        try:
+            await self._update_synced_tags_reference(existing_ref, contact_data)
+        except Exception as e:
+            logger.warning(
+                "Failed to update synced_tags reference data after contact update",
+                error=str(e),
+                external_id=external_id,
+                integration_source=integration_source,
+            )
 
         # Update sync metadata with new version hash
         # This is done atomically in the same transaction as the contact update

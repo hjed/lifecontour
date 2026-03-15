@@ -175,6 +175,8 @@ class TestContactValidationService:
         """Test tag limit validation when under limit."""
         contact = Contact(first_name="John", id=1)
         # Add 24 tags (under limit of 25)
+        if contact.tags is None:
+            contact.tags = []
         for i in range(24):
             contact.tags.append(Tag(name=TagName(f"tag{i}"), id=i))
 
@@ -191,6 +193,8 @@ class TestContactValidationService:
         """Test tag limit validation raises error when at limit."""
         contact = Contact(first_name="John", id=1)
         # Add 25 tags (at limit)
+        if contact.tags is None:
+            contact.tags = []
         for i in range(25):
             contact.tags.append(Tag(name=TagName(f"tag{i}"), id=i))
 

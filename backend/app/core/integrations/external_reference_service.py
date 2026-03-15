@@ -15,6 +15,12 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 logger = structlog.get_logger()
 
 
+class ExternalReferenceError(Exception):
+    """Base exception for external reference service errors."""
+
+    pass
+
+
 class ExternalReferenceService:
     """
     Service for managing external references between internal and external entities.
@@ -39,7 +45,7 @@ class ExternalReferenceService:
         external_system: str,
         external_entity_type: str,
         external_entity_id: str,
-        reference_data: dict[str, Any] | None = None,
+        reference_data: str | None = None,
     ) -> ExternalReference:
         """
         Create an external reference linking internal and external entities.
@@ -56,7 +62,7 @@ class ExternalReferenceService:
             Created ExternalReference instance
 
         Raises:
-            Exception: If creation fails
+            ExternalReferenceError: If creation fails
         """
         logger.info(
             "Creating external reference",
@@ -87,15 +93,13 @@ class ExternalReferenceService:
                     "external_system": external_system,
                     "external_entity_type": external_entity_type,
                     "external_entity_id": external_entity_id,
-                    "reference_data": (
-                        str(reference_data) if reference_data else None
-                    ),  # Store as JSON string
+                    "reference_data": reference_data,
                 },
             )
 
             row = result.fetchone()
             if not row:
-                raise Exception("Failed to create external reference")
+                raise ExternalReferenceError("Failed to create external reference")
 
             logger.info(
                 "Successfully created external reference",
@@ -114,7 +118,7 @@ class ExternalReferenceService:
                 external_system=external_system,
                 external_entity_type=external_entity_type,
                 external_entity_id=external_entity_id,
-                reference_data=str(reference_data) if reference_data else None,
+                reference_data=reference_data,
                 created_at=row.created_at,
                 updated_at=row.updated_at,
             )
@@ -188,7 +192,7 @@ class ExternalReferenceService:
         self,
         reference_id: int,
         external_entity_id: str | None = None,
-        reference_data: dict[str, Any] | None = None,
+        reference_data: str | None = None,
     ) -> ExternalReference | None:
         """
         Update an existing external reference.

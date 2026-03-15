@@ -65,6 +65,11 @@ class SqlContactRepository(ContactRepository):
             is_favourite=contact_row.is_favourite,
             created_at=contact_row.created_at,
             updated_at=contact_row.updated_at,
+            methods=[],
+            addresses=[],
+            notes=[],
+            tags=[],
+            relationships=[],
         )
 
         # Load contact methods
@@ -92,6 +97,7 @@ class SqlContactRepository(ContactRepository):
                 created_at=method_row.created_at,
                 updated_at=method_row.updated_at,
             )
+            assert contact.methods is not None
             contact.methods.append(method)
 
         # Load contact addresses
@@ -121,6 +127,7 @@ class SqlContactRepository(ContactRepository):
                 created_at=address_row.created_at,
                 updated_at=address_row.updated_at,
             )
+            assert contact.addresses is not None
             contact.addresses.append(address)
 
         # Load contact notes
@@ -140,6 +147,7 @@ class SqlContactRepository(ContactRepository):
                 created_at=note_row.created_at,
                 updated_at=note_row.updated_at,
             )
+            assert contact.notes is not None
             contact.notes.append(note)
 
         # Load contact tags
@@ -163,6 +171,7 @@ class SqlContactRepository(ContactRepository):
                 created_at=tag_row.created_at,
                 updated_at=tag_row.updated_at,
             )
+            assert contact.tags is not None
             contact.tags.append(tag)
 
         # Load contact relationships
@@ -186,6 +195,7 @@ class SqlContactRepository(ContactRepository):
                 created_at=rel_row.created_at,
                 updated_at=rel_row.updated_at,
             )
+            assert contact.relationships is not None
             contact.relationships.append(relationship)
 
         return contact
@@ -926,9 +936,20 @@ class SqlContactRepository(ContactRepository):
         """Efficiently load all related entities for a list of contacts in batches."""
         if not contacts:
             return
-
         contact_ids = [contact.id for contact in contacts]
         contact_map = {contact.id: contact for contact in contacts}
+
+        for contact in contacts:
+            if contact.methods is None:
+                contact.methods = []
+            if contact.addresses is None:
+                contact.addresses = []
+            if contact.notes is None:
+                contact.notes = []
+            if contact.tags is None:
+                contact.tags = []
+            if contact.relationships is None:
+                contact.relationships = []
 
         # Batch load contact methods
         methods_query = text(
@@ -952,7 +973,7 @@ class SqlContactRepository(ContactRepository):
                 created_at=row.created_at,
                 updated_at=row.updated_at,
             )
-            contact_map[row.contact_id].methods.append(method)
+            contact_map[row.contact_id].methods.append(method)  # type: ignore[union-attr]
 
         # Batch load contact addresses
         addresses_query = text(
@@ -980,7 +1001,7 @@ class SqlContactRepository(ContactRepository):
                 created_at=row.created_at,
                 updated_at=row.updated_at,
             )
-            contact_map[row.contact_id].addresses.append(address)
+            contact_map[row.contact_id].addresses.append(address)  # type: ignore[union-attr]
 
         # Batch load contact notes
         notes_query = text(
@@ -1000,7 +1021,7 @@ class SqlContactRepository(ContactRepository):
                 created_at=row.created_at,
                 updated_at=row.updated_at,
             )
-            contact_map[row.contact_id].notes.append(note)
+            contact_map[row.contact_id].notes.append(note)  # type: ignore[union-attr]
 
         # Batch load contact tags
         tags_query = text(
@@ -1017,11 +1038,11 @@ class SqlContactRepository(ContactRepository):
         for row in result:
             tag = Tag(
                 id=row.id,
-                name=row.name,
+                name=TagName(row.name),
                 parent_id=row.parent_id,
                 color=row.color,
                 description=row.description,
                 created_at=row.created_at,
                 updated_at=row.updated_at,
             )
-            contact_map[row.contact_id].tags.append(tag)
+            contact_map[row.contact_id].tags.append(tag)  # type: ignore[union-attr]

@@ -44,11 +44,12 @@ class ContactValidationService:
             raise ContactNotFoundError(contact_id)
 
         # Check if there's already a primary method of this type
-        for method in contact.methods:
-            if method.method_type == method_type and method.is_primary:
-                # This will be handled by database constraints
-                # The service just validates the business rule exists
-                pass
+        if contact.methods:
+            for method in contact.methods:
+                if method.method_type == method_type and method.is_primary:
+                    # This will be handled by database constraints
+                    # The service just validates the business rule exists
+                    pass
 
     async def validate_primary_address(
         self, contact_id: int, _transaction: AsyncConnection
@@ -59,11 +60,12 @@ class ContactValidationService:
             raise ContactNotFoundError(contact_id)
 
         # Check if there's already a primary address
-        for address in contact.addresses:
-            if address.is_primary:
-                # This will be handled by database constraints
-                # The service just validates the business rule exists
-                pass
+        if contact.addresses:
+            for address in contact.addresses:
+                if address.is_primary:
+                    # This will be handled by database constraints
+                    # The service just validates the business rule exists
+                    pass
 
     async def validate_contact_exists(
         self, contact_id: int, _transaction: AsyncConnection
@@ -81,7 +83,7 @@ class ContactValidationService:
         if not contact:
             raise ContactNotFoundError(contact_id)
 
-        if len(contact.tags) >= 25:
+        if contact.tags and len(contact.tags) >= 25:
             from app.core.contacts.models.exceptions import TooManyTagsError
 
             raise TooManyTagsError(len(contact.tags), contact_id)
@@ -94,8 +96,9 @@ class ContactValidationService:
     ) -> None:
         """Validate contact data for updates."""
         # Validate email uniqueness if contact has email methods
-        for method in contact.methods:
-            if method.method_type == MethodType.EMAIL:
-                await self.validate_email_uniqueness(
-                    method.value, transaction, exclude_contact_id
-                )
+        if contact.methods:
+            for method in contact.methods:
+                if method.method_type == MethodType.EMAIL:
+                    await self.validate_email_uniqueness(
+                        method.value, transaction, exclude_contact_id
+                    )

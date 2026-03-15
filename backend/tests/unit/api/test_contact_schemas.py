@@ -118,8 +118,8 @@ class TestContactAttributes:
         assert attrs.middle_name == "William"
         assert attrs.nick_name == "Johnny"
         assert attrs.contact_methods == []
-        assert attrs.addresses == []
-        assert attrs.notes == []
+        assert not attrs.addresses
+        assert not attrs.notes
 
     def test_minimal_contact_attributes(self):
         """Test minimal valid contact attributes."""

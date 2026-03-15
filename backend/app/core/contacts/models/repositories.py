@@ -225,6 +225,11 @@ class TagRepository(ABC):
         pass
 
     @abstractmethod
+    async def find_by_names(self, names: list[str]) -> dict[str, Tag]:
+        """Find multiple tags by their names, returned as a dict keyed by tag name."""
+        pass
+
+    @abstractmethod
     async def get_all(self) -> list[Tag]:
         """Get all tags."""
         pass

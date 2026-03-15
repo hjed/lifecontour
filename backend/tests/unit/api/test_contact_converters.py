@@ -181,6 +181,8 @@ class TestContactConverter:
             relationship_type=RelationshipType.FRIEND,
             created_at=datetime(2024, 1, 1, tzinfo=UTC),
         )
+        if contact.relationships is None:
+            contact.relationships = []
         contact.relationships.append(relationship)
 
         resource = ContactConverter.to_resource(contact, "http://example.com")
@@ -297,6 +299,6 @@ class TestContactRequestConverter:
         assert contact.last_name == "Doe"
         assert contact.middle_name == "William"
         assert contact.is_favourite is True
-        assert contact.methods == []
-        assert contact.addresses == []
-        assert contact.notes == []
+        assert not contact.methods
+        assert not contact.addresses
+        assert not contact.notes

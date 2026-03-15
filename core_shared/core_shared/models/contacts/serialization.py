@@ -35,7 +35,7 @@ def serialize_contact(contact: Contact) -> dict[str, Any]:
     Returns:
         Dictionary representation of the contact
     """
-    return {
+    result: dict[str, Any] = {
         "first_name": contact.first_name,
         "last_name": contact.last_name,
         "middle_name": contact.middle_name,
@@ -43,7 +43,10 @@ def serialize_contact(contact: Contact) -> dict[str, Any]:
         "company": contact.company,
         "job_title": contact.job_title,
         "is_favourite": contact.is_favourite,
-        "methods": [
+    }
+
+    if contact.methods is not None:
+        result["methods"] = [
             {
                 "method_type": method.method_type.value,
                 "value": method.value,
@@ -51,8 +54,12 @@ def serialize_contact(contact: Contact) -> dict[str, Any]:
                 "is_primary": method.is_primary,
             }
             for method in contact.methods
-        ],
-        "addresses": [
+        ]
+    else:
+        result["methods"] = None
+
+    if contact.addresses is not None:
+        result["addresses"] = [
             {
                 "street_line_1": address.street_line_1,
                 "street_line_2": address.street_line_2,
@@ -64,10 +71,21 @@ def serialize_contact(contact: Contact) -> dict[str, Any]:
                 "is_primary": address.is_primary,
             }
             for address in contact.addresses
-        ],
-        "notes": [{"content": note.content} for note in contact.notes],
-        "tags": [{"name": tag.name.value} for tag in contact.tags],
-    }
+        ]
+    else:
+        result["addresses"] = None
+
+    if contact.notes is not None:
+        result["notes"] = [{"content": note.content} for note in contact.notes]
+    else:
+        result["notes"] = None
+
+    if contact.tags is not None:
+        result["tags"] = [{"name": tag.name.value} for tag in contact.tags]
+    else:
+        result["tags"] = None
+
+    return result
 
 
 def deserialize_contact(data: dict[str, Any]) -> Contact:
@@ -86,41 +104,67 @@ def deserialize_contact(data: dict[str, Any]) -> Contact:
     if not isinstance(data, dict):
         raise ContactDeserializationError("Contact payload must be a dictionary")
 
+    def _get_list(field: str) -> list[Any] | None:
+        if field not in data or data[field] is None:
+            return None
+        val = data[field]
+        if not isinstance(val, list):
+            raise ContactDeserializationError(f"Field '{field}' must be a list or null")
+        return val
+
     try:
-        methods = [
-            ContactMethod(
-                method_type=MethodType(method_data["method_type"]),
-                value=method_data["value"],
-                label=method_data.get("label"),
-                is_primary=method_data.get("is_primary", False),
-                contact_id=0,
-            )
-            for method_data in data.get("methods", [])
-        ]
+        methods_data = _get_list("methods")
+        methods = (
+            [
+                ContactMethod(
+                    method_type=MethodType(method_data["method_type"]),
+                    value=method_data["value"],
+                    label=method_data.get("label"),
+                    is_primary=method_data.get("is_primary", False),
+                    contact_id=0,
+                )
+                for method_data in methods_data
+            ]
+            if methods_data is not None
+            else None
+        )
 
-        addresses = [
-            ContactAddress(
-                street_line_1=addr_data["street_line_1"],
-                country_code=addr_data["country_code"],
-                street_line_2=addr_data.get("street_line_2"),
-                locality=addr_data.get("locality"),
-                region=addr_data.get("region"),
-                postal_code=addr_data.get("postal_code"),
-                label=addr_data.get("label"),
-                is_primary=addr_data.get("is_primary", False),
-                contact_id=0,
-            )
-            for addr_data in data.get("addresses", [])
-        ]
+        addresses_data = _get_list("addresses")
+        addresses = (
+            [
+                ContactAddress(
+                    street_line_1=addr_data["street_line_1"],
+                    country_code=addr_data["country_code"],
+                    street_line_2=addr_data.get("street_line_2"),
+                    locality=addr_data.get("locality"),
+                    region=addr_data.get("region"),
+                    postal_code=addr_data.get("postal_code"),
+                    label=addr_data.get("label"),
+                    is_primary=addr_data.get("is_primary", False),
+                    contact_id=0,
+                )
+                for addr_data in addresses_data
+            ]
+            if addresses_data is not None
+            else None
+        )
 
-        notes = [
-            ContactNote(content=note_data["content"], contact_id=0)
-            for note_data in data.get("notes", [])
-        ]
+        notes_data = _get_list("notes")
+        notes = (
+            [
+                ContactNote(content=note_data["content"], contact_id=0)
+                for note_data in notes_data
+            ]
+            if notes_data is not None
+            else None
+        )
 
-        tags = [
-            Tag(name=TagName(tag_data["name"])) for tag_data in data.get("tags", [])
-        ]
+        tags_data = _get_list("tags")
+        tags = (
+            [Tag(name=TagName(tag_data["name"])) for tag_data in tags_data]
+            if tags_data is not None
+            else None
+        )
 
         return Contact(
             first_name=data["first_name"],

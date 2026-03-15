@@ -64,6 +64,33 @@ class SqlTagRepository(TagRepository):
             updated_at=row.updated_at,
         )
 
+    async def find_by_names(self, names: list[str]) -> dict[str, Tag]:
+        """Find multiple tags by their names, returned as a dict keyed by tag name."""
+        if not names:
+            return {}
+
+        query = text(
+            """
+            SELECT id, name, parent_id, color, description, created_at, updated_at
+            FROM tags WHERE name = ANY(:names)
+        """
+        )
+        result = await self.conn.execute(query, {"names": names})
+
+        tags_dict = {}
+        for row in result:
+            tags_dict[row.name] = Tag(
+                id=row.id,
+                name=TagName(row.name),
+                parent_id=row.parent_id,
+                color=row.color,
+                description=row.description,
+                created_at=row.created_at,
+                updated_at=row.updated_at,
+            )
+
+        return tags_dict
+
     async def get_all(self) -> list[Tag]:
         """Get all tags."""
         query = text(

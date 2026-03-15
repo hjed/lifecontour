@@ -21,7 +21,6 @@ from app.infrastructure.auth.models import SessionUser
 from app.infrastructure.auth.oauth_service import OAuthService
 from app.infrastructure.config import Settings
 from app.infrastructure.di.contacts import ContactProvider
-from app.infrastructure.di.database import DatabaseProvider
 from app.infrastructure.di.infrastructure import InfrastructureProvider
 from app.infrastructure.di.integrations import IntegrationProvider
 from app.infrastructure.di.journal import JournalProvider
@@ -42,7 +41,7 @@ class TestIntegrationsControllers:
         )
 
     @pytest.fixture
-    def client(self, test_settings, test_user):
+    def client(self, test_settings, test_user, async_connection):
         """Create authenticated test client with all necessary providers."""
 
         class TestAuthProvider(Provider):
@@ -75,9 +74,18 @@ class TestIntegrationsControllers:
         # Create app with test settings
         app = create_app(settings=test_settings)
 
+        class TestDatabaseProvider(Provider):
+            def __init__(self, connection: AsyncConnection):
+                super().__init__()
+                self.connection = connection
+
+            @provide(scope=Scope.REQUEST)
+            def get_connection(self) -> AsyncConnection:
+                return self.connection
+
         # Replace container with test container that includes all providers
         test_container = make_async_container(
-            DatabaseProvider(test_settings),
+            TestDatabaseProvider(async_connection),
             InfrastructureProvider(),
             TestAuthProvider(),  # Override auth with test user and provide settings
             ContactProvider(),
