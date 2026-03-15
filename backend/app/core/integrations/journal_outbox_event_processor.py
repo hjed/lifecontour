@@ -1,9 +1,9 @@
 """
 Journal Outbox Event Processor for handling inbound journal sync events.
 
-Processes journal_event.created, journal_event.updated, and
-journal_event.conflicted outbox events from integration workers to
-create/update journals in the core system.
+Processes journal_event.created, journal_event.updated,
+journal_event.conflicted, and journal_event.cancelled outbox events
+from integration workers to create/update journals in the core system.
 """
 
 from datetime import UTC, datetime, time
@@ -528,7 +528,7 @@ class JournalOutboxEventProcessor:
 
         start_time = self._parse_time(calendar_info_data.get("start_time"))
         end_time = self._parse_time(calendar_info_data.get("end_time"))
-        event_state = calendar_info_data.get("event_state", "confirmed")
+        event_state = calendar_info_data.get("event_state") or "confirmed"
 
         await self.connection.execute(
             text("""
