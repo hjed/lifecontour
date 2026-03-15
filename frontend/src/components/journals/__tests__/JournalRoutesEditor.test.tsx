@@ -2,11 +2,18 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { JournalRoutesEditor } from '../JournalRoutesEditor';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { useRoutes, useCreateRoute } from '@/lib/api/routes';
+import { toast } from 'sonner';
 
 // Mock the API hooks
 jest.mock('@/lib/api/routes', () => ({
   useRoutes: jest.fn(),
   useCreateRoute: jest.fn(),
+}));
+
+jest.mock('sonner', () => ({
+  toast: {
+    error: jest.fn(),
+  },
 }));
 
 function makeQueryClient() {
@@ -117,6 +124,30 @@ describe('JournalRoutesEditor', () => {
             gpx_data: '<gpx></gpx>',
           },
         });
+      });
+    });
+
+    it('shows error toast when mutation fails', async () => {
+      mockMutateAsync.mockRejectedValueOnce(new Error('Upload failed'));
+      render(
+        <JournalRoutesEditor
+          createMode={false}
+          journalId='test-123'
+          isEditing={true}
+        />,
+        { wrapper }
+      );
+
+      const fileInput = screen.getByTestId('gpx-multi-file-input');
+      const file = new File(['<gpx></gpx>'], 'track3.gpx', {
+        type: 'application/gpx+xml',
+      });
+      fireEvent.change(fileInput, { target: { files: [file] } });
+
+      await waitFor(() => {
+        expect(toast.error).toHaveBeenCalledWith(
+          'Failed to process 1 GPX file(s)'
+        );
       });
     });
   });
