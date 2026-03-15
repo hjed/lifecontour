@@ -46,13 +46,47 @@ class TestOutboxEventProcessor:
         return conn
 
     @pytest.fixture
+    def mock_external_ref_service(self) -> AsyncMock:
+        """Create mock external reference service."""
+        service = AsyncMock()
+        service.find_by_external_id.return_value = None
+        service.create_external_reference.return_value = AsyncMock()
+        return service
+
+    @pytest.fixture
+    def mock_sync_metadata_repo(self) -> AsyncMock:
+        """Create mock sync metadata repository."""
+        repo = AsyncMock()
+        repo.find_and_lock.return_value = None
+        repo.upsert.return_value = AsyncMock()
+        repo.should_sync = MagicMock(return_value=True)
+        return repo
+
+    @pytest.fixture
+    def mock_tag_repo(self) -> AsyncMock:
+        """Create mock tag repository."""
+
+        repo = AsyncMock()
+        repo.find_by_names.return_value = {}
+        return repo
+
+    @pytest.fixture
     def processor(
-        self, mock_contact_service: AsyncMock, mock_connection: AsyncConnection
+        self,
+        mock_contact_service: AsyncMock,
+        mock_connection: AsyncConnection,
+        mock_external_ref_service: AsyncMock,
+        mock_sync_metadata_repo: AsyncMock,
+        mock_tag_repo: AsyncMock,
     ) -> OutboxEventProcessor:
         """Create OutboxEventProcessor instance."""
-        return OutboxEventProcessor(
+        processor = OutboxEventProcessor(
             contact_service=mock_contact_service, connection=mock_connection
         )
+        processor.external_reference_service = mock_external_ref_service
+        processor.sync_metadata_repo = mock_sync_metadata_repo
+        processor.tag_repo = mock_tag_repo
+        return processor
 
     @pytest.fixture
     def sample_contact_event_data(self) -> dict[str, Any]:
@@ -159,6 +193,8 @@ class TestOutboxEventProcessor:
         contact_created_event: OutboxEvent,
         mock_contact_service: AsyncMock,
         mock_connection: AsyncConnection,
+        mock_external_ref_service: AsyncMock,
+        mock_sync_metadata_repo: AsyncMock,
     ):
         """Test processing a contact.created event."""
         # Mock contact service to return created contact
@@ -179,22 +215,8 @@ class TestOutboxEventProcessor:
         mock_contact_service.create_contact.return_value = expected_contact
         mock_contact_service.get_contact_by_email.return_value = None
 
-        # Mock external reference service to return None (no existing reference)
-        mock_external_ref_service = AsyncMock()
-        mock_external_ref_service.find_by_external_id.return_value = None
-        mock_external_ref_service.create_external_reference.return_value = AsyncMock()
-
-        mock_sync_metadata_repo = AsyncMock()
-        mock_sync_metadata_repo.upsert.return_value = None
-
-        with (
-            patch.object(
-                processor, "external_reference_service", mock_external_ref_service
-            ),
-            patch.object(processor, "sync_metadata_repo", mock_sync_metadata_repo),
-        ):
-            # Process the event
-            result = await processor.process_event(contact_created_event)
+        # Process the event
+        result = await processor.process_event(contact_created_event)
 
         # Verify contact service was called correctly
         mock_contact_service.create_contact.assert_called_once()
@@ -224,6 +246,8 @@ class TestOutboxEventProcessor:
         contact_updated_event: OutboxEvent,
         mock_contact_service: AsyncMock,
         mock_connection: AsyncConnection,
+        mock_external_ref_service: AsyncMock,
+        mock_sync_metadata_repo: AsyncMock,
     ):
         """Test processing a contact.updated event."""
         # Mock existing contact lookup
@@ -244,28 +268,8 @@ class TestOutboxEventProcessor:
         )
         mock_contact_service.update_contact.return_value = updated_contact
 
-        # Mock external reference service
-        mock_external_ref_service = AsyncMock()
-        mock_external_ref_service.create_external_reference.return_value = AsyncMock()
-
-        # Mock sync metadata repository
-        mock_sync_metadata_repo = AsyncMock()
-        mock_sync_metadata_repo.find_and_lock.return_value = (
-            None  # No existing sync metadata
-        )
-        mock_sync_metadata_repo.should_sync = MagicMock(
-            return_value=True
-        )  # Synchronous method
-        mock_sync_metadata_repo.upsert.return_value = AsyncMock()
-
-        with (
-            patch.object(
-                processor, "external_reference_service", mock_external_ref_service
-            ),
-            patch.object(processor, "sync_metadata_repo", mock_sync_metadata_repo),
-        ):
-            # Process the event
-            result = await processor.process_event(contact_updated_event)
+        # Process the event
+        result = await processor.process_event(contact_updated_event)
 
         # Verify existing contact was looked up
         mock_contact_service.find_contact_by_external_reference.assert_called_once_with(
@@ -294,6 +298,7 @@ class TestOutboxEventProcessor:
         contact_updated_event: OutboxEvent,
         mock_contact_service: AsyncMock,
         mock_connection: AsyncConnection,
+        mock_external_ref_service: AsyncMock,
     ):
         """Test that updating a contact also parses and updates existing reference_data JSON correctly."""
         import json
@@ -303,13 +308,13 @@ class TestOutboxEventProcessor:
         # We will add some fake "tags" to the event payload to test the synced_tags update
         contact_updated_event.event_data["contact_data"]["tags"] = [{"name": "VIP"}]
 
-        existing_contact = Contact(id=123, first_name="John", last_name="Doe")
+        existing_contact = Contact(id=123, first_name="John", last_name="Doe", tags=[])
         mock_contact_service.find_contact_by_external_reference.return_value = (
             existing_contact
         )
+        mock_contact_service.get_contact_by_id.return_value = existing_contact
         mock_contact_service.update_contact.return_value = existing_contact
 
-        mock_external_ref_service = AsyncMock()
         mock_external_ref_service.find_external_reference.return_value = (
             ExternalReference(
                 id=99,
@@ -324,21 +329,7 @@ class TestOutboxEventProcessor:
             )
         )
 
-        mock_sync_metadata_repo = AsyncMock()
-        mock_sync_metadata_repo.find_and_lock.return_value = None
-        mock_sync_metadata_repo.should_sync = MagicMock(return_value=True)
-        mock_sync_metadata_repo.upsert.return_value = AsyncMock()
-
-        processor.tag_repo = AsyncMock()
-        processor.tag_repo.find_by_names.return_value = {}
-
-        with (
-            patch.object(
-                processor, "external_reference_service", mock_external_ref_service
-            ),
-            patch.object(processor, "sync_metadata_repo", mock_sync_metadata_repo),
-        ):
-            await processor.process_event(contact_updated_event)
+        await processor.process_event(contact_updated_event)
 
         mock_external_ref_service.update_external_reference.assert_called_once()
         call_kwargs = mock_external_ref_service.update_external_reference.call_args[1]
@@ -356,6 +347,7 @@ class TestOutboxEventProcessor:
         contact_updated_event: OutboxEvent,
         mock_contact_service: AsyncMock,
         mock_connection: AsyncConnection,
+        mock_external_ref_service: AsyncMock,
     ):
         """Test that omitting tags in a contact update does not overwrite existing synced_tags in reference_data."""
         import json
@@ -366,13 +358,13 @@ class TestOutboxEventProcessor:
         if "tags" in contact_updated_event.event_data["contact_data"]:
             del contact_updated_event.event_data["contact_data"]["tags"]
 
-        existing_contact = Contact(id=123, first_name="John", last_name="Doe")
+        existing_contact = Contact(id=123, first_name="John", last_name="Doe", tags=[])
         mock_contact_service.find_contact_by_external_reference.return_value = (
             existing_contact
         )
+        mock_contact_service.get_contact_by_id.return_value = existing_contact
         mock_contact_service.update_contact.return_value = existing_contact
 
-        mock_external_ref_service = AsyncMock()
         mock_external_ref_service.find_external_reference.return_value = (
             ExternalReference(
                 id=99,
@@ -389,21 +381,7 @@ class TestOutboxEventProcessor:
             )
         )
 
-        mock_sync_metadata_repo = AsyncMock()
-        mock_sync_metadata_repo.find_and_lock.return_value = None
-        mock_sync_metadata_repo.should_sync = MagicMock(return_value=True)
-        mock_sync_metadata_repo.upsert.return_value = AsyncMock()
-
-        processor.tag_repo = AsyncMock()
-        processor.tag_repo.find_by_names.return_value = {}
-
-        with (
-            patch.object(
-                processor, "external_reference_service", mock_external_ref_service
-            ),
-            patch.object(processor, "sync_metadata_repo", mock_sync_metadata_repo),
-        ):
-            await processor.process_event(contact_updated_event)
+        await processor.process_event(contact_updated_event)
 
         mock_external_ref_service.update_external_reference.assert_not_called()
 
@@ -414,6 +392,8 @@ class TestOutboxEventProcessor:
         contact_updated_event: OutboxEvent,
         mock_contact_service: AsyncMock,
         mock_connection: AsyncConnection,
+        mock_external_ref_service: AsyncMock,
+        mock_sync_metadata_repo: AsyncMock,
     ):
         """Test that explicitly setting tags to None in contact update does not overwrite existing synced_tags."""
         import json
@@ -423,13 +403,13 @@ class TestOutboxEventProcessor:
         # Explicitly set tags to None
         contact_updated_event.event_data["contact_data"]["tags"] = None
 
-        existing_contact = Contact(id=123, first_name="John", last_name="Doe")
+        existing_contact = Contact(id=123, first_name="John", last_name="Doe", tags=[])
         mock_contact_service.find_contact_by_external_reference.return_value = (
             existing_contact
         )
+        mock_contact_service.get_contact_by_id.return_value = existing_contact
         mock_contact_service.update_contact.return_value = existing_contact
 
-        mock_external_ref_service = AsyncMock()
         mock_external_ref_service.find_external_reference.return_value = (
             ExternalReference(
                 id=99,
@@ -446,21 +426,11 @@ class TestOutboxEventProcessor:
             )
         )
 
-        mock_sync_metadata_repo = AsyncMock()
-        mock_sync_metadata_repo.find_and_lock.return_value = None
-        mock_sync_metadata_repo.should_sync = MagicMock(return_value=True)
-        mock_sync_metadata_repo.upsert.return_value = AsyncMock()
-
+        # Mock tag_repo as it's accessed directly by the processor
         processor.tag_repo = AsyncMock()
         processor.tag_repo.find_by_names.return_value = {}
 
-        with (
-            patch.object(
-                processor, "external_reference_service", mock_external_ref_service
-            ),
-            patch.object(processor, "sync_metadata_repo", mock_sync_metadata_repo),
-        ):
-            await processor.process_event(contact_updated_event)
+        await processor.process_event(contact_updated_event)
 
         mock_external_ref_service.update_external_reference.assert_not_called()
 
@@ -514,16 +484,9 @@ class TestOutboxEventProcessor:
         mock_contact_service.get_contact_by_email.return_value = None
         mock_contact_service.create_contact.side_effect = Exception("Database error")
 
-        # Mock external reference service
-        mock_external_ref_service = AsyncMock()
-        mock_external_ref_service.find_by_external_id.return_value = None
-
-        with patch.object(
-            processor, "external_reference_service", mock_external_ref_service
-        ):
-            # Should raise OutboxEventProcessingError
-            with pytest.raises(OutboxEventProcessingError) as exc_info:
-                await processor.process_event(contact_created_event)
+        # Should raise OutboxEventProcessingError
+        with pytest.raises(OutboxEventProcessingError) as exc_info:
+            await processor.process_event(contact_created_event)
 
         assert "Failed to process contact.created event" in str(exc_info.value)
         assert "Database error" in str(exc_info.value)
@@ -540,17 +503,9 @@ class TestOutboxEventProcessor:
         # Mock contact service to return None (contact not found)
         mock_contact_service.find_contact_by_external_reference.return_value = None
 
-        # Mock sync metadata repository
-        mock_sync_metadata_repo = AsyncMock()
-        mock_sync_metadata_repo.find_and_lock.return_value = None
-        mock_sync_metadata_repo.should_sync = MagicMock(
-            return_value=True
-        )  # Synchronous method
-
-        with patch.object(processor, "sync_metadata_repo", mock_sync_metadata_repo):
-            # Should raise OutboxEventProcessingError
-            with pytest.raises(OutboxEventProcessingError) as exc_info:
-                await processor.process_event(contact_updated_event)
+        # Should raise OutboxEventProcessingError
+        with pytest.raises(OutboxEventProcessingError) as exc_info:
+            await processor.process_event(contact_updated_event)
 
         assert "Contact not found for update" in str(exc_info.value)
         assert "people/c123456789" in str(exc_info.value)
@@ -577,16 +532,9 @@ class TestOutboxEventProcessor:
             retry_count=0,
         )
 
-        # Mock external reference service
-        mock_external_ref_service = AsyncMock()
-        mock_external_ref_service.find_by_external_id.return_value = None
-
-        with patch.object(
-            processor, "external_reference_service", mock_external_ref_service
-        ):
-            # Should raise a permanent processing error for malformed payloads
-            with pytest.raises(PermanentOutboxEventProcessingError) as exc_info:
-                await processor.process_event(invalid_event)
+        # Should raise a permanent processing error for malformed payloads
+        with pytest.raises(PermanentOutboxEventProcessingError) as exc_info:
+            await processor.process_event(invalid_event)
 
         assert "Missing required contact field 'first_name'" in str(exc_info.value)
         mock_contact_service.create_contact.assert_not_called()
@@ -606,13 +554,8 @@ class TestOutboxEventProcessor:
             existing_contact
         )
 
-        mock_sync_metadata_repo = AsyncMock()
-        mock_sync_metadata_repo.find_and_lock.return_value = None
-        mock_sync_metadata_repo.should_sync = MagicMock(return_value=True)
-
-        with patch.object(processor, "sync_metadata_repo", mock_sync_metadata_repo):
-            with pytest.raises(PermanentOutboxEventProcessingError) as exc_info:
-                await processor.process_event(contact_updated_event)
+        with pytest.raises(PermanentOutboxEventProcessingError) as exc_info:
+            await processor.process_event(contact_updated_event)
 
         assert "Missing required contact field 'first_name'" in str(exc_info.value)
         mock_contact_service.update_contact.assert_not_called()
@@ -639,17 +582,9 @@ class TestOutboxEventProcessor:
             retry_count=0,
         )
 
-        mock_external_ref_service = AsyncMock()
-        mock_external_ref_service.find_by_external_id.return_value = None
-
-        with (
-            patch.object(
-                processor, "external_reference_service", mock_external_ref_service
-            ),
-            patch(
-                "app.core.integrations.outbox_event_processor.logger.error"
-            ) as mock_log_error,
-        ):
+        with patch(
+            "app.core.integrations.outbox_event_processor.logger.error"
+        ) as mock_log_error:
             with pytest.raises(PermanentOutboxEventProcessingError):
                 await processor.process_event(invalid_event)
 
