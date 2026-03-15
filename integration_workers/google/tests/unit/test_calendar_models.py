@@ -90,6 +90,13 @@ def test_google_event_all_day_parsing() -> None:
     event = GoogleEvent(
         id=raw_api_response["id"],
         summary=raw_api_response.get("summary"),
+        status=raw_api_response.get("status"),
+        htmlLink=raw_api_response.get("htmlLink"),
+        created=raw_api_response.get("created"),
+        updated=raw_api_response.get("updated"),
+        description=raw_api_response.get("description"),
+        location=raw_api_response.get("location"),
+        etag=raw_api_response.get("etag"),
         start=GoogleEventStartEnd(**start_data) if start_data else None,
         end=GoogleEventStartEnd(**end_data) if end_data else None,
     )

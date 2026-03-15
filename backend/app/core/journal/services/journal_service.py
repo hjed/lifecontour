@@ -195,17 +195,23 @@ class JournalService:
 
         # Fetch external event IDs before deletion so workers know what to delete
         stmt = text("""
-            SELECT external_event_id
-            FROM journal_external_event_links
-            WHERE journal_id = :journal_id AND external_event_id IS NOT NULL
+            SELECT jeel.external_event_id, c.google_calendar_id
+            FROM journal_external_event_links jeel
+            JOIN calendars c ON jeel.calendar_id = c.id
+            WHERE jeel.journal_id = :journal_id AND jeel.external_event_id IS NOT NULL
         """)
         result = await transaction.execute(stmt, {"journal_id": journal_id})
-        external_identifiers: dict[str, list[str]] = {}
+        external_identifiers: dict[str, list[dict[str, Any]]] = {}
         # We currently only support Google calendar syncing, so we hardcode the key.
         for row in result.fetchall():
             if "google" not in external_identifiers:
                 external_identifiers["google"] = []
-            external_identifiers["google"].append(row.external_event_id)
+            external_identifiers["google"].append(
+                {
+                    "external_event_id": row.external_event_id,
+                    "google_calendar_id": row.google_calendar_id,
+                }
+            )
 
         # Delete the journal
         await self.journal_repo.delete(journal_id)

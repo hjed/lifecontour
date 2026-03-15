@@ -5,7 +5,7 @@ Contains database session fixtures and migrations.
 """
 
 import os
-from typing import Any
+from typing import Any, cast
 
 import pytest
 import pytest_asyncio
@@ -22,7 +22,7 @@ def get_workspace_env() -> dict[str, str]:
         result = subprocess.run(
             ["python3", str(script), "json"], check=True, capture_output=True, text=True
         )
-        return json.loads(result.stdout)
+        return cast(dict[str, str], json.loads(result.stdout))
     except Exception:
         return {}
 

@@ -206,8 +206,8 @@ class TestProcessJournalEvent:
             assert result["action"] == "delete"
             assert result["external_event_ids"] == ["existing_event_id"]
 
-            # Verify API was called
-            mock_google_client.delete_event.assert_called_once_with("existing_event_id")
+            # Verify API was called with fallback calendar_id 'primary' for old string format
+            mock_google_client.delete_event.assert_called_once_with("existing_event_id", "primary")
 
     @pytest.mark.asyncio
     async def test_process_journal_event_ignores_delete_if_no_identifier(

@@ -75,7 +75,7 @@ class JournalDeleted(DomainEvent):
         self,
         journal_id: int,
         user_id: str,
-        external_identifiers: dict[str, list[str]] | None = None,
+        external_identifiers: dict[str, list[dict[str, Any]]] | None = None,
         transaction: AsyncConnection | None = None,
     ):
         now = datetime.now()

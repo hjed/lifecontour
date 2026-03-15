@@ -9,6 +9,7 @@ import asyncio
 from typing import Any
 
 import structlog
+from dishka import AsyncContainer
 
 from app.core.integrations.outbox_event_processor import (
     PermanentOutboxEventProcessingError,
@@ -23,11 +24,11 @@ logger = structlog.get_logger()
 class OutboxProcessor:
     """Background processor for outbox events."""
 
-    def __init__(self) -> None:
+    def __init__(self, container: AsyncContainer) -> None:
         """Initialize the outbox processor."""
         self.max_retries = 3
         self.batch_size = 50
-        self._task_queue: Any | None = None
+        self.container = container
 
     async def process_events(self) -> None:
         """
@@ -222,27 +223,6 @@ class OutboxProcessor:
             result=result,
         )
 
-    async def _get_task_queue(self) -> Any:
-        """Get or initialize the task queue service."""
-        if self._task_queue is None:
-            # Import here to avoid circular dependencies
-            from app.core.integrations.database import get_database_manager
-            from app.core.integrations.task_queue import get_redis_settings
-            from app.core.integrations.task_queue_service import TaskQueueService
-            from app.infrastructure.config import get_settings
-
-            settings = get_settings()
-            redis_settings = get_redis_settings(settings)
-            db_manager = get_database_manager(settings)
-
-            self._task_queue = TaskQueueService(
-                redis_pool=None,  # Automatically created
-                redis_settings=redis_settings,
-                settings=settings,
-                db_manager=db_manager,
-            )
-        return self._task_queue
-
     async def _process_journal_event(self, event: Any) -> None:
         """
         Broadcast journal events to all integrations.
@@ -250,8 +230,11 @@ class OutboxProcessor:
         Args:
             event: Journal sync event (JournalCreated, JournalUpdated, JournalDeleted)
         """
-        task_queue = await self._get_task_queue()
-        await task_queue.broadcast_journal_event(event.event_type, event.event_data)
+        from app.core.integrations.task_queue_service import TaskQueueService
+
+        async with self.container() as request_container:
+            task_queue = await request_container.get(TaskQueueService)
+            await task_queue.broadcast_journal_event(event.event_type, event.event_data)
         logger.info(
             "Broadcasted journal sync event to workers",
             event_id=event.event_id,
@@ -296,22 +279,25 @@ class OutboxProcessor:
 _processor_instance: OutboxProcessor | None = None
 
 
-def get_outbox_processor() -> OutboxProcessor:
+def get_outbox_processor(container: AsyncContainer) -> OutboxProcessor:
     """Get the global outbox processor instance."""
     global _processor_instance
     if _processor_instance is None:
-        _processor_instance = OutboxProcessor()
+        _processor_instance = OutboxProcessor(container)
     return _processor_instance
 
 
-async def run_outbox_processor_loop(interval_seconds: float = 10) -> None:
+async def run_outbox_processor_loop(
+    container: AsyncContainer, interval_seconds: float = 10
+) -> None:
     """
     Run the outbox processor in a loop.
 
     Args:
+        container: Application's AsyncContainer for dependency injection
         interval_seconds: Interval between processing cycles (in seconds, can be fractional)
     """
-    processor = get_outbox_processor()
+    processor = get_outbox_processor(container)
 
     logger.info("Starting outbox processor loop", interval_seconds=interval_seconds)
 

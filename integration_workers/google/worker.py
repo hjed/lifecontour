@@ -1618,13 +1618,12 @@ async def process_journal_event(
                 )
                 return {"status": "ignored", "reason": "no_external_id_for_provider"}
 
-            google_event_ids = (
+            google_events = (
                 google_event_ids_raw
                 if isinstance(google_event_ids_raw, list)
                 else [google_event_ids_raw]
             )
 
-            # Use a dummy calendar ID since we don't have it, but wait! The Google Client delete_event needs calendar_id = 'primary'
             # Let's get the authorization
             async with session_factory() as session:
                 auth_stmt = text("""
@@ -1660,13 +1659,22 @@ async def process_journal_event(
                     user_id=user_id,
                 )
 
-                # Assume calendar_id 'primary' because we might not know it, or maybe delete_event doesn't need it?
-                # Actually our GoogleAPIClient uses 'primary' by default anyway in this implementation! Wait, does it?
                 deleted_ids = []
                 errors = []
-                for google_event_id in google_event_ids:
+                for google_event in google_events:
                     try:
-                        await client.delete_event(google_event_id)
+                        # Fallback for old tests or backwards compatibility
+                        if isinstance(google_event, str):
+                            google_event_id = google_event
+                            calendar_id = "primary"
+                        else:
+                            google_event_id = google_event.get("external_event_id")
+                            calendar_id = google_event.get("google_calendar_id", "primary")
+
+                        if not google_event_id:
+                            continue
+
+                        await client.delete_event(google_event_id, calendar_id)
                         logger.info(
                             "Deleted journal event from Google Calendar",
                             journal_id=journal_id,

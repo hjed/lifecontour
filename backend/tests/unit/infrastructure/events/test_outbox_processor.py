@@ -32,13 +32,35 @@ class TestOutboxProcessor:
         return indexer
 
     @pytest.fixture
-    def processor(self, mock_search_indexer):
+    def mock_task_queue_service(self):
+        """Create a mock TaskQueueService."""
+        service = AsyncMock()
+        return service
+
+    @pytest.fixture
+    def mock_container(self, mock_task_queue_service):
+        """Create a mock dishka container."""
+        container = MagicMock()
+
+        class MockContext:
+            async def __aenter__(self):
+                return container
+
+            async def __aexit__(self, exc_type, exc_val, exc_tb):
+                pass
+
+        container.return_value = MockContext()
+        container.get = AsyncMock(return_value=mock_task_queue_service)
+        return container
+
+    @pytest.fixture
+    def processor(self, mock_search_indexer, mock_container):
         """Create an OutboxProcessor instance with mock dependencies."""
         with patch(
             "app.infrastructure.events.outbox_processor.SearchIndexer",
             return_value=mock_search_indexer,
         ):
-            return OutboxProcessor()
+            return OutboxProcessor(mock_container)
 
     @pytest.fixture
     def sample_outbox_events(self):
@@ -412,9 +434,10 @@ class TestOutboxProcessor:
 
     def test_get_outbox_processor_singleton(self):
         """Test that get_outbox_processor returns the same instance."""
+        mock_container = MagicMock()
         # Act
-        processor1 = get_outbox_processor()
-        processor2 = get_outbox_processor()
+        processor1 = get_outbox_processor(mock_container)
+        processor2 = get_outbox_processor(mock_container)
 
         # Assert
         assert processor1 is processor2
@@ -436,8 +459,9 @@ class TestOutboxProcessor:
                     run_outbox_processor_loop,
                 )
 
+                mock_container = MagicMock()
                 task = asyncio.create_task(
-                    run_outbox_processor_loop(interval_seconds=0.1)
+                    run_outbox_processor_loop(mock_container, interval_seconds=0.1)
                 )
                 await asyncio.sleep(0.05)  # Let it run briefly
                 task.cancel()
@@ -633,7 +657,9 @@ class TestOutboxProcessor:
         mock_repository.mark_as_processed.assert_any_call("search-event")
 
     @pytest.mark.asyncio
-    async def test_process_journal_events(self, processor, mock_search_indexer):
+    async def test_process_journal_events(
+        self, processor, mock_search_indexer, mock_task_queue_service
+    ):
         """Test processing journal events routes to TaskQueueService."""
         # Arrange
         events = [
@@ -672,10 +698,6 @@ class TestOutboxProcessor:
         mock_repository.get_unprocessed_events = AsyncMock(return_value=events)
         mock_repository.mark_as_processed = AsyncMock()
 
-        mock_task_queue_service = AsyncMock()
-        mock_task_queue_service.broadcast_journal_event = AsyncMock()
-        mock_task_queue_service.close = AsyncMock()
-
         with (
             patch(
                 "app.infrastructure.events.outbox_processor.get_async_database_engine",
@@ -689,13 +711,6 @@ class TestOutboxProcessor:
                 "app.infrastructure.events.outbox_processor.SearchIndexer",
                 return_value=mock_search_indexer,
             ),
-            patch(
-                "app.core.integrations.task_queue_service.TaskQueueService",
-                return_value=mock_task_queue_service,
-            ),
-            patch("app.infrastructure.config.get_settings"),
-            patch("app.core.integrations.task_queue.get_redis_settings"),
-            patch("app.core.integrations.database.get_database_manager"),
         ):
             # Act
             await processor.process_events()

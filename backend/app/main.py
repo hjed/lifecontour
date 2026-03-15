@@ -107,7 +107,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
             # Start outbox processor background task
             outbox_task = asyncio.create_task(
-                run_outbox_processor_loop(interval_seconds=10)
+                run_outbox_processor_loop(container, interval_seconds=10)
             )
             logger.info("Outbox processor background task started")
 
