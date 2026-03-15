@@ -2304,14 +2304,21 @@ async def _save_calendar_sync_token(
     user_id: str | int,
     google_account_email: str,
 ) -> None:
-    """Persist a new sync token using UPSERT semantics."""
+    """Persist a new calendar sync token using UPSERT semantics.
+
+    Uses INSERT ... ON CONFLICT DO UPDATE to handle both new and existing
+    integration rows, matching the contacts _save_sync_token pattern.
+    """
     save_token_stmt = text("""
-        UPDATE user_google_integration
-        SET calendar_events_sync_token = :sync_token,
-            updated_at = :updated_at
-        WHERE user_id = :user_id
-        AND google_account_email = :email
-        AND calendar_events_sync_token IS DISTINCT FROM :sync_token
+        INSERT INTO user_google_integration
+            (user_id, google_account_email, calendar_events_sync_token,
+             created_at, updated_at)
+        VALUES
+            (:user_id, :email, :sync_token, :updated_at, :updated_at)
+        ON CONFLICT (user_id, google_account_email)
+        DO UPDATE SET
+            calendar_events_sync_token = EXCLUDED.calendar_events_sync_token,
+            updated_at = EXCLUDED.updated_at
     """)
     await session.execute(
         save_token_stmt,
@@ -2440,6 +2447,7 @@ async def sync_calendar_events(
                 )
 
                 # Process each event
+                calendar_errors = 0
                 for raw_event in all_raw_events:
                     try:
                         google_event = GoogleEvent.from_api_response(raw_event)
@@ -2555,16 +2563,18 @@ async def sync_calendar_events(
                             error_type=type(e).__name__,
                         )
                         metrics["errors"] += 1
+                        calendar_errors += 1
 
-                # Save sync token only when all events processed successfully
-                if new_sync_token and metrics["errors"] == 0:
+                # Save sync token only when this calendar processed without errors
+                if new_sync_token and calendar_errors == 0:
                     await _save_calendar_sync_token(
                         session, new_sync_token, user_id, google_account_email
                     )
-                elif new_sync_token and metrics["errors"] > 0:
+                elif new_sync_token and calendar_errors > 0:
                     logger.warning(
                         "Skipping sync token save due to processing errors",
-                        errors=metrics["errors"],
+                        calendar_errors=calendar_errors,
+                        google_calendar_id=google_calendar_id,
                         google_account_email=google_account_email,
                     )
 

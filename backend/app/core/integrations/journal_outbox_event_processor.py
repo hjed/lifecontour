@@ -234,6 +234,26 @@ class JournalOutboxEventProcessor:
                 "journal_id": existing_journal_id,
             }
 
+        # If no external link exists, create one to make ETag tracking
+        # and idempotency work on subsequent runs
+        if existing_link is None:
+            logger.info(
+                "No external event link found during update, creating one",
+                journal_id=existing_journal_id,
+                external_event_id=external_event_id,
+            )
+            await self._create_external_event_link(
+                journal_id=existing_journal_id,
+                calendar_id=UUID(calendar_id),
+                external_event_id=external_event_id,
+                etag=etag,
+            )
+            # Refetch the link so merge logic sees the correct updated_at
+            existing_link = await self._find_external_event_link(
+                calendar_id=UUID(calendar_id),
+                external_event_id=external_event_id,
+            )
+
         # Apply InboundFieldMerger for protected local edits
         inbound_data = {
             "title": journal_data.get("title", ""),
@@ -638,7 +658,7 @@ class JournalOutboxEventProcessor:
             contact_relationships: List of dicts with 'email' and
                 'relationship_type' keys
         """
-        if not contact_relationships:
+        if contact_relationships is None:
             return
 
         by_type = self._group_relationships_by_type(contact_relationships)
