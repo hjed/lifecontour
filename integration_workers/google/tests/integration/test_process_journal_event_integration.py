@@ -63,6 +63,15 @@ async def _setup_journal_event_test_data(
             """),
             {"journal_id": journal_id, "calendar_id": calendar_id},
         )
+    else:
+        # 5. Setup Data - Ensure pending external link (like what DB migration or frontend does)
+        await db_session.execute(
+            text("""
+            INSERT INTO journal_external_event_links (journal_id, calendar_id, external_event_id, external_version, sync_capability, sync_status, created_at, updated_at)
+            VALUES (:journal_id, :calendar_id, NULL, NULL, 'outbound', 'pending', now(), now())
+            """),
+            {"journal_id": journal_id, "calendar_id": calendar_id},
+        )
 
     await db_session.commit()
     return journal_id

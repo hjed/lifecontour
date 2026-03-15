@@ -202,6 +202,7 @@ class TestProcessJournalEvent:
             patch("worker.GoogleAPIClient", return_value=mock_google_client),
         ):
             mock_session = mock_session_factory.return_value.__aenter__.return_value
+            mock_session.execute.side_effect = None
             mock_result = MagicMock()
             mock_row = MagicMock()
             mock_row.google_account_email = "test@example.com"

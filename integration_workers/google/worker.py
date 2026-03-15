@@ -6,7 +6,6 @@ This worker processes Google Contacts synchronization tasks using ARQ.
 It runs as a separate process from the main FastAPI application.
 """
 
-import random
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -579,7 +578,7 @@ def _handle_http_error(
     from googleapiclient.errors import HttpError
 
     if not isinstance(e, HttpError):
-        raise
+        raise e
 
     # Handle ETag conflicts (400 with failedPrecondition or 412 Precondition Failed)
     error_content = (
@@ -1804,6 +1803,17 @@ async def _process_journal_upsert_event(
 
         for link_row in existing_links:
             if link_row.calendar_id != row.calendar_id:
+                if not link_row.external_event_id:
+                    del_link_stmt = text("""
+                        DELETE FROM journal_external_event_links
+                        WHERE journal_id = :journal_id AND calendar_id = :calendar_id
+                    """)
+                    await session.execute(
+                        del_link_stmt,
+                        {"journal_id": journal_id, "calendar_id": link_row.calendar_id},
+                    )
+                    continue
+
                 success = False
                 try:
                     del_cal_id = link_row.google_calendar_id or "primary"
@@ -1849,7 +1859,8 @@ async def _process_journal_upsert_event(
                         err_link_stmt,
                         {"journal_id": journal_id, "calendar_id": link_row.calendar_id},
                     )
-                await session.commit()
+
+        await session.commit()
 
         external_event_id = row.external_event_id
         target_calendar_id = row.google_calendar_id or "primary"
@@ -1859,15 +1870,21 @@ async def _process_journal_upsert_event(
                 INSERT INTO journal_external_event_links (
                     journal_id, calendar_id, sync_capability, sync_status, created_at, updated_at
                 ) VALUES (
-                    :journal_id, :calendar_id, 'outbound', 'pending', now(), now()
+                    :journal_id, :calendar_id, 'outbound', 'syncing', now(), now()
                 )
-                ON CONFLICT (journal_id, calendar_id) DO NOTHING
+                ON CONFLICT (journal_id, calendar_id) DO UPDATE SET
+                    sync_status = 'syncing', updated_at = now()
+                WHERE journal_external_event_links.external_event_id IS NULL
+                  AND journal_external_event_links.sync_status != 'syncing'
                 RETURNING 1
             """)
             lock_result = await session.execute(
                 lock_stmt, {"journal_id": journal_id, "calendar_id": row.calendar_id}
             )
-            if not lock_result.fetchone():
+            if lock_result.fetchone():
+                await session.commit()
+                action = "create"
+            else:
                 check_stmt = text("""
                     SELECT external_event_id FROM journal_external_event_links
                     WHERE journal_id = :journal_id AND calendar_id = :calendar_id
@@ -1886,9 +1903,6 @@ async def _process_journal_upsert_event(
                         journal_id=journal_id,
                     )
                     return {"status": "ignored", "reason": "concurrent_create"}
-            else:
-                await session.commit()
-                action = "create"
         else:
             action = "update"
         api_result = None
@@ -1903,7 +1917,6 @@ async def _process_journal_upsert_event(
                 api_result = await client.update_event(
                     external_event_id, event_payload, calendar_id=target_calendar_id
                 )
-
             link_stmt = text("""
                 INSERT INTO journal_external_event_links (
                     journal_id, calendar_id, external_event_id, external_version,
@@ -2220,7 +2233,9 @@ def retry_delay_func(retry_count: int) -> float:
     delay = base_delay * (2**retry_count)
 
     # Apply jitter: ±20% to prevent thundering herd
-    jitter = random.uniform(0.8, 1.2)
+    import secrets
+
+    jitter = secrets.SystemRandom().uniform(0.8, 1.2)
     delay_with_jitter = delay * jitter
 
     # Cap at 15 minutes (900 seconds)
