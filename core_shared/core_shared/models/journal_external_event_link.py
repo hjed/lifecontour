@@ -32,6 +32,7 @@ class ExternalEventLinkSyncStatus(StrEnum):
     """Current sync state for an external event link."""
 
     PENDING = "pending"
+    SYNCING = "syncing"
     SYNCED = "synced"
     CONFLICTED = "conflicted"
     CANCELLED = "cancelled"
@@ -82,7 +83,7 @@ class JournalExternalEventLink(Base):
             name="ck_journal_external_event_links_sync_capability",
         ),
         CheckConstraint(
-            "sync_status IN ('pending', 'synced', 'conflicted', 'cancelled', 'errored')",
+            "sync_status IN ('pending', 'syncing', 'synced', 'conflicted', 'cancelled', 'errored')",
             name="ck_journal_external_event_links_sync_status",
         ),
     )

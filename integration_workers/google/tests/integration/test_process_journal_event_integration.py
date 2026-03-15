@@ -447,10 +447,10 @@ class TestProcessJournalEventIntegration:
             db_session, user_id, google_email, calendar_id, "Concurrent Test", False
         )
 
-        # Insert a pending lock simulating another worker starting creation
+        # Update to 'syncing' simulating another worker holding the lock
         await db_session.execute(
             text(
-                "INSERT INTO journal_external_event_links (journal_id, calendar_id, sync_capability, sync_status, created_at, updated_at) VALUES (:journal_id, :calendar_id, 'outbound', 'pending', now(), now())"
+                "UPDATE journal_external_event_links SET sync_status = 'syncing', updated_at = now() WHERE journal_id = :journal_id AND calendar_id = :calendar_id"
             ),
             {"journal_id": journal_id, "calendar_id": calendar_id},
         )

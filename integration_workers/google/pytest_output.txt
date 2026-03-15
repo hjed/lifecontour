@@ -1,0 +1,2433 @@
+============================= test session starts ==============================
+platform linux -- Python 3.12.10, pytest-8.3.5, pluggy-1.6.0 -- /home/hjed/Projects/personal-management-system2/integration_workers/google/.venv/bin/python3
+cachedir: .pytest_cache
+rootdir: /home/hjed/Projects/personal-management-system2/integration_workers/google
+configfile: pyproject.toml
+testpaths: tests
+plugins: anyio-4.12.1, asyncio-0.24.0
+asyncio: mode=Mode.STRICT, default_loop_scope=None
+collecting ... collected 132 items
+
+tests/integration/test_full_sync_integration.py::TestFullSyncIntegration::test_full_sync_processes_all_pages_and_saves_token ERROR [  0%]
+tests/integration/test_incremental_sync_integration.py::TestIncrementalSyncIntegration::test_incremental_sync_uses_contacts_sync_token ERROR [  1%]
+tests/integration/test_outbox_event_creation.py::TestWorkerOutboxEventCreation::test_create_contact_sync_event_for_created_contact ERROR [  2%]
+tests/integration/test_outbox_event_creation.py::TestWorkerOutboxEventCreation::test_create_contact_sync_event_for_updated_contact ERROR [  3%]
+tests/integration/test_outbox_event_creation.py::TestWorkerOutboxEventCreation::test_create_contact_sync_event_preserves_all_contact_data ERROR [  3%]
+tests/integration/test_outbox_event_creation.py::TestWorkerOutboxEventCreation::test_outbox_event_has_required_fields ERROR [  4%]
+tests/integration/test_outbox_event_creation.py::TestWorkerOutboxEventCreation::test_transformer_produces_contact_dict_not_google_format ERROR [  5%]
+tests/integration/test_periodic_sync_integration.py::TestPeriodicSyncIntegration::test_periodic_sync_queries_active_integrations ERROR [  6%]
+tests/integration/test_periodic_sync_integration.py::TestPeriodicSyncIntegration::test_periodic_sync_enqueues_jobs_for_each_account ERROR [  6%]
+tests/integration/test_periodic_sync_integration.py::TestPeriodicSyncIntegration::test_periodic_sync_handles_no_active_accounts ERROR [  7%]
+tests/integration/test_process_journal_event_integration.py::TestProcessJournalEventIntegration::test_process_journal_event_creates_external_link ERROR [  8%]
+tests/integration/test_process_journal_event_integration.py::TestProcessJournalEventIntegration::test_process_journal_event_updates_existing_link ERROR [  9%]
+tests/integration/test_process_journal_event_integration.py::TestProcessJournalEventIntegration::test_process_journal_event_deletes_external_link ERROR [  9%]
+tests/integration/test_process_journal_event_integration.py::TestProcessJournalEventIntegration::test_process_journal_event_deletes_with_explicit_calendar_id ERROR [ 10%]
+tests/integration/test_process_journal_event_integration.py::TestProcessJournalEventIntegration::test_process_journal_event_orphan_delete_fails_sets_errored ERROR [ 11%]
+tests/integration/test_process_journal_event_integration.py::TestProcessJournalEventIntegration::test_process_journal_event_concurrent_create_ignores_duplicate ERROR [ 12%]
+tests/integration/test_reserved_groups_integration.py::TestReservedGroupsIntegration::test_full_sync_with_groups_and_starred ERROR [ 12%]
+tests/integration/test_retry_integration.py::TestARQRetryIntegration::test_worker_settings_configuration ERROR [ 13%]
+tests/integration/test_retry_integration.py::TestARQRetryIntegration::test_retry_delay_exponential_backoff ERROR [ 14%]
+tests/integration/test_retry_integration.py::TestARQRetryIntegration::test_job_enqueue_and_status ERROR [ 15%]
+tests/integration/test_retry_integration.py::TestARQRetryIntegration::test_job_retry_with_worker SKIPPED [ 15%]
+tests/integration/test_sync_timeout_integration.py::test_sync_google_contacts_accepts_job_timeout ERROR [ 16%]
+tests/unit/test_calendar_models.py::test_google_calendar_parsing PASSED  [ 17%]
+tests/unit/test_calendar_models.py::test_google_event_parsing PASSED     [ 18%]
+tests/unit/test_calendar_models.py::test_google_event_all_day_parsing PASSED [ 18%]
+tests/unit/test_event_transformer.py::TestGoogleEventTransformer::test_transform_event_maps_basic_fields_correctly PASSED [ 19%]
+tests/unit/test_event_transformer.py::TestGoogleEventTransformer::test_transform_event_handles_all_day_events PASSED [ 20%]
+tests/unit/test_event_transformer.py::TestGoogleEventTransformer::test_transform_event_returns_none_for_cancelled_events PASSED [ 21%]
+tests/unit/test_event_transformer.py::TestGoogleEventTransformer::test_transform_event_handles_zulu_time PASSED [ 21%]
+tests/unit/test_event_transformer.py::TestGoogleEventTransformer::test_transform_to_google_event_payload_maps_timed_events PASSED [ 22%]
+tests/unit/test_event_transformer.py::TestGoogleEventTransformer::test_transform_to_google_event_payload_maps_all_day_events PASSED [ 23%]
+tests/unit/test_event_transformer.py::TestGoogleEventTransformer::test_transform_to_google_event_payload_includes_invitees_if_sync_enabled PASSED [ 24%]
+tests/unit/test_event_transformer.py::TestGoogleEventTransformer::test_transform_to_google_event_payload_omits_invitees_if_sync_disabled PASSED [ 25%]
+tests/unit/test_event_transformer.py::TestGoogleEventTransformer::test_round_trip_transformation_timed_event PASSED [ 25%]
+tests/unit/test_google_client_calendar.py::test_get_event_success PASSED [ 26%]
+tests/unit/test_google_client_calendar.py::test_create_event_success PASSED [ 27%]
+tests/unit/test_google_client_calendar.py::test_update_event_success PASSED [ 28%]
+tests/unit/test_google_client_calendar.py::test_delete_event_success PASSED [ 28%]
+tests/unit/test_group_translator.py::test_is_reserved_identifies_reserved_groups PASSED [ 29%]
+tests/unit/test_group_translator.py::test_translate_uses_mapping PASSED  [ 30%]
+tests/unit/test_group_translator.py::test_translate_unmapped_returns_default PASSED [ 31%]
+tests/unit/test_periodic_sync.py::TestPeriodicSyncConfiguration::test_worker_settings_has_periodic_sync_env_vars PASSED [ 31%]
+tests/unit/test_periodic_sync.py::TestPeriodicSyncConfiguration::test_worker_settings_periodic_sync_defaults PASSED [ 32%]
+tests/unit/test_periodic_sync.py::TestPeriodicSyncConfiguration::test_cron_jobs_present_when_periodic_sync_enabled PASSED [ 33%]
+tests/unit/test_periodic_sync.py::TestPeriodicSyncConfiguration::test_cron_jobs_empty_when_periodic_sync_disabled PASSED [ 34%]
+tests/unit/test_periodic_sync.py::TestPeriodicSyncConfiguration::test_cron_schedule_matches_sync_interval PASSED [ 34%]
+tests/unit/test_periodic_sync_monitoring.py::TestPeriodicSyncLogging::test_periodic_sync_logs_trigger_type PASSED [ 35%]
+tests/unit/test_periodic_sync_monitoring.py::TestPeriodicSyncLogging::test_sync_google_contacts_accepts_trigger_type PASSED [ 36%]
+tests/unit/test_periodic_sync_monitoring.py::TestPeriodicSyncLogging::test_periodic_sync_logs_metrics PASSED [ 37%]
+tests/unit/test_periodic_sync_monitoring.py::TestPeriodicSyncLogging::test_periodic_sync_logs_errors PASSED [ 37%]
+tests/unit/test_periodic_sync_monitoring.py::TestPeriodicSyncLogging::test_periodic_sync_enqueues_with_smart_sync_type PASSED [ 38%]
+tests/unit/test_process_journal_event.py::TestProcessJournalEvent::test_process_journal_event_creates_new PASSED [ 39%]
+tests/unit/test_process_journal_event.py::TestProcessJournalEvent::test_process_journal_event_updates_existing PASSED [ 40%]
+tests/unit/test_process_journal_event.py::TestProcessJournalEvent::test_process_journal_event_ignores_not_found PASSED [ 40%]
+tests/unit/test_process_journal_event.py::TestProcessJournalEvent::test_process_journal_event_ignores_no_op_update PASSED [ 41%]
+tests/unit/test_process_journal_event.py::TestProcessJournalEvent::test_process_journal_event_deletes_existing PASSED [ 42%]
+tests/unit/test_process_journal_event.py::TestProcessJournalEvent::test_process_journal_event_ignores_delete_if_no_identifier PASSED [ 43%]
+tests/unit/test_process_journal_event.py::TestProcessJournalEvent::test_process_journal_event_orphan_delete_fails PASSED [ 43%]
+tests/unit/test_retry_strategy.py::TestRetryDelayFunction::test_retry_delay_first_retry PASSED [ 44%]
+tests/unit/test_retry_strategy.py::TestRetryDelayFunction::test_retry_delay_second_retry PASSED [ 45%]
+tests/unit/test_retry_strategy.py::TestRetryDelayFunction::test_retry_delay_third_retry PASSED [ 46%]
+tests/unit/test_retry_strategy.py::TestRetryDelayFunction::test_retry_delay_fourth_retry PASSED [ 46%]
+tests/unit/test_retry_strategy.py::TestRetryDelayFunction::test_retry_delay_max_cap PASSED [ 47%]
+tests/unit/test_retry_strategy.py::TestRetryDelayFunction::test_retry_delay_deterministic_with_seed FAILED [ 48%]
+tests/unit/test_retry_strategy.py::TestRetryDelayFunction::test_retry_delay_jitter_variation PASSED [ 49%]
+tests/unit/test_retry_strategy.py::TestRetryDelayFunction::test_retry_delay_exponential_growth PASSED [ 50%]
+tests/unit/test_transformer.py::TestGoogleContactTransformer::test_transform_person_basic_info PASSED [ 50%]
+tests/unit/test_transformer.py::TestGoogleContactTransformer::test_transform_person_basic_structure PASSED [ 51%]
+tests/unit/test_transformer.py::TestGoogleContactTransformer::test_transform_person_email_addresses PASSED [ 52%]
+tests/unit/test_transformer.py::TestGoogleContactTransformer::test_transform_person_phone_numbers PASSED [ 53%]
+tests/unit/test_transformer.py::TestGoogleContactTransformer::test_transform_person_addresses PASSED [ 53%]
+tests/unit/test_transformer.py::TestGoogleContactTransformer::test_transform_person_notes PASSED [ 54%]
+tests/unit/test_transformer.py::TestGoogleContactTransformer::test_transform_person_membership_tags PASSED [ 55%]
+tests/unit/test_transformer.py::TestGoogleContactTransformer::test_transform_person_empty_names PASSED [ 56%]
+tests/unit/test_transformer.py::TestGoogleContactTransformer::test_transform_person_no_primary_name PASSED [ 56%]
+tests/unit/test_transformer.py::TestGoogleContactTransformer::test_transform_person_empty_email_values PASSED [ 57%]
+tests/unit/test_transformer.py::TestGoogleContactTransformer::test_transform_person_invalid_email_values_skipped PASSED [ 58%]
+tests/unit/test_transformer.py::TestGoogleContactTransformer::test_transform_person_invalid_phone_values_skipped PASSED [ 59%]
+tests/unit/test_transformer.py::TestGoogleContactTransformer::test_transform_person_address_fallback_to_formatted PASSED [ 59%]
+tests/unit/test_transformer.py::TestGoogleContactTransformer::test_transform_person_invalid_addresses_skipped PASSED [ 60%]
+tests/unit/test_transformer.py::TestGoogleContactTransformer::test_transform_addresses_with_none_metadata_not_primary PASSED [ 61%]
+tests/unit/test_transformer.py::TestGoogleContactTransformer::test_transform_person_blank_biographies_skipped PASSED [ 62%]
+tests/unit/test_transformer.py::TestGoogleContactTransformer::test_transform_person_invalid_membership_names_skipped PASSED [ 62%]
+tests/unit/test_transformer.py::TestGoogleContactTransformer::test_extract_names_with_primary PASSED [ 63%]
+tests/unit/test_transformer.py::TestGoogleContactTransformer::test_extract_names_no_primary PASSED [ 64%]
+tests/unit/test_transformer.py::TestGoogleContactTransformer::test_extract_names_empty_list PASSED [ 65%]
+tests/unit/test_transformer.py::TestGoogleContactTransformer::test_transform_person_starred_is_favourite PASSED [ 65%]
+tests/unit/test_transformer.py::TestGoogleContactTransformer::test_transform_person_ignores_reserved_groups PASSED [ 66%]
+tests/unit/test_transformer.py::TestOrganizationTransformation::test_transform_person_with_current_organization PASSED [ 67%]
+tests/unit/test_transformer.py::TestOrganizationTransformation::test_transform_person_with_multiple_organizations_uses_current PASSED [ 68%]
+tests/unit/test_transformer.py::TestOrganizationTransformation::test_transform_person_with_no_current_organization_uses_first PASSED [ 68%]
+tests/unit/test_transformer.py::TestOrganizationTransformation::test_transform_person_with_organization_name_only PASSED [ 69%]
+tests/unit/test_transformer.py::TestOrganizationTransformation::test_transform_person_with_organization_title_only PASSED [ 70%]
+tests/unit/test_transformer.py::TestOrganizationTransformation::test_transform_person_with_no_organizations PASSED [ 71%]
+tests/unit/test_transformer.py::TestOrganizationTransformation::test_transform_person_with_empty_organization_fields PASSED [ 71%]
+tests/unit/test_worker.py::TestGoogleWorker::test_sync_google_contacts_full_sync_success PASSED [ 72%]
+tests/unit/test_worker.py::TestGoogleWorker::test_sync_google_contacts_incremental_sync_success PASSED [ 73%]
+tests/unit/test_worker.py::TestGoogleWorker::test_sync_google_contacts_smart_sync_chooses_incremental PASSED [ 74%]
+tests/unit/test_worker.py::TestGoogleWorker::test_sync_google_contacts_handles_auth_error PASSED [ 75%]
+tests/unit/test_worker.py::TestGoogleWorker::test_sync_google_contacts_handles_api_error PASSED [ 75%]
+tests/unit/test_worker.py::TestGoogleWorker::test_process_contacts_batch_partial_failure PASSED [ 76%]
+tests/unit/test_worker.py::TestGoogleWorker::test_perform_full_sync_uses_partial_batch_processing PASSED [ 77%]
+tests/unit/test_worker.py::TestGoogleWorker::test_perform_incremental_sync_uses_partial_batch_processing PASSED [ 78%]
+tests/unit/test_worker.py::TestGoogleAPIClient::test_create_contact_success PASSED [ 78%]
+tests/unit/test_worker.py::TestGoogleAPIClient::test_update_contact_success PASSED [ 79%]
+tests/unit/test_worker.py::TestGoogleAPIClient::test_update_contact_conflict_400_failed_precondition PASSED [ 80%]
+tests/unit/test_worker.py::TestGoogleAPIClient::test_update_contact_empty_fields_raises_error PASSED [ 81%]
+tests/unit/test_worker.py::TestGoogleAPIClient::test_list_calendars_success PASSED [ 81%]
+tests/unit/test_worker.py::TestGoogleAPIClient::test_list_events_success PASSED [ 82%]
+tests/unit/test_worker.py::TestDetectLocalChanges::test_find_locally_created_contacts PASSED [ 83%]
+tests/unit/test_worker.py::TestDetectLocalChanges::test_find_locally_updated_contacts PASSED [ 84%]
+tests/unit/test_worker.py::TestDetectLocalChanges::test_find_no_local_changes PASSED [ 84%]
+tests/unit/test_worker.py::TestDetectLocalChanges::test_find_mixed_local_changes PASSED [ 85%]
+tests/unit/test_worker.py::TestPushSyncLogic::test_push_new_contact_to_google PASSED [ 86%]
+tests/unit/test_worker.py::TestPushSyncLogic::test_push_updated_contact_to_google PASSED [ 87%]
+tests/unit/test_worker.py::TestPushSyncLogic::test_push_handles_conflict_gracefully PASSED [ 87%]
+tests/unit/test_worker.py::TestPushSyncLogic::test_push_handles_412_conflict PASSED [ 88%]
+tests/unit/test_worker.py::TestPushSyncLogic::test_push_mixed_contacts PASSED [ 89%]
+tests/unit/test_worker.py::TestPushSyncLogic::test_push_updates_sync_metadata PASSED [ 90%]
+tests/unit/test_worker.py::TestContactTypeNormalization::test_normalize_work_labels PASSED [ 90%]
+tests/unit/test_worker.py::TestContactTypeNormalization::test_normalize_home_labels PASSED [ 91%]
+tests/unit/test_worker.py::TestContactTypeNormalization::test_normalize_mobile_and_main PASSED [ 92%]
+tests/unit/test_worker.py::TestContactTypeNormalization::test_normalize_other_label PASSED [ 93%]
+tests/unit/test_worker.py::TestContactTypeNormalization::test_normalize_empty_label PASSED [ 93%]
+tests/unit/test_worker.py::TestContactTypeNormalization::test_normalize_unknown_label_passthrough PASSED [ 94%]
+tests/unit/test_worker.py::TestContactTypeNormalization::test_normalize_whitespace_handling PASSED [ 95%]
+tests/unit/test_worker.py::TestOrganizationTransformation::test_transform_organizations_with_both_fields PASSED [ 96%]
+tests/unit/test_worker.py::TestOrganizationTransformation::test_transform_organizations_with_company_only PASSED [ 96%]
+tests/unit/test_worker.py::TestOrganizationTransformation::test_transform_organizations_with_job_title_only PASSED [ 97%]
+tests/unit/test_worker.py::TestOrganizationTransformation::test_transform_organizations_with_no_fields PASSED [ 98%]
+tests/unit/test_worker.py::TestOrganizationTransformation::test_transform_organizations_with_missing_keys PASSED [ 99%]
+tests/unit/test_worker.py::TestOrganizationTransformation::test_transform_contact_to_google_person_includes_organizations PASSED [100%]
+
+==================================== ERRORS ====================================
+_ ERROR at setup of TestFullSyncIntegration.test_full_sync_processes_all_pages_and_saves_token _
+
+    @pytest.fixture(scope="session", autouse=True)
+    def apply_migrations() -> None:
+        """Apply Alembic migrations to the test database."""
+        import subprocess
+        from pathlib import Path
+
+        backend_dir = Path(__file__).parent.parent.parent.parent.parent / "backend"
+
+        # We use the DATABASE_URL environment variable which is already set
+        env = os.environ.copy()
+        env.pop("VIRTUAL_ENV", None)  # Prevent uv warning about mismatched environment
+        # Ensure alembic gets the correct dynamic database URL
+        env["DATABASE_URL"] = get_async_database_url()
+
+        # Run alembic upgrade head
+>       subprocess.run(
+            ["uv", "run", "alembic", "-c", "alembic.ini", "upgrade", "head"],
+            cwd=backend_dir,
+            check=True,
+            env=env,
+            capture_output=True,
+        )
+
+tests/integration/conftest.py:72:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+input = None, capture_output = True, timeout = None, check = True
+popenargs = (['uv', 'run', 'alembic', '-c', 'alembic.ini', 'upgrade', ...],)
+kwargs = {'cwd': PosixPath('/home/hjed/Projects/personal-management-system2/backend'), 'env': {'ANTIGRAVITY_AGENT': '1', 'ANTIG...y-2025.18.0-linux-x64/bundled/libs/debugpy', 'CHROME_DESKTOP': 'antigravity.desktop', ...}, 'stderr': -1, 'stdout': -1}
+process = <Popen: returncode: 1 args: ['uv', 'run', 'alembic', '-c', 'alembic.ini', 'u...>
+stdout = b''
+stderr = b'Traceback (most recent call last):\n  File "/home/hjed/Projects/personal-management-system2/backend/.venv/lib/python...nning on that host and accepting TCP/IP connections?\n\n(Background on this error at: https://sqlalche.me/e/20/e3q8)\n'
+retcode = 1
+
+    def run(*popenargs,
+            input=None, capture_output=False, timeout=None, check=False, **kwargs):
+        """Run command with arguments and return a CompletedProcess instance.
+
+        The returned instance will have attributes args, returncode, stdout and
+        stderr. By default, stdout and stderr are not captured, and those attributes
+        will be None. Pass stdout=PIPE and/or stderr=PIPE in order to capture them,
+        or pass capture_output=True to capture both.
+
+        If check is True and the exit code was non-zero, it raises a
+        CalledProcessError. The CalledProcessError object will have the return code
+        in the returncode attribute, and output & stderr attributes if those streams
+        were captured.
+
+        If timeout (seconds) is given and the process takes too long,
+         a TimeoutExpired exception will be raised.
+
+        There is an optional argument "input", allowing you to
+        pass bytes or a string to the subprocess's stdin.  If you use this argument
+        you may not also use the Popen constructor's "stdin" argument, as
+        it will be used internally.
+
+        By default, all communication is in bytes, and therefore any "input" should
+        be bytes, and the stdout and stderr will be bytes. If in text mode, any
+        "input" should be a string, and stdout and stderr will be strings decoded
+        according to locale encoding, or by "encoding" if set. Text mode is
+        triggered by setting any of text, encoding, errors or universal_newlines.
+
+        The other arguments are the same as for the Popen constructor.
+        """
+        if input is not None:
+            if kwargs.get('stdin') is not None:
+                raise ValueError('stdin and input arguments may not both be used.')
+            kwargs['stdin'] = PIPE
+
+        if capture_output:
+            if kwargs.get('stdout') is not None or kwargs.get('stderr') is not None:
+                raise ValueError('stdout and stderr arguments may not be used '
+                                 'with capture_output.')
+            kwargs['stdout'] = PIPE
+            kwargs['stderr'] = PIPE
+
+        with Popen(*popenargs, **kwargs) as process:
+            try:
+                stdout, stderr = process.communicate(input, timeout=timeout)
+            except TimeoutExpired as exc:
+                process.kill()
+                if _mswindows:
+                    # Windows accumulates the output in a single blocking
+                    # read() call run on child threads, with the timeout
+                    # being done in a join() on those threads.  communicate()
+                    # _after_ kill() is required to collect that and add it
+                    # to the exception.
+                    exc.stdout, exc.stderr = process.communicate()
+                else:
+                    # POSIX _communicate already populated the output so
+                    # far into the TimeoutExpired exception.
+                    process.wait()
+                raise
+            except:  # Including KeyboardInterrupt, communicate handled that.
+                process.kill()
+                # We don't call process.wait() as .__exit__ does that for us.
+                raise
+            retcode = process.poll()
+            if check and retcode:
+>               raise CalledProcessError(retcode, process.args,
+                                         output=stdout, stderr=stderr)
+E               subprocess.CalledProcessError: Command '['uv', 'run', 'alembic', '-c', 'alembic.ini', 'upgrade', 'head']' returned non-zero exit status 1.
+
+/home/hjed/.local/share/uv/python/cpython-3.12.10-linux-x86_64-gnu/lib/python3.12/subprocess.py:571: CalledProcessError
+_ ERROR at setup of TestIncrementalSyncIntegration.test_incremental_sync_uses_contacts_sync_token _
+
+    @pytest.fixture(scope="session", autouse=True)
+    def apply_migrations() -> None:
+        """Apply Alembic migrations to the test database."""
+        import subprocess
+        from pathlib import Path
+
+        backend_dir = Path(__file__).parent.parent.parent.parent.parent / "backend"
+
+        # We use the DATABASE_URL environment variable which is already set
+        env = os.environ.copy()
+        env.pop("VIRTUAL_ENV", None)  # Prevent uv warning about mismatched environment
+        # Ensure alembic gets the correct dynamic database URL
+        env["DATABASE_URL"] = get_async_database_url()
+
+        # Run alembic upgrade head
+>       subprocess.run(
+            ["uv", "run", "alembic", "-c", "alembic.ini", "upgrade", "head"],
+            cwd=backend_dir,
+            check=True,
+            env=env,
+            capture_output=True,
+        )
+
+tests/integration/conftest.py:72:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+input = None, capture_output = True, timeout = None, check = True
+popenargs = (['uv', 'run', 'alembic', '-c', 'alembic.ini', 'upgrade', ...],)
+kwargs = {'cwd': PosixPath('/home/hjed/Projects/personal-management-system2/backend'), 'env': {'ANTIGRAVITY_AGENT': '1', 'ANTIG...y-2025.18.0-linux-x64/bundled/libs/debugpy', 'CHROME_DESKTOP': 'antigravity.desktop', ...}, 'stderr': -1, 'stdout': -1}
+process = <Popen: returncode: 1 args: ['uv', 'run', 'alembic', '-c', 'alembic.ini', 'u...>
+stdout = b''
+stderr = b'Traceback (most recent call last):\n  File "/home/hjed/Projects/personal-management-system2/backend/.venv/lib/python...nning on that host and accepting TCP/IP connections?\n\n(Background on this error at: https://sqlalche.me/e/20/e3q8)\n'
+retcode = 1
+
+    def run(*popenargs,
+            input=None, capture_output=False, timeout=None, check=False, **kwargs):
+        """Run command with arguments and return a CompletedProcess instance.
+
+        The returned instance will have attributes args, returncode, stdout and
+        stderr. By default, stdout and stderr are not captured, and those attributes
+        will be None. Pass stdout=PIPE and/or stderr=PIPE in order to capture them,
+        or pass capture_output=True to capture both.
+
+        If check is True and the exit code was non-zero, it raises a
+        CalledProcessError. The CalledProcessError object will have the return code
+        in the returncode attribute, and output & stderr attributes if those streams
+        were captured.
+
+        If timeout (seconds) is given and the process takes too long,
+         a TimeoutExpired exception will be raised.
+
+        There is an optional argument "input", allowing you to
+        pass bytes or a string to the subprocess's stdin.  If you use this argument
+        you may not also use the Popen constructor's "stdin" argument, as
+        it will be used internally.
+
+        By default, all communication is in bytes, and therefore any "input" should
+        be bytes, and the stdout and stderr will be bytes. If in text mode, any
+        "input" should be a string, and stdout and stderr will be strings decoded
+        according to locale encoding, or by "encoding" if set. Text mode is
+        triggered by setting any of text, encoding, errors or universal_newlines.
+
+        The other arguments are the same as for the Popen constructor.
+        """
+        if input is not None:
+            if kwargs.get('stdin') is not None:
+                raise ValueError('stdin and input arguments may not both be used.')
+            kwargs['stdin'] = PIPE
+
+        if capture_output:
+            if kwargs.get('stdout') is not None or kwargs.get('stderr') is not None:
+                raise ValueError('stdout and stderr arguments may not be used '
+                                 'with capture_output.')
+            kwargs['stdout'] = PIPE
+            kwargs['stderr'] = PIPE
+
+        with Popen(*popenargs, **kwargs) as process:
+            try:
+                stdout, stderr = process.communicate(input, timeout=timeout)
+            except TimeoutExpired as exc:
+                process.kill()
+                if _mswindows:
+                    # Windows accumulates the output in a single blocking
+                    # read() call run on child threads, with the timeout
+                    # being done in a join() on those threads.  communicate()
+                    # _after_ kill() is required to collect that and add it
+                    # to the exception.
+                    exc.stdout, exc.stderr = process.communicate()
+                else:
+                    # POSIX _communicate already populated the output so
+                    # far into the TimeoutExpired exception.
+                    process.wait()
+                raise
+            except:  # Including KeyboardInterrupt, communicate handled that.
+                process.kill()
+                # We don't call process.wait() as .__exit__ does that for us.
+                raise
+            retcode = process.poll()
+            if check and retcode:
+>               raise CalledProcessError(retcode, process.args,
+                                         output=stdout, stderr=stderr)
+E               subprocess.CalledProcessError: Command '['uv', 'run', 'alembic', '-c', 'alembic.ini', 'upgrade', 'head']' returned non-zero exit status 1.
+
+/home/hjed/.local/share/uv/python/cpython-3.12.10-linux-x86_64-gnu/lib/python3.12/subprocess.py:571: CalledProcessError
+_ ERROR at setup of TestWorkerOutboxEventCreation.test_create_contact_sync_event_for_created_contact _
+
+    @pytest.fixture(scope="session", autouse=True)
+    def apply_migrations() -> None:
+        """Apply Alembic migrations to the test database."""
+        import subprocess
+        from pathlib import Path
+
+        backend_dir = Path(__file__).parent.parent.parent.parent.parent / "backend"
+
+        # We use the DATABASE_URL environment variable which is already set
+        env = os.environ.copy()
+        env.pop("VIRTUAL_ENV", None)  # Prevent uv warning about mismatched environment
+        # Ensure alembic gets the correct dynamic database URL
+        env["DATABASE_URL"] = get_async_database_url()
+
+        # Run alembic upgrade head
+>       subprocess.run(
+            ["uv", "run", "alembic", "-c", "alembic.ini", "upgrade", "head"],
+            cwd=backend_dir,
+            check=True,
+            env=env,
+            capture_output=True,
+        )
+
+tests/integration/conftest.py:72:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+input = None, capture_output = True, timeout = None, check = True
+popenargs = (['uv', 'run', 'alembic', '-c', 'alembic.ini', 'upgrade', ...],)
+kwargs = {'cwd': PosixPath('/home/hjed/Projects/personal-management-system2/backend'), 'env': {'ANTIGRAVITY_AGENT': '1', 'ANTIG...y-2025.18.0-linux-x64/bundled/libs/debugpy', 'CHROME_DESKTOP': 'antigravity.desktop', ...}, 'stderr': -1, 'stdout': -1}
+process = <Popen: returncode: 1 args: ['uv', 'run', 'alembic', '-c', 'alembic.ini', 'u...>
+stdout = b''
+stderr = b'Traceback (most recent call last):\n  File "/home/hjed/Projects/personal-management-system2/backend/.venv/lib/python...nning on that host and accepting TCP/IP connections?\n\n(Background on this error at: https://sqlalche.me/e/20/e3q8)\n'
+retcode = 1
+
+    def run(*popenargs,
+            input=None, capture_output=False, timeout=None, check=False, **kwargs):
+        """Run command with arguments and return a CompletedProcess instance.
+
+        The returned instance will have attributes args, returncode, stdout and
+        stderr. By default, stdout and stderr are not captured, and those attributes
+        will be None. Pass stdout=PIPE and/or stderr=PIPE in order to capture them,
+        or pass capture_output=True to capture both.
+
+        If check is True and the exit code was non-zero, it raises a
+        CalledProcessError. The CalledProcessError object will have the return code
+        in the returncode attribute, and output & stderr attributes if those streams
+        were captured.
+
+        If timeout (seconds) is given and the process takes too long,
+         a TimeoutExpired exception will be raised.
+
+        There is an optional argument "input", allowing you to
+        pass bytes or a string to the subprocess's stdin.  If you use this argument
+        you may not also use the Popen constructor's "stdin" argument, as
+        it will be used internally.
+
+        By default, all communication is in bytes, and therefore any "input" should
+        be bytes, and the stdout and stderr will be bytes. If in text mode, any
+        "input" should be a string, and stdout and stderr will be strings decoded
+        according to locale encoding, or by "encoding" if set. Text mode is
+        triggered by setting any of text, encoding, errors or universal_newlines.
+
+        The other arguments are the same as for the Popen constructor.
+        """
+        if input is not None:
+            if kwargs.get('stdin') is not None:
+                raise ValueError('stdin and input arguments may not both be used.')
+            kwargs['stdin'] = PIPE
+
+        if capture_output:
+            if kwargs.get('stdout') is not None or kwargs.get('stderr') is not None:
+                raise ValueError('stdout and stderr arguments may not be used '
+                                 'with capture_output.')
+            kwargs['stdout'] = PIPE
+            kwargs['stderr'] = PIPE
+
+        with Popen(*popenargs, **kwargs) as process:
+            try:
+                stdout, stderr = process.communicate(input, timeout=timeout)
+            except TimeoutExpired as exc:
+                process.kill()
+                if _mswindows:
+                    # Windows accumulates the output in a single blocking
+                    # read() call run on child threads, with the timeout
+                    # being done in a join() on those threads.  communicate()
+                    # _after_ kill() is required to collect that and add it
+                    # to the exception.
+                    exc.stdout, exc.stderr = process.communicate()
+                else:
+                    # POSIX _communicate already populated the output so
+                    # far into the TimeoutExpired exception.
+                    process.wait()
+                raise
+            except:  # Including KeyboardInterrupt, communicate handled that.
+                process.kill()
+                # We don't call process.wait() as .__exit__ does that for us.
+                raise
+            retcode = process.poll()
+            if check and retcode:
+>               raise CalledProcessError(retcode, process.args,
+                                         output=stdout, stderr=stderr)
+E               subprocess.CalledProcessError: Command '['uv', 'run', 'alembic', '-c', 'alembic.ini', 'upgrade', 'head']' returned non-zero exit status 1.
+
+/home/hjed/.local/share/uv/python/cpython-3.12.10-linux-x86_64-gnu/lib/python3.12/subprocess.py:571: CalledProcessError
+_ ERROR at setup of TestWorkerOutboxEventCreation.test_create_contact_sync_event_for_updated_contact _
+
+    @pytest.fixture(scope="session", autouse=True)
+    def apply_migrations() -> None:
+        """Apply Alembic migrations to the test database."""
+        import subprocess
+        from pathlib import Path
+
+        backend_dir = Path(__file__).parent.parent.parent.parent.parent / "backend"
+
+        # We use the DATABASE_URL environment variable which is already set
+        env = os.environ.copy()
+        env.pop("VIRTUAL_ENV", None)  # Prevent uv warning about mismatched environment
+        # Ensure alembic gets the correct dynamic database URL
+        env["DATABASE_URL"] = get_async_database_url()
+
+        # Run alembic upgrade head
+>       subprocess.run(
+            ["uv", "run", "alembic", "-c", "alembic.ini", "upgrade", "head"],
+            cwd=backend_dir,
+            check=True,
+            env=env,
+            capture_output=True,
+        )
+
+tests/integration/conftest.py:72:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+input = None, capture_output = True, timeout = None, check = True
+popenargs = (['uv', 'run', 'alembic', '-c', 'alembic.ini', 'upgrade', ...],)
+kwargs = {'cwd': PosixPath('/home/hjed/Projects/personal-management-system2/backend'), 'env': {'ANTIGRAVITY_AGENT': '1', 'ANTIG...y-2025.18.0-linux-x64/bundled/libs/debugpy', 'CHROME_DESKTOP': 'antigravity.desktop', ...}, 'stderr': -1, 'stdout': -1}
+process = <Popen: returncode: 1 args: ['uv', 'run', 'alembic', '-c', 'alembic.ini', 'u...>
+stdout = b''
+stderr = b'Traceback (most recent call last):\n  File "/home/hjed/Projects/personal-management-system2/backend/.venv/lib/python...nning on that host and accepting TCP/IP connections?\n\n(Background on this error at: https://sqlalche.me/e/20/e3q8)\n'
+retcode = 1
+
+    def run(*popenargs,
+            input=None, capture_output=False, timeout=None, check=False, **kwargs):
+        """Run command with arguments and return a CompletedProcess instance.
+
+        The returned instance will have attributes args, returncode, stdout and
+        stderr. By default, stdout and stderr are not captured, and those attributes
+        will be None. Pass stdout=PIPE and/or stderr=PIPE in order to capture them,
+        or pass capture_output=True to capture both.
+
+        If check is True and the exit code was non-zero, it raises a
+        CalledProcessError. The CalledProcessError object will have the return code
+        in the returncode attribute, and output & stderr attributes if those streams
+        were captured.
+
+        If timeout (seconds) is given and the process takes too long,
+         a TimeoutExpired exception will be raised.
+
+        There is an optional argument "input", allowing you to
+        pass bytes or a string to the subprocess's stdin.  If you use this argument
+        you may not also use the Popen constructor's "stdin" argument, as
+        it will be used internally.
+
+        By default, all communication is in bytes, and therefore any "input" should
+        be bytes, and the stdout and stderr will be bytes. If in text mode, any
+        "input" should be a string, and stdout and stderr will be strings decoded
+        according to locale encoding, or by "encoding" if set. Text mode is
+        triggered by setting any of text, encoding, errors or universal_newlines.
+
+        The other arguments are the same as for the Popen constructor.
+        """
+        if input is not None:
+            if kwargs.get('stdin') is not None:
+                raise ValueError('stdin and input arguments may not both be used.')
+            kwargs['stdin'] = PIPE
+
+        if capture_output:
+            if kwargs.get('stdout') is not None or kwargs.get('stderr') is not None:
+                raise ValueError('stdout and stderr arguments may not be used '
+                                 'with capture_output.')
+            kwargs['stdout'] = PIPE
+            kwargs['stderr'] = PIPE
+
+        with Popen(*popenargs, **kwargs) as process:
+            try:
+                stdout, stderr = process.communicate(input, timeout=timeout)
+            except TimeoutExpired as exc:
+                process.kill()
+                if _mswindows:
+                    # Windows accumulates the output in a single blocking
+                    # read() call run on child threads, with the timeout
+                    # being done in a join() on those threads.  communicate()
+                    # _after_ kill() is required to collect that and add it
+                    # to the exception.
+                    exc.stdout, exc.stderr = process.communicate()
+                else:
+                    # POSIX _communicate already populated the output so
+                    # far into the TimeoutExpired exception.
+                    process.wait()
+                raise
+            except:  # Including KeyboardInterrupt, communicate handled that.
+                process.kill()
+                # We don't call process.wait() as .__exit__ does that for us.
+                raise
+            retcode = process.poll()
+            if check and retcode:
+>               raise CalledProcessError(retcode, process.args,
+                                         output=stdout, stderr=stderr)
+E               subprocess.CalledProcessError: Command '['uv', 'run', 'alembic', '-c', 'alembic.ini', 'upgrade', 'head']' returned non-zero exit status 1.
+
+/home/hjed/.local/share/uv/python/cpython-3.12.10-linux-x86_64-gnu/lib/python3.12/subprocess.py:571: CalledProcessError
+_ ERROR at setup of TestWorkerOutboxEventCreation.test_create_contact_sync_event_preserves_all_contact_data _
+
+    @pytest.fixture(scope="session", autouse=True)
+    def apply_migrations() -> None:
+        """Apply Alembic migrations to the test database."""
+        import subprocess
+        from pathlib import Path
+
+        backend_dir = Path(__file__).parent.parent.parent.parent.parent / "backend"
+
+        # We use the DATABASE_URL environment variable which is already set
+        env = os.environ.copy()
+        env.pop("VIRTUAL_ENV", None)  # Prevent uv warning about mismatched environment
+        # Ensure alembic gets the correct dynamic database URL
+        env["DATABASE_URL"] = get_async_database_url()
+
+        # Run alembic upgrade head
+>       subprocess.run(
+            ["uv", "run", "alembic", "-c", "alembic.ini", "upgrade", "head"],
+            cwd=backend_dir,
+            check=True,
+            env=env,
+            capture_output=True,
+        )
+
+tests/integration/conftest.py:72:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+input = None, capture_output = True, timeout = None, check = True
+popenargs = (['uv', 'run', 'alembic', '-c', 'alembic.ini', 'upgrade', ...],)
+kwargs = {'cwd': PosixPath('/home/hjed/Projects/personal-management-system2/backend'), 'env': {'ANTIGRAVITY_AGENT': '1', 'ANTIG...y-2025.18.0-linux-x64/bundled/libs/debugpy', 'CHROME_DESKTOP': 'antigravity.desktop', ...}, 'stderr': -1, 'stdout': -1}
+process = <Popen: returncode: 1 args: ['uv', 'run', 'alembic', '-c', 'alembic.ini', 'u...>
+stdout = b''
+stderr = b'Traceback (most recent call last):\n  File "/home/hjed/Projects/personal-management-system2/backend/.venv/lib/python...nning on that host and accepting TCP/IP connections?\n\n(Background on this error at: https://sqlalche.me/e/20/e3q8)\n'
+retcode = 1
+
+    def run(*popenargs,
+            input=None, capture_output=False, timeout=None, check=False, **kwargs):
+        """Run command with arguments and return a CompletedProcess instance.
+
+        The returned instance will have attributes args, returncode, stdout and
+        stderr. By default, stdout and stderr are not captured, and those attributes
+        will be None. Pass stdout=PIPE and/or stderr=PIPE in order to capture them,
+        or pass capture_output=True to capture both.
+
+        If check is True and the exit code was non-zero, it raises a
+        CalledProcessError. The CalledProcessError object will have the return code
+        in the returncode attribute, and output & stderr attributes if those streams
+        were captured.
+
+        If timeout (seconds) is given and the process takes too long,
+         a TimeoutExpired exception will be raised.
+
+        There is an optional argument "input", allowing you to
+        pass bytes or a string to the subprocess's stdin.  If you use this argument
+        you may not also use the Popen constructor's "stdin" argument, as
+        it will be used internally.
+
+        By default, all communication is in bytes, and therefore any "input" should
+        be bytes, and the stdout and stderr will be bytes. If in text mode, any
+        "input" should be a string, and stdout and stderr will be strings decoded
+        according to locale encoding, or by "encoding" if set. Text mode is
+        triggered by setting any of text, encoding, errors or universal_newlines.
+
+        The other arguments are the same as for the Popen constructor.
+        """
+        if input is not None:
+            if kwargs.get('stdin') is not None:
+                raise ValueError('stdin and input arguments may not both be used.')
+            kwargs['stdin'] = PIPE
+
+        if capture_output:
+            if kwargs.get('stdout') is not None or kwargs.get('stderr') is not None:
+                raise ValueError('stdout and stderr arguments may not be used '
+                                 'with capture_output.')
+            kwargs['stdout'] = PIPE
+            kwargs['stderr'] = PIPE
+
+        with Popen(*popenargs, **kwargs) as process:
+            try:
+                stdout, stderr = process.communicate(input, timeout=timeout)
+            except TimeoutExpired as exc:
+                process.kill()
+                if _mswindows:
+                    # Windows accumulates the output in a single blocking
+                    # read() call run on child threads, with the timeout
+                    # being done in a join() on those threads.  communicate()
+                    # _after_ kill() is required to collect that and add it
+                    # to the exception.
+                    exc.stdout, exc.stderr = process.communicate()
+                else:
+                    # POSIX _communicate already populated the output so
+                    # far into the TimeoutExpired exception.
+                    process.wait()
+                raise
+            except:  # Including KeyboardInterrupt, communicate handled that.
+                process.kill()
+                # We don't call process.wait() as .__exit__ does that for us.
+                raise
+            retcode = process.poll()
+            if check and retcode:
+>               raise CalledProcessError(retcode, process.args,
+                                         output=stdout, stderr=stderr)
+E               subprocess.CalledProcessError: Command '['uv', 'run', 'alembic', '-c', 'alembic.ini', 'upgrade', 'head']' returned non-zero exit status 1.
+
+/home/hjed/.local/share/uv/python/cpython-3.12.10-linux-x86_64-gnu/lib/python3.12/subprocess.py:571: CalledProcessError
+_ ERROR at setup of TestWorkerOutboxEventCreation.test_outbox_event_has_required_fields _
+
+    @pytest.fixture(scope="session", autouse=True)
+    def apply_migrations() -> None:
+        """Apply Alembic migrations to the test database."""
+        import subprocess
+        from pathlib import Path
+
+        backend_dir = Path(__file__).parent.parent.parent.parent.parent / "backend"
+
+        # We use the DATABASE_URL environment variable which is already set
+        env = os.environ.copy()
+        env.pop("VIRTUAL_ENV", None)  # Prevent uv warning about mismatched environment
+        # Ensure alembic gets the correct dynamic database URL
+        env["DATABASE_URL"] = get_async_database_url()
+
+        # Run alembic upgrade head
+>       subprocess.run(
+            ["uv", "run", "alembic", "-c", "alembic.ini", "upgrade", "head"],
+            cwd=backend_dir,
+            check=True,
+            env=env,
+            capture_output=True,
+        )
+
+tests/integration/conftest.py:72:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+input = None, capture_output = True, timeout = None, check = True
+popenargs = (['uv', 'run', 'alembic', '-c', 'alembic.ini', 'upgrade', ...],)
+kwargs = {'cwd': PosixPath('/home/hjed/Projects/personal-management-system2/backend'), 'env': {'ANTIGRAVITY_AGENT': '1', 'ANTIG...y-2025.18.0-linux-x64/bundled/libs/debugpy', 'CHROME_DESKTOP': 'antigravity.desktop', ...}, 'stderr': -1, 'stdout': -1}
+process = <Popen: returncode: 1 args: ['uv', 'run', 'alembic', '-c', 'alembic.ini', 'u...>
+stdout = b''
+stderr = b'Traceback (most recent call last):\n  File "/home/hjed/Projects/personal-management-system2/backend/.venv/lib/python...nning on that host and accepting TCP/IP connections?\n\n(Background on this error at: https://sqlalche.me/e/20/e3q8)\n'
+retcode = 1
+
+    def run(*popenargs,
+            input=None, capture_output=False, timeout=None, check=False, **kwargs):
+        """Run command with arguments and return a CompletedProcess instance.
+
+        The returned instance will have attributes args, returncode, stdout and
+        stderr. By default, stdout and stderr are not captured, and those attributes
+        will be None. Pass stdout=PIPE and/or stderr=PIPE in order to capture them,
+        or pass capture_output=True to capture both.
+
+        If check is True and the exit code was non-zero, it raises a
+        CalledProcessError. The CalledProcessError object will have the return code
+        in the returncode attribute, and output & stderr attributes if those streams
+        were captured.
+
+        If timeout (seconds) is given and the process takes too long,
+         a TimeoutExpired exception will be raised.
+
+        There is an optional argument "input", allowing you to
+        pass bytes or a string to the subprocess's stdin.  If you use this argument
+        you may not also use the Popen constructor's "stdin" argument, as
+        it will be used internally.
+
+        By default, all communication is in bytes, and therefore any "input" should
+        be bytes, and the stdout and stderr will be bytes. If in text mode, any
+        "input" should be a string, and stdout and stderr will be strings decoded
+        according to locale encoding, or by "encoding" if set. Text mode is
+        triggered by setting any of text, encoding, errors or universal_newlines.
+
+        The other arguments are the same as for the Popen constructor.
+        """
+        if input is not None:
+            if kwargs.get('stdin') is not None:
+                raise ValueError('stdin and input arguments may not both be used.')
+            kwargs['stdin'] = PIPE
+
+        if capture_output:
+            if kwargs.get('stdout') is not None or kwargs.get('stderr') is not None:
+                raise ValueError('stdout and stderr arguments may not be used '
+                                 'with capture_output.')
+            kwargs['stdout'] = PIPE
+            kwargs['stderr'] = PIPE
+
+        with Popen(*popenargs, **kwargs) as process:
+            try:
+                stdout, stderr = process.communicate(input, timeout=timeout)
+            except TimeoutExpired as exc:
+                process.kill()
+                if _mswindows:
+                    # Windows accumulates the output in a single blocking
+                    # read() call run on child threads, with the timeout
+                    # being done in a join() on those threads.  communicate()
+                    # _after_ kill() is required to collect that and add it
+                    # to the exception.
+                    exc.stdout, exc.stderr = process.communicate()
+                else:
+                    # POSIX _communicate already populated the output so
+                    # far into the TimeoutExpired exception.
+                    process.wait()
+                raise
+            except:  # Including KeyboardInterrupt, communicate handled that.
+                process.kill()
+                # We don't call process.wait() as .__exit__ does that for us.
+                raise
+            retcode = process.poll()
+            if check and retcode:
+>               raise CalledProcessError(retcode, process.args,
+                                         output=stdout, stderr=stderr)
+E               subprocess.CalledProcessError: Command '['uv', 'run', 'alembic', '-c', 'alembic.ini', 'upgrade', 'head']' returned non-zero exit status 1.
+
+/home/hjed/.local/share/uv/python/cpython-3.12.10-linux-x86_64-gnu/lib/python3.12/subprocess.py:571: CalledProcessError
+_ ERROR at setup of TestWorkerOutboxEventCreation.test_transformer_produces_contact_dict_not_google_format _
+
+    @pytest.fixture(scope="session", autouse=True)
+    def apply_migrations() -> None:
+        """Apply Alembic migrations to the test database."""
+        import subprocess
+        from pathlib import Path
+
+        backend_dir = Path(__file__).parent.parent.parent.parent.parent / "backend"
+
+        # We use the DATABASE_URL environment variable which is already set
+        env = os.environ.copy()
+        env.pop("VIRTUAL_ENV", None)  # Prevent uv warning about mismatched environment
+        # Ensure alembic gets the correct dynamic database URL
+        env["DATABASE_URL"] = get_async_database_url()
+
+        # Run alembic upgrade head
+>       subprocess.run(
+            ["uv", "run", "alembic", "-c", "alembic.ini", "upgrade", "head"],
+            cwd=backend_dir,
+            check=True,
+            env=env,
+            capture_output=True,
+        )
+
+tests/integration/conftest.py:72:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+input = None, capture_output = True, timeout = None, check = True
+popenargs = (['uv', 'run', 'alembic', '-c', 'alembic.ini', 'upgrade', ...],)
+kwargs = {'cwd': PosixPath('/home/hjed/Projects/personal-management-system2/backend'), 'env': {'ANTIGRAVITY_AGENT': '1', 'ANTIG...y-2025.18.0-linux-x64/bundled/libs/debugpy', 'CHROME_DESKTOP': 'antigravity.desktop', ...}, 'stderr': -1, 'stdout': -1}
+process = <Popen: returncode: 1 args: ['uv', 'run', 'alembic', '-c', 'alembic.ini', 'u...>
+stdout = b''
+stderr = b'Traceback (most recent call last):\n  File "/home/hjed/Projects/personal-management-system2/backend/.venv/lib/python...nning on that host and accepting TCP/IP connections?\n\n(Background on this error at: https://sqlalche.me/e/20/e3q8)\n'
+retcode = 1
+
+    def run(*popenargs,
+            input=None, capture_output=False, timeout=None, check=False, **kwargs):
+        """Run command with arguments and return a CompletedProcess instance.
+
+        The returned instance will have attributes args, returncode, stdout and
+        stderr. By default, stdout and stderr are not captured, and those attributes
+        will be None. Pass stdout=PIPE and/or stderr=PIPE in order to capture them,
+        or pass capture_output=True to capture both.
+
+        If check is True and the exit code was non-zero, it raises a
+        CalledProcessError. The CalledProcessError object will have the return code
+        in the returncode attribute, and output & stderr attributes if those streams
+        were captured.
+
+        If timeout (seconds) is given and the process takes too long,
+         a TimeoutExpired exception will be raised.
+
+        There is an optional argument "input", allowing you to
+        pass bytes or a string to the subprocess's stdin.  If you use this argument
+        you may not also use the Popen constructor's "stdin" argument, as
+        it will be used internally.
+
+        By default, all communication is in bytes, and therefore any "input" should
+        be bytes, and the stdout and stderr will be bytes. If in text mode, any
+        "input" should be a string, and stdout and stderr will be strings decoded
+        according to locale encoding, or by "encoding" if set. Text mode is
+        triggered by setting any of text, encoding, errors or universal_newlines.
+
+        The other arguments are the same as for the Popen constructor.
+        """
+        if input is not None:
+            if kwargs.get('stdin') is not None:
+                raise ValueError('stdin and input arguments may not both be used.')
+            kwargs['stdin'] = PIPE
+
+        if capture_output:
+            if kwargs.get('stdout') is not None or kwargs.get('stderr') is not None:
+                raise ValueError('stdout and stderr arguments may not be used '
+                                 'with capture_output.')
+            kwargs['stdout'] = PIPE
+            kwargs['stderr'] = PIPE
+
+        with Popen(*popenargs, **kwargs) as process:
+            try:
+                stdout, stderr = process.communicate(input, timeout=timeout)
+            except TimeoutExpired as exc:
+                process.kill()
+                if _mswindows:
+                    # Windows accumulates the output in a single blocking
+                    # read() call run on child threads, with the timeout
+                    # being done in a join() on those threads.  communicate()
+                    # _after_ kill() is required to collect that and add it
+                    # to the exception.
+                    exc.stdout, exc.stderr = process.communicate()
+                else:
+                    # POSIX _communicate already populated the output so
+                    # far into the TimeoutExpired exception.
+                    process.wait()
+                raise
+            except:  # Including KeyboardInterrupt, communicate handled that.
+                process.kill()
+                # We don't call process.wait() as .__exit__ does that for us.
+                raise
+            retcode = process.poll()
+            if check and retcode:
+>               raise CalledProcessError(retcode, process.args,
+                                         output=stdout, stderr=stderr)
+E               subprocess.CalledProcessError: Command '['uv', 'run', 'alembic', '-c', 'alembic.ini', 'upgrade', 'head']' returned non-zero exit status 1.
+
+/home/hjed/.local/share/uv/python/cpython-3.12.10-linux-x86_64-gnu/lib/python3.12/subprocess.py:571: CalledProcessError
+_ ERROR at setup of TestPeriodicSyncIntegration.test_periodic_sync_queries_active_integrations _
+
+    @pytest.fixture(scope="session", autouse=True)
+    def apply_migrations() -> None:
+        """Apply Alembic migrations to the test database."""
+        import subprocess
+        from pathlib import Path
+
+        backend_dir = Path(__file__).parent.parent.parent.parent.parent / "backend"
+
+        # We use the DATABASE_URL environment variable which is already set
+        env = os.environ.copy()
+        env.pop("VIRTUAL_ENV", None)  # Prevent uv warning about mismatched environment
+        # Ensure alembic gets the correct dynamic database URL
+        env["DATABASE_URL"] = get_async_database_url()
+
+        # Run alembic upgrade head
+>       subprocess.run(
+            ["uv", "run", "alembic", "-c", "alembic.ini", "upgrade", "head"],
+            cwd=backend_dir,
+            check=True,
+            env=env,
+            capture_output=True,
+        )
+
+tests/integration/conftest.py:72:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+input = None, capture_output = True, timeout = None, check = True
+popenargs = (['uv', 'run', 'alembic', '-c', 'alembic.ini', 'upgrade', ...],)
+kwargs = {'cwd': PosixPath('/home/hjed/Projects/personal-management-system2/backend'), 'env': {'ANTIGRAVITY_AGENT': '1', 'ANTIG...y-2025.18.0-linux-x64/bundled/libs/debugpy', 'CHROME_DESKTOP': 'antigravity.desktop', ...}, 'stderr': -1, 'stdout': -1}
+process = <Popen: returncode: 1 args: ['uv', 'run', 'alembic', '-c', 'alembic.ini', 'u...>
+stdout = b''
+stderr = b'Traceback (most recent call last):\n  File "/home/hjed/Projects/personal-management-system2/backend/.venv/lib/python...nning on that host and accepting TCP/IP connections?\n\n(Background on this error at: https://sqlalche.me/e/20/e3q8)\n'
+retcode = 1
+
+    def run(*popenargs,
+            input=None, capture_output=False, timeout=None, check=False, **kwargs):
+        """Run command with arguments and return a CompletedProcess instance.
+
+        The returned instance will have attributes args, returncode, stdout and
+        stderr. By default, stdout and stderr are not captured, and those attributes
+        will be None. Pass stdout=PIPE and/or stderr=PIPE in order to capture them,
+        or pass capture_output=True to capture both.
+
+        If check is True and the exit code was non-zero, it raises a
+        CalledProcessError. The CalledProcessError object will have the return code
+        in the returncode attribute, and output & stderr attributes if those streams
+        were captured.
+
+        If timeout (seconds) is given and the process takes too long,
+         a TimeoutExpired exception will be raised.
+
+        There is an optional argument "input", allowing you to
+        pass bytes or a string to the subprocess's stdin.  If you use this argument
+        you may not also use the Popen constructor's "stdin" argument, as
+        it will be used internally.
+
+        By default, all communication is in bytes, and therefore any "input" should
+        be bytes, and the stdout and stderr will be bytes. If in text mode, any
+        "input" should be a string, and stdout and stderr will be strings decoded
+        according to locale encoding, or by "encoding" if set. Text mode is
+        triggered by setting any of text, encoding, errors or universal_newlines.
+
+        The other arguments are the same as for the Popen constructor.
+        """
+        if input is not None:
+            if kwargs.get('stdin') is not None:
+                raise ValueError('stdin and input arguments may not both be used.')
+            kwargs['stdin'] = PIPE
+
+        if capture_output:
+            if kwargs.get('stdout') is not None or kwargs.get('stderr') is not None:
+                raise ValueError('stdout and stderr arguments may not be used '
+                                 'with capture_output.')
+            kwargs['stdout'] = PIPE
+            kwargs['stderr'] = PIPE
+
+        with Popen(*popenargs, **kwargs) as process:
+            try:
+                stdout, stderr = process.communicate(input, timeout=timeout)
+            except TimeoutExpired as exc:
+                process.kill()
+                if _mswindows:
+                    # Windows accumulates the output in a single blocking
+                    # read() call run on child threads, with the timeout
+                    # being done in a join() on those threads.  communicate()
+                    # _after_ kill() is required to collect that and add it
+                    # to the exception.
+                    exc.stdout, exc.stderr = process.communicate()
+                else:
+                    # POSIX _communicate already populated the output so
+                    # far into the TimeoutExpired exception.
+                    process.wait()
+                raise
+            except:  # Including KeyboardInterrupt, communicate handled that.
+                process.kill()
+                # We don't call process.wait() as .__exit__ does that for us.
+                raise
+            retcode = process.poll()
+            if check and retcode:
+>               raise CalledProcessError(retcode, process.args,
+                                         output=stdout, stderr=stderr)
+E               subprocess.CalledProcessError: Command '['uv', 'run', 'alembic', '-c', 'alembic.ini', 'upgrade', 'head']' returned non-zero exit status 1.
+
+/home/hjed/.local/share/uv/python/cpython-3.12.10-linux-x86_64-gnu/lib/python3.12/subprocess.py:571: CalledProcessError
+_ ERROR at setup of TestPeriodicSyncIntegration.test_periodic_sync_enqueues_jobs_for_each_account _
+
+    @pytest.fixture(scope="session", autouse=True)
+    def apply_migrations() -> None:
+        """Apply Alembic migrations to the test database."""
+        import subprocess
+        from pathlib import Path
+
+        backend_dir = Path(__file__).parent.parent.parent.parent.parent / "backend"
+
+        # We use the DATABASE_URL environment variable which is already set
+        env = os.environ.copy()
+        env.pop("VIRTUAL_ENV", None)  # Prevent uv warning about mismatched environment
+        # Ensure alembic gets the correct dynamic database URL
+        env["DATABASE_URL"] = get_async_database_url()
+
+        # Run alembic upgrade head
+>       subprocess.run(
+            ["uv", "run", "alembic", "-c", "alembic.ini", "upgrade", "head"],
+            cwd=backend_dir,
+            check=True,
+            env=env,
+            capture_output=True,
+        )
+
+tests/integration/conftest.py:72:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+input = None, capture_output = True, timeout = None, check = True
+popenargs = (['uv', 'run', 'alembic', '-c', 'alembic.ini', 'upgrade', ...],)
+kwargs = {'cwd': PosixPath('/home/hjed/Projects/personal-management-system2/backend'), 'env': {'ANTIGRAVITY_AGENT': '1', 'ANTIG...y-2025.18.0-linux-x64/bundled/libs/debugpy', 'CHROME_DESKTOP': 'antigravity.desktop', ...}, 'stderr': -1, 'stdout': -1}
+process = <Popen: returncode: 1 args: ['uv', 'run', 'alembic', '-c', 'alembic.ini', 'u...>
+stdout = b''
+stderr = b'Traceback (most recent call last):\n  File "/home/hjed/Projects/personal-management-system2/backend/.venv/lib/python...nning on that host and accepting TCP/IP connections?\n\n(Background on this error at: https://sqlalche.me/e/20/e3q8)\n'
+retcode = 1
+
+    def run(*popenargs,
+            input=None, capture_output=False, timeout=None, check=False, **kwargs):
+        """Run command with arguments and return a CompletedProcess instance.
+
+        The returned instance will have attributes args, returncode, stdout and
+        stderr. By default, stdout and stderr are not captured, and those attributes
+        will be None. Pass stdout=PIPE and/or stderr=PIPE in order to capture them,
+        or pass capture_output=True to capture both.
+
+        If check is True and the exit code was non-zero, it raises a
+        CalledProcessError. The CalledProcessError object will have the return code
+        in the returncode attribute, and output & stderr attributes if those streams
+        were captured.
+
+        If timeout (seconds) is given and the process takes too long,
+         a TimeoutExpired exception will be raised.
+
+        There is an optional argument "input", allowing you to
+        pass bytes or a string to the subprocess's stdin.  If you use this argument
+        you may not also use the Popen constructor's "stdin" argument, as
+        it will be used internally.
+
+        By default, all communication is in bytes, and therefore any "input" should
+        be bytes, and the stdout and stderr will be bytes. If in text mode, any
+        "input" should be a string, and stdout and stderr will be strings decoded
+        according to locale encoding, or by "encoding" if set. Text mode is
+        triggered by setting any of text, encoding, errors or universal_newlines.
+
+        The other arguments are the same as for the Popen constructor.
+        """
+        if input is not None:
+            if kwargs.get('stdin') is not None:
+                raise ValueError('stdin and input arguments may not both be used.')
+            kwargs['stdin'] = PIPE
+
+        if capture_output:
+            if kwargs.get('stdout') is not None or kwargs.get('stderr') is not None:
+                raise ValueError('stdout and stderr arguments may not be used '
+                                 'with capture_output.')
+            kwargs['stdout'] = PIPE
+            kwargs['stderr'] = PIPE
+
+        with Popen(*popenargs, **kwargs) as process:
+            try:
+                stdout, stderr = process.communicate(input, timeout=timeout)
+            except TimeoutExpired as exc:
+                process.kill()
+                if _mswindows:
+                    # Windows accumulates the output in a single blocking
+                    # read() call run on child threads, with the timeout
+                    # being done in a join() on those threads.  communicate()
+                    # _after_ kill() is required to collect that and add it
+                    # to the exception.
+                    exc.stdout, exc.stderr = process.communicate()
+                else:
+                    # POSIX _communicate already populated the output so
+                    # far into the TimeoutExpired exception.
+                    process.wait()
+                raise
+            except:  # Including KeyboardInterrupt, communicate handled that.
+                process.kill()
+                # We don't call process.wait() as .__exit__ does that for us.
+                raise
+            retcode = process.poll()
+            if check and retcode:
+>               raise CalledProcessError(retcode, process.args,
+                                         output=stdout, stderr=stderr)
+E               subprocess.CalledProcessError: Command '['uv', 'run', 'alembic', '-c', 'alembic.ini', 'upgrade', 'head']' returned non-zero exit status 1.
+
+/home/hjed/.local/share/uv/python/cpython-3.12.10-linux-x86_64-gnu/lib/python3.12/subprocess.py:571: CalledProcessError
+_ ERROR at setup of TestPeriodicSyncIntegration.test_periodic_sync_handles_no_active_accounts _
+
+    @pytest.fixture(scope="session", autouse=True)
+    def apply_migrations() -> None:
+        """Apply Alembic migrations to the test database."""
+        import subprocess
+        from pathlib import Path
+
+        backend_dir = Path(__file__).parent.parent.parent.parent.parent / "backend"
+
+        # We use the DATABASE_URL environment variable which is already set
+        env = os.environ.copy()
+        env.pop("VIRTUAL_ENV", None)  # Prevent uv warning about mismatched environment
+        # Ensure alembic gets the correct dynamic database URL
+        env["DATABASE_URL"] = get_async_database_url()
+
+        # Run alembic upgrade head
+>       subprocess.run(
+            ["uv", "run", "alembic", "-c", "alembic.ini", "upgrade", "head"],
+            cwd=backend_dir,
+            check=True,
+            env=env,
+            capture_output=True,
+        )
+
+tests/integration/conftest.py:72:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+input = None, capture_output = True, timeout = None, check = True
+popenargs = (['uv', 'run', 'alembic', '-c', 'alembic.ini', 'upgrade', ...],)
+kwargs = {'cwd': PosixPath('/home/hjed/Projects/personal-management-system2/backend'), 'env': {'ANTIGRAVITY_AGENT': '1', 'ANTIG...y-2025.18.0-linux-x64/bundled/libs/debugpy', 'CHROME_DESKTOP': 'antigravity.desktop', ...}, 'stderr': -1, 'stdout': -1}
+process = <Popen: returncode: 1 args: ['uv', 'run', 'alembic', '-c', 'alembic.ini', 'u...>
+stdout = b''
+stderr = b'Traceback (most recent call last):\n  File "/home/hjed/Projects/personal-management-system2/backend/.venv/lib/python...nning on that host and accepting TCP/IP connections?\n\n(Background on this error at: https://sqlalche.me/e/20/e3q8)\n'
+retcode = 1
+
+    def run(*popenargs,
+            input=None, capture_output=False, timeout=None, check=False, **kwargs):
+        """Run command with arguments and return a CompletedProcess instance.
+
+        The returned instance will have attributes args, returncode, stdout and
+        stderr. By default, stdout and stderr are not captured, and those attributes
+        will be None. Pass stdout=PIPE and/or stderr=PIPE in order to capture them,
+        or pass capture_output=True to capture both.
+
+        If check is True and the exit code was non-zero, it raises a
+        CalledProcessError. The CalledProcessError object will have the return code
+        in the returncode attribute, and output & stderr attributes if those streams
+        were captured.
+
+        If timeout (seconds) is given and the process takes too long,
+         a TimeoutExpired exception will be raised.
+
+        There is an optional argument "input", allowing you to
+        pass bytes or a string to the subprocess's stdin.  If you use this argument
+        you may not also use the Popen constructor's "stdin" argument, as
+        it will be used internally.
+
+        By default, all communication is in bytes, and therefore any "input" should
+        be bytes, and the stdout and stderr will be bytes. If in text mode, any
+        "input" should be a string, and stdout and stderr will be strings decoded
+        according to locale encoding, or by "encoding" if set. Text mode is
+        triggered by setting any of text, encoding, errors or universal_newlines.
+
+        The other arguments are the same as for the Popen constructor.
+        """
+        if input is not None:
+            if kwargs.get('stdin') is not None:
+                raise ValueError('stdin and input arguments may not both be used.')
+            kwargs['stdin'] = PIPE
+
+        if capture_output:
+            if kwargs.get('stdout') is not None or kwargs.get('stderr') is not None:
+                raise ValueError('stdout and stderr arguments may not be used '
+                                 'with capture_output.')
+            kwargs['stdout'] = PIPE
+            kwargs['stderr'] = PIPE
+
+        with Popen(*popenargs, **kwargs) as process:
+            try:
+                stdout, stderr = process.communicate(input, timeout=timeout)
+            except TimeoutExpired as exc:
+                process.kill()
+                if _mswindows:
+                    # Windows accumulates the output in a single blocking
+                    # read() call run on child threads, with the timeout
+                    # being done in a join() on those threads.  communicate()
+                    # _after_ kill() is required to collect that and add it
+                    # to the exception.
+                    exc.stdout, exc.stderr = process.communicate()
+                else:
+                    # POSIX _communicate already populated the output so
+                    # far into the TimeoutExpired exception.
+                    process.wait()
+                raise
+            except:  # Including KeyboardInterrupt, communicate handled that.
+                process.kill()
+                # We don't call process.wait() as .__exit__ does that for us.
+                raise
+            retcode = process.poll()
+            if check and retcode:
+>               raise CalledProcessError(retcode, process.args,
+                                         output=stdout, stderr=stderr)
+E               subprocess.CalledProcessError: Command '['uv', 'run', 'alembic', '-c', 'alembic.ini', 'upgrade', 'head']' returned non-zero exit status 1.
+
+/home/hjed/.local/share/uv/python/cpython-3.12.10-linux-x86_64-gnu/lib/python3.12/subprocess.py:571: CalledProcessError
+_ ERROR at setup of TestProcessJournalEventIntegration.test_process_journal_event_creates_external_link _
+
+    @pytest.fixture(scope="session", autouse=True)
+    def apply_migrations() -> None:
+        """Apply Alembic migrations to the test database."""
+        import subprocess
+        from pathlib import Path
+
+        backend_dir = Path(__file__).parent.parent.parent.parent.parent / "backend"
+
+        # We use the DATABASE_URL environment variable which is already set
+        env = os.environ.copy()
+        env.pop("VIRTUAL_ENV", None)  # Prevent uv warning about mismatched environment
+        # Ensure alembic gets the correct dynamic database URL
+        env["DATABASE_URL"] = get_async_database_url()
+
+        # Run alembic upgrade head
+>       subprocess.run(
+            ["uv", "run", "alembic", "-c", "alembic.ini", "upgrade", "head"],
+            cwd=backend_dir,
+            check=True,
+            env=env,
+            capture_output=True,
+        )
+
+tests/integration/conftest.py:72:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+input = None, capture_output = True, timeout = None, check = True
+popenargs = (['uv', 'run', 'alembic', '-c', 'alembic.ini', 'upgrade', ...],)
+kwargs = {'cwd': PosixPath('/home/hjed/Projects/personal-management-system2/backend'), 'env': {'ANTIGRAVITY_AGENT': '1', 'ANTIG...y-2025.18.0-linux-x64/bundled/libs/debugpy', 'CHROME_DESKTOP': 'antigravity.desktop', ...}, 'stderr': -1, 'stdout': -1}
+process = <Popen: returncode: 1 args: ['uv', 'run', 'alembic', '-c', 'alembic.ini', 'u...>
+stdout = b''
+stderr = b'Traceback (most recent call last):\n  File "/home/hjed/Projects/personal-management-system2/backend/.venv/lib/python...nning on that host and accepting TCP/IP connections?\n\n(Background on this error at: https://sqlalche.me/e/20/e3q8)\n'
+retcode = 1
+
+    def run(*popenargs,
+            input=None, capture_output=False, timeout=None, check=False, **kwargs):
+        """Run command with arguments and return a CompletedProcess instance.
+
+        The returned instance will have attributes args, returncode, stdout and
+        stderr. By default, stdout and stderr are not captured, and those attributes
+        will be None. Pass stdout=PIPE and/or stderr=PIPE in order to capture them,
+        or pass capture_output=True to capture both.
+
+        If check is True and the exit code was non-zero, it raises a
+        CalledProcessError. The CalledProcessError object will have the return code
+        in the returncode attribute, and output & stderr attributes if those streams
+        were captured.
+
+        If timeout (seconds) is given and the process takes too long,
+         a TimeoutExpired exception will be raised.
+
+        There is an optional argument "input", allowing you to
+        pass bytes or a string to the subprocess's stdin.  If you use this argument
+        you may not also use the Popen constructor's "stdin" argument, as
+        it will be used internally.
+
+        By default, all communication is in bytes, and therefore any "input" should
+        be bytes, and the stdout and stderr will be bytes. If in text mode, any
+        "input" should be a string, and stdout and stderr will be strings decoded
+        according to locale encoding, or by "encoding" if set. Text mode is
+        triggered by setting any of text, encoding, errors or universal_newlines.
+
+        The other arguments are the same as for the Popen constructor.
+        """
+        if input is not None:
+            if kwargs.get('stdin') is not None:
+                raise ValueError('stdin and input arguments may not both be used.')
+            kwargs['stdin'] = PIPE
+
+        if capture_output:
+            if kwargs.get('stdout') is not None or kwargs.get('stderr') is not None:
+                raise ValueError('stdout and stderr arguments may not be used '
+                                 'with capture_output.')
+            kwargs['stdout'] = PIPE
+            kwargs['stderr'] = PIPE
+
+        with Popen(*popenargs, **kwargs) as process:
+            try:
+                stdout, stderr = process.communicate(input, timeout=timeout)
+            except TimeoutExpired as exc:
+                process.kill()
+                if _mswindows:
+                    # Windows accumulates the output in a single blocking
+                    # read() call run on child threads, with the timeout
+                    # being done in a join() on those threads.  communicate()
+                    # _after_ kill() is required to collect that and add it
+                    # to the exception.
+                    exc.stdout, exc.stderr = process.communicate()
+                else:
+                    # POSIX _communicate already populated the output so
+                    # far into the TimeoutExpired exception.
+                    process.wait()
+                raise
+            except:  # Including KeyboardInterrupt, communicate handled that.
+                process.kill()
+                # We don't call process.wait() as .__exit__ does that for us.
+                raise
+            retcode = process.poll()
+            if check and retcode:
+>               raise CalledProcessError(retcode, process.args,
+                                         output=stdout, stderr=stderr)
+E               subprocess.CalledProcessError: Command '['uv', 'run', 'alembic', '-c', 'alembic.ini', 'upgrade', 'head']' returned non-zero exit status 1.
+
+/home/hjed/.local/share/uv/python/cpython-3.12.10-linux-x86_64-gnu/lib/python3.12/subprocess.py:571: CalledProcessError
+_ ERROR at setup of TestProcessJournalEventIntegration.test_process_journal_event_updates_existing_link _
+
+    @pytest.fixture(scope="session", autouse=True)
+    def apply_migrations() -> None:
+        """Apply Alembic migrations to the test database."""
+        import subprocess
+        from pathlib import Path
+
+        backend_dir = Path(__file__).parent.parent.parent.parent.parent / "backend"
+
+        # We use the DATABASE_URL environment variable which is already set
+        env = os.environ.copy()
+        env.pop("VIRTUAL_ENV", None)  # Prevent uv warning about mismatched environment
+        # Ensure alembic gets the correct dynamic database URL
+        env["DATABASE_URL"] = get_async_database_url()
+
+        # Run alembic upgrade head
+>       subprocess.run(
+            ["uv", "run", "alembic", "-c", "alembic.ini", "upgrade", "head"],
+            cwd=backend_dir,
+            check=True,
+            env=env,
+            capture_output=True,
+        )
+
+tests/integration/conftest.py:72:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+input = None, capture_output = True, timeout = None, check = True
+popenargs = (['uv', 'run', 'alembic', '-c', 'alembic.ini', 'upgrade', ...],)
+kwargs = {'cwd': PosixPath('/home/hjed/Projects/personal-management-system2/backend'), 'env': {'ANTIGRAVITY_AGENT': '1', 'ANTIG...y-2025.18.0-linux-x64/bundled/libs/debugpy', 'CHROME_DESKTOP': 'antigravity.desktop', ...}, 'stderr': -1, 'stdout': -1}
+process = <Popen: returncode: 1 args: ['uv', 'run', 'alembic', '-c', 'alembic.ini', 'u...>
+stdout = b''
+stderr = b'Traceback (most recent call last):\n  File "/home/hjed/Projects/personal-management-system2/backend/.venv/lib/python...nning on that host and accepting TCP/IP connections?\n\n(Background on this error at: https://sqlalche.me/e/20/e3q8)\n'
+retcode = 1
+
+    def run(*popenargs,
+            input=None, capture_output=False, timeout=None, check=False, **kwargs):
+        """Run command with arguments and return a CompletedProcess instance.
+
+        The returned instance will have attributes args, returncode, stdout and
+        stderr. By default, stdout and stderr are not captured, and those attributes
+        will be None. Pass stdout=PIPE and/or stderr=PIPE in order to capture them,
+        or pass capture_output=True to capture both.
+
+        If check is True and the exit code was non-zero, it raises a
+        CalledProcessError. The CalledProcessError object will have the return code
+        in the returncode attribute, and output & stderr attributes if those streams
+        were captured.
+
+        If timeout (seconds) is given and the process takes too long,
+         a TimeoutExpired exception will be raised.
+
+        There is an optional argument "input", allowing you to
+        pass bytes or a string to the subprocess's stdin.  If you use this argument
+        you may not also use the Popen constructor's "stdin" argument, as
+        it will be used internally.
+
+        By default, all communication is in bytes, and therefore any "input" should
+        be bytes, and the stdout and stderr will be bytes. If in text mode, any
+        "input" should be a string, and stdout and stderr will be strings decoded
+        according to locale encoding, or by "encoding" if set. Text mode is
+        triggered by setting any of text, encoding, errors or universal_newlines.
+
+        The other arguments are the same as for the Popen constructor.
+        """
+        if input is not None:
+            if kwargs.get('stdin') is not None:
+                raise ValueError('stdin and input arguments may not both be used.')
+            kwargs['stdin'] = PIPE
+
+        if capture_output:
+            if kwargs.get('stdout') is not None or kwargs.get('stderr') is not None:
+                raise ValueError('stdout and stderr arguments may not be used '
+                                 'with capture_output.')
+            kwargs['stdout'] = PIPE
+            kwargs['stderr'] = PIPE
+
+        with Popen(*popenargs, **kwargs) as process:
+            try:
+                stdout, stderr = process.communicate(input, timeout=timeout)
+            except TimeoutExpired as exc:
+                process.kill()
+                if _mswindows:
+                    # Windows accumulates the output in a single blocking
+                    # read() call run on child threads, with the timeout
+                    # being done in a join() on those threads.  communicate()
+                    # _after_ kill() is required to collect that and add it
+                    # to the exception.
+                    exc.stdout, exc.stderr = process.communicate()
+                else:
+                    # POSIX _communicate already populated the output so
+                    # far into the TimeoutExpired exception.
+                    process.wait()
+                raise
+            except:  # Including KeyboardInterrupt, communicate handled that.
+                process.kill()
+                # We don't call process.wait() as .__exit__ does that for us.
+                raise
+            retcode = process.poll()
+            if check and retcode:
+>               raise CalledProcessError(retcode, process.args,
+                                         output=stdout, stderr=stderr)
+E               subprocess.CalledProcessError: Command '['uv', 'run', 'alembic', '-c', 'alembic.ini', 'upgrade', 'head']' returned non-zero exit status 1.
+
+/home/hjed/.local/share/uv/python/cpython-3.12.10-linux-x86_64-gnu/lib/python3.12/subprocess.py:571: CalledProcessError
+_ ERROR at setup of TestProcessJournalEventIntegration.test_process_journal_event_deletes_external_link _
+
+    @pytest.fixture(scope="session", autouse=True)
+    def apply_migrations() -> None:
+        """Apply Alembic migrations to the test database."""
+        import subprocess
+        from pathlib import Path
+
+        backend_dir = Path(__file__).parent.parent.parent.parent.parent / "backend"
+
+        # We use the DATABASE_URL environment variable which is already set
+        env = os.environ.copy()
+        env.pop("VIRTUAL_ENV", None)  # Prevent uv warning about mismatched environment
+        # Ensure alembic gets the correct dynamic database URL
+        env["DATABASE_URL"] = get_async_database_url()
+
+        # Run alembic upgrade head
+>       subprocess.run(
+            ["uv", "run", "alembic", "-c", "alembic.ini", "upgrade", "head"],
+            cwd=backend_dir,
+            check=True,
+            env=env,
+            capture_output=True,
+        )
+
+tests/integration/conftest.py:72:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+input = None, capture_output = True, timeout = None, check = True
+popenargs = (['uv', 'run', 'alembic', '-c', 'alembic.ini', 'upgrade', ...],)
+kwargs = {'cwd': PosixPath('/home/hjed/Projects/personal-management-system2/backend'), 'env': {'ANTIGRAVITY_AGENT': '1', 'ANTIG...y-2025.18.0-linux-x64/bundled/libs/debugpy', 'CHROME_DESKTOP': 'antigravity.desktop', ...}, 'stderr': -1, 'stdout': -1}
+process = <Popen: returncode: 1 args: ['uv', 'run', 'alembic', '-c', 'alembic.ini', 'u...>
+stdout = b''
+stderr = b'Traceback (most recent call last):\n  File "/home/hjed/Projects/personal-management-system2/backend/.venv/lib/python...nning on that host and accepting TCP/IP connections?\n\n(Background on this error at: https://sqlalche.me/e/20/e3q8)\n'
+retcode = 1
+
+    def run(*popenargs,
+            input=None, capture_output=False, timeout=None, check=False, **kwargs):
+        """Run command with arguments and return a CompletedProcess instance.
+
+        The returned instance will have attributes args, returncode, stdout and
+        stderr. By default, stdout and stderr are not captured, and those attributes
+        will be None. Pass stdout=PIPE and/or stderr=PIPE in order to capture them,
+        or pass capture_output=True to capture both.
+
+        If check is True and the exit code was non-zero, it raises a
+        CalledProcessError. The CalledProcessError object will have the return code
+        in the returncode attribute, and output & stderr attributes if those streams
+        were captured.
+
+        If timeout (seconds) is given and the process takes too long,
+         a TimeoutExpired exception will be raised.
+
+        There is an optional argument "input", allowing you to
+        pass bytes or a string to the subprocess's stdin.  If you use this argument
+        you may not also use the Popen constructor's "stdin" argument, as
+        it will be used internally.
+
+        By default, all communication is in bytes, and therefore any "input" should
+        be bytes, and the stdout and stderr will be bytes. If in text mode, any
+        "input" should be a string, and stdout and stderr will be strings decoded
+        according to locale encoding, or by "encoding" if set. Text mode is
+        triggered by setting any of text, encoding, errors or universal_newlines.
+
+        The other arguments are the same as for the Popen constructor.
+        """
+        if input is not None:
+            if kwargs.get('stdin') is not None:
+                raise ValueError('stdin and input arguments may not both be used.')
+            kwargs['stdin'] = PIPE
+
+        if capture_output:
+            if kwargs.get('stdout') is not None or kwargs.get('stderr') is not None:
+                raise ValueError('stdout and stderr arguments may not be used '
+                                 'with capture_output.')
+            kwargs['stdout'] = PIPE
+            kwargs['stderr'] = PIPE
+
+        with Popen(*popenargs, **kwargs) as process:
+            try:
+                stdout, stderr = process.communicate(input, timeout=timeout)
+            except TimeoutExpired as exc:
+                process.kill()
+                if _mswindows:
+                    # Windows accumulates the output in a single blocking
+                    # read() call run on child threads, with the timeout
+                    # being done in a join() on those threads.  communicate()
+                    # _after_ kill() is required to collect that and add it
+                    # to the exception.
+                    exc.stdout, exc.stderr = process.communicate()
+                else:
+                    # POSIX _communicate already populated the output so
+                    # far into the TimeoutExpired exception.
+                    process.wait()
+                raise
+            except:  # Including KeyboardInterrupt, communicate handled that.
+                process.kill()
+                # We don't call process.wait() as .__exit__ does that for us.
+                raise
+            retcode = process.poll()
+            if check and retcode:
+>               raise CalledProcessError(retcode, process.args,
+                                         output=stdout, stderr=stderr)
+E               subprocess.CalledProcessError: Command '['uv', 'run', 'alembic', '-c', 'alembic.ini', 'upgrade', 'head']' returned non-zero exit status 1.
+
+/home/hjed/.local/share/uv/python/cpython-3.12.10-linux-x86_64-gnu/lib/python3.12/subprocess.py:571: CalledProcessError
+_ ERROR at setup of TestProcessJournalEventIntegration.test_process_journal_event_deletes_with_explicit_calendar_id _
+
+    @pytest.fixture(scope="session", autouse=True)
+    def apply_migrations() -> None:
+        """Apply Alembic migrations to the test database."""
+        import subprocess
+        from pathlib import Path
+
+        backend_dir = Path(__file__).parent.parent.parent.parent.parent / "backend"
+
+        # We use the DATABASE_URL environment variable which is already set
+        env = os.environ.copy()
+        env.pop("VIRTUAL_ENV", None)  # Prevent uv warning about mismatched environment
+        # Ensure alembic gets the correct dynamic database URL
+        env["DATABASE_URL"] = get_async_database_url()
+
+        # Run alembic upgrade head
+>       subprocess.run(
+            ["uv", "run", "alembic", "-c", "alembic.ini", "upgrade", "head"],
+            cwd=backend_dir,
+            check=True,
+            env=env,
+            capture_output=True,
+        )
+
+tests/integration/conftest.py:72:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+input = None, capture_output = True, timeout = None, check = True
+popenargs = (['uv', 'run', 'alembic', '-c', 'alembic.ini', 'upgrade', ...],)
+kwargs = {'cwd': PosixPath('/home/hjed/Projects/personal-management-system2/backend'), 'env': {'ANTIGRAVITY_AGENT': '1', 'ANTIG...y-2025.18.0-linux-x64/bundled/libs/debugpy', 'CHROME_DESKTOP': 'antigravity.desktop', ...}, 'stderr': -1, 'stdout': -1}
+process = <Popen: returncode: 1 args: ['uv', 'run', 'alembic', '-c', 'alembic.ini', 'u...>
+stdout = b''
+stderr = b'Traceback (most recent call last):\n  File "/home/hjed/Projects/personal-management-system2/backend/.venv/lib/python...nning on that host and accepting TCP/IP connections?\n\n(Background on this error at: https://sqlalche.me/e/20/e3q8)\n'
+retcode = 1
+
+    def run(*popenargs,
+            input=None, capture_output=False, timeout=None, check=False, **kwargs):
+        """Run command with arguments and return a CompletedProcess instance.
+
+        The returned instance will have attributes args, returncode, stdout and
+        stderr. By default, stdout and stderr are not captured, and those attributes
+        will be None. Pass stdout=PIPE and/or stderr=PIPE in order to capture them,
+        or pass capture_output=True to capture both.
+
+        If check is True and the exit code was non-zero, it raises a
+        CalledProcessError. The CalledProcessError object will have the return code
+        in the returncode attribute, and output & stderr attributes if those streams
+        were captured.
+
+        If timeout (seconds) is given and the process takes too long,
+         a TimeoutExpired exception will be raised.
+
+        There is an optional argument "input", allowing you to
+        pass bytes or a string to the subprocess's stdin.  If you use this argument
+        you may not also use the Popen constructor's "stdin" argument, as
+        it will be used internally.
+
+        By default, all communication is in bytes, and therefore any "input" should
+        be bytes, and the stdout and stderr will be bytes. If in text mode, any
+        "input" should be a string, and stdout and stderr will be strings decoded
+        according to locale encoding, or by "encoding" if set. Text mode is
+        triggered by setting any of text, encoding, errors or universal_newlines.
+
+        The other arguments are the same as for the Popen constructor.
+        """
+        if input is not None:
+            if kwargs.get('stdin') is not None:
+                raise ValueError('stdin and input arguments may not both be used.')
+            kwargs['stdin'] = PIPE
+
+        if capture_output:
+            if kwargs.get('stdout') is not None or kwargs.get('stderr') is not None:
+                raise ValueError('stdout and stderr arguments may not be used '
+                                 'with capture_output.')
+            kwargs['stdout'] = PIPE
+            kwargs['stderr'] = PIPE
+
+        with Popen(*popenargs, **kwargs) as process:
+            try:
+                stdout, stderr = process.communicate(input, timeout=timeout)
+            except TimeoutExpired as exc:
+                process.kill()
+                if _mswindows:
+                    # Windows accumulates the output in a single blocking
+                    # read() call run on child threads, with the timeout
+                    # being done in a join() on those threads.  communicate()
+                    # _after_ kill() is required to collect that and add it
+                    # to the exception.
+                    exc.stdout, exc.stderr = process.communicate()
+                else:
+                    # POSIX _communicate already populated the output so
+                    # far into the TimeoutExpired exception.
+                    process.wait()
+                raise
+            except:  # Including KeyboardInterrupt, communicate handled that.
+                process.kill()
+                # We don't call process.wait() as .__exit__ does that for us.
+                raise
+            retcode = process.poll()
+            if check and retcode:
+>               raise CalledProcessError(retcode, process.args,
+                                         output=stdout, stderr=stderr)
+E               subprocess.CalledProcessError: Command '['uv', 'run', 'alembic', '-c', 'alembic.ini', 'upgrade', 'head']' returned non-zero exit status 1.
+
+/home/hjed/.local/share/uv/python/cpython-3.12.10-linux-x86_64-gnu/lib/python3.12/subprocess.py:571: CalledProcessError
+_ ERROR at setup of TestProcessJournalEventIntegration.test_process_journal_event_orphan_delete_fails_sets_errored _
+
+    @pytest.fixture(scope="session", autouse=True)
+    def apply_migrations() -> None:
+        """Apply Alembic migrations to the test database."""
+        import subprocess
+        from pathlib import Path
+
+        backend_dir = Path(__file__).parent.parent.parent.parent.parent / "backend"
+
+        # We use the DATABASE_URL environment variable which is already set
+        env = os.environ.copy()
+        env.pop("VIRTUAL_ENV", None)  # Prevent uv warning about mismatched environment
+        # Ensure alembic gets the correct dynamic database URL
+        env["DATABASE_URL"] = get_async_database_url()
+
+        # Run alembic upgrade head
+>       subprocess.run(
+            ["uv", "run", "alembic", "-c", "alembic.ini", "upgrade", "head"],
+            cwd=backend_dir,
+            check=True,
+            env=env,
+            capture_output=True,
+        )
+
+tests/integration/conftest.py:72:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+input = None, capture_output = True, timeout = None, check = True
+popenargs = (['uv', 'run', 'alembic', '-c', 'alembic.ini', 'upgrade', ...],)
+kwargs = {'cwd': PosixPath('/home/hjed/Projects/personal-management-system2/backend'), 'env': {'ANTIGRAVITY_AGENT': '1', 'ANTIG...y-2025.18.0-linux-x64/bundled/libs/debugpy', 'CHROME_DESKTOP': 'antigravity.desktop', ...}, 'stderr': -1, 'stdout': -1}
+process = <Popen: returncode: 1 args: ['uv', 'run', 'alembic', '-c', 'alembic.ini', 'u...>
+stdout = b''
+stderr = b'Traceback (most recent call last):\n  File "/home/hjed/Projects/personal-management-system2/backend/.venv/lib/python...nning on that host and accepting TCP/IP connections?\n\n(Background on this error at: https://sqlalche.me/e/20/e3q8)\n'
+retcode = 1
+
+    def run(*popenargs,
+            input=None, capture_output=False, timeout=None, check=False, **kwargs):
+        """Run command with arguments and return a CompletedProcess instance.
+
+        The returned instance will have attributes args, returncode, stdout and
+        stderr. By default, stdout and stderr are not captured, and those attributes
+        will be None. Pass stdout=PIPE and/or stderr=PIPE in order to capture them,
+        or pass capture_output=True to capture both.
+
+        If check is True and the exit code was non-zero, it raises a
+        CalledProcessError. The CalledProcessError object will have the return code
+        in the returncode attribute, and output & stderr attributes if those streams
+        were captured.
+
+        If timeout (seconds) is given and the process takes too long,
+         a TimeoutExpired exception will be raised.
+
+        There is an optional argument "input", allowing you to
+        pass bytes or a string to the subprocess's stdin.  If you use this argument
+        you may not also use the Popen constructor's "stdin" argument, as
+        it will be used internally.
+
+        By default, all communication is in bytes, and therefore any "input" should
+        be bytes, and the stdout and stderr will be bytes. If in text mode, any
+        "input" should be a string, and stdout and stderr will be strings decoded
+        according to locale encoding, or by "encoding" if set. Text mode is
+        triggered by setting any of text, encoding, errors or universal_newlines.
+
+        The other arguments are the same as for the Popen constructor.
+        """
+        if input is not None:
+            if kwargs.get('stdin') is not None:
+                raise ValueError('stdin and input arguments may not both be used.')
+            kwargs['stdin'] = PIPE
+
+        if capture_output:
+            if kwargs.get('stdout') is not None or kwargs.get('stderr') is not None:
+                raise ValueError('stdout and stderr arguments may not be used '
+                                 'with capture_output.')
+            kwargs['stdout'] = PIPE
+            kwargs['stderr'] = PIPE
+
+        with Popen(*popenargs, **kwargs) as process:
+            try:
+                stdout, stderr = process.communicate(input, timeout=timeout)
+            except TimeoutExpired as exc:
+                process.kill()
+                if _mswindows:
+                    # Windows accumulates the output in a single blocking
+                    # read() call run on child threads, with the timeout
+                    # being done in a join() on those threads.  communicate()
+                    # _after_ kill() is required to collect that and add it
+                    # to the exception.
+                    exc.stdout, exc.stderr = process.communicate()
+                else:
+                    # POSIX _communicate already populated the output so
+                    # far into the TimeoutExpired exception.
+                    process.wait()
+                raise
+            except:  # Including KeyboardInterrupt, communicate handled that.
+                process.kill()
+                # We don't call process.wait() as .__exit__ does that for us.
+                raise
+            retcode = process.poll()
+            if check and retcode:
+>               raise CalledProcessError(retcode, process.args,
+                                         output=stdout, stderr=stderr)
+E               subprocess.CalledProcessError: Command '['uv', 'run', 'alembic', '-c', 'alembic.ini', 'upgrade', 'head']' returned non-zero exit status 1.
+
+/home/hjed/.local/share/uv/python/cpython-3.12.10-linux-x86_64-gnu/lib/python3.12/subprocess.py:571: CalledProcessError
+_ ERROR at setup of TestProcessJournalEventIntegration.test_process_journal_event_concurrent_create_ignores_duplicate _
+
+    @pytest.fixture(scope="session", autouse=True)
+    def apply_migrations() -> None:
+        """Apply Alembic migrations to the test database."""
+        import subprocess
+        from pathlib import Path
+
+        backend_dir = Path(__file__).parent.parent.parent.parent.parent / "backend"
+
+        # We use the DATABASE_URL environment variable which is already set
+        env = os.environ.copy()
+        env.pop("VIRTUAL_ENV", None)  # Prevent uv warning about mismatched environment
+        # Ensure alembic gets the correct dynamic database URL
+        env["DATABASE_URL"] = get_async_database_url()
+
+        # Run alembic upgrade head
+>       subprocess.run(
+            ["uv", "run", "alembic", "-c", "alembic.ini", "upgrade", "head"],
+            cwd=backend_dir,
+            check=True,
+            env=env,
+            capture_output=True,
+        )
+
+tests/integration/conftest.py:72:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+input = None, capture_output = True, timeout = None, check = True
+popenargs = (['uv', 'run', 'alembic', '-c', 'alembic.ini', 'upgrade', ...],)
+kwargs = {'cwd': PosixPath('/home/hjed/Projects/personal-management-system2/backend'), 'env': {'ANTIGRAVITY_AGENT': '1', 'ANTIG...y-2025.18.0-linux-x64/bundled/libs/debugpy', 'CHROME_DESKTOP': 'antigravity.desktop', ...}, 'stderr': -1, 'stdout': -1}
+process = <Popen: returncode: 1 args: ['uv', 'run', 'alembic', '-c', 'alembic.ini', 'u...>
+stdout = b''
+stderr = b'Traceback (most recent call last):\n  File "/home/hjed/Projects/personal-management-system2/backend/.venv/lib/python...nning on that host and accepting TCP/IP connections?\n\n(Background on this error at: https://sqlalche.me/e/20/e3q8)\n'
+retcode = 1
+
+    def run(*popenargs,
+            input=None, capture_output=False, timeout=None, check=False, **kwargs):
+        """Run command with arguments and return a CompletedProcess instance.
+
+        The returned instance will have attributes args, returncode, stdout and
+        stderr. By default, stdout and stderr are not captured, and those attributes
+        will be None. Pass stdout=PIPE and/or stderr=PIPE in order to capture them,
+        or pass capture_output=True to capture both.
+
+        If check is True and the exit code was non-zero, it raises a
+        CalledProcessError. The CalledProcessError object will have the return code
+        in the returncode attribute, and output & stderr attributes if those streams
+        were captured.
+
+        If timeout (seconds) is given and the process takes too long,
+         a TimeoutExpired exception will be raised.
+
+        There is an optional argument "input", allowing you to
+        pass bytes or a string to the subprocess's stdin.  If you use this argument
+        you may not also use the Popen constructor's "stdin" argument, as
+        it will be used internally.
+
+        By default, all communication is in bytes, and therefore any "input" should
+        be bytes, and the stdout and stderr will be bytes. If in text mode, any
+        "input" should be a string, and stdout and stderr will be strings decoded
+        according to locale encoding, or by "encoding" if set. Text mode is
+        triggered by setting any of text, encoding, errors or universal_newlines.
+
+        The other arguments are the same as for the Popen constructor.
+        """
+        if input is not None:
+            if kwargs.get('stdin') is not None:
+                raise ValueError('stdin and input arguments may not both be used.')
+            kwargs['stdin'] = PIPE
+
+        if capture_output:
+            if kwargs.get('stdout') is not None or kwargs.get('stderr') is not None:
+                raise ValueError('stdout and stderr arguments may not be used '
+                                 'with capture_output.')
+            kwargs['stdout'] = PIPE
+            kwargs['stderr'] = PIPE
+
+        with Popen(*popenargs, **kwargs) as process:
+            try:
+                stdout, stderr = process.communicate(input, timeout=timeout)
+            except TimeoutExpired as exc:
+                process.kill()
+                if _mswindows:
+                    # Windows accumulates the output in a single blocking
+                    # read() call run on child threads, with the timeout
+                    # being done in a join() on those threads.  communicate()
+                    # _after_ kill() is required to collect that and add it
+                    # to the exception.
+                    exc.stdout, exc.stderr = process.communicate()
+                else:
+                    # POSIX _communicate already populated the output so
+                    # far into the TimeoutExpired exception.
+                    process.wait()
+                raise
+            except:  # Including KeyboardInterrupt, communicate handled that.
+                process.kill()
+                # We don't call process.wait() as .__exit__ does that for us.
+                raise
+            retcode = process.poll()
+            if check and retcode:
+>               raise CalledProcessError(retcode, process.args,
+                                         output=stdout, stderr=stderr)
+E               subprocess.CalledProcessError: Command '['uv', 'run', 'alembic', '-c', 'alembic.ini', 'upgrade', 'head']' returned non-zero exit status 1.
+
+/home/hjed/.local/share/uv/python/cpython-3.12.10-linux-x86_64-gnu/lib/python3.12/subprocess.py:571: CalledProcessError
+_ ERROR at setup of TestReservedGroupsIntegration.test_full_sync_with_groups_and_starred _
+
+    @pytest.fixture(scope="session", autouse=True)
+    def apply_migrations() -> None:
+        """Apply Alembic migrations to the test database."""
+        import subprocess
+        from pathlib import Path
+
+        backend_dir = Path(__file__).parent.parent.parent.parent.parent / "backend"
+
+        # We use the DATABASE_URL environment variable which is already set
+        env = os.environ.copy()
+        env.pop("VIRTUAL_ENV", None)  # Prevent uv warning about mismatched environment
+        # Ensure alembic gets the correct dynamic database URL
+        env["DATABASE_URL"] = get_async_database_url()
+
+        # Run alembic upgrade head
+>       subprocess.run(
+            ["uv", "run", "alembic", "-c", "alembic.ini", "upgrade", "head"],
+            cwd=backend_dir,
+            check=True,
+            env=env,
+            capture_output=True,
+        )
+
+tests/integration/conftest.py:72:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+input = None, capture_output = True, timeout = None, check = True
+popenargs = (['uv', 'run', 'alembic', '-c', 'alembic.ini', 'upgrade', ...],)
+kwargs = {'cwd': PosixPath('/home/hjed/Projects/personal-management-system2/backend'), 'env': {'ANTIGRAVITY_AGENT': '1', 'ANTIG...y-2025.18.0-linux-x64/bundled/libs/debugpy', 'CHROME_DESKTOP': 'antigravity.desktop', ...}, 'stderr': -1, 'stdout': -1}
+process = <Popen: returncode: 1 args: ['uv', 'run', 'alembic', '-c', 'alembic.ini', 'u...>
+stdout = b''
+stderr = b'Traceback (most recent call last):\n  File "/home/hjed/Projects/personal-management-system2/backend/.venv/lib/python...nning on that host and accepting TCP/IP connections?\n\n(Background on this error at: https://sqlalche.me/e/20/e3q8)\n'
+retcode = 1
+
+    def run(*popenargs,
+            input=None, capture_output=False, timeout=None, check=False, **kwargs):
+        """Run command with arguments and return a CompletedProcess instance.
+
+        The returned instance will have attributes args, returncode, stdout and
+        stderr. By default, stdout and stderr are not captured, and those attributes
+        will be None. Pass stdout=PIPE and/or stderr=PIPE in order to capture them,
+        or pass capture_output=True to capture both.
+
+        If check is True and the exit code was non-zero, it raises a
+        CalledProcessError. The CalledProcessError object will have the return code
+        in the returncode attribute, and output & stderr attributes if those streams
+        were captured.
+
+        If timeout (seconds) is given and the process takes too long,
+         a TimeoutExpired exception will be raised.
+
+        There is an optional argument "input", allowing you to
+        pass bytes or a string to the subprocess's stdin.  If you use this argument
+        you may not also use the Popen constructor's "stdin" argument, as
+        it will be used internally.
+
+        By default, all communication is in bytes, and therefore any "input" should
+        be bytes, and the stdout and stderr will be bytes. If in text mode, any
+        "input" should be a string, and stdout and stderr will be strings decoded
+        according to locale encoding, or by "encoding" if set. Text mode is
+        triggered by setting any of text, encoding, errors or universal_newlines.
+
+        The other arguments are the same as for the Popen constructor.
+        """
+        if input is not None:
+            if kwargs.get('stdin') is not None:
+                raise ValueError('stdin and input arguments may not both be used.')
+            kwargs['stdin'] = PIPE
+
+        if capture_output:
+            if kwargs.get('stdout') is not None or kwargs.get('stderr') is not None:
+                raise ValueError('stdout and stderr arguments may not be used '
+                                 'with capture_output.')
+            kwargs['stdout'] = PIPE
+            kwargs['stderr'] = PIPE
+
+        with Popen(*popenargs, **kwargs) as process:
+            try:
+                stdout, stderr = process.communicate(input, timeout=timeout)
+            except TimeoutExpired as exc:
+                process.kill()
+                if _mswindows:
+                    # Windows accumulates the output in a single blocking
+                    # read() call run on child threads, with the timeout
+                    # being done in a join() on those threads.  communicate()
+                    # _after_ kill() is required to collect that and add it
+                    # to the exception.
+                    exc.stdout, exc.stderr = process.communicate()
+                else:
+                    # POSIX _communicate already populated the output so
+                    # far into the TimeoutExpired exception.
+                    process.wait()
+                raise
+            except:  # Including KeyboardInterrupt, communicate handled that.
+                process.kill()
+                # We don't call process.wait() as .__exit__ does that for us.
+                raise
+            retcode = process.poll()
+            if check and retcode:
+>               raise CalledProcessError(retcode, process.args,
+                                         output=stdout, stderr=stderr)
+E               subprocess.CalledProcessError: Command '['uv', 'run', 'alembic', '-c', 'alembic.ini', 'upgrade', 'head']' returned non-zero exit status 1.
+
+/home/hjed/.local/share/uv/python/cpython-3.12.10-linux-x86_64-gnu/lib/python3.12/subprocess.py:571: CalledProcessError
+_ ERROR at setup of TestARQRetryIntegration.test_worker_settings_configuration _
+
+    @pytest.fixture(scope="session", autouse=True)
+    def apply_migrations() -> None:
+        """Apply Alembic migrations to the test database."""
+        import subprocess
+        from pathlib import Path
+
+        backend_dir = Path(__file__).parent.parent.parent.parent.parent / "backend"
+
+        # We use the DATABASE_URL environment variable which is already set
+        env = os.environ.copy()
+        env.pop("VIRTUAL_ENV", None)  # Prevent uv warning about mismatched environment
+        # Ensure alembic gets the correct dynamic database URL
+        env["DATABASE_URL"] = get_async_database_url()
+
+        # Run alembic upgrade head
+>       subprocess.run(
+            ["uv", "run", "alembic", "-c", "alembic.ini", "upgrade", "head"],
+            cwd=backend_dir,
+            check=True,
+            env=env,
+            capture_output=True,
+        )
+
+tests/integration/conftest.py:72:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+input = None, capture_output = True, timeout = None, check = True
+popenargs = (['uv', 'run', 'alembic', '-c', 'alembic.ini', 'upgrade', ...],)
+kwargs = {'cwd': PosixPath('/home/hjed/Projects/personal-management-system2/backend'), 'env': {'ANTIGRAVITY_AGENT': '1', 'ANTIG...y-2025.18.0-linux-x64/bundled/libs/debugpy', 'CHROME_DESKTOP': 'antigravity.desktop', ...}, 'stderr': -1, 'stdout': -1}
+process = <Popen: returncode: 1 args: ['uv', 'run', 'alembic', '-c', 'alembic.ini', 'u...>
+stdout = b''
+stderr = b'Traceback (most recent call last):\n  File "/home/hjed/Projects/personal-management-system2/backend/.venv/lib/python...nning on that host and accepting TCP/IP connections?\n\n(Background on this error at: https://sqlalche.me/e/20/e3q8)\n'
+retcode = 1
+
+    def run(*popenargs,
+            input=None, capture_output=False, timeout=None, check=False, **kwargs):
+        """Run command with arguments and return a CompletedProcess instance.
+
+        The returned instance will have attributes args, returncode, stdout and
+        stderr. By default, stdout and stderr are not captured, and those attributes
+        will be None. Pass stdout=PIPE and/or stderr=PIPE in order to capture them,
+        or pass capture_output=True to capture both.
+
+        If check is True and the exit code was non-zero, it raises a
+        CalledProcessError. The CalledProcessError object will have the return code
+        in the returncode attribute, and output & stderr attributes if those streams
+        were captured.
+
+        If timeout (seconds) is given and the process takes too long,
+         a TimeoutExpired exception will be raised.
+
+        There is an optional argument "input", allowing you to
+        pass bytes or a string to the subprocess's stdin.  If you use this argument
+        you may not also use the Popen constructor's "stdin" argument, as
+        it will be used internally.
+
+        By default, all communication is in bytes, and therefore any "input" should
+        be bytes, and the stdout and stderr will be bytes. If in text mode, any
+        "input" should be a string, and stdout and stderr will be strings decoded
+        according to locale encoding, or by "encoding" if set. Text mode is
+        triggered by setting any of text, encoding, errors or universal_newlines.
+
+        The other arguments are the same as for the Popen constructor.
+        """
+        if input is not None:
+            if kwargs.get('stdin') is not None:
+                raise ValueError('stdin and input arguments may not both be used.')
+            kwargs['stdin'] = PIPE
+
+        if capture_output:
+            if kwargs.get('stdout') is not None or kwargs.get('stderr') is not None:
+                raise ValueError('stdout and stderr arguments may not be used '
+                                 'with capture_output.')
+            kwargs['stdout'] = PIPE
+            kwargs['stderr'] = PIPE
+
+        with Popen(*popenargs, **kwargs) as process:
+            try:
+                stdout, stderr = process.communicate(input, timeout=timeout)
+            except TimeoutExpired as exc:
+                process.kill()
+                if _mswindows:
+                    # Windows accumulates the output in a single blocking
+                    # read() call run on child threads, with the timeout
+                    # being done in a join() on those threads.  communicate()
+                    # _after_ kill() is required to collect that and add it
+                    # to the exception.
+                    exc.stdout, exc.stderr = process.communicate()
+                else:
+                    # POSIX _communicate already populated the output so
+                    # far into the TimeoutExpired exception.
+                    process.wait()
+                raise
+            except:  # Including KeyboardInterrupt, communicate handled that.
+                process.kill()
+                # We don't call process.wait() as .__exit__ does that for us.
+                raise
+            retcode = process.poll()
+            if check and retcode:
+>               raise CalledProcessError(retcode, process.args,
+                                         output=stdout, stderr=stderr)
+E               subprocess.CalledProcessError: Command '['uv', 'run', 'alembic', '-c', 'alembic.ini', 'upgrade', 'head']' returned non-zero exit status 1.
+
+/home/hjed/.local/share/uv/python/cpython-3.12.10-linux-x86_64-gnu/lib/python3.12/subprocess.py:571: CalledProcessError
+_ ERROR at setup of TestARQRetryIntegration.test_retry_delay_exponential_backoff _
+
+    @pytest.fixture(scope="session", autouse=True)
+    def apply_migrations() -> None:
+        """Apply Alembic migrations to the test database."""
+        import subprocess
+        from pathlib import Path
+
+        backend_dir = Path(__file__).parent.parent.parent.parent.parent / "backend"
+
+        # We use the DATABASE_URL environment variable which is already set
+        env = os.environ.copy()
+        env.pop("VIRTUAL_ENV", None)  # Prevent uv warning about mismatched environment
+        # Ensure alembic gets the correct dynamic database URL
+        env["DATABASE_URL"] = get_async_database_url()
+
+        # Run alembic upgrade head
+>       subprocess.run(
+            ["uv", "run", "alembic", "-c", "alembic.ini", "upgrade", "head"],
+            cwd=backend_dir,
+            check=True,
+            env=env,
+            capture_output=True,
+        )
+
+tests/integration/conftest.py:72:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+input = None, capture_output = True, timeout = None, check = True
+popenargs = (['uv', 'run', 'alembic', '-c', 'alembic.ini', 'upgrade', ...],)
+kwargs = {'cwd': PosixPath('/home/hjed/Projects/personal-management-system2/backend'), 'env': {'ANTIGRAVITY_AGENT': '1', 'ANTIG...y-2025.18.0-linux-x64/bundled/libs/debugpy', 'CHROME_DESKTOP': 'antigravity.desktop', ...}, 'stderr': -1, 'stdout': -1}
+process = <Popen: returncode: 1 args: ['uv', 'run', 'alembic', '-c', 'alembic.ini', 'u...>
+stdout = b''
+stderr = b'Traceback (most recent call last):\n  File "/home/hjed/Projects/personal-management-system2/backend/.venv/lib/python...nning on that host and accepting TCP/IP connections?\n\n(Background on this error at: https://sqlalche.me/e/20/e3q8)\n'
+retcode = 1
+
+    def run(*popenargs,
+            input=None, capture_output=False, timeout=None, check=False, **kwargs):
+        """Run command with arguments and return a CompletedProcess instance.
+
+        The returned instance will have attributes args, returncode, stdout and
+        stderr. By default, stdout and stderr are not captured, and those attributes
+        will be None. Pass stdout=PIPE and/or stderr=PIPE in order to capture them,
+        or pass capture_output=True to capture both.
+
+        If check is True and the exit code was non-zero, it raises a
+        CalledProcessError. The CalledProcessError object will have the return code
+        in the returncode attribute, and output & stderr attributes if those streams
+        were captured.
+
+        If timeout (seconds) is given and the process takes too long,
+         a TimeoutExpired exception will be raised.
+
+        There is an optional argument "input", allowing you to
+        pass bytes or a string to the subprocess's stdin.  If you use this argument
+        you may not also use the Popen constructor's "stdin" argument, as
+        it will be used internally.
+
+        By default, all communication is in bytes, and therefore any "input" should
+        be bytes, and the stdout and stderr will be bytes. If in text mode, any
+        "input" should be a string, and stdout and stderr will be strings decoded
+        according to locale encoding, or by "encoding" if set. Text mode is
+        triggered by setting any of text, encoding, errors or universal_newlines.
+
+        The other arguments are the same as for the Popen constructor.
+        """
+        if input is not None:
+            if kwargs.get('stdin') is not None:
+                raise ValueError('stdin and input arguments may not both be used.')
+            kwargs['stdin'] = PIPE
+
+        if capture_output:
+            if kwargs.get('stdout') is not None or kwargs.get('stderr') is not None:
+                raise ValueError('stdout and stderr arguments may not be used '
+                                 'with capture_output.')
+            kwargs['stdout'] = PIPE
+            kwargs['stderr'] = PIPE
+
+        with Popen(*popenargs, **kwargs) as process:
+            try:
+                stdout, stderr = process.communicate(input, timeout=timeout)
+            except TimeoutExpired as exc:
+                process.kill()
+                if _mswindows:
+                    # Windows accumulates the output in a single blocking
+                    # read() call run on child threads, with the timeout
+                    # being done in a join() on those threads.  communicate()
+                    # _after_ kill() is required to collect that and add it
+                    # to the exception.
+                    exc.stdout, exc.stderr = process.communicate()
+                else:
+                    # POSIX _communicate already populated the output so
+                    # far into the TimeoutExpired exception.
+                    process.wait()
+                raise
+            except:  # Including KeyboardInterrupt, communicate handled that.
+                process.kill()
+                # We don't call process.wait() as .__exit__ does that for us.
+                raise
+            retcode = process.poll()
+            if check and retcode:
+>               raise CalledProcessError(retcode, process.args,
+                                         output=stdout, stderr=stderr)
+E               subprocess.CalledProcessError: Command '['uv', 'run', 'alembic', '-c', 'alembic.ini', 'upgrade', 'head']' returned non-zero exit status 1.
+
+/home/hjed/.local/share/uv/python/cpython-3.12.10-linux-x86_64-gnu/lib/python3.12/subprocess.py:571: CalledProcessError
+____ ERROR at setup of TestARQRetryIntegration.test_job_enqueue_and_status _____
+
+    @pytest.fixture(scope="session", autouse=True)
+    def apply_migrations() -> None:
+        """Apply Alembic migrations to the test database."""
+        import subprocess
+        from pathlib import Path
+
+        backend_dir = Path(__file__).parent.parent.parent.parent.parent / "backend"
+
+        # We use the DATABASE_URL environment variable which is already set
+        env = os.environ.copy()
+        env.pop("VIRTUAL_ENV", None)  # Prevent uv warning about mismatched environment
+        # Ensure alembic gets the correct dynamic database URL
+        env["DATABASE_URL"] = get_async_database_url()
+
+        # Run alembic upgrade head
+>       subprocess.run(
+            ["uv", "run", "alembic", "-c", "alembic.ini", "upgrade", "head"],
+            cwd=backend_dir,
+            check=True,
+            env=env,
+            capture_output=True,
+        )
+
+tests/integration/conftest.py:72:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+input = None, capture_output = True, timeout = None, check = True
+popenargs = (['uv', 'run', 'alembic', '-c', 'alembic.ini', 'upgrade', ...],)
+kwargs = {'cwd': PosixPath('/home/hjed/Projects/personal-management-system2/backend'), 'env': {'ANTIGRAVITY_AGENT': '1', 'ANTIG...y-2025.18.0-linux-x64/bundled/libs/debugpy', 'CHROME_DESKTOP': 'antigravity.desktop', ...}, 'stderr': -1, 'stdout': -1}
+process = <Popen: returncode: 1 args: ['uv', 'run', 'alembic', '-c', 'alembic.ini', 'u...>
+stdout = b''
+stderr = b'Traceback (most recent call last):\n  File "/home/hjed/Projects/personal-management-system2/backend/.venv/lib/python...nning on that host and accepting TCP/IP connections?\n\n(Background on this error at: https://sqlalche.me/e/20/e3q8)\n'
+retcode = 1
+
+    def run(*popenargs,
+            input=None, capture_output=False, timeout=None, check=False, **kwargs):
+        """Run command with arguments and return a CompletedProcess instance.
+
+        The returned instance will have attributes args, returncode, stdout and
+        stderr. By default, stdout and stderr are not captured, and those attributes
+        will be None. Pass stdout=PIPE and/or stderr=PIPE in order to capture them,
+        or pass capture_output=True to capture both.
+
+        If check is True and the exit code was non-zero, it raises a
+        CalledProcessError. The CalledProcessError object will have the return code
+        in the returncode attribute, and output & stderr attributes if those streams
+        were captured.
+
+        If timeout (seconds) is given and the process takes too long,
+         a TimeoutExpired exception will be raised.
+
+        There is an optional argument "input", allowing you to
+        pass bytes or a string to the subprocess's stdin.  If you use this argument
+        you may not also use the Popen constructor's "stdin" argument, as
+        it will be used internally.
+
+        By default, all communication is in bytes, and therefore any "input" should
+        be bytes, and the stdout and stderr will be bytes. If in text mode, any
+        "input" should be a string, and stdout and stderr will be strings decoded
+        according to locale encoding, or by "encoding" if set. Text mode is
+        triggered by setting any of text, encoding, errors or universal_newlines.
+
+        The other arguments are the same as for the Popen constructor.
+        """
+        if input is not None:
+            if kwargs.get('stdin') is not None:
+                raise ValueError('stdin and input arguments may not both be used.')
+            kwargs['stdin'] = PIPE
+
+        if capture_output:
+            if kwargs.get('stdout') is not None or kwargs.get('stderr') is not None:
+                raise ValueError('stdout and stderr arguments may not be used '
+                                 'with capture_output.')
+            kwargs['stdout'] = PIPE
+            kwargs['stderr'] = PIPE
+
+        with Popen(*popenargs, **kwargs) as process:
+            try:
+                stdout, stderr = process.communicate(input, timeout=timeout)
+            except TimeoutExpired as exc:
+                process.kill()
+                if _mswindows:
+                    # Windows accumulates the output in a single blocking
+                    # read() call run on child threads, with the timeout
+                    # being done in a join() on those threads.  communicate()
+                    # _after_ kill() is required to collect that and add it
+                    # to the exception.
+                    exc.stdout, exc.stderr = process.communicate()
+                else:
+                    # POSIX _communicate already populated the output so
+                    # far into the TimeoutExpired exception.
+                    process.wait()
+                raise
+            except:  # Including KeyboardInterrupt, communicate handled that.
+                process.kill()
+                # We don't call process.wait() as .__exit__ does that for us.
+                raise
+            retcode = process.poll()
+            if check and retcode:
+>               raise CalledProcessError(retcode, process.args,
+                                         output=stdout, stderr=stderr)
+E               subprocess.CalledProcessError: Command '['uv', 'run', 'alembic', '-c', 'alembic.ini', 'upgrade', 'head']' returned non-zero exit status 1.
+
+/home/hjed/.local/share/uv/python/cpython-3.12.10-linux-x86_64-gnu/lib/python3.12/subprocess.py:571: CalledProcessError
+_______ ERROR at setup of test_sync_google_contacts_accepts_job_timeout ________
+
+    @pytest.fixture(scope="session", autouse=True)
+    def apply_migrations() -> None:
+        """Apply Alembic migrations to the test database."""
+        import subprocess
+        from pathlib import Path
+
+        backend_dir = Path(__file__).parent.parent.parent.parent.parent / "backend"
+
+        # We use the DATABASE_URL environment variable which is already set
+        env = os.environ.copy()
+        env.pop("VIRTUAL_ENV", None)  # Prevent uv warning about mismatched environment
+        # Ensure alembic gets the correct dynamic database URL
+        env["DATABASE_URL"] = get_async_database_url()
+
+        # Run alembic upgrade head
+>       subprocess.run(
+            ["uv", "run", "alembic", "-c", "alembic.ini", "upgrade", "head"],
+            cwd=backend_dir,
+            check=True,
+            env=env,
+            capture_output=True,
+        )
+
+tests/integration/conftest.py:72:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+input = None, capture_output = True, timeout = None, check = True
+popenargs = (['uv', 'run', 'alembic', '-c', 'alembic.ini', 'upgrade', ...],)
+kwargs = {'cwd': PosixPath('/home/hjed/Projects/personal-management-system2/backend'), 'env': {'ANTIGRAVITY_AGENT': '1', 'ANTIG...y-2025.18.0-linux-x64/bundled/libs/debugpy', 'CHROME_DESKTOP': 'antigravity.desktop', ...}, 'stderr': -1, 'stdout': -1}
+process = <Popen: returncode: 1 args: ['uv', 'run', 'alembic', '-c', 'alembic.ini', 'u...>
+stdout = b''
+stderr = b'Traceback (most recent call last):\n  File "/home/hjed/Projects/personal-management-system2/backend/.venv/lib/python...nning on that host and accepting TCP/IP connections?\n\n(Background on this error at: https://sqlalche.me/e/20/e3q8)\n'
+retcode = 1
+
+    def run(*popenargs,
+            input=None, capture_output=False, timeout=None, check=False, **kwargs):
+        """Run command with arguments and return a CompletedProcess instance.
+
+        The returned instance will have attributes args, returncode, stdout and
+        stderr. By default, stdout and stderr are not captured, and those attributes
+        will be None. Pass stdout=PIPE and/or stderr=PIPE in order to capture them,
+        or pass capture_output=True to capture both.
+
+        If check is True and the exit code was non-zero, it raises a
+        CalledProcessError. The CalledProcessError object will have the return code
+        in the returncode attribute, and output & stderr attributes if those streams
+        were captured.
+
+        If timeout (seconds) is given and the process takes too long,
+         a TimeoutExpired exception will be raised.
+
+        There is an optional argument "input", allowing you to
+        pass bytes or a string to the subprocess's stdin.  If you use this argument
+        you may not also use the Popen constructor's "stdin" argument, as
+        it will be used internally.
+
+        By default, all communication is in bytes, and therefore any "input" should
+        be bytes, and the stdout and stderr will be bytes. If in text mode, any
+        "input" should be a string, and stdout and stderr will be strings decoded
+        according to locale encoding, or by "encoding" if set. Text mode is
+        triggered by setting any of text, encoding, errors or universal_newlines.
+
+        The other arguments are the same as for the Popen constructor.
+        """
+        if input is not None:
+            if kwargs.get('stdin') is not None:
+                raise ValueError('stdin and input arguments may not both be used.')
+            kwargs['stdin'] = PIPE
+
+        if capture_output:
+            if kwargs.get('stdout') is not None or kwargs.get('stderr') is not None:
+                raise ValueError('stdout and stderr arguments may not be used '
+                                 'with capture_output.')
+            kwargs['stdout'] = PIPE
+            kwargs['stderr'] = PIPE
+
+        with Popen(*popenargs, **kwargs) as process:
+            try:
+                stdout, stderr = process.communicate(input, timeout=timeout)
+            except TimeoutExpired as exc:
+                process.kill()
+                if _mswindows:
+                    # Windows accumulates the output in a single blocking
+                    # read() call run on child threads, with the timeout
+                    # being done in a join() on those threads.  communicate()
+                    # _after_ kill() is required to collect that and add it
+                    # to the exception.
+                    exc.stdout, exc.stderr = process.communicate()
+                else:
+                    # POSIX _communicate already populated the output so
+                    # far into the TimeoutExpired exception.
+                    process.wait()
+                raise
+            except:  # Including KeyboardInterrupt, communicate handled that.
+                process.kill()
+                # We don't call process.wait() as .__exit__ does that for us.
+                raise
+            retcode = process.poll()
+            if check and retcode:
+>               raise CalledProcessError(retcode, process.args,
+                                         output=stdout, stderr=stderr)
+E               subprocess.CalledProcessError: Command '['uv', 'run', 'alembic', '-c', 'alembic.ini', 'upgrade', 'head']' returned non-zero exit status 1.
+
+/home/hjed/.local/share/uv/python/cpython-3.12.10-linux-x86_64-gnu/lib/python3.12/subprocess.py:571: CalledProcessError
+=================================== FAILURES ===================================
+_______ TestRetryDelayFunction.test_retry_delay_deterministic_with_seed ________
+
+self = <tests.unit.test_retry_strategy.TestRetryDelayFunction object at 0x71f46b6045f0>
+
+    def test_retry_delay_deterministic_with_seed(self):
+        """Test that retry delay is deterministic when random seed is set."""
+        import math
+
+        from worker import retry_delay_func
+
+        # Set random seed for reproducibility
+        with patch("random.uniform") as mock_uniform:
+            mock_uniform.return_value = 1.0  # No jitter
+
+            delay = retry_delay_func(0)
+>           assert math.isclose(delay, 60.0, rel_tol=1e-9), (
+                f"Expected 60s with no jitter, got {delay}s"
+            )
+E           AssertionError: Expected 60s with no jitter, got 51.14146226102396s
+E           assert False
+E            +  where False = <built-in function isclose>(51.14146226102396, 60.0, rel_tol=1e-09)
+E            +    where <built-in function isclose> = <module 'math' (built-in)>.isclose
+
+tests/unit/test_retry_strategy.py:77: AssertionError
+=============================== warnings summary ===============================
+tests/unit/test_worker.py::TestGoogleWorker::test_sync_google_contacts_full_sync_success
+tests/unit/test_worker.py::TestGoogleWorker::test_sync_google_contacts_incremental_sync_success
+tests/unit/test_worker.py::TestGoogleWorker::test_sync_google_contacts_smart_sync_chooses_incremental
+tests/unit/test_worker.py::TestGoogleWorker::test_sync_google_contacts_handles_auth_error
+tests/unit/test_worker.py::TestGoogleWorker::test_sync_google_contacts_handles_api_error
+tests/unit/test_worker.py::TestGoogleWorker::test_perform_full_sync_uses_partial_batch_processing
+tests/unit/test_worker.py::TestGoogleWorker::test_perform_incremental_sync_uses_partial_batch_processing
+  /home/hjed/Projects/personal-management-system2/integration_workers/google/worker.py:827: RuntimeWarning: coroutine 'AsyncMockMixin._execute_mock_call' was never awaited
+    groups_response = ListContactGroupsResponse(**groups_data)
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED tests/unit/test_retry_strategy.py::TestRetryDelayFunction::test_retry_delay_deterministic_with_seed
+ERROR tests/integration/test_full_sync_integration.py::TestFullSyncIntegration::test_full_sync_processes_all_pages_and_saves_token
+ERROR tests/integration/test_incremental_sync_integration.py::TestIncrementalSyncIntegration::test_incremental_sync_uses_contacts_sync_token
+ERROR tests/integration/test_outbox_event_creation.py::TestWorkerOutboxEventCreation::test_create_contact_sync_event_for_created_contact
+ERROR tests/integration/test_outbox_event_creation.py::TestWorkerOutboxEventCreation::test_create_contact_sync_event_for_updated_contact
+ERROR tests/integration/test_outbox_event_creation.py::TestWorkerOutboxEventCreation::test_create_contact_sync_event_preserves_all_contact_data
+ERROR tests/integration/test_outbox_event_creation.py::TestWorkerOutboxEventCreation::test_outbox_event_has_required_fields
+ERROR tests/integration/test_outbox_event_creation.py::TestWorkerOutboxEventCreation::test_transformer_produces_contact_dict_not_google_format
+ERROR tests/integration/test_periodic_sync_integration.py::TestPeriodicSyncIntegration::test_periodic_sync_queries_active_integrations
+ERROR tests/integration/test_periodic_sync_integration.py::TestPeriodicSyncIntegration::test_periodic_sync_enqueues_jobs_for_each_account
+ERROR tests/integration/test_periodic_sync_integration.py::TestPeriodicSyncIntegration::test_periodic_sync_handles_no_active_accounts
+ERROR tests/integration/test_process_journal_event_integration.py::TestProcessJournalEventIntegration::test_process_journal_event_creates_external_link
+ERROR tests/integration/test_process_journal_event_integration.py::TestProcessJournalEventIntegration::test_process_journal_event_updates_existing_link
+ERROR tests/integration/test_process_journal_event_integration.py::TestProcessJournalEventIntegration::test_process_journal_event_deletes_external_link
+ERROR tests/integration/test_process_journal_event_integration.py::TestProcessJournalEventIntegration::test_process_journal_event_deletes_with_explicit_calendar_id
+ERROR tests/integration/test_process_journal_event_integration.py::TestProcessJournalEventIntegration::test_process_journal_event_orphan_delete_fails_sets_errored
+ERROR tests/integration/test_process_journal_event_integration.py::TestProcessJournalEventIntegration::test_process_journal_event_concurrent_create_ignores_duplicate
+ERROR tests/integration/test_reserved_groups_integration.py::TestReservedGroupsIntegration::test_full_sync_with_groups_and_starred
+ERROR tests/integration/test_retry_integration.py::TestARQRetryIntegration::test_worker_settings_configuration
+ERROR tests/integration/test_retry_integration.py::TestARQRetryIntegration::test_retry_delay_exponential_backoff
+ERROR tests/integration/test_retry_integration.py::TestARQRetryIntegration::test_job_enqueue_and_status
+ERROR tests/integration/test_sync_timeout_integration.py::test_sync_google_contacts_accepts_job_timeout
+======= 1 failed, 109 passed, 1 skipped, 7 warnings, 21 errors in 2.45s ========
