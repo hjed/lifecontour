@@ -716,7 +716,7 @@ class ContactService:
             field: str, current: str | None, updated: str | None
         ) -> None:
             if current != updated:
-                changed_fields[field] = (current or "", updated or "")
+                changed_fields[field] = (current, updated)
 
         # Check basic contact fields
         _add_if_changed(

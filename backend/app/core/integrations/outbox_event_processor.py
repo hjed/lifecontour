@@ -429,7 +429,7 @@ class OutboxEventProcessor:
 
         incoming_tag_names = [tag_data["name"] for tag_data in contact_data["tags"]]
 
-        new_ref_data = {}
+        new_ref_data: dict[str, Any] = {}
         if existing_ref.reference_data:
             parsed = self._parse_reference_data(
                 existing_ref.reference_data, existing_ref.id
@@ -437,8 +437,11 @@ class OutboxEventProcessor:
             if parsed is not None:
                 new_ref_data = parsed
 
+        # Skip update if synced_tags already matches
+        if new_ref_data.get("synced_tags") == incoming_tag_names:
+            return
+
         new_ref_data["synced_tags"] = incoming_tag_names
-        # Note: self.external_reference_service needs to be available here
         await self.external_reference_service.update_external_reference(
             reference_id=existing_ref.id,
             reference_data=json.dumps(new_ref_data),

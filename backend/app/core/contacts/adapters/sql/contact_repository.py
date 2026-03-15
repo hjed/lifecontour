@@ -1038,7 +1038,7 @@ class SqlContactRepository(ContactRepository):
         for row in result:
             tag = Tag(
                 id=row.id,
-                name=row.name,
+                name=TagName(row.name),
                 parent_id=row.parent_id,
                 color=row.color,
                 description=row.description,
