@@ -173,9 +173,6 @@ class FitnessDataSchema(BaseModel):
     )
     duration: int | None = Field(default=None, description="Duration (seconds)", ge=0)
     calories: int | None = Field(default=None, description="Calories burned", ge=0)
-    gpx_track_data: str | None = Field(
-        default=None, description="GPX track data (XML format)"
-    )
     strava_activity_id: str | None = Field(
         default=None,
         description="Strava activity ID (external reference)",

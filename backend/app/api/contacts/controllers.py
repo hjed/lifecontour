@@ -915,6 +915,7 @@ async def get_contact_journals(
             climbing_data_repo,
             kayaking_data_repo,
             skiing_data_repo,
+            include_routes=False,
         )
         parent = parent_by_id.get(journal.parent_id) if journal.parent_id else None
         children_count = (

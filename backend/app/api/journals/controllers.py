@@ -772,6 +772,7 @@ async def list_journals(
             climbing_data_repo,
             kayaking_data_repo,
             skiing_data_repo,
+            include_routes=False,
         )
 
         resource = JournalConverter.to_resource(
