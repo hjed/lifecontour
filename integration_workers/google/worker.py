@@ -306,8 +306,8 @@ async def _load_tag_names_for_contact(
     tags_stmt = text("""
         SELECT t.name
         FROM tags t
-        INNER JOIN contact_tag_assignments cta ON t.id = cta.tag_id
-        WHERE cta.contact_id = :contact_id
+        INNER JOIN contact_tags ct ON t.id = ct.tag_id
+        WHERE ct.contact_id = :contact_id
         ORDER BY t.name ASC
     """)
     tags_result = await session.execute(tags_stmt, {"contact_id": contact_id})
@@ -572,13 +572,27 @@ def _build_reverse_group_mapping(
     display names. The reverse mapping (used for push) maps display names
     back to resource names.
 
+    Note: Google allows duplicate group display names. When duplicates exist,
+    the last resource name seen wins. A warning is logged for visibility.
+
     Args:
         forward_mapping: resource_name → display_name mapping
 
     Returns:
         display_name → resource_name mapping
     """
-    return {name: resource_name for resource_name, name in forward_mapping.items()}
+    reverse: dict[str, str] = {}
+    for resource_name, name in forward_mapping.items():
+        if name in reverse:
+            logger.warning(
+                "Duplicate Google Contact Group name detected, "
+                "last resource wins",
+                group_name=name,
+                previous_resource=reverse[name],
+                new_resource=resource_name,
+            )
+        reverse[name] = resource_name
+    return reverse
 
 
 async def _ensure_google_groups_exist(
@@ -760,8 +774,10 @@ async def _push_single_contact(
         full_contact_data = await _load_full_contact(session, contact["id"])
         contact.update(full_contact_data)
 
-        # Add group mapping for tag→membership transformation
-        if group_name_to_resource:
+        # Add group mapping for tag→membership transformation.
+        # Use `is not None` so an empty dict still activates membership
+        # clearing (sends empty memberships list to Google).
+        if group_name_to_resource is not None:
             contact["group_name_to_resource"] = group_name_to_resource
 
         # Transform to Google Person format
@@ -2270,15 +2286,14 @@ async def push_local_contacts_to_google(
                 forward_group_mapping
             )
 
-            # Collect all tag names across contacts to push
+            # Collect all tag names across contacts to pre-create groups.
+            # Tags are loaded again per-contact in _load_full_contact, but
+            # we need all names upfront to ensure groups exist before push.
             all_tag_names: set[str] = set()
             for contact in contacts_to_push:
-                # Tags will be loaded per-contact in _load_full_contact,
-                # but we need to pre-create groups here. Load tags now.
                 tag_names = await _load_tag_names_for_contact(
                     session, contact["id"]
                 )
-                contact["_preloaded_tags"] = tag_names
                 all_tag_names.update(tag_names)
 
             # Ensure groups exist for all tags

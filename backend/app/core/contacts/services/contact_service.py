@@ -859,18 +859,23 @@ class ContactService:
         transaction: AsyncConnection,
         changed_by: str = "system",
     ) -> None:
-        """Publish contact created event and record creation history."""
+        """Publish contact created event.
+
+        Args:
+            contact: The created contact
+            transaction: Database transaction
+            changed_by: Provenance identifier (e.g. "google_sync").
+                Threaded for future use when creation history recording
+                is implemented with proper frontend rendering support.
+        """
         if contact.id is None:
             raise ContactValidationError(
                 "id", "Contact ID is required for event publishing"
             )
-        # Record creation in field history for provenance tracking
-        await self.history_service.record_contact_change(
-            contact.id,
-            {"created": (None, f"{contact.first_name} {contact.last_name}")},
-            changed_by=changed_by,
-            _transaction=transaction,
-        )
+        # TODO: Record creation in field history once the frontend
+        # ActivityItem can render creation events distinctly from
+        # field-change entries (currently would display as
+        # "Added Created: ...").
         event = ContactCreated(
             contact.id,
             contact.first_name,
