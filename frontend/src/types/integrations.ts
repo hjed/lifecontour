@@ -39,6 +39,22 @@ export interface GoogleStatusResponse {
   };
 }
 
+// Google Calendar types
+export interface GoogleCalendarItem {
+  id: string;
+  type: 'google-calendar';
+  attributes: {
+    summary: string;
+    description?: string;
+    backgroundColor?: string;
+    primary: boolean;
+  };
+}
+
+export interface GoogleCalendarListResponse {
+  data: GoogleCalendarItem[];
+}
+
 // Sync Job Types
 export interface SyncJobAttributes {
   status: SyncStatus;

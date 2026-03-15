@@ -224,4 +224,152 @@ test.describe('Integrations Page UI (mocked API)', () => {
       authenticatedPage.locator('[data-testid="connect-google"]')
     ).toBeVisible();
   });
+
+  test('connected with needsReconsent: shows scope upgrade banner and triggers re-auth', async ({
+    authenticatedPage,
+  }) => {
+    let oauthAuthorizePayload: any = null;
+
+    await authenticatedPage.route('**/api/integrations/health', route =>
+      route.fulfill(
+        json({
+          data: {
+            id: 'integrations',
+            type: 'integration-health',
+            attributes: {
+              overall: 'healthy',
+              lastChecked: new Date().toISOString(),
+              redis: { status: 'healthy', latency: 1, lastSeen: null },
+              worker: { status: 'healthy', latency: 1, lastSeen: null },
+            },
+          },
+        })
+      )
+    );
+
+    await authenticatedPage.route(
+      '**/api/integrations/google/contacts/status',
+      route =>
+        route.fulfill(
+          json({
+            data: {
+              id: 'google',
+              type: 'integration-status',
+              attributes: {
+                connected: true,
+                lastSync: new Date().toISOString(),
+                syncCount: 42,
+                status: 'active',
+                needsReconsent: true,
+              },
+            },
+          })
+        )
+    );
+
+    await authenticatedPage.route(
+      '**/api/integrations/google/contacts/sync-history**',
+      route =>
+        route.fulfill(
+          json({
+            data: [],
+            meta: { total: 0, page: 1, pageSize: 5 },
+          })
+        )
+    );
+
+    await authenticatedPage.route(
+      '**/api/integrations/google/contacts/oauth/authorize',
+      async route => {
+        const req = route.request();
+        if (req.method() !== 'POST') return route.fallback();
+        oauthAuthorizePayload = req.postDataJSON();
+        return route.fulfill(
+          json({
+            authorization_url:
+              'https://accounts.google.com/o/oauth2/auth?scope=calendar',
+            state: 'test-state',
+          })
+        );
+      }
+    );
+
+    await authenticatedPage.goto('/integrations');
+
+    // Banner should be visible with upgrade messaging
+    const banner = authenticatedPage.locator(
+      '[data-testid="scope-upgrade-banner"]'
+    );
+    await expect(banner).toBeVisible();
+    await expect(banner).toContainText('calendar');
+
+    // Click "Upgrade Permissions" button and verify OAuth is triggered
+    await authenticatedPage.click('[data-testid="upgrade-permissions-button"]');
+    await expect.poll(() => oauthAuthorizePayload).toBeTruthy();
+    expect(oauthAuthorizePayload).toEqual({ redirect_url: '/integrations' });
+  });
+
+  test('connected without needsReconsent: does not show scope upgrade banner', async ({
+    authenticatedPage,
+  }) => {
+    await authenticatedPage.route('**/api/integrations/health', route =>
+      route.fulfill(
+        json({
+          data: {
+            id: 'integrations',
+            type: 'integration-health',
+            attributes: {
+              overall: 'healthy',
+              lastChecked: new Date().toISOString(),
+              redis: { status: 'healthy', latency: 1, lastSeen: null },
+              worker: { status: 'healthy', latency: 1, lastSeen: null },
+            },
+          },
+        })
+      )
+    );
+
+    await authenticatedPage.route(
+      '**/api/integrations/google/contacts/status',
+      route =>
+        route.fulfill(
+          json({
+            data: {
+              id: 'google',
+              type: 'integration-status',
+              attributes: {
+                connected: true,
+                lastSync: new Date().toISOString(),
+                syncCount: 42,
+                status: 'active',
+                needsReconsent: false,
+              },
+            },
+          })
+        )
+    );
+
+    await authenticatedPage.route(
+      '**/api/integrations/google/contacts/sync-history**',
+      route =>
+        route.fulfill(
+          json({
+            data: [],
+            meta: { total: 0, page: 1, pageSize: 5 },
+          })
+        )
+    );
+
+    await authenticatedPage.goto('/integrations');
+
+    // Status should show Connected
+    await expect(
+      authenticatedPage.locator('[data-testid="integration-status"]')
+    ).toContainText('Connected');
+
+    // Banner should NOT be visible
+    await expect(
+      authenticatedPage.locator('[data-testid="scope-upgrade-banner"]')
+    ).toHaveCount(0);
+  });
 });

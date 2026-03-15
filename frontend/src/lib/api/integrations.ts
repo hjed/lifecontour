@@ -9,6 +9,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import {
   GoogleStatusResponse,
+  GoogleCalendarListResponse,
   SyncJobResponse,
   SyncJobListResponse,
   IntegrationHealthResponse,
@@ -35,6 +36,8 @@ export const integrationKeys = {
   googleContacts: () => [...integrationKeys.all, 'google'] as const,
   googleContactsStatus: () =>
     [...integrationKeys.googleContacts(), 'status'] as const,
+  googleCalendars: () =>
+    [...integrationKeys.all, 'google', 'calendars'] as const,
   syncJobs: () => [...integrationKeys.all, 'sync-jobs'] as const,
   syncJob: (jobId: string) => [...integrationKeys.syncJobs(), jobId] as const,
   syncHistory: (filters: SyncHistoryFilters) =>
@@ -370,5 +373,29 @@ export function useGoogleOAuthDisconnect() {
     onError: (error: Error) => {
       toast.error(`Failed to disconnect: ${error.message}`);
     },
+  });
+}
+
+// Google Calendar List Functions
+
+/**
+ * Fetch the list of Google Calendars for the authenticated user.
+ */
+export async function fetchGoogleCalendars(): Promise<GoogleCalendarListResponse> {
+  const response = await fetch('/api/integrations/google/calendars', {
+    credentials: 'include',
+  });
+  return handleApiResponse<GoogleCalendarListResponse>(response);
+}
+
+/**
+ * Hook to fetch Google Calendars. Only enabled when Google is connected.
+ */
+export function useGoogleCalendars(enabled: boolean = true) {
+  return useQuery({
+    queryKey: integrationKeys.googleCalendars(),
+    queryFn: fetchGoogleCalendars,
+    enabled,
+    staleTime: 5 * 60 * 1000, // 5 minutes
   });
 }

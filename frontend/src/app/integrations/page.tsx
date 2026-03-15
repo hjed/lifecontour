@@ -14,6 +14,7 @@ import {
   Clock,
   Users,
   AlertCircle,
+  ShieldAlert,
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { enAU } from 'date-fns/locale';
@@ -34,7 +35,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
-import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { AuthGuard } from '@/components/auth/AuthGuard';
 import { LoadingSpinner } from '@/components/ui/loading';
 
@@ -72,6 +73,46 @@ function getSyncStatusVariant(
   if (status === 'completed') return 'default';
   if (status === 'failed') return 'destructive';
   return 'secondary';
+}
+
+// Scope Upgrade Banner Component
+interface ScopeUpgradeBannerProps {
+  readonly onUpgrade: () => void;
+  readonly oauthLoading: boolean;
+}
+
+function ScopeUpgradeBanner({
+  onUpgrade,
+  oauthLoading,
+}: ScopeUpgradeBannerProps) {
+  return (
+    <Alert variant='destructive' data-testid='scope-upgrade-banner'>
+      <ShieldAlert className='h-4 w-4' />
+      <AlertTitle>Calendar permissions required</AlertTitle>
+      <AlertDescription className='flex flex-col gap-2'>
+        <p>
+          Your Google account is connected but does not have calendar sync
+          permissions. Upgrade your permissions to enable calendar
+          synchronisation.
+        </p>
+        <div>
+          <Button
+            size='sm'
+            onClick={onUpgrade}
+            disabled={oauthLoading}
+            data-testid='upgrade-permissions-button'
+          >
+            {oauthLoading ? (
+              <RefreshCw className='mr-2 h-4 w-4 animate-spin' />
+            ) : (
+              <ShieldAlert className='mr-2 h-4 w-4' />
+            )}
+            Upgrade Permissions
+          </Button>
+        </div>
+      </AlertDescription>
+    </Alert>
+  );
 }
 
 // Sync Controls Component
@@ -466,6 +507,14 @@ function IntegrationsPageContent() {
                       )}
                     </div>
                   </div>
+
+                  {/* Scope Upgrade Banner */}
+                  {status.connected && status.needsReconsent && (
+                    <ScopeUpgradeBanner
+                      onUpgrade={handleConnectGoogle}
+                      oauthLoading={oauthLoading}
+                    />
+                  )}
 
                   {/* Sync Controls */}
                   <SyncControls
