@@ -106,7 +106,7 @@ _PROTECTED_FIELDS = frozenset(
 class InboundFieldMerger:
     """Determines which journal fields to update from inbound data.
 
-    Protected field rule: if journal.updated_at > link.last_synced_at,
+    Protected field rule: if journal.updated_at > link.updated_at,
     the journal was manually edited locally → preserve existing title/content,
     only update time fields from inbound.
     """
@@ -116,7 +116,7 @@ class InboundFieldMerger:
         existing_data: dict[str, Any],
         inbound_data: dict[str, Any],
         journal_updated_at: datetime,
-        link_last_synced_at: datetime,
+        link_updated_at: datetime,
     ) -> dict[str, Any]:
         """Merge inbound data into existing journal data with protection rules.
 
@@ -124,12 +124,12 @@ class InboundFieldMerger:
             existing_data: Current journal field values
             inbound_data: New field values from Google Calendar
             journal_updated_at: When the journal was last updated
-            link_last_synced_at: When the link was last synced
+            link_updated_at: When the link was last updated (last sync proxy)
 
         Returns:
             Merged data dictionary with protected fields preserved
         """
-        has_local_edits = journal_updated_at > link_last_synced_at
+        has_local_edits = journal_updated_at > link_updated_at
 
         merged = dict(existing_data)
 

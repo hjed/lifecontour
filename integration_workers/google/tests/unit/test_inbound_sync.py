@@ -167,7 +167,7 @@ class TestInboundFieldMerger:
             existing_data=existing_journal_data,
             inbound_data=inbound_journal_data,
             journal_updated_at=journal_updated_at,
-            link_last_synced_at=last_synced_at,
+            link_updated_at=last_synced_at,
         )
 
         assert result["title"] == "Updated From Google"
@@ -189,7 +189,7 @@ class TestInboundFieldMerger:
             existing_data=existing_journal_data,
             inbound_data=inbound_journal_data,
             journal_updated_at=journal_updated_at,
-            link_last_synced_at=last_synced_at,
+            link_updated_at=last_synced_at,
         )
 
         # Local edits preserved
@@ -213,7 +213,7 @@ class TestInboundFieldMerger:
             existing_data=existing_journal_data,
             inbound_data=inbound_journal_data,
             journal_updated_at=journal_updated_at,
-            link_last_synced_at=last_synced_at,
+            link_updated_at=last_synced_at,
         )
 
         assert result["event_date_range_start"] == "2026-03-20T14:00:00+00:00"
@@ -232,7 +232,7 @@ class TestInboundFieldMerger:
             existing_data=existing_journal_data,
             inbound_data=inbound_journal_data,
             journal_updated_at=synced_at,
-            link_last_synced_at=synced_at,
+            link_updated_at=synced_at,
         )
 
         assert result["title"] == "Updated From Google"

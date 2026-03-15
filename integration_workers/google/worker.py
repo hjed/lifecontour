@@ -2242,7 +2242,7 @@ def retry_delay_func(retry_count: int) -> float:
     return float(min(delay_with_jitter, 900.0))
 
 
-async def _create_google_client(
+def _create_google_client(
     session: Any,
     user_id: str | int,
     google_account_email: str,
@@ -2263,6 +2263,64 @@ async def _create_google_client(
         google_client_id=settings.google_client_id,
         google_client_secret=settings.google_client_secret.get_secret_value(),
         user_id=user_id,
+    )
+
+
+async def _fetch_all_calendar_events(
+    client: GoogleAPIClient,
+    list_kwargs: dict[str, Any],
+) -> tuple[list[dict[str, Any]], str | None]:
+    """Fetch all events for a calendar using pagination.
+
+    Returns:
+        Tuple of (all_raw_events, new_sync_token). The sync token
+        comes from the final page's nextSyncToken, or None if absent.
+    """
+    all_raw_events: list[dict[str, Any]] = []
+    new_sync_token = None
+    page_token = None
+
+    while True:
+        page_kwargs = dict(list_kwargs)
+        if page_token:
+            page_kwargs["page_token"] = page_token
+        events_response = await client.list_events(**page_kwargs)
+
+        all_raw_events.extend(events_response.get("items", []))
+
+        if "nextSyncToken" in events_response:
+            new_sync_token = events_response["nextSyncToken"]
+
+        page_token = events_response.get("nextPageToken")
+        if not page_token:
+            break
+
+    return all_raw_events, new_sync_token
+
+
+async def _save_calendar_sync_token(
+    session: Any,
+    new_sync_token: str,
+    user_id: str | int,
+    google_account_email: str,
+) -> None:
+    """Persist a new sync token using UPSERT semantics."""
+    save_token_stmt = text("""
+        UPDATE user_google_integration
+        SET calendar_events_sync_token = :sync_token,
+            updated_at = :updated_at
+        WHERE user_id = :user_id
+        AND google_account_email = :email
+        AND calendar_events_sync_token IS DISTINCT FROM :sync_token
+    """)
+    await session.execute(
+        save_token_stmt,
+        {
+            "sync_token": new_sync_token,
+            "updated_at": datetime.now(UTC),
+            "user_id": str(user_id),
+            "email": google_account_email,
+        },
     )
 
 
@@ -2324,7 +2382,7 @@ async def sync_calendar_events(
 
     try:
         async with session_factory() as session:
-            client = await _create_google_client(session, user_id, google_account_email)
+            client = _create_google_client(session, user_id, google_account_email)
 
             # Fetch synced calendars from DB
             cal_stmt = text("""
@@ -2376,26 +2434,10 @@ async def sync_calendar_events(
                     time_min = (datetime.now(UTC) - timedelta(days=90)).isoformat()
                     list_kwargs["time_min"] = time_min
 
-                # Fetch events from Google (with pagination)
-                all_raw_events: list[dict[str, Any]] = []
-                new_sync_token = None
-                page_token = None
-
-                while True:
-                    page_kwargs = dict(list_kwargs)
-                    if page_token:
-                        page_kwargs["page_token"] = page_token
-                    events_response = await client.list_events(**page_kwargs)
-
-                    all_raw_events.extend(events_response.get("items", []))
-
-                    # Only persist nextSyncToken from the final page
-                    if "nextSyncToken" in events_response:
-                        new_sync_token = events_response["nextSyncToken"]
-
-                    page_token = events_response.get("nextPageToken")
-                    if not page_token:
-                        break
+                # Fetch all events with pagination
+                all_raw_events, new_sync_token = await _fetch_all_calendar_events(
+                    client, list_kwargs
+                )
 
                 # Process each event
                 for raw_event in all_raw_events:
@@ -2514,24 +2556,16 @@ async def sync_calendar_events(
                         )
                         metrics["errors"] += 1
 
-                # Save sync token (UPSERT pattern)
-                if new_sync_token:
-                    save_token_stmt = text("""
-                        UPDATE user_google_integration
-                        SET calendar_events_sync_token = :sync_token,
-                            updated_at = :updated_at
-                        WHERE user_id = :user_id
-                        AND google_account_email = :email
-                        AND calendar_events_sync_token IS DISTINCT FROM :sync_token
-                    """)
-                    await session.execute(
-                        save_token_stmt,
-                        {
-                            "sync_token": new_sync_token,
-                            "updated_at": datetime.now(UTC),
-                            "user_id": str(user_id),
-                            "email": google_account_email,
-                        },
+                # Save sync token only when all events processed successfully
+                if new_sync_token and metrics["errors"] == 0:
+                    await _save_calendar_sync_token(
+                        session, new_sync_token, user_id, google_account_email
+                    )
+                elif new_sync_token and metrics["errors"] > 0:
+                    logger.warning(
+                        "Skipping sync token save due to processing errors",
+                        errors=metrics["errors"],
+                        google_account_email=google_account_email,
                     )
 
             await session.commit()

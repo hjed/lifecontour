@@ -23,13 +23,21 @@ from app.core.integrations.journal_outbox_event_processor import (
 
 CALENDAR_ID = "12345678-1234-5678-1234-567812345678"
 
+DEFAULT_DATE_RANGE = EventDateRange(
+    start=datetime(2026, 3, 20, 10, 0, tzinfo=UTC),
+    end=datetime(2026, 3, 20, 11, 0, tzinfo=UTC),
+)
+
+
+# ── Shared test helpers ──────────────────────────────────────────────
+
 
 def _make_journal_event_data(
     *,
     sync_action: str = "created",
     external_event_id: str = "google-event-abc",
     calendar_id: str = CALENDAR_ID,
-    etag: str = '"etag-123"',
+    etag: str | None = '"etag-123"',
     existing_journal_id: int | None = None,
     contact_relationships: list[dict[str, str]] | None = None,
 ) -> dict[str, Any]:
@@ -57,6 +65,37 @@ def _make_journal_event_data(
         "existing_journal_id": existing_journal_id,
         "contact_relationships": contact_relationships or [],
     }
+
+
+def _make_outbox_event(
+    event_type: str = "journal_event.created",
+    **event_data_kwargs: Any,
+) -> OutboxEvent:
+    """Build an OutboxEvent with the given type and event_data overrides."""
+    return OutboxEvent(
+        id=uuid4(),
+        event_type=event_type,
+        event_data=_make_journal_event_data(**event_data_kwargs),
+        created_at=datetime.now(UTC),
+        processed_at=None,
+        retry_count=0,
+    )
+
+
+def _make_journal(
+    *,
+    journal_id: int = 42,
+    title: str = "Team Meeting",
+    content: str = "Weekly sync",
+) -> Journal:
+    """Build a Journal domain object for mock return values."""
+    return Journal(
+        id=journal_id,
+        user_id="1",
+        title=title,
+        content=content,
+        event_date_range=DEFAULT_DATE_RANGE,
+    )
 
 
 def _make_journal_row(
@@ -94,6 +133,40 @@ def _make_link_row(
     row.sync_status = "synced"
     row.updated_at = updated_at or datetime(2026, 3, 16, tzinfo=UTC)
     return row
+
+
+def _mock_resolve_contact(contact_id: int) -> MagicMock:
+    """Build a mock DB result that resolves to the given contact_id."""
+    result = MagicMock()
+    row = MagicMock()
+    row.id = contact_id
+    result.fetchone.return_value = row
+    return result
+
+
+def _mock_empty_result() -> MagicMock:
+    """Build a mock DB result with no rows."""
+    result = MagicMock()
+    result.fetchone.return_value = None
+    result.fetchall.return_value = []
+    return result
+
+
+def _mock_empty_rels() -> MagicMock:
+    """Build a mock DB result for an empty relationship query."""
+    result = MagicMock()
+    result.fetchall.return_value = []
+    return result
+
+
+def _mock_fetchone(row: MagicMock) -> MagicMock:
+    """Wrap a mock row in a fetchone-returning result."""
+    result = MagicMock()
+    result.fetchone.return_value = row
+    return result
+
+
+# ── Tests ────────────────────────────────────────────────────────────
 
 
 class TestJournalOutboxEventProcessor:
@@ -134,74 +207,34 @@ class TestJournalOutboxEventProcessor:
         mock_connection: AsyncMock,
     ) -> None:
         """Creates a journal + calendar info + external link + synced invitees."""
-        invitee_email = "alice@example.com"
-        event_data = _make_journal_event_data(
+        event = _make_outbox_event(
+            event_type="journal_event.created",
             sync_action="created",
             contact_relationships=[
-                {"email": invitee_email, "relationship_type": "INVITEE"},
+                {"email": "alice@example.com", "relationship_type": "INVITEE"},
             ],
         )
-        event = OutboxEvent(
-            id=uuid4(),
-            event_type="journal_event.created",
-            event_data=event_data,
-            created_at=datetime.now(UTC),
-            processed_at=None,
-            retry_count=0,
-        )
 
-        created_journal = Journal(
-            id=42,
-            user_id="1",
-            title="Team Meeting",
-            content="Weekly sync",
-            event_date_range=EventDateRange(
-                start=datetime(2026, 3, 20, 10, 0, tzinfo=UTC),
-                end=datetime(2026, 3, 20, 11, 0, tzinfo=UTC),
-            ),
-        )
-        mock_journal_service.create_journal.return_value = created_journal
-
-        # Mock DB execute calls:
-        # 1. _save_calendar_info
-        # 2. _create_external_event_link
-        # 3. contact_resolver.resolve_by_email → returns contact_id
-        # 4. _get_relationships_by_type → returns empty
-        # 5. _create_contact_relationship
-        resolve_result = MagicMock()
-        resolve_row = MagicMock()
-        resolve_row.id = 100
-        resolve_result.fetchone.return_value = resolve_row
-
-        existing_rels_result = MagicMock()
-        existing_rels_result.fetchall.return_value = []
-
-        empty_result = MagicMock()
-        empty_result.fetchone.return_value = None
-        empty_result.fetchall.return_value = []
+        mock_journal_service.create_journal.return_value = _make_journal()
 
         mock_connection.execute.side_effect = [
-            empty_result,  # _save_calendar_info
-            empty_result,  # _create_external_event_link
-            resolve_result,  # contact resolver
-            existing_rels_result,  # existing relationships
-            empty_result,  # create relationship
+            _mock_empty_result(),  # _save_calendar_info
+            _mock_empty_result(),  # _create_external_event_link
+            _mock_resolve_contact(100),  # contact resolver
+            _mock_empty_rels(),  # existing relationships
+            _mock_empty_result(),  # create relationship
         ]
 
         result = await processor.process_event(event)
 
-        # Verify journal was created
         mock_journal_service.create_journal.assert_called_once()
         journal_arg = mock_journal_service.create_journal.call_args[0][0]
         assert journal_arg.title == "Team Meeting"
         assert journal_arg.content == "Weekly sync"
 
-        # Verify result
         assert result["status"] == "success"
         assert result["event_type"] == "journal_event.created"
         assert result["journal_id"] == 42
-
-        # Verify DB was called at least 5 times (calendar, link, resolve, get_rels, create_rel)
         assert mock_connection.execute.call_count == 5
 
     @pytest.mark.asyncio
@@ -212,28 +245,13 @@ class TestJournalOutboxEventProcessor:
         mock_connection: AsyncMock,
     ) -> None:
         """Creates journal without invitees when contact_relationships is empty."""
-        event = OutboxEvent(
-            id=uuid4(),
+        event = _make_outbox_event(
             event_type="journal_event.created",
-            event_data=_make_journal_event_data(
-                sync_action="created", contact_relationships=[]
-            ),
-            created_at=datetime.now(UTC),
-            processed_at=None,
-            retry_count=0,
+            sync_action="created",
+            contact_relationships=[],
         )
 
-        created_journal = Journal(
-            id=42,
-            user_id="1",
-            title="Team Meeting",
-            content="Weekly sync",
-            event_date_range=EventDateRange(
-                start=datetime(2026, 3, 20, 10, 0, tzinfo=UTC),
-                end=datetime(2026, 3, 20, 11, 0, tzinfo=UTC),
-            ),
-        )
-        mock_journal_service.create_journal.return_value = created_journal
+        mock_journal_service.create_journal.return_value = _make_journal()
         mock_connection.execute.return_value = MagicMock()
 
         result = await processor.process_event(event)
@@ -252,63 +270,26 @@ class TestJournalOutboxEventProcessor:
         mock_connection: AsyncMock,
     ) -> None:
         """Updates an existing journal with invitee sync."""
-        invitees = [{"email": "bob@example.com", "relationship_type": "INVITEE"}]
-        event_data = _make_journal_event_data(
+        event = _make_outbox_event(
+            event_type="journal_event.updated",
             sync_action="updated",
             existing_journal_id=42,
-            contact_relationships=invitees,
+            contact_relationships=[
+                {"email": "bob@example.com", "relationship_type": "INVITEE"},
+            ],
         )
-        event = OutboxEvent(
-            id=uuid4(),
-            event_type="journal_event.updated",
-            event_data=event_data,
-            created_at=datetime.now(UTC),
-            processed_at=None,
-            retry_count=0,
-        )
-
-        journal_row = _make_journal_row()
-        link_row = _make_link_row()
-
-        journal_result = MagicMock()
-        journal_result.fetchone.return_value = journal_row
-
-        link_result = MagicMock()
-        link_result.fetchone.return_value = link_row
-
-        resolve_result = MagicMock()
-        resolve_row = MagicMock()
-        resolve_row.id = 200
-        resolve_result.fetchone.return_value = resolve_row
-
-        existing_rels_result = MagicMock()
-        existing_rels_result.fetchall.return_value = []
-
-        generic_result = MagicMock()
-        generic_result.fetchone.return_value = None
-        generic_result.fetchall.return_value = []
 
         mock_connection.execute.side_effect = [
-            journal_result,  # _find_journal_by_id
-            link_result,  # _find_external_event_link
-            generic_result,  # _save_calendar_info
-            generic_result,  # _update_external_event_link_etag
-            resolve_result,  # contact resolver
-            existing_rels_result,  # existing relationships
-            generic_result,  # create relationship
+            _mock_fetchone(_make_journal_row()),  # _find_journal_by_id
+            _mock_fetchone(_make_link_row()),  # _find_external_event_link
+            _mock_empty_result(),  # _save_calendar_info
+            _mock_empty_result(),  # _update_external_event_link_etag
+            _mock_resolve_contact(200),  # contact resolver
+            _mock_empty_rels(),  # existing relationships
+            _mock_empty_result(),  # create relationship
         ]
 
-        updated_journal = Journal(
-            id=42,
-            user_id="1",
-            title="Team Meeting",
-            content="Weekly sync",
-            event_date_range=EventDateRange(
-                start=datetime(2026, 3, 20, 10, 0, tzinfo=UTC),
-                end=datetime(2026, 3, 20, 11, 0, tzinfo=UTC),
-            ),
-        )
-        mock_journal_service.update_journal.return_value = updated_journal
+        mock_journal_service.update_journal.return_value = _make_journal()
 
         result = await processor.process_event(event)
 
@@ -324,17 +305,10 @@ class TestJournalOutboxEventProcessor:
         mock_connection: AsyncMock,
     ) -> None:
         """When journal was locally edited after last sync, title/content are preserved."""
-        event_data = _make_journal_event_data(
+        event = _make_outbox_event(
+            event_type="journal_event.updated",
             sync_action="updated",
             existing_journal_id=42,
-        )
-        event = OutboxEvent(
-            id=uuid4(),
-            event_type="journal_event.updated",
-            event_data=event_data,
-            created_at=datetime.now(UTC),
-            processed_at=None,
-            retry_count=0,
         )
 
         # Journal was updated AFTER the link's last sync
@@ -348,40 +322,22 @@ class TestJournalOutboxEventProcessor:
             updated_at=datetime(2026, 3, 16, tzinfo=UTC),  # earlier than journal
         )
 
-        journal_result = MagicMock()
-        journal_result.fetchone.return_value = journal_row
-
-        link_result = MagicMock()
-        link_result.fetchone.return_value = link_row
-
-        generic_result = MagicMock()
-        generic_result.fetchone.return_value = None
-        generic_result.fetchall.return_value = []
-
         mock_connection.execute.side_effect = [
-            journal_result,  # _find_journal_by_id
-            link_result,  # _find_external_event_link
-            generic_result,  # _save_calendar_info
-            generic_result,  # _update_external_event_link_etag
+            _mock_fetchone(journal_row),  # _find_journal_by_id
+            _mock_fetchone(link_row),  # _find_external_event_link
+            _mock_empty_result(),  # _save_calendar_info
+            _mock_empty_result(),  # _update_external_event_link_etag
         ]
 
-        mock_journal_service.update_journal.return_value = Journal(
-            id=42,
-            user_id="1",
+        mock_journal_service.update_journal.return_value = _make_journal(
             title="My Local Title",
             content="My local content",
-            event_date_range=EventDateRange(
-                start=datetime(2026, 3, 20, 10, 0, tzinfo=UTC),
-                end=datetime(2026, 3, 20, 11, 0, tzinfo=UTC),
-            ),
         )
 
         result = await processor.process_event(event)
 
         assert result["status"] == "success"
-        # Protected fields should be the local values, not the inbound values
-        update_call = mock_journal_service.update_journal
-        journal_arg = update_call.call_args[0][0]
+        journal_arg = mock_journal_service.update_journal.call_args[0][0]
         assert journal_arg.title == "My Local Title"
         assert journal_arg.content == "My local content"
         # But date range should be from inbound (always-update field)
@@ -399,23 +355,13 @@ class TestJournalOutboxEventProcessor:
         mock_connection: AsyncMock,
     ) -> None:
         """When updated event references a non-existent journal_id, it should error."""
-        event_data = _make_journal_event_data(
+        event = _make_outbox_event(
+            event_type="journal_event.updated",
             sync_action="updated",
             existing_journal_id=999,
         )
-        event = OutboxEvent(
-            id=uuid4(),
-            event_type="journal_event.updated",
-            event_data=event_data,
-            created_at=datetime.now(UTC),
-            processed_at=None,
-            retry_count=0,
-        )
 
-        # Mock: journal not found
-        mock_result = MagicMock()
-        mock_result.fetchone.return_value = None
-        mock_connection.execute.return_value = mock_result
+        mock_connection.execute.return_value = _mock_empty_result()
 
         with pytest.raises(JournalOutboxEventProcessingError, match="not found"):
             await processor.process_event(event)
@@ -429,14 +375,9 @@ class TestJournalOutboxEventProcessor:
         mock_connection: AsyncMock,
     ) -> None:
         """Conflicted events should mark the link as conflicted status."""
-        event_data = _make_journal_event_data(sync_action="conflicted")
-        event = OutboxEvent(
-            id=uuid4(),
+        event = _make_outbox_event(
             event_type="journal_event.conflicted",
-            event_data=event_data,
-            created_at=datetime.now(UTC),
-            processed_at=None,
-            retry_count=0,
+            sync_action="conflicted",
         )
 
         mock_connection.execute.return_value = MagicMock()
@@ -454,14 +395,7 @@ class TestJournalOutboxEventProcessor:
         processor: "JournalOutboxEventProcessor",
     ) -> None:
         """Unknown journal_event subtypes should raise an error."""
-        event = OutboxEvent(
-            id=uuid4(),
-            event_type="journal_event.unknown",
-            event_data=_make_journal_event_data(),
-            created_at=datetime.now(UTC),
-            processed_at=None,
-            retry_count=0,
-        )
+        event = _make_outbox_event(event_type="journal_event.unknown")
 
         with pytest.raises(
             JournalOutboxEventProcessingError, match="Unknown journal event type"
@@ -478,30 +412,17 @@ class TestJournalOutboxEventProcessor:
         mock_connection: AsyncMock,
     ) -> None:
         """If the ETag matches the stored external_version, skip processing."""
-        event_data = _make_journal_event_data(
+        event = _make_outbox_event(
+            event_type="journal_event.updated",
             sync_action="updated",
             existing_journal_id=42,
             etag='"etag-123"',
         )
-        event = OutboxEvent(
-            id=uuid4(),
-            event_type="journal_event.updated",
-            event_data=event_data,
-            created_at=datetime.now(UTC),
-            processed_at=None,
-            retry_count=0,
-        )
 
-        journal_row = _make_journal_row()
-        link_row = _make_link_row(external_version='"etag-123"')
-
-        journal_result = MagicMock()
-        journal_result.fetchone.return_value = journal_row
-
-        link_result = MagicMock()
-        link_result.fetchone.return_value = link_row
-
-        mock_connection.execute.side_effect = [journal_result, link_result]
+        mock_connection.execute.side_effect = [
+            _mock_fetchone(_make_journal_row()),
+            _mock_fetchone(_make_link_row(external_version='"etag-123"')),
+        ]
 
         result = await processor.process_event(event)
 
@@ -517,55 +438,24 @@ class TestJournalOutboxEventProcessor:
         mock_connection: AsyncMock,
     ) -> None:
         """None etag should NOT trigger idempotency skip, even when stored is also None."""
-        event_data = _make_journal_event_data(
+        event = _make_outbox_event(
+            event_type="journal_event.updated",
             sync_action="updated",
             existing_journal_id=42,
-            etag=None,  # type: ignore[arg-type]
+            etag=None,
         )
-        event = OutboxEvent(
-            id=uuid4(),
-            event_type="journal_event.updated",
-            event_data=event_data,
-            created_at=datetime.now(UTC),
-            processed_at=None,
-            retry_count=0,
-        )
-
-        journal_row = _make_journal_row()
-        link_row = _make_link_row(external_version=None)
-
-        journal_result = MagicMock()
-        journal_result.fetchone.return_value = journal_row
-
-        link_result = MagicMock()
-        link_result.fetchone.return_value = link_row
-
-        generic_result = MagicMock()
-        generic_result.fetchone.return_value = None
-        generic_result.fetchall.return_value = []
 
         mock_connection.execute.side_effect = [
-            journal_result,
-            link_result,
-            generic_result,  # _save_calendar_info
-            generic_result,  # _update_external_event_link_etag
+            _mock_fetchone(_make_journal_row()),
+            _mock_fetchone(_make_link_row(external_version=None)),
+            _mock_empty_result(),  # _save_calendar_info
+            _mock_empty_result(),  # _update_external_event_link_etag
         ]
 
-        updated_journal = Journal(
-            id=42,
-            user_id="1",
-            title="Team Meeting",
-            content="Weekly sync",
-            event_date_range=EventDateRange(
-                start=datetime(2026, 3, 20, 10, 0, tzinfo=UTC),
-                end=datetime(2026, 3, 20, 11, 0, tzinfo=UTC),
-            ),
-        )
-        mock_journal_service.update_journal.return_value = updated_journal
+        mock_journal_service.update_journal.return_value = _make_journal()
 
         result = await processor.process_event(event)
 
-        # Should proceed with update, not skip
         assert result["status"] == "success"
         mock_journal_service.update_journal.assert_called_once()
 
@@ -579,54 +469,23 @@ class TestJournalOutboxEventProcessor:
         mock_connection: AsyncMock,
     ) -> None:
         """event_date_range changes should be included in changed_fields."""
-        event_data = _make_journal_event_data(
+        event = _make_outbox_event(
+            event_type="journal_event.updated",
             sync_action="updated",
             existing_journal_id=42,
         )
-        event = OutboxEvent(
-            id=uuid4(),
-            event_type="journal_event.updated",
-            event_data=event_data,
-            created_at=datetime.now(UTC),
-            processed_at=None,
-            retry_count=0,
-        )
-
-        # Existing journal has different date range
-        journal_row = _make_journal_row()
-        link_row = _make_link_row()
-
-        journal_result = MagicMock()
-        journal_result.fetchone.return_value = journal_row
-
-        link_result = MagicMock()
-        link_result.fetchone.return_value = link_row
-
-        generic_result = MagicMock()
-        generic_result.fetchone.return_value = None
-        generic_result.fetchall.return_value = []
 
         mock_connection.execute.side_effect = [
-            journal_result,
-            link_result,
-            generic_result,
-            generic_result,
+            _mock_fetchone(_make_journal_row()),
+            _mock_fetchone(_make_link_row()),
+            _mock_empty_result(),
+            _mock_empty_result(),
         ]
 
-        mock_journal_service.update_journal.return_value = Journal(
-            id=42,
-            user_id="1",
-            title="Team Meeting",
-            content="Weekly sync",
-            event_date_range=EventDateRange(
-                start=datetime(2026, 3, 20, 10, 0, tzinfo=UTC),
-                end=datetime(2026, 3, 20, 11, 0, tzinfo=UTC),
-            ),
-        )
+        mock_journal_service.update_journal.return_value = _make_journal()
 
         await processor.process_event(event)
 
-        # Check changed_fields argument passed to update_journal
         changed_fields = mock_journal_service.update_journal.call_args[0][1]
         assert "event_date_range" in changed_fields
 
@@ -640,32 +499,17 @@ class TestJournalOutboxEventProcessor:
         mock_connection: AsyncMock,
     ) -> None:
         """Calendar info upsert should include updated_at in ON CONFLICT clause."""
-        event = OutboxEvent(
-            id=uuid4(),
+        event = _make_outbox_event(
             event_type="journal_event.created",
-            event_data=_make_journal_event_data(sync_action="created"),
-            created_at=datetime.now(UTC),
-            processed_at=None,
-            retry_count=0,
+            sync_action="created",
         )
 
-        created_journal = Journal(
-            id=42,
-            user_id="1",
-            title="Team Meeting",
-            content="Weekly sync",
-            event_date_range=EventDateRange(
-                start=datetime(2026, 3, 20, 10, 0, tzinfo=UTC),
-                end=datetime(2026, 3, 20, 11, 0, tzinfo=UTC),
-            ),
-        )
-        mock_journal_service.create_journal.return_value = created_journal
+        mock_journal_service.create_journal.return_value = _make_journal()
         mock_connection.execute.return_value = MagicMock()
 
         result = await processor.process_event(event)
 
         assert result["status"] == "success"
-        # Verify calendar info SQL includes updated_at
         calendar_call = mock_connection.execute.call_args_list[0]
         sql_text = str(calendar_call[0][0].text)
         assert "updated_at" in sql_text
@@ -680,50 +524,22 @@ class TestJournalOutboxEventProcessor:
         mock_connection: AsyncMock,
     ) -> None:
         """Invitee sync should only touch INVITEE relationships, not PARTICIPANT."""
-        event_data = _make_journal_event_data(
+        event = _make_outbox_event(
+            event_type="journal_event.created",
             sync_action="created",
             contact_relationships=[
                 {"email": "alice@example.com", "relationship_type": "INVITEE"},
             ],
         )
-        event = OutboxEvent(
-            id=uuid4(),
-            event_type="journal_event.created",
-            event_data=event_data,
-            created_at=datetime.now(UTC),
-            processed_at=None,
-            retry_count=0,
-        )
 
-        created_journal = Journal(
-            id=42,
-            user_id="1",
-            title="Team Meeting",
-            content="Weekly sync",
-            event_date_range=EventDateRange(
-                start=datetime(2026, 3, 20, 10, 0, tzinfo=UTC),
-                end=datetime(2026, 3, 20, 11, 0, tzinfo=UTC),
-            ),
-        )
-        mock_journal_service.create_journal.return_value = created_journal
-
-        resolve_result = MagicMock()
-        resolve_row = MagicMock()
-        resolve_row.id = 100
-        resolve_result.fetchone.return_value = resolve_row
-
-        existing_rels_result = MagicMock()
-        existing_rels_result.fetchall.return_value = []
-
-        generic_result = MagicMock()
-        generic_result.fetchone.return_value = None
+        mock_journal_service.create_journal.return_value = _make_journal()
 
         mock_connection.execute.side_effect = [
-            generic_result,  # _save_calendar_info
-            generic_result,  # _create_external_event_link
-            resolve_result,  # resolve_by_email
-            existing_rels_result,  # _get_relationships_by_type (INVITEE only)
-            generic_result,  # _create_contact_relationship
+            _mock_empty_result(),  # _save_calendar_info
+            _mock_empty_result(),  # _create_external_event_link
+            _mock_resolve_contact(100),  # resolve_by_email
+            _mock_empty_rels(),  # _get_relationships_by_type (INVITEE only)
+            _mock_empty_result(),  # _create_contact_relationship
         ]
 
         await processor.process_event(event)
@@ -743,36 +559,18 @@ class TestJournalOutboxEventProcessor:
         mock_connection: AsyncMock,
     ) -> None:
         """Invitees no longer in the Google event should be deleted locally."""
-        event_data = _make_journal_event_data(
+        event = _make_outbox_event(
+            event_type="journal_event.created",
             sync_action="created",
             contact_relationships=[],  # No invitees
         )
-        event = OutboxEvent(
-            id=uuid4(),
-            event_type="journal_event.created",
-            event_data=event_data,
-            created_at=datetime.now(UTC),
-            processed_at=None,
-            retry_count=0,
-        )
 
-        created_journal = Journal(
-            id=42,
-            user_id="1",
-            title="Team Meeting",
-            content="Weekly sync",
-            event_date_range=EventDateRange(
-                start=datetime(2026, 3, 20, 10, 0, tzinfo=UTC),
-                end=datetime(2026, 3, 20, 11, 0, tzinfo=UTC),
-            ),
-        )
-        mock_journal_service.create_journal.return_value = created_journal
+        mock_journal_service.create_journal.return_value = _make_journal()
         mock_connection.execute.return_value = MagicMock()
 
         await processor.process_event(event)
 
         # No relationship calls should happen since contact_relationships is empty
-        # DB calls: calendar info + external link = 2
         assert mock_connection.execute.call_count == 2
 
     # ── Invitee sync: unknown email skipped ───────────────────────────
@@ -785,49 +583,27 @@ class TestJournalOutboxEventProcessor:
         mock_connection: AsyncMock,
     ) -> None:
         """Emails not matching a contact should be silently skipped."""
-        event_data = _make_journal_event_data(
+        event = _make_outbox_event(
+            event_type="journal_event.created",
             sync_action="created",
             contact_relationships=[
                 {"email": "unknown@example.com", "relationship_type": "INVITEE"},
             ],
         )
-        event = OutboxEvent(
-            id=uuid4(),
-            event_type="journal_event.created",
-            event_data=event_data,
-            created_at=datetime.now(UTC),
-            processed_at=None,
-            retry_count=0,
-        )
 
-        created_journal = Journal(
-            id=42,
-            user_id="1",
+        mock_journal_service.create_journal.return_value = _make_journal(
             title="Meeting",
             content="",
-            event_date_range=EventDateRange(
-                start=datetime(2026, 3, 20, 10, 0, tzinfo=UTC),
-                end=datetime(2026, 3, 20, 11, 0, tzinfo=UTC),
-            ),
         )
-        mock_journal_service.create_journal.return_value = created_journal
 
-        # Resolve returns None (no matching contact)
-        resolve_result = MagicMock()
-        resolve_result.fetchone.return_value = None
-
-        existing_rels_result = MagicMock()
-        existing_rels_result.fetchall.return_value = []
-
-        generic_result = MagicMock()
-        generic_result.fetchone.return_value = None
+        resolve_no_match = MagicMock()
+        resolve_no_match.fetchone.return_value = None
 
         mock_connection.execute.side_effect = [
-            generic_result,  # _save_calendar_info
-            generic_result,  # _create_external_event_link
-            resolve_result,  # resolve_by_email → None
-            existing_rels_result,  # _get_relationships_by_type
-            # No create call since no contacts resolved
+            _mock_empty_result(),  # _save_calendar_info
+            _mock_empty_result(),  # _create_external_event_link
+            resolve_no_match,  # resolve_by_email → None
+            _mock_empty_rels(),  # _get_relationships_by_type
         ]
 
         result = await processor.process_event(event)
@@ -846,17 +622,10 @@ class TestJournalOutboxEventProcessor:
         mock_connection: AsyncMock,
     ) -> None:
         """Verify that InboundFieldMerger is applied during update."""
-        event_data = _make_journal_event_data(
+        event = _make_outbox_event(
+            event_type="journal_event.updated",
             sync_action="updated",
             existing_journal_id=42,
-        )
-        event = OutboxEvent(
-            id=uuid4(),
-            event_type="journal_event.updated",
-            event_data=event_data,
-            created_at=datetime.now(UTC),
-            processed_at=None,
-            retry_count=0,
         )
 
         # No local edits: journal.updated_at <= link.updated_at
@@ -867,33 +636,14 @@ class TestJournalOutboxEventProcessor:
             updated_at=datetime(2026, 3, 16, tzinfo=UTC),  # link is newer
         )
 
-        journal_result = MagicMock()
-        journal_result.fetchone.return_value = journal_row
-
-        link_result = MagicMock()
-        link_result.fetchone.return_value = link_row
-
-        generic_result = MagicMock()
-        generic_result.fetchone.return_value = None
-        generic_result.fetchall.return_value = []
-
         mock_connection.execute.side_effect = [
-            journal_result,
-            link_result,
-            generic_result,
-            generic_result,
+            _mock_fetchone(journal_row),
+            _mock_fetchone(link_row),
+            _mock_empty_result(),
+            _mock_empty_result(),
         ]
 
-        mock_journal_service.update_journal.return_value = Journal(
-            id=42,
-            user_id="1",
-            title="Team Meeting",
-            content="Weekly sync",
-            event_date_range=EventDateRange(
-                start=datetime(2026, 3, 20, 10, 0, tzinfo=UTC),
-                end=datetime(2026, 3, 20, 11, 0, tzinfo=UTC),
-            ),
-        )
+        mock_journal_service.update_journal.return_value = _make_journal()
 
         result = await processor.process_event(event)
 

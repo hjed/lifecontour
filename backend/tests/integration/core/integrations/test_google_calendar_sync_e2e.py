@@ -328,7 +328,6 @@ async def _run_calendar_sync_worker(
         with patch.object(
             worker_module,
             "_create_google_client",
-            new_callable=AsyncMock,
             return_value=mock_client,
         ):
             await arq_worker.async_run()

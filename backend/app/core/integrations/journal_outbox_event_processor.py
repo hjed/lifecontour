@@ -260,7 +260,10 @@ class JournalOutboxEventProcessor:
         ]
 
         updated_journal = self._build_journal_from_data(
-            merged_journal_data, journal_id=existing_journal_id
+            merged_journal_data,
+            journal_id=existing_journal_id,
+            parent_id=existing_journal.parent_id,
+            order=existing_journal.order,
         )
 
         # Calculate changed fields (including event_date_range)
@@ -278,10 +281,13 @@ class JournalOutboxEventProcessor:
                 updated_journal.event_date_range,
             )
 
-        # Update via journal service
-        saved_journal = await self.journal_service.update_journal(
-            updated_journal, changed_fields, self.connection
-        )
+        # Update via journal service (only if fields actually changed)
+        if changed_fields:
+            saved_journal = await self.journal_service.update_journal(
+                updated_journal, changed_fields, self.connection
+            )
+        else:
+            saved_journal = existing_journal
 
         # Update calendar info
         if saved_journal.id is not None:
@@ -358,6 +364,8 @@ class JournalOutboxEventProcessor:
     def _build_journal_from_data(
         journal_data: dict[str, Any],
         journal_id: int | None = None,
+        parent_id: int | None = None,
+        order: int | None = None,
     ) -> Journal:
         """Build a Journal entity from outbox event payload data."""
         start_str = journal_data.get("event_date_range_start")
@@ -372,6 +380,8 @@ class JournalOutboxEventProcessor:
             title=journal_data.get("title", ""),
             content=journal_data.get("content", ""),
             event_date_range=EventDateRange(start=start, end=end),
+            parent_id=parent_id,
+            order=order,
         )
 
     @staticmethod
@@ -469,7 +479,11 @@ class JournalOutboxEventProcessor:
         external_event_id: str,
         etag: str | None,
     ) -> None:
-        """Create an external event link for tracking sync state."""
+        """Create an external event link for tracking sync state.
+
+        Uses ON CONFLICT DO UPDATE so retries of journal_event.created
+        don't fail on the composite PK (journal_id, calendar_id).
+        """
         now = datetime.now(UTC)
         await self.connection.execute(
             text("""
@@ -483,6 +497,11 @@ class JournalOutboxEventProcessor:
                      :etag,
                      'bidirectional', 'synced',
                      :now, :now)
+                ON CONFLICT (journal_id, calendar_id) DO UPDATE SET
+                    external_event_id = :external_event_id,
+                    external_version = :etag,
+                    sync_status = 'synced',
+                    updated_at = :now
             """),
             {
                 "journal_id": journal_id,
@@ -569,6 +588,38 @@ class JournalOutboxEventProcessor:
             },
         )
 
+    @staticmethod
+    def _group_relationships_by_type(
+        contact_relationships: list[dict[str, str]],
+    ) -> dict[str, list[str]]:
+        """Group contact relationship entries by type, filtering empty values."""
+        by_type: dict[str, list[str]] = {}
+        for rel in contact_relationships:
+            rel_type = rel.get("relationship_type", "")
+            email = rel.get("email", "")
+            if rel_type and email:
+                by_type.setdefault(rel_type, []).append(email)
+        return by_type
+
+    async def _resolve_emails_to_contact_ids(
+        self,
+        emails: list[str],
+        journal_id: int,
+    ) -> set[int]:
+        """Resolve a list of emails to contact IDs, skipping unknown emails."""
+        resolved: set[int] = set()
+        for email in emails:
+            contact_id = await self.contact_resolver.resolve_by_email(email)
+            if contact_id is not None:
+                resolved.add(contact_id)
+            else:
+                logger.debug(
+                    "Invitee email not matched to contact, skipping",
+                    email=email,
+                    journal_id=journal_id,
+                )
+        return resolved
+
     async def _sync_contact_relationships(
         self,
         journal_id: int,
@@ -590,13 +641,7 @@ class JournalOutboxEventProcessor:
         if not contact_relationships:
             return
 
-        # Group by relationship type for independent processing
-        by_type: dict[str, list[str]] = {}
-        for rel in contact_relationships:
-            rel_type = rel.get("relationship_type", "")
-            email = rel.get("email", "")
-            if rel_type and email:
-                by_type.setdefault(rel_type, []).append(email)
+        by_type = self._group_relationships_by_type(contact_relationships)
 
         for rel_type_str, emails in by_type.items():
             try:
@@ -609,24 +654,14 @@ class JournalOutboxEventProcessor:
                 )
                 continue
 
-            # Resolve emails to contact IDs
-            resolved_contact_ids: set[int] = set()
-            for email in emails:
-                contact_id = await self.contact_resolver.resolve_by_email(email)
-                if contact_id is not None:
-                    resolved_contact_ids.add(contact_id)
-                else:
-                    logger.debug(
-                        "Invitee email not matched to contact, skipping",
-                        email=email,
-                        journal_id=journal_id,
-                    )
+            resolved_contact_ids = await self._resolve_emails_to_contact_ids(
+                emails, journal_id
+            )
 
-            # Fetch existing relationships of this type
+            # Diff against existing relationships of this type
             existing = await self._get_relationships_by_type(journal_id, rel_type)
             existing_contact_ids = {r.contact_id for r in existing}
 
-            # Diff: create missing, delete removed
             to_create = resolved_contact_ids - existing_contact_ids
             to_delete = existing_contact_ids - resolved_contact_ids
 

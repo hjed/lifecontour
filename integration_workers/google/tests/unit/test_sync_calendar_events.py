@@ -89,7 +89,7 @@ class TestSyncCalendarEvents:
         mock_session.execute.return_value = cal_result
 
         with patch(
-            "worker._create_google_client", new_callable=AsyncMock
+            "worker._create_google_client",
         ) as mock_create:
             mock_create.return_value = MagicMock()
             result = await sync_calendar_events(
@@ -137,7 +137,6 @@ class TestSyncCalendarEvents:
 
         with patch(
             "worker._create_google_client",
-            new_callable=AsyncMock,
             return_value=mock_client,
         ):
             result = await sync_calendar_events(
@@ -189,7 +188,6 @@ class TestSyncCalendarEvents:
 
         with patch(
             "worker._create_google_client",
-            new_callable=AsyncMock,
             return_value=mock_client,
         ):
             result = await sync_calendar_events(
@@ -230,7 +228,6 @@ class TestSyncCalendarEvents:
 
         with patch(
             "worker._create_google_client",
-            new_callable=AsyncMock,
             return_value=mock_client,
         ):
             result = await sync_calendar_events(
@@ -271,7 +268,6 @@ class TestSyncCalendarEvents:
 
         with patch(
             "worker._create_google_client",
-            new_callable=AsyncMock,
             return_value=mock_client,
         ):
             result = await sync_calendar_events(
@@ -323,7 +319,6 @@ class TestSyncCalendarEvents:
 
         with patch(
             "worker._create_google_client",
-            new_callable=AsyncMock,
             return_value=mock_client,
         ):
             result = await sync_calendar_events(
