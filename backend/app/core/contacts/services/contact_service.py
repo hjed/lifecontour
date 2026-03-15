@@ -476,9 +476,7 @@ class ContactService:
 
             # Find the method to update
             method_to_update = None
-            assert current_contact.methods is not None
-            assert current_contact.methods is not None
-            for method in current_contact.methods:
+            for method in current_contact.methods or []:
                 if method.id == method_id:
                     method_to_update = method
                     break
@@ -566,9 +564,7 @@ class ContactService:
 
             # Find the address to update
             address_to_update = None
-            assert current_contact.addresses is not None
-            assert current_contact.addresses is not None
-            for address in current_contact.addresses:
+            for address in current_contact.addresses or []:
                 if address.id == address_id:
                     address_to_update = address
                     break
@@ -656,9 +652,7 @@ class ContactService:
 
             # Find the note to update
             note_to_update = None
-            assert current_contact.notes is not None
-            assert current_contact.notes is not None
-            for note in current_contact.notes:
+            for note in current_contact.notes or []:
                 if note.id == note_id:
                     note_to_update = note
                     break
@@ -716,32 +710,27 @@ class ContactService:
         self, current_contact: Contact, updated_contact: Contact
     ) -> dict[str, Any]:
         """Calculate which fields have changed between current and updated contact."""
-        changed_fields = {}
+        changed_fields: dict[str, Any] = {}
+
+        def _add_if_changed(
+            field: str, current: str | None, updated: str | None
+        ) -> None:
+            if current != updated:
+                changed_fields[field] = (current or "", updated or "")
 
         # Check basic contact fields
-        if current_contact.first_name != updated_contact.first_name:
-            changed_fields["first_name"] = (
-                current_contact.first_name,
-                updated_contact.first_name,
-            )
-
-        if current_contact.last_name != updated_contact.last_name:
-            changed_fields["last_name"] = (
-                current_contact.last_name or "",
-                updated_contact.last_name or "",
-            )
-
-        if current_contact.middle_name != updated_contact.middle_name:
-            changed_fields["middle_name"] = (
-                current_contact.middle_name or "",
-                updated_contact.middle_name or "",
-            )
-
-        if current_contact.nick_name != updated_contact.nick_name:
-            changed_fields["nick_name"] = (
-                current_contact.nick_name or "",
-                updated_contact.nick_name or "",
-            )
+        _add_if_changed(
+            "first_name", current_contact.first_name, updated_contact.first_name
+        )
+        _add_if_changed(
+            "last_name", current_contact.last_name, updated_contact.last_name
+        )
+        _add_if_changed(
+            "middle_name", current_contact.middle_name, updated_contact.middle_name
+        )
+        _add_if_changed(
+            "nick_name", current_contact.nick_name, updated_contact.nick_name
+        )
 
         # For methods, addresses, and notes, we'll do a simplified comparison
         # A more sophisticated implementation could compare individual items
@@ -1136,9 +1125,7 @@ class ContactService:
         # Only replace tags if new tags are provided
         if contact.tags is not None:
             # Remove all existing tags first
-            assert current_contact.tags is not None
-            assert current_contact.tags is not None
-            for current_tag in current_contact.tags:
+            for current_tag in current_contact.tags or []:
                 if current_tag.id is not None:
                     await self.contact_repo.remove_tag(contact_id, current_tag.id)
 

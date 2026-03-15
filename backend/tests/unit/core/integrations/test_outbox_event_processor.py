@@ -645,3 +645,59 @@ class TestOutboxEventProcessor:
         assert result[1].id == 99
         assert str(result[1].name) == "missing2"
         assert mock_tag_repo.save.call_count == 2
+
+    @pytest.mark.asyncio
+    async def test_resolve_contact_tags_legacy_reference_data(
+        self, processor: OutboxEventProcessor, mock_tag_repo: AsyncMock
+    ):
+        """Legacy reference_data without synced_tags defaults to preserving all existing tags currently to prevent data loss."""
+        mock_tag_repo.find_by_names.return_value = {
+            "incoming": Tag(id=1, name=TagName("incoming")),
+            "existing_local": Tag(id=2, name=TagName("existing_local")),
+            "existing_synced_but_unknown": Tag(
+                id=3, name=TagName("existing_synced_but_unknown")
+            ),
+        }
+
+        # Legacy data (e.g., just resource_name, no synced_tags)
+        legacy_ref_data = '{"resource_name": "people/123"}'
+        existing_tags = [
+            Tag(id=2, name=TagName("existing_local")),
+            Tag(id=3, name=TagName("existing_synced_but_unknown")),
+        ]
+
+        result = await processor._resolve_contact_tags(
+            contact_data={"tags": [{"name": "incoming"}]},
+            existing_reference_data=legacy_ref_data,
+            existing_contact_tags=existing_tags,
+        )
+
+        assert result is not None
+        assert len(result) == 3
+        names = [str(t.name) for t in result]
+        assert "incoming" in names
+        assert "existing_local" in names
+        assert "existing_synced_but_unknown" in names
+
+    @pytest.mark.asyncio
+    async def test_resolve_contact_tags_preserves_local_when_inbound_removes_synced(
+        self, processor: OutboxEventProcessor, mock_tag_repo: AsyncMock
+    ):
+        """If inbound removes a synced tag, the synced tag is removed but local ones are kept."""
+        mock_tag_repo.find_by_names.return_value = {
+            "local_tag1": Tag(id=2, name=TagName("local_tag1")),
+        }
+
+        # The remote system removed 'synced_tag1'
+        result = await processor._resolve_contact_tags(
+            contact_data={"tags": []},  # Explicit empty list means remote removed tags
+            existing_reference_data='{"synced_tags": ["synced_tag1"]}',
+            existing_contact_tags=[
+                Tag(id=2, name=TagName("local_tag1")),
+                Tag(id=3, name=TagName("synced_tag1")),
+            ],
+        )
+
+        assert result is not None
+        assert len(result) == 1
+        assert str(result[0].name) == "local_tag1"

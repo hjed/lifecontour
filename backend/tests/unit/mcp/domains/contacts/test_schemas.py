@@ -59,7 +59,7 @@ class TestContactResponse:
         assert response.name == "Jane Smith"
         assert response.email is None
         assert response.phone is None
-        assert not response.tags
+        assert response.tags == []
         assert response.summary == "Jane is a colleague from the marketing department."
 
     def test_contact_response_empty_tags(self):
@@ -78,7 +78,7 @@ class TestContactResponse:
             summary=str(contact_data["summary"]),
         )
 
-        assert not response.tags
+        assert response.tags == []
 
     def test_contact_response_validation_required_fields(self):
         """Test validation behavior for required fields."""

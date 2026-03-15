@@ -15,6 +15,12 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 logger = structlog.get_logger()
 
 
+class ExternalReferenceError(Exception):
+    """Base exception for external reference service errors."""
+
+    pass
+
+
 class ExternalReferenceService:
     """
     Service for managing external references between internal and external entities.
@@ -93,7 +99,7 @@ class ExternalReferenceService:
 
             row = result.fetchone()
             if not row:
-                raise Exception("Failed to create external reference")
+                raise ExternalReferenceError("Failed to create external reference")
 
             logger.info(
                 "Successfully created external reference",

@@ -35,7 +35,7 @@ def serialize_contact(contact: Contact) -> dict[str, Any]:
     Returns:
         Dictionary representation of the contact
     """
-    return {
+    result: dict[str, Any] = {
         "first_name": contact.first_name,
         "last_name": contact.last_name,
         "middle_name": contact.middle_name,
@@ -43,16 +43,23 @@ def serialize_contact(contact: Contact) -> dict[str, Any]:
         "company": contact.company,
         "job_title": contact.job_title,
         "is_favourite": contact.is_favourite,
-        "methods": [
+    }
+
+    if contact.methods is not None:
+        result["methods"] = [
             {
                 "method_type": method.method_type.value,
                 "value": method.value,
                 "label": method.label,
                 "is_primary": method.is_primary,
             }
-            for method in (contact.methods or [])
-        ],
-        "addresses": [
+            for method in contact.methods
+        ]
+    else:
+        result["methods"] = None
+
+    if contact.addresses is not None:
+        result["addresses"] = [
             {
                 "street_line_1": address.street_line_1,
                 "street_line_2": address.street_line_2,
@@ -63,11 +70,22 @@ def serialize_contact(contact: Contact) -> dict[str, Any]:
                 "label": address.label,
                 "is_primary": address.is_primary,
             }
-            for address in (contact.addresses or [])
-        ],
-        "notes": [{"content": note.content} for note in (contact.notes or [])],
-        "tags": [{"name": tag.name.value} for tag in (contact.tags or [])],
-    }
+            for address in contact.addresses
+        ]
+    else:
+        result["addresses"] = None
+
+    if contact.notes is not None:
+        result["notes"] = [{"content": note.content} for note in contact.notes]
+    else:
+        result["notes"] = None
+
+    if contact.tags is not None:
+        result["tags"] = [{"name": tag.name.value} for tag in contact.tags]
+    else:
+        result["tags"] = None
+
+    return result
 
 
 def deserialize_contact(data: dict[str, Any]) -> Contact:

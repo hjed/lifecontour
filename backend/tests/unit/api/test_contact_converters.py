@@ -183,10 +183,6 @@ class TestContactConverter:
         )
         if contact.relationships is None:
             contact.relationships = []
-        if contact.relationships is None:
-            contact.relationships = []
-        if contact.relationships is None:
-            contact.relationships = []
         contact.relationships.append(relationship)
 
         resource = ContactConverter.to_resource(contact, "http://example.com")

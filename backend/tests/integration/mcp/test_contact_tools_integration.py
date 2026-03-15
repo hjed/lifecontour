@@ -334,7 +334,6 @@ class TestContactToolsIntegration:
         assert retrieved_contact.get_primary_email() == "jane.smith@example.com"
         assert retrieved_contact.get_primary_phone() == "+1234567890"
         assert retrieved_contact.notes is not None
-        assert retrieved_contact.notes is not None
         assert len(retrieved_contact.notes) == 1
         assert retrieved_contact.notes is not None
         assert retrieved_contact.notes[0].content == "Met at conference"
@@ -489,9 +488,7 @@ class TestContactToolsIntegration:
         assert created_contact.first_name == "Alice"
         assert created_contact.last_name == "Johnson"
         assert created_contact.methods is not None
-        assert created_contact.methods is not None
         assert len(created_contact.methods) == 2
-        assert created_contact.notes is not None
         assert created_contact.notes is not None
         assert len(created_contact.notes) == 1
 
@@ -538,10 +535,6 @@ class TestContactToolsIntegration:
         )
         if contact.methods is None:
             contact.methods = []
-        if contact.methods is None:
-            contact.methods = []
-        if contact.methods is None:
-            contact.methods = []
         contact.methods.append(email_method)
 
         # Simulate the MCP tool tag handling logic
@@ -557,24 +550,12 @@ class TestContactToolsIntegration:
 
             if existing_tag_found:
                 # Use existing tag
-                if contact.tags is None:
-                    contact.tags = []
-                if contact.tags is None:
-                    contact.tags = []
-                if contact.tags is None:
-                    contact.tags = []
-                contact.tags.append(existing_tag_found)
+                contact.add_tag(existing_tag_found)
             else:
                 # Create new tag
                 new_tag = Tag(name=TagName(tag_name))
                 saved_tag = await tag_repo.save(new_tag)
-                if contact.tags is None:
-                    contact.tags = []
-                if contact.tags is None:
-                    contact.tags = []
-                if contact.tags is None:
-                    contact.tags = []
-                contact.tags.append(saved_tag)
+                contact.add_tag(saved_tag)
 
         # Create the contact using the service (same as MCP tool)
         created_contact = await contact_service.create_contact(contact, clean_database)
@@ -582,7 +563,6 @@ class TestContactToolsIntegration:
         # Verify the contact was created with all tags
         assert created_contact.id is not None
         assert created_contact.first_name == "David"
-        assert created_contact.tags is not None
         assert created_contact.tags is not None
         assert len(created_contact.tags) == 3
 
@@ -595,7 +575,6 @@ class TestContactToolsIntegration:
         # Verify the contact was actually saved to the database with tags
         retrieved_contact = await contact_service.get_contact_by_id(created_contact.id)
         assert retrieved_contact is not None
-        assert retrieved_contact.tags is not None
         assert retrieved_contact.tags is not None
         assert len(retrieved_contact.tags) == 3
 
@@ -716,9 +695,7 @@ class TestContactToolsIntegration:
         assert final_contact.middle_name == "Middle"
         assert final_contact.nick_name == "Nick"
         assert final_contact.methods is not None
-        assert final_contact.methods is not None
         assert len(final_contact.methods) == 2  # Email + Phone
-        assert final_contact.tags is not None
         assert final_contact.tags is not None
         assert len(final_contact.tags) == 1  # Only the new tag (replacement strategy)
 
@@ -732,7 +709,6 @@ class TestContactToolsIntegration:
         assert retrieved_contact.get_primary_phone() == "+1234567890"
 
         # Verify tags were replaced (not appended)
-        assert retrieved_contact.tags is not None
         assert retrieved_contact.tags is not None
         assert len(retrieved_contact.tags) == 1
         assert str(retrieved_contact.tags[0].name) == "updated"

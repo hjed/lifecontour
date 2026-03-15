@@ -481,57 +481,60 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
                 job_title=request.job_title
                 if request.job_title is not None
                 else existing_contact.job_title,
-                methods=[],
-                addresses=[],
-                notes=[],
-                tags=[],
+                methods=None,
+                addresses=None,
+                notes=None,
+                tags=None,
             )
 
             # Add contact methods if provided (replacement strategy)
             if request.email:
+                if updated_contact.methods is None:
+                    updated_contact.methods = []
                 email_method = ContactMethod(
                     method_type=MethodType.EMAIL,
                     value=request.email,
                     contact_id=request.contact_id,
                     is_primary=True,
                 )
-                assert updated_contact.methods is not None
                 updated_contact.methods.append(email_method)
 
             if request.phone:
+                if updated_contact.methods is None:
+                    updated_contact.methods = []
                 phone_method = ContactMethod(
                     method_type=MethodType.PHONE,
                     value=request.phone,
                     contact_id=request.contact_id,
                     is_primary=True,
                 )
-                assert updated_contact.methods is not None
                 updated_contact.methods.append(phone_method)
 
             # Add additional note if provided
             if request.notes:
+                if updated_contact.notes is None:
+                    updated_contact.notes = []
                 note = ContactNote(
                     content=request.notes,
                     contact_id=request.contact_id,
                 )
-                assert updated_contact.notes is not None
                 updated_contact.notes.append(note)
 
             # Handle tags if provided - find or create tags by name (replacement strategy)
             if request.tags is not None:
+                if updated_contact.tags is None:
+                    updated_contact.tags = []
                 for tag_name in request.tags:
                     # Try to find existing tag by name
                     existing_tag = await tag_repo.find_by_name(tag_name)
 
                     if existing_tag:
                         # Use existing tag
-                        assert updated_contact.tags is not None
                         updated_contact.tags.append(existing_tag)
                     else:
                         # Create new tag
                         new_tag = Tag(name=TagName(tag_name))
                         saved_tag = await tag_repo.save(new_tag)
-                        assert updated_contact.tags is not None
                         updated_contact.tags.append(saved_tag)
 
             # Update the contact with all methods, notes, and tags in a single transaction

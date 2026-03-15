@@ -36,7 +36,7 @@ class TestContactConverter:
         assert response.name == "John Doe"
         assert response.email is None
         assert response.phone is None
-        assert not response.tags
+        assert response.tags == []
         assert "John Doe is a contact" in response.summary
 
     def test_to_contact_response_with_additional_context(self):
