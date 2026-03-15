@@ -274,7 +274,9 @@ class ContactService:
             )
 
             # Publish creation event
-            await self._publish_contact_created_event(complete_contact, transaction)
+            await self._publish_contact_created_event(
+                complete_contact, transaction, changed_by=changed_by
+            )
 
             return complete_contact
 
@@ -852,13 +854,23 @@ class ContactService:
         return saved_contact
 
     async def _publish_contact_created_event(
-        self, contact: Contact, transaction: AsyncConnection
+        self,
+        contact: Contact,
+        transaction: AsyncConnection,
+        changed_by: str = "system",
     ) -> None:
-        """Publish contact created event."""
+        """Publish contact created event and record creation history."""
         if contact.id is None:
             raise ContactValidationError(
                 "id", "Contact ID is required for event publishing"
             )
+        # Record creation in field history for provenance tracking
+        await self.history_service.record_contact_change(
+            contact.id,
+            {"created": (None, f"{contact.first_name} {contact.last_name}")},
+            changed_by=changed_by,
+            _transaction=transaction,
+        )
         event = ContactCreated(
             contact.id,
             contact.first_name,

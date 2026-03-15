@@ -521,13 +521,15 @@ def _transform_contact_to_google_person(contact: dict[str, Any]) -> dict[str, An
 
     # Transform tags to Google group memberships
     tag_names = contact.get("tags", [])
-    group_name_to_resource = contact.get("group_name_to_resource", {})
-    if tag_names and group_name_to_resource:
+    if "group_name_to_resource" in contact:
+        group_name_to_resource = contact["group_name_to_resource"]
+        # Always include memberships when tag push is active (group mapping
+        # provided), even if empty, so that removed local tags clear existing
+        # Google group memberships via the updatePersonFields mask.
         memberships = _transform_tags_to_memberships(
             tag_names, group_name_to_resource
-        )
-        if memberships:
-            person_data["memberships"] = memberships
+        ) if tag_names and group_name_to_resource else []
+        person_data["memberships"] = memberships
 
     return person_data
 
@@ -2260,12 +2262,40 @@ async def push_local_contacts_to_google(
                     **metrics,
                 }
 
+            # Build group mapping for tag→membership push.
+            # Fetch existing groups, reverse the mapping, and pre-create any
+            # missing groups for local tags.
+            forward_group_mapping = await _build_contact_group_mapping(client)
+            reverse_group_mapping = _build_reverse_group_mapping(
+                forward_group_mapping
+            )
+
+            # Collect all tag names across contacts to push
+            all_tag_names: set[str] = set()
+            for contact in contacts_to_push:
+                # Tags will be loaded per-contact in _load_full_contact,
+                # but we need to pre-create groups here. Load tags now.
+                tag_names = await _load_tag_names_for_contact(
+                    session, contact["id"]
+                )
+                contact["_preloaded_tags"] = tag_names
+                all_tag_names.update(tag_names)
+
+            # Ensure groups exist for all tags
+            if all_tag_names:
+                reverse_group_mapping = await _ensure_google_groups_exist(
+                    client=client,
+                    tag_names=list(all_tag_names),
+                    existing_groups=reverse_group_mapping,
+                )
+
             # Push contacts to Google
             push_result = await push_contacts_to_google(
                 session=session,
                 client=client,
                 contacts=contacts_to_push,
                 google_account_email=google_account_email,
+                group_name_to_resource=reverse_group_mapping,
             )
 
             metrics.update(push_result)

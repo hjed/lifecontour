@@ -8,7 +8,6 @@ no-op detection, and push payload verification.
 """
 
 import sys
-from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -192,8 +191,10 @@ class TestTransformContactToGooglePersonWithTags:
         assert "memberships" in result
         assert len(result["memberships"]) == 2
 
-    def test_no_memberships_when_no_tags(self):
-        """Test person payload has no memberships when tags are empty."""
+    def test_empty_memberships_when_no_tags_but_group_mapping_present(self):
+        """Test person payload has empty memberships when tags are empty
+        but group_name_to_resource is provided — ensures Google clears
+        existing memberships via updatePersonFields mask."""
         from worker import _transform_contact_to_google_person
 
         contact = {
@@ -208,7 +209,8 @@ class TestTransformContactToGooglePersonWithTags:
 
         result = _transform_contact_to_google_person(contact)
 
-        assert "memberships" not in result
+        assert "memberships" in result
+        assert result["memberships"] == []
 
     def test_no_memberships_when_tags_key_missing(self):
         """Test person payload has no memberships when tags key is absent."""
