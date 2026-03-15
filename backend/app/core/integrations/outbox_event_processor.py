@@ -142,7 +142,16 @@ class OutboxEventProcessor:
     def _normalize_contact_data(self, contact_data: dict[str, Any]) -> dict[str, Any]:
         """Normalize inbound contact data before versioning and persistence."""
         normalized_contact_data = dict(contact_data)
-        methods = contact_data.get("methods")
+
+        # Strip explicit None lists so deserialize_contact doesn't fail
+        for list_field in ["methods", "addresses", "notes", "tags"]:
+            if (
+                list_field in normalized_contact_data
+                and normalized_contact_data[list_field] is None
+            ):
+                del normalized_contact_data[list_field]
+
+        methods = normalized_contact_data.get("methods")
         if isinstance(methods, Sequence) and not isinstance(methods, (str, bytes)):
             normalized_contact_data["methods"] = self._deduplicate_contact_methods(
                 methods
@@ -282,7 +291,9 @@ class OutboxEventProcessor:
         return matched_contact
 
     @staticmethod
-    def _parse_reference_data(reference_data: str) -> dict[str, Any] | None:
+    def _parse_reference_data(
+        reference_data: str, reference_id: int | None = None
+    ) -> dict[str, Any] | None:
         """Safely parse reference data JSON string, with fallback to ast.literal_eval."""
         import ast
         import json
@@ -296,6 +307,7 @@ class OutboxEventProcessor:
                 else:
                     logger.warning(
                         "Failed to parse reference_data as JSON and too large for literal_eval",
+                        reference_id=reference_id,
                         reference_data_preview=reference_data[:200],
                     )
                     return None
@@ -305,6 +317,7 @@ class OutboxEventProcessor:
         except Exception as e:
             logger.warning(
                 f"Failed to parse reference_data: {e}",
+                reference_id=reference_id,
                 reference_data_preview=reference_data[:200],
             )
 
@@ -314,6 +327,7 @@ class OutboxEventProcessor:
         self,
         contact_data: dict[str, Any],
         existing_reference_data: str | None = None,
+        existing_reference_id: int | None = None,
         existing_contact_tags: list[Tag] | None = None,
     ) -> list[Tag] | None:
         """
@@ -332,32 +346,46 @@ class OutboxEventProcessor:
         # Determine which tags were previously synced
         previously_synced_tags = set()
         if existing_reference_data:
-            ref_data = self._parse_reference_data(existing_reference_data)
-
+            ref_data = self._parse_reference_data(
+                existing_reference_data, existing_reference_id
+            )
             if isinstance(ref_data, dict):
-                synced = ref_data.get("synced_tags", [])
-                if isinstance(synced, list) and all(isinstance(x, str) for x in synced):
-                    previously_synced_tags = set(synced)
+                if "synced_tags" in ref_data:
+                    synced = ref_data.get("synced_tags")
+                    if isinstance(synced, list) and all(
+                        isinstance(x, str) for x in synced
+                    ):
+                        previously_synced_tags = set(synced)
+                    else:
+                        logger.warning(
+                            "synced_tags in reference_data is not a list of strings",
+                            reference_id=existing_reference_id,
+                            synced_value=synced,
+                        )
                 else:
-                    logger.warning(
-                        "synced_tags in reference_data is not a list of strings",
-                        synced_value=synced,
-                    )
+                    previously_synced_tags = set(existing_tag_names)
+            else:
+                previously_synced_tags = set(existing_tag_names)
+        else:
+            previously_synced_tags = set(existing_tag_names)
 
         # Tags that are purely local (never synced before)
         local_only_tags = existing_tag_names - previously_synced_tags
 
-        # Final tag set: incoming tags + preserved local tags
-        final_tag_names = incoming_tag_names | local_only_tags
+        # Stable order: inbound tags first, then local only
+        final_tag_names_ordered = list(incoming_tag_names)
+        for tag_name in sorted(local_only_tags):
+            if tag_name not in final_tag_names_ordered:
+                final_tag_names_ordered.append(tag_name)
 
-        if not final_tag_names:
+        if not final_tag_names_ordered:
             return []
 
         # Bulk lookup all required tags
-        found_tags_dict = await self.tag_repo.find_by_names(list(final_tag_names))
+        found_tags_dict = await self.tag_repo.find_by_names(final_tag_names_ordered)
 
         resolved_tags = []
-        for tag_name in final_tag_names:
+        for tag_name in final_tag_names_ordered:
             if tag_name in found_tags_dict:
                 resolved_tags.append(found_tags_dict[tag_name])
             else:
@@ -629,15 +657,16 @@ class OutboxEventProcessor:
             )
 
             ref_data_str = existing_ref.reference_data if existing_ref else None
-            resolved_tags = await self._resolve_contact_tags(
-                contact_data,
-                existing_reference_data=ref_data_str,
-                existing_contact_tags=existing_tags,
-            )
-            if resolved_tags is not None:
-                updated_contact_data.tags = resolved_tags
+            if "tags" in contact_data and contact_data["tags"] is not None:
+                resolved_tags = await self._resolve_contact_tags(
+                    contact_data,
+                    existing_reference_data=ref_data_str,
+                    existing_reference_id=existing_ref.id if existing_ref else None,
+                    existing_contact_tags=existing_tags,
+                )
+                updated_contact_data.tags = resolved_tags  # type: ignore[assignment]
             else:
-                updated_contact_data.tags = existing_tags
+                updated_contact_data.tags = None  # type: ignore[assignment]
         except ContactDeserializationError as e:
             raise PermanentOutboxEventProcessingError(str(e)) from e
 
@@ -648,23 +677,28 @@ class OutboxEventProcessor:
             )
 
             # Update reference data with new synced tags
-            if existing_ref and contact_data.get("tags") is not None:
+            if (
+                existing_ref
+                and "tags" in contact_data
+                and contact_data["tags"] is not None
+            ):
                 incoming_tag_names = [
                     tag_data["name"] for tag_data in contact_data["tags"]
                 ]
 
                 new_ref_data = {}
                 if existing_ref.reference_data:
-                    new_ref_data = (
-                        self._parse_reference_data(existing_ref.reference_data) or {}
+                    parsed = self._parse_reference_data(
+                        existing_ref.reference_data, existing_ref.id
                     )
+                    if parsed is not None:
+                        new_ref_data = parsed
 
-                if isinstance(new_ref_data, dict):
-                    new_ref_data["synced_tags"] = incoming_tag_names
-                    await self.external_reference_service.update_external_reference(
-                        reference_id=existing_ref.id,
-                        reference_data=json.dumps(new_ref_data),
-                    )
+                new_ref_data["synced_tags"] = incoming_tag_names
+                await self.external_reference_service.update_external_reference(
+                    reference_id=existing_ref.id,
+                    reference_data=json.dumps(new_ref_data),
+                )
         except Exception as e:
             raise OutboxEventProcessingError(
                 f"Failed to update contact: {str(e)}"
