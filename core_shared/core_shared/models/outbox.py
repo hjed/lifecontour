@@ -150,6 +150,55 @@ class OutboxEvent(Base):
             aggregate_id=0,
         )
 
+    @classmethod
+    def create_journal_sync_event(
+        cls,
+        journal_data: dict[str, Any],
+        calendar_info_data: dict[str, Any],
+        integration_source: str,
+        external_event_id: str,
+        calendar_id: str,
+        sync_action: str,
+        etag: str | None = None,
+        existing_journal_id: int | None = None,
+        contact_relationships: list[dict[str, str]] | None = None,
+    ) -> "OutboxEvent":
+        """
+        Create an outbox event for journal calendar event synchronization.
+
+        Args:
+            journal_data: Journal data transformed from external event
+            calendar_info_data: Calendar info data (times, location, etc.)
+            integration_source: Source integration (e.g., 'google')
+            external_event_id: External system's event ID
+            calendar_id: Internal calendar ID
+            sync_action: Type of sync action ('created', 'updated', 'conflicted')
+            etag: External system's version identifier (e.g., Google ETag)
+            existing_journal_id: ID of existing journal if updating
+            contact_relationships: List of contact relationship dicts with
+                'email' and 'relationship_type' keys. Generic format supports
+                INVITEE, PARTICIPANT, ABOUT, etc. for future integrations.
+
+        Returns:
+            OutboxEvent instance ready to be saved
+        """
+        return cls(
+            event_type=f"journal_event.{sync_action}",
+            event_data={
+                "integration_source": integration_source,
+                "external_event_id": external_event_id,
+                "calendar_id": calendar_id,
+                "journal_data": journal_data,
+                "calendar_info_data": calendar_info_data,
+                "sync_timestamp": datetime.now(UTC).isoformat(),
+                "sync_action": sync_action,
+                "etag": etag,
+                "existing_journal_id": existing_journal_id,
+                "contact_relationships": contact_relationships or [],
+            },
+            aggregate_id=existing_journal_id or 0,
+        )
+
     def is_failed(self) -> bool:
         """Check if the event has failed processing."""
         return bool(self.retry_count >= 3 and self.processed_at is None)

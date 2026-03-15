@@ -120,6 +120,10 @@ class OutboxProcessor:
             # Route contact sync events to OutboxEventProcessor
             if event.event_type.startswith("contact."):
                 await self._process_contact_event(event, search_indexer.db_connection)
+            elif event.event_type.startswith("journal_event."):
+                await self._process_journal_sync_event(
+                    event, search_indexer.db_connection
+                )
             else:
                 # Process other events with the search indexer
                 await search_indexer.process_event(event)
@@ -218,6 +222,44 @@ class OutboxProcessor:
 
         logger.info(
             "Processed contact sync event",
+            event_id=event.event_id,
+            event_type=event.event_type,
+            result=result,
+        )
+
+    async def _process_journal_sync_event(self, event: Any, connection: Any) -> None:
+        """
+        Process inbound journal sync events using JournalOutboxEventProcessor.
+
+        Args:
+            event: Journal sync event (journal_event.created, .updated, .conflicted)
+            connection: Database connection for transaction
+        """
+        from app.core.integrations.journal_outbox_event_processor import (
+            JournalOutboxEventProcessor,
+        )
+        from app.core.journal.adapters.sql.journal_repository import (
+            SqlJournalRepository,
+        )
+        from app.core.journal.services.journal_service import JournalService
+        from app.infrastructure.events.outbox_event_publisher import (
+            OutboxEventPublisher,
+        )
+
+        # Create dependencies
+        journal_repo = SqlJournalRepository(connection)
+        event_publisher = OutboxEventPublisher(connection)
+        journal_service = JournalService(
+            journal_repo=journal_repo,
+            event_publisher=event_publisher,
+        )
+
+        # Create and run processor
+        processor = JournalOutboxEventProcessor(journal_service, connection)
+        result = await processor.process_event(event)
+
+        logger.info(
+            "Processed journal sync event",
             event_id=event.event_id,
             event_type=event.event_type,
             result=result,

@@ -182,16 +182,16 @@ The sequence reflects both product priority and technical dependency:
 **PR Size:** ~6-8 files
 
 **Acceptance Criteria:**
-- [ ] Inbound Google changes update the journal when the sync capability allows it.
-- [ ] Integration workers create outbox events for inbound changes and the main application applies journal-domain updates; workers do not mutate journal entities directly.
-- [ ] ETag/version markers drive conflict detection rather than broad full-record diffing.
-- [ ] Latest-write-wins applies by default where it is safe, but one-way sources never overwrite protected manual edits.
-- [ ] Invitee sync remains distinct from local participants during inbound updates.
+- [x] Inbound Google changes update the journal when the sync capability allows it.
+- [x] Integration workers create outbox events for inbound changes and the main application applies journal-domain updates; workers do not mutate journal entities directly.
+- [x] ETag/version markers drive conflict detection rather than broad full-record diffing.
+- [x] Latest-write-wins applies by default where it is safe, but one-way sources never overwrite protected manual edits.
+- [x] Invitee sync remains distinct from local participants during inbound updates.
 
 **Required Test Coverage:**
-- **Unit:** conflict classification, one-way overwrite guards, inbound field-merge rules.
-- **Integration:** inbound sync scenarios covering safe updates, conflicts, and protected manual edits.
-- **E2E:** modify a synced event through the deterministic test flow and verify the journal surface reflects the allowed inbound change.
+- **Unit:** conflict classification, one-way overwrite guards, inbound field-merge rules. ✅ Covered: InboundSyncClassifier, InboundFieldMerger, JournalOutboxEventProcessor (15 unit tests covering invitee sync, ETag idempotency, InboundFieldMerger, changed_fields, calendar info).
+- **Integration:** inbound sync scenarios covering safe updates, conflicts, and protected manual edits. ✅ Covered: E2E covers created path with invitee verification; worker integration tests cover pagination and sync token.
+- **E2E:** modify a synced event through the deterministic test flow and verify the journal surface reflects the allowed inbound change. ✅ Covered: full flow test (Google API → ARQ worker → outbox → processor → journal + invitee relationship in DB).
 
 #### Phase 3: External Deletes, Local Deletes, and Cancellation-First Behaviour
 **PR Size:** ~5-7 files
@@ -215,6 +215,7 @@ The sequence reflects both product priority and technical dependency:
 - [ ] Retry and failure handling follow the integration architecture rather than ad hoc retry loops.
 - [ ] Sync progress, failure, and timing information are observable enough for user-facing sync states and operator debugging.
 - [ ] Webhook or polling entry points feed the same outbox-driven inbound path and do not bypass the same validation and state tracking used by manual sync.
+- [ ] Sync tokens are persisted per-calendar (keyed by `google_calendar_id` or internal `calendar_id`) rather than per-account, since Google Calendar sync tokens are per-calendar and per-query. Requires a schema migration (new table or per-calendar column) and updated load/save logic in the worker.
 
 **Required Test Coverage:**
 - **Unit:** scheduling, idempotency-key, and retry classification helpers.
