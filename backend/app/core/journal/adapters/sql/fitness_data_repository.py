@@ -27,7 +27,6 @@ class SqlFitnessDataRepository(FitnessDataRepository):
             elevation_loss=row.elevation_loss,
             duration=row.duration,
             calories=row.calories,
-            gpx_track_data=row.gpx_track_data,
             strava_activity_id=row.strava_activity_id,
             created_at=row.created_at,
             updated_at=row.updated_at,
@@ -39,7 +38,7 @@ class SqlFitnessDataRepository(FitnessDataRepository):
             """
             SELECT journal_id, heart_rate_avg, heart_rate_max, distance,
                    elevation_gain, elevation_loss, duration, calories,
-                   gpx_track_data, strava_activity_id,
+                   strava_activity_id,
                    created_at, updated_at
             FROM journal_fitness_data
             WHERE journal_id = :journal_id
@@ -72,12 +71,12 @@ class SqlFitnessDataRepository(FitnessDataRepository):
             INSERT INTO journal_fitness_data (
                 journal_id, heart_rate_avg, heart_rate_max, distance,
                 elevation_gain, elevation_loss, duration, calories,
-                gpx_track_data, strava_activity_id
+                strava_activity_id
             )
             VALUES (
                 :journal_id, :heart_rate_avg, :heart_rate_max, :distance,
                 :elevation_gain, :elevation_loss, :duration, :calories,
-                :gpx_track_data, :strava_activity_id
+                :strava_activity_id
             )
             ON CONFLICT (journal_id) DO UPDATE SET
                 heart_rate_avg = EXCLUDED.heart_rate_avg,
@@ -87,12 +86,11 @@ class SqlFitnessDataRepository(FitnessDataRepository):
                 elevation_loss = EXCLUDED.elevation_loss,
                 duration = EXCLUDED.duration,
                 calories = EXCLUDED.calories,
-                gpx_track_data = EXCLUDED.gpx_track_data,
                 strava_activity_id = EXCLUDED.strava_activity_id,
                 updated_at = now()
             RETURNING journal_id, heart_rate_avg, heart_rate_max, distance,
                       elevation_gain, elevation_loss, duration, calories,
-                      gpx_track_data, strava_activity_id,
+                      strava_activity_id,
                       created_at, updated_at
             """
         )
@@ -107,7 +105,6 @@ class SqlFitnessDataRepository(FitnessDataRepository):
                 "elevation_loss": fitness_data.elevation_loss,
                 "duration": fitness_data.duration,
                 "calories": fitness_data.calories,
-                "gpx_track_data": fitness_data.gpx_track_data,
                 "strava_activity_id": fitness_data.strava_activity_id,
             },
         )

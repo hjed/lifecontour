@@ -37,18 +37,15 @@ describe('Journal Types', () => {
   describe('KayakingData interface', () => {
     it('should create valid kayaking data', () => {
       const data: KayakingData = {
-        route_id: 'some-uuid',
         water_type: 'river',
       };
 
-      expect(data.route_id).toBe('some-uuid');
       expect(data.water_type).toBe('river');
     });
 
     it('should allow optional fields', () => {
       const data: KayakingData = {};
 
-      expect(data.route_id).toBeUndefined();
       expect(data.water_type).toBeUndefined();
     });
   });
@@ -56,18 +53,15 @@ describe('Journal Types', () => {
   describe('CrossCountrySkiingData interface', () => {
     it('should create valid cross-country skiing data', () => {
       const data: CrossCountrySkiingData = {
-        route_id: 'some-uuid',
         snow_conditions: 'packed powder',
       };
 
-      expect(data.route_id).toBe('some-uuid');
       expect(data.snow_conditions).toBe('packed powder');
     });
 
     it('should allow optional fields', () => {
       const data: CrossCountrySkiingData = {};
 
-      expect(data.route_id).toBeUndefined();
       expect(data.snow_conditions).toBeUndefined();
     });
   });

@@ -28,6 +28,7 @@ from core_shared.models.journals import (
     PlanData,
     TravelData,
 )
+from core_shared.models.route import Route
 
 from app.api.common.schemas import JsonApiLinks
 from app.api.journals.schemas import (
@@ -147,9 +148,10 @@ class JournalConverter:
         tags: list[JournalTag] | None,
         contacts: list[JournalContactRelationship] | None,
         calendar: Calendar | None,
+        routes: list[Route] | None = None,
     ) -> JournalRelationships | None:
         """Create relationships object."""
-        if not (tags or contacts or calendar):
+        if not (tags or contacts or calendar or routes):
             return None
 
         tags_data = None
@@ -170,10 +172,17 @@ class JournalConverter:
         if calendar and calendar.id:
             calendar_data = {"data": {"type": "calendars", "id": str(calendar.id)}}
 
+        routes_data = None
+        if routes:
+            routes_data = {
+                "data": [{"type": "routes", "id": str(r.id)} for r in routes]
+            }
+
         return JournalRelationships(
             tags=tags_data,
             contacts=contacts_data,
             calendar=calendar_data,
+            routes=routes_data,
         )
 
     @staticmethod
@@ -187,6 +196,7 @@ class JournalConverter:
         calendar: Calendar | None = None,
         parent: Journal | None = None,
         children_count: int | None = None,
+        routes: list[Route] | None = None,
     ) -> JournalResource:
         """
         Convert Journal domain entity to API resource.
@@ -232,7 +242,9 @@ class JournalConverter:
         )
 
         # Create relationships
-        relationships = JournalConverter._create_relationships(tags, contacts, calendar)
+        relationships = JournalConverter._create_relationships(
+            tags, contacts, calendar, routes
+        )
 
         # Create links
         links = None
@@ -356,7 +368,6 @@ class TypeDataConverter:
             elevation_loss=fitness_data.elevation_loss,
             duration=fitness_data.duration,
             calories=fitness_data.calories,
-            gpx_track_data=fitness_data.gpx_track_data,
             strava_activity_id=fitness_data.strava_activity_id,
         ).model_dump(exclude_none=True)
 
@@ -377,7 +388,6 @@ class TypeDataConverter:
     def bushwalking_data_to_schema(data: BushwalkingData) -> dict[str, Any]:
         """Convert BushwalkingData domain entity to API schema."""
         return BushwalkingDataSchema(
-            route_id=str(data.route_id) if data.route_id is not None else None,
             track_grading=data.track_grading,
         ).model_dump(exclude_none=True)
 
@@ -385,7 +395,6 @@ class TypeDataConverter:
     def jogging_data_to_schema(data: JoggingData) -> dict[str, Any]:
         """Convert JoggingData domain entity to API schema."""
         return JoggingDataSchema(
-            route_id=str(data.route_id) if data.route_id is not None else None,
             pace=data.pace,
         ).model_dump(exclude_none=True)
 
@@ -401,7 +410,6 @@ class TypeDataConverter:
     def canyoning_data_to_schema(data: CanyoningData) -> dict[str, Any]:
         """Convert CanyoningData domain entity to API schema."""
         return CanyoningDataSchema(
-            route_id=str(data.route_id) if data.route_id is not None else None,
             french_grade=data.french_grade,
             water_guage_name=data.water_guage_name,
             water_guage_level=data.water_guage_level,
@@ -414,7 +422,6 @@ class TypeDataConverter:
     def climbing_data_to_schema(data: ClimbingData) -> dict[str, Any]:
         """Convert ClimbingData domain entity to API schema."""
         return ClimbingDataSchema(
-            route_id=str(data.route_id) if data.route_id is not None else None,
             climbing_type=data.climbing_type,
             grade=data.grade,
             length=data.length,
@@ -424,7 +431,6 @@ class TypeDataConverter:
     def kayaking_data_to_schema(data: KayakingData) -> dict[str, Any]:
         """Convert KayakingData domain entity to API schema."""
         return KayakingDataSchema(
-            route_id=str(data.route_id) if data.route_id is not None else None,
             water_type=data.water_type,
         ).model_dump(exclude_none=True)
 
@@ -434,7 +440,6 @@ class TypeDataConverter:
     ) -> dict[str, Any]:
         """Convert CrossCountrySkiingData domain entity to API schema."""
         return CrossCountrySkiingDataSchema(
-            route_id=str(data.route_id) if data.route_id is not None else None,
             snow_conditions=data.snow_conditions,
         ).model_dump(exclude_none=True)
 

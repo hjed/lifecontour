@@ -7,7 +7,7 @@ Controllers act as adapters between HTTP and domain services.
 
 from uuid import UUID
 
-from core_shared.models.journals import RouteNotFoundError
+from core_shared.models.journals import JournalNotFoundError, RouteNotFoundError
 from dishka.integrations.fastapi import FromDishka, inject
 from fastapi import APIRouter, Query, Request, status
 from sqlalchemy.ext.asyncio import AsyncConnection
@@ -25,11 +25,12 @@ from app.api.routes.schemas import (
     RouteResponse,
     RouteUpdateRequest,
 )
+from app.core.journal.services.journal_service import JournalService
 from app.core.journal.services.route_service import RouteService
 from app.infrastructure.auth.models import SessionUser
 
 router = APIRouter(
-    prefix="/routes",
+    prefix="/journals/{journal_id}/routes",
     tags=["routes"],
 )
 
@@ -37,8 +38,10 @@ router = APIRouter(
 @router.get("")
 @inject
 async def list_routes(
+    journal_id: int,
     request: Request,
     route_service: FromDishka[RouteService],
+    journal_service: FromDishka[JournalService],
     user: FromDishka[SessionUser],  # Require authentication
     page: int = Query(default=1, description="Page number", ge=1),
     limit: int = Query(default=20, description="Items per page", ge=1, le=100),
@@ -56,28 +59,36 @@ async def list_routes(
     pagination = PaginationParams(page=page, limit=limit)
     base_url = get_request_base_url(request)
 
-    # Get routes for the authenticated user
-    routes = await route_service.get_routes_for_user(
-        user_id=user.id,
+    # Verify journal ownership first
+    journal = await journal_service.get_journal(journal_id)
+    if not journal or journal.user_id != user.id:
+        raise JournalNotFoundError(journal_id)
+
+    # Get routes for the authenticated user, pushing filter and pagination to the database
+    routes, total_count = await route_service.get_routes_by_journal_paginated(
+        journal_id=journal_id,
+        name_filter=name,
         limit=pagination.limit,
         offset=pagination.offset,
-        name=name,
     )
-
-    # Get total count for pagination
-    total_count = await route_service.get_route_count(user_id=user.id, name=name)
 
     # Convert to resources
     route_resources = [RouteConverter.to_resource(route, base_url) for route in routes]
 
     # Create pagination metadata and links
     meta = create_pagination_meta(total_count, page, limit)
+    base_link_url = f"{base_url}/api/journals/{journal_id}/routes"
+
+    additional_params: dict[str, str | list[str]] = {}
+    if name:
+        additional_params["name"] = name
+
     links = create_pagination_links(
-        f"{base_url}/api/routes",
+        base_link_url,
         page,
         limit,
         total_count,
-        additional_params={"name": name} if name else None,
+        additional_params=additional_params if additional_params else None,
     )
 
     return RouteListResponse(
@@ -90,9 +101,11 @@ async def list_routes(
 @router.get("/{route_id}")
 @inject
 async def get_route(
+    journal_id: int,
     route_id: str,
     request: Request,
     route_service: FromDishka[RouteService],
+    journal_service: FromDishka[JournalService],
     user: FromDishka[SessionUser],  # Require authentication
 ) -> RouteResponse:
     """
@@ -101,6 +114,11 @@ async def get_route(
     Returns a single route resource following JSON API specification.
     """
     base_url = get_request_base_url(request)
+
+    # Verify journal ownership first
+    journal = await journal_service.get_journal(journal_id)
+    if not journal or journal.user_id != user.id:
+        raise JournalNotFoundError(journal_id)
 
     # Parse UUID
     try:
@@ -112,7 +130,7 @@ async def get_route(
     route = await route_service.get_route(route_uuid)
 
     # Verify route belongs to user
-    if route.user_id != user.id:
+    if route.journal_id != journal_id:
         raise RouteNotFoundError(route_id)
 
     # Convert to resource
@@ -124,9 +142,11 @@ async def get_route(
 @router.post("", status_code=status.HTTP_201_CREATED)
 @inject
 async def create_route(
+    journal_id: int,
     request: Request,
     route_request: RouteCreateRequest,
     route_service: FromDishka[RouteService],
+    journal_service: FromDishka[JournalService],
     connection: FromDishka[AsyncConnection],
     user: FromDishka[SessionUser],  # Require authentication
 ) -> RouteResponse:
@@ -137,9 +157,14 @@ async def create_route(
     """
     base_url = get_request_base_url(request)
 
+    # Verify journal ownership first
+    journal = await journal_service.get_journal(journal_id)
+    if not journal or journal.user_id != user.id:
+        raise JournalNotFoundError(journal_id)
+
     # Convert request to domain entity
     route = RouteRequestConverter.from_create_request(
-        route_request.data, user_id=user.id
+        route_request.data, journal_id=journal_id
     )
 
     # Create the route
@@ -154,10 +179,12 @@ async def create_route(
 @router.put("/{route_id}")
 @inject
 async def update_route(
+    journal_id: int,
     route_id: str,
     request: Request,
     route_request: RouteUpdateRequest,
     route_service: FromDishka[RouteService],
+    journal_service: FromDishka[JournalService],
     connection: FromDishka[AsyncConnection],
     user: FromDishka[SessionUser],  # Require authentication
 ) -> RouteResponse:
@@ -168,6 +195,11 @@ async def update_route(
     """
     base_url = get_request_base_url(request)
 
+    # Verify journal ownership first
+    journal = await journal_service.get_journal(journal_id)
+    if not journal or journal.user_id != user.id:
+        raise JournalNotFoundError(journal_id)
+
     # Parse UUID
     try:
         route_uuid = UUID(route_id)
@@ -176,7 +208,7 @@ async def update_route(
 
     # Verify route exists and belongs to user
     existing_route = await route_service.get_route(route_uuid)
-    if existing_route.user_id != user.id:
+    if existing_route.journal_id != journal_id:
         raise RouteNotFoundError(route_id)
 
     # Convert request to domain entity with changed fields
@@ -198,8 +230,10 @@ async def update_route(
 @router.delete("/{route_id}", status_code=status.HTTP_204_NO_CONTENT)
 @inject
 async def delete_route(
+    journal_id: int,
     route_id: str,
     route_service: FromDishka[RouteService],
+    journal_service: FromDishka[JournalService],
     connection: FromDishka[AsyncConnection],
     user: FromDishka[SessionUser],  # Require authentication
 ) -> None:
@@ -213,6 +247,10 @@ async def delete_route(
         RouteNotFoundError: If route doesn't exist
         RouteInUseError: If route is referenced by journals
     """
+    # Verify journal ownership first
+    journal = await journal_service.get_journal(journal_id)
+    if not journal or journal.user_id != user.id:
+        raise JournalNotFoundError(journal_id)
     # Parse UUID
     try:
         route_uuid = UUID(route_id)
@@ -221,7 +259,7 @@ async def delete_route(
 
     # Verify route exists and belongs to user
     existing_route = await route_service.get_route(route_uuid)
-    if existing_route.user_id != user.id:
+    if existing_route.journal_id != journal_id:
         raise RouteNotFoundError(route_id)
 
     # Delete the route (will check for usage)

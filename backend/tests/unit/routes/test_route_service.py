@@ -6,7 +6,6 @@ from uuid import UUID, uuid4
 import pytest
 from core_shared.models import Route
 from core_shared.models.journals import (
-    RouteInUseError,
     RouteNotFoundError,
     RouteValidationError,
 )
@@ -16,7 +15,7 @@ from app.core.journal.services.route_service import RouteService
 
 def create_test_route(
     route_id: UUID | None = None,
-    user_id: str = "test-user-123",
+    journal_id: int = 1,
     name: str = "Test Route",
     description: str | None = None,
     gpx_data: str | None = None,
@@ -24,7 +23,7 @@ def create_test_route(
     """Create a test route."""
     return Route(
         id=route_id,
-        user_id=user_id,
+        journal_id=journal_id,
         name=name,
         description=description,
         gpx_data=gpx_data,
@@ -146,14 +145,11 @@ class TestRouteServiceDelete:
         route = create_test_route(route_id=route_id)
 
         mock_route_repo.find_by_id.return_value = route
-        mock_route_repo.check_usage_in_journals.return_value = False
-
         # Act
         await route_service.delete_route(route_id, mock_transaction)
 
         # Assert
         mock_route_repo.find_by_id.assert_called_once_with(route_id)
-        mock_route_repo.check_usage_in_journals.assert_called_once_with(route_id)
         mock_route_repo.delete.assert_called_once_with(route_id)
         mock_event_publisher.publish.assert_called_once()
 
@@ -169,22 +165,6 @@ class TestRouteServiceDelete:
 
         # Act & Assert
         with pytest.raises(RouteNotFoundError):
-            await route_service.delete_route(route_id, mock_transaction)
-
-    @pytest.mark.asyncio
-    async def test_delete_route_in_use(
-        self, route_service, mock_route_repo, mock_transaction
-    ):
-        """Test delete fails when route is in use."""
-        # Arrange
-        route_id = uuid4()
-        route = create_test_route(route_id=route_id)
-
-        mock_route_repo.find_by_id.return_value = route
-        mock_route_repo.check_usage_in_journals.return_value = True
-
-        # Act & Assert
-        with pytest.raises(RouteInUseError):
             await route_service.delete_route(route_id, mock_transaction)
 
 
@@ -224,66 +204,19 @@ class TestRouteServiceList:
     """Test route listing."""
 
     @pytest.mark.asyncio
-    async def test_get_routes_for_user(self, route_service, mock_route_repo):
+    async def test_get_routes_by_journal(self, route_service, mock_route_repo):
         """Test getting all routes for a user."""
         # Arrange
-        user_id = "test-user-123"
         routes = [
             create_test_route(route_id=uuid4(), name="Route 1"),
             create_test_route(route_id=uuid4(), name="Route 2"),
         ]
 
-        mock_route_repo.get_all.return_value = routes
+        mock_route_repo.find_by_journal_id.return_value = routes
 
         # Act
-        result = await route_service.get_routes_for_user(user_id, limit=10, offset=0)
+        result = await route_service.get_routes_by_journal(1)
 
         # Assert
         assert result == routes
-        mock_route_repo.get_all.assert_called_once_with(user_id, 10, 0, None)
-
-    @pytest.mark.asyncio
-    async def test_get_routes_for_user_with_name_filter(
-        self, route_service, mock_route_repo
-    ):
-        """Test getting filtered routes for a user."""
-        user_id = "test-user-123"
-        routes = [create_test_route(route_id=uuid4(), name="Grand Canyon")]
-
-        mock_route_repo.get_all.return_value = routes
-
-        result = await route_service.get_routes_for_user(
-            user_id, name="grand", limit=10, offset=0
-        )
-
-        assert result == routes
-        mock_route_repo.get_all.assert_called_once_with(user_id, 10, 0, "grand")
-
-    @pytest.mark.asyncio
-    async def test_get_route_count(self, route_service, mock_route_repo):
-        """Test getting route count for a user."""
-        # Arrange
-        user_id = "test-user-123"
-
-        mock_route_repo.get_count.return_value = 5
-
-        # Act
-        result = await route_service.get_route_count(user_id)
-
-        # Assert
-        assert result == 5
-        mock_route_repo.get_count.assert_called_once_with(user_id, None)
-
-    @pytest.mark.asyncio
-    async def test_get_route_count_with_name_filter(
-        self, route_service, mock_route_repo
-    ):
-        """Test getting filtered route count for a user."""
-        user_id = "test-user-123"
-
-        mock_route_repo.get_count.return_value = 2
-
-        result = await route_service.get_route_count(user_id, name="grand")
-
-        assert result == 2
-        mock_route_repo.get_count.assert_called_once_with(user_id, "grand")
+        mock_route_repo.find_by_journal_id.assert_called_once_with(1)

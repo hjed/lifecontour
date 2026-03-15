@@ -138,7 +138,7 @@ class RouteCreated(DomainEvent):
     def __init__(
         self,
         route_id: str,
-        user_id: str,
+        journal_id: int,
         name: str,
         transaction: AsyncConnection | None = None,
     ):
@@ -153,7 +153,7 @@ class RouteCreated(DomainEvent):
             event_type="RouteCreated",
             event_data={
                 "route_id": route_id,
-                "user_id": user_id,
+                "journal_id": journal_id,
                 "name": name,
             },
             transaction=transaction,

@@ -81,5 +81,8 @@ describe('FitnessTypeEditor', () => {
     // Should immediately show inputs and NOT the stats view
     expect(screen.getByTestId('distance-input')).toBeInTheDocument();
     expect(screen.queryByTestId('activity-stats-grid')).not.toBeInTheDocument();
+
+    // Should show GPX upload since it's createMode
+    expect(screen.getByTestId('gpx-multi-file-input')).toBeInTheDocument();
   });
 });

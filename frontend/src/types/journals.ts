@@ -128,8 +128,9 @@ export interface FitnessData {
   elevation_loss?: number | null;
   duration?: number | null;
   calories?: number | null;
-  gpx_track_data?: string | null;
   strava_activity_id?: string | null;
+  // Frontend-only field for handling multiple GPX tracks during create mode
+  pending_routes?: { name: string; gpx_data: string }[];
 }
 
 export interface OutdoorActivityData {
@@ -141,12 +142,10 @@ export interface OutdoorActivityData {
 }
 
 export interface BushwalkingData {
-  route_id?: string | null;
   track_grading?: string | null;
 }
 
 export interface JoggingData {
-  route_id?: string | null;
   pace?: number | null; // seconds per kilometre
 }
 
@@ -156,7 +155,6 @@ export interface AbseilingData {
 }
 
 export interface CanyoningData {
-  route_id?: string | null; // UUID of associated route
   french_grade?: string | null; // French canyoning grade
   water_guage_name?: string | null; // Name of the water gauge
   water_guage_level?: number | null; // Water gauge reading
@@ -166,19 +164,16 @@ export interface CanyoningData {
 }
 
 export interface ClimbingData {
-  route_id?: string | null; // UUID of associated route
   climbing_type?: string | null; // e.g. sport, trad, bouldering
   grade?: number | null;
   length?: number | null; // length in metres
 }
 
 export interface KayakingData {
-  route_id?: string | null; // UUID of associated route
   water_type?: string | null; // Type of water (e.g. river, lake, sea)
 }
 
 export interface CrossCountrySkiingData {
-  route_id?: string | null; // UUID of associated route
   snow_conditions?: string | null; // Description of snow conditions
 }
 

@@ -39,6 +39,7 @@ describe('runGlobalSetup', () => {
     OAUTH_UI_PORT: oauthUiPort,
     OAUTH_AUTHORIZATION_URL: `http://localhost:${oauthPublicPort}/oauth2/auth`,
     OAUTH_ISSUER: `http://localhost:${oauthPublicPort}`,
+    OAUTH_PUBLIC_URL: `http://localhost:${oauthPublicPort}`,
     FRONTEND_URL: FRONTEND_TEST_URL,
     FRONTEND_PORT: FRONTEND_TEST_PORT,
     CORS_ORIGINS: getFrontendCorsOrigins(),

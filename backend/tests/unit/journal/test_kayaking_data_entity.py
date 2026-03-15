@@ -1,7 +1,5 @@
 """Unit tests for KayakingData entity (KAYAKING type)."""
 
-from uuid import UUID, uuid4
-
 import pytest
 from core_shared.models.journals import KayakingData, KayakingDataValidationError
 
@@ -15,17 +13,9 @@ class TestKayakingData:
         data = KayakingData(journal_id=1)
 
         assert data.journal_id == 1
-        assert data.route_id is None
         assert data.water_type is None
         assert data.created_at is None
         assert data.updated_at is None
-
-    def test_create_kayaking_data_with_route(self):
-        """Test creating kayaking data with a route ID."""
-        route_id = uuid4()
-        data = KayakingData(journal_id=1, route_id=route_id)
-
-        assert data.route_id == route_id
 
     def test_create_kayaking_data_with_water_type(self):
         """Test creating kayaking data with a water type."""
@@ -35,15 +25,12 @@ class TestKayakingData:
 
     def test_create_kayaking_data_with_all_fields(self):
         """Test creating kayaking data with all optional fields populated."""
-        route_id = uuid4()
         data = KayakingData(
             journal_id=2,
-            route_id=route_id,
             water_type="sea",
         )
 
         assert data.journal_id == 2
-        assert data.route_id == route_id
         assert data.water_type == "sea"
 
     def test_water_type_river(self):
@@ -91,10 +78,3 @@ class TestKayakingData:
             KayakingData(journal_id=1, water_type="")
 
         assert "water_type" in str(exc_info.value)
-
-    def test_route_id_is_uuid(self):
-        """Test that route_id must be a UUID."""
-        route_id = UUID("12345678-1234-5678-1234-567812345678")
-        data = KayakingData(journal_id=1, route_id=route_id)
-
-        assert isinstance(data.route_id, UUID)

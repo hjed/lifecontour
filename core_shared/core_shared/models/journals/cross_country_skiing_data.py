@@ -12,7 +12,6 @@ CROSS_COUNTRY_SKIING requires BUSHWALKING, OUTDOOR_ACTIVITY, and FITNESS types.
 
 from dataclasses import dataclass
 from datetime import datetime
-from uuid import UUID
 
 from .exceptions import CrossCountrySkiingDataValidationError
 
@@ -35,14 +34,12 @@ class CrossCountrySkiingData:
 
     Attributes:
         journal_id: Foreign key to the journal (primary key in DB)
-        route_id: UUID reference to a route (from the routes domain) (nullable)
         snow_conditions: Description of snow conditions (nullable)
         created_at: Creation timestamp
         updated_at: Last update timestamp
     """
 
     journal_id: int
-    route_id: UUID | None = None
     snow_conditions: str | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None

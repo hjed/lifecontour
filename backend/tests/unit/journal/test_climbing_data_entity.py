@@ -1,7 +1,5 @@
 """Unit tests for ClimbingData entity (CLIMBING type)."""
 
-from uuid import UUID, uuid4
-
 import pytest
 from core_shared.models.journals import ClimbingData, ClimbingDataValidationError
 
@@ -15,33 +13,22 @@ class TestClimbingData:
         data = ClimbingData(journal_id=1)
 
         assert data.journal_id == 1
-        assert data.route_id is None
         assert data.climbing_type is None
         assert data.grade is None
         assert data.length is None
         assert data.created_at is None
         assert data.updated_at is None
 
-    def test_create_climbing_data_with_route(self):
-        """Test creating climbing data with a route ID."""
-        route_id = uuid4()
-        data = ClimbingData(journal_id=1, route_id=route_id)
-
-        assert data.route_id == route_id
-
     def test_create_climbing_data_with_all_fields(self):
         """Test creating climbing data with all optional fields populated."""
-        route_id = uuid4()
         data = ClimbingData(
             journal_id=2,
-            route_id=route_id,
             climbing_type="sport",
             grade=18,
             length=25,
         )
 
         assert data.journal_id == 2
-        assert data.route_id == route_id
         assert data.climbing_type == "sport"
         assert data.grade == 18
         assert data.length == 25
@@ -117,10 +104,3 @@ class TestClimbingData:
         """Test that length of 0 is valid."""
         data = ClimbingData(journal_id=1, length=0)
         assert data.length == 0
-
-    def test_route_id_is_uuid(self):
-        """Test that route_id must be a UUID."""
-        route_id = UUID("12345678-1234-5678-1234-567812345678")
-        data = ClimbingData(journal_id=1, route_id=route_id)
-
-        assert isinstance(data.route_id, UUID)

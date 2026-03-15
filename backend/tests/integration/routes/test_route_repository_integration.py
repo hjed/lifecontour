@@ -1,11 +1,17 @@
 """Integration tests for SqlRouteRepository with real database."""
 
+from typing import TYPE_CHECKING
 from uuid import uuid4
 
 import pytest
 import pytest_asyncio
 from core_shared.models.route import Route
 from sqlalchemy.ext.asyncio import AsyncConnection
+
+if TYPE_CHECKING:
+    from core_shared.models.journals import Journal
+
+    from app.core.journal.adapters.sql.journal_repository import SqlJournalRepository
 
 from app.core.journal.adapters.sql.route_repository import SqlRouteRepository
 
@@ -14,19 +20,49 @@ from app.core.journal.adapters.sql.route_repository import SqlRouteRepository
 async def route_repository(
     async_connection: AsyncConnection,
 ) -> SqlRouteRepository:
-    """Create a route repository for testing."""
     return SqlRouteRepository(async_connection)
 
 
+@pytest_asyncio.fixture
+async def journal_repository(
+    async_connection: AsyncConnection,
+) -> "SqlJournalRepository":
+    """Create a journal repository for testing."""
+    from app.core.journal.adapters.sql.journal_repository import SqlJournalRepository
+
+    return SqlJournalRepository(async_connection)
+
+
+@pytest_asyncio.fixture
+async def test_journal(journal_repository: "SqlJournalRepository") -> "Journal":
+    """Create a test journal."""
+    from datetime import UTC, datetime, timedelta
+
+    from core_shared.models.journals import EventDateRange, Journal
+
+    now = datetime.now(UTC)
+    journal = Journal(
+        user_id="test-user-123",
+        title="Test Journal",
+        content="Test content",
+        event_date_range=EventDateRange(
+            start=now,
+            end=now + timedelta(hours=1),
+        ),
+    )
+    return await journal_repository.save(journal)
+
+
 def create_test_route(
-    user_id: str = "test-user-123",
+    journal_id: int | None = 1,
     name: str = "Test Route",
     description: str | None = "A test route",
     gpx_data: str | None = None,
 ) -> Route:
     """Helper to create a test route."""
+    assert journal_id is not None
     return Route(
-        user_id=user_id,
+        journal_id=journal_id,
         name=name,
         description=description,
         gpx_data=gpx_data,
@@ -37,26 +73,28 @@ def create_test_route(
 class TestRouteRepositorySave:
     """Test route save operations."""
 
-    async def test_save_creates_new_route(self, route_repository: SqlRouteRepository):
+    async def test_save_creates_new_route(
+        self, route_repository: SqlRouteRepository, test_journal: "Journal"
+    ):
         """Test creating a new route."""
-        route = create_test_route()
+        route = create_test_route(journal_id=test_journal.id)
 
         saved = await route_repository.save(route)
 
         assert saved.id is not None
-        assert saved.user_id == "test-user-123"
+        assert saved.journal_id == test_journal.id
         assert saved.name == "Test Route"
         assert saved.description == "A test route"
         assert saved.created_at is not None
         assert saved.updated_at is not None
 
     async def test_save_updates_existing_route(
-        self, route_repository: SqlRouteRepository
+        self, route_repository: SqlRouteRepository, test_journal: "Journal"
     ):
         """Test updating an existing route."""
         import asyncio
 
-        route = create_test_route()
+        route = create_test_route(journal_id=test_journal.id)
         saved = await route_repository.save(route)
 
         # Save the original updated_at timestamp before updating
@@ -78,12 +116,14 @@ class TestRouteRepositorySave:
         assert original_updated_at is not None
         assert updated.updated_at > original_updated_at
 
-    async def test_save_route_with_gpx_data(self, route_repository: SqlRouteRepository):
+    async def test_save_route_with_gpx_data(
+        self, route_repository: SqlRouteRepository, test_journal: "Journal"
+    ):
         """Test saving a route with GPX data."""
         gpx_data = (
             '<?xml version="1.0"?><gpx version="1.1"><trk><name>Test</name></trk></gpx>'
         )
-        route = create_test_route(gpx_data=gpx_data)
+        route = create_test_route(journal_id=test_journal.id, gpx_data=gpx_data)
 
         saved = await route_repository.save(route)
 
@@ -95,9 +135,11 @@ class TestRouteRepositorySave:
 class TestRouteRepositoryFindById:
     """Test route find by ID operations."""
 
-    async def test_find_by_id_returns_route(self, route_repository: SqlRouteRepository):
+    async def test_find_by_id_returns_route(
+        self, route_repository: SqlRouteRepository, test_journal: "Journal"
+    ):
         """Test finding a route by ID."""
-        route = create_test_route()
+        route = create_test_route(journal_id=test_journal.id)
         saved = await route_repository.save(route)
 
         found = await route_repository.find_by_id(saved.id)  # type: ignore[arg-type]
@@ -119,9 +161,11 @@ class TestRouteRepositoryFindById:
 class TestRouteRepositoryDelete:
     """Test route delete operations."""
 
-    async def test_delete_removes_route(self, route_repository: SqlRouteRepository):
+    async def test_delete_removes_route(
+        self, route_repository: SqlRouteRepository, test_journal: "Journal"
+    ):
         """Test deleting a route."""
-        route = create_test_route()
+        route = create_test_route(journal_id=test_journal.id)
         saved = await route_repository.save(route)
 
         await route_repository.delete(saved.id)  # type: ignore[arg-type]
@@ -135,135 +179,3 @@ class TestRouteRepositoryDelete:
         """Test deleting a non-existent route doesn't raise an error."""
         # Should not raise an exception
         await route_repository.delete(uuid4())
-
-
-@pytest.mark.integration
-class TestRouteRepositoryQueries:
-    """Test route query operations."""
-
-    async def test_get_all_returns_user_routes(
-        self, route_repository: SqlRouteRepository
-    ):
-        """Test getting all routes for a user."""
-        user1_r1 = create_test_route(user_id="user-1", name="User 1 Route 1")
-        user1_r2 = create_test_route(user_id="user-1", name="User 1 Route 2")
-        user2_r1 = create_test_route(user_id="user-2", name="User 2 Route 1")
-
-        await route_repository.save(user1_r1)
-        await route_repository.save(user1_r2)
-        await route_repository.save(user2_r1)
-
-        user1_routes = await route_repository.get_all("user-1")
-
-        assert len(user1_routes) == 2
-        assert all(r.user_id == "user-1" for r in user1_routes)
-
-    async def test_get_all_with_pagination(self, route_repository: SqlRouteRepository):
-        """Test getting routes with pagination."""
-        # Create 5 routes for the same user
-        for i in range(5):
-            route = create_test_route(user_id="user-1", name=f"Route {i}")
-            await route_repository.save(route)
-
-        # Get first 2 routes
-        page1 = await route_repository.get_all("user-1", limit=2, offset=0)
-        assert len(page1) == 2
-
-        # Get next 2 routes
-        page2 = await route_repository.get_all("user-1", limit=2, offset=2)
-        assert len(page2) == 2
-
-        # Ensure they're different routes
-        page1_ids = {r.id for r in page1}
-        page2_ids = {r.id for r in page2}
-        assert page1_ids.isdisjoint(page2_ids)
-
-    async def test_get_all_filters_by_name_case_insensitively(
-        self, route_repository: SqlRouteRepository
-    ):
-        """Test getting routes filtered by partial name match."""
-        matching_route_1 = create_test_route(user_id="user-1", name="Grand Canyon")
-        matching_route_2 = create_test_route(user_id="user-1", name="grand ridge")
-        non_matching_route = create_test_route(user_id="user-1", name="Harbour Walk")
-        other_user_route = create_test_route(user_id="user-2", name="Grand Traverse")
-
-        await route_repository.save(matching_route_1)
-        await route_repository.save(matching_route_2)
-        await route_repository.save(non_matching_route)
-        await route_repository.save(other_user_route)
-
-        filtered_routes = await route_repository.get_all("user-1", name="GRAND")
-
-        assert [route.name for route in filtered_routes] == [
-            "Grand Canyon",
-            "grand ridge",
-        ]
-
-    async def test_get_count_returns_total_routes(
-        self, route_repository: SqlRouteRepository
-    ):
-        """Test getting total count of routes for a user."""
-        # Create 3 routes for user-1
-        for i in range(3):
-            route = create_test_route(user_id="user-1", name=f"Route {i}")
-            await route_repository.save(route)
-
-        # Create 2 routes for user-2
-        for i in range(2):
-            route = create_test_route(user_id="user-2", name=f"Route {i}")
-            await route_repository.save(route)
-
-        count_user1 = await route_repository.get_count("user-1")
-        count_user2 = await route_repository.get_count("user-2")
-
-        assert count_user1 == 3
-        assert count_user2 == 2
-
-    async def test_get_count_filters_by_name(
-        self, route_repository: SqlRouteRepository
-    ):
-        """Test getting filtered route count for a user."""
-        await route_repository.save(
-            create_test_route(user_id="user-1", name="Grand Canyon")
-        )
-        await route_repository.save(
-            create_test_route(user_id="user-1", name="Grand Traverse")
-        )
-        await route_repository.save(
-            create_test_route(user_id="user-1", name="Harbour Walk")
-        )
-        await route_repository.save(
-            create_test_route(user_id="user-2", name="Grand Loop")
-        )
-
-        count = await route_repository.get_count("user-1", name="grand")
-
-        assert count == 2
-
-    async def test_get_count_returns_zero_for_no_routes(
-        self, route_repository: SqlRouteRepository
-    ):
-        """Test getting count returns 0 when user has no routes."""
-        count = await route_repository.get_count("nonexistent-user")
-        assert count == 0
-
-
-@pytest.mark.integration
-class TestRouteRepositoryUsageCheck:
-    """Test route usage checking in journals."""
-
-    async def test_check_usage_returns_false_when_not_used(
-        self, route_repository: SqlRouteRepository
-    ):
-        """Test check_usage_in_journals returns False when route is not used.
-
-        Note: This currently always returns False since activity-specific tables
-        (journal_bushwalking_data, journal_kayaking_data, etc.) don't exist yet.
-        This test will be updated when those tables are implemented in future iterations.
-        """
-        route = create_test_route()
-        saved = await route_repository.save(route)
-
-        is_used = await route_repository.check_usage_in_journals(saved.id)  # type: ignore[arg-type]
-
-        assert is_used is False

@@ -5,15 +5,11 @@ import { CrossCountrySkiingTypeEditor } from '../CrossCountrySkiingTypeEditor';
 import { JoggingTypeEditor } from '../JoggingTypeEditor';
 import { KayakingTypeEditor } from '../KayakingTypeEditor';
 
-jest.mock('@/components/routes/RouteSelector', () => ({
-  RouteSelector: () => <div data-testid='mock-route-selector' />,
-}));
-
 jest.mock('@/lib/api/routes', () => ({
   useRoute: () => ({ data: undefined }),
 }));
 
-const routeBackedEditorCases = [
+const genericEditorCases = [
   {
     name: 'BushwalkingTypeEditor',
     renderCreate: () => render(<BushwalkingTypeEditor createMode={true} />),
@@ -24,10 +20,10 @@ const routeBackedEditorCases = [
       render(
         <BushwalkingTypeEditor
           createMode={false}
-          data={{ route_id: 'route-123', track_grading: 'Grade 4' }}
+          data={{ track_grading: 'Grade 4' }}
         />
       ),
-    summaryTexts: ['Grade 4', 'route-123'],
+    summaryTexts: ['Grade 4'],
     summaryTestId: 'bushwalking-type-editor',
     renderEmptyView: () =>
       render(<BushwalkingTypeEditor createMode={false} data={{}} />),
@@ -46,7 +42,6 @@ const routeBackedEditorCases = [
         <ClimbingTypeEditor
           createMode={false}
           data={{
-            route_id: 'route-123',
             climbing_type: 'sport',
             grade: 18,
             length: 30,
@@ -54,7 +49,7 @@ const routeBackedEditorCases = [
         />
       ),
     summaryTestId: 'climbing-summary',
-    summaryTexts: ['sport', '18', '30 m', 'route-123'],
+    summaryTexts: ['sport', '18', '30 m'],
     renderEmptyView: () =>
       render(<ClimbingTypeEditor createMode={false} data={{}} />),
     emptyMessage: 'No climbing details provided.',
@@ -67,13 +62,10 @@ const routeBackedEditorCases = [
     },
     renderView: () =>
       render(
-        <KayakingTypeEditor
-          createMode={false}
-          data={{ route_id: 'route-123', water_type: 'river' }}
-        />
+        <KayakingTypeEditor createMode={false} data={{ water_type: 'river' }} />
       ),
     summaryTestId: 'kayaking-summary',
-    summaryTexts: ['river', 'route-123'],
+    summaryTexts: ['river'],
     renderEmptyView: () =>
       render(<KayakingTypeEditor createMode={false} data={{}} />),
     emptyMessage: 'No kayaking details provided.',
@@ -85,13 +77,8 @@ const routeBackedEditorCases = [
       expect(screen.getByTestId('pace-input')).toBeInTheDocument();
     },
     renderView: () =>
-      render(
-        <JoggingTypeEditor
-          createMode={false}
-          data={{ route_id: 'route-123', pace: 330 }}
-        />
-      ),
-    summaryTexts: ['5:30 /km', 'route-123'],
+      render(<JoggingTypeEditor createMode={false} data={{ pace: 330 }} />),
+    summaryTexts: ['5:30 /km'],
     summaryTestId: 'jogging-type-editor',
     renderEmptyView: () =>
       render(<JoggingTypeEditor createMode={false} data={{}} />),
@@ -108,22 +95,20 @@ const routeBackedEditorCases = [
       render(
         <CrossCountrySkiingTypeEditor
           createMode={false}
-          data={{ route_id: 'route-123', snow_conditions: 'Fresh powder' }}
+          data={{ snow_conditions: 'Fresh powder' }}
         />
       ),
     summaryTestId: 'cross-country-skiing-summary',
-    summaryTexts: ['Fresh powder', 'route-123'],
+    summaryTexts: ['Fresh powder'],
     renderEmptyView: () =>
       render(<CrossCountrySkiingTypeEditor createMode={false} data={{}} />),
     emptyMessage: 'No cross-country skiing details provided.',
   },
 ] as const;
 
-describe.each(routeBackedEditorCases)('$name', testCase => {
-  it('renders route-backed controls in create mode', () => {
+describe.each(genericEditorCases)('$name', testCase => {
+  it('renders correctly in create mode', () => {
     testCase.renderCreate();
-
-    expect(screen.getByTestId('mock-route-selector')).toBeInTheDocument();
     testCase.assertCreate();
   });
 

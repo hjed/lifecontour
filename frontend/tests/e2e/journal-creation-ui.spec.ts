@@ -40,61 +40,8 @@ async function fillAndSubmitJournal(
   await page.getByRole('button', { name: /create journal/i }).click();
 }
 
-function escapeRegExp(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
-
-/** Create a route record via the API for route-backed journal types. */
-async function createRoute(
-  page: Page,
-  opts: { name: string; description: string }
-): Promise<{ id: string; name: string }> {
-  const routeRes = await page.request.post('/api/routes', {
-    data: {
-      data: {
-        type: 'routes',
-        attributes: {
-          name: opts.name,
-          description: opts.description,
-        },
-      },
-    },
-  });
-
-  expect(routeRes.ok()).toBeTruthy();
-
-  const routeJson = await routeRes.json();
-
-  return {
-    id: routeJson.data.id as string,
-    name: routeJson.data.attributes.name as string,
-  };
-}
-
-/** Select a route inside a specific type editor's route selector. */
-async function selectRouteInEditor(
-  page: Page,
-  editorTestId: string,
-  routeName: string
-) {
-  const editor = page.getByTestId(editorTestId);
-  const routeCombobox = editor.getByRole('combobox', { name: /route/i });
-
-  await expect(routeCombobox).toBeVisible();
-  await routeCombobox.click();
-
-  const searchInput = page.getByPlaceholder('Search routes...');
-  await expect(searchInput).toBeVisible();
-  await searchInput.fill(routeName);
-
-  const routeOption = page.getByRole('option', {
-    name: new RegExp(`^${escapeRegExp(routeName)}(?:\\s|$)`),
-  });
-
-  await expect(routeOption).toBeVisible();
-  await routeOption.click();
-  await expect(routeCombobox).toHaveText(routeName);
-}
+// Removed createRoute and selectRouteInEditor as they are obsolete
+// Routes are now created by uploading GPX files during journal creation
 
 /** Assert the selected type panel and its dependency badges in the create form. */
 async function assertSelectedTypeDependencies(
@@ -136,10 +83,7 @@ async function awaitCreationAndAssertBadge(
 }
 
 interface ComplexRouteBackedJournalOptions {
-  readonly route: {
-    readonly name: string;
-    readonly description: string;
-  };
+  readonly gpxTrackName: string;
   readonly journal: {
     readonly title: string;
     readonly content: string;
@@ -155,20 +99,14 @@ interface ComplexRouteBackedJournalOptions {
   readonly fillTypeFields: (args: {
     page: Page;
     editor: Locator;
-    routeName: string;
   }) => Promise<void>;
-  readonly assertSummary: (args: {
-    summary: Locator;
-    routeName: string;
-  }) => Promise<void>;
+  readonly assertSummary: (args: { summary: Locator }) => Promise<void>;
 }
 
 async function createRouteBackedComplexJournal(
   page: Page,
   opts: ComplexRouteBackedJournalOptions
 ) {
-  const route = await createRoute(page, opts.route);
-
   await navigateToNewJournal(page);
   await fillJournalBasics(page, opts.journal);
   await assertSelectedTypeDependencies(
@@ -180,8 +118,19 @@ async function createRouteBackedComplexJournal(
   const editor = page.getByTestId(opts.editorTestId);
   await expect(editor).toBeVisible();
 
-  await selectRouteInEditor(page, opts.editorTestId, route.name);
-  await opts.fillTypeFields({ page, editor, routeName: route.name });
+  await expect(page.getByTestId('fitness-type-editor')).toBeVisible();
+
+  const gpxContent = `<?xml version="1.0" encoding="UTF-8"?>
+<gpx version="1.1" creator="Test">
+  <trk><trkseg><trkpt lat="-33.8" lon="151.2"></trkpt></trkseg></trk>
+</gpx>`;
+  await page.getByTestId('gpx-multi-file-input').setInputFiles({
+    name: `${opts.gpxTrackName}.gpx`,
+    mimeType: 'application/gpx+xml',
+    buffer: Buffer.from(gpxContent),
+  });
+
+  await opts.fillTypeFields({ page, editor });
 
   await page.getByRole('button', { name: /create journal/i }).click();
 
@@ -192,7 +141,13 @@ async function createRouteBackedComplexJournal(
 
   const summary = page.getByTestId(opts.summaryTestId);
   await expect(summary).toBeVisible();
-  await opts.assertSummary({ summary, routeName: route.name });
+  await opts.assertSummary({ summary });
+
+  // Also verify that the GPX map rendered
+  await page.getByTestId('type-section-trigger-fitness').click();
+  // Map renders on the journal detail view AFTER submission
+  await expect(page.getByTestId('gpx-track-display')).toBeVisible();
+  await expect(page.locator('.leaflet-container')).toBeVisible();
 }
 
 // ---------------------------------------------------------------------------
@@ -416,7 +371,7 @@ test.describe('Journal Creation UI Flow', () => {
   </trk>
 </gpx>`;
 
-    await page.getByTestId('gpx-file-input').setInputFiles({
+    await page.getByTestId('gpx-multi-file-input').setInputFiles({
       name: 'test-track.gpx',
       mimeType: 'application/gpx+xml',
       buffer: Buffer.from(gpxContent),
@@ -499,15 +454,10 @@ test.describe('Journal Creation UI Flow', () => {
     await expect(page.getByText('5:30 /km')).toBeVisible();
   });
 
-  test('should create a BUSHWALKING journal with a route and verify route display', async ({
+  test('should create a BUSHWALKING journal with a GPX track and verify display', async ({
     authenticatedPage,
   }) => {
     const page = authenticatedPage;
-
-    const route = await createRoute(page, {
-      name: `E2E Bushwalk Route ${Date.now()}`,
-      description: 'A test bushwalking route',
-    });
 
     await navigateToNewJournal(page);
 
@@ -518,26 +468,33 @@ test.describe('Journal Creation UI Flow', () => {
     });
 
     await expect(page.getByTestId('bushwalking-type-editor')).toBeVisible();
-    await selectRouteInEditor(page, 'bushwalking-type-editor', route.name);
+    await expect(page.getByTestId('fitness-type-editor')).toBeVisible();
+
+    const gpxContent = `<?xml version="1.0" encoding="UTF-8"?>
+<gpx version="1.1" creator="Test">
+  <trk><trkseg><trkpt lat="-33.8" lon="151.2"></trkpt></trkseg></trk>
+</gpx>`;
+    await page.getByTestId('gpx-multi-file-input').setInputFiles({
+      name: `E2E_Bushwalk_Track.gpx`,
+      mimeType: 'application/gpx+xml',
+      buffer: Buffer.from(gpxContent),
+    });
 
     await page.getByRole('button', { name: /create journal/i }).click();
 
     await awaitCreationAndAssertBadge(page, 'manage-type-bushwalking');
     await page.getByTestId('type-section-trigger-bushwalking').click();
+    await page.getByTestId('type-section-trigger-fitness').click();
 
-    // Verify route is displayed in read-only view
-    await expect(page.getByText(route.name)).toBeVisible();
+    // Verify map is rendered showing the uploaded GPX
+    await expect(page.getByTestId('gpx-track-display')).toBeVisible();
+    await expect(page.locator('.leaflet-container')).toBeVisible();
   });
 
-  test('should create a JOGGING journal with a route and verify route selector and display', async ({
+  test('should create a JOGGING journal with a GPX track and verify display', async ({
     authenticatedPage,
   }) => {
     const page = authenticatedPage;
-
-    const route = await createRoute(page, {
-      name: `E2E Jogging Route ${Date.now()}`,
-      description: 'A test jogging route',
-    });
 
     await navigateToNewJournal(page);
 
@@ -548,15 +505,27 @@ test.describe('Journal Creation UI Flow', () => {
     });
 
     await expect(page.getByTestId('jogging-type-editor')).toBeVisible();
-    await selectRouteInEditor(page, 'jogging-type-editor', route.name);
+    await expect(page.getByTestId('fitness-type-editor')).toBeVisible();
+
+    const gpxContent = `<?xml version="1.0" encoding="UTF-8"?>
+<gpx version="1.1" creator="Test">
+  <trk><trkseg><trkpt lat="-33.8" lon="151.2"></trkpt></trkseg></trk>
+</gpx>`;
+    await page.getByTestId('gpx-multi-file-input').setInputFiles({
+      name: `E2E_Jogging_Track.gpx`,
+      mimeType: 'application/gpx+xml',
+      buffer: Buffer.from(gpxContent),
+    });
 
     await page.getByRole('button', { name: /create journal/i }).click();
 
     await awaitCreationAndAssertBadge(page, 'manage-type-jogging');
     await page.getByTestId('type-section-trigger-jogging').click();
+    await page.getByTestId('type-section-trigger-fitness').click();
 
-    // Verify route is displayed in read-only view
-    await expect(page.getByText(route.name)).toBeVisible();
+    // Verify route map is displayed in read-only view
+    await expect(page.getByTestId('gpx-track-display')).toBeVisible();
+    await expect(page.locator('.leaflet-container')).toBeVisible();
   });
 
   test('should create an ABSEILING_TRIP journal and verify dependencies and summary', async ({
@@ -602,10 +571,7 @@ test.describe('Journal Creation UI Flow', () => {
   }) => {
     const page = authenticatedPage;
     await createRouteBackedComplexJournal(page, {
-      route: {
-        name: `E2E Canyon Route ${Date.now()}`,
-        description: 'A test canyoning route',
-      },
+      gpxTrackName: `E2E_Canyon_Route_${Date.now()}`,
       journal: {
         title: `Canyon Trip ${Date.now()}`,
         content: 'Technical canyon with flowing water.',
@@ -638,8 +604,7 @@ test.describe('Journal Creation UI Flow', () => {
         await detailPage.getByTestId('vertical-switch').click();
         await detailPage.getByTestId('white-water-switch').click();
       },
-      assertSummary: async ({ summary, routeName }) => {
-        await expect(summary).toContainText(routeName);
+      assertSummary: async ({ summary }) => {
         await expect(summary).toContainText('v3a2IV**');
         await expect(summary).toContainText('Kowmung Gauge (8)');
         await expect(summary).toContainText('Vertical');
@@ -653,10 +618,7 @@ test.describe('Journal Creation UI Flow', () => {
   }) => {
     const page = authenticatedPage;
     await createRouteBackedComplexJournal(page, {
-      route: {
-        name: `E2E Climbing Route ${Date.now()}`,
-        description: 'A test climbing route',
-      },
+      gpxTrackName: `E2E_Climbing_Route_${Date.now()}`,
       journal: {
         title: `Climbing Session ${Date.now()}`,
         content: 'Strong day on the wall.',
@@ -681,8 +643,7 @@ test.describe('Journal Creation UI Flow', () => {
         await detailPage.getByTestId('climbing-grade-input').fill('18');
         await detailPage.getByTestId('climbing-length-input').fill('30');
       },
-      assertSummary: async ({ summary, routeName }) => {
-        await expect(summary).toContainText(routeName);
+      assertSummary: async ({ summary }) => {
         await expect(summary).toContainText('sport');
         await expect(summary).toContainText('18');
         await expect(summary).toContainText('30 m');
@@ -695,10 +656,7 @@ test.describe('Journal Creation UI Flow', () => {
   }) => {
     const page = authenticatedPage;
     await createRouteBackedComplexJournal(page, {
-      route: {
-        name: `E2E Kayak Route ${Date.now()}`,
-        description: 'A test kayaking route',
-      },
+      gpxTrackName: `E2E_Kayak_Route_${Date.now()}`,
       journal: {
         title: `Kayak Paddle ${Date.now()}`,
         content: 'Cold water paddle with steady flow.',
@@ -714,8 +672,7 @@ test.describe('Journal Creation UI Flow', () => {
       fillTypeFields: async ({ page: detailPage }) => {
         await detailPage.getByTestId('water-type-input').fill('river');
       },
-      assertSummary: async ({ summary, routeName }) => {
-        await expect(summary).toContainText(routeName);
+      assertSummary: async ({ summary }) => {
         await expect(summary).toContainText('river');
       },
     });
@@ -726,10 +683,7 @@ test.describe('Journal Creation UI Flow', () => {
   }) => {
     const page = authenticatedPage;
     await createRouteBackedComplexJournal(page, {
-      route: {
-        name: `E2E Ski Route ${Date.now()}`,
-        description: 'A test cross-country skiing route',
-      },
+      gpxTrackName: `E2E_Ski_Route_${Date.now()}`,
       journal: {
         title: `XC Ski Tour ${Date.now()}`,
         content: 'Snowy day on groomed tracks.',
@@ -752,8 +706,7 @@ test.describe('Journal Creation UI Flow', () => {
           .getByTestId('snow-conditions-input')
           .fill('Fresh powder with groomed tracks');
       },
-      assertSummary: async ({ summary, routeName }) => {
-        await expect(summary).toContainText(routeName);
+      assertSummary: async ({ summary }) => {
         await expect(summary).toContainText('Fresh powder with groomed tracks');
       },
     });

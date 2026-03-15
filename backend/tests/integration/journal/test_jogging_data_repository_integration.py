@@ -61,7 +61,7 @@ async def test_journal(
 async def test_route(route_repository: SqlRouteRepository) -> Route:
     """Create a test route."""
     route = Route(
-        user_id="test-user-123",
+        journal_id=999,
         name="Park Loop",
         description="5km loop around the park",
     )
@@ -87,7 +87,6 @@ class TestJoggingDataRepositorySave:
 
         assert saved.journal_id == test_journal.id
         assert saved.pace == 360
-        assert saved.route_id is None
         assert saved.created_at is not None
         assert saved.updated_at is not None
 
@@ -102,28 +101,9 @@ class TestJoggingDataRepositorySave:
         saved = await jogging_repository.save(data)
 
         assert saved.journal_id == test_journal.id
-        assert saved.route_id is None
         assert saved.pace is None
         assert saved.created_at is not None
         assert saved.updated_at is not None
-
-    async def test_save_with_route_id(
-        self,
-        jogging_repository: SqlJoggingDataRepository,
-        test_journal: Journal,
-        test_route: Route,
-    ):
-        """Test creating jogging data with a route reference."""
-        data = JoggingData(
-            journal_id=test_journal.id,  # type: ignore[arg-type]
-            route_id=test_route.id,
-            pace=300,  # 5 min/km
-        )
-
-        saved = await jogging_repository.save(data)
-
-        assert saved.route_id == test_route.id
-        assert saved.pace == 300
 
     async def test_save_updates_existing_data(
         self,
@@ -176,24 +156,6 @@ class TestJoggingDataRepositoryFind:
         found = await jogging_repository.find_by_journal_id(99999)
 
         assert found is None
-
-    async def test_find_preserves_route_id(
-        self,
-        jogging_repository: SqlJoggingDataRepository,
-        test_journal: Journal,
-        test_route: Route,
-    ):
-        """Test that route_id is correctly persisted and retrieved."""
-        data = JoggingData(
-            journal_id=test_journal.id,  # type: ignore[arg-type]
-            route_id=test_route.id,
-        )
-        await jogging_repository.save(data)
-
-        found = await jogging_repository.find_by_journal_id(test_journal.id)  # type: ignore[arg-type]
-
-        assert found is not None
-        assert found.route_id == test_route.id
 
 
 @pytest.mark.integration

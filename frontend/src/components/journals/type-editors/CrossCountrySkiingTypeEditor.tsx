@@ -7,10 +7,9 @@ import { Textarea } from '@/components/ui/textarea';
 import type { CrossCountrySkiingData } from '@/types/journals';
 import {
   compactSummaryItems,
-  buildRouteSummaryItem,
-  RouteBackedTypeEditorLayout,
-} from './RouteBackedTypeEditorLayout';
-import { useRouteBackedTypeEditor } from './useRouteBackedTypeEditor';
+  GenericTypeEditorLayout,
+} from './GenericTypeEditorLayout';
+import { useTypeEditorState } from './useTypeEditorState';
 
 interface CrossCountrySkiingTypeEditorProps {
   readonly journalId?: string;
@@ -34,39 +33,34 @@ export function CrossCountrySkiingTypeEditor({
   onChange,
 }: CrossCountrySkiingTypeEditorProps) {
   const baseId = useId();
-  const routeFieldId = `${baseId}-route`;
   const snowConditionsFieldId = `${baseId}-snow-conditions`;
 
   const {
-    initialData,
-    routeName,
     isEditing,
     editData,
     setEditData,
     handleEdit,
     handleSave,
     handleCancel,
-  } = useRouteBackedTypeEditor({
-    data,
-    defaultData: DEFAULT_DATA,
+  } = useTypeEditorState({
+    initialData: data ?? DEFAULT_DATA,
     onSave,
     createMode,
     onChange,
   });
 
   const summaryItems = compactSummaryItems(
-    buildRouteSummaryItem(initialData.route_id, routeName),
-    initialData.snow_conditions
+    data?.snow_conditions
       ? {
           label: 'Snow Conditions',
-          value: initialData.snow_conditions,
+          value: data.snow_conditions,
           fullWidth: true,
         }
       : null
   );
 
   return (
-    <RouteBackedTypeEditorLayout
+    <GenericTypeEditorLayout
       className={className}
       testId={testId || 'cross-country-skiing-type-editor'}
       createMode={createMode}
@@ -74,12 +68,6 @@ export function CrossCountrySkiingTypeEditor({
       emptyMessage='No cross-country skiing details provided.'
       summaryItems={summaryItems}
       summaryTestId='cross-country-skiing-summary'
-      routeFieldId={routeFieldId}
-      routeValue={editData.route_id}
-      onRouteChange={routeId =>
-        setEditData(previous => ({ ...previous, route_id: routeId }))
-      }
-      routePlaceholder='Select a ski route...'
       onEdit={handleEdit}
       onSave={handleSave}
       onCancel={handleCancel}
@@ -108,6 +96,6 @@ export function CrossCountrySkiingTypeEditor({
           data-testid='snow-conditions-input'
         />
       </div>
-    </RouteBackedTypeEditorLayout>
+    </GenericTypeEditorLayout>
   );
 }

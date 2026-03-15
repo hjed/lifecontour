@@ -636,7 +636,6 @@ class TestFetchJournalTypesAndDataNewActivityTypes:
         assert "bushwalking" in types
         bushwalking = type_data["bushwalking"]
         assert bushwalking["track_grading"] == "Grade 3"
-        assert bushwalking["route_id"] is None
 
     @pytest.mark.asyncio
     async def test_fetch_detects_jogging_type(
@@ -703,7 +702,6 @@ class TestFetchJournalTypesAndDataNewActivityTypes:
         assert canyoning["is_vertical"] is True
         assert canyoning["is_night_canyon"] is False
         assert canyoning["is_white_water"] is True
-        assert canyoning["route_id"] is None
 
     @pytest.mark.asyncio
     async def test_fetch_detects_climbing_type(
@@ -725,7 +723,6 @@ class TestFetchJournalTypesAndDataNewActivityTypes:
         assert climbing["climbing_type"] == "sport"
         assert climbing["grade"] == 18
         assert climbing["length"] == 25
-        assert climbing["route_id"] is None
 
     @pytest.mark.asyncio
     async def test_fetch_detects_kayaking_type(
@@ -745,7 +742,6 @@ class TestFetchJournalTypesAndDataNewActivityTypes:
         assert "kayaking" in types
         kayaking = type_data["kayaking"]
         assert kayaking["water_type"] == "river"
-        assert kayaking["route_id"] is None
 
     @pytest.mark.asyncio
     async def test_fetch_detects_cross_country_skiing_type(
@@ -765,7 +761,6 @@ class TestFetchJournalTypesAndDataNewActivityTypes:
         assert "cross_country_skiing" in types
         skiing = type_data["cross_country_skiing"]
         assert skiing["snow_conditions"] == "packed powder"
-        assert skiing["route_id"] is None
 
     @pytest.mark.asyncio
     async def test_journal_with_no_activity_data_is_note(
@@ -834,16 +829,16 @@ class TestActivityMcpToolsMountedIntegration:
         conn: AsyncConnection,
         *,
         name: str,
-        user_id: str = "test-user-123",
+        journal_id: int,
     ) -> str:
         result = await conn.execute(
             text("""
-                INSERT INTO routes (user_id, name, description)
-                VALUES (:user_id, :name, :description)
+                INSERT INTO routes (journal_id, name, description)
+                VALUES (:journal_id, :name, :description)
                 RETURNING id
             """),
             {
-                "user_id": user_id,
+                "journal_id": journal_id,
                 "name": name,
                 "description": f"Route for {name}",
             },
@@ -906,17 +901,15 @@ class TestActivityMcpToolsMountedIntegration:
         conn: AsyncConnection,
         *,
         journal_id: int,
-        route_id: str | None = None,
         water_type: str = "river",
     ) -> None:
         await conn.execute(
             text("""
-                INSERT INTO journal_kayaking_data (journal_id, route_id, water_type)
-                VALUES (:journal_id, :route_id, :water_type)
+                INSERT INTO journal_kayaking_data (journal_id, water_type)
+                VALUES (:journal_id, :water_type)
             """),
             {
                 "journal_id": journal_id,
-                "route_id": route_id,
                 "water_type": water_type,
             },
         )
@@ -926,17 +919,15 @@ class TestActivityMcpToolsMountedIntegration:
         conn: AsyncConnection,
         *,
         journal_id: int,
-        route_id: str | None = None,
         pace: int = 330,
     ) -> None:
         await conn.execute(
             text("""
-                INSERT INTO journal_jogging_data (journal_id, route_id, pace)
-                VALUES (:journal_id, :route_id, :pace)
+                INSERT INTO journal_jogging_data (journal_id, pace)
+                VALUES (:journal_id, :pace)
             """),
             {
                 "journal_id": journal_id,
-                "route_id": route_id,
                 "pace": pace,
             },
         )
@@ -946,17 +937,15 @@ class TestActivityMcpToolsMountedIntegration:
         conn: AsyncConnection,
         *,
         journal_id: int,
-        route_id: str | None = None,
         track_grading: str = "Grade 3",
     ) -> None:
         await conn.execute(
             text("""
-                INSERT INTO journal_bushwalking_data (journal_id, route_id, track_grading)
-                VALUES (:journal_id, :route_id, :track_grading)
+                INSERT INTO journal_bushwalking_data (journal_id, track_grading)
+                VALUES (:journal_id, :track_grading)
             """),
             {
                 "journal_id": journal_id,
-                "route_id": route_id,
                 "track_grading": track_grading,
             },
         )
@@ -966,17 +955,15 @@ class TestActivityMcpToolsMountedIntegration:
         conn: AsyncConnection,
         *,
         journal_id: int,
-        route_id: str | None = None,
         snow_conditions: str = "packed powder",
     ) -> None:
         await conn.execute(
             text("""
-                INSERT INTO journal_skiing_data (journal_id, route_id, snow_conditions)
-                VALUES (:journal_id, :route_id, :snow_conditions)
+                INSERT INTO journal_skiing_data (journal_id, snow_conditions)
+                VALUES (:journal_id, :snow_conditions)
             """),
             {
                 "journal_id": journal_id,
-                "route_id": route_id,
                 "snow_conditions": snow_conditions,
             },
         )
@@ -1391,8 +1378,6 @@ class TestActivityMcpToolsMountedIntegration:
         authenticated_lifespan_client,
         clean_database: AsyncConnection,
     ) -> None:
-        route_id = await self._insert_route(clean_database, name="Harbour Loop")
-
         kayaking_journal_id = await self._insert_journal(
             clean_database,
             title="Harbour paddle",
@@ -1415,32 +1400,11 @@ class TestActivityMcpToolsMountedIntegration:
         await self._insert_kayaking_data(
             clean_database,
             journal_id=kayaking_journal_id,
-            route_id=route_id,
         )
 
-        bushwalk_journal_id = await self._insert_journal(
-            clean_database,
-            title="Harbour headland hike",
-            content="Route session on foot",
-            start=datetime(2024, 4, 3, tzinfo=UTC),
-        )
-        await self._insert_fitness_data(
-            clean_database,
-            journal_id=bushwalk_journal_id,
-            distance=9000,
-            elevation_gain=240,
-            duration=7600,
-            calories=820,
-        )
-        await self._insert_outdoor_activity_data(
-            clean_database,
-            journal_id=bushwalk_journal_id,
-            activity_type="Bushwalking",
-        )
-        await self._insert_bushwalking_data(
-            clean_database,
-            journal_id=bushwalk_journal_id,
-            route_id=route_id,
+        # Route belongs to the journal
+        route_id = await self._insert_route(
+            clean_database, name="Harbour Loop", journal_id=kayaking_journal_id
         )
 
         async with authenticated_lifespan_client() as authenticated_client:
@@ -1454,10 +1418,9 @@ class TestActivityMcpToolsMountedIntegration:
 
         assert payload["route"]["id"] == route_id
         assert payload["route"]["name"] == "Harbour Loop"
-        assert payload["usage_count"] == 2
-        assert set(payload["activity_types"]) == {"kayaking", "bushwalking"}
+        assert payload["usage_count"] == 1
+        assert payload["activity_types"] == ["ROUTE"]
         assert [entry["journal_title"] for entry in payload["entries"]] == [
-            "Harbour headland hike",
             "Harbour paddle",
         ]
 
@@ -1467,15 +1430,16 @@ class TestActivityMcpToolsMountedIntegration:
         authenticated_lifespan_client,
         clean_database: AsyncConnection,
     ) -> None:
-        target_route_id = await self._insert_route(clean_database, name="River Run")
-        other_route_id = await self._insert_route(clean_database, name="Sea Paddle")
-
         mixed_activity_journal_id = await self._insert_journal(
             clean_database,
             title="Brick workout",
             content="Run on one route, paddle on another",
             start=datetime(2024, 4, 5, tzinfo=UTC),
         )
+        target_route_id = await self._insert_route(
+            clean_database, name="River Run", journal_id=mixed_activity_journal_id
+        )
+
         await self._insert_fitness_data(
             clean_database,
             journal_id=mixed_activity_journal_id,
@@ -1487,12 +1451,6 @@ class TestActivityMcpToolsMountedIntegration:
         await self._insert_jogging_data(
             clean_database,
             journal_id=mixed_activity_journal_id,
-            route_id=target_route_id,
-        )
-        await self._insert_kayaking_data(
-            clean_database,
-            journal_id=mixed_activity_journal_id,
-            route_id=other_route_id,
         )
 
         async with authenticated_lifespan_client() as authenticated_client:
@@ -1505,6 +1463,6 @@ class TestActivityMcpToolsMountedIntegration:
             )
 
         assert payload["usage_count"] == 1
-        assert payload["activity_types"] == ["jogging"]
+        assert payload["activity_types"] == ["ROUTE"]
         assert payload["entries"][0]["journal_title"] == "Brick workout"
-        assert payload["entries"][0]["activity_type"] == "jogging"
+        assert payload["entries"][0]["activity_type"] == "ROUTE"

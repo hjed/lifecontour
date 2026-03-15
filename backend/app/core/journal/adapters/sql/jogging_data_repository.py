@@ -1,7 +1,6 @@
 """SQL implementation of JoggingDataRepository."""
 
 from typing import Any
-from uuid import UUID
 
 from core_shared.models.journals import JoggingData
 from sqlalchemy import text
@@ -21,7 +20,6 @@ class SqlJoggingDataRepository(JoggingDataRepository):
         """Convert a database row to a JoggingData entity."""
         return JoggingData(
             journal_id=row.journal_id,
-            route_id=UUID(str(row.route_id)) if row.route_id is not None else None,
             pace=row.pace,
             created_at=row.created_at,
             updated_at=row.updated_at,
@@ -31,7 +29,7 @@ class SqlJoggingDataRepository(JoggingDataRepository):
         """Find jogging data by journal ID."""
         query = text(
             """
-            SELECT journal_id, route_id, pace, created_at, updated_at
+            SELECT journal_id, pace, created_at, updated_at
             FROM journal_jogging_data
             WHERE journal_id = :journal_id
             """
@@ -57,23 +55,21 @@ class SqlJoggingDataRepository(JoggingDataRepository):
         query = text(
             """
             INSERT INTO journal_jogging_data (
-                journal_id, route_id, pace
+                journal_id, pace
             )
             VALUES (
-                :journal_id, :route_id, :pace
+                :journal_id, :pace
             )
             ON CONFLICT (journal_id) DO UPDATE SET
-                route_id = EXCLUDED.route_id,
                 pace = EXCLUDED.pace,
                 updated_at = now()
-            RETURNING journal_id, route_id, pace, created_at, updated_at
+            RETURNING journal_id, pace, created_at, updated_at
             """
         )
         result = await self.conn.execute(
             query,
             {
                 "journal_id": data.journal_id,
-                "route_id": str(data.route_id) if data.route_id is not None else None,
                 "pace": data.pace,
             },
         )

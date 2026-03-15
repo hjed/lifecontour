@@ -120,14 +120,13 @@ describe('JournalTypeSection', () => {
       <JournalTypeSection
         journalId={mockJournalId}
         type={JournalType.CANYONING}
-        typeData={{ french_grade: 'v3a2IV**', route_id: 'route-123' }}
+        typeData={{ french_grade: 'v3a2IV**' }}
         defaultOpen={true}
       />
     );
 
     expect(screen.getByTestId('canyoning-type-editor')).toBeInTheDocument();
     expect(screen.getByText('v3a2IV**')).toBeInTheDocument();
-    expect(screen.getByText('route-123')).toBeInTheDocument();
   });
 
   it('renders abseiling content when expanded', () => {

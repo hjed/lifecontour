@@ -1,7 +1,6 @@
 """SQL implementation of CrossCountrySkiingDataRepository."""
 
 from typing import Any
-from uuid import UUID
 
 from core_shared.models.journals import CrossCountrySkiingData
 from sqlalchemy import text
@@ -21,7 +20,6 @@ class SqlCrossCountrySkiingDataRepository(CrossCountrySkiingDataRepository):
         """Convert a database row to a CrossCountrySkiingData entity."""
         return CrossCountrySkiingData(
             journal_id=row.journal_id,
-            route_id=UUID(str(row.route_id)) if row.route_id is not None else None,
             snow_conditions=row.snow_conditions,
             created_at=row.created_at,
             updated_at=row.updated_at,
@@ -33,7 +31,7 @@ class SqlCrossCountrySkiingDataRepository(CrossCountrySkiingDataRepository):
         """Find cross-country skiing data by journal ID."""
         query = text(
             """
-            SELECT journal_id, route_id, snow_conditions,
+            SELECT journal_id, snow_conditions,
                    created_at, updated_at
             FROM journal_skiing_data
             WHERE journal_id = :journal_id
@@ -60,16 +58,15 @@ class SqlCrossCountrySkiingDataRepository(CrossCountrySkiingDataRepository):
         query = text(
             """
             INSERT INTO journal_skiing_data (
-                journal_id, route_id, snow_conditions
+                journal_id, snow_conditions
             )
             VALUES (
-                :journal_id, :route_id, :snow_conditions
+                :journal_id, :snow_conditions
             )
             ON CONFLICT (journal_id) DO UPDATE SET
-                route_id = EXCLUDED.route_id,
                 snow_conditions = EXCLUDED.snow_conditions,
                 updated_at = now()
-            RETURNING journal_id, route_id, snow_conditions,
+            RETURNING journal_id, snow_conditions,
                       created_at, updated_at
             """
         )
@@ -77,7 +74,6 @@ class SqlCrossCountrySkiingDataRepository(CrossCountrySkiingDataRepository):
             query,
             {
                 "journal_id": data.journal_id,
-                "route_id": str(data.route_id) if data.route_id is not None else None,
                 "snow_conditions": data.snow_conditions,
             },
         )

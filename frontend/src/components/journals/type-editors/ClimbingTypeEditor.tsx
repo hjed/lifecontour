@@ -14,10 +14,9 @@ import {
 import type { ClimbingData } from '@/types/journals';
 import {
   compactSummaryItems,
-  buildRouteSummaryItem,
-  RouteBackedTypeEditorLayout,
-} from './RouteBackedTypeEditorLayout';
-import { useRouteBackedTypeEditor } from './useRouteBackedTypeEditor';
+  GenericTypeEditorLayout,
+} from './GenericTypeEditorLayout';
+import { useTypeEditorState } from './useTypeEditorState';
 
 interface ClimbingTypeEditorProps {
   readonly journalId?: string;
@@ -42,52 +41,47 @@ export function ClimbingTypeEditor({
   onChange,
 }: ClimbingTypeEditorProps) {
   const baseId = useId();
-  const routeFieldId = `${baseId}-route`;
   const climbingTypeFieldId = `${baseId}-climbing-type`;
   const climbingGradeFieldId = `${baseId}-climbing-grade`;
   const climbingLengthFieldId = `${baseId}-climbing-length`;
 
   const {
-    initialData,
-    routeName,
     isEditing,
     editData,
     setEditData,
     handleEdit,
     handleSave,
     handleCancel,
-  } = useRouteBackedTypeEditor({
-    data,
-    defaultData: DEFAULT_DATA,
+  } = useTypeEditorState({
+    initialData: data ?? DEFAULT_DATA,
     onSave,
     createMode,
     onChange,
   });
 
   const summaryItems = compactSummaryItems(
-    buildRouteSummaryItem(initialData.route_id, routeName),
-    initialData.climbing_type
+    data?.climbing_type
       ? {
           label: 'Climbing Type',
-          value: initialData.climbing_type,
+          value: data.climbing_type,
         }
       : null,
-    initialData.grade != null
-      ? {
+    data?.grade == null
+      ? null
+      : {
           label: 'Grade',
-          value: initialData.grade,
-        }
-      : null,
-    initialData.length != null
-      ? {
+          value: data.grade,
+        },
+    data?.length == null
+      ? null
+      : {
           label: 'Length',
-          value: `${initialData.length} m`,
+          value: `${data.length} m`,
         }
-      : null
   );
 
   return (
-    <RouteBackedTypeEditorLayout
+    <GenericTypeEditorLayout
       className={className}
       testId={testId || 'climbing-type-editor'}
       createMode={createMode}
@@ -95,12 +89,6 @@ export function ClimbingTypeEditor({
       emptyMessage='No climbing details provided.'
       summaryItems={summaryItems}
       summaryTestId='climbing-summary'
-      routeFieldId={routeFieldId}
-      routeValue={editData.route_id}
-      onRouteChange={routeId =>
-        setEditData(previous => ({ ...previous, route_id: routeId }))
-      }
-      routePlaceholder='Select a climbing route...'
       onEdit={handleEdit}
       onSave={handleSave}
       onCancel={handleCancel}
@@ -182,6 +170,6 @@ export function ClimbingTypeEditor({
           data-testid='climbing-length-input'
         />
       </div>
-    </RouteBackedTypeEditorLayout>
+    </GenericTypeEditorLayout>
   );
 }

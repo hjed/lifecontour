@@ -61,7 +61,7 @@ async def test_journal(
 async def test_route(route_repository: SqlRouteRepository) -> Route:
     """Create a test route."""
     route = Route(
-        user_id="test-user-123",
+        journal_id=999,
         name="Murray River Paddle",
         description="Paddle route along the Murray River",
     )
@@ -87,7 +87,6 @@ class TestKayakingDataRepositorySave:
 
         assert saved.journal_id == test_journal.id
         assert saved.water_type == "river"
-        assert saved.route_id is None
         assert saved.created_at is not None
         assert saved.updated_at is not None
 
@@ -102,28 +101,9 @@ class TestKayakingDataRepositorySave:
         saved = await kayaking_repository.save(data)
 
         assert saved.journal_id == test_journal.id
-        assert saved.route_id is None
         assert saved.water_type is None
         assert saved.created_at is not None
         assert saved.updated_at is not None
-
-    async def test_save_with_route_id(
-        self,
-        kayaking_repository: SqlKayakingDataRepository,
-        test_journal: Journal,
-        test_route: Route,
-    ):
-        """Test creating kayaking data with a route reference."""
-        data = KayakingData(
-            journal_id=test_journal.id,  # type: ignore[arg-type]
-            route_id=test_route.id,
-            water_type="lake",
-        )
-
-        saved = await kayaking_repository.save(data)
-
-        assert saved.route_id == test_route.id
-        assert saved.water_type == "lake"
 
     async def test_save_updates_existing_data(
         self,
@@ -176,24 +156,6 @@ class TestKayakingDataRepositoryFind:
         found = await kayaking_repository.find_by_journal_id(99999)
 
         assert found is None
-
-    async def test_find_preserves_route_id(
-        self,
-        kayaking_repository: SqlKayakingDataRepository,
-        test_journal: Journal,
-        test_route: Route,
-    ):
-        """Test that route_id is correctly persisted and retrieved."""
-        data = KayakingData(
-            journal_id=test_journal.id,  # type: ignore[arg-type]
-            route_id=test_route.id,
-        )
-        await kayaking_repository.save(data)
-
-        found = await kayaking_repository.find_by_journal_id(test_journal.id)  # type: ignore[arg-type]
-
-        assert found is not None
-        assert found.route_id == test_route.id
 
 
 @pytest.mark.integration

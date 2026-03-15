@@ -1,9 +1,10 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useMemo, useEffect, useRef } from 'react';
 import dynamic from 'next/dynamic';
 import { Card } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
+import { toast } from 'sonner';
 
 const GPXTrackMap = dynamic(() => import('./GPXTrackMap'), {
   ssr: false,
@@ -17,10 +18,51 @@ interface GPXTrackDisplayProps {
 }
 
 import { Coordinate } from '@/types/journals';
+import { useRoutes } from '@/lib/api/routes';
 
-interface GPXData {
+export interface ParsedTrack {
+  id: string;
   coordinates: Coordinate[];
-  statistics?: unknown;
+}
+
+function parseGPXString(
+  gpxString: string,
+  routeId: string,
+  routeName: string
+): { track?: ParsedTrack; error?: string } {
+  const parser = new DOMParser();
+  const xmlDoc = parser.parseFromString(gpxString, 'text/xml');
+
+  const parserError = xmlDoc.querySelector('parsererror');
+  if (parserError) {
+    console.error(
+      'Failed to parse GPX data for route',
+      routeId,
+      parserError.textContent
+    );
+    return {
+      error: `Contains invalid GPX data in route ${routeName}`,
+    };
+  }
+
+  const trkpts = xmlDoc.getElementsByTagName('trkpt');
+  const coordinates: Coordinate[] = [];
+
+  for (const pt of Array.from(trkpts)) {
+    const lat = pt.getAttribute('lat');
+    const lon = pt.getAttribute('lon');
+    if (lat && lon) {
+      coordinates.push({
+        latitude: Number.parseFloat(lat),
+        longitude: Number.parseFloat(lon),
+      });
+    }
+  }
+
+  if (coordinates.length > 0) {
+    return { track: { id: routeId, coordinates } };
+  }
+  return {};
 }
 
 export function GPXTrackDisplay({
@@ -28,49 +70,55 @@ export function GPXTrackDisplay({
   className,
   'data-testid': testId,
 }: GPXTrackDisplayProps) {
-  const [data, setData] = useState<GPXData | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const {
+    data: routesResponse,
+    isLoading,
+    error: apiError,
+  } = useRoutes(journalId);
+  const routesData = routesResponse?.data;
+  const { tracks, errors } = useMemo(() => {
+    if (!routesData) return { tracks: [], errors: [] };
 
-  useEffect(() => {
-    let isMounted = true;
+    const parsedTracks: ParsedTrack[] = [];
+    const parseErrors: string[] = [];
 
-    async function fetchGPX() {
+    for (const route of routesData) {
+      const gpxString = route.attributes.gpx_data;
+      if (!gpxString) continue;
+
       try {
-        setLoading(true);
-        setError(null); // Clear any previous error before each fetch
-        const res = await fetch(`/api/journals/${journalId}/gpx`, {
-          credentials: 'include',
-        });
-        if (!res.ok) {
-          if (res.status === 404) {
-            // It's normal to not have GPX track data sometimes
-            if (isMounted) setData(null);
-            return;
-          }
-          throw new Error('Failed to fetch GPX data');
-        }
-
-        const json = await res.json();
-        if (isMounted && json.data?.attributes) {
-          setData(json.data.attributes);
+        const { track, error } = parseGPXString(
+          gpxString,
+          route.id,
+          route.attributes.name
+        );
+        if (error) {
+          parseErrors.push(error);
+        } else if (track) {
+          parsedTracks.push(track);
         }
       } catch (err) {
-        console.error('Error fetching GPX data:', err);
-        if (isMounted) setError('Could not load track data');
-      } finally {
-        if (isMounted) setLoading(false);
+        console.error('Failed to parse GPX data for route', route.id, err);
       }
     }
 
-    fetchGPX();
+    return { tracks: parsedTracks, errors: parseErrors };
+  }, [routesData]);
 
-    return () => {
-      isMounted = false;
-    };
-  }, [journalId]);
+  const toastedErrorsRef = useRef<Set<string>>(new Set());
 
-  if (loading) {
+  useEffect(() => {
+    if (errors && errors.length > 0) {
+      errors.forEach(err => {
+        if (!toastedErrorsRef.current.has(err)) {
+          toast.error(err);
+          toastedErrorsRef.current.add(err);
+        }
+      });
+    }
+  }, [errors]);
+
+  if (isLoading) {
     return (
       <Skeleton
         className='h-[300px] w-full'
@@ -79,7 +127,7 @@ export function GPXTrackDisplay({
     );
   }
 
-  if (error || !data?.coordinates?.length) {
+  if (apiError || tracks.length === 0) {
     return null; // Return nothing if no valid data
   }
 
@@ -88,11 +136,8 @@ export function GPXTrackDisplay({
       <Card
         className={`relative z-0 h-[350px] overflow-hidden border ${className || ''}`}
       >
-        <GPXTrackMap coordinates={data.coordinates} />
+        <GPXTrackMap tracks={tracks} />
       </Card>
-      {/* If stats exists from the GPX endpoint, we could render an ActivityStats here,
-          but ActivityStats expects FitnessData shape. We can adapt it if needed, or
-          leave it to the JournalTypeDataDisplay to show stats from the main journal type payload. */}
     </div>
   );
 }

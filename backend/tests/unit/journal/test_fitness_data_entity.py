@@ -20,7 +20,6 @@ class TestFitnessData:
         assert fitness_data.elevation_loss is None
         assert fitness_data.duration is None
         assert fitness_data.calories is None
-        assert fitness_data.gpx_track_data is None
         assert fitness_data.strava_activity_id is None
 
     def test_create_fitness_data_with_heart_rate(self):
@@ -58,21 +57,6 @@ class TestFitnessData:
         assert fitness_data.duration == 3600
         assert fitness_data.calories == 450
 
-    def test_create_fitness_data_with_gpx_track(self):
-        """Test creating fitness data with GPX track data."""
-        gpx_data = """<?xml version="1.0" encoding="UTF-8"?>
-<gpx version="1.1" creator="Test">
-  <trk>
-    <name>Test Track</name>
-  </trk>
-</gpx>"""
-        fitness_data = FitnessData(
-            journal_id=1,
-            gpx_track_data=gpx_data,
-        )
-
-        assert fitness_data.gpx_track_data == gpx_data
-
     def test_create_fitness_data_with_strava_id(self):
         """Test creating fitness data with Strava activity ID."""
         fitness_data = FitnessData(
@@ -81,43 +65,6 @@ class TestFitnessData:
         )
 
         assert fitness_data.strava_activity_id == "12345678"
-
-    def test_create_fitness_data_complete(self):
-        """Test creating fitness data with all fields."""
-        gpx_data = """<?xml version="1.0" encoding="UTF-8"?>
-<gpx version="1.1" creator="Test">
-  <trk>
-    <name>Complete Track</name>
-  </trk>
-</gpx>"""
-        fitness_data = FitnessData(
-            journal_id=1,
-            heart_rate_avg=145,
-            heart_rate_max=178,
-            distance=10000,
-            elevation_gain=500,
-            elevation_loss=450,
-            duration=7200,
-            calories=800,
-            gpx_track_data=gpx_data,
-            strava_activity_id="87654321",
-        )
-
-        assert fitness_data.journal_id == 1
-        assert fitness_data.heart_rate_avg == 145
-        assert fitness_data.heart_rate_max == 178
-        assert fitness_data.distance == 10000
-        assert fitness_data.elevation_gain == 500
-        assert fitness_data.elevation_loss == 450
-        assert fitness_data.duration == 7200
-        assert fitness_data.calories == 800
-        assert fitness_data.gpx_track_data == gpx_data
-        assert fitness_data.strava_activity_id == "87654321"
-
-
-@pytest.mark.unit
-class TestFitnessDataValidation:
-    """Test FitnessData validation."""
 
     def test_invalid_journal_id_raises_error(self):
         """Test that invalid journal_id raises error."""
@@ -188,26 +135,6 @@ class TestFitnessDataValidation:
             match="Calories must be non-negative",
         ):
             FitnessData(journal_id=1, calories=-1)
-
-    def test_invalid_gpx_data_raises_error(self):
-        """Test that invalid GPX data raises error."""
-        with pytest.raises(
-            FitnessDataValidationError,
-            match="GPX data must be valid XML",
-        ):
-            FitnessData(journal_id=1, gpx_track_data="not valid xml")
-
-    def test_gpx_data_without_gpx_root_raises_error(self):
-        """Test that GPX data without <gpx> root element raises error."""
-        invalid_gpx = """<?xml version="1.0" encoding="UTF-8"?>
-<track>
-  <name>Test</name>
-</track>"""
-        with pytest.raises(
-            FitnessDataValidationError,
-            match="GPX data must have <gpx> root element",
-        ):
-            FitnessData(journal_id=1, gpx_track_data=invalid_gpx)
 
     def test_empty_strava_activity_id_raises_error(self):
         """Test that empty Strava activity ID raises error."""

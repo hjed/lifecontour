@@ -1,7 +1,5 @@
 """Unit tests for JoggingData entity (JOGGING type)."""
 
-from uuid import UUID, uuid4
-
 import pytest
 from core_shared.models.journals import JoggingData, JoggingDataValidationError
 
@@ -15,17 +13,9 @@ class TestJoggingData:
         data = JoggingData(journal_id=1)
 
         assert data.journal_id == 1
-        assert data.route_id is None
         assert data.pace is None
         assert data.created_at is None
         assert data.updated_at is None
-
-    def test_create_jogging_data_with_route(self):
-        """Test creating jogging data with a route ID."""
-        route_id = uuid4()
-        data = JoggingData(journal_id=1, route_id=route_id)
-
-        assert data.route_id == route_id
 
     def test_create_jogging_data_with_pace(self):
         """Test creating jogging data with a pace value."""
@@ -36,15 +26,12 @@ class TestJoggingData:
 
     def test_create_jogging_data_with_all_fields(self):
         """Test creating jogging data with all fields populated."""
-        route_id = uuid4()
         data = JoggingData(
             journal_id=2,
-            route_id=route_id,
             pace=360,  # 6 min/km
         )
 
         assert data.journal_id == 2
-        assert data.route_id == route_id
         assert data.pace == 360
 
     def test_invalid_journal_id_zero(self):
@@ -79,19 +66,6 @@ class TestJoggingData:
         data = JoggingData(journal_id=1, pace=None)
 
         assert data.pace is None
-
-    def test_none_route_id_is_valid(self):
-        """Test that None route_id is valid (field is optional)."""
-        data = JoggingData(journal_id=1, route_id=None)
-
-        assert data.route_id is None
-
-    def test_route_id_is_uuid(self):
-        """Test that route_id must be a UUID."""
-        route_id = UUID("12345678-1234-5678-1234-567812345678")
-        data = JoggingData(journal_id=1, route_id=route_id)
-
-        assert isinstance(data.route_id, UUID)
 
     def test_large_valid_pace(self):
         """Test that a large pace value (slow runner) is valid."""

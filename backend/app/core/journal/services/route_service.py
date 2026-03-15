@@ -6,7 +6,6 @@ from uuid import UUID
 import structlog
 from core_shared.models import Route
 from core_shared.models.journals import (
-    RouteInUseError,
     RouteNotFoundError,
     RouteValidationError,
 )
@@ -44,6 +43,32 @@ class RouteService:
         """
         self.route_repo = route_repo
         self.event_publisher = event_publisher
+
+    async def get_routes_by_journal_paginated(
+        self,
+        journal_id: int,
+        name_filter: str | None = None,
+        limit: int = 20,
+        offset: int = 0,
+    ) -> tuple[list[Route], int]:
+        """
+        Get routes for a journal with filtering and pagination.
+
+        Args:
+            journal_id: ID of the journal
+            name_filter: Optional string to filter by name
+            limit: Maximum number of routes to return
+            offset: Offset for pagination
+
+        Returns:
+            Tuple of (list of routes, total count matching filters)
+        """
+        return await self.route_repo.find_by_journal_id_paginated(
+            journal_id=journal_id,
+            name_filter=name_filter,
+            limit=limit,
+            offset=offset,
+        )
 
     async def create_route(self, route: Route, transaction: AsyncConnection) -> Route:
         """
@@ -84,7 +109,7 @@ class RouteService:
         # Publish creation event
         event = RouteCreated(
             str(saved_route.id),
-            saved_route.user_id,
+            saved_route.journal_id,
             saved_route.name,
             transaction=transaction,
         )
@@ -93,7 +118,7 @@ class RouteService:
         logger.info(
             "Route created",
             route_id=str(saved_route.id),
-            user_id=saved_route.user_id,
+            journal_id=saved_route.journal_id,
             name=saved_route.name,
         )
 
@@ -176,11 +201,6 @@ class RouteService:
         if route is None:
             raise RouteNotFoundError(str(route_id))
 
-        # Check if route is in use
-        is_in_use = await self.route_repo.check_usage_in_journals(route_id)
-        if is_in_use:
-            raise RouteInUseError(str(route_id))
-
         # Delete the route
         await self.route_repo.delete(route_id)
 
@@ -208,36 +228,17 @@ class RouteService:
             raise RouteNotFoundError(str(route_id))
         return route
 
-    async def get_routes_for_user(
+    async def get_routes_by_journal(
         self,
-        user_id: str,
-        limit: int = 50,
-        offset: int = 0,
-        name: str | None = None,
+        journal_id: int,
     ) -> list[Route]:
         """
-        Get all routes for a user with pagination.
+        Get all routes for a journal.
 
         Args:
-            user_id: The user ID to filter by
-            limit: Maximum number of routes to return
-            offset: Number of routes to skip
-            name: Optional case-insensitive partial route name filter
+            journal_id: The journal ID to get routes for
 
         Returns:
             List of routes
         """
-        return await self.route_repo.get_all(user_id, limit, offset, name)
-
-    async def get_route_count(self, user_id: str, name: str | None = None) -> int:
-        """
-        Get count of routes for a user.
-
-        Args:
-            user_id: The user ID to count routes for
-            name: Optional case-insensitive partial route name filter
-
-        Returns:
-            Total count of routes
-        """
-        return await self.route_repo.get_count(user_id, name)
+        return await self.route_repo.find_by_journal_id(journal_id)

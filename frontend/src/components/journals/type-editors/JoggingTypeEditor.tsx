@@ -1,15 +1,14 @@
 'use client';
 
 import { useId, useState } from 'react';
-import { Timer, Map as MapIcon } from 'lucide-react';
+import { Timer } from 'lucide-react';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
 import type { JoggingData } from '@/types/journals';
 import { TypeEditorActions } from './TypeEditorActions';
-import { RouteSelector } from '@/components/routes/RouteSelector';
 import { formatSecondsPerKm } from '../ActivityStats';
-import { useRouteBackedTypeEditor } from './useRouteBackedTypeEditor';
+import { useTypeEditorState } from './useTypeEditorState';
 
 interface JoggingTypeEditorProps {
   readonly journalId?: string;
@@ -34,32 +33,22 @@ export function JoggingTypeEditor({
 }: JoggingTypeEditorProps) {
   const baseId = useId();
   const paceFieldId = `${baseId}-pace`;
-  const routeFieldId = `${baseId}-route`;
-  const {
-    initialData,
-    routeName,
-    isEditing,
-    editData,
-    setEditData,
-    handleEdit,
-    handleSave,
-    handleCancel,
-  } = useRouteBackedTypeEditor({
-    data,
-    defaultData: DEFAULT_DATA,
-    onSave,
-    createMode,
-    onChange,
-  });
+  const { isEditing, setEditData, handleEdit, handleSave, handleCancel } =
+    useTypeEditorState({
+      initialData: data ?? DEFAULT_DATA,
+      onSave,
+      createMode,
+      onChange,
+    });
 
   // Track the raw user-typed pace string (e.g., "5:30") independently.
-  // Initialised from `initialData.pace` once; subsequent updates come only
+  // Initialised from `data?.pace` once; subsequent updates come only
   // from user interaction — no effect needed, avoiding the ESLint
   // react-hooks/set-state-in-effect rule.
   const [localPace, setLocalPace] = useState<string>(() => {
-    if (initialData.pace) {
-      const m = Math.floor(initialData.pace / 60);
-      const s = initialData.pace % 60;
+    if (data?.pace) {
+      const m = Math.floor(data.pace / 60);
+      const s = data.pace % 60;
       return `${m}:${s.toString().padStart(2, '0')}`;
     }
     return '';
@@ -93,7 +82,7 @@ export function JoggingTypeEditor({
   };
 
   if (!isEditing && !createMode) {
-    const hasData = initialData.route_id || initialData.pace;
+    const hasData = data?.pace;
 
     if (!hasData) {
       return (
@@ -117,18 +106,10 @@ export function JoggingTypeEditor({
         data-testid={testId || 'jogging-type-editor'}
       >
         <div className='grid grid-cols-2 gap-4'>
-          {initialData.pace && (
+          {data?.pace && (
             <div>
               <span className='text-muted-foreground font-medium'>Pace: </span>
-              {formatSecondsPerKm(initialData.pace)}{' '}
-            </div>
-          )}
-          {initialData.route_id && (
-            <div>
-              <span className='text-muted-foreground font-medium'>Route: </span>
-              <span data-testid='jogging-route-display'>
-                {routeName ?? initialData.route_id}
-              </span>
+              {formatSecondsPerKm(data.pace)}{' '}
             </div>
           )}
         </div>
@@ -164,25 +145,6 @@ export function JoggingTypeEditor({
             onChange={handlePaceChange}
             placeholder='e.g., 5:30'
             data-testid='pace-input'
-          />
-        </div>
-
-        {/* Route Selector */}
-        <div className='space-y-2'>
-          <Label htmlFor={routeFieldId} className='flex items-center gap-2'>
-            <MapIcon
-              className='text-muted-foreground h-4 w-4'
-              aria-hidden='true'
-            />
-            Route
-          </Label>
-          <RouteSelector
-            id={routeFieldId}
-            value={editData.route_id ?? null}
-            onChange={routeId =>
-              setEditData(previous => ({ ...previous, route_id: routeId }))
-            }
-            placeholder='Select a running route...'
           />
         </div>
       </div>

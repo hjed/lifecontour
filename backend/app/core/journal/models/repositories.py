@@ -1012,8 +1012,7 @@ class RouteRepository(ABC):
     """
     Repository interface for route operations.
 
-    Routes are shared across multiple activity types (BUSHWALKING, CANYONING,
-    CLIMBING, KAYAKING, CROSS_COUNTRY_SKIING, JOGGING) and are user-specific.
+    Routes are GPX tracks or mapped paths owned by a specific journal.
     """
 
     @abstractmethod
@@ -1053,57 +1052,37 @@ class RouteRepository(ABC):
         pass
 
     @abstractmethod
-    async def get_all(
-        self,
-        user_id: str,
-        limit: int = 100,
-        offset: int = 0,
-        name: str | None = None,
-    ) -> list[Route]:
+    async def find_by_journal_id(self, journal_id: int) -> list[Route]:
         """
-        Get all routes for a user with pagination.
+        Get all routes associated with a specific journal.
 
         Args:
-            user_id: The user ID to filter by
+            journal_id: The journal ID to filter by
+
+        Returns:
+            List of routes for the journal
+        """
+        pass
+
+    @abstractmethod
+    async def find_by_journal_id_paginated(
+        self,
+        journal_id: int,
+        name_filter: str | None = None,
+        limit: int = 20,
+        offset: int = 0,
+    ) -> tuple[list[Route], int]:
+        """
+        Get routes for a journal with filtering and pagination.
+
+        Args:
+            journal_id: The journal ID
+            name_filter: Optional name filter
             limit: Maximum number of routes to return
             offset: Number of routes to skip
-            name: Optional case-insensitive partial route name filter
 
         Returns:
-            List of routes
-        """
-        pass
-
-    @abstractmethod
-    async def get_count(self, user_id: str, name: str | None = None) -> int:
-        """
-        Get total count of routes for a user.
-
-        Args:
-            user_id: The user ID to filter by
-            name: Optional case-insensitive partial route name filter
-
-        Returns:
-            Total number of routes for the user
-        """
-        pass
-
-    @abstractmethod
-    async def check_usage_in_journals(self, route_id: UUID) -> bool:
-        """
-        Check if a route is referenced by any journal entries.
-
-        Routes are referenced by activity-specific data tables (journal_bushwalking_data,
-        journal_kayaking_data, journal_climbing_data, journal_skiing_data, journal_jogging_data,
-        journal_canyoning_data), NOT by the journals table itself.
-
-        This is used to prevent deletion of routes that are in use.
-
-        Args:
-            route_id: The route UUID to check
-
-        Returns:
-            True if the route is used in any activity-specific journal data, False otherwise
+            Tuple of (list of routes, total count matching filter)
         """
         pass
 

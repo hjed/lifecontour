@@ -11,11 +11,8 @@ import {
   SummaryBadgeList,
   type ReadOnlyTypeSummaryItem,
 } from './ReadOnlyTypeSummary';
-import {
-  RouteBackedTypeEditorLayout,
-  buildRouteSummaryItem,
-} from './RouteBackedTypeEditorLayout';
-import { useRouteBackedTypeEditor } from './useRouteBackedTypeEditor';
+import { GenericTypeEditorLayout } from './GenericTypeEditorLayout';
+import { useTypeEditorState } from './useTypeEditorState';
 
 interface CanyoningTypeEditorProps {
   readonly journalId?: string;
@@ -73,16 +70,10 @@ function createTransientGradeState(
 
 function buildReadOnlySummaryItems(
   data: CanyoningData,
-  routeName: string | undefined,
   canyonFlags: string[]
 ): ReadOnlyTypeSummaryItem[] {
   const waterGaugeSummary = getWaterGaugeLabel(data);
   const summaryItems: ReadOnlyTypeSummaryItem[] = [];
-
-  const routeSummaryItem = buildRouteSummaryItem(data.route_id, routeName);
-  if (routeSummaryItem) {
-    summaryItems.push(routeSummaryItem);
-  }
 
   if (data.french_grade) {
     summaryItems.push({
@@ -119,7 +110,6 @@ export function CanyoningTypeEditor({
   onChange,
 }: CanyoningTypeEditorProps) {
   const baseId = useId();
-  const routeFieldId = `${baseId}-route`;
   const frenchGradeFieldId = `${baseId}-french-grade`;
   const waterGaugeNameFieldId = `${baseId}-water-gauge-name`;
   const waterGaugeLevelFieldId = `${baseId}-water-gauge-level`;
@@ -128,35 +118,32 @@ export function CanyoningTypeEditor({
   const whiteWaterFieldId = `${baseId}-white-water`;
 
   const {
-    initialData,
-    routeName,
     isEditing,
     editData,
     setEditData,
     handleEdit,
     handleSave,
     handleCancel,
-  } = useRouteBackedTypeEditor({
-    data,
-    defaultData: DEFAULT_DATA,
+  } = useTypeEditorState({
+    initialData: data ?? DEFAULT_DATA,
     onSave,
     createMode,
     onChange,
   });
 
   const gradeResetKey = useMemo(
-    () => JSON.stringify(initialData),
-    [initialData]
+    () => JSON.stringify(data ?? DEFAULT_DATA),
+    [data]
   );
   const [gradeState, setGradeState] = useState<GradeState>(() =>
-    createSavedGradeState(gradeResetKey, initialData.french_grade)
+    createSavedGradeState(gradeResetKey, data?.french_grade)
   );
   const currentGradeState =
     gradeState.resetKey === gradeResetKey
       ? gradeState
-      : createSavedGradeState(gradeResetKey, initialData.french_grade);
+      : createSavedGradeState(gradeResetKey, data?.french_grade);
 
-  const canyonFlags = buildCanyonFlags(initialData);
+  const canyonFlags = buildCanyonFlags(data ?? DEFAULT_DATA);
 
   const handleFrenchGradeChange = (value: string) => {
     const nextGradeState = createTransientGradeState(gradeResetKey, value);
@@ -181,20 +168,17 @@ export function CanyoningTypeEditor({
   };
 
   const handleEditorCancel = () => {
-    setGradeState(
-      createSavedGradeState(gradeResetKey, initialData.french_grade)
-    );
+    setGradeState(createSavedGradeState(gradeResetKey, data?.french_grade));
     handleCancel();
   };
 
   const summaryItems = buildReadOnlySummaryItems(
-    initialData,
-    routeName,
+    data ?? DEFAULT_DATA,
     canyonFlags
   );
 
   return (
-    <RouteBackedTypeEditorLayout
+    <GenericTypeEditorLayout
       className={className}
       testId={testId || 'canyoning-type-editor'}
       createMode={createMode}
@@ -202,12 +186,6 @@ export function CanyoningTypeEditor({
       emptyMessage='No canyoning details provided.'
       summaryItems={summaryItems}
       summaryTestId='canyoning-summary'
-      routeFieldId={routeFieldId}
-      routeValue={editData.route_id}
-      onRouteChange={routeId =>
-        setEditData(previous => ({ ...previous, route_id: routeId }))
-      }
-      routePlaceholder='Select a canyon route...'
       onEdit={handleEdit}
       onSave={handleSave}
       onCancel={handleEditorCancel}
@@ -329,6 +307,6 @@ export function CanyoningTypeEditor({
           White Water
         </Label>
       </div>
-    </RouteBackedTypeEditorLayout>
+    </GenericTypeEditorLayout>
   );
 }

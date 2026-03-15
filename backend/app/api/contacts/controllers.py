@@ -71,6 +71,7 @@ from app.core.journal.models.repositories import (
     OutdoorActivityDataRepository,
     PhotoAlbumDataRepository,
     PlanDataRepository,
+    RouteRepository,
     TravelDataRepository,
 )
 from app.core.journal.services.journal_service import JournalService
@@ -796,6 +797,7 @@ async def get_contact_journals(
     kayaking_data_repo: FromDishka[KayakingDataRepository],
     skiing_data_repo: FromDishka[CrossCountrySkiingDataRepository],
     tag_repo: FromDishka[JournalTagRepository],
+    route_repo: FromDishka[RouteRepository],
     _user: FromDishka[SessionUser],  # Require authentication
     page: int = Query(default=1, description=PAGE_NUMBER_DESCRIPTION, ge=1),
     limit: int = Query(
@@ -893,7 +895,7 @@ async def get_contact_journals(
     # Enrich journals with type data, contacts, tags, etc.
     journal_resources = []
     for journal in all_journals:
-        types, type_data, contacts, tags, calendar = await _enrich_journal_data(
+        types, type_data, contacts, tags, calendar, routes = await _enrich_journal_data(
             journal,
             calendar_info_repo,
             calendar_repo,
@@ -904,6 +906,7 @@ async def get_contact_journals(
             fitness_data_repo,
             contact_relationship_repo,
             tag_repo,
+            route_repo,
             outdoor_activity_data_repo,
             bushwalking_data_repo,
             jogging_data_repo,
@@ -912,6 +915,7 @@ async def get_contact_journals(
             climbing_data_repo,
             kayaking_data_repo,
             skiing_data_repo,
+            include_routes=False,
         )
         parent = parent_by_id.get(journal.parent_id) if journal.parent_id else None
         children_count = (
@@ -925,6 +929,7 @@ async def get_contact_journals(
             contacts,
             tags,
             calendar,
+            routes=routes,
             parent=parent,
             children_count=children_count,
         )
