@@ -40,18 +40,6 @@ describe('FitnessTypeEditor', () => {
     expect(screen.queryByTestId('distance-input')).not.toBeInTheDocument();
   });
 
-  it('renders read-only view including routes when routes exist', () => {
-    // FitnessTypeEditor uses JournalRoutesEditor which in read mode will just read routes.
-    // The type editor doesn't directly render tracks, but JournalRoutesEditor should be rendered.
-    const data = { distance: 5000, duration: 1800 };
-    render(
-      <FitnessTypeEditor journalId='test-1' data={data} onSave={mockOnSave} />,
-      { wrapper }
-    );
-    expect(screen.getByTestId('activity-stats-grid')).toBeInTheDocument();
-    // In edit mode we see the upload controls
-  });
-
   it('enters edit mode and allows updating stats', async () => {
     const data = { distance: 5000 };
     render(

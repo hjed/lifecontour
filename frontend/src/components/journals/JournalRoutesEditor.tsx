@@ -78,8 +78,14 @@ export function JournalRoutesEditor({
         }
       }
 
-      if (createMode && newRoutes.length > 0 && onPendingRoutesChange) {
-        onPendingRoutesChange([...pendingRoutes, ...newRoutes]);
+      if (createMode && newRoutes.length > 0) {
+        if (onPendingRoutesChange) {
+          onPendingRoutesChange([...pendingRoutes, ...newRoutes]);
+        } else {
+          console.error(
+            'JournalRoutesEditor in createMode requires onPendingRoutesChange to be provided'
+          );
+        }
       }
 
       if (errorCount > 0) {

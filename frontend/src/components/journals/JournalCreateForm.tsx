@@ -500,7 +500,7 @@ export function JournalCreateForm({ onCancel }: JournalCreateFormProps = {}) {
         // Remove pending_routes before submitting to prevent validation errors
         // eslint-disable-next-line @typescript-eslint/no-unused-vars
         const { pending_routes, ...sanitizedFitnessData } = fitnessData;
-        submittedTypeData['FITNESS'] = sanitizedFitnessData;
+        submittedTypeData[JournalType.FITNESS] = sanitizedFitnessData;
       }
 
       const result = await createJournal({
