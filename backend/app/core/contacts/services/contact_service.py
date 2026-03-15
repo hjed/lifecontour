@@ -873,22 +873,22 @@ class ContactService:
             "tags": [],
         }
 
-        if contact.methods:
+        if contact.methods is not None:
             saved_entities["methods"] = await self._save_contact_methods(
                 contact_id, contact.methods, transaction
             )
 
-        if contact.addresses:
+        if contact.addresses is not None:
             saved_entities["addresses"] = await self._save_contact_addresses(
                 contact_id, contact.addresses, transaction
             )
 
-        if contact.notes:
+        if contact.notes is not None:
             saved_entities["notes"] = await self._save_contact_notes(
                 contact_id, contact.notes, transaction
             )
 
-        if contact.tags:
+        if contact.tags is not None:
             saved_entities["tags"] = await self._save_contact_tags(
                 contact_id, contact.tags, transaction
             )
@@ -906,18 +906,22 @@ class ContactService:
         # If methods/addresses/notes/tags were provided, use the new ones
         # Otherwise, preserve the existing ones from the current contact
         saved_contact.methods = (
-            saved_entities["methods"] if contact.methods else current_contact.methods
+            saved_entities["methods"]
+            if contact.methods is not None
+            else current_contact.methods
         )
         saved_contact.addresses = (
             saved_entities["addresses"]
-            if contact.addresses
+            if contact.addresses is not None
             else current_contact.addresses
         )
         saved_contact.notes = (
-            saved_entities["notes"] if contact.notes else current_contact.notes
+            saved_entities["notes"]
+            if contact.notes is not None
+            else current_contact.notes
         )
         saved_contact.tags = (
-            saved_entities["tags"] if contact.tags else current_contact.tags
+            saved_entities["tags"] if contact.tags is not None else current_contact.tags
         )
         return saved_contact
 
@@ -1084,19 +1088,19 @@ class ContactService:
     ) -> None:
         """Remove existing relations when updating contact."""
         # Only replace methods if new methods are provided
-        if contact.methods:
+        if contact.methods is not None:
             await self.contact_repo.delete_all_methods(contact_id)
 
         # Only replace addresses if new addresses are provided
-        if contact.addresses:
+        if contact.addresses is not None:
             await self.contact_repo.delete_all_addresses(contact_id)
 
         # Only replace notes if new notes are provided
-        if contact.notes:
+        if contact.notes is not None:
             await self.contact_repo.delete_all_notes(contact_id)
 
         # Only replace tags if new tags are provided
-        if contact.tags:
+        if contact.tags is not None:
             # Remove all existing tags first
             for current_tag in current_contact.tags:
                 if current_tag.id is not None:

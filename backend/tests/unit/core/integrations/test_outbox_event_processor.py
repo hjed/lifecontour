@@ -11,7 +11,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
 import pytest
-from core_shared.models.contacts.entities import Contact, ContactMethod, MethodType
+from core_shared.models.contacts.entities import Contact, ContactMethod, MethodType, Tag
+from core_shared.models.contacts.value_objects import TagName
 from core_shared.models.outbox import OutboxEvent
 from sqlalchemy.ext.asyncio import AsyncConnection
 
@@ -593,3 +594,91 @@ class TestOutboxEventProcessor:
             "Outbox event has permanent invalid payload"
         )
         mock_contact_service.create_contact.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_resolve_contact_tags_returns_none_if_tags_not_in_payload(
+        self, processor: OutboxEventProcessor
+    ):
+        """If incoming tags are None/omitted, it should return None to avoid overwriting."""
+        result = await processor._resolve_contact_tags(
+            contact_data={"first_name": "Test"},
+            existing_reference_data=None,
+            existing_contact_tags=[],
+        )
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_resolve_contact_tags_preserves_local_only_tags(
+        self, processor: OutboxEventProcessor, mock_tag_repo: AsyncMock
+    ):
+        """Locally added tags (not in synced_tags history) should be preserved."""
+        # mock_tag_repo fixture needs to return our dict
+        mock_tag_repo.find_by_names.return_value = {
+            "incoming": Tag(id=1, name=TagName("incoming")),
+            "local": Tag(id=2, name=TagName("local")),
+        }
+
+        result = await processor._resolve_contact_tags(
+            contact_data={"tags": [{"name": "incoming"}]},
+            existing_reference_data='{"synced_tags": ["old_incoming"]}',
+            existing_contact_tags=[Tag(id=2, name=TagName("local"))],
+        )
+
+        assert result is not None
+        assert len(result) == 2
+        names = [str(t.name) for t in result]
+        assert "incoming" in names
+        assert "local" in names
+
+    @pytest.mark.asyncio
+    async def test_resolve_contact_tags_removes_previously_synced_tags(
+        self, processor: OutboxEventProcessor, mock_tag_repo: AsyncMock
+    ):
+        """Tags that were synced previously but are missing from inbound should be removed."""
+        mock_tag_repo.find_by_names.return_value = {
+            "new_incoming": Tag(id=1, name=TagName("new_incoming")),
+            "local": Tag(id=2, name=TagName("local")),
+        }
+
+        # 'removed_incoming' is in reference_data so we know it came from the integration
+        result = await processor._resolve_contact_tags(
+            contact_data={"tags": [{"name": "new_incoming"}]},
+            existing_reference_data='{"synced_tags": ["removed_incoming"]}',
+            existing_contact_tags=[
+                Tag(id=2, name=TagName("local")),
+                Tag(id=3, name=TagName("removed_incoming")),
+            ],
+        )
+
+        assert result is not None
+        assert len(result) == 2
+        names = [str(t.name) for t in result]
+        assert "new_incoming" in names
+        assert "local" in names
+        assert "removed_incoming" not in names
+
+    @pytest.mark.asyncio
+    async def test_resolve_contact_tags_creates_missing_inbound_tags(
+        self, processor: OutboxEventProcessor, mock_tag_repo: AsyncMock
+    ):
+        """Tags not found in repository are saved to DB before being assigned."""
+        mock_tag_repo.find_by_names.return_value = {}  # Empty DB
+
+        def mock_save(tag: Tag) -> Tag:
+            return Tag(id=99, name=tag.name)
+
+        mock_tag_repo.save.side_effect = mock_save
+
+        result = await processor._resolve_contact_tags(
+            contact_data={"tags": [{"name": "missing1"}, {"name": "missing2"}]},
+            existing_reference_data=None,
+            existing_contact_tags=[],
+        )
+
+        assert result is not None
+        assert len(result) == 2
+        assert result[0].id == 99
+        assert str(result[0].name) == "missing1"
+        assert result[1].id == 99
+        assert str(result[1].name) == "missing2"
+        assert mock_tag_repo.save.call_count == 2

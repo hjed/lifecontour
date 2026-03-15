@@ -290,33 +290,30 @@ class OutboxEventProcessor:
 
         return matched_contact
 
-    @staticmethod
     def _parse_reference_data(
-        reference_data: str, reference_id: int | None = None
+        self, reference_data: str, reference_id: int | None = None
     ) -> dict[str, Any] | None:
-        """Safely parse reference data JSON string, with fallback to ast.literal_eval."""
-        import ast
+        """Parse reference_data safely, expecting standard JSON format."""
         import json
 
-        try:
-            try:
-                ref_data = json.loads(reference_data)
-            except json.JSONDecodeError:
-                if len(reference_data) < 10000:
-                    ref_data = ast.literal_eval(reference_data)
-                else:
-                    logger.warning(
-                        "Failed to parse reference_data as JSON and too large for literal_eval",
-                        reference_id=reference_id,
-                        reference_data_preview=reference_data[:200],
-                    )
-                    return None
+        if not reference_data:
+            return None
 
+        try:
+            ref_data = json.loads(reference_data)
             if isinstance(ref_data, dict):
                 return ref_data
+        except json.JSONDecodeError as e:
+            logger.warning(
+                "Failed to parse reference_data as JSON",
+                error=str(e),
+                reference_id=reference_id,
+                reference_data_preview=reference_data[:200],
+            )
         except Exception as e:
             logger.warning(
-                f"Failed to parse reference_data: {e}",
+                "Unexpected error parsing reference_data",
+                error=str(e),
                 reference_id=reference_id,
                 reference_data_preview=reference_data[:200],
             )
@@ -339,7 +336,15 @@ class OutboxEventProcessor:
         if incoming_tags is None:
             return None
 
-        incoming_tag_names = {tag["name"] for tag in incoming_tags}
+        # Preserve incoming order while deduplicating
+        incoming_tag_names_ordered = []
+        for tag in incoming_tags:
+            tag_name = tag["name"]
+            if tag_name not in incoming_tag_names_ordered:
+                incoming_tag_names_ordered.append(tag_name)
+
+        incoming_tag_names_set = set(incoming_tag_names_ordered)
+
         existing_contact_tags = existing_contact_tags or []
         existing_tag_names = {str(tag.name) for tag in existing_contact_tags}
 
@@ -362,20 +367,14 @@ class OutboxEventProcessor:
                             reference_id=existing_reference_id,
                             synced_value=synced,
                         )
-                else:
-                    previously_synced_tags = set(existing_tag_names)
-            else:
-                previously_synced_tags = set(existing_tag_names)
-        else:
-            previously_synced_tags = set(existing_tag_names)
 
         # Tags that are purely local (never synced before)
         local_only_tags = existing_tag_names - previously_synced_tags
 
         # Stable order: inbound tags first, then local only
-        final_tag_names_ordered = list(incoming_tag_names)
+        final_tag_names_ordered = list(incoming_tag_names_ordered)
         for tag_name in sorted(local_only_tags):
-            if tag_name not in final_tag_names_ordered:
+            if tag_name not in incoming_tag_names_set:
                 final_tag_names_ordered.append(tag_name)
 
         if not final_tag_names_ordered:

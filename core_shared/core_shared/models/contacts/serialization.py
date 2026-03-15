@@ -86,6 +86,14 @@ def deserialize_contact(data: dict[str, Any]) -> Contact:
     if not isinstance(data, dict):
         raise ContactDeserializationError("Contact payload must be a dictionary")
 
+    def _get_list(field: str) -> list[Any]:
+        val = data.get(field)
+        if val is None:
+            return []
+        if not isinstance(val, list):
+            raise ContactDeserializationError(f"Field '{field}' must be a list or null")
+        return val
+
     try:
         methods = [
             ContactMethod(
@@ -95,7 +103,7 @@ def deserialize_contact(data: dict[str, Any]) -> Contact:
                 is_primary=method_data.get("is_primary", False),
                 contact_id=0,
             )
-            for method_data in (data.get("methods") or [])
+            for method_data in _get_list("methods")
         ]
 
         addresses = [
@@ -110,17 +118,15 @@ def deserialize_contact(data: dict[str, Any]) -> Contact:
                 is_primary=addr_data.get("is_primary", False),
                 contact_id=0,
             )
-            for addr_data in (data.get("addresses") or [])
+            for addr_data in _get_list("addresses")
         ]
 
         notes = [
             ContactNote(content=note_data["content"], contact_id=0)
-            for note_data in (data.get("notes") or [])
+            for note_data in _get_list("notes")
         ]
 
-        tags = [
-            Tag(name=TagName(tag_data["name"])) for tag_data in (data.get("tags") or [])
-        ]
+        tags = [Tag(name=TagName(tag_data["name"])) for tag_data in _get_list("tags")]
 
         return Contact(
             first_name=data["first_name"],

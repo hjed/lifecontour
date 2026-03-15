@@ -475,9 +475,15 @@ class TestContactServiceIntegration:
             saved_contact.id, saved_client_tag.id, clean_database
         )
 
+        # Fetch full contact with all relations since update_contact uses replacement strategy
+        full_contact_to_update = await contact_service.get_contact_by_id(
+            saved_contact.id
+        )
+        assert full_contact_to_update is not None
+
         # Update contact
-        saved_contact.nick_name = "Johnny"
-        await contact_service.update_contact(saved_contact, clean_database)
+        full_contact_to_update.nick_name = "Johnny"
+        await contact_service.update_contact(full_contact_to_update, clean_database)
 
         # Verify final state
         final_contact = await contact_service.get_contact_by_id(saved_contact.id)
