@@ -30,8 +30,8 @@ dependencies = [
     "structlog==23.2.0",
 
     # Configuration
-    "pydantic==2.5.0",
-    "pydantic-settings==2.1.0",
+    "pydantic==2.12.5",
+    "pydantic-settings==2.13.1",
 
     # Encryption
     "cryptography>=42.0.0",
