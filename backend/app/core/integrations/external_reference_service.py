@@ -39,7 +39,7 @@ class ExternalReferenceService:
         external_system: str,
         external_entity_type: str,
         external_entity_id: str,
-        reference_data: dict[str, Any] | None = None,
+        reference_data: str | None = None,
     ) -> ExternalReference:
         """
         Create an external reference linking internal and external entities.
@@ -87,9 +87,7 @@ class ExternalReferenceService:
                     "external_system": external_system,
                     "external_entity_type": external_entity_type,
                     "external_entity_id": external_entity_id,
-                    "reference_data": (
-                        str(reference_data) if reference_data else None
-                    ),  # Store as JSON string
+                    "reference_data": reference_data,
                 },
             )
 
@@ -114,7 +112,7 @@ class ExternalReferenceService:
                 external_system=external_system,
                 external_entity_type=external_entity_type,
                 external_entity_id=external_entity_id,
-                reference_data=str(reference_data) if reference_data else None,
+                reference_data=reference_data,
                 created_at=row.created_at,
                 updated_at=row.updated_at,
             )

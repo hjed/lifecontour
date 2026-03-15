@@ -729,7 +729,9 @@ def mock_search_service():
 
 
 @pytest.fixture
-def authenticated_search_client(test_settings, mock_search_service, test_user):
+def authenticated_search_client(
+    test_settings, mock_search_service, test_user, async_connection
+):
     """
     Create a test client with authentication and search service mocking.
 
@@ -791,7 +793,6 @@ def authenticated_search_client(test_settings, mock_search_service, test_user):
     from dishka.integrations.fastapi import FastapiProvider
 
     from app.infrastructure.di.contacts import ContactProvider
-    from app.infrastructure.di.database import DatabaseProvider
     from app.infrastructure.di.infrastructure import InfrastructureProvider
     from app.infrastructure.di.integrations import IntegrationProvider
     from app.infrastructure.di.journal import JournalProvider

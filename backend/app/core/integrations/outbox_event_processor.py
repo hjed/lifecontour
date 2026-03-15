@@ -10,6 +10,7 @@ This processor implements production-grade resilience patterns:
 3. Atomic operations with proper transaction handling
 """
 
+import json
 from collections.abc import Sequence
 from typing import Any
 
@@ -456,11 +457,13 @@ class OutboxEventProcessor:
                 external_system=integration_source,
                 external_entity_type="person",
                 external_entity_id=external_id,
-                reference_data={
-                    "resource_name": external_id,
-                    "etag": event_data.get("etag"),
-                    "sync_timestamp": event_data["sync_timestamp"],
-                },
+                reference_data=json.dumps(
+                    {
+                        "resource_name": external_id,
+                        "etag": event_data.get("etag"),
+                        "sync_timestamp": event_data["sync_timestamp"],
+                    }
+                ),
             )
         except Exception as e:
             logger.warning(
