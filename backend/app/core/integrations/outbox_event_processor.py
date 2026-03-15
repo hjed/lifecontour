@@ -144,7 +144,7 @@ class OutboxEventProcessor:
         """Normalize inbound contact data before versioning and persistence."""
         normalized_contact_data = dict(contact_data)
 
-        # Strip explicit None lists so deserialize_contact doesn't fail
+        # Strip explicit None lists so they are treated as "field omitted"
         for list_field in ["methods", "addresses", "notes", "tags"]:
             if (
                 list_field in normalized_contact_data
@@ -295,7 +295,6 @@ class OutboxEventProcessor:
         self, reference_data: str, reference_id: int | None = None
     ) -> dict[str, Any] | None:
         """Parse reference_data safely, expecting standard JSON format."""
-        import json
 
         if not reference_data:
             return None

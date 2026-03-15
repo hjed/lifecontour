@@ -146,7 +146,7 @@ The sequence reflects both user priority and technical dependency:
 **Acceptance Criteria:**
 - [ ] Tags can have one parent and that relationship is exposed consistently through backend schemas and frontend types.
 - [ ] Update `TagName` validation to support `/` as the delimiter for hierarchical tags.
-- [ ] Descendant resolution is implemented centrally rather than duplicated across API and UI.
+- [ ] Descendant resolution is implemented centrally rather than duplicated across API, MCP and UI.
 - [ ] Filtering by a parent tag includes contacts assigned to descendant tags.
 - [ ] Existing flat-tag behaviour continues to work for tags without parents.
 

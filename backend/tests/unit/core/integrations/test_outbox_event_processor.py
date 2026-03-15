@@ -51,6 +51,7 @@ class TestOutboxEventProcessor:
         """Create mock external reference service."""
         service = AsyncMock()
         service.find_by_external_id.return_value = None
+        service.find_external_reference.return_value = None
         service.create_external_reference.return_value = AsyncMock()
         return service
 

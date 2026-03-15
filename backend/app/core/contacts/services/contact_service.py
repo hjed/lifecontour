@@ -958,8 +958,6 @@ class ContactService:
         """Validate contact data including methods and addresses."""
         # Validate email uniqueness if contact has email methods
         if contact.methods:
-            assert contact.methods is not None
-            assert contact.methods is not None
             for method in contact.methods:
                 if method.method_type == MethodType.EMAIL:
                     await self.contact_validation.validate_email_uniqueness(
@@ -968,8 +966,6 @@ class ContactService:
 
         # Validate addresses
         if contact.addresses:
-            assert contact.addresses is not None
-            assert contact.addresses is not None
             for address in contact.addresses:
                 await self.address_validation.validate_with_transaction(
                     address, transaction

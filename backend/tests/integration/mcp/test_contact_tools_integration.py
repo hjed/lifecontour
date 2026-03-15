@@ -282,10 +282,6 @@ class TestContactToolsIntegration:
         )
         if contact.methods is None:
             contact.methods = []
-        if contact.methods is None:
-            contact.methods = []
-        if contact.methods is None:
-            contact.methods = []
         contact.methods.append(email_method)
 
         # Add phone method (attached before creation)
@@ -297,10 +293,6 @@ class TestContactToolsIntegration:
         )
         if contact.methods is None:
             contact.methods = []
-        if contact.methods is None:
-            contact.methods = []
-        if contact.methods is None:
-            contact.methods = []
         contact.methods.append(phone_method)
 
         # Add note (attached before creation)
@@ -308,10 +300,6 @@ class TestContactToolsIntegration:
             content="Met at conference",
             contact_id=0,  # Will be set when contact is saved
         )
-        if contact.notes is None:
-            contact.notes = []
-        if contact.notes is None:
-            contact.notes = []
         if contact.notes is None:
             contact.notes = []
         contact.notes.append(note)
@@ -335,7 +323,6 @@ class TestContactToolsIntegration:
         assert retrieved_contact.get_primary_phone() == "+1234567890"
         assert retrieved_contact.notes is not None
         assert len(retrieved_contact.notes) == 1
-        assert retrieved_contact.notes is not None
         assert retrieved_contact.notes[0].content == "Met at conference"
 
     @pytest.mark.asyncio
@@ -446,10 +433,6 @@ class TestContactToolsIntegration:
         )
         if contact.methods is None:
             contact.methods = []
-        if contact.methods is None:
-            contact.methods = []
-        if contact.methods is None:
-            contact.methods = []
         contact.methods.append(email_method)
 
         # Add phone method (same as MCP tool)
@@ -461,10 +444,6 @@ class TestContactToolsIntegration:
         )
         if contact.methods is None:
             contact.methods = []
-        if contact.methods is None:
-            contact.methods = []
-        if contact.methods is None:
-            contact.methods = []
         contact.methods.append(phone_method)
 
         # Add note (same as MCP tool)
@@ -472,10 +451,6 @@ class TestContactToolsIntegration:
             content="Created via MCP tool integration test",
             contact_id=0,  # Will be set when contact is saved
         )
-        if contact.notes is None:
-            contact.notes = []
-        if contact.notes is None:
-            contact.notes = []
         if contact.notes is None:
             contact.notes = []
         contact.notes.append(note)
@@ -609,19 +584,11 @@ class TestContactToolsIntegration:
         )
         if original_contact.methods is None:
             original_contact.methods = []
-        if original_contact.methods is None:
-            original_contact.methods = []
-        if original_contact.methods is None:
-            original_contact.methods = []
         original_contact.methods.append(original_email)
 
         # Create original tag
         original_tag = Tag(name=TagName("original"))
         saved_original_tag = await tag_repo.save(original_tag)
-        if original_contact.tags is None:
-            original_contact.tags = []
-        if original_contact.tags is None:
-            original_contact.tags = []
         if original_contact.tags is None:
             original_contact.tags = []
         original_contact.tags.append(saved_original_tag)
@@ -650,10 +617,6 @@ class TestContactToolsIntegration:
         )
         if updated_contact.methods is None:
             updated_contact.methods = []
-        if updated_contact.methods is None:
-            updated_contact.methods = []
-        if updated_contact.methods is None:
-            updated_contact.methods = []
         updated_contact.methods.append(updated_email)
 
         # Add phone method (new)
@@ -665,20 +628,12 @@ class TestContactToolsIntegration:
         )
         if updated_contact.methods is None:
             updated_contact.methods = []
-        if updated_contact.methods is None:
-            updated_contact.methods = []
-        if updated_contact.methods is None:
-            updated_contact.methods = []
         updated_contact.methods.append(phone_method)
 
         # Update tags (replacement strategy) - mix of existing and new
         # Create a new tag for testing
         new_tag = Tag(name=TagName("updated"))
         saved_new_tag = await tag_repo.save(new_tag)
-        if updated_contact.tags is None:
-            updated_contact.tags = []
-        if updated_contact.tags is None:
-            updated_contact.tags = []
         if updated_contact.tags is None:
             updated_contact.tags = []
         updated_contact.tags.append(saved_new_tag)
