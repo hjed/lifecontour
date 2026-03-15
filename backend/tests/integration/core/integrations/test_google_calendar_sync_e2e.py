@@ -263,6 +263,16 @@ def _build_mock_calendar_list_events() -> dict[str, Any]:
                 "start": {"dateTime": "2026-03-20T09:00:00+10:00"},
                 "end": {"dateTime": "2026-03-20T09:30:00+10:00"},
                 "location": "Room 42",
+                "attendees": [
+                    {
+                        "email": "invitee-e2e@example.com",
+                        "responseStatus": "accepted",
+                    },
+                    {
+                        "email": "unknown-e2e@example.com",
+                        "responseStatus": "needsAction",
+                    },
+                ],
             }
         ],
         "nextSyncToken": "calendar-sync-token-after-e2e",
@@ -383,6 +393,29 @@ async def test_calendar_sync_flow_runs_through_arq_and_outbox(
             google_calendar_id="primary",
         )
 
+        # Insert a test contact whose email matches the mock attendee
+        await async_connection.execute(
+            text("""
+                INSERT INTO contacts (first_name, last_name)
+                VALUES ('E2E', 'Invitee')
+            """),
+        )
+        contact_id = (
+            await async_connection.execute(
+                text("""
+                    SELECT id FROM contacts
+                    WHERE first_name = 'E2E'
+                """),
+            )
+        ).scalar_one()
+        await async_connection.execute(
+            text("""
+                INSERT INTO contact_methods (contact_id, method_type, value, is_primary)
+                VALUES (:contact_id, 'email', :email, true)
+            """),
+            {"contact_id": contact_id, "email": "invitee-e2e@example.com"},
+        )
+
         # ── Step 2: Enqueue the sync task ────────────────────────────
         job = await redis_pool.enqueue_job(
             "sync_calendar_events",
@@ -490,6 +523,26 @@ async def test_calendar_sync_flow_runs_through_arq_and_outbox(
         assert all(row[1] for row in processed_rows), (
             f"All journal_event outbox events should be processed: {processed_rows}"
         )
+
+        # ── Step 10: Assert invitee relationship created ─────────────
+        invitee_rows = list(
+            (
+                await async_connection.execute(
+                    text("""
+                        SELECT contact_id, relationship_type
+                        FROM journal_contact_relationships
+                        WHERE journal_id = :journal_id
+                    """),
+                    {"journal_id": journal_row.id},
+                )
+            ).fetchall()
+        )
+        # Only the known contact (invitee-e2e@example.com) should appear
+        assert len(invitee_rows) == 1, (
+            f"Expected 1 INVITEE relationship, got: {invitee_rows}"
+        )
+        assert invitee_rows[0].contact_id == contact_id
+        assert invitee_rows[0].relationship_type == "INVITEE"
 
     finally:
         await redis_pool.flushdb()

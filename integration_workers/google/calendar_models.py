@@ -32,6 +32,17 @@ class GoogleEventStartEnd(BaseModel):
     )
 
 
+class GoogleEventAttendee(BaseModel):
+    """Attendee of a Google Calendar event."""
+
+    email: str = Field(..., description="The attendee's email address")
+    response_status: str | None = Field(
+        None,
+        alias="responseStatus",
+        description="The attendee's response status (needsAction, declined, tentative, accepted)",
+    )
+
+
 class GoogleEvent(BaseModel):
     """Transformer-facing model for a Google Event."""
 
@@ -63,6 +74,9 @@ class GoogleEvent(BaseModel):
         None, description="The end time of the event"
     )
     etag: str | None = Field(None, description="ETag of the resource")
+    attendees: list[GoogleEventAttendee] = Field(
+        default_factory=list, description="The attendees of the event"
+    )
 
     @classmethod
     def from_api_response(cls, data: dict[str, Any]) -> "GoogleEvent":

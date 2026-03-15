@@ -44,7 +44,9 @@ class InboundSyncClassifier:
     """Determines the sync action for each inbound Google Calendar event.
 
     Uses ETag comparison and sync_capability checks to decide whether to
-    create, update, skip, or flag a conflict for each event.
+    create, update, or skip each event. Conflict detection (e.g. protected
+    local edits) is handled at the backend level by InboundFieldMerger,
+    not by this classifier.
     """
 
     def classify_inbound_event(

@@ -2289,9 +2289,9 @@ async def sync_calendar_events(
     Returns:
         Task result dictionary with sync status and metrics
     """
-    from calendar_models import GoogleEvent
     from core_shared.models.outbox import OutboxEvent
 
+    from calendar_models import GoogleEvent
     from event_transformer import GoogleEventTransformer
     from inbound_sync import InboundSyncAction, InboundSyncClassifier
 
@@ -2324,9 +2324,7 @@ async def sync_calendar_events(
 
     try:
         async with session_factory() as session:
-            client = await _create_google_client(
-                session, user_id, google_account_email
-            )
+            client = await _create_google_client(session, user_id, google_account_email)
 
             # Fetch synced calendars from DB
             cal_stmt = text("""
@@ -2366,10 +2364,7 @@ async def sync_calendar_events(
                 existing_sync_token = token_result.scalar()
 
                 # Decide whether to use sync token or time_min
-                use_sync_token = (
-                    sync_type != "full"
-                    and existing_sync_token is not None
-                )
+                use_sync_token = sync_type != "full" and existing_sync_token is not None
 
                 list_kwargs: dict[str, Any] = {
                     "calendar_id": google_calendar_id,
@@ -2378,19 +2373,32 @@ async def sync_calendar_events(
                     list_kwargs["sync_token"] = existing_sync_token
                 else:
                     # Full sync: fetch events from 90 days ago
-                    time_min = (
-                        datetime.now(UTC) - timedelta(days=90)
-                    ).isoformat()
+                    time_min = (datetime.now(UTC) - timedelta(days=90)).isoformat()
                     list_kwargs["time_min"] = time_min
 
-                # Fetch events from Google
-                events_response = await client.list_events(**list_kwargs)
+                # Fetch events from Google (with pagination)
+                all_raw_events: list[dict[str, Any]] = []
+                new_sync_token = None
+                page_token = None
 
-                google_events = events_response.get("items", [])
-                new_sync_token = events_response.get("nextSyncToken")
+                while True:
+                    page_kwargs = dict(list_kwargs)
+                    if page_token:
+                        page_kwargs["page_token"] = page_token
+                    events_response = await client.list_events(**page_kwargs)
+
+                    all_raw_events.extend(events_response.get("items", []))
+
+                    # Only persist nextSyncToken from the final page
+                    if "nextSyncToken" in events_response:
+                        new_sync_token = events_response["nextSyncToken"]
+
+                    page_token = events_response.get("nextPageToken")
+                    if not page_token:
+                        break
 
                 # Process each event
-                for raw_event in google_events:
+                for raw_event in all_raw_events:
                     try:
                         google_event = GoogleEvent.from_api_response(raw_event)
 
@@ -2449,9 +2457,23 @@ async def sync_calendar_events(
                             "calendar_id": str(calendar_id),
                             "is_all_day": calendar_info.is_all_day,
                             "location": calendar_info.location,
-                            "start_time": calendar_info.start_time.isoformat() if calendar_info.start_time else None,
-                            "end_time": calendar_info.end_time.isoformat() if calendar_info.end_time else None,
+                            "start_time": calendar_info.start_time.isoformat()
+                            if calendar_info.start_time
+                            else None,
+                            "end_time": calendar_info.end_time.isoformat()
+                            if calendar_info.end_time
+                            else None,
                         }
+
+                        # Extract attendee emails as contact relationships
+                        contact_relationships = [
+                            {
+                                "email": attendee.email,
+                                "relationship_type": "INVITEE",
+                            }
+                            for attendee in google_event.attendees
+                            if attendee.email
+                        ]
 
                         # Determine sync action string
                         if action == InboundSyncAction.CREATE_JOURNAL:
@@ -2478,6 +2500,7 @@ async def sync_calendar_events(
                             sync_action=sync_action,
                             etag=google_event.etag,
                             existing_journal_id=existing_journal_id,
+                            contact_relationships=contact_relationships,
                         )
                         session.add(outbox_event)
                         metrics["events_processed"] += 1
@@ -2491,7 +2514,7 @@ async def sync_calendar_events(
                         )
                         metrics["errors"] += 1
 
-                # Save sync token
+                # Save sync token (UPSERT pattern)
                 if new_sync_token:
                     save_token_stmt = text("""
                         UPDATE user_google_integration
@@ -2499,6 +2522,7 @@ async def sync_calendar_events(
                             updated_at = :updated_at
                         WHERE user_id = :user_id
                         AND google_account_email = :email
+                        AND calendar_events_sync_token IS DISTINCT FROM :sync_token
                     """)
                     await session.execute(
                         save_token_stmt,

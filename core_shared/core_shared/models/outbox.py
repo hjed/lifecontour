@@ -161,6 +161,7 @@ class OutboxEvent(Base):
         sync_action: str,
         etag: str | None = None,
         existing_journal_id: int | None = None,
+        contact_relationships: list[dict[str, str]] | None = None,
     ) -> "OutboxEvent":
         """
         Create an outbox event for journal calendar event synchronization.
@@ -174,6 +175,9 @@ class OutboxEvent(Base):
             sync_action: Type of sync action ('created', 'updated', 'conflicted')
             etag: External system's version identifier (e.g., Google ETag)
             existing_journal_id: ID of existing journal if updating
+            contact_relationships: List of contact relationship dicts with
+                'email' and 'relationship_type' keys. Generic format supports
+                INVITEE, PARTICIPANT, ABOUT, etc. for future integrations.
 
         Returns:
             OutboxEvent instance ready to be saved
@@ -190,6 +194,7 @@ class OutboxEvent(Base):
                 "sync_action": sync_action,
                 "etag": etag,
                 "existing_journal_id": existing_journal_id,
+                "contact_relationships": contact_relationships or [],
             },
             aggregate_id=existing_journal_id or 0,
         )

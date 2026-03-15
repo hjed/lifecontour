@@ -1,15 +1,12 @@
 """Unit tests for sync_calendar_events ARQ task."""
 
 import uuid
-from datetime import UTC, datetime
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 # We need to import after setting up env vars (conftest handles this)
-from calendar_models import GoogleEvent, GoogleEventStartEnd
-from core_shared.models.outbox import OutboxEvent
 
 
 def _make_google_event(
@@ -91,7 +88,9 @@ class TestSyncCalendarEvents:
         cal_result.fetchall.return_value = []
         mock_session.execute.return_value = cal_result
 
-        with patch("worker._create_google_client", new_callable=AsyncMock) as mock_create:
+        with patch(
+            "worker._create_google_client", new_callable=AsyncMock
+        ) as mock_create:
             mock_create.return_value = MagicMock()
             result = await sync_calendar_events(
                 mock_ctx, "test@example.com", "user-1", "full"
@@ -122,8 +121,8 @@ class TestSyncCalendarEvents:
         link_result.fetchone.return_value = None
 
         mock_session.execute.side_effect = [
-            cal_result,   # calendar query
-            token_result, # sync token query
+            cal_result,  # calendar query
+            token_result,  # sync token query
             link_result,  # existing link lookup
             MagicMock(),  # sync token update
         ]
@@ -136,7 +135,11 @@ class TestSyncCalendarEvents:
         mock_client = MagicMock()
         mock_client.list_events = AsyncMock(return_value=google_events)
 
-        with patch("worker._create_google_client", new_callable=AsyncMock, return_value=mock_client):
+        with patch(
+            "worker._create_google_client",
+            new_callable=AsyncMock,
+            return_value=mock_client,
+        ):
             result = await sync_calendar_events(
                 mock_ctx, "test@example.com", "user-1", "full"
             )
@@ -184,13 +187,18 @@ class TestSyncCalendarEvents:
         mock_client = MagicMock()
         mock_client.list_events = AsyncMock(return_value=google_events)
 
-        with patch("worker._create_google_client", new_callable=AsyncMock, return_value=mock_client):
+        with patch(
+            "worker._create_google_client",
+            new_callable=AsyncMock,
+            return_value=mock_client,
+        ):
             result = await sync_calendar_events(
                 mock_ctx, "test@example.com", "user-1", "full"
             )
 
         assert result["status"] == "success"
         # No outbox events should be created for unchanged event
+        mock_session.add.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_sync_saves_calendar_sync_token(
@@ -220,7 +228,11 @@ class TestSyncCalendarEvents:
         mock_client = MagicMock()
         mock_client.list_events = AsyncMock(return_value=google_events)
 
-        with patch("worker._create_google_client", new_callable=AsyncMock, return_value=mock_client):
+        with patch(
+            "worker._create_google_client",
+            new_callable=AsyncMock,
+            return_value=mock_client,
+        ):
             result = await sync_calendar_events(
                 mock_ctx, "test@example.com", "user-1", "full"
             )
@@ -257,12 +269,69 @@ class TestSyncCalendarEvents:
         mock_client = MagicMock()
         mock_client.list_events = AsyncMock(return_value=google_events)
 
-        with patch("worker._create_google_client", new_callable=AsyncMock, return_value=mock_client):
+        with patch(
+            "worker._create_google_client",
+            new_callable=AsyncMock,
+            return_value=mock_client,
+        ):
             result = await sync_calendar_events(
                 mock_ctx, "test@example.com", "user-1", "smart"
             )
 
         assert result["status"] == "success"
         # list_events should have been called without sync_token (i.e., with time_min)
-        call_kwargs = mock_client.list_events.call_args
-        assert call_kwargs is not None
+        call_kwargs = mock_client.list_events.call_args.kwargs
+        assert "time_min" in call_kwargs
+        assert "sync_token" not in call_kwargs
+
+    @pytest.mark.asyncio
+    async def test_sync_paginates_events(
+        self, mock_ctx: dict, mock_session: AsyncMock
+    ) -> None:
+        """Should follow nextPageToken until exhausted, collecting all events."""
+        from worker import sync_calendar_events
+
+        synced_cal = _make_calendar_row(is_synced_to_google=True)
+        cal_result = MagicMock()
+        cal_result.fetchall.return_value = [synced_cal]
+        token_result = MagicMock()
+        token_result.scalar.return_value = None
+
+        # Existing link lookup (none found) — used per event
+        link_result = MagicMock()
+        link_result.fetchone.return_value = None
+
+        mock_session.execute.side_effect = [
+            cal_result,
+            token_result,
+            link_result,  # link lookup for event on page 1
+            link_result,  # link lookup for event on page 2
+            MagicMock(),  # sync token save
+        ]
+
+        page_1 = {
+            "items": [_make_google_event(event_id="event-page1")],
+            "nextPageToken": "page2-token",
+        }
+        page_2 = {
+            "items": [_make_google_event(event_id="event-page2")],
+            "nextSyncToken": "final-sync-token",
+        }
+
+        mock_client = MagicMock()
+        mock_client.list_events = AsyncMock(side_effect=[page_1, page_2])
+
+        with patch(
+            "worker._create_google_client",
+            new_callable=AsyncMock,
+            return_value=mock_client,
+        ):
+            result = await sync_calendar_events(
+                mock_ctx, "test@example.com", "user-1", "full"
+            )
+
+        assert result["status"] == "success"
+        # list_events should have been called twice (two pages)
+        assert mock_client.list_events.call_count == 2
+        # Two outbox events should be added (one per page)
+        assert mock_session.add.call_count == 2
