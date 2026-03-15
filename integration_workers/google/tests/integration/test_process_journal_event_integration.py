@@ -3,7 +3,7 @@
 import uuid
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from sqlalchemy import text
@@ -319,3 +319,155 @@ class TestProcessJournalEventIntegration:
         mock_google_client.delete_event.assert_called_once_with(
             external_event_id, google_calendar_id
         )
+
+    async def test_process_journal_event_orphan_delete_fails_sets_errored(
+        self, db_session
+    ):
+        """Test that if deleting an orphaned link fails with non-404, the link is marked errored."""
+        user_id = str(uuid.uuid4())
+        google_email = f"test_{uuid.uuid4().hex[:8]}@example.com"
+        calendar_id_1 = str(uuid.uuid4())  # old calendar
+        calendar_id_2 = str(uuid.uuid4())  # new calendar
+
+        # Setup user and both calendars
+        await db_session.execute(
+            text(
+                "INSERT INTO user_google_integration (user_id, google_account_email, created_at, updated_at) VALUES (:user_id, :email, now(), now())"
+            ),
+            {"user_id": user_id, "email": google_email},
+        )
+        await db_session.execute(
+            text(
+                "INSERT INTO calendars (id, user_id, name, color, is_synced_to_google) VALUES (:id, :user_id, 'Cal 1', '#FF0000', true)"
+            ),
+            {"id": calendar_id_1, "user_id": user_id},
+        )
+        await db_session.execute(
+            text(
+                "INSERT INTO calendars (id, user_id, name, color, is_synced_to_google) VALUES (:id, :user_id, 'Cal 2', '#00FF00', true)"
+            ),
+            {"id": calendar_id_2, "user_id": user_id},
+        )
+
+        # Setup journal
+        event_start = datetime.now(UTC)
+        event_end = event_start + timedelta(hours=1)
+        result = await db_session.execute(
+            text(
+                "INSERT INTO journals (user_id, title, content, event_date_range_start, event_date_range_end) VALUES (:user_id, 'Title', 'Content', :start, :end) RETURNING id"
+            ),
+            {"user_id": user_id, "start": event_start, "end": event_end},
+        )
+        journal_id = result.scalar()
+
+        # Current calendar is calendar 2
+        await db_session.execute(
+            text(
+                "INSERT INTO journal_calendar_info (journal_id, calendar_id, is_all_day, location) VALUES (:journal_id, :calendar_id, false, 'Loc')"
+            ),
+            {"journal_id": journal_id, "calendar_id": calendar_id_2},
+        )
+
+        # Orphan link on calendar 1
+        await db_session.execute(
+            text(
+                "INSERT INTO journal_external_event_links (journal_id, calendar_id, external_event_id, sync_capability, sync_status, created_at, updated_at) VALUES (:journal_id, :calendar_id, 'orphan_123', 'outbound', 'synced', now(), now())"
+            ),
+            {"journal_id": journal_id, "calendar_id": calendar_id_1},
+        )
+        await db_session.commit()
+
+        from googleapiclient.errors import HttpError
+
+        from worker import process_journal_event
+
+        @asynccontextmanager
+        async def mock_session_factory():
+            yield db_session
+
+        ctx = {"session_factory": mock_session_factory, "job_id": "test_orphan"}
+
+        mock_google_client = AsyncMock()
+        mock_google_auth_service = AsyncMock()
+        mock_google_auth_service.get_access_token.return_value = "token"
+
+        # Mock delete_event to raise a non-404 error
+        mock_resp = MagicMock()
+        mock_resp.status = 500
+        mock_resp.reason = "Internal Server Error"
+
+        mock_google_client.delete_event.side_effect = HttpError(
+            resp=mock_resp, content=b"error"
+        )
+
+        # And mock create_event for the normal flow
+        mock_google_client.create_event.return_value = {"id": "new_event_123"}
+
+        with (
+            patch("worker.GoogleAuthService", return_value=mock_google_auth_service),
+            patch("worker.GoogleAPIClient", return_value=mock_google_client),
+        ):
+            result = await process_journal_event(
+                ctx=ctx,
+                event_type="JournalUpdated",
+                event_data={
+                    "journal_id": journal_id,
+                    "changed_fields": {"title": ["Old", "New"]},
+                },
+            )
+
+        # Check DB to see if orphan link is 'errored'
+        result = await db_session.execute(
+            text(
+                "SELECT sync_status FROM journal_external_event_links WHERE journal_id = :journal_id AND calendar_id = :calendar_id"
+            ),
+            {"journal_id": journal_id, "calendar_id": calendar_id_1},
+        )
+        status = result.scalar()
+        assert status == "errored"
+
+    async def test_process_journal_event_concurrent_create_ignores_duplicate(
+        self, db_session
+    ):
+        """Test that duplicate create jobs correctly abort if another job holds the lock."""
+        user_id = str(uuid.uuid4())
+        google_email = f"test_{uuid.uuid4().hex[:8]}@example.com"
+        calendar_id = str(uuid.uuid4())
+
+        journal_id = await _setup_journal_event_test_data(
+            db_session, user_id, google_email, calendar_id, "Concurrent Test", False
+        )
+
+        # Insert a pending lock simulating another worker starting creation
+        await db_session.execute(
+            text(
+                "INSERT INTO journal_external_event_links (journal_id, calendar_id, sync_capability, sync_status, created_at, updated_at) VALUES (:journal_id, :calendar_id, 'outbound', 'pending', now(), now())"
+            ),
+            {"journal_id": journal_id, "calendar_id": calendar_id},
+        )
+        await db_session.commit()
+
+        from worker import process_journal_event
+
+        @asynccontextmanager
+        async def mock_session_factory():
+            yield db_session
+
+        ctx = {"session_factory": mock_session_factory, "job_id": "test_concurrent"}
+
+        mock_google_client = AsyncMock()
+        mock_google_auth_service = AsyncMock()
+
+        with (
+            patch("worker.GoogleAuthService", return_value=mock_google_auth_service),
+            patch("worker.GoogleAPIClient", return_value=mock_google_client),
+        ):
+            result = await process_journal_event(
+                ctx=ctx,
+                event_type="JournalCreated",
+                event_data={"journal_id": journal_id},
+            )
+
+        assert result["status"] == "ignored"
+        assert result["reason"] == "concurrent_create"
+        mock_google_client.create_event.assert_not_called()
