@@ -14,7 +14,7 @@ from collections.abc import Sequence
 from typing import Any
 
 import structlog
-from core_shared.models.contacts.entities import Contact
+from core_shared.models.contacts.entities import Contact, Tag
 from core_shared.models.contacts.serialization import (
     ContactDeserializationError,
     deserialize_contact,
@@ -75,6 +75,9 @@ class OutboxEventProcessor:
         self.connection = connection
         self.external_reference_service = ExternalReferenceService(connection)
         self.sync_metadata_repo = SyncMetadataRepository(connection)
+        from app.core.contacts.adapters.sql.tag_repository import SqlTagRepository
+
+        self.tag_repo = SqlTagRepository(connection)
 
     async def process_event(self, event: OutboxEvent) -> dict[str, Any]:
         """
@@ -276,6 +279,83 @@ class OutboxEventProcessor:
             )
 
         return matched_contact
+
+    async def _resolve_contact_tags(
+        self,
+        contact_data: dict[str, Any],
+        existing_reference_data: str | None = None,
+        existing_contact_tags: list[Any] | None = None,
+    ) -> list[Tag] | None:
+        """
+        Merge inbound tags with existing local tags based on sync history.
+        Preserves locally created tags that were never synced by the integration.
+        """
+        import ast
+        import json
+
+        incoming_tags = contact_data.get("tags")
+        if incoming_tags is None:
+            return None
+
+        incoming_tag_names = {tag["name"] for tag in incoming_tags}
+        existing_contact_tags = existing_contact_tags or []
+        existing_tag_names = {tag.name for tag in existing_contact_tags}
+
+        # Determine which tags were previously synced
+        previously_synced_tags = set()
+        if existing_reference_data:
+            try:
+                ref_data = {}
+                try:
+                    ref_data = json.loads(existing_reference_data)
+                except json.JSONDecodeError:
+                    if len(existing_reference_data) < 10000:
+                        ref_data = ast.literal_eval(existing_reference_data)
+                    else:
+                        logger.warning(
+                            "Failed to parse reference_data as JSON and too large for literal_eval",
+                            reference_data_preview=existing_reference_data[:200],
+                        )
+
+                if isinstance(ref_data, dict):
+                    synced = ref_data.get("synced_tags", [])
+                    if isinstance(synced, list) and all(
+                        isinstance(x, str) for x in synced
+                    ):
+                        previously_synced_tags = set(synced)
+                    else:
+                        logger.warning(
+                            "synced_tags in reference_data is not a list of strings",
+                            synced_value=synced,
+                        )
+            except Exception as e:
+                logger.warning(
+                    f"Failed to parse synced_tags from reference_data: {e}",
+                    reference_data_preview=existing_reference_data[:200],
+                )
+
+        # Tags that are purely local (never synced before)
+        local_only_tags = existing_tag_names - previously_synced_tags
+
+        # Final tag set: incoming tags + preserved local tags
+        final_tag_names = incoming_tag_names | local_only_tags
+
+        if not final_tag_names:
+            return []
+
+        # Bulk lookup all required tags
+        found_tags_dict = await self.tag_repo.find_by_names(list(final_tag_names))
+
+        resolved_tags = []
+        for tag_name in final_tag_names:
+            if tag_name in found_tags_dict:
+                resolved_tags.append(found_tags_dict[tag_name])
+            else:
+                from core_shared.models.contacts.value_objects import TagName
+
+                resolved_tags.append(Tag(name=TagName(tag_name)))
+
+        return resolved_tags
 
     async def _process_contact_created(self, event: OutboxEvent) -> dict[str, Any]:
         """Process a contact.created event."""
@@ -513,8 +593,37 @@ class OutboxEventProcessor:
         try:
             updated_contact_data = deserialize_contact(contact_data)
 
+            if existing_contact.id is None:
+                raise OutboxEventProcessingError("Existing contact has no ID")
+
             # Preserve the existing contact ID
             updated_contact_data.id = existing_contact.id
+
+            # Refetch full contact to ensure we have current tags
+            full_existing_contact = await self.contact_service.get_contact_by_id(
+                existing_contact.id
+            )
+            existing_tags = full_existing_contact.tags if full_existing_contact else []
+
+            # Find existing integration reference
+            existing_ref = (
+                await self.external_reference_service.find_external_reference(
+                    internal_entity_type="contact",
+                    internal_entity_id=existing_contact.id,
+                    external_system=integration_source,
+                )
+            )
+
+            ref_data_str = existing_ref.reference_data if existing_ref else None
+            resolved_tags = await self._resolve_contact_tags(
+                contact_data,
+                existing_reference_data=ref_data_str,
+                existing_contact_tags=existing_tags,
+            )
+            if resolved_tags is not None:
+                updated_contact_data.tags = resolved_tags
+            else:
+                updated_contact_data.tags = existing_tags
         except ContactDeserializationError as e:
             raise PermanentOutboxEventProcessingError(str(e)) from e
 
@@ -523,6 +632,38 @@ class OutboxEventProcessor:
             updated_contact = await self.contact_service.update_contact(
                 updated_contact_data, self.connection
             )
+
+            # Update reference data with new synced tags
+            if existing_ref:
+                incoming_tag_names = [
+                    tag_data["name"] for tag_data in contact_data.get("tags", [])
+                ]
+                import ast
+                import json
+
+                new_ref_data = {}
+                if existing_ref.reference_data:
+                    try:
+                        try:
+                            new_ref_data = json.loads(existing_ref.reference_data)
+                        except json.JSONDecodeError:
+                            if len(existing_ref.reference_data) < 10000:
+                                new_ref_data = ast.literal_eval(
+                                    existing_ref.reference_data
+                                )
+                            else:
+                                logger.warning(
+                                    "Existing reference_data too large to parse"
+                                )
+                    except Exception:
+                        pass
+
+                if isinstance(new_ref_data, dict):
+                    new_ref_data["synced_tags"] = incoming_tag_names
+                    await self.external_reference_service.update_external_reference(
+                        reference_id=existing_ref.id,
+                        reference_data=json.dumps(new_ref_data),
+                    )
         except Exception as e:
             raise OutboxEventProcessingError(
                 f"Failed to update contact: {str(e)}"
