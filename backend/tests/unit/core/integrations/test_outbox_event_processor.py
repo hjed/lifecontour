@@ -702,3 +702,61 @@ class TestOutboxEventProcessor:
         assert result is not None
         assert len(result) == 1
         assert str(result[0].name) == "local_tag1"
+
+    @pytest.mark.asyncio
+    async def test_process_contact_created_passes_google_sync_provenance(
+        self,
+        processor: OutboxEventProcessor,
+        contact_created_event: OutboxEvent,
+        mock_contact_service: AsyncMock,
+        mock_connection: AsyncConnection,
+        mock_external_ref_service: AsyncMock,
+        mock_sync_metadata_repo: AsyncMock,
+    ):
+        """Test that contact.created events pass changed_by='google_sync' to contact service."""
+        expected_contact = Contact(
+            id=123,
+            first_name="John",
+            last_name="Doe",
+            methods=[
+                ContactMethod(
+                    id=1,
+                    method_type=MethodType.EMAIL,
+                    value="john.doe@example.com",
+                    contact_id=123,
+                    is_primary=True,
+                )
+            ],
+        )
+        mock_contact_service.create_contact.return_value = expected_contact
+        mock_contact_service.get_contact_by_email.return_value = None
+
+        await processor.process_event(contact_created_event)
+
+        # Verify changed_by was passed as keyword argument
+        call_kwargs = mock_contact_service.create_contact.call_args
+        assert call_kwargs.kwargs.get("changed_by") == "google_sync"
+
+    @pytest.mark.asyncio
+    async def test_process_contact_updated_passes_google_sync_provenance(
+        self,
+        processor: OutboxEventProcessor,
+        contact_updated_event: OutboxEvent,
+        mock_contact_service: AsyncMock,
+        mock_connection: AsyncConnection,
+        mock_external_ref_service: AsyncMock,
+        mock_sync_metadata_repo: AsyncMock,
+    ):
+        """Test that contact.updated events pass changed_by='google_sync' to contact service."""
+        existing_contact = Contact(id=123, first_name="John", last_name="Doe", tags=[])
+        mock_contact_service.find_contact_by_external_reference.return_value = (
+            existing_contact
+        )
+        mock_contact_service.get_contact_by_id.return_value = existing_contact
+        mock_contact_service.update_contact.return_value = existing_contact
+
+        await processor.process_event(contact_updated_event)
+
+        # Verify changed_by was passed as keyword argument
+        call_kwargs = mock_contact_service.update_contact.call_args
+        assert call_kwargs.kwargs.get("changed_by") == "google_sync"

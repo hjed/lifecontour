@@ -210,7 +210,10 @@ class ContactService:
         raise error
 
     async def create_contact(
-        self, contact: Contact, transaction: AsyncConnection
+        self,
+        contact: Contact,
+        transaction: AsyncConnection,
+        changed_by: str = "system",
     ) -> Contact:
         """
         Create a new contact with transaction management.
@@ -283,6 +286,7 @@ class ContactService:
         self,
         contact: Contact,
         transaction: AsyncConnection,
+        changed_by: str = "system",
     ) -> Contact:
         """
         Update an existing contact with transaction management.
@@ -344,7 +348,10 @@ class ContactService:
             # Publish update events if there were changes
             if changed_fields:
                 await self._publish_contact_updated_events(
-                    complete_contact, changed_fields, transaction
+                    complete_contact,
+                    changed_fields,
+                    transaction,
+                    changed_by=changed_by,
                 )
 
             return complete_contact
@@ -936,6 +943,7 @@ class ContactService:
         contact: Contact,
         changed_fields: dict[str, Any],
         transaction: AsyncConnection,
+        changed_by: str = "system",
     ) -> None:
         """Publish contact updated events and record history."""
         if contact.id is None:
@@ -943,7 +951,10 @@ class ContactService:
                 "id", "Contact ID is required for event publishing"
             )
         await self.history_service.record_contact_change(
-            contact.id, changed_fields, _transaction=transaction
+            contact.id,
+            changed_fields,
+            changed_by=changed_by,
+            _transaction=transaction,
         )
 
         event = ContactUpdated(contact.id, changed_fields, transaction=transaction)

@@ -284,7 +284,34 @@ async def _load_full_contact(session: AsyncSession, contact_id: int) -> dict[str
     notes_rows = notes_result.fetchall()
     notes = [{"id": row.id, "content": row.content} for row in notes_rows]
 
-    return {"methods": methods, "addresses": addresses, "notes": notes}
+    # Load contact tags
+    tags = await _load_tag_names_for_contact(session, contact_id)
+
+    return {"methods": methods, "addresses": addresses, "notes": notes, "tags": tags}
+
+
+async def _load_tag_names_for_contact(
+    session: AsyncSession, contact_id: int
+) -> list[str]:
+    """
+    Load tag names assigned to a contact.
+
+    Args:
+        session: Database session
+        contact_id: Contact ID
+
+    Returns:
+        List of tag name strings
+    """
+    tags_stmt = text("""
+        SELECT t.name
+        FROM tags t
+        INNER JOIN contact_tag_assignments cta ON t.id = cta.tag_id
+        WHERE cta.contact_id = :contact_id
+        ORDER BY t.name ASC
+    """)
+    tags_result = await session.execute(tags_stmt, {"contact_id": contact_id})
+    return [row.name for row in tags_result.fetchall()]
 
 
 def _transform_names(contact: dict[str, Any]) -> list[dict[str, Any]]:
@@ -492,7 +519,110 @@ def _transform_contact_to_google_person(contact: dict[str, Any]) -> dict[str, An
     if organizations:
         person_data["organizations"] = organizations
 
+    # Transform tags to Google group memberships
+    tag_names = contact.get("tags", [])
+    group_name_to_resource = contact.get("group_name_to_resource", {})
+    if tag_names and group_name_to_resource:
+        memberships = _transform_tags_to_memberships(
+            tag_names, group_name_to_resource
+        )
+        if memberships:
+            person_data["memberships"] = memberships
+
     return person_data
+
+
+def _transform_tags_to_memberships(
+    tag_names: list[str],
+    group_name_to_resource: dict[str, str],
+) -> list[dict[str, Any]]:
+    """
+    Transform local tag names to Google People API memberships format.
+
+    Args:
+        tag_names: List of local tag names
+        group_name_to_resource: Mapping of tag name to Google group resource name
+
+    Returns:
+        List of membership dictionaries in Google format
+    """
+    memberships = []
+    for tag_name in tag_names:
+        resource_name = group_name_to_resource.get(tag_name)
+        if resource_name:
+            memberships.append(
+                {
+                    "contactGroupMembership": {
+                        "contactGroupResourceName": resource_name
+                    }
+                }
+            )
+    return memberships
+
+
+def _build_reverse_group_mapping(
+    forward_mapping: dict[str, str],
+) -> dict[str, str]:
+    """
+    Build a name→resource_name mapping from a resource_name→name mapping.
+
+    The forward mapping (used for pull) maps Google group resource names to
+    display names. The reverse mapping (used for push) maps display names
+    back to resource names.
+
+    Args:
+        forward_mapping: resource_name → display_name mapping
+
+    Returns:
+        display_name → resource_name mapping
+    """
+    return {name: resource_name for resource_name, name in forward_mapping.items()}
+
+
+async def _ensure_google_groups_exist(
+    client: GoogleAPIClient,
+    tag_names: list[str],
+    existing_groups: dict[str, str],
+) -> dict[str, str]:
+    """
+    Ensure Google Contact Groups exist for all local tag names.
+
+    Creates missing groups via the Google API. Returns a complete mapping
+    of tag name → group resource name.
+
+    Args:
+        client: Google Contacts API client
+        tag_names: List of local tag names that need groups
+        existing_groups: Known tag name → group resource name mapping
+
+    Returns:
+        Updated tag name → group resource name mapping
+    """
+    updated_mapping = dict(existing_groups)
+
+    for tag_name in tag_names:
+        if tag_name in updated_mapping:
+            continue
+
+        try:
+            result = await client.create_contact_group(tag_name)
+            resource_name = result.get("resourceName")
+            if resource_name:
+                updated_mapping[tag_name] = resource_name
+                logger.info(
+                    "Created Google Contact Group for local tag",
+                    tag_name=tag_name,
+                    resource_name=resource_name,
+                )
+        except Exception as e:
+            logger.warning(
+                "Failed to create Google Contact Group for tag",
+                tag_name=tag_name,
+                error=str(e),
+            )
+            # Continue without this group — tag won't be synced this cycle
+
+    return updated_mapping
 
 
 async def _create_contact_in_google(
@@ -618,14 +748,19 @@ async def _push_single_contact(
     contact: dict[str, Any],
     google_account_email: str,
     metrics: dict[str, int],
+    group_name_to_resource: dict[str, str] | None = None,
 ) -> None:
     """Push a single contact to Google."""
     from googleapiclient.errors import HttpError
 
     try:
-        # Load full contact data (methods, addresses, notes)
+        # Load full contact data (methods, addresses, notes, tags)
         full_contact_data = await _load_full_contact(session, contact["id"])
         contact.update(full_contact_data)
+
+        # Add group mapping for tag→membership transformation
+        if group_name_to_resource:
+            contact["group_name_to_resource"] = group_name_to_resource
 
         # Transform to Google Person format
         person_data = _transform_contact_to_google_person(contact)
@@ -660,6 +795,7 @@ async def push_contacts_to_google(
     client: GoogleAPIClient,
     contacts: list[dict[str, Any]],
     google_account_email: str,
+    group_name_to_resource: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     """
     Push local contacts to Google.
@@ -683,7 +819,8 @@ async def push_contacts_to_google(
 
     for contact in contacts:
         await _push_single_contact(
-            session, client, contact, google_account_email, metrics
+            session, client, contact, google_account_email, metrics,
+            group_name_to_resource=group_name_to_resource,
         )
 
     logger.info(
