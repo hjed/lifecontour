@@ -228,7 +228,11 @@ class TestProcessJournalEventIntegration:
             assert link.sync_status == "synced"
 
     async def test_process_journal_event_deletes_external_link(self, db_session):
-        """Test that process_journal_event correctly deletes an event in Google Calendar."""
+        """Test that process_journal_event correctly deletes an event in Google Calendar.
+
+        When no google_calendar_id is provided in the event payload, the worker should
+        fall back to the 'primary' calendar.
+        """
         user_id = str(uuid.uuid4())
         google_email = f"test_{uuid.uuid4().hex[:8]}@example.com"
         external_event_id = "to_be_deleted_id_123"
@@ -262,7 +266,7 @@ class TestProcessJournalEventIntegration:
             patch("worker.GoogleAuthService", return_value=mock_google_auth_service),
             patch("worker.GoogleAPIClient", return_value=mock_google_client),
         ):
-            # 3. Call process_journal_event with DELETED action
+            # 3. Call process_journal_event with DELETED action (no google_calendar_id)
             result = await process_journal_event(
                 ctx=ctx,
                 event_type="JournalDeleted",
@@ -277,5 +281,63 @@ class TestProcessJournalEventIntegration:
         assert result["status"] == "success"
         assert result["action"] == "delete"
 
-        # Verify Google API was called
-        mock_google_client.delete_event.assert_called_once_with(external_event_id)
+        # Verify Google API was called with the fallback 'primary' calendar
+        mock_google_client.delete_event.assert_called_once_with(
+            external_event_id, "primary"
+        )
+
+    async def test_process_journal_event_deletes_with_explicit_calendar_id(
+        self, db_session
+    ):
+        """Test that process_journal_event passes google_calendar_id when present."""
+        user_id = str(uuid.uuid4())
+        google_email = f"test_{uuid.uuid4().hex[:8]}@example.com"
+        external_event_id = "to_be_deleted_id_456"
+        google_calendar_id = "some_calendar@group.calendar.google.com"
+
+        await db_session.execute(
+            text("""
+            INSERT INTO user_google_integration (user_id, google_account_email, created_at, updated_at)
+            VALUES (:user_id, :email, now(), now())
+            """),
+            {"user_id": user_id, "email": google_email},
+        )
+
+        from worker import process_journal_event
+
+        @asynccontextmanager
+        async def mock_session_factory():
+            yield db_session
+
+        ctx = {
+            "session_factory": mock_session_factory,
+            "job_id": "test_job_delete_explicit_calendar",
+        }
+
+        mock_google_client = AsyncMock()
+        mock_google_auth_service = AsyncMock()
+        mock_google_auth_service.get_access_token.return_value = "mock_access_token"
+
+        with (
+            patch("worker.GoogleAuthService", return_value=mock_google_auth_service),
+            patch("worker.GoogleAPIClient", return_value=mock_google_client),
+        ):
+            result = await process_journal_event(
+                ctx=ctx,
+                event_type="JournalDeleted",
+                event_data={
+                    "journal_id": 99998,
+                    "user_id": user_id,
+                    "google_calendar_id": google_calendar_id,
+                    "external_identifiers": {"google": [external_event_id]},
+                },
+            )
+
+        assert result["status"] == "success"
+        assert result["action"] == "delete"
+
+        # Verify the explicit calendar ID is passed through
+        mock_google_client.delete_event.assert_called_once_with(
+            external_event_id, google_calendar_id
+        )
+
