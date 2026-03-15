@@ -30,6 +30,7 @@ logger = structlog.get_logger()
 EVENT_TYPE_JOURNAL_EVENT_CREATED = "journal_event.created"
 EVENT_TYPE_JOURNAL_EVENT_UPDATED = "journal_event.updated"
 EVENT_TYPE_JOURNAL_EVENT_CONFLICTED = "journal_event.conflicted"
+EVENT_TYPE_JOURNAL_EVENT_CANCELLED = "journal_event.cancelled"
 
 
 class JournalOutboxEventProcessingError(Exception):
@@ -122,6 +123,8 @@ class JournalOutboxEventProcessor:
             return await self._process_journal_updated(event)
         if event.event_type == EVENT_TYPE_JOURNAL_EVENT_CONFLICTED:
             return await self._process_journal_conflicted(event)
+        if event.event_type == EVENT_TYPE_JOURNAL_EVENT_CANCELLED:
+            return await self._process_journal_cancelled(event)
 
         raise JournalOutboxEventProcessingError(
             f"Unknown journal event type: {event.event_type}"
@@ -378,6 +381,74 @@ class JournalOutboxEventProcessor:
             "external_event_id": external_event_id,
         }
 
+    async def _process_journal_cancelled(self, event: OutboxEvent) -> dict[str, Any]:
+        """
+        Process a journal_event.cancelled event.
+
+        Marks the external event link as cancelled and sets the journal's
+        event_state to 'cancelled'. Does NOT delete the journal (cancellation-first
+        approach per AC2).
+        """
+        event_data: dict[str, Any] = event.event_data  # type: ignore
+        external_event_id = event_data["external_event_id"]
+        calendar_id = event_data["calendar_id"]
+        existing_journal_id = event_data.get("existing_journal_id")
+
+        if existing_journal_id is None:
+            logger.warning(
+                "Cancelled event has no existing_journal_id, skipping",
+                external_event_id=external_event_id,
+            )
+            return {
+                "status": "skipped",
+                "event_type": EVENT_TYPE_JOURNAL_EVENT_CANCELLED,
+                "reason": "no_existing_journal_id",
+            }
+
+        # Mark link as cancelled
+        await self.connection.execute(
+            text("""
+                UPDATE journal_external_event_links
+                SET sync_status = 'cancelled',
+                    updated_at = :now
+                WHERE calendar_id = :calendar_id
+                  AND external_event_id = :external_event_id
+            """),
+            {
+                "calendar_id": UUID(calendar_id),
+                "external_event_id": external_event_id,
+                "now": datetime.now(UTC),
+            },
+        )
+
+        # Set journal event_state to cancelled
+        await self.connection.execute(
+            text("""
+                UPDATE journal_calendar_info
+                SET event_state = 'cancelled',
+                    updated_at = :now
+                WHERE journal_id = :journal_id
+            """),
+            {
+                "journal_id": existing_journal_id,
+                "now": datetime.now(UTC),
+            },
+        )
+
+        logger.info(
+            "Processed journal cancellation",
+            journal_id=existing_journal_id,
+            external_event_id=external_event_id,
+            calendar_id=calendar_id,
+        )
+
+        return {
+            "status": "success",
+            "event_type": EVENT_TYPE_JOURNAL_EVENT_CANCELLED,
+            "journal_id": existing_journal_id,
+            "external_event_id": external_event_id,
+        }
+
     # ── Helper methods ──────────────────────────────────────────────────
 
     @staticmethod
@@ -457,19 +528,23 @@ class JournalOutboxEventProcessor:
 
         start_time = self._parse_time(calendar_info_data.get("start_time"))
         end_time = self._parse_time(calendar_info_data.get("end_time"))
+        event_state = calendar_info_data.get("event_state", "confirmed")
 
         await self.connection.execute(
             text("""
                 INSERT INTO journal_calendar_info
-                    (journal_id, calendar_id, is_all_day, location, start_time, end_time)
+                    (journal_id, calendar_id, is_all_day, location,
+                     start_time, end_time, event_state)
                 VALUES
-                    (:journal_id, :calendar_id, :is_all_day, :location, :start_time, :end_time)
+                    (:journal_id, :calendar_id, :is_all_day, :location,
+                     :start_time, :end_time, :event_state)
                 ON CONFLICT (journal_id) DO UPDATE SET
                     calendar_id = :calendar_id,
                     is_all_day = :is_all_day,
                     location = :location,
                     start_time = :start_time,
                     end_time = :end_time,
+                    event_state = :event_state,
                     updated_at = :now
             """),
             {
@@ -479,6 +554,7 @@ class JournalOutboxEventProcessor:
                 "location": calendar_info_data.get("location"),
                 "start_time": start_time,
                 "end_time": end_time,
+                "event_state": event_state,
                 "now": datetime.now(UTC),
             },
         )

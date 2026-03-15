@@ -42,6 +42,15 @@ export interface EventDateRange {
   end: string; // ISO datetime string
 }
 
+// Event State Enum
+// Values must match backend EventState enum (lowercase)
+export enum EventState {
+  INVITED = 'invited',
+  TENTATIVE = 'tentative',
+  CONFIRMED = 'confirmed',
+  CANCELLED = 'cancelled',
+}
+
 // Type-specific data schemas
 export interface CalendarInfoData {
   calendar_id: string;
@@ -50,6 +59,7 @@ export interface CalendarInfoData {
   is_all_day: boolean;
   location?: string | null;
   sync_invitees: boolean;
+  event_state?: EventState;
 }
 
 export interface MoodData {

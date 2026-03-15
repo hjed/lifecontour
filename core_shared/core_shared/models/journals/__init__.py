@@ -41,6 +41,7 @@ from .constants import (
 )
 from .cross_country_skiing_data import CrossCountrySkiingData
 from .entities import Journal
+from .event_state import EventState
 from .exceptions import (
     AbseilingDataValidationError,
     BushwalkingDataValidationError,
@@ -149,6 +150,7 @@ __all__ = [
     "CrossCountrySkiingData",
     "JoggingData",
     # Enums
+    "EventState",
     "JournalType",
     "JournalContactRelationshipType",
     # Exceptions

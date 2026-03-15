@@ -8,6 +8,7 @@ from core_shared.models.journals import (
     Journal,
     JournalValidationError,
 )
+from core_shared.models.journals.event_state import EventState
 
 from calendar_models import GoogleEvent, GoogleEventStartEnd
 
@@ -18,10 +19,21 @@ class GoogleEventTransformer:
     """Transforms events between Google Calendar API and internal Journal formats."""
 
     def transform_event(
-        self, google_event: GoogleEvent, user_id: str, calendar_id: uuid.UUID
+        self,
+        google_event: GoogleEvent,
+        user_id: str,
+        calendar_id: uuid.UUID,
+        self_email: str | None = None,
     ) -> tuple[Journal, CalendarInfo] | None:
         """
         Transform a GoogleEvent into a Journal and CalendarInfo tuple.
+
+        Args:
+            google_event: The Google Calendar event to transform
+            user_id: The user ID for the journal
+            calendar_id: The calendar UUID for the CalendarInfo
+            self_email: The user's email to match against attendees for
+                        responseStatus → event_state mapping
 
         Returns None if the event is cancelled or should not be synced.
         """
@@ -76,6 +88,8 @@ class GoogleEventTransformer:
             start_time = start_dt.time().replace(tzinfo=None)
             end_time = end_dt.time().replace(tzinfo=None)
 
+        event_state = self._resolve_event_state(google_event, self_email)
+
         calendar_info = CalendarInfo(
             journal_id=None,
             calendar_id=calendar_id,
@@ -83,9 +97,44 @@ class GoogleEventTransformer:
             end_time=end_time,
             is_all_day=is_all_day,
             location=google_event.location,
+            event_state=event_state,
         )
 
         return journal, calendar_info
+
+    def _resolve_event_state(
+        self,
+        google_event: GoogleEvent,
+        self_email: str | None,
+    ) -> EventState:
+        """Resolve event_state from Google event status + self-attendee responseStatus.
+
+        Priority:
+        1. Event-level status "tentative" → TENTATIVE
+        2. Self-attendee responseStatus "needsAction" → INVITED
+        3. Self-attendee responseStatus "tentative" → TENTATIVE
+        4. Self-attendee responseStatus "declined" → keep event-level mapping
+        5. Default: CONFIRMED
+        """
+        # Map event-level status
+        if google_event.status == "tentative":
+            return EventState.TENTATIVE
+
+        base_state = EventState.CONFIRMED
+
+        # Check self-attendee responseStatus override
+        if self_email and google_event.attendees:
+            for attendee in google_event.attendees:
+                if attendee.email.lower() == self_email.lower():
+                    response = attendee.response_status
+                    if response == "needsAction":
+                        return EventState.INVITED
+                    elif response == "tentative":
+                        return EventState.TENTATIVE
+                    # "accepted" or "declined" → use base_state
+                    break
+
+        return base_state
 
     def _parse_event_time(
         self, time_data: GoogleEventStartEnd | None

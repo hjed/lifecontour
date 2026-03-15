@@ -108,7 +108,7 @@ class TestInboundSyncClassifier:
     def test_classify_cancelled_event_with_existing_link(
         self, classifier: InboundSyncClassifier
     ) -> None:
-        """Cancelled event with existing link should be SKIP_CANCELLED."""
+        """Cancelled event with existing link should be CANCEL_JOURNAL."""
         cancelled_event = GoogleEvent(
             id="google-event-cancelled",
             summary="Cancelled Meeting",
@@ -125,7 +125,29 @@ class TestInboundSyncClassifier:
             google_event=cancelled_event,
             existing_link=existing_link,
         )
-        assert result == InboundSyncAction.SKIP_CANCELLED
+        assert result == InboundSyncAction.CANCEL_JOURNAL
+
+    def test_classify_cancelled_event_with_outbound_only_link(
+        self, classifier: InboundSyncClassifier
+    ) -> None:
+        """Cancelled event with outbound-only link should still be CANCEL_JOURNAL."""
+        cancelled_event = GoogleEvent(
+            id="google-event-cancelled",
+            summary="Cancelled Meeting",
+            status="cancelled",
+            etag='"etag-cancelled"',
+            start=GoogleEventStartEnd(date_time="2026-03-20T10:00:00Z"),
+            end=GoogleEventStartEnd(date_time="2026-03-20T11:00:00Z"),
+        )
+        existing_link = _make_link(
+            external_version='"etag-old"',
+            sync_capability="outbound",
+        )
+        result = classifier.classify_inbound_event(
+            google_event=cancelled_event,
+            existing_link=existing_link,
+        )
+        assert result == InboundSyncAction.CANCEL_JOURNAL
 
 
 class TestInboundFieldMerger:

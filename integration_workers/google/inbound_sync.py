@@ -15,6 +15,7 @@ class InboundSyncAction(StrEnum):
 
     CREATE_JOURNAL = "create_journal"
     UPDATE_JOURNAL = "update_journal"
+    CANCEL_JOURNAL = "cancel_journal"
     SKIP_UNCHANGED = "skip_unchanged"
     SKIP_ONE_WAY = "skip_one_way"
     SKIP_CANCELLED = "skip_cancelled"
@@ -63,8 +64,10 @@ class InboundSyncClassifier:
         Returns:
             The action to take for this event
         """
-        # Cancelled events are skipped (Phase 3 handles deletion)
+        # Cancelled events: cancel linked journal or skip if no link
         if google_event.status == "cancelled":
+            if existing_link is not None:
+                return InboundSyncAction.CANCEL_JOURNAL
             return InboundSyncAction.SKIP_CANCELLED
 
         # No existing link → new journal

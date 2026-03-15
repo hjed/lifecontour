@@ -12,6 +12,7 @@ from datetime import datetime, time
 from uuid import UUID
 
 from .constants import MAX_LOCATION_LENGTH
+from .event_state import EventState
 from .exceptions import CalendarInfoValidationError
 
 
@@ -32,6 +33,7 @@ class CalendarInfo:
         is_all_day: Whether this is an all-day event
         location: Optional location string
         sync_invitees: Whether to sync invitees to Google Calendar
+        event_state: Event participation state (invited/tentative/confirmed/cancelled)
         created_at: Creation timestamp
         updated_at: Last update timestamp
     """
@@ -43,6 +45,7 @@ class CalendarInfo:
     is_all_day: bool = False
     location: str | None = None
     sync_invitees: bool = False
+    event_state: EventState = EventState.CONFIRMED
     created_at: datetime | None = None
     updated_at: datetime | None = None
 
@@ -52,6 +55,7 @@ class CalendarInfo:
         self._validate_calendar_id()
         self._validate_times()
         self._validate_location()
+        self._validate_event_state()
 
     def _validate_journal_id(self) -> None:
         """Validate journal_id is positive if provided."""
@@ -105,3 +109,15 @@ class CalendarInfo:
                 "location",
                 f"Location cannot exceed {MAX_LOCATION_LENGTH} characters",
             )
+
+    def _validate_event_state(self) -> None:
+        """Validate event_state is a valid EventState value."""
+        if not isinstance(self.event_state, EventState):
+            try:
+                self.event_state = EventState(self.event_state)
+            except (ValueError, KeyError):
+                raise CalendarInfoValidationError(
+                    "event_state",
+                    f"Invalid event state: {self.event_state}. "
+                    f"Must be one of: {', '.join(e.value for e in EventState)}",
+                ) from None

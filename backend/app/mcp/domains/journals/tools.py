@@ -778,6 +778,9 @@ def _build_calendar_data(calendar_info: Any) -> dict[str, Any]:
         "is_all_day": calendar_info.is_all_day,
         "location": calendar_info.location,
         "sync_invitees": calendar_info.sync_invitees,
+        "event_state": calendar_info.event_state.value
+        if hasattr(calendar_info.event_state, "value")
+        else calendar_info.event_state,
     }
 
 
@@ -1205,6 +1208,7 @@ async def _update_event_data(
         is_all_day=type_data_dict.get("is_all_day", False),
         location=type_data_dict.get("location"),
         sync_invitees=type_data_dict.get("sync_invitees", False),
+        event_state=type_data_dict.get("event_state", "confirmed"),
     )
     await calendar_info_repo.save(calendar_info)
 
