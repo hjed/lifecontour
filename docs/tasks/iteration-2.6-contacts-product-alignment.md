@@ -104,15 +104,15 @@ The sequence reflects both user priority and technical dependency:
 **PR Size:** ~5-7 files
 
 **Acceptance Criteria:**
-- [ ] Importing ordinary Google groups creates or matches local tags consistently.
-- [ ] Group removals in Google remove the corresponding local tag assignment.
-- [ ] Favourite handling continues to work alongside tag membership import.
-- [ ] Slash-path inputs are normalised through the translation layer rather than leaking raw sync names into unrelated code.
+- [x] Importing ordinary Google groups creates or matches local tags consistently.
+- [x] Group removals in Google remove the corresponding local tag assignment.
+- [x] Favourite handling continues to work alongside tag membership import.
+- [x] Slash-path inputs are normalised through the translation layer rather than leaking raw sync names into unrelated code.
 
 **Required Test Coverage:**
-- **Unit:** membership-to-tag mapping, add/remove semantics, matching rules.
-- **Integration:** real-database import scenarios covering created, updated, and removed memberships.
-- **E2E:** end-to-end sync scenario showing imported group changes reflected in the contacts UI.
+- [x] **Unit:** membership-to-tag mapping, add/remove semantics, matching rules.
+- [x] **Integration:** real-database import scenarios covering created, updated, and removed memberships.
+- [x] **E2E:** end-to-end sync scenario showing imported group changes reflected in the contacts UI.
 
 #### Phase 3: Local → Google Push, Conflicts, and Provenance Scaffolding
 **PR Size:** ~5-8 files
