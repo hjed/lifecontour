@@ -1,6 +1,6 @@
 """Domain entities for the contacts domain."""
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
 
@@ -154,11 +154,11 @@ class Contact:
     updated_at: datetime | None = None
 
     # Related entities (loaded separately)
-    methods: list[ContactMethod] = field(default_factory=list)
-    addresses: list[ContactAddress] = field(default_factory=list)
-    notes: list[ContactNote] = field(default_factory=list)
-    tags: list[Tag] = field(default_factory=list)
-    relationships: list["ContactRelationship"] = field(default_factory=list)
+    methods: list[ContactMethod] | None = None
+    addresses: list[ContactAddress] | None = None
+    notes: list[ContactNote] | None = None
+    tags: list[Tag] | None = None
+    relationships: list["ContactRelationship"] | None = None
 
     def __post_init__(self) -> None:
         """Validate contact."""
@@ -204,27 +204,33 @@ class Contact:
 
     def get_primary_email(self) -> str | None:
         """Get primary email address."""
-        for method in self.methods:
-            if method.method_type == MethodType.EMAIL and method.is_primary:
-                return method.value
+        if self.methods:
+            for method in self.methods:
+                if method.method_type == MethodType.EMAIL and method.is_primary:
+                    return method.value
         return None
 
     def get_primary_phone(self) -> str | None:
         """Get primary phone number."""
-        for method in self.methods:
-            if method.method_type == MethodType.PHONE and method.is_primary:
-                return method.value
+        if self.methods:
+            for method in self.methods:
+                if method.method_type == MethodType.PHONE and method.is_primary:
+                    return method.value
         return None
 
     def get_primary_address(self) -> ContactAddress | None:
         """Get primary address."""
-        for address in self.addresses:
-            if address.is_primary:
-                return address
+        if self.addresses:
+            for address in self.addresses:
+                if address.is_primary:
+                    return address
         return None
 
     def add_tag(self, tag: Tag) -> None:
         """Add a tag to the contact."""
+        if self.tags is None:
+            self.tags = []
+
         # Check if tag already exists
         for existing_tag in self.tags:
             if existing_tag.id == tag.id:
@@ -238,7 +244,8 @@ class Contact:
 
     def remove_tag(self, tag_id: int) -> None:
         """Remove a tag from the contact."""
-        self.tags = [tag for tag in self.tags if tag.id != tag_id]
+        if self.tags is not None:
+            self.tags = [tag for tag in self.tags if tag.id != tag_id]
 
     def toggle_favourite(self) -> None:
         """Toggle the favourite status of the contact."""

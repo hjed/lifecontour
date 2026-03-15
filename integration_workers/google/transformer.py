@@ -84,6 +84,11 @@ class GoogleContactTransformer:
             middle_name=middle_name,
             nick_name=nick_name,
             is_favourite=is_favourite,
+            methods=[],
+            addresses=[],
+            notes=[],
+            tags=[],
+            relationships=[],
         )
 
         contact.methods.extend(

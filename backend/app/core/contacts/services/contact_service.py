@@ -476,6 +476,8 @@ class ContactService:
 
             # Find the method to update
             method_to_update = None
+            assert current_contact.methods is not None
+            assert current_contact.methods is not None
             for method in current_contact.methods:
                 if method.id == method_id:
                     method_to_update = method
@@ -564,6 +566,8 @@ class ContactService:
 
             # Find the address to update
             address_to_update = None
+            assert current_contact.addresses is not None
+            assert current_contact.addresses is not None
             for address in current_contact.addresses:
                 if address.id == address_id:
                     address_to_update = address
@@ -652,6 +656,8 @@ class ContactService:
 
             # Find the note to update
             note_to_update = None
+            assert current_contact.notes is not None
+            assert current_contact.notes is not None
             for note in current_contact.notes:
                 if note.id == note_id:
                     note_to_update = note
@@ -739,33 +745,44 @@ class ContactService:
 
         # For methods, addresses, and notes, we'll do a simplified comparison
         # A more sophisticated implementation could compare individual items
-        if len(current_contact.methods) != len(updated_contact.methods):
+        if updated_contact.methods is not None and len(
+            current_contact.methods or []
+        ) != len(updated_contact.methods):
             changed_fields["contact_methods"] = (
-                f"count:{len(current_contact.methods)}",
+                f"count:{len(current_contact.methods or [])}",
                 f"count:{len(updated_contact.methods)}",
             )
 
-        if len(current_contact.addresses) != len(updated_contact.addresses):
+        if updated_contact.addresses is not None and len(
+            current_contact.addresses or []
+        ) != len(updated_contact.addresses):
             changed_fields["addresses"] = (
-                f"count:{len(current_contact.addresses)}",
+                f"count:{len(current_contact.addresses or [])}",
                 f"count:{len(updated_contact.addresses)}",
             )
 
-        if len(current_contact.notes) != len(updated_contact.notes):
+        if updated_contact.notes is not None and len(
+            current_contact.notes or []
+        ) != len(updated_contact.notes):
             changed_fields["notes"] = (
-                f"count:{len(current_contact.notes)}",
+                f"count:{len(current_contact.notes or [])}",
                 f"count:{len(updated_contact.notes)}",
             )
 
         # Check tag changes by comparing tag IDs
-        current_tag_ids = {tag.id for tag in current_contact.tags if tag.id is not None}
-        updated_tag_ids = {tag.id for tag in updated_contact.tags if tag.id is not None}
+        if updated_contact.tags is not None:
+            current_tag_ids = {
+                tag.id for tag in (current_contact.tags or []) if tag.id is not None
+            }
+            updated_tag_ids = {
+                tag.id for tag in (updated_contact.tags or []) if tag.id is not None
+            }
 
-        if current_tag_ids != updated_tag_ids:
-            changed_fields["tags"] = (
-                f"ids:{sorted(current_tag_ids)}",
-                f"ids:{sorted(updated_tag_ids)}",
-            )
+            if current_tag_ids != updated_tag_ids:
+                changed_fields["tags"] = (
+                    f"ids:{sorted(current_tag_ids)}",
+                    f"ids:{sorted(updated_tag_ids)}",
+                )
 
         return changed_fields
 
@@ -951,26 +968,34 @@ class ContactService:
     ) -> None:
         """Validate contact data including methods and addresses."""
         # Validate email uniqueness if contact has email methods
-        for method in contact.methods:
-            if method.method_type == MethodType.EMAIL:
-                await self.contact_validation.validate_email_uniqueness(
-                    method.value, transaction, exclude_contact_id=exclude_contact_id
-                )
+        if contact.methods:
+            assert contact.methods is not None
+            assert contact.methods is not None
+            for method in contact.methods:
+                if method.method_type == MethodType.EMAIL:
+                    await self.contact_validation.validate_email_uniqueness(
+                        method.value, transaction, exclude_contact_id=exclude_contact_id
+                    )
 
         # Validate addresses
-        for address in contact.addresses:
-            await self.address_validation.validate_with_transaction(
-                address, transaction
-            )
+        if contact.addresses:
+            assert contact.addresses is not None
+            assert contact.addresses is not None
+            for address in contact.addresses:
+                await self.address_validation.validate_with_transaction(
+                    address, transaction
+                )
 
     async def _save_contact_methods(
         self,
         contact_id: int,
-        methods: list[ContactMethod],
+        methods: list[ContactMethod] | None,
         transaction: AsyncConnection,
     ) -> list[ContactMethod]:
         """Save contact methods and publish events."""
         saved_methods = []
+        if methods is None:
+            methods = []
         for method in methods:
             # Update contact_id for the method
             method.contact_id = contact_id
@@ -1003,11 +1028,13 @@ class ContactService:
     async def _save_contact_addresses(
         self,
         contact_id: int,
-        addresses: list[ContactAddress],
+        addresses: list[ContactAddress] | None,
         transaction: AsyncConnection,
     ) -> list[ContactAddress]:
         """Save contact addresses and publish events."""
         saved_addresses = []
+        if addresses is None:
+            addresses = []
         for address in addresses:
             # Update contact_id for the address
             address.contact_id = contact_id
@@ -1038,10 +1065,15 @@ class ContactService:
         return saved_addresses
 
     async def _save_contact_notes(
-        self, contact_id: int, notes: list[ContactNote], transaction: AsyncConnection
+        self,
+        contact_id: int,
+        notes: list[ContactNote] | None,
+        transaction: AsyncConnection,
     ) -> list[ContactNote]:
         """Save contact notes and publish events."""
         saved_notes = []
+        if notes is None:
+            notes = []
         for note in notes:
             # Update contact_id for the note
             note.contact_id = contact_id
@@ -1062,10 +1094,12 @@ class ContactService:
         return saved_notes
 
     async def _save_contact_tags(
-        self, contact_id: int, tags: list[Tag], transaction: AsyncConnection
+        self, contact_id: int, tags: list[Tag] | None, transaction: AsyncConnection
     ) -> list[Tag]:
         """Save contact tags and publish events."""
         saved_tags = []
+        if tags is None:
+            tags = []
         for tag in tags:
             # Ensure tag has ID
             if tag.id is None:
@@ -1102,6 +1136,8 @@ class ContactService:
         # Only replace tags if new tags are provided
         if contact.tags is not None:
             # Remove all existing tags first
+            assert current_contact.tags is not None
+            assert current_contact.tags is not None
             for current_tag in current_contact.tags:
                 if current_tag.id is not None:
                     await self.contact_repo.remove_tag(contact_id, current_tag.id)

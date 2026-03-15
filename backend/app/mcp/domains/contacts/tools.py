@@ -298,6 +298,10 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
             nick_name=request.nick_name,
             company=request.company,
             job_title=request.job_title,
+            methods=[],
+            addresses=[],
+            notes=[],
+            tags=[],
         )
 
         # Add contact methods if provided
@@ -308,6 +312,7 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
                 contact_id=0,  # Will be set when contact is saved
                 is_primary=True,
             )
+            assert contact.methods is not None
             contact.methods.append(email_method)
 
         if request.phone:
@@ -317,6 +322,7 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
                 contact_id=0,  # Will be set when contact is saved
                 is_primary=True,
             )
+            assert contact.methods is not None
             contact.methods.append(phone_method)
 
         # Add initial note if provided
@@ -325,6 +331,7 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
                 content=request.notes,
                 contact_id=0,  # Will be set when contact is saved
             )
+            assert contact.notes is not None
             contact.notes.append(note)
 
         # Handle tags if provided - find or create tags by name
@@ -335,11 +342,13 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
 
                 if existing_tag:
                     # Use existing tag
+                    assert contact.tags is not None
                     contact.tags.append(existing_tag)
                 else:
                     # Create new tag
                     new_tag = Tag(name=TagName(tag_name))
                     saved_tag = await tag_repo.save(new_tag)
+                    assert contact.tags is not None
                     contact.tags.append(saved_tag)
 
         # Create the contact with all methods, notes, and tags in a single transaction
@@ -472,6 +481,10 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
                 job_title=request.job_title
                 if request.job_title is not None
                 else existing_contact.job_title,
+                methods=[],
+                addresses=[],
+                notes=[],
+                tags=[],
             )
 
             # Add contact methods if provided (replacement strategy)
@@ -482,6 +495,7 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
                     contact_id=request.contact_id,
                     is_primary=True,
                 )
+                assert updated_contact.methods is not None
                 updated_contact.methods.append(email_method)
 
             if request.phone:
@@ -491,6 +505,7 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
                     contact_id=request.contact_id,
                     is_primary=True,
                 )
+                assert updated_contact.methods is not None
                 updated_contact.methods.append(phone_method)
 
             # Add additional note if provided
@@ -499,6 +514,7 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
                     content=request.notes,
                     contact_id=request.contact_id,
                 )
+                assert updated_contact.notes is not None
                 updated_contact.notes.append(note)
 
             # Handle tags if provided - find or create tags by name (replacement strategy)
@@ -509,11 +525,13 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
 
                     if existing_tag:
                         # Use existing tag
+                        assert updated_contact.tags is not None
                         updated_contact.tags.append(existing_tag)
                     else:
                         # Create new tag
                         new_tag = Tag(name=TagName(tag_name))
                         saved_tag = await tag_repo.save(new_tag)
+                        assert updated_contact.tags is not None
                         updated_contact.tags.append(saved_tag)
 
             # Update the contact with all methods, notes, and tags in a single transaction

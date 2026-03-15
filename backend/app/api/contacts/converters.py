@@ -108,16 +108,19 @@ class ContactConverter:
         """Convert Contact domain entity to API resource."""
         # Convert embedded entities
         contact_methods = [
-            ContactConverter.to_method_resource(method) for method in contact.methods
+            ContactConverter.to_method_resource(method)
+            for method in (contact.methods or [])
         ]
         addresses = [
             ContactConverter.to_address_resource(address)
-            for address in contact.addresses
+            for address in (contact.addresses or [])
         ]
-        notes = [ContactConverter.to_note_resource(note) for note in contact.notes]
+        notes = [
+            ContactConverter.to_note_resource(note) for note in (contact.notes or [])
+        ]
         relationship_resources = [
             ContactRelationshipConverter.to_resource(relationship, base_url)
-            for relationship in contact.relationships
+            for relationship in (contact.relationships or [])
         ]
 
         # Create attributes

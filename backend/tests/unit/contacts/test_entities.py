@@ -247,10 +247,10 @@ class TestContact:
         assert contact.middle_name is None
         assert contact.nick_name is None
         assert contact.is_favourite is False  # Default should be False
-        assert len(contact.methods) == 0
-        assert len(contact.addresses) == 0
-        assert len(contact.notes) == 0
-        assert len(contact.tags) == 0
+        assert not contact.methods
+        assert not contact.addresses
+        assert not contact.notes
+        assert not contact.tags
 
     def test_create_contact_complete(self):
         """Test creating contact with all fields."""
@@ -336,6 +336,8 @@ class TestContact:
         assert contact.get_primary_email() is None
 
         # Non-primary email - returns None
+        if contact.methods is None:
+            contact.methods = []
         contact.methods.append(
             ContactMethod(
                 method_type=MethodType.EMAIL,
@@ -347,6 +349,8 @@ class TestContact:
         assert contact.get_primary_email() is None
 
         # Primary email - returns email
+        if contact.methods is None:
+            contact.methods = []
         contact.methods.append(
             ContactMethod(
                 method_type=MethodType.EMAIL,
@@ -365,6 +369,8 @@ class TestContact:
         assert contact.get_primary_phone() is None
 
         # Non-primary phone - returns None
+        if contact.methods is None:
+            contact.methods = []
         contact.methods.append(
             ContactMethod(
                 method_type=MethodType.PHONE,
@@ -376,6 +382,8 @@ class TestContact:
         assert contact.get_primary_phone() is None
 
         # Primary phone - returns phone
+        if contact.methods is None:
+            contact.methods = []
         contact.methods.append(
             ContactMethod(
                 method_type=MethodType.PHONE,
@@ -394,6 +402,8 @@ class TestContact:
         assert contact.get_primary_address() is None
 
         # Non-primary address - returns None
+        if contact.addresses is None:
+            contact.addresses = []
         contact.addresses.append(
             ContactAddress(
                 street_line_1="123 Main St",
@@ -411,6 +421,12 @@ class TestContact:
             contact_id=1,
             is_primary=True,
         )
+        if contact.addresses is None:
+            contact.addresses = []
+        if contact.addresses is None:
+            contact.addresses = []
+        if contact.addresses is None:
+            contact.addresses = []
         contact.addresses.append(primary_address)
         assert contact.get_primary_address() == primary_address
 
@@ -421,16 +437,24 @@ class TestContact:
 
         # Add first tag
         contact.add_tag(tag)
+        assert contact.tags is not None
+        assert contact.tags is not None
         assert len(contact.tags) == 1
+        assert contact.tags is not None
+        assert contact.tags is not None
         assert contact.tags[0] == tag
 
         # Add duplicate tag - should not add
         contact.add_tag(tag)
+        assert contact.tags is not None
+        assert contact.tags is not None
         assert len(contact.tags) == 1
 
         # Add different tag
         tag2 = Tag(name=TagName("family"), id=2)
         contact.add_tag(tag2)
+        assert contact.tags is not None
+        assert contact.tags is not None
         assert len(contact.tags) == 2
 
     def test_add_tag_limit_exceeded(self):
@@ -442,6 +466,8 @@ class TestContact:
             tag = Tag(name=TagName(f"tag{i}"), id=i)
             contact.add_tag(tag)
 
+        assert contact.tags is not None
+        assert contact.tags is not None
         assert len(contact.tags) == 25
 
         # Try to add 26th tag - should raise error
@@ -457,15 +483,23 @@ class TestContact:
 
         contact.add_tag(tag1)
         contact.add_tag(tag2)
+        assert contact.tags is not None
+        assert contact.tags is not None
         assert len(contact.tags) == 2
 
         # Remove existing tag
         contact.remove_tag(1)
+        assert contact.tags is not None
+        assert contact.tags is not None
         assert len(contact.tags) == 1
+        assert contact.tags is not None
+        assert contact.tags is not None
         assert contact.tags[0] == tag2
 
         # Remove non-existing tag - should not error
         contact.remove_tag(999)
+        assert contact.tags is not None
+        assert contact.tags is not None
         assert len(contact.tags) == 1
 
     def test_favourite_default_false(self):

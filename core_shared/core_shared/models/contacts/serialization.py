@@ -50,7 +50,7 @@ def serialize_contact(contact: Contact) -> dict[str, Any]:
                 "label": method.label,
                 "is_primary": method.is_primary,
             }
-            for method in contact.methods
+            for method in (contact.methods or [])
         ],
         "addresses": [
             {
@@ -63,10 +63,10 @@ def serialize_contact(contact: Contact) -> dict[str, Any]:
                 "label": address.label,
                 "is_primary": address.is_primary,
             }
-            for address in contact.addresses
+            for address in (contact.addresses or [])
         ],
-        "notes": [{"content": note.content} for note in contact.notes],
-        "tags": [{"name": tag.name.value} for tag in contact.tags],
+        "notes": [{"content": note.content} for note in (contact.notes or [])],
+        "tags": [{"name": tag.name.value} for tag in (contact.tags or [])],
     }
 
 
@@ -86,47 +86,67 @@ def deserialize_contact(data: dict[str, Any]) -> Contact:
     if not isinstance(data, dict):
         raise ContactDeserializationError("Contact payload must be a dictionary")
 
-    def _get_list(field: str) -> list[Any]:
-        val = data.get(field)
-        if val is None:
-            return []
+    def _get_list(field: str) -> list[Any] | None:
+        if field not in data or data[field] is None:
+            return None
+        val = data[field]
         if not isinstance(val, list):
             raise ContactDeserializationError(f"Field '{field}' must be a list or null")
         return val
 
     try:
-        methods = [
-            ContactMethod(
-                method_type=MethodType(method_data["method_type"]),
-                value=method_data["value"],
-                label=method_data.get("label"),
-                is_primary=method_data.get("is_primary", False),
-                contact_id=0,
-            )
-            for method_data in _get_list("methods")
-        ]
+        methods_data = _get_list("methods")
+        methods = (
+            [
+                ContactMethod(
+                    method_type=MethodType(method_data["method_type"]),
+                    value=method_data["value"],
+                    label=method_data.get("label"),
+                    is_primary=method_data.get("is_primary", False),
+                    contact_id=0,
+                )
+                for method_data in methods_data
+            ]
+            if methods_data is not None
+            else None
+        )
 
-        addresses = [
-            ContactAddress(
-                street_line_1=addr_data["street_line_1"],
-                country_code=addr_data["country_code"],
-                street_line_2=addr_data.get("street_line_2"),
-                locality=addr_data.get("locality"),
-                region=addr_data.get("region"),
-                postal_code=addr_data.get("postal_code"),
-                label=addr_data.get("label"),
-                is_primary=addr_data.get("is_primary", False),
-                contact_id=0,
-            )
-            for addr_data in _get_list("addresses")
-        ]
+        addresses_data = _get_list("addresses")
+        addresses = (
+            [
+                ContactAddress(
+                    street_line_1=addr_data["street_line_1"],
+                    country_code=addr_data["country_code"],
+                    street_line_2=addr_data.get("street_line_2"),
+                    locality=addr_data.get("locality"),
+                    region=addr_data.get("region"),
+                    postal_code=addr_data.get("postal_code"),
+                    label=addr_data.get("label"),
+                    is_primary=addr_data.get("is_primary", False),
+                    contact_id=0,
+                )
+                for addr_data in addresses_data
+            ]
+            if addresses_data is not None
+            else None
+        )
 
-        notes = [
-            ContactNote(content=note_data["content"], contact_id=0)
-            for note_data in _get_list("notes")
-        ]
+        notes_data = _get_list("notes")
+        notes = (
+            [
+                ContactNote(content=note_data["content"], contact_id=0)
+                for note_data in notes_data
+            ]
+            if notes_data is not None
+            else None
+        )
 
-        tags = [Tag(name=TagName(tag_data["name"])) for tag_data in _get_list("tags")]
+        tags_data = _get_list("tags")
+        tags = (
+            [Tag(name=TagName(tag_data["name"])) for tag_data in tags_data]
+            if tags_data is not None
+            else None
+        )
 
         return Contact(
             first_name=data["first_name"],

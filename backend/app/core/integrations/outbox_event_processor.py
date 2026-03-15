@@ -12,7 +12,7 @@ This processor implements production-grade resilience patterns:
 
 import json
 from collections.abc import Sequence
-from typing import Any
+from typing import Any, cast
 
 import structlog
 from core_shared.models.contacts.entities import Contact, Tag
@@ -398,7 +398,7 @@ class OutboxEventProcessor:
 
     async def _process_contact_created(self, event: OutboxEvent) -> dict[str, Any]:
         """Process a contact.created event."""
-        event_data: dict[str, Any] = event.event_data  # type: ignore
+        event_data: dict[str, Any] = cast(dict[str, Any], event.event_data)
         integration_source: str = event_data["integration_source"]
         external_id: str = event_data["external_id"]
         contact_data = self._normalize_contact_data(event_data["contact_data"])
@@ -563,7 +563,7 @@ class OutboxEventProcessor:
         2. Checks version hash for idempotency (skip if unchanged)
         3. Updates contact and sync metadata atomically
         """
-        event_data: dict[str, Any] = event.event_data  # type: ignore
+        event_data: dict[str, Any] = cast(dict[str, Any], event.event_data)
         integration_source: str = event_data["integration_source"]
         external_id: str = event_data["external_id"]
         contact_data = self._normalize_contact_data(event_data["contact_data"])
@@ -663,9 +663,9 @@ class OutboxEventProcessor:
                     existing_reference_id=existing_ref.id if existing_ref else None,
                     existing_contact_tags=existing_tags,
                 )
-                updated_contact_data.tags = resolved_tags  # type: ignore[assignment]
+                updated_contact_data.tags = resolved_tags
             else:
-                updated_contact_data.tags = None  # type: ignore[assignment]
+                updated_contact_data.tags = None
         except ContactDeserializationError as e:
             raise PermanentOutboxEventProcessingError(str(e)) from e
 
@@ -696,7 +696,7 @@ class OutboxEventProcessor:
                 new_ref_data["synced_tags"] = incoming_tag_names
                 await self.external_reference_service.update_external_reference(
                     reference_id=existing_ref.id,
-                    reference_data=json.dumps(new_ref_data),
+                    reference_data=new_ref_data,
                 )
         except Exception as e:
             raise OutboxEventProcessingError(

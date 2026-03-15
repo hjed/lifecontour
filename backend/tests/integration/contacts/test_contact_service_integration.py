@@ -121,6 +121,12 @@ class TestContactServiceIntegration:
             contact_id=0,  # Will be set when contact is saved
             is_primary=True,
         )
+        if contact.methods is None:
+            contact.methods = []
+        if contact.methods is None:
+            contact.methods = []
+        if contact.methods is None:
+            contact.methods = []
         contact.methods.append(email_method)
 
         # Add phone method
@@ -130,6 +136,12 @@ class TestContactServiceIntegration:
             contact_id=0,  # Will be set when contact is saved
             is_primary=True,
         )
+        if contact.methods is None:
+            contact.methods = []
+        if contact.methods is None:
+            contact.methods = []
+        if contact.methods is None:
+            contact.methods = []
         contact.methods.append(phone_method)
 
         # Add note
@@ -137,6 +149,12 @@ class TestContactServiceIntegration:
             content="Met at conference",
             contact_id=0,  # Will be set when contact is saved
         )
+        if contact.notes is None:
+            contact.notes = []
+        if contact.notes is None:
+            contact.notes = []
+        if contact.notes is None:
+            contact.notes = []
         contact.notes.append(note)
 
         # Act
@@ -284,6 +302,12 @@ class TestContactServiceIntegration:
             contact_id=saved_contact.id,
             is_primary=True,
         )
+        if updated_contact.methods is None:
+            updated_contact.methods = []
+        if updated_contact.methods is None:
+            updated_contact.methods = []
+        if updated_contact.methods is None:
+            updated_contact.methods = []
         updated_contact.methods.append(email_method)
 
         # Add phone method
@@ -293,6 +317,12 @@ class TestContactServiceIntegration:
             contact_id=saved_contact.id,
             is_primary=True,
         )
+        if updated_contact.methods is None:
+            updated_contact.methods = []
+        if updated_contact.methods is None:
+            updated_contact.methods = []
+        if updated_contact.methods is None:
+            updated_contact.methods = []
         updated_contact.methods.append(phone_method)
 
         # Add note
@@ -300,6 +330,12 @@ class TestContactServiceIntegration:
             content="Updated contact with new information",
             contact_id=saved_contact.id,
         )
+        if updated_contact.notes is None:
+            updated_contact.notes = []
+        if updated_contact.notes is None:
+            updated_contact.notes = []
+        if updated_contact.notes is None:
+            updated_contact.notes = []
         updated_contact.notes.append(note)
 
         # Update the contact using the service

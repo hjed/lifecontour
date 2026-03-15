@@ -288,6 +288,12 @@ class TestContactService:
             contact_id=0,
             is_primary=True,
         )
+        if contact.methods is None:
+            contact.methods = []
+        if contact.methods is None:
+            contact.methods = []
+        if contact.methods is None:
+            contact.methods = []
         contact.methods.append(email_method)
 
         # Add phone method
@@ -297,6 +303,12 @@ class TestContactService:
             contact_id=0,
             is_primary=True,
         )
+        if contact.methods is None:
+            contact.methods = []
+        if contact.methods is None:
+            contact.methods = []
+        if contact.methods is None:
+            contact.methods = []
         contact.methods.append(phone_method)
 
         saved_contact = Contact(first_name="John", last_name="Doe", id=1)
@@ -346,6 +358,12 @@ class TestContactService:
             content="Met at conference",
             contact_id=0,
         )
+        if contact.notes is None:
+            contact.notes = []
+        if contact.notes is None:
+            contact.notes = []
+        if contact.notes is None:
+            contact.notes = []
         contact.notes.append(note)
 
         saved_contact = Contact(first_name="Jane", last_name="Smith", id=1)
@@ -386,6 +404,12 @@ class TestContactService:
             contact_id=0,
             is_primary=True,
         )
+        if contact.methods is None:
+            contact.methods = []
+        if contact.methods is None:
+            contact.methods = []
+        if contact.methods is None:
+            contact.methods = []
         contact.methods.append(email_method)
 
         # Add note
@@ -393,6 +417,12 @@ class TestContactService:
             content="Important client",
             contact_id=0,
         )
+        if contact.notes is None:
+            contact.notes = []
+        if contact.notes is None:
+            contact.notes = []
+        if contact.notes is None:
+            contact.notes = []
         contact.notes.append(note)
 
         saved_contact = Contact(first_name="Bob", last_name="Wilson", id=1)
@@ -445,6 +475,12 @@ class TestContactService:
             contact_id=0,
             is_primary=True,
         )
+        if contact.methods is None:
+            contact.methods = []
+        if contact.methods is None:
+            contact.methods = []
+        if contact.methods is None:
+            contact.methods = []
         contact.methods.append(email_method)
 
         saved_contact = Contact(first_name="John", last_name="Doe", id=1)
@@ -480,6 +516,12 @@ class TestContactService:
             content="Met at conference",
             contact_id=0,
         )
+        if contact.notes is None:
+            contact.notes = []
+        if contact.notes is None:
+            contact.notes = []
+        if contact.notes is None:
+            contact.notes = []
         contact.notes.append(note)
 
         saved_contact = Contact(first_name="Jane", last_name="Smith", id=1)
@@ -515,6 +557,12 @@ class TestContactService:
             contact_id=1,
             is_primary=True,
         )
+        if updated_contact.methods is None:
+            updated_contact.methods = []
+        if updated_contact.methods is None:
+            updated_contact.methods = []
+        if updated_contact.methods is None:
+            updated_contact.methods = []
         updated_contact.methods.append(email_method)
 
         # Add note to updated contact
@@ -522,6 +570,12 @@ class TestContactService:
             content="Updated contact information",
             contact_id=1,
         )
+        if updated_contact.notes is None:
+            updated_contact.notes = []
+        if updated_contact.notes is None:
+            updated_contact.notes = []
+        if updated_contact.notes is None:
+            updated_contact.notes = []
         updated_contact.notes.append(note)
 
         saved_contact = Contact(first_name="John", last_name="Doe", id=1)

@@ -57,7 +57,7 @@ class ContactConverter:
         full_name = contact.get_full_name()
         primary_email = contact.get_primary_email()
         primary_phone = contact.get_primary_phone()
-        tag_names = [str(tag.name) for tag in contact.tags]
+        tag_names = [str(tag.name) for tag in (contact.tags or [])]
 
         # Build AI-friendly summary
         summary = ContactConverter._build_contact_summary(

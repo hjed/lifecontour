@@ -176,6 +176,12 @@ class TestContactValidationService:
         contact = Contact(first_name="John", id=1)
         # Add 24 tags (under limit of 25)
         for i in range(24):
+            if contact.tags is None:
+                contact.tags = []
+            if contact.tags is None:
+                contact.tags = []
+            if contact.tags is None:
+                contact.tags = []
             contact.tags.append(Tag(name=TagName(f"tag{i}"), id=i))
 
         mock_contact_repo.find_by_id.return_value = contact
@@ -192,6 +198,12 @@ class TestContactValidationService:
         contact = Contact(first_name="John", id=1)
         # Add 25 tags (at limit)
         for i in range(25):
+            if contact.tags is None:
+                contact.tags = []
+            if contact.tags is None:
+                contact.tags = []
+            if contact.tags is None:
+                contact.tags = []
             contact.tags.append(Tag(name=TagName(f"tag{i}"), id=i))
 
         mock_contact_repo.find_by_id.return_value = contact
