@@ -1859,7 +1859,7 @@ async def _process_journal_upsert_event(
                 INSERT INTO journal_external_event_links (
                     journal_id, calendar_id, sync_capability, sync_status, created_at, updated_at
                 ) VALUES (
-                    :journal_id, :calendar_id, 'outbound', 'syncing', now(), now()
+                    :journal_id, :calendar_id, 'outbound', 'pending', now(), now()
                 )
                 ON CONFLICT (journal_id, calendar_id) DO NOTHING
                 RETURNING 1

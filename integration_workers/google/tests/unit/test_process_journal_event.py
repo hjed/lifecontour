@@ -223,6 +223,11 @@ class TestProcessJournalEvent:
             assert result["action"] == "delete"
             assert result["external_event_ids"] == ["existing_event_id"]
 
+            # Verify auth layout query was executed
+            assert mock_session.execute.call_count == 1
+            auth_call_args = mock_session.execute.call_args[0]
+            assert "SELECT google_account_email" in str(auth_call_args[0])
+
             # Verify API was called with fallback calendar_id 'primary' for old string format
             mock_google_client.delete_event.assert_called_once_with(
                 "existing_event_id", "primary"
