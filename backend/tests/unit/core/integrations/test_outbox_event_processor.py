@@ -292,22 +292,15 @@ class TestOutboxEventProcessor:
         assert result["event_type"] == "contact.updated"
         assert result["contact_id"] == 123
 
-    @pytest.mark.asyncio
-    async def test_process_contact_updated_updates_reference_data(
+    def _setup_contact_and_reference_mocks(
         self,
-        processor: OutboxEventProcessor,
-        contact_updated_event: OutboxEvent,
         mock_contact_service: AsyncMock,
-        mock_connection: AsyncConnection,
         mock_external_ref_service: AsyncMock,
-    ):
-        """Test that updating a contact also parses and updates existing reference_data JSON correctly."""
+        reference_data_dict: dict[str, Any],
+    ) -> Contact:
         import json
 
         from core_shared.models.external_reference import ExternalReference
-
-        # We will add some fake "tags" to the event payload to test the synced_tags update
-        contact_updated_event.event_data["contact_data"]["tags"] = [{"name": "VIP"}]
 
         existing_contact = Contact(id=123, first_name="John", last_name="Doe", tags=[])
         mock_contact_service.find_contact_by_external_reference.return_value = (
@@ -324,10 +317,44 @@ class TestOutboxEventProcessor:
                 external_system="google",
                 external_entity_type="person",
                 external_entity_id="people/c123456789",
-                reference_data=json.dumps({"old_key": "old_value"}),
+                reference_data=json.dumps(reference_data_dict),
                 created_at=datetime.now(UTC),
                 updated_at=datetime.now(UTC),
             )
+        )
+        return existing_contact
+
+    def _create_invalid_event(self) -> OutboxEvent:
+        return OutboxEvent(
+            id=uuid4(),
+            event_type="contact.created",
+            event_data={
+                "integration_source": "google",
+                "external_id": "people/invalid",
+                "contact_data": {"invalid": "data"},  # Missing required fields
+                "sync_timestamp": datetime.now(UTC).isoformat(),
+                "sync_type": "created",
+            },
+            created_at=datetime.now(UTC),
+            processed_at=None,
+            retry_count=0,
+        )
+
+    @pytest.mark.asyncio
+    async def test_process_contact_updated_updates_reference_data(
+        self,
+        processor: OutboxEventProcessor,
+        contact_updated_event: OutboxEvent,
+        mock_contact_service: AsyncMock,
+        mock_connection: AsyncConnection,
+        mock_external_ref_service: AsyncMock,
+    ):
+        """Test that updating a contact also parses and updates existing reference_data JSON correctly."""
+        # We will add some fake "tags" to the event payload to test the synced_tags update
+        contact_updated_event.event_data["contact_data"]["tags"] = [{"name": "VIP"}]
+
+        self._setup_contact_and_reference_mocks(
+            mock_contact_service, mock_external_ref_service, {"old_key": "old_value"}
         )
 
         await processor.process_event(contact_updated_event)
@@ -336,8 +363,8 @@ class TestOutboxEventProcessor:
         call_kwargs = mock_external_ref_service.update_external_reference.call_args[1]
         assert call_kwargs["reference_id"] == 99
 
-        # Verify JSON
-        updated_ref_data = json.loads(call_kwargs["reference_data"])
+        # Verify dict
+        updated_ref_data = call_kwargs["reference_data"]
         assert updated_ref_data["old_key"] == "old_value"
         assert updated_ref_data["synced_tags"] == ["VIP"]
 
@@ -351,35 +378,14 @@ class TestOutboxEventProcessor:
         mock_external_ref_service: AsyncMock,
     ):
         """Test that omitting tags in a contact update does not overwrite existing synced_tags in reference_data."""
-        import json
-
-        from core_shared.models.external_reference import ExternalReference
-
         # Remove "tags" from contact data
         if "tags" in contact_updated_event.event_data["contact_data"]:
             del contact_updated_event.event_data["contact_data"]["tags"]
 
-        existing_contact = Contact(id=123, first_name="John", last_name="Doe", tags=[])
-        mock_contact_service.find_contact_by_external_reference.return_value = (
-            existing_contact
-        )
-        mock_contact_service.get_contact_by_id.return_value = existing_contact
-        mock_contact_service.update_contact.return_value = existing_contact
-
-        mock_external_ref_service.find_external_reference.return_value = (
-            ExternalReference(
-                id=99,
-                internal_entity_type="contact",
-                internal_entity_id=123,
-                external_system="google",
-                external_entity_type="person",
-                external_entity_id="people/c123456789",
-                reference_data=json.dumps(
-                    {"old_key": "old_value", "synced_tags": ["Work"]}
-                ),
-                created_at=datetime.now(UTC),
-                updated_at=datetime.now(UTC),
-            )
+        self._setup_contact_and_reference_mocks(
+            mock_contact_service,
+            mock_external_ref_service,
+            {"old_key": "old_value", "synced_tags": ["Work"]},
         )
 
         await processor.process_event(contact_updated_event)
@@ -397,34 +403,13 @@ class TestOutboxEventProcessor:
         mock_sync_metadata_repo: AsyncMock,
     ):
         """Test that explicitly setting tags to None in contact update does not overwrite existing synced_tags."""
-        import json
-
-        from core_shared.models.external_reference import ExternalReference
-
         # Explicitly set tags to None
         contact_updated_event.event_data["contact_data"]["tags"] = None
 
-        existing_contact = Contact(id=123, first_name="John", last_name="Doe", tags=[])
-        mock_contact_service.find_contact_by_external_reference.return_value = (
-            existing_contact
-        )
-        mock_contact_service.get_contact_by_id.return_value = existing_contact
-        mock_contact_service.update_contact.return_value = existing_contact
-
-        mock_external_ref_service.find_external_reference.return_value = (
-            ExternalReference(
-                id=99,
-                internal_entity_type="contact",
-                internal_entity_id=123,
-                external_system="google",
-                external_entity_type="person",
-                external_entity_id="people/c123456789",
-                reference_data=json.dumps(
-                    {"old_key": "old_value", "synced_tags": ["Work"]}
-                ),
-                created_at=datetime.now(UTC),
-                updated_at=datetime.now(UTC),
-            )
+        self._setup_contact_and_reference_mocks(
+            mock_contact_service,
+            mock_external_ref_service,
+            {"old_key": "old_value", "synced_tags": ["Work"]},
         )
 
         # Mock tag_repo as it's accessed directly by the processor
@@ -518,20 +503,7 @@ class TestOutboxEventProcessor:
         mock_contact_service: AsyncMock,
     ):
         """Test processing event with invalid contact data."""
-        invalid_event = OutboxEvent(
-            id=uuid4(),
-            event_type="contact.created",
-            event_data={
-                "integration_source": "google",
-                "external_id": "people/invalid",
-                "contact_data": {"invalid": "data"},  # Missing required fields
-                "sync_timestamp": datetime.now(UTC).isoformat(),
-                "sync_type": "created",
-            },
-            created_at=datetime.now(UTC),
-            processed_at=None,
-            retry_count=0,
-        )
+        invalid_event = self._create_invalid_event()
 
         # Should raise a permanent processing error for malformed payloads
         with pytest.raises(PermanentOutboxEventProcessingError) as exc_info:
@@ -568,20 +540,7 @@ class TestOutboxEventProcessor:
         mock_contact_service: AsyncMock,
     ):
         """Test permanent payload failures use a distinct log message."""
-        invalid_event = OutboxEvent(
-            id=uuid4(),
-            event_type="contact.created",
-            event_data={
-                "integration_source": "google",
-                "external_id": "people/invalid",
-                "contact_data": {"invalid": "data"},
-                "sync_timestamp": datetime.now(UTC).isoformat(),
-                "sync_type": "created",
-            },
-            created_at=datetime.now(UTC),
-            processed_at=None,
-            retry_count=0,
-        )
+        invalid_event = self._create_invalid_event()
 
         with patch(
             "app.core.integrations.outbox_event_processor.logger.error"
