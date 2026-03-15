@@ -281,18 +281,45 @@ class OutboxEventProcessor:
 
         return matched_contact
 
+    @staticmethod
+    def _parse_reference_data(reference_data: str) -> dict[str, Any] | None:
+        """Safely parse reference data JSON string, with fallback to ast.literal_eval."""
+        import ast
+        import json
+
+        try:
+            try:
+                ref_data = json.loads(reference_data)
+            except json.JSONDecodeError:
+                if len(reference_data) < 10000:
+                    ref_data = ast.literal_eval(reference_data)
+                else:
+                    logger.warning(
+                        "Failed to parse reference_data as JSON and too large for literal_eval",
+                        reference_data_preview=reference_data[:200],
+                    )
+                    return None
+
+            if isinstance(ref_data, dict):
+                return ref_data
+        except Exception as e:
+            logger.warning(
+                f"Failed to parse reference_data: {e}",
+                reference_data_preview=reference_data[:200],
+            )
+
+        return None
+
     async def _resolve_contact_tags(
         self,
         contact_data: dict[str, Any],
         existing_reference_data: str | None = None,
-        existing_contact_tags: list[Any] | None = None,
+        existing_contact_tags: list[Tag] | None = None,
     ) -> list[Tag] | None:
         """
         Merge inbound tags with existing local tags based on sync history.
         Preserves locally created tags that were never synced by the integration.
         """
-        import ast
-        import json
 
         incoming_tags = contact_data.get("tags")
         if incoming_tags is None:
@@ -305,35 +332,17 @@ class OutboxEventProcessor:
         # Determine which tags were previously synced
         previously_synced_tags = set()
         if existing_reference_data:
-            try:
-                ref_data = {}
-                try:
-                    ref_data = json.loads(existing_reference_data)
-                except json.JSONDecodeError:
-                    if len(existing_reference_data) < 10000:
-                        ref_data = ast.literal_eval(existing_reference_data)
-                    else:
-                        logger.warning(
-                            "Failed to parse reference_data as JSON and too large for literal_eval",
-                            reference_data_preview=existing_reference_data[:200],
-                        )
+            ref_data = self._parse_reference_data(existing_reference_data)
 
-                if isinstance(ref_data, dict):
-                    synced = ref_data.get("synced_tags", [])
-                    if isinstance(synced, list) and all(
-                        isinstance(x, str) for x in synced
-                    ):
-                        previously_synced_tags = set(synced)
-                    else:
-                        logger.warning(
-                            "synced_tags in reference_data is not a list of strings",
-                            synced_value=synced,
-                        )
-            except Exception as e:
-                logger.warning(
-                    f"Failed to parse synced_tags from reference_data: {e}",
-                    reference_data_preview=existing_reference_data[:200],
-                )
+            if isinstance(ref_data, dict):
+                synced = ref_data.get("synced_tags", [])
+                if isinstance(synced, list) and all(isinstance(x, str) for x in synced):
+                    previously_synced_tags = set(synced)
+                else:
+                    logger.warning(
+                        "synced_tags in reference_data is not a list of strings",
+                        synced_value=synced,
+                    )
 
         # Tags that are purely local (never synced before)
         local_only_tags = existing_tag_names - previously_synced_tags
@@ -639,29 +648,16 @@ class OutboxEventProcessor:
             )
 
             # Update reference data with new synced tags
-            if existing_ref:
+            if existing_ref and contact_data.get("tags") is not None:
                 incoming_tag_names = [
-                    tag_data["name"] for tag_data in contact_data.get("tags", [])
+                    tag_data["name"] for tag_data in contact_data["tags"]
                 ]
-                import ast
-                import json
 
                 new_ref_data = {}
                 if existing_ref.reference_data:
-                    try:
-                        try:
-                            new_ref_data = json.loads(existing_ref.reference_data)
-                        except json.JSONDecodeError:
-                            if len(existing_ref.reference_data) < 10000:
-                                new_ref_data = ast.literal_eval(
-                                    existing_ref.reference_data
-                                )
-                            else:
-                                logger.warning(
-                                    "Existing reference_data too large to parse"
-                                )
-                    except Exception:
-                        pass
+                    new_ref_data = (
+                        self._parse_reference_data(existing_ref.reference_data) or {}
+                    )
 
                 if isinstance(new_ref_data, dict):
                     new_ref_data["synced_tags"] = incoming_tag_names

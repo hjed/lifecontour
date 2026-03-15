@@ -350,6 +350,121 @@ class TestOutboxEventProcessor:
         assert updated_ref_data["synced_tags"] == ["VIP"]
 
     @pytest.mark.asyncio
+    async def test_process_contact_updated_omits_reference_data_tags(
+        self,
+        processor: OutboxEventProcessor,
+        contact_updated_event: OutboxEvent,
+        mock_contact_service: AsyncMock,
+        mock_connection: AsyncConnection,
+    ):
+        """Test that omitting tags in a contact update does not overwrite existing synced_tags in reference_data."""
+        import json
+
+        from core_shared.models.external_reference import ExternalReference
+
+        # Remove "tags" from contact data
+        if "tags" in contact_updated_event.event_data["contact_data"]:
+            del contact_updated_event.event_data["contact_data"]["tags"]
+
+        existing_contact = Contact(id=123, first_name="John", last_name="Doe")
+        mock_contact_service.find_contact_by_external_reference.return_value = (
+            existing_contact
+        )
+        mock_contact_service.update_contact.return_value = existing_contact
+
+        mock_external_ref_service = AsyncMock()
+        mock_external_ref_service.find_external_reference.return_value = (
+            ExternalReference(
+                id=99,
+                internal_entity_type="contact",
+                internal_entity_id=123,
+                external_system="google",
+                external_entity_type="person",
+                external_entity_id="people/c123456789",
+                reference_data=json.dumps(
+                    {"old_key": "old_value", "synced_tags": ["Work"]}
+                ),
+                created_at=datetime.now(UTC),
+                updated_at=datetime.now(UTC),
+            )
+        )
+
+        mock_sync_metadata_repo = AsyncMock()
+        mock_sync_metadata_repo.find_and_lock.return_value = None
+        mock_sync_metadata_repo.should_sync = MagicMock(return_value=True)
+        mock_sync_metadata_repo.upsert.return_value = AsyncMock()
+
+        processor.tag_repo = AsyncMock()
+        processor.tag_repo.find_by_names.return_value = {}
+
+        with (
+            patch.object(
+                processor, "external_reference_service", mock_external_ref_service
+            ),
+            patch.object(processor, "sync_metadata_repo", mock_sync_metadata_repo),
+        ):
+            await processor.process_event(contact_updated_event)
+
+        mock_external_ref_service.update_external_reference.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_process_contact_updated_none_tags_reference_data(
+        self,
+        processor: OutboxEventProcessor,
+        contact_updated_event: OutboxEvent,
+        mock_contact_service: AsyncMock,
+        mock_connection: AsyncConnection,
+    ):
+        """Test that explicitly setting tags to None in contact update does not overwrite existing synced_tags."""
+        import json
+
+        from core_shared.models.external_reference import ExternalReference
+
+        # Explicitly set tags to None
+        contact_updated_event.event_data["contact_data"]["tags"] = None
+
+        existing_contact = Contact(id=123, first_name="John", last_name="Doe")
+        mock_contact_service.find_contact_by_external_reference.return_value = (
+            existing_contact
+        )
+        mock_contact_service.update_contact.return_value = existing_contact
+
+        mock_external_ref_service = AsyncMock()
+        mock_external_ref_service.find_external_reference.return_value = (
+            ExternalReference(
+                id=99,
+                internal_entity_type="contact",
+                internal_entity_id=123,
+                external_system="google",
+                external_entity_type="person",
+                external_entity_id="people/c123456789",
+                reference_data=json.dumps(
+                    {"old_key": "old_value", "synced_tags": ["Work"]}
+                ),
+                created_at=datetime.now(UTC),
+                updated_at=datetime.now(UTC),
+            )
+        )
+
+        mock_sync_metadata_repo = AsyncMock()
+        mock_sync_metadata_repo.find_and_lock.return_value = None
+        mock_sync_metadata_repo.should_sync = MagicMock(return_value=True)
+        mock_sync_metadata_repo.upsert.return_value = AsyncMock()
+
+        processor.tag_repo = AsyncMock()
+        processor.tag_repo.find_by_names.return_value = {}
+
+        with (
+            patch.object(
+                processor, "external_reference_service", mock_external_ref_service
+            ),
+            patch.object(processor, "sync_metadata_repo", mock_sync_metadata_repo),
+        ):
+            await processor.process_event(contact_updated_event)
+
+        mock_external_ref_service.update_external_reference.assert_not_called()
+
+    @pytest.mark.asyncio
     async def test_process_sync_completed_event(
         self,
         processor: OutboxEventProcessor,

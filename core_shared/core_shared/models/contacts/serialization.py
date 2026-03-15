@@ -95,7 +95,7 @@ def deserialize_contact(data: dict[str, Any]) -> Contact:
                 is_primary=method_data.get("is_primary", False),
                 contact_id=0,
             )
-            for method_data in data.get("methods", [])
+            for method_data in (data.get("methods") or [])
         ]
 
         addresses = [
@@ -110,16 +110,16 @@ def deserialize_contact(data: dict[str, Any]) -> Contact:
                 is_primary=addr_data.get("is_primary", False),
                 contact_id=0,
             )
-            for addr_data in data.get("addresses", [])
+            for addr_data in (data.get("addresses") or [])
         ]
 
         notes = [
             ContactNote(content=note_data["content"], contact_id=0)
-            for note_data in data.get("notes", [])
+            for note_data in (data.get("notes") or [])
         ]
 
         tags = [
-            Tag(name=TagName(tag_data["name"])) for tag_data in data.get("tags", [])
+            Tag(name=TagName(tag_data["name"])) for tag_data in (data.get("tags") or [])
         ]
 
         return Contact(
