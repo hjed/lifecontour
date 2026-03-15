@@ -2242,6 +2242,309 @@ def retry_delay_func(retry_count: int) -> float:
     return float(min(delay_with_jitter, 900.0))
 
 
+async def _create_google_client(
+    session: Any,
+    user_id: str | int,
+    google_account_email: str,
+) -> GoogleAPIClient:
+    """Create an authenticated Google API client for the given user.
+
+    Extracts the repeated auth+client creation pattern used across tasks.
+    """
+    auth_service = GoogleAuthService(
+        session=session,
+        encryption_key=settings.encryption_key.get_secret_value(),
+        google_client_id=settings.google_client_id,
+        google_client_secret=settings.google_client_secret.get_secret_value(),
+    )
+    return GoogleAPIClient(
+        auth_service=auth_service,
+        google_account_email=google_account_email,
+        google_client_id=settings.google_client_id,
+        google_client_secret=settings.google_client_secret.get_secret_value(),
+        user_id=user_id,
+    )
+
+
+async def sync_calendar_events(
+    ctx: dict[str, Any],
+    google_account_email: str,
+    user_id: str | int,
+    sync_type: str = "smart",
+    **kwargs: Any,
+) -> dict[str, Any]:
+    """
+    Sync Google Calendar events inbound to create journal outbox events.
+
+    This ARQ task fetches events from Google Calendar for each synced calendar,
+    classifies them (new/updated/unchanged), and creates outbox events for the
+    backend to process into journals.
+
+    Args:
+        ctx: ARQ context dictionary
+        google_account_email: Google account email to sync
+        user_id: User ID who initiated the sync
+        sync_type: Type of sync - "full", "incremental", or "smart" (default)
+
+    Returns:
+        Task result dictionary with sync status and metrics
+    """
+    from calendar_models import GoogleEvent
+    from core_shared.models.outbox import OutboxEvent
+
+    from event_transformer import GoogleEventTransformer
+    from inbound_sync import InboundSyncAction, InboundSyncClassifier
+
+    job_id = ctx.get("job_id", "unknown")
+    set_job_id(job_id)
+    set_worker_id(settings.worker_id)
+
+    logger.info(
+        "Starting inbound calendar events sync",
+        job_id=job_id,
+        google_account_email=google_account_email,
+        user_id=user_id,
+        sync_type=sync_type,
+    )
+
+    session_factory = ctx["session_factory"]
+    started_at = datetime.now(UTC)
+    classifier = InboundSyncClassifier()
+    transformer = GoogleEventTransformer()
+
+    metrics: dict[str, Any] = {
+        "events_processed": 0,
+        "events_created": 0,
+        "events_updated": 0,
+        "events_skipped": 0,
+        "errors": 0,
+        "worker_id": settings.worker_id,
+        "started_at": started_at.isoformat(),
+    }
+
+    try:
+        async with session_factory() as session:
+            client = await _create_google_client(
+                session, user_id, google_account_email
+            )
+
+            # Fetch synced calendars from DB
+            cal_stmt = text("""
+                SELECT c.id as calendar_id, c.google_calendar_id, c.is_synced_to_google
+                FROM calendars c
+                WHERE c.user_id = :user_id AND c.is_synced_to_google = true
+            """)
+            cal_result = await session.execute(cal_stmt, {"user_id": str(user_id)})
+            synced_calendars = cal_result.fetchall()
+
+            if not synced_calendars:
+                logger.info(
+                    "No synced calendars found",
+                    google_account_email=google_account_email,
+                )
+                metrics["completed_at"] = datetime.now(UTC).isoformat()
+                return {"status": "success", **metrics}
+
+            for cal_row in synced_calendars:
+                if not cal_row.is_synced_to_google:
+                    continue
+
+                google_calendar_id = cal_row.google_calendar_id or "primary"
+                calendar_id = cal_row.calendar_id
+
+                # Get existing sync token for this calendar
+                token_stmt = text("""
+                    SELECT calendar_events_sync_token
+                    FROM user_google_integration
+                    WHERE user_id = :user_id
+                    AND google_account_email = :email
+                """)
+                token_result = await session.execute(
+                    token_stmt,
+                    {"user_id": str(user_id), "email": google_account_email},
+                )
+                existing_sync_token = token_result.scalar()
+
+                # Decide whether to use sync token or time_min
+                use_sync_token = (
+                    sync_type != "full"
+                    and existing_sync_token is not None
+                )
+
+                list_kwargs: dict[str, Any] = {
+                    "calendar_id": google_calendar_id,
+                }
+                if use_sync_token:
+                    list_kwargs["sync_token"] = existing_sync_token
+                else:
+                    # Full sync: fetch events from 90 days ago
+                    time_min = (
+                        datetime.now(UTC) - timedelta(days=90)
+                    ).isoformat()
+                    list_kwargs["time_min"] = time_min
+
+                # Fetch events from Google
+                events_response = await client.list_events(**list_kwargs)
+
+                google_events = events_response.get("items", [])
+                new_sync_token = events_response.get("nextSyncToken")
+
+                # Process each event
+                for raw_event in google_events:
+                    try:
+                        google_event = GoogleEvent.from_api_response(raw_event)
+
+                        # Lookup existing link
+                        link_stmt = text("""
+                            SELECT journal_id, external_event_id, external_version,
+                                   sync_capability, sync_status
+                            FROM journal_external_event_links
+                            WHERE calendar_id = :calendar_id
+                            AND external_event_id = :external_event_id
+                        """)
+                        link_result = await session.execute(
+                            link_stmt,
+                            {
+                                "calendar_id": calendar_id,
+                                "external_event_id": google_event.id,
+                            },
+                        )
+                        existing_link = link_result.fetchone()
+
+                        # Classify the event
+                        action = classifier.classify_inbound_event(
+                            google_event=google_event,
+                            existing_link=existing_link,
+                        )
+
+                        if action in (
+                            InboundSyncAction.SKIP_UNCHANGED,
+                            InboundSyncAction.SKIP_ONE_WAY,
+                            InboundSyncAction.SKIP_CANCELLED,
+                        ):
+                            metrics["events_skipped"] += 1
+                            continue
+
+                        # Transform to journal data
+                        import uuid
+
+                        transform_result = transformer.transform_event(
+                            google_event, str(user_id), uuid.UUID(str(calendar_id))
+                        )
+                        if transform_result is None:
+                            metrics["events_skipped"] += 1
+                            continue
+
+                        journal, calendar_info = transform_result
+
+                        # Build journal data dict for outbox
+                        journal_data = {
+                            "title": journal.title,
+                            "content": journal.content,
+                            "event_date_range_start": journal.event_date_range.start.isoformat(),
+                            "event_date_range_end": journal.event_date_range.end.isoformat(),
+                            "user_id": str(user_id),
+                        }
+                        calendar_info_data = {
+                            "calendar_id": str(calendar_id),
+                            "is_all_day": calendar_info.is_all_day,
+                            "location": calendar_info.location,
+                            "start_time": calendar_info.start_time.isoformat() if calendar_info.start_time else None,
+                            "end_time": calendar_info.end_time.isoformat() if calendar_info.end_time else None,
+                        }
+
+                        # Determine sync action string
+                        if action == InboundSyncAction.CREATE_JOURNAL:
+                            sync_action = "created"
+                            metrics["events_created"] += 1
+                        elif action == InboundSyncAction.UPDATE_JOURNAL:
+                            sync_action = "updated"
+                            metrics["events_updated"] += 1
+                        else:
+                            metrics["events_skipped"] += 1
+                            continue
+
+                        existing_journal_id = (
+                            existing_link.journal_id if existing_link else None
+                        )
+
+                        # Create outbox event
+                        outbox_event = OutboxEvent.create_journal_sync_event(
+                            journal_data=journal_data,
+                            calendar_info_data=calendar_info_data,
+                            integration_source="google",
+                            external_event_id=google_event.id,
+                            calendar_id=str(calendar_id),
+                            sync_action=sync_action,
+                            etag=google_event.etag,
+                            existing_journal_id=existing_journal_id,
+                        )
+                        session.add(outbox_event)
+                        metrics["events_processed"] += 1
+
+                    except Exception as e:
+                        logger.error(
+                            "Failed to process inbound calendar event",
+                            event_id=raw_event.get("id"),
+                            error=str(e),
+                            error_type=type(e).__name__,
+                        )
+                        metrics["errors"] += 1
+
+                # Save sync token
+                if new_sync_token:
+                    save_token_stmt = text("""
+                        UPDATE user_google_integration
+                        SET calendar_events_sync_token = :sync_token,
+                            updated_at = :updated_at
+                        WHERE user_id = :user_id
+                        AND google_account_email = :email
+                    """)
+                    await session.execute(
+                        save_token_stmt,
+                        {
+                            "sync_token": new_sync_token,
+                            "updated_at": datetime.now(UTC),
+                            "user_id": str(user_id),
+                            "email": google_account_email,
+                        },
+                    )
+
+            await session.commit()
+
+        duration = (datetime.now(UTC) - started_at).total_seconds()
+        metrics["completed_at"] = datetime.now(UTC).isoformat()
+        metrics["duration_seconds"] = duration
+
+        logger.info(
+            "Inbound calendar events sync completed",
+            job_id=job_id,
+            google_account_email=google_account_email,
+            **metrics,
+        )
+
+        return {"status": "success", **metrics}
+
+    except Exception as e:
+        duration = (datetime.now(UTC) - started_at).total_seconds()
+        logger.error(
+            "Inbound calendar events sync failed",
+            job_id=job_id,
+            google_account_email=google_account_email,
+            error=str(e),
+            error_type=type(e).__name__,
+            duration_seconds=duration,
+        )
+        return {
+            "status": "error",
+            "google_account_email": google_account_email,
+            "error": str(e),
+            "error_type": type(e).__name__,
+            "worker_id": settings.worker_id,
+            "failed_at": datetime.now(UTC).isoformat(),
+        }
+
+
 # ARQ Worker Settings
 class GoogleWorkerSettings(WorkerSettingsBase):
     """ARQ worker configuration."""
@@ -2251,6 +2554,7 @@ class GoogleWorkerSettings(WorkerSettingsBase):
         sync_google_contacts,
         push_local_contacts_to_google,
         process_journal_event,
+        sync_calendar_events,
         periodic_sync_all_accounts,  # Wrapper for periodic cron syncs
     ]
 

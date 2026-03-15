@@ -182,16 +182,16 @@ The sequence reflects both product priority and technical dependency:
 **PR Size:** ~6-8 files
 
 **Acceptance Criteria:**
-- [ ] Inbound Google changes update the journal when the sync capability allows it.
-- [ ] Integration workers create outbox events for inbound changes and the main application applies journal-domain updates; workers do not mutate journal entities directly.
-- [ ] ETag/version markers drive conflict detection rather than broad full-record diffing.
-- [ ] Latest-write-wins applies by default where it is safe, but one-way sources never overwrite protected manual edits.
+- [x] Inbound Google changes update the journal when the sync capability allows it.
+- [x] Integration workers create outbox events for inbound changes and the main application applies journal-domain updates; workers do not mutate journal entities directly.
+- [x] ETag/version markers drive conflict detection rather than broad full-record diffing.
+- [x] Latest-write-wins applies by default where it is safe, but one-way sources never overwrite protected manual edits.
 - [ ] Invitee sync remains distinct from local participants during inbound updates.
 
 **Required Test Coverage:**
-- **Unit:** conflict classification, one-way overwrite guards, inbound field-merge rules.
-- **Integration:** inbound sync scenarios covering safe updates, conflicts, and protected manual edits.
-- **E2E:** modify a synced event through the deterministic test flow and verify the journal surface reflects the allowed inbound change.
+- **Unit:** conflict classification, one-way overwrite guards, inbound field-merge rules. ✅ Covered: InboundSyncClassifier, InboundFieldMerger, JournalOutboxEventProcessor (6 tests).
+- **Integration:** inbound sync scenarios covering safe updates, conflicts, and protected manual edits. 🟡 Partial: E2E covers created path; worker integration tests for conflict/update paths still needed.
+- **E2E:** modify a synced event through the deterministic test flow and verify the journal surface reflects the allowed inbound change. ✅ Covered: full flow test (Google API → ARQ worker → outbox → processor → journal in DB).
 
 #### Phase 3: External Deletes, Local Deletes, and Cancellation-First Behaviour
 **PR Size:** ~5-7 files
