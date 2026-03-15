@@ -257,14 +257,19 @@ class TestContactServiceIntegration:
         assert result.first_name == "John"
         assert result.last_name == "Doe"
 
-        # Verify field history was recorded
+        # Verify field history was recorded (creation entry + last_name change)
         history = await history_repo.get_contact_history(saved_contact.id)
-        assert len(history) == 1
-        assert history[0].entity_type == "contact"
-        assert history[0].entity_id == saved_contact.id
-        assert history[0].field_name == "last_name"
-        assert history[0].old_value == "Smith"
-        assert history[0].new_value == "Doe"
+        assert len(history) == 2
+        # Filter for the last_name change specifically
+        last_name_history = [h for h in history if h.field_name == "last_name"]
+        assert len(last_name_history) == 1
+        assert last_name_history[0].entity_type == "contact"
+        assert last_name_history[0].entity_id == saved_contact.id
+        assert last_name_history[0].old_value == "Smith"
+        assert last_name_history[0].new_value == "Doe"
+        # Verify creation history entry exists
+        created_history = [h for h in history if h.field_name == "created"]
+        assert len(created_history) == 1
 
     @pytest.mark.asyncio
     async def test_update_contact_with_methods_and_notes_single_call(
