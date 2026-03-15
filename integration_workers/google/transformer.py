@@ -84,25 +84,28 @@ class GoogleContactTransformer:
             middle_name=middle_name,
             nick_name=nick_name,
             is_favourite=is_favourite,
-            methods=[],
-            addresses=[],
-            notes=[],
-            tags=[],
-            relationships=[],
         )
 
-        contact.methods.extend(
+        # Methods: Google is authoritative — always provide a list (even if empty)
+        methods: list[ContactMethod] = []
+        methods.extend(
             self._transform_email_addresses(google_person.email_addresses)
         )
-        contact.methods.extend(
+        methods.extend(
             self._transform_phone_numbers(google_person.phone_numbers)
         )
+        contact.methods = methods
 
-        contact.addresses.extend(self._transform_addresses(google_person.addresses))
-        contact.notes.extend(self._transform_biographies(google_person.biographies))
-        contact.tags.extend(
-            self._transform_memberships_to_tags(google_person.memberships)
-        )
+        # Addresses, notes, tags: use None when Google provides no data
+        # so that locally-managed data is preserved on sync updates.
+        transformed_addresses = self._transform_addresses(google_person.addresses)
+        contact.addresses = transformed_addresses or None
+
+        transformed_notes = self._transform_biographies(google_person.biographies)
+        contact.notes = transformed_notes or None
+
+        transformed_tags = self._transform_memberships_to_tags(google_person.memberships)
+        contact.tags = transformed_tags or None
 
         company, job_title = self._extract_organization_info(
             google_person.organizations
@@ -114,9 +117,9 @@ class GoogleContactTransformer:
             "Successfully transformed Google person to contact",
             resource_name=google_person.resource_name,
             contact_methods_count=len(contact.methods),
-            addresses_count=len(contact.addresses),
-            notes_count=len(contact.notes),
-            tags_count=len(contact.tags),
+            addresses_count=len(contact.addresses or []),
+            notes_count=len(contact.notes or []),
+            tags_count=len(contact.tags or []),
             company=contact.company,
             job_title=contact.job_title,
         )
