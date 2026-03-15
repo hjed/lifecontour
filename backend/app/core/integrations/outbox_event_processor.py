@@ -403,7 +403,14 @@ class OutboxEventProcessor:
                 from core_shared.models.contacts.value_objects import TagName
 
                 new_tag = Tag(name=TagName(tag_name))
-                saved_tag = await self.tag_repo.save(new_tag)
+                try:
+                    saved_tag = await self.tag_repo.save(new_tag)
+                except Exception:
+                    # Race condition: another worker created the same tag
+                    found_tag = await self.tag_repo.find_by_name(tag_name)
+                    if found_tag is None:
+                        raise
+                    saved_tag = found_tag
                 resolved_tags.append(saved_tag)
 
         return resolved_tags
@@ -505,6 +512,17 @@ class OutboxEventProcessor:
             contact = deserialize_contact(contact_data)
         except ContactDeserializationError as e:
             raise PermanentOutboxEventProcessingError(str(e)) from e
+
+        # Resolve tags: deserialize_contact creates Tag objects without DB IDs.
+        # We need to look up or create real tags before saving the contact.
+        if contact.tags:
+            resolved_tags = await self._resolve_contact_tags(
+                contact_data,
+                existing_reference_data=None,
+                existing_reference_id=None,
+                existing_contact_tags=None,
+            )
+            contact.tags = resolved_tags
 
         # Reconcile to an existing local contact when there is a single clear email match.
         try:

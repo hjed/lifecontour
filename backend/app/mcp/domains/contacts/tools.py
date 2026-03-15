@@ -341,15 +341,13 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
                 existing_tag = await tag_repo.find_by_name(tag_name)
 
                 if existing_tag:
-                    # Use existing tag
-                    assert contact.tags is not None
-                    contact.tags.append(existing_tag)
+                    # Use existing tag (add_tag handles dedup and limit)
+                    contact.add_tag(existing_tag)
                 else:
                     # Create new tag
                     new_tag = Tag(name=TagName(tag_name))
                     saved_tag = await tag_repo.save(new_tag)
-                    assert contact.tags is not None
-                    contact.tags.append(saved_tag)
+                    contact.add_tag(saved_tag)
 
         # Create the contact with all methods, notes, and tags in a single transaction
         final_contact = await contact_service.create_contact(contact, connection)
@@ -529,13 +527,13 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
                     existing_tag = await tag_repo.find_by_name(tag_name)
 
                     if existing_tag:
-                        # Use existing tag
-                        updated_contact.tags.append(existing_tag)
+                        # Use existing tag (add_tag handles dedup and limit)
+                        updated_contact.add_tag(existing_tag)
                     else:
                         # Create new tag
                         new_tag = Tag(name=TagName(tag_name))
                         saved_tag = await tag_repo.save(new_tag)
-                        updated_contact.tags.append(saved_tag)
+                        updated_contact.add_tag(saved_tag)
 
             # Update the contact with all methods, notes, and tags in a single transaction
             final_contact = await contact_service.update_contact(
