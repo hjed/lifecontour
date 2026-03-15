@@ -186,7 +186,7 @@ class ExternalReferenceService:
         self,
         reference_id: int,
         external_entity_id: str | None = None,
-        reference_data: dict[str, Any] | None = None,
+        reference_data: str | None = None,
     ) -> ExternalReference | None:
         """
         Update an existing external reference.

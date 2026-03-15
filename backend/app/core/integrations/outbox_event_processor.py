@@ -696,7 +696,7 @@ class OutboxEventProcessor:
                 new_ref_data["synced_tags"] = incoming_tag_names
                 await self.external_reference_service.update_external_reference(
                     reference_id=existing_ref.id,
-                    reference_data=new_ref_data,
+                    reference_data=json.dumps(new_ref_data),
                 )
         except Exception as e:
             raise OutboxEventProcessingError(

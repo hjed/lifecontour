@@ -363,8 +363,12 @@ class TestOutboxEventProcessor:
         call_kwargs = mock_external_ref_service.update_external_reference.call_args[1]
         assert call_kwargs["reference_id"] == 99
 
-        # Verify dict
-        updated_ref_data = call_kwargs["reference_data"]
+        # Verify JSON
+        updated_ref_data_str = call_kwargs["reference_data"]
+        assert isinstance(updated_ref_data_str, str)
+        import json
+
+        updated_ref_data = json.loads(updated_ref_data_str)
         assert updated_ref_data["old_key"] == "old_value"
         assert updated_ref_data["synced_tags"] == ["VIP"]
 
