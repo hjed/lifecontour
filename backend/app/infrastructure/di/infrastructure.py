@@ -4,11 +4,12 @@ Infrastructure providers for Dishka dependency injection.
 Provides general infrastructure services like settings, search, and event publishing.
 """
 
-from dishka import Provider, Scope, provide
+from dishka import AsyncContainer, Provider, Scope, provide
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.infrastructure.config import Settings, get_settings
 from app.infrastructure.events.outbox_event_publisher import OutboxEventPublisher
+from app.infrastructure.events.outbox_processor import OutboxProcessor
 from app.infrastructure.search.search_service import SearchService
 
 
@@ -31,3 +32,8 @@ class InfrastructureProvider(Provider):
     ) -> OutboxEventPublisher:
         """Get outbox event publisher for request scope."""
         return OutboxEventPublisher(connection)
+
+    @provide(scope=Scope.APP)
+    def provide_outbox_processor(self, container: AsyncContainer) -> OutboxProcessor:
+        """Get outbox processor for app scope."""
+        return OutboxProcessor(container)

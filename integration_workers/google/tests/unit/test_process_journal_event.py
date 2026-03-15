@@ -21,6 +21,7 @@ class TestProcessJournalEvent:
         mock_row.is_all_day = False
         mock_row.location = "Test Location"
         mock_row.calendar_id = "test-cal-id"
+        mock_row.google_calendar_id = "test-google-cal-id"
         mock_row.is_synced_to_google = True
         mock_row.external_event_id = None
         mock_row.sync_status = None
@@ -33,10 +34,13 @@ class TestProcessJournalEvent:
         mock_auth_result.fetchone.return_value = mock_auth_row
 
         mock_session = AsyncMock()
-        mock_session.execute.side_effect = [mock_result, mock_auth_result, MagicMock()]
+        mock_session.execute.side_effect = [mock_result, mock_auth_result] + [
+            MagicMock() for _ in range(10)
+        ]
 
         mock_factory = MagicMock()
-        mock_factory.return_value.__aenter__.return_value = mock_session
+        mock_factory.return_value.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_factory.return_value.__aexit__ = AsyncMock(return_value=None)
         return mock_factory
 
     @pytest.fixture
@@ -101,6 +105,7 @@ class TestProcessJournalEvent:
         mock_row.is_all_day = False
         mock_row.location = "Test Location"
         mock_row.calendar_id = "test-cal-id"
+        mock_row.google_calendar_id = "test-google-cal-id"
         mock_row.is_synced_to_google = True
         mock_row.external_event_id = "existing_event_id"
         mock_row.sync_status = "synced"
@@ -111,7 +116,9 @@ class TestProcessJournalEvent:
         mock_auth_row.google_account_email = "test@example.com"
         mock_auth_result.fetchone.return_value = mock_auth_row
 
-        mock_session.execute.side_effect = [mock_result, mock_auth_result, MagicMock()]
+        mock_session.execute.side_effect = [mock_result, mock_auth_result] + [
+            MagicMock() for _ in range(10)
+        ]
 
         from worker import process_journal_event
 
@@ -143,6 +150,7 @@ class TestProcessJournalEvent:
                     "start": {"dateTime": "2024-01-01T10:00:00+00:00"},
                     "end": {"dateTime": "2024-01-01T11:00:00+00:00"},
                 },
+                calendar_id="test-google-cal-id",
             )
 
     @pytest.mark.asyncio
@@ -150,7 +158,9 @@ class TestProcessJournalEvent:
         mock_session = mock_session_factory.return_value.__aenter__.return_value
         mock_result = MagicMock()
         mock_result.fetchone.return_value = None
-        mock_session.execute.side_effect = [mock_result, MagicMock(), MagicMock()]
+        mock_session.execute.side_effect = [mock_result] + [
+            MagicMock() for _ in range(10)
+        ]
 
         from worker import process_journal_event
 
@@ -191,6 +201,13 @@ class TestProcessJournalEvent:
             patch("worker.GoogleAuthService", return_value=mock_google_auth_service),
             patch("worker.GoogleAPIClient", return_value=mock_google_client),
         ):
+            mock_session = mock_session_factory.return_value.__aenter__.return_value
+            mock_result = MagicMock()
+            mock_row = MagicMock()
+            mock_row.google_account_email = "test@example.com"
+            mock_result.fetchone.return_value = mock_row
+            mock_session.execute.return_value = mock_result
+
             ctx = {"session_factory": mock_session_factory, "job_id": "job123"}
             result = await process_journal_event(
                 ctx=ctx,
@@ -207,7 +224,9 @@ class TestProcessJournalEvent:
             assert result["external_event_ids"] == ["existing_event_id"]
 
             # Verify API was called with fallback calendar_id 'primary' for old string format
-            mock_google_client.delete_event.assert_called_once_with("existing_event_id", "primary")
+            mock_google_client.delete_event.assert_called_once_with(
+                "existing_event_id", "primary"
+            )
 
     @pytest.mark.asyncio
     async def test_process_journal_event_ignores_delete_if_no_identifier(
@@ -228,3 +247,87 @@ class TestProcessJournalEvent:
 
         assert result["status"] == "ignored"
         assert result["reason"] == "no_external_id_for_provider"
+
+    @pytest.mark.asyncio
+    async def test_process_journal_event_orphan_delete_fails(
+        self, mock_session_factory, mock_google_auth_service, mock_google_client
+    ):
+        from googleapiclient.errors import HttpError
+
+        from worker import process_journal_event
+
+        mock_google_client.delete_event.side_effect = HttpError(
+            resp=MagicMock(status=500, reason="Internal Server Error"),
+            content=b"Internal Server Error",
+        )
+
+        with (
+            patch("worker.GoogleAuthService", return_value=mock_google_auth_service),
+            patch("worker.GoogleAPIClient", return_value=mock_google_client),
+        ):
+            mock_session = mock_session_factory.return_value.__aenter__.return_value
+            mock_result = MagicMock()
+            mock_row = MagicMock()
+            mock_row.journal_id = 1
+            mock_row.title = "Test Journal"
+            mock_row.content = "Content"
+            mock_row.event_date_range_start = datetime(2024, 1, 1, 10, 0, tzinfo=UTC)
+            mock_row.event_date_range_end = datetime(2024, 1, 1, 11, 0, tzinfo=UTC)
+            mock_row.user_id = 1
+            mock_row.is_all_day = False
+            mock_row.location = "Test Location"
+            mock_row.calendar_id = "test-cal-id-new"
+            mock_row.google_calendar_id = "test-google-cal-id-new"
+            mock_row.is_synced_to_google = True
+            mock_row.external_event_id = "new_event_id"
+            mock_row.sync_status = "synced"
+            mock_result.fetchone.return_value = mock_row
+
+            mock_auth_result = MagicMock()
+            mock_auth_row = MagicMock()
+            mock_auth_row.google_account_email = "test@example.com"
+            mock_auth_result.fetchone.return_value = mock_auth_row
+
+            mock_links_result = MagicMock()
+            mock_link_row = MagicMock()
+            mock_link_row.calendar_id = "test-cal-id-old"
+            mock_link_row.external_event_id = "old_event_id"
+            mock_link_row.google_calendar_id = "test-google-cal-id-old"
+            mock_links_result.fetchall.return_value = [mock_link_row]
+
+            mock_session.execute.side_effect = [
+                mock_result,  # SELECT journal...
+                mock_auth_result,  # SELECT google_account_email
+                mock_links_result,  # SELECT existing links
+            ] + [MagicMock() for _ in range(15)]
+
+            ctx = {"session_factory": mock_session_factory, "job_id": "job123"}
+            result = await process_journal_event(
+                ctx=ctx,
+                event_type="JournalUpdated",
+                event_data={
+                    "journal_id": 1,
+                    "changed_fields": {"calendar_info": ("Old", "New")},
+                },
+            )
+
+            assert result["status"] == "success"
+            mock_google_client.delete_event.assert_called_once_with(
+                "old_event_id", "test-google-cal-id-old"
+            )
+
+            # Should have called the UPDATE statement setting status to errored
+            update_call = None
+            for call in mock_session.execute.call_args_list:
+                stmt_str = str(call[0][0])
+                if (
+                    "UPDATE journal_external_event_links" in stmt_str
+                    and "sync_status = 'errored'" in stmt_str
+                ):
+                    update_call = call
+                    break
+
+            assert update_call is not None, (
+                "Did not execute UPDATE journal_external_event_links to set errored state"
+            )
+            assert update_call[0][1]["calendar_id"] == "test-cal-id-old"

@@ -61,12 +61,15 @@ class TaskQueueService:
     async def _get_arq_pool(self) -> ArqRedis:
         """Get or create the ARQ pool for job operations."""
         if self._arq_pool is None:
-            self._arq_pool = await create_pool(self.redis_settings)
+            if self.redis_pool is not None:
+                self._arq_pool = self.redis_pool
+            else:
+                self._arq_pool = await create_pool(self.redis_settings)
         return self._arq_pool
 
     async def close(self) -> None:
         """Close the ARQ pool connection."""
-        if self._arq_pool is not None:
+        if self._arq_pool is not None and self._arq_pool is not self.redis_pool:
             await self._arq_pool.close()
             self._arq_pool = None
 

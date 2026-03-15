@@ -16,7 +16,6 @@ from app.core.integrations.outbox_event_processor import (
 )
 from app.infrastructure.events.outbox_processor import (
     OutboxProcessor,
-    get_outbox_processor,
 )
 from app.infrastructure.events.outbox_repository import OutboxEvent
 
@@ -47,7 +46,7 @@ class TestOutboxProcessor:
                 return container
 
             async def __aexit__(self, exc_type, exc_val, exc_tb):
-                pass
+                pass  # Mock implementation for context manager
 
         container.return_value = MockContext()
         container.get = AsyncMock(return_value=mock_task_queue_service)
@@ -432,16 +431,6 @@ class TestOutboxProcessor:
         assert summary["failed_event_count"] == 0
         assert summary["failed_events"] == []
 
-    def test_get_outbox_processor_singleton(self):
-        """Test that get_outbox_processor returns the same instance."""
-        mock_container = MagicMock()
-        # Act
-        processor1 = get_outbox_processor(mock_container)
-        processor2 = get_outbox_processor(mock_container)
-
-        # Assert
-        assert processor1 is processor2
-
     @pytest.mark.asyncio
     async def test_run_outbox_processor_loop_cancellation(self):
         """Test that the processor loop handles cancellation correctly."""
@@ -449,29 +438,26 @@ class TestOutboxProcessor:
         mock_processor = MagicMock()
         mock_processor.process_events = AsyncMock()
 
-        with patch(
-            "app.infrastructure.events.outbox_processor.get_outbox_processor",
-            return_value=mock_processor,
-        ):
-            # Create a task that we can cancel
-            async def run_and_cancel():
-                from app.infrastructure.events.outbox_processor import (
-                    run_outbox_processor_loop,
-                )
+        # Create a task that we can cancel
+        async def run_and_cancel():
+            from app.infrastructure.events.outbox_processor import (
+                run_outbox_processor_loop,
+            )
 
-                mock_container = MagicMock()
-                task = asyncio.create_task(
-                    run_outbox_processor_loop(mock_container, interval_seconds=0.1)
-                )
-                await asyncio.sleep(0.05)  # Let it run briefly
-                task.cancel()
-                try:
-                    await task
-                except asyncio.CancelledError:
-                    pass
+            mock_container = MagicMock()
+            mock_container.get = AsyncMock(return_value=mock_processor)
+            task = asyncio.create_task(
+                run_outbox_processor_loop(mock_container, interval_seconds=0.1)
+            )
+            await asyncio.sleep(0.05)  # Let it run briefly
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
 
-            # Act
-            await run_and_cancel()
+        # Act
+        await run_and_cancel()
 
         # Assert
         # Should have called process_events at least once

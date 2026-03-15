@@ -236,7 +236,13 @@ class TestJournalServiceCRUD:
         mock_journal_repo.find_by_id.return_value = journal
 
         mock_result = MagicMock()
-        mock_result.fetchall.return_value = []
+        mock_row1 = MagicMock()
+        mock_row1.external_event_id = "ext1"
+        mock_row1.google_calendar_id = "cal1"
+        mock_row2 = MagicMock()
+        mock_row2.external_event_id = "ext2"
+        mock_row2.google_calendar_id = "cal2"
+        mock_result.fetchall.return_value = [mock_row1, mock_row2]
         mock_transaction.execute.return_value = mock_result
 
         # Act
@@ -246,6 +252,15 @@ class TestJournalServiceCRUD:
         mock_journal_repo.find_by_id.assert_called_once_with(1)
         mock_journal_repo.delete.assert_called_once_with(1)
         mock_event_publisher.publish.assert_called_once()
+        published_event = mock_event_publisher.publish.mock_calls[0][1][0]
+        assert "google" in published_event.event_data["external_identifiers"]
+        assert len(published_event.event_data["external_identifiers"]["google"]) == 2
+        assert (
+            published_event.event_data["external_identifiers"]["google"][0][
+                "external_event_id"
+            ]
+            == "ext1"
+        )
 
     @pytest.mark.asyncio
     async def test_delete_journal_not_found(

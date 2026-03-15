@@ -275,18 +275,6 @@ class OutboxProcessor:
             return {"failed_event_count": 0, "failed_events": []}
 
 
-# Global processor instance
-_processor_instance: OutboxProcessor | None = None
-
-
-def get_outbox_processor(container: AsyncContainer) -> OutboxProcessor:
-    """Get the global outbox processor instance."""
-    global _processor_instance
-    if _processor_instance is None:
-        _processor_instance = OutboxProcessor(container)
-    return _processor_instance
-
-
 async def run_outbox_processor_loop(
     container: AsyncContainer, interval_seconds: float = 10
 ) -> None:
@@ -297,7 +285,7 @@ async def run_outbox_processor_loop(
         container: Application's AsyncContainer for dependency injection
         interval_seconds: Interval between processing cycles (in seconds, can be fractional)
     """
-    processor = get_outbox_processor(container)
+    processor = await container.get(OutboxProcessor)
 
     logger.info("Starting outbox processor loop", interval_seconds=interval_seconds)
 

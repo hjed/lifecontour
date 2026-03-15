@@ -10,7 +10,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from arq.connections import RedisSettings
 from arq.jobs import JobStatus
-from redis.asyncio import Redis
 
 from app.core.integrations.exceptions import JobNotFoundException
 from app.core.integrations.task_queue_service import ARQ_QUEUE_NAME, TaskQueueService
@@ -23,7 +22,9 @@ class TestTaskQueueService:
     @pytest.fixture
     def mock_redis_pool(self) -> AsyncMock:
         """Create mock Redis pool."""
-        return AsyncMock(spec=Redis)
+        from arq.connections import ArqRedis
+
+        return AsyncMock(spec=ArqRedis)
 
     @pytest.fixture
     def redis_settings(self) -> RedisSettings:
@@ -61,11 +62,10 @@ class TestTaskQueueService:
         self, service: TaskQueueService, mock_redis_pool: AsyncMock
     ):
         """Test successful job enqueueing."""
-        # Mock ARQ pool and job
-        mock_pool = AsyncMock()
+        # Mock ARQ job
         mock_job = MagicMock()
         mock_job.job_id = "test-job-123"
-        mock_pool.enqueue_job.return_value = mock_job
+        mock_redis_pool.enqueue_job.return_value = mock_job
 
         # Mock database session and repository
         mock_session = MagicMock()
@@ -86,15 +86,9 @@ class TestTaskQueueService:
         # Mock the db_manager's get_session method
         service.db_manager.get_session = MagicMock(return_value=mock_get_session_ctx)  # type: ignore[method-assign]
 
-        with (
-            patch(
-                "app.core.integrations.task_queue_service.create_pool"
-            ) as mock_create_pool,
-            patch(
-                "app.core.integrations.task_queue_service.SyncJobRepository"
-            ) as mock_repo_class,
-        ):
-            mock_create_pool.return_value = mock_pool
+        with patch(
+            "app.core.integrations.task_queue_service.SyncJobRepository"
+        ) as mock_repo_class:
             mock_repo = AsyncMock()
             mock_repo_class.return_value = mock_repo
 
@@ -108,8 +102,7 @@ class TestTaskQueueService:
             )
 
             # Verify job was enqueued correctly
-            mock_create_pool.assert_called_once_with(service.redis_settings)
-            mock_pool.enqueue_job.assert_called_once_with(
+            mock_redis_pool.enqueue_job.assert_called_once_with(
                 "sync_google_contacts",
                 "test@example.com",
                 123,
@@ -128,31 +121,31 @@ class TestTaskQueueService:
             mock_redis_pool.expire.assert_called_once_with("user_jobs:123", 86400)
 
     @pytest.mark.asyncio
-    async def test_enqueue_google_sync_failure(self, service: TaskQueueService):
+    async def test_enqueue_google_sync_failure(
+        self, service: TaskQueueService, mock_redis_pool: AsyncMock
+    ):
         """Test job enqueueing failure."""
-        with patch(
-            "app.core.integrations.task_queue_service.create_pool"
-        ) as mock_create_pool:
-            mock_create_pool.side_effect = Exception("Redis connection failed")
+        mock_redis_pool.enqueue_job.side_effect = Exception("Redis connection failed")
 
-            # Should raise exception
-            with pytest.raises(Exception) as exc_info:
-                await service.enqueue_google_sync(
-                    google_account_email="test@example.com",
-                    user_id=123,
-                    sync_type="smart",
-                )
+        # Should raise exception
+        with pytest.raises(Exception) as exc_info:
+            await service.enqueue_google_sync(
+                google_account_email="test@example.com",
+                user_id=123,
+                sync_type="smart",
+            )
 
-            assert "Redis connection failed" in str(exc_info.value)
+        assert "Redis connection failed" in str(exc_info.value)
 
     @pytest.mark.asyncio
-    async def test_get_job_status_completed(self, service: TaskQueueService):
+    async def test_get_job_status_completed(
+        self, service: TaskQueueService, mock_redis_pool: AsyncMock
+    ):
         """Test getting status of completed job."""
         job_id = "test-job-123"
         user_id = 123
 
-        # Mock ARQ pool and job info
-        mock_pool = AsyncMock()
+        # Mock ARQ job info
         mock_job = AsyncMock()
         mock_job_info = MagicMock()
         mock_job_info.job_status = JobStatus.complete
@@ -167,21 +160,16 @@ class TestTaskQueueService:
             service.redis_pool, "hexists", new=AsyncMock(return_value=True)
         ) as mock_hexists:
             with patch(
-                "app.core.integrations.task_queue_service.create_pool"
-            ) as mock_create_pool:
-                mock_create_pool.return_value = mock_pool
-                with patch(
-                    "app.core.integrations.task_queue_service.Job"
-                ) as mock_job_class:
-                    mock_job_class.return_value = mock_job
+                "app.core.integrations.task_queue_service.Job"
+            ) as mock_job_class:
+                mock_job_class.return_value = mock_job
 
-                    # Get job status
-                    status = await service.get_job_status(job_id, user_id)
+                # Get job status
+                status = await service.get_job_status(job_id, user_id)
 
-                    # Verify correct calls
-                    mock_hexists.assert_called_once_with("user_jobs:123", job_id)
-                mock_create_pool.assert_called_once_with(service.redis_settings)
-                mock_job_class.assert_called_once_with(job_id, redis=mock_pool)
+                # Verify correct calls
+                mock_hexists.assert_called_once_with("user_jobs:123", job_id)
+                mock_job_class.assert_called_once_with(job_id, redis=mock_redis_pool)
                 mock_job.info.assert_called_once()
 
                 # Verify status response
@@ -201,8 +189,7 @@ class TestTaskQueueService:
 
         # Mock user-job ownership verification will be done with patch.object
 
-        # Mock ARQ pool and job info
-        mock_pool = AsyncMock()
+        # Mock ARQ job info
         mock_job = AsyncMock()
         mock_job_info = MagicMock()
         mock_job_info.job_status = JobStatus.in_progress
@@ -217,19 +204,15 @@ class TestTaskQueueService:
             service.redis_pool, "hexists", new=AsyncMock(return_value=True)
         ) as mock_hexists:
             with patch(
-                "app.core.integrations.task_queue_service.create_pool"
-            ) as mock_create_pool:
-                mock_create_pool.return_value = mock_pool
-                with patch(
-                    "app.core.integrations.task_queue_service.Job"
-                ) as mock_job_class:
-                    mock_job_class.return_value = mock_job
+                "app.core.integrations.task_queue_service.Job"
+            ) as mock_job_class:
+                mock_job_class.return_value = mock_job
 
-                    # Get job status
-                    status = await service.get_job_status(job_id, user_id)
+                # Get job status
+                status = await service.get_job_status(job_id, user_id)
 
-                    # Verify status response
-                    mock_hexists.assert_called_once_with("user_jobs:123", job_id)
+                # Verify status response
+                mock_hexists.assert_called_once_with("user_jobs:123", job_id)
                 assert status["job_id"] == job_id
                 assert status["status"] == "running"
                 assert status["message"] == "Job is currently being processed"
@@ -243,8 +226,7 @@ class TestTaskQueueService:
 
         # Mock user-job ownership verification will be done with patch.object
 
-        # Mock ARQ pool and job info
-        mock_pool = AsyncMock()
+        # Mock ARQ job info
         mock_job = AsyncMock()
         mock_job.info.return_value = None  # Job not found
 
@@ -252,16 +234,12 @@ class TestTaskQueueService:
             service.redis_pool, "hexists", new=AsyncMock(return_value=True)
         ):
             with patch(
-                "app.core.integrations.task_queue_service.create_pool"
-            ) as mock_create_pool:
-                mock_create_pool.return_value = mock_pool
-                with patch(
-                    "app.core.integrations.task_queue_service.Job"
-                ) as mock_job_class:
-                    mock_job_class.return_value = mock_job
+                "app.core.integrations.task_queue_service.Job"
+            ) as mock_job_class:
+                mock_job_class.return_value = mock_job
 
-                    # Get job status
-                    status = await service.get_job_status(job_id, user_id)
+                # Get job status
+                status = await service.get_job_status(job_id, user_id)
 
                 # Verify status response
                 assert status["job_id"] == job_id
@@ -442,3 +420,48 @@ class TestTaskQueueService:
 
         # Verify the exception message mentions authorization
         assert "not authorized" in str(exc_info.value).lower()
+
+    @pytest.mark.asyncio
+    async def test_broadcast_journal_event_success(
+        self, service: TaskQueueService, mock_redis_pool: AsyncMock
+    ):
+        """Test broadcasting a journal event to the task queue."""
+        event_type = "JournalCreated"
+        event_data = {"journal_id": 1, "test": "data"}
+
+        # Mock ARQ job
+        mock_job = AsyncMock()
+        mock_job.job_id = "test-job-id"
+        mock_redis_pool.enqueue_job.return_value = mock_job
+
+        job_id = await service.broadcast_journal_event(event_type, event_data)
+
+        assert job_id == "test-job-id"
+        mock_redis_pool.enqueue_job.assert_called_once_with(
+            "process_journal_event",
+            event_type,
+            event_data,
+            _job_timeout=300,
+            _defer_until=None,
+            _queue_name=ARQ_QUEUE_NAME,
+        )
+
+    @pytest.mark.asyncio
+    async def test_broadcast_journal_event_none_job(
+        self, service: TaskQueueService, mock_redis_pool: AsyncMock
+    ):
+        """Test broadcasting when enqueue_job returns None."""
+        from app.core.integrations.exceptions import JobEnqueueError
+
+        event_type = "JournalCreated"
+        event_data = {"journal_id": 1}
+
+        # Mock ARQ pool to return None
+        mock_redis_pool.enqueue_job.return_value = None
+
+        with pytest.raises(JobEnqueueError) as exc_info:
+            await service.broadcast_journal_event(event_type, event_data)
+
+        assert "Failed to broadcast event to any integration queue" in str(
+            exc_info.value
+        )

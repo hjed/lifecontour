@@ -168,10 +168,10 @@ The sequence reflects both product priority and technical dependency:
 **PR Size:** ~5-8 files
 
 **Acceptance Criteria:**
-- [ ] Creating or updating an EVENT journal fans out changes to all eligible linked calendars.
-- [ ] Per-link sync states are tracked explicitly, including pending, synced, and error states.
-- [ ] Manual edits in the journal system remain the canonical source for outbound updates.
-- [ ] No-op outbound writes are detected and do not create noisy state changes.
+- [x] Creating or updating an EVENT journal fans out changes to all eligible linked calendars.
+- [x] Per-link sync states are tracked explicitly, including pending, synced, and error states.
+- [x] Manual edits in the journal system remain the canonical source for outbound updates.
+- [x] No-op outbound writes are detected and do not create noisy state changes.
 
 **Required Test Coverage:**
 - **Unit:** fan-out planning, no-op detection, payload selection per linked calendar.

@@ -11,6 +11,8 @@ from core_shared.models.journals import (
 
 from calendar_models import GoogleEvent, GoogleEventStartEnd
 
+UTC_OFFSET_SUFFIX = "+00:00"
+
 
 class GoogleEventTransformer:
     """Transforms events between Google Calendar API and internal Journal formats."""
@@ -95,38 +97,41 @@ class GoogleEventTransformer:
             return None, False
 
         if time_data.date:
-            # All-day event
-            try:
-                dt_naive = datetime.strptime(time_data.date, "%Y-%m-%d")
-                dt_utc = dt_naive.replace(tzinfo=UTC)
-                return dt_utc, True
-            except ValueError:
-                return None, False
+            return self._parse_all_day_date(time_data.date)
         elif time_data.date_time:
-            # Timed event
-            try:
-                date_time_str = time_data.date_time
-                if date_time_str.endswith("Z"):
-                    date_time_str = date_time_str[:-1] + "+00:00"
-                dt = datetime.fromisoformat(date_time_str)
-                # If the parsing didn't result in an aware datetime and timeZone is provided, we could attach it.
-                # However, fromisoformat with Z or +00:00 will handle aware. If missing entirely, assume UTC.
-                if dt.tzinfo is None:
-                    if time_data.time_zone:
-                        try:
-                            from zoneinfo import ZoneInfo
-
-                            tz = ZoneInfo(time_data.time_zone)
-                            dt = dt.replace(tzinfo=tz)
-                        except Exception:
-                            dt = dt.replace(tzinfo=UTC)
-                    else:
-                        dt = dt.replace(tzinfo=UTC)
-                return dt.astimezone(UTC), False
-            except ValueError:
-                return None, False
+            return self._parse_timed_datetime(time_data.date_time, time_data.time_zone)
 
         return None, False
+
+    def _parse_all_day_date(self, date_str: str) -> tuple[datetime | None, bool]:
+        try:
+            dt_naive = datetime.strptime(date_str, "%Y-%m-%d")
+            dt_utc = dt_naive.replace(tzinfo=UTC)
+            return dt_utc, True
+        except ValueError:
+            return None, False
+
+    def _parse_timed_datetime(
+        self, date_time_str: str, time_zone_str: str | None
+    ) -> tuple[datetime | None, bool]:
+        try:
+            if date_time_str.endswith("Z"):
+                date_time_str = date_time_str[:-1] + UTC_OFFSET_SUFFIX
+            dt = datetime.fromisoformat(date_time_str)
+            if dt.tzinfo is None:
+                if time_zone_str:
+                    try:
+                        from zoneinfo import ZoneInfo
+
+                        tz = ZoneInfo(time_zone_str)
+                        dt = dt.replace(tzinfo=tz)
+                    except Exception:
+                        dt = dt.replace(tzinfo=UTC)
+                else:
+                    dt = dt.replace(tzinfo=UTC)
+            return dt.astimezone(UTC), False
+        except ValueError:
+            return None, False
 
     def transform_to_google_event_payload(
         self,
@@ -166,8 +171,12 @@ class GoogleEventTransformer:
 
             # Format datetime as ISO 8601. Add 'Z' manually if UTC, else Google handles offsets.
             # Our backend expects UTC.
-            payload["start"] = {"dateTime": start_dt.isoformat().replace("+00:00", "Z")}
-            payload["end"] = {"dateTime": end_dt.isoformat().replace("+00:00", "Z")}
+            payload["start"] = {
+                "dateTime": start_dt.isoformat().replace(UTC_OFFSET_SUFFIX, "Z")
+            }
+            payload["end"] = {
+                "dateTime": end_dt.isoformat().replace(UTC_OFFSET_SUFFIX, "Z")
+            }
 
         if calendar_info.sync_invitees and invitee_emails:
             payload["attendees"] = [{"email": email} for email in invitee_emails]

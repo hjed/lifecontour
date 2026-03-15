@@ -119,7 +119,7 @@ class TestGoogleEventTransformer:
         # Act
         result = transformer.transform_event(google_event, user_id, calendar_id)
         assert result is not None
-        journal, calendar_info = result
+        journal, _ = result
 
         # Assert
         assert journal.event_date_range is not None

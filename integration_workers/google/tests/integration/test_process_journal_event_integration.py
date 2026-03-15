@@ -11,6 +11,63 @@ from sqlalchemy import text
 from worker import process_journal_event
 
 
+async def _setup_journal_event_test_data(
+    db_session, user_id, google_email, calendar_id, title, include_existing_link=False
+):
+    # 1. Setup Data - Insert into user_google_integration
+    await db_session.execute(
+        text("""
+        INSERT INTO user_google_integration (user_id, google_account_email, created_at, updated_at)
+        VALUES (:user_id, :email, now(), now())
+        """),
+        {"user_id": user_id, "email": google_email},
+    )
+
+    # 2. Setup Data - Insert into calendars
+    await db_session.execute(
+        text("""
+        INSERT INTO calendars (id, user_id, name, color, is_synced_to_google)
+        VALUES (:id, :user_id, 'Test Cal', '#FF0000', true)
+        """),
+        {"id": calendar_id, "user_id": user_id},
+    )
+
+    # 3. Setup Data - Insert into journals
+    event_start = datetime.now(UTC)
+    event_end = event_start + timedelta(hours=1)
+    result = await db_session.execute(
+        text("""
+        INSERT INTO journals (user_id, title, content, event_date_range_start, event_date_range_end)
+        VALUES (:user_id, :title, 'Content', :start, :end)
+        RETURNING id
+        """),
+        {"user_id": user_id, "title": title, "start": event_start, "end": event_end},
+    )
+    journal_id = result.scalar()
+
+    # 4. Setup Data - Insert into journal_calendar_info
+    await db_session.execute(
+        text("""
+        INSERT INTO journal_calendar_info (journal_id, calendar_id, is_all_day, location)
+        VALUES (:journal_id, :calendar_id, false, 'Some Location')
+        """),
+        {"journal_id": journal_id, "calendar_id": calendar_id},
+    )
+
+    if include_existing_link:
+        # 5. Setup Data - Insert into journal_external_event_links
+        await db_session.execute(
+            text("""
+            INSERT INTO journal_external_event_links (journal_id, calendar_id, external_event_id, external_version, sync_capability, sync_status, created_at, updated_at)
+            VALUES (:journal_id, :calendar_id, 'existing_event_id_123', 'old_etag', 'outbound', 'synced', now(), now())
+            """),
+            {"journal_id": journal_id, "calendar_id": calendar_id},
+        )
+
+    await db_session.commit()
+    return journal_id
+
+
 @pytest.mark.asyncio
 class TestProcessJournalEventIntegration:
     """Integration test for process_journal_event flow handling."""
@@ -21,46 +78,9 @@ class TestProcessJournalEventIntegration:
         google_email = f"test_{uuid.uuid4().hex[:8]}@example.com"
         calendar_id = str(uuid.uuid4())
 
-        # 1. Setup Data - Insert into user_google_integration
-        await db_session.execute(
-            text("""
-            INSERT INTO user_google_integration (user_id, google_account_email, created_at, updated_at)
-            VALUES (:user_id, :email, now(), now())
-            """),
-            {"user_id": user_id, "email": google_email},
+        journal_id = await _setup_journal_event_test_data(
+            db_session, user_id, google_email, calendar_id, "Integration Test", False
         )
-
-        # 2. Setup Data - Insert into calendars
-        await db_session.execute(
-            text("""
-            INSERT INTO calendars (id, user_id, name, color, is_synced_to_google)
-            VALUES (:id, :user_id, 'Test Cal', '#FF0000', true)
-            """),
-            {"id": calendar_id, "user_id": user_id},
-        )
-
-        # 3. Setup Data - Insert into journals
-        event_start = datetime.now(UTC)
-        event_end = event_start + timedelta(hours=1)
-        result = await db_session.execute(
-            text("""
-            INSERT INTO journals (user_id, title, content, event_date_range_start, event_date_range_end)
-            VALUES (:user_id, 'Integration Test', 'Content', :start, :end)
-            RETURNING id
-            """),
-            {"user_id": user_id, "start": event_start, "end": event_end},
-        )
-        journal_id = result.scalar()
-
-        # 4. Setup Data - Insert into journal_calendar_info
-        await db_session.execute(
-            text("""
-            INSERT INTO journal_calendar_info (journal_id, calendar_id, is_all_day, location)
-            VALUES (:journal_id, :calendar_id, false, 'Some Location')
-            """),
-            {"journal_id": journal_id, "calendar_id": calendar_id},
-        )
-        await db_session.commit()
 
         @asynccontextmanager
         async def mock_session_factory():
@@ -117,55 +137,14 @@ class TestProcessJournalEventIntegration:
         google_email = f"test_{uuid.uuid4().hex[:8]}@example.com"
         calendar_id = str(uuid.uuid4())
 
-        # 1. Setup Data - Insert into user_google_integration
-        await db_session.execute(
-            text("""
-            INSERT INTO user_google_integration (user_id, google_account_email, created_at, updated_at)
-            VALUES (:user_id, :email, now(), now())
-            """),
-            {"user_id": user_id, "email": google_email},
+        journal_id = await _setup_journal_event_test_data(
+            db_session,
+            user_id,
+            google_email,
+            calendar_id,
+            "Integration Test Update",
+            True,
         )
-
-        # 2. Setup Data - Insert into calendars
-        await db_session.execute(
-            text("""
-            INSERT INTO calendars (id, user_id, name, color, is_synced_to_google)
-            VALUES (:id, :user_id, 'Test Cal', '#FF0000', true)
-            """),
-            {"id": calendar_id, "user_id": user_id},
-        )
-
-        # 3. Setup Data - Insert into journals
-        event_start = datetime.now(UTC)
-        event_end = event_start + timedelta(hours=1)
-        result = await db_session.execute(
-            text("""
-            INSERT INTO journals (user_id, title, content, event_date_range_start, event_date_range_end)
-            VALUES (:user_id, 'Integration Test Update', 'Content', :start, :end)
-            RETURNING id
-            """),
-            {"user_id": user_id, "start": event_start, "end": event_end},
-        )
-        journal_id = result.scalar()
-
-        # 4. Setup Data - Insert into journal_calendar_info
-        await db_session.execute(
-            text("""
-            INSERT INTO journal_calendar_info (journal_id, calendar_id, is_all_day, location)
-            VALUES (:journal_id, :calendar_id, false, 'Some Location')
-            """),
-            {"journal_id": journal_id, "calendar_id": calendar_id},
-        )
-
-        # 5. Setup Data - Insert into journal_external_event_links
-        await db_session.execute(
-            text("""
-            INSERT INTO journal_external_event_links (journal_id, calendar_id, external_event_id, external_version, sync_capability, sync_status, created_at, updated_at)
-            VALUES (:journal_id, :calendar_id, 'existing_event_id_123', 'old_etag', 'outbound', 'synced', now(), now())
-            """),
-            {"journal_id": journal_id, "calendar_id": calendar_id},
-        )
-        await db_session.commit()
 
         @asynccontextmanager
         async def mock_session_factory():
@@ -340,4 +319,3 @@ class TestProcessJournalEventIntegration:
         mock_google_client.delete_event.assert_called_once_with(
             external_event_id, google_calendar_id
         )
-
