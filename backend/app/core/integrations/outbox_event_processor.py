@@ -390,6 +390,11 @@ class OutboxEventProcessor:
         # Bulk lookup all required tags
         found_tags_dict = await self.tag_repo.find_by_names(final_tag_names_ordered)
 
+        # Tags not yet in the DB need to be created.
+        # This happens outside the contact update transaction, but is safe because:
+        # - Tags are reusable, shared entities (not contact-specific)
+        # - Tag creation is idempotent (find_by_names will find them on retry)
+        # - Orphan tag rows (if contact update later fails) are harmless
         resolved_tags = []
         for tag_name in final_tag_names_ordered:
             if tag_name in found_tags_dict:
@@ -726,13 +731,23 @@ class OutboxEventProcessor:
             updated_contact = await self.contact_service.update_contact(
                 updated_contact_data, self.connection
             )
-
-            # Update reference data with new synced tags
-            await self._update_synced_tags_reference(existing_ref, contact_data)
         except Exception as e:
             raise OutboxEventProcessingError(
                 f"Failed to update contact: {str(e)}"
             ) from e
+
+        # Update reference data with new synced tags.
+        # Non-fatal: if this fails the contact update is already committed,
+        # and synced_tags metadata will self-heal on the next sync cycle.
+        try:
+            await self._update_synced_tags_reference(existing_ref, contact_data)
+        except Exception as e:
+            logger.warning(
+                "Failed to update synced_tags reference data after contact update",
+                error=str(e),
+                external_id=external_id,
+                integration_source=integration_source,
+            )
 
         # Update sync metadata with new version hash
         # This is done atomically in the same transaction as the contact update
