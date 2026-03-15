@@ -62,7 +62,7 @@ class ExternalReferenceService:
             Created ExternalReference instance
 
         Raises:
-            Exception: If creation fails
+            ExternalReferenceError: If creation fails
         """
         logger.info(
             "Creating external reference",

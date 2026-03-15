@@ -104,8 +104,9 @@ class GoogleContactTransformer:
         transformed_notes = self._transform_biographies(google_person.biographies)
         contact.notes = transformed_notes or None
 
-        transformed_tags = self._transform_memberships_to_tags(google_person.memberships)
-        contact.tags = transformed_tags or None
+        # Tags: Google memberships are explicitly requested in personFields,
+        # so an empty list IS authoritative (contact has no group memberships).
+        contact.tags = self._transform_memberships_to_tags(google_person.memberships)
 
         company, job_title = self._extract_organization_info(
             google_person.organizations

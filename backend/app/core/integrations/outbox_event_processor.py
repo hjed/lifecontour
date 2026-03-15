@@ -25,6 +25,7 @@ from core_shared.models.outbox import OutboxEvent
 from core_shared.models.sync_metadata import SyncStatus
 from sqlalchemy.ext.asyncio import AsyncConnection
 
+from app.core.contacts.models.exceptions import DuplicateTagNameError
 from app.core.contacts.services.contact_service import ContactService
 from app.core.integrations.adapters.sql.sync_metadata_repository import (
     SyncMetadataRepository,
@@ -405,7 +406,7 @@ class OutboxEventProcessor:
                 new_tag = Tag(name=TagName(tag_name))
                 try:
                     saved_tag = await self.tag_repo.save(new_tag)
-                except Exception:
+                except DuplicateTagNameError:
                     # Race condition: another worker created the same tag
                     found_tag = await self.tag_repo.find_by_name(tag_name)
                     if found_tag is None:
@@ -570,19 +571,24 @@ class OutboxEventProcessor:
             raise OutboxEventProcessingError("Created contact has no ID")
 
         try:
+            # Include synced_tags so the diff strategy can correctly
+            # remove previously-synced tags on the very first update.
+            initial_ref_data: dict[str, Any] = {
+                "resource_name": external_id,
+                "etag": event_data.get("etag"),
+                "sync_timestamp": event_data["sync_timestamp"],
+            }
+            if contact.tags:
+                initial_ref_data["synced_tags"] = [
+                    str(tag.name) for tag in contact.tags
+                ]
             await self.external_reference_service.create_external_reference(
                 internal_entity_type="contact",
                 internal_entity_id=created_contact.id,
                 external_system=integration_source,
                 external_entity_type="person",
                 external_entity_id=external_id,
-                reference_data=json.dumps(
-                    {
-                        "resource_name": external_id,
-                        "etag": event_data.get("etag"),
-                        "sync_timestamp": event_data["sync_timestamp"],
-                    }
-                ),
+                reference_data=json.dumps(initial_ref_data),
             )
         except Exception as e:
             logger.warning(
