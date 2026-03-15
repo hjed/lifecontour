@@ -200,11 +200,12 @@ class JournalService:
             WHERE journal_id = :journal_id AND external_event_id IS NOT NULL
         """)
         result = await transaction.execute(stmt, {"journal_id": journal_id})
-        external_identifiers = {}
+        external_identifiers: dict[str, list[str]] = {}
         # We currently only support Google calendar syncing, so we hardcode the key.
-        # If multiple external_event_ids exist for the same journal, this will take the last one.
         for row in result.fetchall():
-            external_identifiers["google"] = row.external_event_id
+            if "google" not in external_identifiers:
+                external_identifiers["google"] = []
+            external_identifiers["google"].append(row.external_event_id)
 
         # Delete the journal
         await self.journal_repo.delete(journal_id)

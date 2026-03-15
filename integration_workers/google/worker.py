@@ -579,7 +579,7 @@ def _handle_http_error(
     from googleapiclient.errors import HttpError
 
     if not isinstance(e, HttpError):
-        raise e
+        raise
 
     # Handle ETag conflicts (400 with failedPrecondition or 412 Precondition Failed)
     error_content = (
@@ -1600,20 +1600,29 @@ async def process_journal_event(
 
     try:
         journal_id = event_data["journal_id"]
-        action = event_data.get("action")
 
-        if action == "DELETED":
+        if event_type == "JournalDeleted":
             user_id = event_data.get("user_id")
             if not user_id:
-                logger.error("JournalDeleted event missing user_id", journal_id=journal_id)
+                logger.error(
+                    "JournalDeleted event missing user_id", journal_id=journal_id
+                )
                 return {"status": "error", "reason": "Missing user_id for deletion"}
 
             external_identifiers = event_data.get("external_identifiers", {})
-            google_event_id = external_identifiers.get("google")
+            google_event_ids_raw = external_identifiers.get("google")
 
-            if not google_event_id:
-                logger.debug("Ignoring JournalDeleted: No Google event ID found in payload")
+            if not google_event_ids_raw:
+                logger.debug(
+                    "Ignoring JournalDeleted: No Google event ID found in payload"
+                )
                 return {"status": "ignored", "reason": "no_external_id_for_provider"}
+
+            google_event_ids = (
+                google_event_ids_raw
+                if isinstance(google_event_ids_raw, list)
+                else [google_event_ids_raw]
+            )
 
             # Use a dummy calendar ID since we don't have it, but wait! The Google Client delete_event needs calendar_id = 'primary'
             # Let's get the authorization
@@ -1624,7 +1633,9 @@ async def process_journal_event(
                     WHERE user_id = :user_id
                     LIMIT 1
                 """)
-                auth_result = await session.execute(auth_stmt, {"user_id": str(user_id)})
+                auth_result = await session.execute(
+                    auth_stmt, {"user_id": str(user_id)}
+                )
                 auth_row = auth_result.fetchone()
 
                 if not auth_row:
@@ -1651,17 +1662,34 @@ async def process_journal_event(
 
                 # Assume calendar_id 'primary' because we might not know it, or maybe delete_event doesn't need it?
                 # Actually our GoogleAPIClient uses 'primary' by default anyway in this implementation! Wait, does it?
-                try:
-                    await client.delete_event(google_event_id)
-                    logger.info("Deleted journal event from Google Calendar", journal_id=journal_id)
+                deleted_ids = []
+                errors = []
+                for google_event_id in google_event_ids:
+                    try:
+                        await client.delete_event(google_event_id)
+                        logger.info(
+                            "Deleted journal event from Google Calendar",
+                            journal_id=journal_id,
+                        )
+                        deleted_ids.append(google_event_id)
+                    except Exception as e:
+                        logger.error(
+                            "Failed to delete journal event from Google Calendar",
+                            error=str(e),
+                        )
+                        errors.append(str(e))
+
+                if errors:
                     return {
-                        "status": "success",
-                        "action": "delete",
-                        "external_event_id": google_event_id,
+                        "status": "error",
+                        "reason": "Failed to delete some events: " + ", ".join(errors),
                     }
-                except Exception as e:
-                    logger.error("Failed to delete journal event from Google Calendar", error=str(e))
-                    return {"status": "error", "reason": str(e)}
+
+                return {
+                    "status": "success",
+                    "action": "delete",
+                    "external_event_ids": deleted_ids,
+                }
 
         async with session_factory() as session:
             # Fetch the journal, calendar, and sync metadata
@@ -1851,7 +1879,7 @@ async def process_journal_event(
                     "duration_seconds": duration,
                 }
 
-            except Exception as e:
+            except Exception:
                 # Update link status to errored on failure
                 link_stmt = text("""
                     INSERT INTO journal_external_event_links (
@@ -1871,7 +1899,7 @@ async def process_journal_event(
                     },
                 )
                 await session.commit()
-                raise e
+                raise
 
     except Exception as e:
         logger.error(
@@ -1881,7 +1909,7 @@ async def process_journal_event(
             error=str(e),
             error_type=type(e).__name__,
         )
-        raise e
+        raise
 
 
 async def push_local_contacts_to_google(

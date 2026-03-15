@@ -1,7 +1,6 @@
 """Tests for process_journal_event task."""
 
-import asyncio
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -49,8 +48,14 @@ class TestProcessJournalEvent:
     @pytest.fixture
     def mock_google_client(self):
         mock_client = AsyncMock()
-        mock_client.create_event.return_value = {"id": "new_event_id", "etag": "new_etag"}
-        mock_client.update_event.return_value = {"id": "existing_event_id", "etag": "new_etag"}
+        mock_client.create_event.return_value = {
+            "id": "new_event_id",
+            "etag": "new_etag",
+        }
+        mock_client.update_event.return_value = {
+            "id": "existing_event_id",
+            "etag": "new_etag",
+        }
         return mock_client
 
     @pytest.mark.asyncio
@@ -65,9 +70,7 @@ class TestProcessJournalEvent:
         ):
             ctx = {"session_factory": mock_session_factory, "job_id": "job123"}
             result = await process_journal_event(
-                ctx=ctx,
-                event_type="JournalCreated",
-                event_data={"journal_id": 1}
+                ctx=ctx, event_type="JournalCreated", event_data={"journal_id": 1}
             )
 
             assert result["status"] == "success"
@@ -122,8 +125,8 @@ class TestProcessJournalEvent:
                 event_type="JournalUpdated",
                 event_data={
                     "journal_id": 1,
-                    "changed_fields": {"title": ("Old", "New")}
-                }
+                    "changed_fields": {"title": ("Old", "New")},
+                },
             )
 
             assert result["status"] == "success"
@@ -131,12 +134,19 @@ class TestProcessJournalEvent:
             assert result["external_event_id"] == "existing_event_id"
 
             # Verify API was called
-            mock_google_client.update_event.assert_called_once_with("existing_event_id", {"summary": "Test Journal", "description": "Content", "location": "Test Location", "start": {"dateTime": "2024-01-01T10:00:00+00:00"}, "end": {"dateTime": "2024-01-01T11:00:00+00:00"}})
+            mock_google_client.update_event.assert_called_once_with(
+                "existing_event_id",
+                {
+                    "summary": "Test Journal",
+                    "description": "Content",
+                    "location": "Test Location",
+                    "start": {"dateTime": "2024-01-01T10:00:00+00:00"},
+                    "end": {"dateTime": "2024-01-01T11:00:00+00:00"},
+                },
+            )
 
     @pytest.mark.asyncio
-    async def test_process_journal_event_ignores_not_found(
-        self, mock_session_factory
-    ):
+    async def test_process_journal_event_ignores_not_found(self, mock_session_factory):
         mock_session = mock_session_factory.return_value.__aenter__.return_value
         mock_result = MagicMock()
         mock_result.fetchone.return_value = None
@@ -146,9 +156,7 @@ class TestProcessJournalEvent:
 
         ctx = {"session_factory": mock_session_factory, "job_id": "job123"}
         result = await process_journal_event(
-            ctx=ctx,
-            event_type="JournalCreated",
-            event_data={"journal_id": 1}
+            ctx=ctx, event_type="JournalCreated", event_data={"journal_id": 1}
         )
 
         assert result["status"] == "ignored"
@@ -166,8 +174,8 @@ class TestProcessJournalEvent:
             event_type="JournalUpdated",
             event_data={
                 "journal_id": 1,
-                "changed_fields": {"tags": ([], ["new_tag"])} # Non-sync field
-            }
+                "changed_fields": {"tags": ([], ["new_tag"])},  # Non-sync field
+            },
         )
 
         assert result["status"] == "ignored"
@@ -190,14 +198,13 @@ class TestProcessJournalEvent:
                 event_data={
                     "journal_id": 1,
                     "user_id": "test_user",
-                    "action": "DELETED",
-                    "external_identifiers": {"google": "existing_event_id"}
-                }
+                    "external_identifiers": {"google": ["existing_event_id"]},
+                },
             )
 
             assert result["status"] == "success"
             assert result["action"] == "delete"
-            assert result["external_event_id"] == "existing_event_id"
+            assert result["external_event_ids"] == ["existing_event_id"]
 
             # Verify API was called
             mock_google_client.delete_event.assert_called_once_with("existing_event_id")
@@ -215,9 +222,8 @@ class TestProcessJournalEvent:
             event_data={
                 "journal_id": 1,
                 "user_id": "test_user",
-                "action": "DELETED",
-                "external_identifiers": {}
-            }
+                "external_identifiers": {},
+            },
         )
 
         assert result["status"] == "ignored"

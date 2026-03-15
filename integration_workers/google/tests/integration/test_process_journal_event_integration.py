@@ -1,9 +1,9 @@
 """Integration tests for process_journal_event flow."""
 
+import uuid
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, patch
-import uuid
 
 import pytest
 from sqlalchemy import text
@@ -27,7 +27,7 @@ class TestProcessJournalEventIntegration:
             INSERT INTO user_google_integration (user_id, google_account_email, created_at, updated_at)
             VALUES (:user_id, :email, now(), now())
             """),
-            {"user_id": user_id, "email": google_email}
+            {"user_id": user_id, "email": google_email},
         )
 
         # 2. Setup Data - Insert into calendars
@@ -36,7 +36,7 @@ class TestProcessJournalEventIntegration:
             INSERT INTO calendars (id, user_id, name, color, is_synced_to_google)
             VALUES (:id, :user_id, 'Test Cal', '#FF0000', true)
             """),
-            {"id": calendar_id, "user_id": user_id}
+            {"id": calendar_id, "user_id": user_id},
         )
 
         # 3. Setup Data - Insert into journals
@@ -48,7 +48,7 @@ class TestProcessJournalEventIntegration:
             VALUES (:user_id, 'Integration Test', 'Content', :start, :end)
             RETURNING id
             """),
-            {"user_id": user_id, "start": event_start, "end": event_end}
+            {"user_id": user_id, "start": event_start, "end": event_end},
         )
         journal_id = result.scalar()
 
@@ -58,7 +58,7 @@ class TestProcessJournalEventIntegration:
             INSERT INTO journal_calendar_info (journal_id, calendar_id, is_all_day, location)
             VALUES (:journal_id, :calendar_id, false, 'Some Location')
             """),
-            {"journal_id": journal_id, "calendar_id": calendar_id}
+            {"journal_id": journal_id, "calendar_id": calendar_id},
         )
         await db_session.commit()
 
@@ -75,7 +75,10 @@ class TestProcessJournalEventIntegration:
         mock_auth_service.get_access_token.return_value = "fake_token"
 
         mock_client = AsyncMock()
-        mock_client.create_event.return_value = {"id": "google_event_123", "etag": "etag_123"}
+        mock_client.create_event.return_value = {
+            "id": "google_event_123",
+            "etag": "etag_123",
+        }
 
         with (
             patch("worker.GoogleAuthService", return_value=mock_auth_service),
@@ -85,7 +88,7 @@ class TestProcessJournalEventIntegration:
             result = await process_journal_event(
                 ctx=ctx,
                 event_type="JournalCreated",
-                event_data={"journal_id": journal_id}
+                event_data={"journal_id": journal_id},
             )
 
             # Assert task successful
@@ -100,7 +103,7 @@ class TestProcessJournalEventIntegration:
                 FROM journal_external_event_links
                 WHERE journal_id = :journal_id AND calendar_id = :calendar_id
                 """),
-                {"journal_id": journal_id, "calendar_id": calendar_id}
+                {"journal_id": journal_id, "calendar_id": calendar_id},
             )
             link = link_result.fetchone()
             assert link is not None
@@ -120,7 +123,7 @@ class TestProcessJournalEventIntegration:
             INSERT INTO user_google_integration (user_id, google_account_email, created_at, updated_at)
             VALUES (:user_id, :email, now(), now())
             """),
-            {"user_id": user_id, "email": google_email}
+            {"user_id": user_id, "email": google_email},
         )
 
         # 2. Setup Data - Insert into calendars
@@ -129,7 +132,7 @@ class TestProcessJournalEventIntegration:
             INSERT INTO calendars (id, user_id, name, color, is_synced_to_google)
             VALUES (:id, :user_id, 'Test Cal', '#FF0000', true)
             """),
-            {"id": calendar_id, "user_id": user_id}
+            {"id": calendar_id, "user_id": user_id},
         )
 
         # 3. Setup Data - Insert into journals
@@ -141,7 +144,7 @@ class TestProcessJournalEventIntegration:
             VALUES (:user_id, 'Integration Test Update', 'Content', :start, :end)
             RETURNING id
             """),
-            {"user_id": user_id, "start": event_start, "end": event_end}
+            {"user_id": user_id, "start": event_start, "end": event_end},
         )
         journal_id = result.scalar()
 
@@ -151,7 +154,7 @@ class TestProcessJournalEventIntegration:
             INSERT INTO journal_calendar_info (journal_id, calendar_id, is_all_day, location)
             VALUES (:journal_id, :calendar_id, false, 'Some Location')
             """),
-            {"journal_id": journal_id, "calendar_id": calendar_id}
+            {"journal_id": journal_id, "calendar_id": calendar_id},
         )
 
         # 5. Setup Data - Insert into journal_external_event_links
@@ -160,7 +163,7 @@ class TestProcessJournalEventIntegration:
             INSERT INTO journal_external_event_links (journal_id, calendar_id, external_event_id, external_version, sync_capability, sync_status, created_at, updated_at)
             VALUES (:journal_id, :calendar_id, 'existing_event_id_123', 'old_etag', 'outbound', 'synced', now(), now())
             """),
-            {"journal_id": journal_id, "calendar_id": calendar_id}
+            {"journal_id": journal_id, "calendar_id": calendar_id},
         )
         await db_session.commit()
 
@@ -177,7 +180,10 @@ class TestProcessJournalEventIntegration:
         mock_auth_service.get_access_token.return_value = "fake_token"
 
         mock_client = AsyncMock()
-        mock_client.update_event.return_value = {"id": "existing_event_id_123", "etag": "new_updated_etag"}
+        mock_client.update_event.return_value = {
+            "id": "existing_event_id_123",
+            "etag": "new_updated_etag",
+        }
 
         with (
             patch("worker.GoogleAuthService", return_value=mock_auth_service),
@@ -189,8 +195,13 @@ class TestProcessJournalEventIntegration:
                 event_type="JournalUpdated",
                 event_data={
                     "journal_id": journal_id,
-                    "changed_fields": {"title": ("Integration Test Update", "Integration Test Updated!")}
-                }
+                    "changed_fields": {
+                        "title": (
+                            "Integration Test Update",
+                            "Integration Test Updated!",
+                        )
+                    },
+                },
             )
 
             # Assert task successful
@@ -208,7 +219,7 @@ class TestProcessJournalEventIntegration:
                 FROM journal_external_event_links
                 WHERE journal_id = :journal_id AND calendar_id = :calendar_id
                 """),
-                {"journal_id": journal_id, "calendar_id": calendar_id}
+                {"journal_id": journal_id, "calendar_id": calendar_id},
             )
             link = link_result.fetchone()
             assert link is not None
@@ -220,7 +231,6 @@ class TestProcessJournalEventIntegration:
         """Test that process_journal_event correctly deletes an event in Google Calendar."""
         user_id = str(uuid.uuid4())
         google_email = f"test_{uuid.uuid4().hex[:8]}@example.com"
-        calendar_id = str(uuid.uuid4())
         external_event_id = "to_be_deleted_id_123"
 
         # 1. Setup Data - Insert into user_google_integration
@@ -229,7 +239,7 @@ class TestProcessJournalEventIntegration:
             INSERT INTO user_google_integration (user_id, google_account_email, created_at, updated_at)
             VALUES (:user_id, :email, now(), now())
             """),
-            {"user_id": user_id, "email": google_email}
+            {"user_id": user_id, "email": google_email},
         )
 
         from worker import process_journal_event
@@ -259,9 +269,8 @@ class TestProcessJournalEventIntegration:
                 event_data={
                     "journal_id": 99999,  # Doesn't matter, deleted from DB
                     "user_id": user_id,
-                    "action": "DELETED",
-                    "external_identifiers": {"google": external_event_id}
-                }
+                    "external_identifiers": {"google": [external_event_id]},
+                },
             )
 
         # 4. Assertions

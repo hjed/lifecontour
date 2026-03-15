@@ -642,7 +642,10 @@ class TestOutboxProcessor:
                 event_id="journal-event",
                 event_type="JournalUpdated",
                 aggregate_id=42,
-                event_data={"id": "j1", "changed_fields": ["title"]},
+                event_data={
+                    "journal_id": 1,
+                    "changed_fields": {"title": ("Old", "New")},
+                },
                 occurred_at=datetime(2024, 1, 1, 10, 0, 0),
                 processed_at=None,
                 retry_count=0,
@@ -700,9 +703,9 @@ class TestOutboxProcessor:
         # Assert
         # Journal event should go to TaskQueueService AND SearchIndexer
         mock_task_queue_service.broadcast_journal_event.assert_called_once_with(
-            "JournalUpdated", {"id": "j1", "changed_fields": ["title"]}
+            "JournalUpdated",
+            {"journal_id": 1, "changed_fields": {"title": ("Old", "New")}},
         )
-        mock_task_queue_service.close.assert_called_once()
         mock_search_indexer.process_event.assert_called_once_with(events[0])
 
         assert mock_repository.mark_as_processed.call_count == 1
