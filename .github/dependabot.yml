@@ -2,7 +2,10 @@ version: 2
 updates:
   # Python backend dependencies (using uv)
   - package-ecosystem: "uv"
-    directory: "/backend"
+    directories:
+      - "/backend"
+      - "/integration_workers/google"
+      - "/core_shared"
     schedule:
       interval: "weekly"
       day: "monday"
@@ -16,23 +19,23 @@ updates:
     labels:
       - "dependencies"
       - "backend"
-
-  # Python core_shared dependencies (using uv)
-  - package-ecosystem: "uv"
-    directory: "/core_shared"
-    schedule:
-      interval: "weekly"
-      day: "monday"
-      time: "09:00"
-    open-pull-requests-limit: 3
-    assignees:
-      - "hjed"
-    commit-message:
-      prefix: "chore(core_shared)"
-      include: "scope"
-    labels:
-      - "dependencies"
-      - "backend"
+    groups:
+      development-dependencies:
+        dependency-type: "development"
+      google:
+        applies-to: version-updates
+        patterns:
+          - "google*"
+      pydantic:
+        applies-to: version-updates
+        patterns:
+          - "pydantic*"
+      sql:
+        applies-to: version-updates
+        patterns:
+          - "sqlalchemy*"
+          - "alembic*"
+          - "psycopg*"
 
   - package-ecosystem: "npm"
     directory: "/frontend"
@@ -49,6 +52,30 @@ updates:
     labels:
       - "dependencies"
       - "frontend"
+    groups:
+      radix:
+        applies-to: version-updates
+        patterns:
+          - "@radix-ui*"
+      tanstack:
+        applies-to: version-updates
+        patterns:
+          - "@tanstack*"
+      react:
+        applies-to: version-updates
+        patterns:
+          - "react*"
+          - "@types/react*"
+      jest:
+        applies-to: version-updates
+        patterns:
+          - "jest*"
+          - "@types/jest*"
+      eslint:
+        applies-to: version-updates
+        patterns:
+          - "eslint*"
+
 
   # GitHub Actions
   - package-ecosystem: "github-actions"
@@ -99,3 +126,21 @@ updates:
     labels:
       - "dependencies"
       - "docker"
+
+  - package-ecosystem: "docker-compose"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+    open-pull-requests-limit: 2
+    assignees:
+      - "hjed"
+    commit-message:
+      prefix: "chore(docker)"
+      include: "scope"
+    labels:
+      - "dependencies"
+      - "docker"
+
+
