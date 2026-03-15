@@ -70,8 +70,9 @@ class TestRetryDelayFunction:
         from worker import retry_delay_func
 
         # Set random seed for reproducibility
-        with patch("random.uniform") as mock_uniform:
-            mock_uniform.return_value = 1.0  # No jitter
+        with patch("secrets.SystemRandom") as mock_random_class:
+            mock_random_instance = mock_random_class.return_value
+            mock_random_instance.uniform.return_value = 1.0  # No jitter
 
             delay = retry_delay_func(0)
             assert math.isclose(delay, 60.0, rel_tol=1e-9), (

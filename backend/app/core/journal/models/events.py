@@ -71,14 +71,24 @@ class JournalUpdated(DomainEvent):
 class JournalDeleted(DomainEvent):
     """Event raised when a journal is deleted."""
 
-    def __init__(self, journal_id: int, transaction: AsyncConnection | None = None):
+    def __init__(
+        self,
+        journal_id: int,
+        user_id: str,
+        external_identifiers: dict[str, list[dict[str, Any]]] | None = None,
+        transaction: AsyncConnection | None = None,
+    ):
         now = datetime.now()
         super().__init__(
             event_id=f"journal_deleted_{journal_id}_{now.isoformat()}",
             occurred_at=now,
             aggregate_id=journal_id,
             event_type="JournalDeleted",
-            event_data={"journal_id": journal_id},
+            event_data={
+                "journal_id": journal_id,
+                "user_id": user_id,
+                "external_identifiers": external_identifiers or {},
+            },
             transaction=transaction,
         )
 

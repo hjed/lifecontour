@@ -15,7 +15,7 @@ import pytest_asyncio
 from arq import Worker, create_pool
 from arq.connections import RedisSettings
 from arq.jobs import JobStatus
-from redis.exceptions import RedisError
+from redis.exceptions import RedisError  # type: ignore[import-untyped]
 
 sys.path.insert(0, "/core_shared")
 

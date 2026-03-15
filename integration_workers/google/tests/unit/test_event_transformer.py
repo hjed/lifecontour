@@ -26,9 +26,7 @@ class TestGoogleEventTransformer:
         calendar_id = uuid.uuid4()
 
         # Act
-        result = transformer.transform_event(
-            google_event, user_id, calendar_id
-        )
+        result = transformer.transform_event(google_event, user_id, calendar_id)
         assert result is not None
         journal, calendar_info = result
 
@@ -68,9 +66,7 @@ class TestGoogleEventTransformer:
         calendar_id = uuid.uuid4()
 
         # Act
-        result = transformer.transform_event(
-            google_event, user_id, calendar_id
-        )
+        result = transformer.transform_event(google_event, user_id, calendar_id)
         assert result is not None
         journal, calendar_info = result
 
@@ -94,7 +90,9 @@ class TestGoogleEventTransformer:
     def test_transform_event_returns_none_for_cancelled_events(self) -> None:
         # Arrange
         google_event_dict: dict[str, Any] = {
-            "id": "event789", "summary": "Cancelled Meeting", "status": "cancelled"
+            "id": "event789",
+            "summary": "Cancelled Meeting",
+            "status": "cancelled",
         }
         google_event = GoogleEvent.model_validate(google_event_dict)
         transformer = GoogleEventTransformer()
@@ -107,10 +105,11 @@ class TestGoogleEventTransformer:
     def test_transform_event_handles_zulu_time(self) -> None:
         # Arrange
         google_event_dict: dict[str, Any] = {
-            "id": "event_zulu", "summary": "Zulu Meeting",
+            "id": "event_zulu",
+            "summary": "Zulu Meeting",
             "start": {"dateTime": "2023-10-27T10:00:00Z"},
             "end": {"dateTime": "2023-10-27T11:00:00Z"},
-            "status": "confirmed"
+            "status": "confirmed",
         }
         google_event = GoogleEvent.model_validate(google_event_dict)
         transformer = GoogleEventTransformer()
@@ -120,11 +119,14 @@ class TestGoogleEventTransformer:
         # Act
         result = transformer.transform_event(google_event, user_id, calendar_id)
         assert result is not None
-        journal, calendar_info = result
+        journal, _ = result
 
         # Assert
         assert journal.event_date_range is not None
-        assert journal.event_date_range.start.isoformat(timespec="seconds") == "2023-10-27T10:00:00+00:00"
+        assert (
+            journal.event_date_range.start.isoformat(timespec="seconds")
+            == "2023-10-27T10:00:00+00:00"
+        )
 
     def test_transform_to_google_event_payload_maps_timed_events(self) -> None:
         # Arrange
@@ -188,7 +190,9 @@ class TestGoogleEventTransformer:
         assert "dateTime" not in payload["start"]
         assert "dateTime" not in payload["end"]
 
-    def test_transform_to_google_event_payload_includes_invitees_if_sync_enabled(self) -> None:
+    def test_transform_to_google_event_payload_includes_invitees_if_sync_enabled(
+        self,
+    ) -> None:
         # Arrange
         transformer = GoogleEventTransformer()
         start_dt = datetime(2023, 10, 27, 10, 0, tzinfo=UTC)
@@ -221,7 +225,9 @@ class TestGoogleEventTransformer:
         assert payload["attendees"][0]["email"] == "client@example.com"
         assert payload["attendees"][1]["email"] == "manager@example.com"
 
-    def test_transform_to_google_event_payload_omits_invitees_if_sync_disabled(self) -> None:
+    def test_transform_to_google_event_payload_omits_invitees_if_sync_disabled(
+        self,
+    ) -> None:
         # Arrange
         transformer = GoogleEventTransformer()
         start_dt = datetime(2023, 10, 27, 10, 0, tzinfo=UTC)
@@ -270,9 +276,7 @@ class TestGoogleEventTransformer:
         calendar_id = uuid.uuid4()
 
         # Act 1: API to Domain
-        result = transformer.transform_event(
-            google_event, user_id, calendar_id
-        )
+        result = transformer.transform_event(google_event, user_id, calendar_id)
         assert result is not None
         journal, calendar_info = result
 

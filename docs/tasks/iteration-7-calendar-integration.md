@@ -168,15 +168,15 @@ The sequence reflects both product priority and technical dependency:
 **PR Size:** ~5-8 files
 
 **Acceptance Criteria:**
-- [ ] Creating or updating an EVENT journal fans out changes to all eligible linked calendars.
-- [ ] Per-link sync states are tracked explicitly, including pending, synced, and error states.
-- [ ] Manual edits in the journal system remain the canonical source for outbound updates.
-- [ ] No-op outbound writes are detected and do not create noisy state changes.
+- [x] Creating or updating an EVENT journal fans out changes to all eligible linked calendars.
+- [x] Per-link sync states are tracked explicitly, including pending, synced, and error states.
+- [x] Manual edits in the journal system remain the canonical source for outbound updates.
+- [x] No-op outbound writes are detected and do not create noisy state changes.
 
 **Required Test Coverage:**
-- **Unit:** fan-out planning, no-op detection, payload selection per linked calendar.
-- **Integration:** service/worker tests with mocked Google responses and real-database sync-state changes.
-- **E2E:** create or update a linked EVENT journal and verify the user can observe the sync state changing through a real product surface.
+- **Unit:** fan-out planning, no-op detection, payload selection per linked calendar. ✅ Covered in this branch.
+- **Integration:** service/worker tests with mocked Google responses and real-database sync-state changes. ✅ Covered in this branch.
+- **E2E:** create or update a linked EVENT journal and verify the user can observe the sync state changing through a real product surface. ⏸️ Deferred for this backend slice.
 
 #### Phase 2: Inbound Google → Journal Sync, ETag Conflicts, and One-Way Guardrails
 **PR Size:** ~6-8 files

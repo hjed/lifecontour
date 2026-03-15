@@ -220,13 +220,20 @@ export function FitnessTypeEditor({
         <ActivityStats data={initialData} />
       )}
       {/* GPX Tracks Manager */}
-      <JournalRoutesEditor
-        createMode={createMode}
-        journalId={journalId}
-        pendingRoutes={editData.pending_routes}
-        onPendingRoutesChange={handlePendingRoutesChange}
-        isEditing={isEditing}
-      />
+      {createMode ? (
+        <JournalRoutesEditor
+          createMode={true}
+          pendingRoutes={editData.pending_routes || []}
+          onPendingRoutesChange={handlePendingRoutesChange}
+          isEditing={isEditing}
+        />
+      ) : journalId ? (
+        <JournalRoutesEditor
+          createMode={false}
+          journalId={journalId}
+          isEditing={isEditing}
+        />
+      ) : null}
 
       {/* Edit/Save/Cancel buttons */}
       {!createMode && (

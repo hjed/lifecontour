@@ -16,7 +16,6 @@ from app.core.integrations.outbox_event_processor import (
 )
 from app.infrastructure.events.outbox_processor import (
     OutboxProcessor,
-    get_outbox_processor,
 )
 from app.infrastructure.events.outbox_repository import OutboxEvent
 
@@ -32,13 +31,35 @@ class TestOutboxProcessor:
         return indexer
 
     @pytest.fixture
-    def processor(self, mock_search_indexer):
+    def mock_task_queue_service(self):
+        """Create a mock TaskQueueService."""
+        service = AsyncMock()
+        return service
+
+    @pytest.fixture
+    def mock_container(self, mock_task_queue_service):
+        """Create a mock dishka container."""
+        container = MagicMock()
+
+        class MockContext:
+            async def __aenter__(self):
+                return container
+
+            async def __aexit__(self, exc_type, exc_val, exc_tb):
+                pass  # Mock implementation for context manager
+
+        container.return_value = MockContext()
+        container.get = AsyncMock(return_value=mock_task_queue_service)
+        return container
+
+    @pytest.fixture
+    def processor(self, mock_search_indexer, mock_container):
         """Create an OutboxProcessor instance with mock dependencies."""
         with patch(
             "app.infrastructure.events.outbox_processor.SearchIndexer",
             return_value=mock_search_indexer,
         ):
-            return OutboxProcessor()
+            return OutboxProcessor(mock_container)
 
     @pytest.fixture
     def sample_outbox_events(self):
@@ -410,15 +431,6 @@ class TestOutboxProcessor:
         assert summary["failed_event_count"] == 0
         assert summary["failed_events"] == []
 
-    def test_get_outbox_processor_singleton(self):
-        """Test that get_outbox_processor returns the same instance."""
-        # Act
-        processor1 = get_outbox_processor()
-        processor2 = get_outbox_processor()
-
-        # Assert
-        assert processor1 is processor2
-
     @pytest.mark.asyncio
     async def test_run_outbox_processor_loop_cancellation(self):
         """Test that the processor loop handles cancellation correctly."""
@@ -426,28 +438,26 @@ class TestOutboxProcessor:
         mock_processor = MagicMock()
         mock_processor.process_events = AsyncMock()
 
-        with patch(
-            "app.infrastructure.events.outbox_processor.get_outbox_processor",
-            return_value=mock_processor,
-        ):
-            # Create a task that we can cancel
-            async def run_and_cancel():
-                from app.infrastructure.events.outbox_processor import (
-                    run_outbox_processor_loop,
-                )
+        # Create a task that we can cancel
+        async def run_and_cancel():
+            from app.infrastructure.events.outbox_processor import (
+                run_outbox_processor_loop,
+            )
 
-                task = asyncio.create_task(
-                    run_outbox_processor_loop(interval_seconds=0.1)
-                )
-                await asyncio.sleep(0.05)  # Let it run briefly
-                task.cancel()
-                try:
-                    await task
-                except asyncio.CancelledError:
-                    pass
+            mock_container = MagicMock()
+            mock_container.get = AsyncMock(return_value=mock_processor)
+            task = asyncio.create_task(
+                run_outbox_processor_loop(mock_container, interval_seconds=0.1)
+            )
+            await asyncio.sleep(0.05)  # Let it run briefly
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
 
-            # Act
-            await run_and_cancel()
+        # Act
+        await run_and_cancel()
 
         # Assert
         # Should have called process_events at least once
@@ -631,3 +641,73 @@ class TestOutboxProcessor:
         assert mock_repository.mark_as_processed.call_count == 2
         mock_repository.mark_as_processed.assert_any_call("contact-event")
         mock_repository.mark_as_processed.assert_any_call("search-event")
+
+    @pytest.mark.asyncio
+    async def test_process_journal_events(
+        self, processor, mock_search_indexer, mock_task_queue_service
+    ):
+        """Test processing journal events routes to TaskQueueService."""
+        # Arrange
+        events = [
+            OutboxEvent(
+                id=1,
+                event_id="journal-event",
+                event_type="JournalUpdated",
+                aggregate_id=42,
+                event_data={
+                    "journal_id": 1,
+                    "changed_fields": {"title": ("Old", "New")},
+                },
+                occurred_at=datetime(2024, 1, 1, 10, 0, 0),
+                processed_at=None,
+                retry_count=0,
+                created_at=datetime(2024, 1, 1, 10, 0, 0),
+            )
+        ]
+
+        mock_conn = AsyncMock()
+
+        @asynccontextmanager
+        async def mock_begin():
+            yield mock_conn
+
+        @asynccontextmanager
+        async def mock_begin_nested():
+            yield mock_conn
+
+        mock_conn.begin_nested = mock_begin_nested
+
+        mock_engine = AsyncMock()
+        mock_engine.begin = mock_begin
+
+        mock_repository = MagicMock()
+        mock_repository.get_unprocessed_events = AsyncMock(return_value=events)
+        mock_repository.mark_as_processed = AsyncMock()
+
+        with (
+            patch(
+                "app.infrastructure.events.outbox_processor.get_async_database_engine",
+                return_value=mock_engine,
+            ),
+            patch(
+                "app.infrastructure.events.outbox_processor.OutboxRepository",
+                return_value=mock_repository,
+            ),
+            patch(
+                "app.infrastructure.events.outbox_processor.SearchIndexer",
+                return_value=mock_search_indexer,
+            ),
+        ):
+            # Act
+            await processor.process_events()
+
+        # Assert
+        # Journal event should go to TaskQueueService AND SearchIndexer
+        mock_task_queue_service.broadcast_journal_event.assert_called_once_with(
+            "JournalUpdated",
+            {"journal_id": 1, "changed_fields": {"title": ("Old", "New")}},
+        )
+        mock_search_indexer.process_event.assert_called_once_with(events[0])
+
+        assert mock_repository.mark_as_processed.call_count == 1
+        mock_repository.mark_as_processed.assert_called_once_with("journal-event")

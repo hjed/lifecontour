@@ -108,11 +108,13 @@ class TestContactOutboxProcessorIntegration:
             def begin(self):
                 return mock_begin()
 
+        from unittest.mock import AsyncMock
+
         with patch(
             "app.infrastructure.events.outbox_processor.get_async_database_engine",
             return_value=_TestEngine(),
         ):
-            await OutboxProcessor().process_events()
+            await OutboxProcessor(AsyncMock()).process_events()
 
     async def _fetch_contact_by_name(
         self,

@@ -8,20 +8,30 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useRoutes, useCreateRoute } from '@/lib/api/routes';
 
-interface JournalRoutesEditorProps {
-  /** If in create mode, we manage internal state instead of API */
-  readonly createMode?: boolean;
-  /** Journal ID required if not in create mode */
-  readonly journalId?: string;
-  /** Internal routes controlled by parent if in create mode */
-  readonly pendingRoutes?: { name: string; gpx_data: string }[];
-  /** Callback to update parent routes if in create mode */
-  readonly onPendingRoutesChange?: (
-    routes: { name: string; gpx_data: string }[]
-  ) => void;
+type JournalRoutesEditorProps = {
   /** Whether the component is currently in edit state (hides upload UI if false) */
   readonly isEditing?: boolean;
-}
+} & (
+  | {
+      /** If in create mode, we manage internal state instead of API */
+      readonly createMode: true;
+      /** Internal routes controlled by parent if in create mode */
+      readonly pendingRoutes: { name: string; gpx_data: string }[];
+      /** Callback to update parent routes if in create mode */
+      readonly onPendingRoutesChange: (
+        routes: { name: string; gpx_data: string }[]
+      ) => void;
+      readonly journalId?: never;
+    }
+  | {
+      /** If in create mode, we manage internal state instead of API */
+      readonly createMode?: false;
+      /** Journal ID required if not in create mode */
+      readonly journalId: string;
+      readonly pendingRoutes?: never;
+      readonly onPendingRoutesChange?: never;
+    }
+);
 
 export function JournalRoutesEditor({
   createMode = false,

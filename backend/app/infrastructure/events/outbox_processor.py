@@ -9,6 +9,7 @@ import asyncio
 from typing import Any
 
 import structlog
+from dishka import AsyncContainer
 
 from app.core.integrations.outbox_event_processor import (
     PermanentOutboxEventProcessingError,
@@ -23,10 +24,11 @@ logger = structlog.get_logger()
 class OutboxProcessor:
     """Background processor for outbox events."""
 
-    def __init__(self) -> None:
+    def __init__(self, container: AsyncContainer) -> None:
         """Initialize the outbox processor."""
         self.max_retries = 3
         self.batch_size = 50
+        self.container = container
 
     async def process_events(self) -> None:
         """
@@ -122,6 +124,14 @@ class OutboxProcessor:
                 # Process other events with the search indexer
                 await search_indexer.process_event(event)
 
+            # Additionally route journal events to integration workers
+            if event.event_type in (
+                "JournalCreated",
+                "JournalUpdated",
+                "JournalDeleted",
+            ):
+                await self._process_journal_event(event)
+
             # Mark as processed
             await repository.mark_as_processed(event.event_id)
 
@@ -213,6 +223,24 @@ class OutboxProcessor:
             result=result,
         )
 
+    async def _process_journal_event(self, event: Any) -> None:
+        """
+        Broadcast journal events to all integrations.
+
+        Args:
+            event: Journal sync event (JournalCreated, JournalUpdated, JournalDeleted)
+        """
+        from app.core.integrations.task_queue_service import TaskQueueService
+
+        async with self.container() as request_container:
+            task_queue = await request_container.get(TaskQueueService)
+            await task_queue.broadcast_journal_event(event.event_type, event.event_data)
+        logger.info(
+            "Broadcasted journal sync event to workers",
+            event_id=event.event_id,
+            event_type=event.event_type,
+        )
+
     async def get_failed_events_summary(self) -> dict[str, Any]:
         """
         Get a summary of failed events for monitoring.
@@ -247,26 +275,17 @@ class OutboxProcessor:
             return {"failed_event_count": 0, "failed_events": []}
 
 
-# Global processor instance
-_processor_instance: OutboxProcessor | None = None
-
-
-def get_outbox_processor() -> OutboxProcessor:
-    """Get the global outbox processor instance."""
-    global _processor_instance
-    if _processor_instance is None:
-        _processor_instance = OutboxProcessor()
-    return _processor_instance
-
-
-async def run_outbox_processor_loop(interval_seconds: float = 10) -> None:
+async def run_outbox_processor_loop(
+    container: AsyncContainer, interval_seconds: float = 10
+) -> None:
     """
     Run the outbox processor in a loop.
 
     Args:
+        container: Application's AsyncContainer for dependency injection
         interval_seconds: Interval between processing cycles (in seconds, can be fractional)
     """
-    processor = get_outbox_processor()
+    processor = await container.get(OutboxProcessor)
 
     logger.info("Starting outbox processor loop", interval_seconds=interval_seconds)
 
