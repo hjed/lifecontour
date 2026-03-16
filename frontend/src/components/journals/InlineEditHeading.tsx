@@ -51,7 +51,7 @@ export function InlineEditHeading({
   'aria-label': ariaLabel,
 }: InlineEditHeadingProps) {
   // Create the heading element based on level
-  const HeadingTag = `h${level}` as keyof JSX.IntrinsicElements;
+  const HeadingTag = `h${level}` as keyof React.JSX.IntrinsicElements;
 
   return (
     <InlineEditField
