@@ -867,12 +867,12 @@ class TestInboundHierarchySplitting:
         assert "C" in tag_names
         assert len(contact.tags) == 3  # type: ignore[arg-type]
 
-    def test_sanitize_tag_name_preserves_slash(
+    def test_sanitize_tag_name_replaces_slash(
         self, transformer: GoogleContactTransformer
     ) -> None:
-        """Test that _sanitize_tag_name preserves / as hierarchy delimiter."""
+        """Test that _sanitize_tag_name replaces / with -."""
         result = transformer._sanitize_tag_name("Family/Extended")
-        assert result == "Family/Extended"
+        assert result == "Family-Extended"
 
     def test_reserved_group_with_slash_still_filtered(
         self,
