@@ -27,7 +27,7 @@ dependencies = [
     "httpx==0.25.2",
 
     # Logging and monitoring
-    "structlog==23.2.0",
+    "structlog==25.5.0",
 
     # Configuration
     "pydantic==2.12.5",
