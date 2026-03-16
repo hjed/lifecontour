@@ -300,13 +300,15 @@ class TestGoogleEventTransformerEventState:
         """Event with status='confirmed' should have event_state=CONFIRMED."""
         from core_shared.models.journals.event_state import EventState
 
-        google_event = GoogleEvent.model_validate({
-            "id": "event_confirmed",
-            "summary": "Confirmed Meeting",
-            "start": {"dateTime": "2023-10-27T10:00:00Z"},
-            "end": {"dateTime": "2023-10-27T11:00:00Z"},
-            "status": "confirmed",
-        })
+        google_event = GoogleEvent.model_validate(
+            {
+                "id": "event_confirmed",
+                "summary": "Confirmed Meeting",
+                "start": {"dateTime": "2023-10-27T10:00:00Z"},
+                "end": {"dateTime": "2023-10-27T11:00:00Z"},
+                "status": "confirmed",
+            }
+        )
         transformer = GoogleEventTransformer()
         result = transformer.transform_event(google_event, "user1", uuid.uuid4())
         assert result is not None
@@ -317,12 +319,14 @@ class TestGoogleEventTransformerEventState:
         """Event with no status should default to CONFIRMED."""
         from core_shared.models.journals.event_state import EventState
 
-        google_event = GoogleEvent.model_validate({
-            "id": "event_no_status",
-            "summary": "No Status Event",
-            "start": {"dateTime": "2023-10-27T10:00:00Z"},
-            "end": {"dateTime": "2023-10-27T11:00:00Z"},
-        })
+        google_event = GoogleEvent.model_validate(
+            {
+                "id": "event_no_status",
+                "summary": "No Status Event",
+                "start": {"dateTime": "2023-10-27T10:00:00Z"},
+                "end": {"dateTime": "2023-10-27T11:00:00Z"},
+            }
+        )
         transformer = GoogleEventTransformer()
         result = transformer.transform_event(google_event, "user1", uuid.uuid4())
         assert result is not None
@@ -333,13 +337,15 @@ class TestGoogleEventTransformerEventState:
         """Event with status='tentative' should have event_state=TENTATIVE."""
         from core_shared.models.journals.event_state import EventState
 
-        google_event = GoogleEvent.model_validate({
-            "id": "event_tentative",
-            "summary": "Tentative Meeting",
-            "start": {"dateTime": "2023-10-27T10:00:00Z"},
-            "end": {"dateTime": "2023-10-27T11:00:00Z"},
-            "status": "tentative",
-        })
+        google_event = GoogleEvent.model_validate(
+            {
+                "id": "event_tentative",
+                "summary": "Tentative Meeting",
+                "start": {"dateTime": "2023-10-27T10:00:00Z"},
+                "end": {"dateTime": "2023-10-27T11:00:00Z"},
+                "status": "tentative",
+            }
+        )
         transformer = GoogleEventTransformer()
         result = transformer.transform_event(google_event, "user1", uuid.uuid4())
         assert result is not None
@@ -350,20 +356,24 @@ class TestGoogleEventTransformerEventState:
         """Self-attendee with responseStatus='needsAction' → INVITED."""
         from core_shared.models.journals.event_state import EventState
 
-        google_event = GoogleEvent.model_validate({
-            "id": "event_invite",
-            "summary": "Party Invite",
-            "start": {"dateTime": "2023-10-27T10:00:00Z"},
-            "end": {"dateTime": "2023-10-27T11:00:00Z"},
-            "status": "confirmed",
-            "attendees": [
-                {"email": "user@example.com", "responseStatus": "needsAction"},
-                {"email": "other@example.com", "responseStatus": "accepted"},
-            ],
-        })
+        google_event = GoogleEvent.model_validate(
+            {
+                "id": "event_invite",
+                "summary": "Party Invite",
+                "start": {"dateTime": "2023-10-27T10:00:00Z"},
+                "end": {"dateTime": "2023-10-27T11:00:00Z"},
+                "status": "confirmed",
+                "attendees": [
+                    {"email": "user@example.com", "responseStatus": "needsAction"},
+                    {"email": "other@example.com", "responseStatus": "accepted"},
+                ],
+            }
+        )
         transformer = GoogleEventTransformer()
         result = transformer.transform_event(
-            google_event, "user1", uuid.uuid4(),
+            google_event,
+            "user1",
+            uuid.uuid4(),
             self_email="user@example.com",
         )
         assert result is not None
@@ -374,19 +384,23 @@ class TestGoogleEventTransformerEventState:
         """Self-attendee with responseStatus='tentative' ("maybe") → TENTATIVE."""
         from core_shared.models.journals.event_state import EventState
 
-        google_event = GoogleEvent.model_validate({
-            "id": "event_maybe",
-            "summary": "Maybe Meeting",
-            "start": {"dateTime": "2023-10-27T10:00:00Z"},
-            "end": {"dateTime": "2023-10-27T11:00:00Z"},
-            "status": "confirmed",
-            "attendees": [
-                {"email": "user@example.com", "responseStatus": "tentative"},
-            ],
-        })
+        google_event = GoogleEvent.model_validate(
+            {
+                "id": "event_maybe",
+                "summary": "Maybe Meeting",
+                "start": {"dateTime": "2023-10-27T10:00:00Z"},
+                "end": {"dateTime": "2023-10-27T11:00:00Z"},
+                "status": "confirmed",
+                "attendees": [
+                    {"email": "user@example.com", "responseStatus": "tentative"},
+                ],
+            }
+        )
         transformer = GoogleEventTransformer()
         result = transformer.transform_event(
-            google_event, "user1", uuid.uuid4(),
+            google_event,
+            "user1",
+            uuid.uuid4(),
             self_email="user@example.com",
         )
         assert result is not None
@@ -397,19 +411,23 @@ class TestGoogleEventTransformerEventState:
         """Self-attendee with responseStatus='accepted' → CONFIRMED."""
         from core_shared.models.journals.event_state import EventState
 
-        google_event = GoogleEvent.model_validate({
-            "id": "event_accepted",
-            "summary": "Accepted Meeting",
-            "start": {"dateTime": "2023-10-27T10:00:00Z"},
-            "end": {"dateTime": "2023-10-27T11:00:00Z"},
-            "status": "confirmed",
-            "attendees": [
-                {"email": "user@example.com", "responseStatus": "accepted"},
-            ],
-        })
+        google_event = GoogleEvent.model_validate(
+            {
+                "id": "event_accepted",
+                "summary": "Accepted Meeting",
+                "start": {"dateTime": "2023-10-27T10:00:00Z"},
+                "end": {"dateTime": "2023-10-27T11:00:00Z"},
+                "status": "confirmed",
+                "attendees": [
+                    {"email": "user@example.com", "responseStatus": "accepted"},
+                ],
+            }
+        )
         transformer = GoogleEventTransformer()
         result = transformer.transform_event(
-            google_event, "user1", uuid.uuid4(),
+            google_event,
+            "user1",
+            uuid.uuid4(),
             self_email="user@example.com",
         )
         assert result is not None
@@ -420,19 +438,20 @@ class TestGoogleEventTransformerEventState:
         """Without self_email, attendee responseStatus is not considered."""
         from core_shared.models.journals.event_state import EventState
 
-        google_event = GoogleEvent.model_validate({
-            "id": "event_no_self",
-            "summary": "Meeting No Self",
-            "start": {"dateTime": "2023-10-27T10:00:00Z"},
-            "end": {"dateTime": "2023-10-27T11:00:00Z"},
-            "status": "confirmed",
-            "attendees": [
-                {"email": "user@example.com", "responseStatus": "needsAction"},
-            ],
-        })
+        google_event = GoogleEvent.model_validate(
+            {
+                "id": "event_no_self",
+                "summary": "Meeting No Self",
+                "start": {"dateTime": "2023-10-27T10:00:00Z"},
+                "end": {"dateTime": "2023-10-27T11:00:00Z"},
+                "status": "confirmed",
+                "attendees": [
+                    {"email": "user@example.com", "responseStatus": "needsAction"},
+                ],
+            }
+        )
         transformer = GoogleEventTransformer()
         result = transformer.transform_event(google_event, "user1", uuid.uuid4())
         assert result is not None
         _, calendar_info = result
         assert calendar_info.event_state == EventState.CONFIRMED
-

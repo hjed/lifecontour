@@ -121,9 +121,7 @@ class TestLoadTagNamesForContactIntegration:
 
         assert tag_names == []
 
-    async def test_returns_sorted_tag_names(
-        self, db_session: AsyncSession
-    ) -> None:
+    async def test_returns_sorted_tag_names(self, db_session: AsyncSession) -> None:
         """Test that tag names are returned in alphabetical order."""
         # Create contact
         result = await db_session.execute(
@@ -228,9 +226,7 @@ class TestLoadFullContactIntegration:
         )
         tag_id = tag_result.scalar_one()
         await db_session.execute(
-            text(
-                "INSERT INTO contact_tags (contact_id, tag_id) VALUES (:cid, :tid)"
-            ),
+            text("INSERT INTO contact_tags (contact_id, tag_id) VALUES (:cid, :tid)"),
             {"cid": contact_id, "tid": tag_id},
         )
         await db_session.flush()
@@ -245,9 +241,7 @@ class TestLoadFullContactIntegration:
         assert full_data["notes"][0]["content"] == "Test note"
         assert full_data["tags"] == ["loaded"]
 
-    async def test_load_full_contact_empty_tags(
-        self, db_session: AsyncSession
-    ) -> None:
+    async def test_load_full_contact_empty_tags(self, db_session: AsyncSession) -> None:
         """Test that _load_full_contact returns empty tags for tagless contact."""
         result = await db_session.execute(
             text(
@@ -295,12 +289,16 @@ class TestLoadTagNamesForContactsBatchIntegration:
         cid2 = r2.scalar_one()
 
         # Create tags
-        t1 = (await db_session.execute(
-            text("INSERT INTO tags (name) VALUES ('alpha') RETURNING id")
-        )).scalar_one()
-        t2 = (await db_session.execute(
-            text("INSERT INTO tags (name) VALUES ('beta') RETURNING id")
-        )).scalar_one()
+        t1 = (
+            await db_session.execute(
+                text("INSERT INTO tags (name) VALUES ('alpha') RETURNING id")
+            )
+        ).scalar_one()
+        t2 = (
+            await db_session.execute(
+                text("INSERT INTO tags (name) VALUES ('beta') RETURNING id")
+            )
+        ).scalar_one()
 
         # Assign: contact 1 gets both, contact 2 gets beta only
         await db_session.execute(
@@ -312,9 +310,7 @@ class TestLoadTagNamesForContactsBatchIntegration:
         )
         await db_session.flush()
 
-        result = await _load_tag_names_for_contacts_batch(
-            db_session, [cid1, cid2]
-        )
+        result = await _load_tag_names_for_contacts_batch(db_session, [cid1, cid2])
 
         assert result[cid1] == ["alpha", "beta"]
         assert result[cid2] == ["beta"]

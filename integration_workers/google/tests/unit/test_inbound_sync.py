@@ -21,16 +21,16 @@ class TestInboundSyncClassifier:
 
     @pytest.fixture
     def sample_google_event(self) -> GoogleEvent:
-        return GoogleEvent(
+        return GoogleEvent(  # type: ignore[call-arg]
             id="google-event-123",
             summary="Team Meeting",
             description="Weekly sync",
             status="confirmed",
             etag='"etag-new-abc"',
-            start=GoogleEventStartEnd(
+            start=GoogleEventStartEnd(  # type: ignore[call-arg]
                 date_time="2026-03-20T10:00:00Z",
             ),
-            end=GoogleEventStartEnd(
+            end=GoogleEventStartEnd(  # type: ignore[call-arg]
                 date_time="2026-03-20T11:00:00Z",
             ),
         )
@@ -87,17 +87,15 @@ class TestInboundSyncClassifier:
         )
         assert result == InboundSyncAction.SKIP_ONE_WAY
 
-    def test_classify_cancelled_event(
-        self, classifier: InboundSyncClassifier
-    ) -> None:
+    def test_classify_cancelled_event(self, classifier: InboundSyncClassifier) -> None:
         """Cancelled event should be SKIP (Phase 3 handles deletion)."""
-        cancelled_event = GoogleEvent(
+        cancelled_event = GoogleEvent(  # type: ignore[call-arg]
             id="google-event-cancelled",
             summary="Cancelled Meeting",
             status="cancelled",
             etag='"etag-cancelled"',
-            start=GoogleEventStartEnd(date_time="2026-03-20T10:00:00Z"),
-            end=GoogleEventStartEnd(date_time="2026-03-20T11:00:00Z"),
+            start=GoogleEventStartEnd(date_time="2026-03-20T10:00:00Z"),  # type: ignore[call-arg]
+            end=GoogleEventStartEnd(date_time="2026-03-20T11:00:00Z"),  # type: ignore[call-arg]
         )
         result = classifier.classify_inbound_event(
             google_event=cancelled_event,
@@ -109,13 +107,13 @@ class TestInboundSyncClassifier:
         self, classifier: InboundSyncClassifier
     ) -> None:
         """Cancelled event with existing link should be CANCEL_JOURNAL."""
-        cancelled_event = GoogleEvent(
+        cancelled_event = GoogleEvent(  # type: ignore[call-arg]
             id="google-event-cancelled",
             summary="Cancelled Meeting",
             status="cancelled",
             etag='"etag-cancelled"',
-            start=GoogleEventStartEnd(date_time="2026-03-20T10:00:00Z"),
-            end=GoogleEventStartEnd(date_time="2026-03-20T11:00:00Z"),
+            start=GoogleEventStartEnd(date_time="2026-03-20T10:00:00Z"),  # type: ignore[call-arg]
+            end=GoogleEventStartEnd(date_time="2026-03-20T11:00:00Z"),  # type: ignore[call-arg]
         )
         existing_link = _make_link(
             external_version='"etag-old"',
@@ -131,13 +129,13 @@ class TestInboundSyncClassifier:
         self, classifier: InboundSyncClassifier
     ) -> None:
         """Cancelled event with outbound-only link should still be CANCEL_JOURNAL."""
-        cancelled_event = GoogleEvent(
+        cancelled_event = GoogleEvent(  # type: ignore[call-arg]
             id="google-event-cancelled",
             summary="Cancelled Meeting",
             status="cancelled",
             etag='"etag-cancelled"',
-            start=GoogleEventStartEnd(date_time="2026-03-20T10:00:00Z"),
-            end=GoogleEventStartEnd(date_time="2026-03-20T11:00:00Z"),
+            start=GoogleEventStartEnd(date_time="2026-03-20T10:00:00Z"),  # type: ignore[call-arg]
+            end=GoogleEventStartEnd(date_time="2026-03-20T11:00:00Z"),  # type: ignore[call-arg]
         )
         existing_link = _make_link(
             external_version='"etag-old"',
@@ -158,7 +156,7 @@ class TestInboundFieldMerger:
         return InboundFieldMerger()
 
     @pytest.fixture
-    def existing_journal_data(self) -> dict:
+    def existing_journal_data(self) -> dict:  # type: ignore[type-arg]
         return {
             "title": "Original Title",
             "content": "Original content written locally",
@@ -167,7 +165,7 @@ class TestInboundFieldMerger:
         }
 
     @pytest.fixture
-    def inbound_journal_data(self) -> dict:
+    def inbound_journal_data(self) -> dict:  # type: ignore[type-arg]
         return {
             "title": "Updated From Google",
             "content": "Description changed in Google",
@@ -178,8 +176,8 @@ class TestInboundFieldMerger:
     def test_merge_no_local_edits_overwrites_cleanly(
         self,
         merger: InboundFieldMerger,
-        existing_journal_data: dict,
-        inbound_journal_data: dict,
+        existing_journal_data: dict,  # type: ignore[type-arg]
+        inbound_journal_data: dict,  # type: ignore[type-arg]
     ) -> None:
         """When journal.updated_at <= link.last_synced_at, inbound data overwrites."""
         last_synced_at = datetime(2026, 3, 15, 12, 0, 0, tzinfo=UTC)
@@ -200,8 +198,8 @@ class TestInboundFieldMerger:
     def test_merge_local_edits_preserves_title_content(
         self,
         merger: InboundFieldMerger,
-        existing_journal_data: dict,
-        inbound_journal_data: dict,
+        existing_journal_data: dict,  # type: ignore[type-arg]
+        inbound_journal_data: dict,  # type: ignore[type-arg]
     ) -> None:
         """When journal.updated_at > link.last_synced_at, preserve local title/content."""
         last_synced_at = datetime(2026, 3, 15, 12, 0, 0, tzinfo=UTC)
@@ -224,8 +222,8 @@ class TestInboundFieldMerger:
     def test_merge_always_updates_time_fields(
         self,
         merger: InboundFieldMerger,
-        existing_journal_data: dict,
-        inbound_journal_data: dict,
+        existing_journal_data: dict,  # type: ignore[type-arg]
+        inbound_journal_data: dict,  # type: ignore[type-arg]
     ) -> None:
         """Time fields should always take inbound values regardless of local edits."""
         last_synced_at = datetime(2026, 3, 15, 12, 0, 0, tzinfo=UTC)
@@ -244,8 +242,8 @@ class TestInboundFieldMerger:
     def test_merge_equal_timestamps_overwrites(
         self,
         merger: InboundFieldMerger,
-        existing_journal_data: dict,
-        inbound_journal_data: dict,
+        existing_journal_data: dict,  # type: ignore[type-arg]
+        inbound_journal_data: dict,  # type: ignore[type-arg]
     ) -> None:
         """When updated_at == last_synced_at (no local edits), inbound overwrites."""
         synced_at = datetime(2026, 3, 15, 12, 0, 0, tzinfo=UTC)

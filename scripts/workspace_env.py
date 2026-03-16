@@ -5,13 +5,18 @@ import os
 import sys
 from pathlib import Path
 
+
 def get_workspace_env():
     # Use the absolute path of the workspace (root of the repo)
     workspace = str(Path(__file__).parent.parent.absolute())
 
     is_ci_val = os.environ.get("CI", "").lower()
     is_github_actions_val = os.environ.get("GITHUB_ACTIONS", "").lower()
-    is_ci = is_ci_val in ("true", "1", "yes") or is_github_actions_val in ("true", "1", "yes")
+    is_ci = is_ci_val in ("true", "1", "yes") or is_github_actions_val in (
+        "true",
+        "1",
+        "yes",
+    )
 
     if is_ci:
         offset = 0
@@ -47,6 +52,7 @@ def get_workspace_env():
     }
     return env
 
+
 def main():
     env = get_workspace_env()
 
@@ -65,6 +71,7 @@ def main():
     else:
         print(f"Unknown format or key: {output_format}", file=sys.stderr)
         sys.exit(1)
+
 
 if __name__ == "__main__":
     main()

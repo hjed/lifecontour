@@ -27,7 +27,11 @@ import {
   TagFactory,
   DataSetFactory,
 } from './data-management';
-import { FRONTEND_TEST_LOGIN_URL } from './utils/frontend-test-config';
+import {
+  FRONTEND_TEST_LOGIN_URL,
+  OAUTH_PUBLIC_TEST_PORT,
+  OAUTH_UI_TEST_PORT,
+} from './utils/frontend-test-config';
 
 // Types for our fixtures
 export interface AuthState {
@@ -204,7 +208,11 @@ async function completeWorkerOAuthFlow(browser: any): Promise<AuthState> {
     );
 
     // Step 3: Handle OAuth provider interaction
-    if (currentUrl.includes('localhost:4446') || currentUrl.includes('hydra')) {
+    if (
+      currentUrl.includes(`localhost:${OAUTH_PUBLIC_TEST_PORT}`) ||
+      currentUrl.includes(`localhost:${OAUTH_UI_TEST_PORT}`) ||
+      currentUrl.includes('hydra')
+    ) {
       console.debug(
         '🔐 [Worker Auth] Successfully redirected to Hydra OAuth provider'
       );

@@ -1577,6 +1577,30 @@ class ContactService:
         """Get all contacts with pagination."""
         return await self.contact_repo.get_all(limit, offset)
 
+    async def _expand_tag_ids_with_descendants(self, tag_ids: list[int]) -> list[int]:
+        """Expand tag IDs to include all descendant tag IDs.
+
+        For each tag ID, fetches all descendant tags and includes their IDs.
+        This enables hierarchical filtering: filtering by a parent tag
+        automatically includes contacts tagged with any descendant tag.
+
+        Args:
+            tag_ids: Original list of tag IDs
+
+        Returns:
+            Expanded list including original IDs plus all descendant IDs
+        """
+        if not tag_ids:
+            return []
+
+        expanded: set[int] = set(tag_ids)
+        descendants = await self.tag_hierarchy.get_all_descendants_bulk(tag_ids)
+        for descendant in descendants:
+            if descendant.id is not None:
+                expanded.add(descendant.id)
+
+        return sorted(expanded)
+
     async def get_contacts_paginated(
         self,
         limit: int = 20,
@@ -1586,6 +1610,9 @@ class ContactService:
     ) -> list[Contact]:
         """
         Get contacts with pagination and optional filtering.
+
+        When tag_ids are provided, each tag is automatically expanded to
+        include all its descendant tags, enabling hierarchical filtering.
 
         Args:
             limit: Maximum number of contacts to return
@@ -1600,10 +1627,17 @@ class ContactService:
         if is_favourite is None and tag_ids is None:
             return await self.get_all_contacts(limit, offset)
 
+        # Expand tag_ids to include descendants for hierarchical filtering
+        expanded_tag_ids = (
+            await self._expand_tag_ids_with_descendants(tag_ids)
+            if tag_ids is not None
+            else None
+        )
+
         # Use the filtered method when filters are applied
         return await self.contact_repo.get_contacts_by_filters(
             is_favourite=is_favourite,
-            tag_ids=tag_ids,
+            tag_ids=expanded_tag_ids,
             limit=limit,
             offset=offset,
         )
@@ -1613,13 +1647,24 @@ class ContactService:
         is_favourite: bool | None = None,
         tag_ids: list[int] | None = None,
     ) -> int:
-        """Get total count of contacts with optional filtering."""
+        """Get total count of contacts with optional filtering.
+
+        When tag_ids are provided, each tag is automatically expanded to
+        include all its descendant tags.
+        """
         if is_favourite is None and tag_ids is None:
             return await self.contact_repo.get_count()
 
+        # Expand tag_ids to include descendants for hierarchical filtering
+        expanded_tag_ids = (
+            await self._expand_tag_ids_with_descendants(tag_ids)
+            if tag_ids is not None
+            else None
+        )
+
         return await self.contact_repo.get_contacts_count_by_filters(
             is_favourite=is_favourite,
-            tag_ids=tag_ids,
+            tag_ids=expanded_tag_ids,
         )
 
     async def get_contacts_by_tag(self, tag_id: int) -> list[Contact]:

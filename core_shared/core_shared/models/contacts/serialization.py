@@ -81,7 +81,15 @@ def serialize_contact(contact: Contact) -> dict[str, Any]:
         result["notes"] = None
 
     if contact.tags is not None:
-        result["tags"] = [{"name": tag.name.value} for tag in contact.tags]
+        serialized_tags = []
+        for tag in contact.tags:
+            tag_dict: dict[str, Any] = {"name": tag.name.value}
+            # Include parent_name for hierarchical tags (set by transformer)
+            parent_name = getattr(tag, "_parent_name", None)
+            if parent_name is not None:
+                tag_dict["parent_name"] = parent_name
+            serialized_tags.append(tag_dict)
+        result["tags"] = serialized_tags
     else:
         result["tags"] = None
 

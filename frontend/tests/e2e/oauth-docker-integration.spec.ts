@@ -12,6 +12,8 @@ import {
   FRONTEND_TEST_CALLBACK_URL,
   FRONTEND_TEST_LOGIN_URL,
   FRONTEND_TEST_URL,
+  OAUTH_PUBLIC_TEST_PORT,
+  OAUTH_UI_TEST_PORT,
 } from './utils/frontend-test-config';
 
 test.describe('OAuth Docker Integration', () => {
@@ -23,7 +25,7 @@ test.describe('OAuth Docker Integration', () => {
     // Test if Hydra public endpoint is accessible
     try {
       const response = await page.request.get(
-        'http://localhost:4446/.well-known/openid_configuration'
+        `http://localhost:${OAUTH_PUBLIC_TEST_PORT}/.well-known/openid_configuration`
       );
 
       if (response.ok()) {
@@ -183,7 +185,8 @@ test.describe('OAuth Docker Integration', () => {
           // Check if we were redirected to Hydra
           const currentUrl = page.url();
           if (
-            currentUrl.includes('localhost:4446') ||
+            currentUrl.includes(`localhost:${OAUTH_PUBLIC_TEST_PORT}`) ||
+            currentUrl.includes(`localhost:${OAUTH_UI_TEST_PORT}`) ||
             currentUrl.includes('oauth2/auth')
           ) {
             console.log('8. Successfully redirected to Hydra OAuth provider');

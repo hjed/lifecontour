@@ -240,6 +240,11 @@ class TagRepository(ABC):
         pass
 
     @abstractmethod
+    async def get_descendants_for_tags(self, tag_ids: list[int]) -> list[Tag]:
+        """Get all descendant tags (recursive) for a list of tag IDs."""
+        pass
+
+    @abstractmethod
     async def get_root_tags(self) -> list[Tag]:
         """Get all root tags (no parent)."""
         pass

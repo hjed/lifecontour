@@ -26,6 +26,7 @@ from api_models import (
     GooglePerson,
     GooglePhoneNumber,
 )
+from group_translator import GoogleGroupNameTranslator
 from transformer import GoogleContactTransformer
 
 
@@ -159,7 +160,7 @@ class TestGoogleContactTransformer:
         contact = transformer.transform_person(sample_google_person)
 
         email_methods = [
-            cm for cm in contact.methods if cm.method_type == MethodType.EMAIL
+            cm for cm in contact.methods if cm.method_type == MethodType.EMAIL  # type: ignore[union-attr]
         ]
         assert len(email_methods) == 2
 
@@ -180,7 +181,7 @@ class TestGoogleContactTransformer:
         contact = transformer.transform_person(sample_google_person)
 
         phone_methods = [
-            cm for cm in contact.methods if cm.method_type == MethodType.PHONE
+            cm for cm in contact.methods if cm.method_type == MethodType.PHONE  # type: ignore[union-attr]
         ]
         assert len(phone_methods) == 1
 
@@ -195,8 +196,8 @@ class TestGoogleContactTransformer:
         """Test transformation of addresses."""
         contact = transformer.transform_person(sample_google_person)
 
-        assert len(contact.addresses) == 1
-        address = contact.addresses[0]
+        assert len(contact.addresses) == 1  # type: ignore[arg-type]
+        address = contact.addresses[0]  # type: ignore[index]
         assert address.street_line_1 == "123 Main St"
         assert address.locality == "Anytown"
         assert address.region == "CA"
@@ -210,8 +211,8 @@ class TestGoogleContactTransformer:
         """Test transformation of biographies to notes."""
         contact = transformer.transform_person(sample_google_person)
 
-        assert len(contact.notes) == 1
-        note = contact.notes[0]
+        assert len(contact.notes) == 1  # type: ignore[arg-type]
+        note = contact.notes[0]  # type: ignore[index]
         assert note.content == "Software engineer with 10 years of experience."
 
     def test_transform_person_membership_tags(
@@ -220,8 +221,8 @@ class TestGoogleContactTransformer:
         """Test transformation of contact group memberships to tags."""
         contact = transformer.transform_person(sample_google_person)
 
-        assert len(contact.tags) == 2
-        tag_names = [tag.name.value for tag in contact.tags]
+        assert len(contact.tags) == 2  # type: ignore[arg-type]
+        tag_names = [tag.name.value for tag in contact.tags]  # type: ignore[union-attr]
         assert "family" in tag_names  # Contact group ID becomes tag
         assert "work-colleagues" in tag_names  # Contact group ID becomes tag
 
@@ -283,7 +284,7 @@ class TestGoogleContactTransformer:
 
         # Should only include valid email
         email_methods = [
-            cm for cm in contact.methods if cm.method_type == MethodType.EMAIL
+            cm for cm in contact.methods if cm.method_type == MethodType.EMAIL  # type: ignore[union-attr]
         ]
         assert len(email_methods) == 1
         assert email_methods[0].value == "valid@example.com"
@@ -303,7 +304,7 @@ class TestGoogleContactTransformer:
         contact = transformer.transform_person(person)
 
         email_methods = [
-            cm for cm in contact.methods if cm.method_type == MethodType.EMAIL
+            cm for cm in contact.methods if cm.method_type == MethodType.EMAIL  # type: ignore[union-attr]
         ]
         assert len(email_methods) == 1
         assert email_methods[0].value == "valid@example.com"
@@ -323,7 +324,7 @@ class TestGoogleContactTransformer:
         contact = transformer.transform_person(person)
 
         phone_methods = [
-            cm for cm in contact.methods if cm.method_type == MethodType.PHONE
+            cm for cm in contact.methods if cm.method_type == MethodType.PHONE  # type: ignore[union-attr]
         ]
         assert len(phone_methods) == 1
         assert phone_methods[0].value == "+61 400 123 456"
@@ -347,8 +348,8 @@ class TestGoogleContactTransformer:
 
         contact = transformer.transform_person(person)
 
-        assert len(contact.addresses) == 1
-        address = contact.addresses[0]
+        assert len(contact.addresses) == 1  # type: ignore[arg-type]
+        address = contact.addresses[0]  # type: ignore[index]
         assert address.street_line_1 == "123 Main St, Anytown, CA 12345"
         assert address.locality == "Anytown"
         assert address.region == "CA"
@@ -373,9 +374,9 @@ class TestGoogleContactTransformer:
 
         contact = transformer.transform_person(person)
 
-        assert len(contact.addresses) == 1
-        assert contact.addresses[0].street_line_1 == "123 Main St"
-        assert contact.addresses[0].country_code == "AU"
+        assert len(contact.addresses) == 1  # type: ignore[arg-type]
+        assert contact.addresses[0].street_line_1 == "123 Main St"  # type: ignore[index]
+        assert contact.addresses[0].country_code == "AU"  # type: ignore[index]
 
     def test_transform_addresses_with_none_metadata_not_primary(
         self, transformer: GoogleContactTransformer
@@ -410,8 +411,8 @@ class TestGoogleContactTransformer:
 
         contact = transformer.transform_person(person)
 
-        assert len(contact.notes) == 1
-        assert contact.notes[0].content == "Valid note"
+        assert len(contact.notes) == 1  # type: ignore[arg-type]
+        assert contact.notes[0].content == "Valid note"  # type: ignore[index]
 
     def test_transform_person_invalid_membership_names_skipped(
         self, transformer: GoogleContactTransformer
@@ -439,9 +440,9 @@ class TestGoogleContactTransformer:
         contact = transformer.transform_person(person)
 
         # Should only create tags for valid group memberships
-        tag_names = [tag.name.value for tag in contact.tags]
+        tag_names = [tag.name.value for tag in contact.tags]  # type: ignore[union-attr]
         assert "valid-group" in tag_names
-        assert len(contact.tags) == 1
+        assert len(contact.tags) == 1  # type: ignore[arg-type]
 
     def test_extract_names_with_primary(
         self, transformer: GoogleContactTransformer
@@ -525,10 +526,10 @@ class TestGoogleContactTransformer:
 
         assert contact.is_favourite is True
         # "starred" should not become a tag
-        tag_names = [tag.name.value for tag in contact.tags]
+        tag_names = [tag.name.value for tag in contact.tags]  # type: ignore[union-attr]
         assert "family" in tag_names
         assert "starred" not in tag_names
-        assert len(contact.tags) == 1
+        assert len(contact.tags) == 1  # type: ignore[arg-type]
 
     def test_transform_person_ignores_reserved_groups(self) -> None:
         """Test that reserved groups (like myContacts) are ignored and not converted to tags."""
@@ -560,10 +561,10 @@ class TestGoogleContactTransformer:
 
         contact = transformer.transform_person(person)
 
-        tag_names = [tag.name.value for tag in contact.tags]
+        tag_names = [tag.name.value for tag in contact.tags]  # type: ignore[union-attr]
         assert "friends" in tag_names
         assert "myContacts" not in tag_names
-        assert len(contact.tags) == 1
+        assert len(contact.tags) == 1  # type: ignore[arg-type]
 
 
 class TestOrganizationTransformation:
@@ -776,3 +777,126 @@ class TestOrganizationTransformation:
         # Empty strings should be treated as None
         assert contact.company is None
         assert contact.job_title is None
+
+
+class TestInboundHierarchySplitting:
+    """Test hierarchy-aware tag splitting in the transformer."""
+
+    def test_flat_group_produces_single_tag(
+        self, transformer: GoogleContactTransformer
+    ) -> None:
+        """Test that a flat group name produces a single tag without parent_name."""
+        person = GooglePerson(
+            resourceName="people/c123",
+            names=[GoogleName(givenName="Test", familyName="Person")],
+            memberships=[
+                GoogleMembership(
+                    contactGroupMembership=GoogleContactGroupMembership(
+                        contactGroupId="work",
+                        contactGroupResourceName="contactGroups/work",
+                    )
+                ),
+            ],
+        )
+
+        contact = transformer.transform_person(person)
+
+        assert len(contact.tags) == 1  # type: ignore[arg-type]
+        assert contact.tags[0].name.value == "work"  # type: ignore[index]
+        assert contact.tags[0].parent_id is None  # type: ignore[index]
+
+    def test_hierarchical_group_produces_parent_and_child(
+        self, transformer: GoogleContactTransformer
+    ) -> None:
+        """Test 'Family/Extended' produces two tags with parent→child relationship."""
+        translator = GoogleGroupNameTranslator(
+            reserved_group_ids=[],
+            group_mapping={"contactGroups/abc123": "Family/Extended"},
+        )
+        transformer_with_groups = GoogleContactTransformer(translator=translator)
+
+        person = GooglePerson(
+            resourceName="people/c123",
+            names=[GoogleName(givenName="Test", familyName="Person")],
+            memberships=[
+                GoogleMembership(
+                    contactGroupMembership=GoogleContactGroupMembership(
+                        contactGroupId="abc123",
+                        contactGroupResourceName="contactGroups/abc123",
+                    )
+                ),
+            ],
+        )
+
+        contact = transformer_with_groups.transform_person(person)
+
+        # Should produce 2 tags: "Family" (root) and "Extended" (child)
+        assert len(contact.tags) == 2  # type: ignore[arg-type]
+        tag_names = [tag.name.value for tag in contact.tags]  # type: ignore[union-attr]
+        assert "Family" in tag_names
+        assert "Extended" in tag_names
+
+    def test_three_level_hierarchy_produces_chain(
+        self, transformer: GoogleContactTransformer
+    ) -> None:
+        """Test 'A/B/C' produces three tags in parent chain."""
+        translator = GoogleGroupNameTranslator(
+            reserved_group_ids=[],
+            group_mapping={"contactGroups/deep": "A/B/C"},
+        )
+        transformer_with_groups = GoogleContactTransformer(translator=translator)
+
+        person = GooglePerson(
+            resourceName="people/c123",
+            names=[GoogleName(givenName="Test", familyName="Person")],
+            memberships=[
+                GoogleMembership(
+                    contactGroupMembership=GoogleContactGroupMembership(
+                        contactGroupId="deep",
+                        contactGroupResourceName="contactGroups/deep",
+                    )
+                ),
+            ],
+        )
+
+        contact = transformer_with_groups.transform_person(person)
+
+        tag_names = [tag.name.value for tag in contact.tags]  # type: ignore[union-attr]
+        assert "A" in tag_names
+        assert "B" in tag_names
+        assert "C" in tag_names
+        assert len(contact.tags) == 3  # type: ignore[arg-type]
+
+    def test_sanitize_tag_name_replaces_slash(
+        self, transformer: GoogleContactTransformer
+    ) -> None:
+        """Test that _sanitize_tag_name replaces / with -."""
+        result = transformer._sanitize_tag_name("Family/Extended")
+        assert result == "Family-Extended"
+
+    def test_reserved_group_with_slash_still_filtered(
+        self,
+    ) -> None:
+        """Test that reserved groups containing / are still filtered out."""
+        translator = GoogleGroupNameTranslator(
+            reserved_group_ids=["myContacts/special"],
+            group_mapping={},
+        )
+        transformer_with_reserved = GoogleContactTransformer(translator=translator)
+
+        person = GooglePerson(
+            resourceName="people/c123",
+            names=[GoogleName(givenName="Test", familyName="Person")],
+            memberships=[
+                GoogleMembership(
+                    contactGroupMembership=GoogleContactGroupMembership(
+                        contactGroupId="myContacts/special",
+                        contactGroupResourceName="contactGroups/myContacts-special",
+                    )
+                ),
+            ],
+        )
+
+        contact = transformer_with_reserved.transform_person(person)
+
+        assert len(contact.tags) == 0  # type: ignore[arg-type]

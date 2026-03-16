@@ -141,6 +141,46 @@ class SqlTagRepository(TagRepository):
 
         return tags
 
+    async def get_descendants_for_tags(self, tag_ids: list[int]) -> list[Tag]:
+        """Get all descendant tags (recursive) for a list of tag IDs."""
+        if not tag_ids:
+            return []
+
+        query = text(
+            """
+            WITH RECURSIVE descendants AS (
+                SELECT id, name, parent_id, color, description, created_at, updated_at
+                FROM tags
+                WHERE parent_id = ANY(:tag_ids)
+
+                UNION ALL
+
+                SELECT t.id, t.name, t.parent_id, t.color, t.description, t.created_at, t.updated_at
+                FROM tags t
+                INNER JOIN descendants d ON t.parent_id = d.id
+            )
+            SELECT DISTINCT id, name, parent_id, color, description, created_at, updated_at
+            FROM descendants
+            ORDER BY name
+            """
+        )
+        result = await self.conn.execute(query, {"tag_ids": tag_ids})
+
+        tags = []
+        for row in result.fetchall():
+            tag = Tag(
+                id=row.id,
+                name=TagName(row.name),
+                parent_id=row.parent_id,
+                color=row.color,
+                description=row.description,
+                created_at=row.created_at,
+                updated_at=row.updated_at,
+            )
+            tags.append(tag)
+
+        return tags
+
     async def get_root_tags(self) -> list[Tag]:
         """Get all root tags (no parent)."""
         query = text(

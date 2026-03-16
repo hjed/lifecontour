@@ -88,12 +88,8 @@ class GoogleContactTransformer:
 
         # Methods: Google is authoritative — always provide a list (even if empty)
         methods: list[ContactMethod] = []
-        methods.extend(
-            self._transform_email_addresses(google_person.email_addresses)
-        )
-        methods.extend(
-            self._transform_phone_numbers(google_person.phone_numbers)
-        )
+        methods.extend(self._transform_email_addresses(google_person.email_addresses))
+        methods.extend(self._transform_phone_numbers(google_person.phone_numbers))
         contact.methods = methods
 
         # Addresses, notes, tags: use None when Google provides no data
@@ -334,27 +330,34 @@ class GoogleContactTransformer:
             return None
 
     def _transform_memberships_to_tags(self, memberships: list[Any]) -> list[Tag]:
-        """Transform Google contact group memberships to Tag entities."""
-        tags = []
+        """Transform Google contact group memberships to Tag entities.
+
+        Handles hierarchical group names containing '/' by splitting them
+        into parent→child tag chains. Deduplicates tags by name.
+        """
+        tags: list[Tag] = []
+        seen_names: set[str] = set()
 
         for membership in memberships:
-            tag = self._create_tag_from_membership(membership)
-            if tag:
-                tags.append(tag)
+            chain = self._create_tags_from_membership(membership)
+            for tag in chain:
+                if tag.name.value not in seen_names:
+                    seen_names.add(tag.name.value)
+                    tags.append(tag)
 
         return tags
 
-    def _create_tag_from_membership(self, membership: Any) -> Tag | None:
-        """Create a tag from a Google membership, if possible."""
+    def _create_tags_from_membership(self, membership: Any) -> list[Tag]:
+        """Create tag(s) from a Google membership, splitting '/' into parent→child chains."""
         group_info = getattr(membership, "contact_group_membership", None)
         if not group_info:
-            return None
+            return []
 
         group_id = self._extract_group_id(group_info)
         resource_name = self._extract_resource_name(group_info)
 
         if self.translator.is_reserved(group_id):
-            return None
+            return []
 
         fallback_name = self._extract_membership_group_name(membership)
         translated_name = self.translator.translate(
@@ -362,19 +365,39 @@ class GoogleContactTransformer:
         )
 
         if not translated_name:
-            return None
+            return []
 
-        try:
-            sanitized_name = self._sanitize_tag_name(str(translated_name))
-            if sanitized_name:
-                return Tag(name=TagName(sanitized_name))
-        except ValueError:
-            logger.debug(
-                "Skipping invalid contact group name for tag",
-                group_name=translated_name,
-            )
+        name_str = str(translated_name)
 
-        return None
+        # Split on '/' for hierarchy
+        segments = [s.strip() for s in name_str.split("/") if s.strip()]
+        if not segments:
+            return []
+
+        tags: list[Tag] = []
+        for segment in segments:
+            try:
+                sanitized = self._sanitize_tag_name(segment)
+                if sanitized:
+                    tag = Tag(name=TagName(sanitized))
+                    # For child tags in a hierarchy, set _parent_name so
+                    # serialization can carry the relationship info.
+                    if tags:
+                        tag._parent_name = tags[-1].name.value  # type: ignore[attr-defined]
+                    tags.append(tag)
+            except ValueError:
+                logger.debug(
+                    "Skipping invalid segment in hierarchical group name",
+                    segment=segment,
+                    full_name=name_str,
+                )
+
+        return tags
+
+    def _create_tag_from_membership(self, membership: Any) -> Tag | None:
+        """Create a single tag from a Google membership (legacy, flat names only)."""
+        tags = self._create_tags_from_membership(membership)
+        return tags[0] if tags else None
 
     def _extract_group_id(self, group_info: Any) -> str | None:
         """Extract the contact group ID."""
@@ -418,6 +441,7 @@ class GoogleContactTransformer:
         Sanitize a string to make it valid for TagName.
 
         TagName only allows alphanumeric, hyphens, underscores, and ampersands.
+        The '/' character should be split before this method is called.
         """
         if not name or not name.strip():
             return None

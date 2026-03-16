@@ -353,11 +353,21 @@ class OutboxEventProcessor:
         """
         Merge inbound tags with existing local tags based on sync history.
         Preserves locally created tags that were never synced by the integration.
+
+        Also resolves parent→child hierarchy from inbound `parent_name` metadata
+        (set by the transformer when splitting hierarchical group names).
         """
 
         incoming_tags = contact_data.get("tags")
         if incoming_tags is None:
             return None
+
+        # Build parent_name mapping for hierarchy resolution
+        parent_name_map: dict[str, str] = {}
+        for tag in incoming_tags:
+            parent_name = tag.get("parent_name")
+            if parent_name:
+                parent_name_map[tag["name"]] = parent_name
 
         # Preserve incoming order while deduplicating
         incoming_tag_names_ordered = []
@@ -397,9 +407,12 @@ class OutboxEventProcessor:
         # - Tag creation is idempotent (find_by_names will find them on retry)
         # - Orphan tag rows (if contact update later fails) are harmless
         resolved_tags = []
+        resolved_by_name: dict[str, Tag] = {}
         for tag_name in final_tag_names_ordered:
             if tag_name in found_tags_dict:
-                resolved_tags.append(found_tags_dict[tag_name])
+                tag = found_tags_dict[tag_name]
+                resolved_tags.append(tag)
+                resolved_by_name[tag_name] = tag
             else:
                 from core_shared.models.contacts.value_objects import TagName
 
@@ -413,8 +426,51 @@ class OutboxEventProcessor:
                         raise
                     saved_tag = found_tag
                 resolved_tags.append(saved_tag)
+                resolved_by_name[tag_name] = saved_tag
+
+        # Resolve hierarchy: set parent_id on child tags based on parent_name
+        for child_name, parent_name in parent_name_map.items():
+            child_tag = resolved_by_name.get(child_name)
+            parent_tag = resolved_by_name.get(parent_name)
+            if child_tag and parent_tag and parent_tag.id is not None:
+                if child_tag.parent_id != parent_tag.id:
+                    if await self._would_create_cycle(parent_tag.id, child_tag.id):
+                        logger.warning(
+                            "Skip setting parent due to cycle",
+                            child_id=child_tag.id,
+                            parent_id=parent_tag.id,
+                        )
+                        continue
+                    child_tag.parent_id = parent_tag.id
+                    await self.tag_repo.save(child_tag)
 
         return resolved_tags
+
+    async def _would_create_cycle(self, parent_id: int, child_id: int | None) -> bool:
+        """Check if setting parent_id would create a circular reference."""
+        if child_id is None:
+            return False
+
+        if parent_id == child_id:
+            return True
+
+        current_id: int | None = parent_id
+        visited = set()
+
+        while current_id is not None:
+            if current_id in visited:
+                return True
+            if current_id == child_id:
+                return True
+
+            visited.add(current_id)
+            current_tag = await self.tag_repo.find_by_id(current_id)
+            if current_tag:
+                current_id = current_tag.parent_id
+            else:
+                break
+
+        return False
 
     async def _update_synced_tags_reference(
         self,

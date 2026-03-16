@@ -125,3 +125,11 @@ class TagHierarchyService:
                 descendants.extend(child_descendants)
 
         return descendants
+
+    async def get_all_descendants_bulk(
+        self, tag_ids: list[int], _transaction: AsyncConnection | None = None
+    ) -> list[Tag]:
+        """Get all descendant tags for multiple tags in a single query."""
+        if not tag_ids:
+            return []
+        return await self.tag_repo.get_descendants_for_tags(tag_ids)

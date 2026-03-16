@@ -222,6 +222,29 @@ class TestTagConverter:
         assert resource.links is not None
         assert resource.links.self == "http://localhost:8000/api/tags/1"
 
+    def test_to_resource_with_parent_id(self):
+        """Test that TagConverter includes parent_id when set."""
+        tag = Tag(
+            id=2,
+            name=TagName("extended"),
+            parent_id=1,
+        )
+
+        resource = TagConverter.to_resource(tag)
+
+        assert resource.attributes.parent_id == 1
+
+    def test_to_resource_without_parent_id(self):
+        """Test that TagConverter includes parent_id as None for root tags."""
+        tag = Tag(
+            id=1,
+            name=TagName("family"),
+        )
+
+        resource = TagConverter.to_resource(tag)
+
+        assert resource.attributes.parent_id is None
+
 
 class TestContactRequestConverter:
     """Test ContactRequestConverter methods."""
