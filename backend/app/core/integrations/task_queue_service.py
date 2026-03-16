@@ -157,6 +157,88 @@ class TaskQueueService:
             )
             raise
 
+    async def enqueue_calendar_sync(
+        self, google_account_email: str, user_id: str | int, sync_type: str = "smart"
+    ) -> str:
+        """
+        Enqueue a Google Calendar sync job.
+
+        Args:
+            google_account_email: Google account email to sync
+            user_id: ID of the user requesting the sync (string or integer)
+            sync_type: Type of sync ('full', 'incremental', or 'smart')
+
+        Returns:
+            Job ID for tracking the job status
+
+        Raises:
+            JobEnqueueError: If job enqueueing fails
+            ConnectionError: If Redis connection fails
+        """
+        logger.info(
+            "Enqueueing Google Calendar sync job",
+            google_account_email=google_account_email,
+            user_id=user_id,
+            sync_type=sync_type,
+        )
+
+        try:
+            pool = await self._get_arq_pool()
+
+            job = await pool.enqueue_job(
+                "sync_calendar_events",
+                google_account_email,
+                user_id,
+                sync_type,
+                _job_timeout=self.settings.task_queue_job_timeout_seconds,
+                _defer_until=None,
+                _queue_name=ARQ_QUEUE_NAME,
+            )
+
+            if not job:
+                raise JobEnqueueError(
+                    message="Failed to enqueue calendar sync job - no job returned",
+                    integration_source="google",
+                    reason="ARQ pool returned None",
+                )
+
+            job_id = job.job_id
+            logger.info(
+                "Successfully enqueued Google Calendar sync job",
+                job_id=job_id,
+                google_account_email=google_account_email,
+                user_id=user_id,
+                sync_type=sync_type,
+            )
+
+            # Store user-job association for security
+            await self._store_user_job_association(user_id, job_id)
+
+            # Persist job to database for history tracking
+            async with self.db_manager.get_session() as session:
+                async with session.begin():
+                    conn = await session.connection()
+                    repo = SyncJobRepository(conn)
+                    await repo.create(
+                        job_id=job_id,
+                        user_id=str(user_id),
+                        integration_source="google",
+                        sync_type=sync_type,
+                        status="queued",
+                    )
+
+            return job_id
+
+        except Exception as e:
+            logger.error(
+                "Failed to enqueue Google Calendar sync job",
+                google_account_email=google_account_email,
+                user_id=user_id,
+                sync_type=sync_type,
+                error=str(e),
+            )
+            raise
+
     async def broadcast_journal_event(
         self, event_type: str, event_data: dict[str, Any]
     ) -> str:

@@ -582,3 +582,73 @@ class GoogleAPIClient:
         except HttpError as e:
             logger.error("Error deleting event", error=str(e))
             raise e
+
+    async def watch_events(
+        self,
+        calendar_id: str,
+        channel_id: str,
+        webhook_url: str,
+        ttl_seconds: int = 604800,  # 7 days default
+    ) -> dict[str, Any]:
+        """Register a push notification channel for calendar events.
+
+        Args:
+            calendar_id: Google Calendar ID to watch
+            channel_id: Unique UUID for this notification channel
+            webhook_url: HTTPS URL to receive notifications
+            ttl_seconds: Channel expiration in seconds (max ~30 days)
+
+        Returns:
+            Google API response with channel metadata
+        """
+        try:
+            service = await self._get_calendar_service()
+            body = {
+                "id": channel_id,
+                "type": "web_hook",
+                "address": webhook_url,
+                "params": {"ttl": str(ttl_seconds)},
+            }
+            result = service.events().watch(calendarId=calendar_id, body=body).execute()
+            logger.info(
+                "Registered calendar watch channel",
+                calendar_id=calendar_id,
+                channel_id=channel_id,
+                resource_id=result.get("resourceId"),
+                expiration=result.get("expiration"),
+            )
+            return cast(dict[str, Any], result)
+        except HttpError as e:
+            logger.error(
+                "Error registering calendar watch",
+                calendar_id=calendar_id,
+                error=str(e),
+            )
+            raise
+
+    async def stop_channel(self, channel_id: str, resource_id: str) -> None:
+        """Stop a push notification channel.
+
+        Args:
+            channel_id: The channel UUID to stop
+            resource_id: The resource ID from the watch response
+        """
+        try:
+            service = await self._get_calendar_service()
+            body = {
+                "id": channel_id,
+                "resourceId": resource_id,
+            }
+            service.channels().stop(body=body).execute()
+            logger.info(
+                "Stopped calendar watch channel",
+                channel_id=channel_id,
+                resource_id=resource_id,
+            )
+        except HttpError as e:
+            logger.error(
+                "Error stopping calendar watch channel",
+                channel_id=channel_id,
+                error=str(e),
+            )
+            raise

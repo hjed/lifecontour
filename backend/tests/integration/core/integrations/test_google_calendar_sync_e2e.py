@@ -497,11 +497,14 @@ async def test_calendar_sync_flow_runs_through_arq_and_outbox(
         sync_token = (
             await async_connection.execute(
                 text("""
-                    SELECT calendar_events_sync_token
-                    FROM user_google_integration
+                    SELECT sync_token
+                    FROM calendar_sync_tokens
                     WHERE google_account_email = :email
+                    AND user_id = :user_id
+                    AND google_calendar_id = 'primary'
+                    LIMIT 1
                 """),
-                {"email": test_email},
+                {"email": test_email, "user_id": str(test_user_id)},
             )
         ).scalar_one()
         assert sync_token == "calendar-sync-token-after-e2e"
