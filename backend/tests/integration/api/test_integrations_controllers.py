@@ -688,10 +688,10 @@ class TestIntegrationsControllers:
 
             response = client.get("/api/integrations/google/calendars")
 
-            assert response.status_code == 502
+            assert response.status_code == 401
             data = response.json()
             assert "errors" in data
-            assert "Failed to fetch Google Calendars" in data["errors"][0]["detail"]
+            assert "Google account not connected" in data["errors"][0]["detail"]
 
     def test_list_google_calendars_no_tokens(self, client: TestClient):
         """Test Google Calendar list when tokens are not found."""
@@ -714,7 +714,7 @@ class TestIntegrationsControllers:
 
             response = client.get("/api/integrations/google/calendars")
 
-            assert response.status_code == 502
+            assert response.status_code == 401
             data = response.json()
             assert "errors" in data
-            assert "Failed to fetch Google Calendars" in data["errors"][0]["detail"]
+            assert "Google tokens not found" in data["errors"][0]["detail"]

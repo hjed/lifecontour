@@ -84,13 +84,11 @@ test.describe('Calendar Google Sync Settings', () => {
     authenticatedPage: page,
   }) => {
     // Mock Google status as connected
-    await page.route(
-      '**/api/integrations/google/contacts/status',
-      route => route.fulfill(json(googleStatusConnected))
+    await page.route('**/api/integrations/google/contacts/status', route =>
+      route.fulfill(json(googleStatusConnected))
     );
-    await page.route(
-      '**/api/integrations/google/calendars',
-      route => route.fulfill(json(googleCalendars))
+    await page.route('**/api/integrations/google/calendars', route =>
+      route.fulfill(json(googleCalendars))
     );
 
     await page.goto('/settings');
@@ -110,9 +108,8 @@ test.describe('Calendar Google Sync Settings', () => {
     authenticatedPage: page,
   }) => {
     // Mock Google status as disconnected
-    await page.route(
-      '**/api/integrations/google/contacts/status',
-      route => route.fulfill(json(googleStatusDisconnected))
+    await page.route('**/api/integrations/google/contacts/status', route =>
+      route.fulfill(json(googleStatusDisconnected))
     );
 
     await page.goto('/settings');
@@ -130,9 +127,8 @@ test.describe('Calendar Google Sync Settings', () => {
   test('sync toggle is disabled when needsReconsent is true', async ({
     authenticatedPage: page,
   }) => {
-    await page.route(
-      '**/api/integrations/google/contacts/status',
-      route => route.fulfill(json(googleStatusNeedsReconsent))
+    await page.route('**/api/integrations/google/contacts/status', route =>
+      route.fulfill(json(googleStatusNeedsReconsent))
     );
 
     await page.goto('/settings');
@@ -151,20 +147,16 @@ test.describe('Calendar Google Sync Settings', () => {
   }) => {
     let createPayload: any = null;
 
-    await page.route(
-      '**/api/integrations/google/contacts/status',
-      route => route.fulfill(json(googleStatusConnected))
+    await page.route('**/api/integrations/google/contacts/status', route =>
+      route.fulfill(json(googleStatusConnected))
     );
-    await page.route(
-      '**/api/integrations/google/calendars',
-      route => route.fulfill(json(googleCalendars))
+    await page.route('**/api/integrations/google/calendars', route =>
+      route.fulfill(json(googleCalendars))
     );
     // Intercept calendar creation to capture payload
     await page.route('**/api/calendars', async route => {
       if (route.request().method() === 'POST') {
-        createPayload = JSON.parse(
-          (await route.request().postData()) || '{}'
-        );
+        createPayload = JSON.parse((await route.request().postData()) || '{}');
         await route.fulfill(
           json({
             data: {

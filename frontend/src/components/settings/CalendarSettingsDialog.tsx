@@ -120,6 +120,15 @@ export function CalendarSettingsDialog({
     }
   }, [open, calendar, form]);
 
+  // Auto-clear sync fields if Google sync becomes unavailable while the
+  // dialog is open (e.g. useGoogleStatus refetch flips needsReconsent).
+  useEffect(() => {
+    if (!googleSyncAvailable && isSyncEnabled) {
+      form.setValue('is_synced_to_google', false);
+      form.setValue('google_calendar_id', null);
+    }
+  }, [googleSyncAvailable, isSyncEnabled, form]);
+
   const onSubmit = async (values: CalendarFormValues) => {
     try {
       // If sync is disabled, clear the google_calendar_id
@@ -243,7 +252,7 @@ export function CalendarSettingsDialog({
                           form.setValue('google_calendar_id', null);
                         }
                       }}
-                      disabled={!googleSyncAvailable}
+                      disabled={!googleSyncAvailable && !field.value}
                       data-testid='google-sync-toggle'
                     />
                   </FormControl>
