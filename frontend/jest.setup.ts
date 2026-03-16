@@ -54,6 +54,11 @@ jest.mock('@/lib/constants', () => ({
       BASE: '/api/contacts',
       SEARCH: '/api/contacts/search',
     },
+    SEARCH: {
+      CONTACTS: '/api/search/contacts',
+      GLOBAL: '/api/search/global',
+      SUGGESTIONS: '/api/search/suggestions',
+    },
   },
   HTTP_HEADERS: {
     CONTENT_TYPE: 'Content-Type',

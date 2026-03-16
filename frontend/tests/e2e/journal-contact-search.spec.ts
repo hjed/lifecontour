@@ -93,11 +93,16 @@ test.describe('Journal Contact Search (Typeahead)', () => {
       testCleanup(async () => await dataManager.cleanup());
 
       // Wait for contacts to be indexed in MeiliSearch
-      await waitForContactSearchIndexing(page, 'Zephyr', 'Zephyr Uniquename');
+      // Use returned contact names which include the unique UUID suffix
       await waitForContactSearchIndexing(
         page,
-        'Barnaby',
-        'Barnaby Otherperson'
+        contacts[0].firstName,
+        `${contacts[0].firstName} ${contacts[0].lastName}`
+      );
+      await waitForContactSearchIndexing(
+        page,
+        contacts[1].firstName,
+        `${contacts[1].firstName} ${contacts[1].lastName}`
       );
 
       // Navigate to journal detail page
@@ -114,7 +119,7 @@ test.describe('Journal Contact Search (Typeahead)', () => {
         'Search for a contact...'
       );
       await expect(contactSearchCombobox).toBeVisible();
-      await contactSearchCombobox.fill('Zephyr');
+      await contactSearchCombobox.fill(contacts[0].firstName);
 
       // Wait for the search results listbox to appear
       await expect(page.getByRole('listbox')).toBeVisible({ timeout: 10000 });
@@ -159,10 +164,11 @@ test.describe('Journal Contact Search (Typeahead)', () => {
       testCleanup(async () => await dataManager.cleanup());
 
       // Wait for the contact to be indexed in MeiliSearch
+      // Use returned contact name which includes the unique UUID suffix
       await waitForContactSearchIndexing(
         page,
-        'Querencia',
-        'Querencia Typeahead'
+        contact.firstName,
+        `${contact.firstName} ${contact.lastName}`
       );
 
       // Navigate to journal detail page

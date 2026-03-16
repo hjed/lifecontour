@@ -8,9 +8,8 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ContactSearchCombobox } from '../ContactSearchCombobox';
 import { ContactListResponse } from '@/types/contacts';
 
-// Mock the API
+// Mock fetch - use jest.fn() but assign in beforeEach to ensure it runs after jsdom setup
 const mockFetch = jest.fn();
-globalThis.fetch = mockFetch;
 
 // Mock toast
 jest.mock('sonner', () => ({
@@ -71,10 +70,29 @@ const createWrapper = () => {
   return Wrapper;
 };
 
+/**
+ * Helper to create a mock fetch response that resolves after a small delay.
+ *
+ * Using `mockResolvedValue` causes the fetch to resolve synchronously during
+ * React's render cycle, which prevents the dropdown state from updating
+ * properly. A slight async delay ensures React state updates are processed
+ * between the fetch call and its resolution.
+ */
+function createMockFetchResponse(data: unknown) {
+  return () =>
+    new Promise(resolve => {
+      setTimeout(
+        () => resolve({ ok: true, json: () => Promise.resolve(data) }),
+        10
+      );
+    });
+}
+
 describe('ContactSearchCombobox', () => {
   beforeEach(() => {
-    jest.clearAllMocks();
     mockFetch.mockClear();
+    // Assign fetch mock in beforeEach to ensure it runs after jsdom/Next.js setup
+    globalThis.fetch = mockFetch as unknown as typeof fetch;
   });
 
   it('renders with placeholder text', () => {
@@ -146,10 +164,7 @@ describe('ContactSearchCombobox', () => {
     const user = userEvent.setup();
     const Wrapper = createWrapper();
 
-    mockFetch.mockResolvedValue({
-      ok: true,
-      json: () => Promise.resolve(mockContacts),
-    });
+    mockFetch.mockImplementation(createMockFetchResponse(mockContacts));
 
     render(
       <Wrapper>
@@ -170,10 +185,7 @@ describe('ContactSearchCombobox', () => {
     const user = userEvent.setup();
     const Wrapper = createWrapper();
 
-    mockFetch.mockResolvedValue({
-      ok: true,
-      json: () => Promise.resolve(mockContacts),
-    });
+    mockFetch.mockImplementation(createMockFetchResponse(mockContacts));
 
     render(
       <Wrapper>
@@ -195,10 +207,7 @@ describe('ContactSearchCombobox', () => {
     const onSelect = jest.fn();
     const Wrapper = createWrapper();
 
-    mockFetch.mockResolvedValue({
-      ok: true,
-      json: () => Promise.resolve(mockContacts),
-    });
+    mockFetch.mockImplementation(createMockFetchResponse(mockContacts));
 
     render(
       <Wrapper>
@@ -229,10 +238,7 @@ describe('ContactSearchCombobox', () => {
     const user = userEvent.setup();
     const Wrapper = createWrapper();
 
-    mockFetch.mockResolvedValue({
-      ok: true,
-      json: () => Promise.resolve({ data: [] }),
-    });
+    mockFetch.mockImplementation(createMockFetchResponse({ data: [] }));
 
     render(
       <Wrapper>
@@ -272,10 +278,7 @@ describe('ContactSearchCombobox', () => {
     const user = userEvent.setup();
     const Wrapper = createWrapper();
 
-    mockFetch.mockResolvedValue({
-      ok: true,
-      json: () => Promise.resolve(mockContacts),
-    });
+    mockFetch.mockImplementation(createMockFetchResponse(mockContacts));
 
     render(
       <Wrapper>
@@ -300,10 +303,7 @@ describe('ContactSearchCombobox', () => {
     const onSelect = jest.fn();
     const Wrapper = createWrapper();
 
-    mockFetch.mockResolvedValue({
-      ok: true,
-      json: () => Promise.resolve(mockContacts),
-    });
+    mockFetch.mockImplementation(createMockFetchResponse(mockContacts));
 
     render(
       <Wrapper>
@@ -336,10 +336,7 @@ describe('ContactSearchCombobox', () => {
     const user = userEvent.setup();
     const Wrapper = createWrapper();
 
-    mockFetch.mockResolvedValue({
-      ok: true,
-      json: () => Promise.resolve(mockContacts),
-    });
+    mockFetch.mockImplementation(createMockFetchResponse(mockContacts));
 
     render(
       <Wrapper>
