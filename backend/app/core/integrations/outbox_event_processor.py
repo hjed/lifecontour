@@ -353,11 +353,21 @@ class OutboxEventProcessor:
         """
         Merge inbound tags with existing local tags based on sync history.
         Preserves locally created tags that were never synced by the integration.
+
+        Also resolves parent→child hierarchy from inbound `parent_name` metadata
+        (set by the transformer when splitting hierarchical group names).
         """
 
         incoming_tags = contact_data.get("tags")
         if incoming_tags is None:
             return None
+
+        # Build parent_name mapping for hierarchy resolution
+        parent_name_map: dict[str, str] = {}
+        for tag in incoming_tags:
+            parent_name = tag.get("parent_name")
+            if parent_name:
+                parent_name_map[tag["name"]] = parent_name
 
         # Preserve incoming order while deduplicating
         incoming_tag_names_ordered = []
@@ -397,9 +407,12 @@ class OutboxEventProcessor:
         # - Tag creation is idempotent (find_by_names will find them on retry)
         # - Orphan tag rows (if contact update later fails) are harmless
         resolved_tags = []
+        resolved_by_name: dict[str, Tag] = {}
         for tag_name in final_tag_names_ordered:
             if tag_name in found_tags_dict:
-                resolved_tags.append(found_tags_dict[tag_name])
+                tag = found_tags_dict[tag_name]
+                resolved_tags.append(tag)
+                resolved_by_name[tag_name] = tag
             else:
                 from core_shared.models.contacts.value_objects import TagName
 
@@ -413,6 +426,16 @@ class OutboxEventProcessor:
                         raise
                     saved_tag = found_tag
                 resolved_tags.append(saved_tag)
+                resolved_by_name[tag_name] = saved_tag
+
+        # Resolve hierarchy: set parent_id on child tags based on parent_name
+        for child_name, parent_name in parent_name_map.items():
+            child_tag = resolved_by_name.get(child_name)
+            parent_tag = resolved_by_name.get(parent_name)
+            if child_tag and parent_tag and parent_tag.id is not None:
+                if child_tag.parent_id != parent_tag.id:
+                    child_tag.parent_id = parent_tag.id
+                    await self.tag_repo.save(child_tag)
 
         return resolved_tags
 

@@ -14,6 +14,7 @@
  */
 
 import { test, expect } from './fixtures';
+import { OAUTH_PUBLIC_TEST_PORT } from './utils/frontend-test-config';
 
 /** Common selector for error elements used across OAuth error handling tests */
 const ERROR_SELECTOR = '[role="alert"], .alert, .error, [data-testid="error"]';
@@ -220,7 +221,9 @@ test.describe('OAuth Session and State Management Errors', () => {
 
     // Intercept OAuth provider requests to simulate unavailability
     await page.route('**/oauth/**', route => route.abort('failed'));
-    await page.route('**localhost:4446/**', route => route.abort('failed'));
+    await page.route(`**localhost:${OAUTH_PUBLIC_TEST_PORT}/**`, route =>
+      route.abort('failed')
+    );
 
     await oauthButton.click();
 

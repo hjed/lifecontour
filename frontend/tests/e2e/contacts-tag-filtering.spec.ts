@@ -89,11 +89,139 @@ test.describe('Tag Filtering Pages', () => {
     }
   });
 
-  // TODO: Re-enable when tag filtering functionality is implemented
-  test.skip('should display contacts filtered by tag when available', async ({
-    authenticatedPage, // eslint-disable-line @typescript-eslint/no-unused-vars
+  test('parent tag page should show contacts tagged with child tags', async ({
+    authenticatedPage,
   }) => {
-    // Test skipped - tag filtering functionality not yet implemented
+    // 1. Create parent tag
+    const parentName = 'ParentHier-' + Date.now();
+    const parentResp = await authenticatedPage.request.post('/api/tags', {
+      data: {
+        data: {
+          type: 'tags',
+          attributes: { name: parentName },
+        },
+      },
+      headers: { 'Content-Type': 'application/json' },
+    });
+    expect(parentResp.ok()).toBe(true);
+    const parentData = await parentResp.json();
+    const parentId = parentData.data.id;
+
+    // 2. Create child tag with parent_id
+    const childName = 'ChildHier-' + Date.now();
+    const childResp = await authenticatedPage.request.post('/api/tags', {
+      data: {
+        data: {
+          type: 'tags',
+          attributes: { name: childName, parent_id: Number(parentId) },
+        },
+      },
+      headers: { 'Content-Type': 'application/json' },
+    });
+    expect(childResp.ok()).toBe(true);
+    const childData = await childResp.json();
+    const childId = childData.data.id;
+
+    // 3. Create a contact
+    const contactResp = await authenticatedPage.request.post('/api/contacts', {
+      data: {
+        data: {
+          type: 'contacts',
+          attributes: {
+            first_name: 'HierTest',
+            last_name: 'Contact-' + Date.now(),
+          },
+        },
+      },
+      headers: { 'Content-Type': 'application/json' },
+    });
+    expect(contactResp.ok()).toBe(true);
+    const contactData = await contactResp.json();
+    const contactId = contactData.data.id;
+
+    // 4. Assign child tag to contact
+    const assignResp = await authenticatedPage.request.post(
+      `/api/contacts/${contactId}/tags`,
+      {
+        data: { data: { type: 'tags', id: String(childId) } },
+        headers: { 'Content-Type': 'application/json' },
+      }
+    );
+    expect(assignResp.ok() || assignResp.status() === 204).toBe(true);
+
+    // 5. Navigate to parent tag page — descendant filtering should show the contact
+    await authenticatedPage.goto(`/contacts/tags/${parentId}`);
+    await expect(authenticatedPage).toHaveTitle(/Personal Management System/);
+
+    // The contact should appear because filtering by parent includes descendants
+    const contactCard = authenticatedPage.locator(
+      `[data-testid="contact-${contactId}"]`
+    );
+    await expect(contactCard).toBeVisible({ timeout: 10000 });
+
+    // Cleanup
+    await authenticatedPage.request.delete(`/api/contacts/${contactId}`);
+    await authenticatedPage.request.delete(`/api/tags/${childId}`);
+    await authenticatedPage.request.delete(`/api/tags/${parentId}`);
+  });
+
+  test('flat tag filtering still works for tags without parents', async ({
+    authenticatedPage,
+  }) => {
+    // 1. Create a simple flat tag (no parent)
+    const tagName = 'FlatHier-' + Date.now();
+    const tagResp = await authenticatedPage.request.post('/api/tags', {
+      data: {
+        data: {
+          type: 'tags',
+          attributes: { name: tagName },
+        },
+      },
+      headers: { 'Content-Type': 'application/json' },
+    });
+    expect(tagResp.ok()).toBe(true);
+    const tagData = await tagResp.json();
+    const tagId = tagData.data.id;
+
+    // 2. Create and tag a contact
+    const contactResp = await authenticatedPage.request.post('/api/contacts', {
+      data: {
+        data: {
+          type: 'contacts',
+          attributes: {
+            first_name: 'FlatTest',
+            last_name: 'Contact-' + Date.now(),
+          },
+        },
+      },
+      headers: { 'Content-Type': 'application/json' },
+    });
+    expect(contactResp.ok()).toBe(true);
+    const contactData = await contactResp.json();
+    const contactId = contactData.data.id;
+
+    const assignResp = await authenticatedPage.request.post(
+      `/api/contacts/${contactId}/tags`,
+      {
+        data: { data: { type: 'tags', id: String(tagId) } },
+        headers: { 'Content-Type': 'application/json' },
+      }
+    );
+    expect(assignResp.ok() || assignResp.status() === 204).toBe(true);
+
+    // 3. Navigate to the tag page
+    await authenticatedPage.goto(`/contacts/tags/${tagId}`);
+    await expect(authenticatedPage).toHaveTitle(/Personal Management System/);
+
+    // The contact should be visible
+    const contactCard = authenticatedPage.locator(
+      `[data-testid="contact-${contactId}"]`
+    );
+    await expect(contactCard).toBeVisible({ timeout: 10000 });
+
+    // Cleanup
+    await authenticatedPage.request.delete(`/api/contacts/${contactId}`);
+    await authenticatedPage.request.delete(`/api/tags/${tagId}`);
   });
 
   test('should show tag name in page header when tag exists', async ({

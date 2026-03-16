@@ -294,21 +294,35 @@ async def _load_tag_names_for_contact(
     session: AsyncSession, contact_id: int
 ) -> list[str]:
     """
-    Load tag names assigned to a contact.
+    Load tag names assigned to a contact, using hierarchical path names.
+
+    For tags with parent_id, builds path-style names by walking up the
+    parent chain (e.g., "Family/Extended"). Root tags keep flat names.
 
     Args:
         session: Database session
         contact_id: Contact ID
 
     Returns:
-        List of tag name strings
+        List of tag name strings (with hierarchy paths for child tags)
     """
     tags_stmt = text("""
-        SELECT t.name
-        FROM tags t
-        INNER JOIN contact_tags ct ON t.id = ct.tag_id
+        WITH RECURSIVE tag_paths AS (
+            -- Base case: root tags (no parent)
+            SELECT t.id, t.name, t.name AS full_path
+            FROM tags t
+            WHERE t.parent_id IS NULL
+            UNION ALL
+            -- Recursive case: child tags
+            SELECT t.id, t.name, tp.full_path || '/' || t.name AS full_path
+            FROM tags t
+            INNER JOIN tag_paths tp ON t.parent_id = tp.id
+        )
+        SELECT tp.full_path AS name
+        FROM tag_paths tp
+        INNER JOIN contact_tags ct ON tp.id = ct.tag_id
         WHERE ct.contact_id = :contact_id
-        ORDER BY t.name ASC
+        ORDER BY tp.full_path ASC
     """)
     tags_result = await session.execute(tags_stmt, {"contact_id": contact_id})
     return [row.name for row in tags_result.fetchall()]
@@ -320,6 +334,7 @@ async def _load_tag_names_for_contacts_batch(
     """
     Load tag names for multiple contacts in a single query.
 
+    Uses recursive CTE to build path-style names for hierarchical tags.
     More efficient than calling _load_tag_names_for_contact per contact
     when processing batches.
 
@@ -328,22 +343,31 @@ async def _load_tag_names_for_contacts_batch(
         contact_ids: List of contact IDs
 
     Returns:
-        Mapping of contact_id → sorted list of tag name strings.
+        Mapping of contact_id → sorted list of tag name strings (with hierarchy paths).
         Contacts with no tags will have an empty list.
     """
     if not contact_ids:
         return {}
 
     tags_stmt = text("""
-        SELECT ct.contact_id, t.name
-        FROM tags t
-        INNER JOIN contact_tags ct ON t.id = ct.tag_id
+        WITH RECURSIVE tag_paths AS (
+            -- Base case: root tags (no parent)
+            SELECT t.id, t.name, t.name AS full_path
+            FROM tags t
+            WHERE t.parent_id IS NULL
+            UNION ALL
+            -- Recursive case: child tags
+            SELECT t.id, t.name, tp.full_path || '/' || t.name AS full_path
+            FROM tags t
+            INNER JOIN tag_paths tp ON t.parent_id = tp.id
+        )
+        SELECT ct.contact_id, tp.full_path AS name
+        FROM tag_paths tp
+        INNER JOIN contact_tags ct ON tp.id = ct.tag_id
         WHERE ct.contact_id = ANY(:contact_ids)
-        ORDER BY ct.contact_id, t.name ASC
+        ORDER BY ct.contact_id, tp.full_path ASC
     """)
-    tags_result = await session.execute(
-        tags_stmt, {"contact_ids": contact_ids}
-    )
+    tags_result = await session.execute(tags_stmt, {"contact_ids": contact_ids})
 
     result: dict[int, list[str]] = {cid: [] for cid in contact_ids}
     for row in tags_result.fetchall():
@@ -563,9 +587,11 @@ def _transform_contact_to_google_person(contact: dict[str, Any]) -> dict[str, An
         # Always include memberships when tag push is active (group mapping
         # provided), even if empty, so that removed local tags clear existing
         # Google group memberships via the updatePersonFields mask.
-        memberships = _transform_tags_to_memberships(
-            tag_names, group_name_to_resource
-        ) if tag_names and group_name_to_resource else []
+        memberships = (
+            _transform_tags_to_memberships(tag_names, group_name_to_resource)
+            if tag_names and group_name_to_resource
+            else []
+        )
         person_data["memberships"] = memberships
 
     return person_data
@@ -590,11 +616,7 @@ def _transform_tags_to_memberships(
         resource_name = group_name_to_resource.get(tag_name)
         if resource_name:
             memberships.append(
-                {
-                    "contactGroupMembership": {
-                        "contactGroupResourceName": resource_name
-                    }
-                }
+                {"contactGroupMembership": {"contactGroupResourceName": resource_name}}
             )
     return memberships
 
@@ -622,8 +644,7 @@ def _build_reverse_group_mapping(
     for resource_name, name in forward_mapping.items():
         if name in reverse:
             logger.warning(
-                "Duplicate Google Contact Group name detected, "
-                "last resource wins",
+                "Duplicate Google Contact Group name detected, last resource wins",
                 group_name=name,
                 previous_resource=reverse[name],
                 new_resource=resource_name,
@@ -874,7 +895,11 @@ async def push_contacts_to_google(
 
     for contact in contacts:
         await _push_single_contact(
-            session, client, contact, google_account_email, metrics,
+            session,
+            client,
+            contact,
+            google_account_email,
+            metrics,
             group_name_to_resource=group_name_to_resource,
         )
 
@@ -2319,9 +2344,7 @@ async def push_local_contacts_to_google(
             # Fetch existing groups, reverse the mapping, and pre-create any
             # missing groups for local tags.
             forward_group_mapping = await _build_contact_group_mapping(client)
-            reverse_group_mapping = _build_reverse_group_mapping(
-                forward_group_mapping
-            )
+            reverse_group_mapping = _build_reverse_group_mapping(forward_group_mapping)
 
             # Collect all tag names across contacts with a single batch query.
             # Tags are loaded again per-contact in _load_full_contact, but we

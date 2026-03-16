@@ -60,6 +60,7 @@ class TagInfo(BaseModel):
 
     id: str
     name: str
+    parent_id: int | None = None
     usage_count: int
     description: str
 
@@ -789,6 +790,7 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
                 tag_info = TagInfo(
                     id=str(tag.id) if tag.id else "unknown",
                     name=tag.name.value,
+                    parent_id=tag.parent_id,
                     usage_count=0,  # TODO: Add usage count when available
                     description=f"Tag for categorizing contacts as '{tag.name.value}'",
                 )

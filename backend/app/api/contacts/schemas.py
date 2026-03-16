@@ -94,6 +94,9 @@ class TagAttributes(BaseModel):
     name: str = Field(..., description="Tag name")
     color: str | None = Field(default=None, description="Tag color (hex code)")
     description: str | None = Field(default=None, description="Tag description")
+    parent_id: int | None = Field(
+        default=None, description="Parent tag ID for hierarchical tags"
+    )
 
 
 class TagResource(BaseModel):

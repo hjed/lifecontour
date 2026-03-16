@@ -1,0 +1,240 @@
+"""Integration tests for tag API endpoints with hierarchical tag support."""
+
+from typing import Any
+
+import pytest
+import pytest_asyncio
+from httpx import ASGITransport, AsyncClient
+from sqlalchemy.ext.asyncio import AsyncConnection
+
+from app.main import create_app
+
+
+@pytest_asyncio.fixture
+async def tag_api_client(async_connection, clean_database, test_settings):  # noqa: ARG001
+    """Create async test client for tag API integration tests with real database setup."""
+    from dishka import Provider, Scope, make_async_container, provide
+    from dishka.integrations.fastapi import FastapiProvider, setup_dishka
+
+    from app.infrastructure.auth.models import SessionUser
+    from app.infrastructure.di.contacts import ContactProvider
+    from app.infrastructure.di.infrastructure import InfrastructureProvider
+    from app.infrastructure.di.integrations import IntegrationProvider
+    from app.infrastructure.di.journal import JournalProvider
+
+    class TestDatabaseProvider(Provider):
+        def __init__(self, connection: AsyncConnection):
+            super().__init__()
+            self.connection = connection
+
+        @provide(scope=Scope.REQUEST)
+        async def get_connection(self) -> AsyncConnection:
+            return self.connection
+
+        @provide(scope=Scope.REQUEST)
+        def get_session_user(self) -> SessionUser:
+            return SessionUser(
+                id="test-user-123",
+                email="test@example.com",
+                name="Test User",
+                avatar_url="https://example.com/avatar.jpg",
+                provider="test",
+            )
+
+    app = create_app(settings=test_settings)
+    await app.state.dishka_container.close()
+
+    test_container = make_async_container(
+        TestDatabaseProvider(async_connection),
+        InfrastructureProvider(),
+        ContactProvider(),
+        JournalProvider(),
+        IntegrationProvider(),
+        FastapiProvider(),
+    )
+    app.state.dishka_container = test_container
+    setup_dishka(test_container, app)
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://testserver"
+    ) as client:
+        yield client
+
+    await test_container.close()
+
+
+@pytest.mark.integration
+class TestTagEndpointsHierarchy:
+    """Integration tests for tag API endpoints with hierarchical tag support."""
+
+    @pytest_asyncio.fixture(autouse=True)
+    async def setup_method(self, clean_database):  # noqa: ARG002
+        """Setup method to ensure clean database for each test."""
+
+    async def _create_tag(
+        self, client: AsyncClient, name: str, *, parent_id: int | None = None
+    ) -> dict[str, Any]:
+        """Helper to create a tag via API."""
+        attributes: dict[str, Any] = {"name": name}
+        if parent_id is not None:
+            attributes["parent_id"] = parent_id
+
+        request_data = {
+            "data": {
+                "type": "tags",
+                "attributes": attributes,
+            }
+        }
+        response = await client.post("/api/tags", json=request_data)
+        assert response.status_code == 201, (
+            f"Failed to create tag '{name}': {response.text}"
+        )
+        result: dict[str, Any] = response.json()["data"]
+        return result
+
+    async def _create_contact(
+        self, client: AsyncClient, first_name: str
+    ) -> dict[str, Any]:
+        """Helper to create a contact via API."""
+        request_data = {
+            "data": {
+                "type": "contacts",
+                "attributes": {
+                    "first_name": first_name,
+                    "contact_methods": [],
+                    "addresses": [],
+                    "notes": [],
+                },
+            }
+        }
+        response = await client.post("/api/contacts", json=request_data)
+        assert response.status_code == 201
+        result: dict[str, Any] = response.json()["data"]
+        return result
+
+    async def _assign_tag_to_contact(
+        self, client: AsyncClient, contact_id: int, tag_id: int
+    ) -> None:
+        """Helper to assign a tag to a contact via API."""
+        request_data = {"data": {"type": "tags", "id": str(tag_id)}}
+        response = await client.post(
+            f"/api/contacts/{contact_id}/tags", json=request_data
+        )
+        assert response.status_code in (
+            200,
+            201,
+            204,
+        ), f"Failed to assign tag {tag_id} to contact {contact_id}: {response.text}"
+
+    # ---- Test 1: POST /api/tags with parent_id ----
+
+    async def test_create_tag_with_parent_id(self, tag_api_client):
+        """Test creating a tag with a valid parent_id."""
+        parent = await self._create_tag(tag_api_client, "family")
+        parent_id = int(parent["id"])
+
+        child = await self._create_tag(tag_api_client, "extended", parent_id=parent_id)
+
+        assert int(child["attributes"]["parent_id"]) == parent_id
+        assert child["attributes"]["name"] == "extended"
+
+    # ---- Test 2: POST /api/tags without parent_id ----
+
+    async def test_create_tag_without_parent_id(self, tag_api_client):
+        """Test creating a tag without parent_id — should be a root tag."""
+        tag = await self._create_tag(tag_api_client, "standalone")
+
+        assert tag["attributes"]["parent_id"] is None
+        assert tag["attributes"]["name"] == "standalone"
+
+    # ---- Test 3: POST /api/tags with invalid parent_id ----
+
+    async def test_create_tag_with_invalid_parent_id(self, tag_api_client):
+        """Test creating a tag with a non-existent parent_id returns an error."""
+        request_data = {
+            "data": {
+                "type": "tags",
+                "attributes": {
+                    "name": "orphan",
+                    "parent_id": 999999,
+                },
+            }
+        }
+        response = await tag_api_client.post("/api/tags", json=request_data)
+        assert response.status_code == 404
+
+    # ---- Test 4: GET /api/tags returns parent_id ----
+
+    async def test_list_tags_includes_parent_id(self, tag_api_client):
+        """Test that GET /api/tags response includes parent_id for each tag."""
+        parent = await self._create_tag(tag_api_client, "business")
+        parent_id = int(parent["id"])
+        await self._create_tag(tag_api_client, "client", parent_id=parent_id)
+
+        response = await tag_api_client.get("/api/tags")
+        assert response.status_code == 200
+
+        data = response.json()
+        tags = data["data"]
+
+        # Find our tags by name
+        parent_tag = next(t for t in tags if t["attributes"]["name"] == "business")
+        child_tag = next(t for t in tags if t["attributes"]["name"] == "client")
+
+        assert parent_tag["attributes"]["parent_id"] is None
+        assert int(child_tag["attributes"]["parent_id"]) == parent_id
+
+    # ---- Test 5: GET /api/contacts?tag_ids=<parent> — descendant filtering ----
+
+    async def test_filter_contacts_by_parent_tag_includes_descendants(
+        self, tag_api_client
+    ):
+        """Filtering by a parent tag returns contacts tagged with child tags only."""
+        # Create parent + child tags
+        parent = await self._create_tag(tag_api_client, "family")
+        parent_id = int(parent["id"])
+        child = await self._create_tag(tag_api_client, "extended", parent_id=parent_id)
+        child_id = int(child["id"])
+
+        # Create a contact, assign only the child tag
+        contact = await self._create_contact(tag_api_client, "ChildOnly")
+        contact_id = int(contact["id"])
+        await self._assign_tag_to_contact(tag_api_client, contact_id, child_id)
+
+        # Filter by parent tag — should return the child-tagged contact
+        response = await tag_api_client.get(f"/api/contacts?tag_ids={parent_id}")
+        assert response.status_code == 200
+
+        data = response.json()
+        returned_ids = [int(c["id"]) for c in data["data"]]
+        assert contact_id in returned_ids
+
+    # ---- Test 6: GET /api/contacts?tag_ids=<leaf> — exact match ----
+
+    async def test_filter_contacts_by_leaf_tag_returns_directly_tagged_only(
+        self, tag_api_client
+    ):
+        """Filtering by a leaf tag returns only directly-tagged contacts."""
+        parent = await self._create_tag(tag_api_client, "work")
+        parent_id = int(parent["id"])
+        child = await self._create_tag(tag_api_client, "project-a", parent_id=parent_id)
+        child_id = int(child["id"])
+
+        # Contact tagged with parent only
+        parent_contact = await self._create_contact(tag_api_client, "ParentTagged")
+        parent_contact_id = int(parent_contact["id"])
+        await self._assign_tag_to_contact(tag_api_client, parent_contact_id, parent_id)
+
+        # Contact tagged with child only
+        child_contact = await self._create_contact(tag_api_client, "ChildTagged")
+        child_contact_id = int(child_contact["id"])
+        await self._assign_tag_to_contact(tag_api_client, child_contact_id, child_id)
+
+        # Filter by leaf tag — should only return the child-tagged contact
+        response = await tag_api_client.get(f"/api/contacts?tag_ids={child_id}")
+        assert response.status_code == 200
+
+        data = response.json()
+        returned_ids = [int(c["id"]) for c in data["data"]]
+        assert child_contact_id in returned_ids
+        assert parent_contact_id not in returned_ids

@@ -93,9 +93,7 @@ class TestPushTagEndToEnd:
         )
         tag_id = tag_result.scalar_one()
         await db_session.execute(
-            text(
-                "INSERT INTO contact_tags (contact_id, tag_id) VALUES (:cid, :tid)"
-            ),
+            text("INSERT INTO contact_tags (contact_id, tag_id) VALUES (:cid, :tid)"),
             {"cid": contact_id, "tid": tag_id},
         )
 
@@ -229,9 +227,7 @@ class TestPushTagEndToEnd:
 
         # Email still intact
         method_row = await db_session.execute(
-            text(
-                "SELECT value FROM contact_methods WHERE contact_id = :cid"
-            ),
+            text("SELECT value FROM contact_methods WHERE contact_id = :cid"),
             {"cid": contact_id},
         )
         assert method_row.scalar_one() == "push-e2e@test.com"

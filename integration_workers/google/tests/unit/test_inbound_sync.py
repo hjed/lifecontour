@@ -87,9 +87,7 @@ class TestInboundSyncClassifier:
         )
         assert result == InboundSyncAction.SKIP_ONE_WAY
 
-    def test_classify_cancelled_event(
-        self, classifier: InboundSyncClassifier
-    ) -> None:
+    def test_classify_cancelled_event(self, classifier: InboundSyncClassifier) -> None:
         """Cancelled event should be SKIP (Phase 3 handles deletion)."""
         cancelled_event = GoogleEvent(
             id="google-event-cancelled",

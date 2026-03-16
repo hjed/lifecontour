@@ -6,7 +6,7 @@ PostgreSQL database to verify that sync metadata is correctly persisted
 and that conflict handling (409 ETag mismatch) works end-to-end.
 """
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 import pytest_asyncio
@@ -52,9 +52,7 @@ async def push_contact_data(db_session: AsyncSession) -> dict:
     )
     tag_id = tag_result.scalar_one()
     await db_session.execute(
-        text(
-            "INSERT INTO contact_tags (contact_id, tag_id) VALUES (:cid, :tid)"
-        ),
+        text("INSERT INTO contact_tags (contact_id, tag_id) VALUES (:cid, :tid)"),
         {"cid": contact_id, "tid": tag_id},
     )
     await db_session.flush()

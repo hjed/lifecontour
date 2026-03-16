@@ -26,6 +26,7 @@ from api_models import (
     GooglePerson,
     GooglePhoneNumber,
 )
+from group_translator import GoogleGroupNameTranslator
 from transformer import GoogleContactTransformer
 
 
@@ -776,3 +777,126 @@ class TestOrganizationTransformation:
         # Empty strings should be treated as None
         assert contact.company is None
         assert contact.job_title is None
+
+
+class TestInboundHierarchySplitting:
+    """Test hierarchy-aware tag splitting in the transformer."""
+
+    def test_flat_group_produces_single_tag(
+        self, transformer: GoogleContactTransformer
+    ) -> None:
+        """Test that a flat group name produces a single tag without parent_name."""
+        person = GooglePerson(
+            resourceName="people/c123",
+            names=[GoogleName(givenName="Test", familyName="Person")],
+            memberships=[
+                GoogleMembership(
+                    contactGroupMembership=GoogleContactGroupMembership(
+                        contactGroupId="work",
+                        contactGroupResourceName="contactGroups/work",
+                    )
+                ),
+            ],
+        )
+
+        contact = transformer.transform_person(person)
+
+        assert len(contact.tags) == 1
+        assert contact.tags[0].name.value == "work"
+        assert contact.tags[0].parent_id is None
+
+    def test_hierarchical_group_produces_parent_and_child(
+        self, transformer: GoogleContactTransformer
+    ) -> None:
+        """Test 'Family/Extended' produces two tags with parent→child relationship."""
+        translator = GoogleGroupNameTranslator(
+            reserved_group_ids=[],
+            group_mapping={"contactGroups/abc123": "Family/Extended"},
+        )
+        transformer_with_groups = GoogleContactTransformer(translator=translator)
+
+        person = GooglePerson(
+            resourceName="people/c123",
+            names=[GoogleName(givenName="Test", familyName="Person")],
+            memberships=[
+                GoogleMembership(
+                    contactGroupMembership=GoogleContactGroupMembership(
+                        contactGroupId="abc123",
+                        contactGroupResourceName="contactGroups/abc123",
+                    )
+                ),
+            ],
+        )
+
+        contact = transformer_with_groups.transform_person(person)
+
+        # Should produce 2 tags: "Family" (root) and "Extended" (child)
+        assert len(contact.tags) == 2
+        tag_names = [tag.name.value for tag in contact.tags]
+        assert "Family" in tag_names
+        assert "Extended" in tag_names
+
+    def test_three_level_hierarchy_produces_chain(
+        self, transformer: GoogleContactTransformer
+    ) -> None:
+        """Test 'A/B/C' produces three tags in parent chain."""
+        translator = GoogleGroupNameTranslator(
+            reserved_group_ids=[],
+            group_mapping={"contactGroups/deep": "A/B/C"},
+        )
+        transformer_with_groups = GoogleContactTransformer(translator=translator)
+
+        person = GooglePerson(
+            resourceName="people/c123",
+            names=[GoogleName(givenName="Test", familyName="Person")],
+            memberships=[
+                GoogleMembership(
+                    contactGroupMembership=GoogleContactGroupMembership(
+                        contactGroupId="deep",
+                        contactGroupResourceName="contactGroups/deep",
+                    )
+                ),
+            ],
+        )
+
+        contact = transformer_with_groups.transform_person(person)
+
+        tag_names = [tag.name.value for tag in contact.tags]
+        assert "A" in tag_names
+        assert "B" in tag_names
+        assert "C" in tag_names
+        assert len(contact.tags) == 3
+
+    def test_sanitize_tag_name_preserves_slash(
+        self, transformer: GoogleContactTransformer
+    ) -> None:
+        """Test that _sanitize_tag_name preserves / as hierarchy delimiter."""
+        result = transformer._sanitize_tag_name("Family/Extended")
+        assert result == "Family/Extended"
+
+    def test_reserved_group_with_slash_still_filtered(
+        self,
+    ) -> None:
+        """Test that reserved groups containing / are still filtered out."""
+        translator = GoogleGroupNameTranslator(
+            reserved_group_ids=["myContacts/special"],
+            group_mapping={},
+        )
+        transformer_with_reserved = GoogleContactTransformer(translator=translator)
+
+        person = GooglePerson(
+            resourceName="people/c123",
+            names=[GoogleName(givenName="Test", familyName="Person")],
+            memberships=[
+                GoogleMembership(
+                    contactGroupMembership=GoogleContactGroupMembership(
+                        contactGroupId="myContacts/special",
+                        contactGroupResourceName="contactGroups/myContacts-special",
+                    )
+                ),
+            ],
+        )
+
+        contact = transformer_with_reserved.transform_person(person)
+
+        assert len(contact.tags) == 0

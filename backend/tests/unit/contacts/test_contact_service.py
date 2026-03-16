@@ -806,3 +806,113 @@ class TestContactService:
         # Assert
         assert result == contacts
         mock_contact_repo.get_contacts_by_tag.assert_called_once_with(1)
+
+    # Descendant-aware filtering tests (ITER2.6-002 Phase 1)
+
+    @pytest.mark.asyncio
+    async def test_get_contacts_paginated_with_parent_tag_expands_descendants(
+        self, contact_service, mock_contact_repo, mock_tag_repo
+    ):
+        """Test that filtering by a parent tag expands to include descendant tag IDs."""
+        # Arrange: parent tag 1 has children tag 2 and tag 3
+        parent_tag_id = 1
+        child_tag_1 = Tag(name=TagName("child1"), id=2, parent_id=parent_tag_id)
+        child_tag_2 = Tag(name=TagName("child2"), id=3, parent_id=parent_tag_id)
+
+        mock_tag_repo.get_children.side_effect = lambda tag_id: (
+            [child_tag_1, child_tag_2] if tag_id == parent_tag_id else []
+        )
+        mock_contact_repo.get_contacts_by_filters.return_value = []
+
+        # Act
+        await contact_service.get_contacts_paginated(
+            limit=10, offset=0, tag_ids=[parent_tag_id]
+        )
+
+        # Assert: repo should be called with expanded tag_ids including parent + descendants
+        call_args = mock_contact_repo.get_contacts_by_filters.call_args
+        called_tag_ids = call_args.kwargs.get("tag_ids") or call_args[1].get("tag_ids")
+        assert set(called_tag_ids) == {1, 2, 3}
+
+    @pytest.mark.asyncio
+    async def test_get_contacts_count_with_parent_tag_expands_descendants(
+        self, contact_service, mock_contact_repo, mock_tag_repo
+    ):
+        """Test that count with parent tag expands to include descendant tag IDs."""
+        # Arrange: parent tag 10 has child tag 20
+        parent_tag_id = 10
+        child_tag = Tag(name=TagName("child"), id=20, parent_id=parent_tag_id)
+
+        mock_tag_repo.get_children.side_effect = lambda tag_id: (
+            [child_tag] if tag_id == parent_tag_id else []
+        )
+        mock_contact_repo.get_contacts_count_by_filters.return_value = 5
+
+        # Act
+        result = await contact_service.get_contacts_count(tag_ids=[parent_tag_id])
+
+        # Assert
+        assert result == 5
+        call_args = mock_contact_repo.get_contacts_count_by_filters.call_args
+        called_tag_ids = call_args.kwargs.get("tag_ids") or call_args[1].get("tag_ids")
+        assert set(called_tag_ids) == {10, 20}
+
+    @pytest.mark.asyncio
+    async def test_get_contacts_paginated_leaf_tag_unchanged(
+        self, contact_service, mock_contact_repo, mock_tag_repo
+    ):
+        """Test that a leaf tag (no children) passes through unchanged."""
+        # Arrange: tag 5 has no children
+        leaf_tag_id = 5
+        mock_tag_repo.get_children.return_value = []
+        mock_contact_repo.get_contacts_by_filters.return_value = []
+
+        # Act
+        await contact_service.get_contacts_paginated(
+            limit=10, offset=0, tag_ids=[leaf_tag_id]
+        )
+
+        # Assert: repo should be called with just the original tag ID
+        call_args = mock_contact_repo.get_contacts_by_filters.call_args
+        called_tag_ids = call_args.kwargs.get("tag_ids") or call_args[1].get("tag_ids")
+        assert called_tag_ids == [leaf_tag_id]
+
+    @pytest.mark.asyncio
+    async def test_get_contacts_paginated_mixed_hierarchy_expands_all(
+        self, contact_service, mock_contact_repo, mock_tag_repo
+    ):
+        """Test that multiple tag_ids with mixed hierarchy expand independently."""
+        # Arrange: tag 1 has child 2, tag 5 has no children
+        parent_tag_id = 1
+        child_tag = Tag(name=TagName("child"), id=2, parent_id=parent_tag_id)
+        leaf_tag_id = 5
+
+        mock_tag_repo.get_children.side_effect = lambda tag_id: (
+            [child_tag] if tag_id == parent_tag_id else []
+        )
+        mock_contact_repo.get_contacts_by_filters.return_value = []
+
+        # Act
+        await contact_service.get_contacts_paginated(
+            limit=10, offset=0, tag_ids=[parent_tag_id, leaf_tag_id]
+        )
+
+        # Assert: repo called with parent + child + leaf
+        call_args = mock_contact_repo.get_contacts_by_filters.call_args
+        called_tag_ids = call_args.kwargs.get("tag_ids") or call_args[1].get("tag_ids")
+        assert set(called_tag_ids) == {1, 2, 5}
+
+    @pytest.mark.asyncio
+    async def test_get_contacts_paginated_no_tag_ids_skips_descendant_resolution(
+        self, contact_service, mock_contact_repo, mock_tag_repo
+    ):
+        """Test that no tag_ids skips descendant resolution entirely."""
+        # Arrange
+        mock_contact_repo.get_all.return_value = []
+
+        # Act
+        await contact_service.get_contacts_paginated(limit=10, offset=0, tag_ids=None)
+
+        # Assert: get_children should never be called
+        mock_tag_repo.get_children.assert_not_called()
+        mock_contact_repo.get_all.assert_called_once()

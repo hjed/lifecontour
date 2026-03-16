@@ -17,6 +17,9 @@ class TagCreateAttributes(BaseModel):
     name: str = Field(..., description="Tag name", min_length=1, max_length=100)
     color: str | None = Field(default=None, description="Tag color (hex code)")
     description: str | None = Field(default=None, description="Tag description")
+    parent_id: int | None = Field(
+        default=None, description="Parent tag ID for hierarchical tags"
+    )
 
 
 class TagCreateData(BaseModel):

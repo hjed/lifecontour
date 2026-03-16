@@ -80,9 +80,7 @@ class TestLoadTagNamesForContactsBatch:
         mock_result.fetchall.return_value = [row1, row2, row3]
         mock_session.execute.return_value = mock_result
 
-        result = await _load_tag_names_for_contacts_batch(
-            mock_session, [1, 2, 3]
-        )
+        result = await _load_tag_names_for_contacts_batch(mock_session, [1, 2, 3])
 
         assert result[1] == ["Friends", "Work"]
         assert result[2] == ["Family"]
@@ -184,9 +182,10 @@ class TestTransformTagsToMemberships:
         )
 
         assert len(result) == 1
-        assert result[0]["contactGroupMembership"][
-            "contactGroupResourceName"
-        ] == "contactGroups/abc123"
+        assert (
+            result[0]["contactGroupMembership"]["contactGroupResourceName"]
+            == "contactGroups/abc123"
+        )
 
     def test_empty_tags_returns_empty_list(self):
         """Test that empty tag list produces empty memberships."""
@@ -510,7 +509,13 @@ class TestPushContactWithTagsEndToEnd:
 
             # Verify the create_contact call included memberships
             call_args = mock_google_client.create_contact.call_args
-            person_data = call_args[0][0] if call_args[0] else call_args[1].get("contact_data", call_args[1].get("person_data", {}))
+            person_data = (
+                call_args[0][0]
+                if call_args[0]
+                else call_args[1].get(
+                    "contact_data", call_args[1].get("person_data", {})
+                )
+            )
 
             assert "memberships" in person_data
             assert len(person_data["memberships"]) == 1

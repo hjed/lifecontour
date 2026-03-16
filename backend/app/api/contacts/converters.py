@@ -178,6 +178,7 @@ class TagConverter:
             name=tag.name.value,
             color=tag.color,
             description=tag.description,
+            parent_id=tag.parent_id,
         )
 
         # Create links

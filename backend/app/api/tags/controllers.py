@@ -65,14 +65,25 @@ async def create_tag(
     Create a new tag.
 
     Creates a new tag with the provided data and returns the created resource.
+    If parent_id is provided, validates that the parent tag exists.
     """
     base_url = get_request_base_url(request)
+    attrs = tag_request.data.attributes
+
+    # Validate parent tag exists if parent_id is provided
+    if attrs.parent_id is not None:
+        parent_tag = await tag_repo.find_by_id(attrs.parent_id)
+        if not parent_tag:
+            from app.core.contacts.models.exceptions import TagNotFoundError
+
+            raise TagNotFoundError(attrs.parent_id)
 
     # Create tag entity
     tag = Tag(
-        name=TagName(tag_request.data.attributes.name),
-        color=tag_request.data.attributes.color,
-        description=tag_request.data.attributes.description,
+        name=TagName(attrs.name),
+        color=attrs.color,
+        description=attrs.description,
+        parent_id=attrs.parent_id,
     )
 
     # Save tag
