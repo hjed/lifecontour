@@ -330,3 +330,35 @@ class SyncJobJsonApiResponse(BaseModel):
     """Response model for a single sync job (JSON API format)."""
 
     data: SyncJobData = Field(description="Sync job resource")
+
+
+# Google Calendar List Response Models (JSON API format)
+class GoogleCalendarAttributes(BaseModel):
+    """Attributes for a Google Calendar item."""
+
+    summary: str = Field(description="Calendar name/summary")
+    description: str | None = Field(default=None, description="Calendar description")
+    background_color: str | None = Field(
+        default=None,
+        description="Calendar background colour",
+        serialization_alias="backgroundColor",
+    )
+    primary: bool = Field(
+        default=False, description="Whether this is the primary calendar"
+    )
+
+    model_config = {"populate_by_name": True}
+
+
+class GoogleCalendarData(BaseModel):
+    """JSON API data wrapper for a Google Calendar."""
+
+    id: str = Field(description="Google Calendar ID")
+    type: str = Field(default="google-calendar", description="Resource type")
+    attributes: GoogleCalendarAttributes = Field(description="Calendar attributes")
+
+
+class GoogleCalendarListResponse(BaseModel):
+    """JSON API response for listing Google Calendars."""
+
+    data: list[GoogleCalendarData] = Field(description="List of Google Calendars")

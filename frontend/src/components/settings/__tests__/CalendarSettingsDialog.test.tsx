@@ -3,12 +3,59 @@
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { CalendarSettingsDialog } from '../CalendarSettingsDialog';
 import { useCreateCalendar, useUpdateCalendar } from '@/lib/api/journals';
+import { useGoogleCalendars, useGoogleStatus } from '@/lib/api/integrations';
 
 // Mock the API hooks
 jest.mock('@/lib/api/journals', () => ({
   useCreateCalendar: jest.fn(),
   useUpdateCalendar: jest.fn(),
 }));
+
+jest.mock('@/lib/api/integrations', () => ({
+  useGoogleCalendars: jest.fn(),
+  useGoogleStatus: jest.fn(),
+}));
+
+// Default Google status: connected with calendar scopes
+const mockGoogleConnected = {
+  data: {
+    data: {
+      attributes: {
+        connected: true,
+        needsReconsent: false,
+      },
+    },
+  },
+};
+
+const mockGoogleDisconnected = {
+  data: {
+    data: {
+      attributes: {
+        connected: false,
+        needsReconsent: false,
+      },
+    },
+  },
+};
+
+const mockGoogleCalendars = {
+  data: {
+    data: [
+      {
+        id: 'primary@gmail.com',
+        type: 'google-calendar',
+        attributes: { summary: 'My Calendar', primary: true },
+      },
+      {
+        id: 'work@group.v.calendar.google.com',
+        type: 'google-calendar',
+        attributes: { summary: 'Work Calendar', primary: false },
+      },
+    ],
+  },
+  isLoading: false,
+};
 
 describe('CalendarSettingsDialog', () => {
   const mockCreate = jest.fn();
@@ -24,6 +71,8 @@ describe('CalendarSettingsDialog', () => {
       mutateAsync: mockUpdate,
       isPending: false,
     });
+    (useGoogleStatus as jest.Mock).mockReturnValue(mockGoogleConnected);
+    (useGoogleCalendars as jest.Mock).mockReturnValue(mockGoogleCalendars);
   });
 
   it('renders create form when no calendar is provided', () => {
@@ -104,5 +153,39 @@ describe('CalendarSettingsDialog', () => {
       });
       expect(onOpenChange).toHaveBeenCalledWith(false);
     });
+  });
+
+  it('enables Google sync toggle when Google is connected with calendar scopes', () => {
+    render(<CalendarSettingsDialog open={true} onOpenChange={jest.fn()} />);
+
+    const toggle = screen.getByTestId('google-sync-toggle');
+    expect(toggle).not.toBeDisabled();
+  });
+
+  it('disables Google sync toggle when Google is not connected', () => {
+    (useGoogleStatus as jest.Mock).mockReturnValue(mockGoogleDisconnected);
+
+    render(<CalendarSettingsDialog open={true} onOpenChange={jest.fn()} />);
+
+    const toggle = screen.getByTestId('google-sync-toggle');
+    expect(toggle).toBeDisabled();
+  });
+
+  it('disables Google sync toggle when needsReconsent is true', () => {
+    (useGoogleStatus as jest.Mock).mockReturnValue({
+      data: {
+        data: {
+          attributes: {
+            connected: true,
+            needsReconsent: true,
+          },
+        },
+      },
+    });
+
+    render(<CalendarSettingsDialog open={true} onOpenChange={jest.fn()} />);
+
+    const toggle = screen.getByTestId('google-sync-toggle');
+    expect(toggle).toBeDisabled();
   });
 });

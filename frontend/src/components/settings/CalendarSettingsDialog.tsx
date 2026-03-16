@@ -21,22 +21,41 @@ import {
   FormLabel,
   FormMessage,
 } from '@/components/ui/form';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
 import { useCreateCalendar, useUpdateCalendar } from '@/lib/api/journals';
+import { useGoogleCalendars, useGoogleStatus } from '@/lib/api/integrations';
 import { JournalCalendar } from '@/types/journals';
 
-const calendarFormSchema = z.object({
-  name: z.string().min(1, 'Name is required').max(100),
-  description: z.string().max(500).optional().nullable(),
-  color: z
-    .string()
-    .min(1, 'Color is required')
-    .regex(/^#[0-9A-Fa-f]{6}$/, 'Must be a valid hex color'),
-  is_synced_to_google: z.boolean(),
-});
+const calendarFormSchema = z
+  .object({
+    name: z.string().min(1, 'Name is required').max(100),
+    description: z.string().max(500).optional().nullable(),
+    color: z
+      .string()
+      .min(1, 'Color is required')
+      .regex(/^#[0-9A-Fa-f]{6}$/, 'Must be a valid hex color'),
+    is_synced_to_google: z.boolean(),
+    google_calendar_id: z.string().nullable().optional(),
+  })
+  .refine(
+    data =>
+      !data.is_synced_to_google ||
+      (data.google_calendar_id && data.google_calendar_id.length > 0),
+    {
+      message: 'Please select a Google Calendar to sync with',
+      path: ['google_calendar_id'],
+    }
+  );
 
 type CalendarFormValues = z.infer<typeof calendarFormSchema>;
 
@@ -58,6 +77,14 @@ export function CalendarSettingsDialog({
   const { mutateAsync: updateCalendar, isPending: isUpdating } =
     useUpdateCalendar();
 
+  const { data: statusData } = useGoogleStatus();
+  const isGoogleConnected = statusData?.data?.attributes?.connected ?? false;
+  const needsReconsent = statusData?.data?.attributes?.needsReconsent ?? false;
+  const googleSyncAvailable = isGoogleConnected && !needsReconsent;
+
+  const { data: googleCalendars, isLoading: calendarsLoading } =
+    useGoogleCalendars(googleSyncAvailable);
+
   const form = useForm<CalendarFormValues>({
     resolver: zodResolver(calendarFormSchema),
     defaultValues: {
@@ -65,8 +92,11 @@ export function CalendarSettingsDialog({
       description: '',
       color: '#3b82f6', // default blue
       is_synced_to_google: false,
+      google_calendar_id: null,
     },
   });
+
+  const isSyncEnabled = form.watch('is_synced_to_google');
 
   useEffect(() => {
     if (open) {
@@ -76,6 +106,7 @@ export function CalendarSettingsDialog({
           description: calendar.description || '',
           color: calendar.color || '#3b82f6',
           is_synced_to_google: calendar.is_synced_to_google || false,
+          google_calendar_id: calendar.google_calendar_id || null,
         });
       } else {
         form.reset({
@@ -83,17 +114,35 @@ export function CalendarSettingsDialog({
           description: '',
           color: '#3b82f6',
           is_synced_to_google: false,
+          google_calendar_id: null,
         });
       }
     }
   }, [open, calendar, form]);
 
+  // Auto-clear sync fields if Google sync becomes unavailable while the
+  // dialog is open (e.g. useGoogleStatus refetch flips needsReconsent).
+  useEffect(() => {
+    if (!googleSyncAvailable && isSyncEnabled) {
+      form.setValue('is_synced_to_google', false);
+      form.setValue('google_calendar_id', null);
+    }
+  }, [googleSyncAvailable, isSyncEnabled, form]);
+
   const onSubmit = async (values: CalendarFormValues) => {
     try {
+      // If sync is disabled, clear the google_calendar_id
+      const submitData = {
+        ...values,
+        google_calendar_id: values.is_synced_to_google
+          ? values.google_calendar_id
+          : null,
+      };
+
       if (isEditing) {
-        await updateCalendar({ id: calendar.id, data: values });
+        await updateCalendar({ id: calendar.id, data: submitData });
       } else {
-        await createCalendar(values);
+        await createCalendar(submitData);
       }
       onOpenChange(false);
     } catch (error) {
@@ -189,19 +238,67 @@ export function CalendarSettingsDialog({
                   <div className='space-y-0.5'>
                     <FormLabel>Google Sync</FormLabel>
                     <FormDescription>
-                      Sync events to your Google Calendar
+                      {googleSyncAvailable
+                        ? 'Sync events to your Google Calendar'
+                        : 'Connect Google with calendar permissions to enable sync'}
                     </FormDescription>
                   </div>
                   <FormControl>
                     <Switch
                       checked={field.value}
-                      onCheckedChange={field.onChange}
-                      disabled={true} // Disabled for now as per requirements
+                      onCheckedChange={checked => {
+                        field.onChange(checked);
+                        if (!checked) {
+                          form.setValue('google_calendar_id', null);
+                        }
+                      }}
+                      disabled={!googleSyncAvailable && !field.value}
+                      data-testid='google-sync-toggle'
                     />
                   </FormControl>
                 </FormItem>
               )}
             />
+
+            {isSyncEnabled && googleSyncAvailable && (
+              <FormField
+                control={form.control}
+                name='google_calendar_id'
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Google Calendar</FormLabel>
+                    <Select
+                      onValueChange={field.onChange}
+                      value={field.value || undefined}
+                    >
+                      <FormControl>
+                        <SelectTrigger data-testid='google-calendar-select'>
+                          <SelectValue
+                            placeholder={
+                              calendarsLoading
+                                ? 'Loading calendars...'
+                                : 'Select a Google Calendar'
+                            }
+                          />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        {googleCalendars?.data.map(cal => (
+                          <SelectItem key={cal.id} value={cal.id}>
+                            {cal.attributes.summary}
+                            {cal.attributes.primary && ' (Primary)'}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <FormDescription>
+                      Choose which Google Calendar to sync with
+                    </FormDescription>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+            )}
 
             <DialogFooter className='pt-4'>
               <Button

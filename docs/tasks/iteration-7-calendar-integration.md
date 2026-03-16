@@ -210,6 +210,26 @@ The sequence reflects both product priority and technical dependency:
 - **Integration:** real-database and mocked-remote tests for external delete, local cancel, and local delete behaviour. ✅ Covered via existing E2E flow tests from Phase 2.
 - **E2E:** cancel and delete event-journal flows proving the correct visible outcome in the journal UI. ✅ Covered: 3 E2E tests verifying `event_state` defaults to `confirmed` on creation, presence in API response, and persistence through journal update.
 
+#### Phase 3b: Calendar-Google Selection UI and Scope Upgrade (Gap Fill)
+**PR:** #478
+**PR Size:** ~10 files
+
+This phase fills two product-specification gaps discovered during Phase 3 completion: (a) selecting which local calendar syncs with which Google Calendar, and (b) a UI to upgrade Google OAuth tokens with calendar scopes when they are missing.
+
+**Acceptance Criteria:**
+- [x] `GET /integrations/google/calendars` endpoint fetches the user's Google Calendar list using stored OAuth tokens (paginated via `nextPageToken`).
+- [x] Returns 401 for local auth failures (no Google account, missing tokens) and 502 for upstream Google API errors.
+- [x] Google sync toggle in `CalendarSettingsDialog` is enabled when Google is connected with calendar scopes.
+- [x] Google Calendar selection dropdown appears when sync is enabled, populated by the new endpoint.
+- [x] Cross-field validation requires a Google Calendar to be selected when sync is enabled.
+- [x] Auto-clears sync fields if `googleSyncAvailable` flips to false while the dialog is open.
+- [x] Scope upgrade banner renders on the integrations page when `needsReconsent=true`, with an "Upgrade Permissions" button that triggers re-auth.
+
+**Required Test Coverage:**
+- **Unit:** CalendarSettingsDialog sync toggle enabled/disabled states (3 tests). ✅
+- **Integration:** Google Calendars list endpoint: success, API error, no Google account, missing tokens (4 tests). ✅
+- **E2E:** Calendar sync toggle states, calendar creation with Google Calendar selection, scope upgrade banner visibility and re-auth flow (6 tests). ✅
+
 #### Phase 4: Worker Scheduling, Webhooks, and Observability
 **PR Size:** ~5-7 files
 

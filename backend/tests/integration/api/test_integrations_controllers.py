@@ -554,3 +554,167 @@ class TestIntegrationsControllers:
 
             # Verify service was called
             mock_disconnect.assert_called_once()
+
+    # Google Calendar List Tests
+    def test_list_google_calendars_success(self, client: TestClient):
+        """Test successful Google Calendar list retrieval."""
+        with (
+            patch(
+                "app.infrastructure.auth.oauth_service.OAuthService.get_connected_google_account_email"
+            ) as mock_get_email,
+            patch(
+                "app.infrastructure.auth.google_token_service.GoogleTokenService.get_tokens"
+            ) as mock_get_tokens,
+            patch(
+                "app.api.integrations.controllers.aiohttp.ClientSession"
+            ) as mock_session_cls,
+        ):
+            mock_get_email.return_value = "user@gmail.com"
+            mock_get_tokens.return_value = {
+                "access_token": "test_access_token",
+                "refresh_token": "test_refresh_token",
+                "is_expired": False,
+            }
+
+            # Mock the aiohttp response
+            from unittest.mock import AsyncMock, MagicMock
+
+            mock_response = AsyncMock()
+            mock_response.status = 200
+            mock_response.json = AsyncMock(
+                return_value={
+                    "items": [
+                        {
+                            "id": "primary@gmail.com",
+                            "summary": "My Calendar",
+                            "description": "Main calendar",
+                            "backgroundColor": "#4285f4",
+                            "primary": True,
+                        },
+                        {
+                            "id": "work@group.v.calendar.google.com",
+                            "summary": "Work",
+                            "backgroundColor": "#7986cb",
+                            "primary": False,
+                        },
+                    ]
+                }
+            )
+
+            mock_context = AsyncMock()
+            mock_context.__aenter__ = AsyncMock(return_value=mock_response)
+            mock_context.__aexit__ = AsyncMock(return_value=False)
+
+            mock_session = MagicMock()
+            mock_session.get = MagicMock(return_value=mock_context)
+            mock_session.__aenter__ = AsyncMock(return_value=mock_session)
+            mock_session.__aexit__ = AsyncMock(return_value=False)
+
+            mock_session_cls.return_value = mock_session
+
+            response = client.get("/api/integrations/google/calendars")
+
+            assert response.status_code == 200
+            data = response.json()
+            assert "data" in data
+            assert len(data["data"]) == 2
+
+            # Verify first calendar (primary)
+            cal1 = data["data"][0]
+            assert cal1["id"] == "primary@gmail.com"
+            assert cal1["type"] == "google-calendar"
+            assert cal1["attributes"]["summary"] == "My Calendar"
+            assert cal1["attributes"]["primary"] is True
+            assert cal1["attributes"]["backgroundColor"] == "#4285f4"
+
+            # Verify second calendar
+            cal2 = data["data"][1]
+            assert cal2["id"] == "work@group.v.calendar.google.com"
+            assert cal2["attributes"]["summary"] == "Work"
+            assert cal2["attributes"]["primary"] is False
+
+    def test_list_google_calendars_api_error(self, client: TestClient):
+        """Test Google Calendar list when Google API returns an error."""
+        with (
+            patch(
+                "app.infrastructure.auth.oauth_service.OAuthService.get_connected_google_account_email"
+            ) as mock_get_email,
+            patch(
+                "app.infrastructure.auth.google_token_service.GoogleTokenService.get_tokens"
+            ) as mock_get_tokens,
+            patch(
+                "app.api.integrations.controllers.aiohttp.ClientSession"
+            ) as mock_session_cls,
+        ):
+            mock_get_email.return_value = "user@gmail.com"
+            mock_get_tokens.return_value = {
+                "access_token": "expired_token",
+                "refresh_token": "test_refresh_token",
+                "is_expired": True,
+            }
+
+            from unittest.mock import AsyncMock, MagicMock
+
+            mock_response = AsyncMock()
+            mock_response.status = 401
+            mock_response.text = AsyncMock(return_value="Unauthorized")
+
+            mock_context = AsyncMock()
+            mock_context.__aenter__ = AsyncMock(return_value=mock_response)
+            mock_context.__aexit__ = AsyncMock(return_value=False)
+
+            mock_session = MagicMock()
+            mock_session.get = MagicMock(return_value=mock_context)
+            mock_session.__aenter__ = AsyncMock(return_value=mock_session)
+            mock_session.__aexit__ = AsyncMock(return_value=False)
+
+            mock_session_cls.return_value = mock_session
+
+            response = client.get("/api/integrations/google/calendars")
+
+            assert response.status_code == 502
+            data = response.json()
+            assert "errors" in data
+            assert "Failed to fetch Google Calendars" in data["errors"][0]["detail"]
+
+    def test_list_google_calendars_no_google_account(self, client: TestClient):
+        """Test Google Calendar list when user has no Google account connected."""
+        with patch(
+            "app.infrastructure.auth.oauth_service.OAuthService.get_connected_google_account_email"
+        ) as mock_get_email:
+            mock_get_email.side_effect = ValueError(
+                "No Google Contacts connection found for user 123"
+            )
+
+            response = client.get("/api/integrations/google/calendars")
+
+            assert response.status_code == 401
+            data = response.json()
+            assert "errors" in data
+            assert "Google account not connected" in data["errors"][0]["detail"]
+
+    def test_list_google_calendars_no_tokens(self, client: TestClient):
+        """Test Google Calendar list when tokens are not found."""
+        from app.infrastructure.auth.google_token_service import (
+            GoogleTokenNotFoundError,
+        )
+
+        with (
+            patch(
+                "app.infrastructure.auth.oauth_service.OAuthService.get_connected_google_account_email"
+            ) as mock_get_email,
+            patch(
+                "app.infrastructure.auth.google_token_service.GoogleTokenService.get_tokens"
+            ) as mock_get_tokens,
+        ):
+            mock_get_email.return_value = "user@gmail.com"
+            mock_get_tokens.side_effect = GoogleTokenNotFoundError(
+                "No Google tokens found"
+            )
+
+            response = client.get("/api/integrations/google/calendars")
+
+            assert response.status_code == 401
+            data = response.json()
+            assert "errors" in data
+            assert "Google tokens not found" in data["errors"][0]["detail"]

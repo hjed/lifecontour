@@ -11,6 +11,7 @@ import urllib.parse
 from datetime import UTC, datetime
 from typing import Any
 
+import aiohttp
 import structlog
 from core_shared.repositories.sync_job_repository import SyncJobRepository
 from dishka.integrations.fastapi import FromDishka, inject
@@ -19,6 +20,9 @@ from pydantic import BaseModel
 
 from app.api.integrations.schemas import (
     ComponentHealthAttributes,
+    GoogleCalendarAttributes,
+    GoogleCalendarData,
+    GoogleCalendarListResponse,
     GoogleStatusAttributes,
     GoogleStatusData,
     GoogleStatusJsonApiResponse,
@@ -815,4 +819,133 @@ async def google_oauth_disconnect(
         raise HTTPException(
             status_code=500,
             detail="Failed to disconnect Google Contacts",
+        ) from e
+
+
+GOOGLE_CALENDAR_LIST_URL = (
+    "https://www.googleapis.com/calendar/v3/users/me/calendarList"
+)
+
+
+@router.get(
+    "/google/calendars",
+    response_model=GoogleCalendarListResponse,
+    responses={
+        401: {"description": "Not authenticated or Google not connected"},
+        502: {"description": "Google Calendar API error"},
+    },
+)
+@inject
+async def list_google_calendars(
+    user: FromDishka[SessionUser],
+    oauth_service: FromDishka[OAuthService],
+    google_token_service: FromDishka[GoogleTokenService],
+    db_manager: FromDishka[IntegrationDatabaseManager],
+) -> GoogleCalendarListResponse:
+    """
+    List the authenticated user's Google Calendars.
+
+    Fetches the calendar list from the Google Calendar API using stored
+    OAuth tokens. Requires the user to be connected with calendar scopes.
+    """
+    from app.infrastructure.auth.google_token_service import GoogleTokenNotFoundError
+
+    # --- Resolve credentials (local failures → 401) ---
+    try:
+        async with db_manager.get_session() as session:
+            conn = await session.connection()
+            google_email = await oauth_service.get_connected_google_account_email(
+                user.id, conn
+            )
+    except ValueError as e:
+        logger.warning(
+            "Google account not connected",
+            user_id=user.id,
+            error=str(e),
+        )
+        raise HTTPException(
+            status_code=401,
+            detail="Google account not connected",
+        ) from e
+
+    try:
+        tokens = await google_token_service.get_tokens(
+            user_id=str(user.id), google_email=google_email
+        )
+    except GoogleTokenNotFoundError as e:
+        logger.warning(
+            "Google tokens not found",
+            user_id=user.id,
+            error=str(e),
+        )
+        raise HTTPException(
+            status_code=401,
+            detail="Google tokens not found – please reconnect your account",
+        ) from e
+
+    access_token = tokens["access_token"]
+
+    # --- Fetch calendars from Google Calendar API (paginated) ---
+    try:
+        headers = {"Authorization": f"Bearer {access_token}"}
+        calendars: list[GoogleCalendarData] = []
+        page_token: str | None = None
+
+        async with aiohttp.ClientSession() as http_session:
+            while True:
+                params: dict[str, str] = {"maxResults": "250"}
+                if page_token:
+                    params["pageToken"] = page_token
+
+                async with http_session.get(
+                    GOOGLE_CALENDAR_LIST_URL,
+                    headers=headers,
+                    params=params,
+                    timeout=aiohttp.ClientTimeout(total=15),
+                ) as response:
+                    if response.status != 200:
+                        error_text = await response.text()
+                        logger.error(
+                            "Google Calendar API error",
+                            status=response.status,
+                            error=error_text,
+                        )
+                        raise HTTPException(
+                            status_code=502,
+                            detail="Failed to fetch Google Calendars",
+                        )
+
+                    data = await response.json()
+
+                for item in data.get("items", []):
+                    calendars.append(
+                        GoogleCalendarData(
+                            id=item["id"],
+                            attributes=GoogleCalendarAttributes(
+                                summary=item.get("summary", "Untitled"),
+                                description=item.get("description"),
+                                background_color=item.get("backgroundColor"),
+                                primary=item.get("primary", False),
+                            ),
+                        )
+                    )
+
+                page_token = data.get("nextPageToken")
+                if not page_token:
+                    break
+
+        return GoogleCalendarListResponse(data=calendars)
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(
+            "Failed to list Google Calendars",
+            user_id=user.id,
+            error=str(e),
+            exc_info=True,
+        )
+        raise HTTPException(
+            status_code=502,
+            detail="Failed to fetch Google Calendars",
         ) from e
