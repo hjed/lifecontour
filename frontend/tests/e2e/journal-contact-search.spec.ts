@@ -27,33 +27,33 @@ async function waitForContactSearchIndexing(
   for (let attempt = 0; attempt < timeoutSeconds && !indexed; attempt++) {
     await page.waitForTimeout(1000);
 
-    const response = await page.evaluate(
-      async ({ term }) => {
-        try {
-          const res = await fetch(
-            `/api/search/contacts?q=${encodeURIComponent(term)}&limit=20`
-          );
-          if (!res.ok) return { ok: false, names: [] as string[] };
-          const data = await res.json();
-          const names = (data.data ?? []).map(
-            (c: { attributes?: { first_name?: string; last_name?: string } }) =>
-              `${c.attributes?.first_name ?? ''} ${c.attributes?.last_name ?? ''}`.trim()
-          );
-          return { ok: true, names };
-        } catch {
-          return { ok: false, names: [] as string[] };
+    try {
+      // Use page.request.get() instead of page.evaluate(fetch()) because
+      // the page may still be on about:blank before navigation, and
+      // browser-context fetch with relative URLs fails on about:blank.
+      // Playwright's request API uses the configured baseURL.
+      const res = await page.request.get(
+        `/api/search/contacts?q=${encodeURIComponent(searchTerm)}&limit=20`
+      );
+      if (res.ok()) {
+        const data = await res.json();
+        const names = (
+          (data.data as Array<{
+            attributes?: { first_name?: string; last_name?: string };
+          }>) ?? []
+        ).map(c =>
+          `${c.attributes?.first_name ?? ''} ${c.attributes?.last_name ?? ''}`.trim()
+        );
+        if (
+          names.some((n: string) =>
+            n.toLowerCase().includes(expectedName.toLowerCase())
+          )
+        ) {
+          indexed = true;
         }
-      },
-      { term: searchTerm }
-    );
-
-    if (
-      response.ok &&
-      response.names.some((n: string) =>
-        n.toLowerCase().includes(expectedName.toLowerCase())
-      )
-    ) {
-      indexed = true;
+      }
+    } catch {
+      // Search service not available yet, keep retrying
     }
   }
 
