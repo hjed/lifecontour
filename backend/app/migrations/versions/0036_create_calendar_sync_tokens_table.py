@@ -113,6 +113,7 @@ def upgrade() -> None:
             LEFT JOIN calendars c
                 ON c.user_id = ugi.user_id
                 AND c.google_calendar_id IS NOT NULL
+                AND c.is_synced_to_google = true
             WHERE ugi.calendar_events_sync_token IS NOT NULL
             ON CONFLICT (user_id, google_account_email, google_calendar_id)
                 DO NOTHING

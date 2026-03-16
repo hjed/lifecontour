@@ -3057,7 +3057,7 @@ async def setup_calendar_webhook(
             "Calendar webhook setup complete",
             channel_id=channel_id,
             resource_id=resource_id,
-            channel_expiration=str(channel_expiration),
+            channel_expiration=channel_expiration.isoformat() if channel_expiration else None,
             google_calendar_id=google_calendar_id,
         )
 
@@ -3065,7 +3065,7 @@ async def setup_calendar_webhook(
             "status": "success",
             "channel_id": channel_id,
             "resource_id": resource_id,
-            "channel_expiration": str(channel_expiration),
+            "channel_expiration": channel_expiration.isoformat() if channel_expiration else None,
         }
 
     except Exception as e:
