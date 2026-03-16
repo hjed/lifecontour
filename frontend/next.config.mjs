@@ -1,9 +1,7 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: false, // Required for react-leaflet (Map container is already initialized)
-  experimental: {
-    typedRoutes: true,
-  },
+  typedRoutes: true,
 
   // Enable standalone output for Docker (disabled on Windows due to symlink issues)
   output: process.platform === 'win32' ? undefined : 'standalone',
@@ -45,7 +43,16 @@ const nextConfig = {
 
   // Image optimization
   images: {
-    domains: ['localhost'],
+    remotePatterns: [
+      {
+        protocol: 'http',
+        hostname: 'localhost',
+      },
+      {
+        protocol: 'https',
+        hostname: 'localhost',
+      },
+    ],
     formats: ['image/webp', 'image/avif'],
   },
 };
