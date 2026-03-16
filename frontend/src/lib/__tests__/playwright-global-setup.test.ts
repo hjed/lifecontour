@@ -52,7 +52,7 @@ describe('runGlobalSetup', () => {
     hasExpectedOAuthClientRedirect.mockResolvedValue(true);
   });
 
-  it('reruns backend migrations when reusing already-running local services', async () => {
+  it('skips docker commands when reusing already-running local services', async () => {
     areServicesRunning.mockReturnValue(true);
 
     await runGlobalSetup({
@@ -72,32 +72,22 @@ describe('runGlobalSetup', () => {
 
     expect(chdir).toHaveBeenCalledWith('/workspace');
     expect(removeExistingContainers).not.toHaveBeenCalled();
-    expect(execCommand).toHaveBeenCalledTimes(1);
-    expect(execCommand).toHaveBeenCalledWith(
-      'docker compose --profile test --env-file .env.test exec -T backend alembic upgrade head',
-      'Ensuring backend database schema is up to date',
-      '/workspace',
-      { env: expectedDockerEnv }
-    );
+    expect(execCommand).not.toHaveBeenCalled();
     expect(waitForService).toHaveBeenNthCalledWith(
       1,
       `http://localhost:${BACKEND_TEST_PORT}/api/health/ready`
     );
     expect(waitForService).toHaveBeenNthCalledWith(
       2,
-      `http://localhost:${BACKEND_TEST_PORT}/api/health/ready`
-    );
-    expect(waitForService).toHaveBeenNthCalledWith(
-      3,
       `http://localhost:${OAUTH_ADMIN_TEST_PORT}/health/ready`
     );
     expect(waitForService).toHaveBeenNthCalledWith(
-      4,
+      3,
       `http://localhost:${MEILI_TEST_PORT}/health`
     );
   });
 
-  it('starts services and still ensures backend schema is up to date', async () => {
+  it('starts services when not already running', async () => {
     areServicesRunning.mockReturnValue(false);
 
     await runGlobalSetup({
@@ -116,6 +106,7 @@ describe('runGlobalSetup', () => {
     });
 
     expect(removeExistingContainers).toHaveBeenCalledTimes(1);
+    expect(execCommand).toHaveBeenCalledTimes(2);
     expect(execCommand).toHaveBeenNthCalledWith(
       1,
       'docker compose --profile test --env-file .env.test down --remove-orphans',
@@ -130,27 +121,16 @@ describe('runGlobalSetup', () => {
       '/workspace',
       { env: expectedDockerEnv, ignoreError: true }
     );
-    expect(execCommand).toHaveBeenNthCalledWith(
-      3,
-      'docker compose --profile test --env-file .env.test exec -T backend alembic upgrade head',
-      'Ensuring backend database schema is up to date',
-      '/workspace',
-      { env: expectedDockerEnv }
-    );
     expect(waitForService).toHaveBeenNthCalledWith(
       1,
       `http://localhost:${BACKEND_TEST_PORT}/api/health/ready`
     );
     expect(waitForService).toHaveBeenNthCalledWith(
       2,
-      `http://localhost:${BACKEND_TEST_PORT}/api/health/ready`
-    );
-    expect(waitForService).toHaveBeenNthCalledWith(
-      3,
       `http://localhost:${OAUTH_ADMIN_TEST_PORT}/health/ready`
     );
     expect(waitForService).toHaveBeenNthCalledWith(
-      4,
+      3,
       `http://localhost:${MEILI_TEST_PORT}/health`
     );
   });
@@ -175,6 +155,7 @@ describe('runGlobalSetup', () => {
     });
 
     expect(removeExistingContainers).toHaveBeenCalledTimes(1);
+    expect(execCommand).toHaveBeenCalledTimes(2);
     expect(execCommand).toHaveBeenNthCalledWith(
       1,
       'docker compose --profile test --env-file .env.test down --remove-orphans',
@@ -188,13 +169,6 @@ describe('runGlobalSetup', () => {
       'Starting Docker services',
       '/workspace',
       { env: expectedDockerEnv, ignoreError: true }
-    );
-    expect(execCommand).toHaveBeenNthCalledWith(
-      3,
-      'docker compose --profile test --env-file .env.test exec -T backend alembic upgrade head',
-      'Ensuring backend database schema is up to date',
-      '/workspace',
-      { env: expectedDockerEnv }
     );
   });
 });
