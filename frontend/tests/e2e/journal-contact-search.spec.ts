@@ -14,54 +14,42 @@ import { TestDataManager } from './data-management';
 import type { Page } from '@playwright/test';
 
 /**
- * Poll the contact search API until MeiliSearch has indexed the target contact.
- * Uses the same pattern as journals-list.spec.ts for waiting on MeiliSearch indexing.
+ * Wait until MeiliSearch has indexed a contact matching the given search term.
+ *
+ * Uses Playwright's `expect.toPass()` for idiomatic retry/timeout behaviour
+ * instead of manual `waitForTimeout` loops.  The request is made via
+ * `page.request.get()` so it works even when the page has not navigated yet
+ * (relative URLs resolve against the configured `baseURL`).
  */
 async function waitForContactSearchIndexing(
   page: Page,
   searchTerm: string,
   expectedName: string,
-  timeoutSeconds: number = 30
+  timeoutMs: number = 30_000
 ): Promise<void> {
-  let indexed = false;
-  for (let attempt = 0; attempt < timeoutSeconds && !indexed; attempt++) {
-    await page.waitForTimeout(1000);
-
-    try {
-      // Use page.request.get() instead of page.evaluate(fetch()) because
-      // the page may still be on about:blank before navigation, and
-      // browser-context fetch with relative URLs fails on about:blank.
-      // Playwright's request API uses the configured baseURL.
-      const res = await page.request.get(
-        `/api/search/contacts?q=${encodeURIComponent(searchTerm)}&limit=20`
-      );
-      if (res.ok()) {
-        const data = await res.json();
-        const names = (
-          (data.data as Array<{
-            attributes?: { first_name?: string; last_name?: string };
-          }>) ?? []
-        ).map(c =>
-          `${c.attributes?.first_name ?? ''} ${c.attributes?.last_name ?? ''}`.trim()
-        );
-        if (
-          names.some((n: string) =>
-            n.toLowerCase().includes(expectedName.toLowerCase())
-          )
-        ) {
-          indexed = true;
-        }
-      }
-    } catch {
-      // Search service not available yet, keep retrying
-    }
-  }
-
-  if (!indexed) {
-    throw new Error(
-      `Contact "${expectedName}" was not indexed in MeiliSearch within ${timeoutSeconds} seconds for search term "${searchTerm}"`
+  await expect(async () => {
+    const res = await page.request.get(
+      `/api/search/contacts?q=${encodeURIComponent(searchTerm)}&limit=20`
     );
-  }
+    expect(res.ok()).toBe(true);
+
+    const data = await res.json();
+    const names = (
+      (data.data as Array<{
+        attributes?: { first_name?: string; last_name?: string };
+      }>) ?? []
+    ).map(c =>
+      `${c.attributes?.first_name ?? ''} ${c.attributes?.last_name ?? ''}`.trim()
+    );
+
+    const found = names.some((n: string) =>
+      n.toLowerCase().includes(expectedName.toLowerCase())
+    );
+    expect(found).toBe(true);
+  }).toPass({
+    timeout: timeoutMs,
+    intervals: [1_000, 1_000, 2_000, 2_000, 5_000],
+  });
 }
 
 test.describe('Journal Contact Search (Typeahead)', () => {
@@ -107,7 +95,6 @@ test.describe('Journal Contact Search (Typeahead)', () => {
 
       // Navigate to journal detail page
       await page.goto(`/journals/${journal.id}`);
-      await page.waitForLoadState('networkidle');
 
       // Open the add contact popover
       const addContactButton = page.getByTestId('add-contact-button');
@@ -173,7 +160,6 @@ test.describe('Journal Contact Search (Typeahead)', () => {
 
       // Navigate to journal detail page
       await page.goto(`/journals/${journal.id}`);
-      await page.waitForLoadState('networkidle');
 
       // Open the add contact popover
       const addContactButton = page.getByTestId('add-contact-button');
