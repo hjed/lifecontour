@@ -5,11 +5,10 @@ the core webhook processing logic. Covers header validation, DB channel
 lookup, and sync enqueue behavior.
 """
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from fastapi import HTTPException
-from sqlalchemy import text
 
 
 class TestWebhookHeaderValidation:

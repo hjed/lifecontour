@@ -51,11 +51,8 @@ class TestPeriodicSyncCalendar:
         """Should enqueue both sync_google_contacts AND sync_calendar_events per account."""
         from worker import periodic_sync_all_accounts
 
-        # Set up: one active account
-        account_row = MagicMock()
-        account_row.__getitem__ = lambda self, idx: (
-            "user-1" if idx == 0 else "test@example.com"
-        )
+        # Use tuple rows — worker accesses row[0] and row[1] via index
+        account_row = ("user-1", "test@example.com")
         result = MagicMock()
         result.fetchall.return_value = [account_row]
         mock_session.execute.return_value = result
@@ -85,10 +82,7 @@ class TestPeriodicSyncCalendar:
         """Calendar sync should use 'smart' sync type for periodic syncs."""
         from worker import periodic_sync_all_accounts
 
-        account_row = MagicMock()
-        account_row.__getitem__ = lambda self, idx: (
-            "user-1" if idx == 0 else "test@example.com"
-        )
+        account_row = ("user-1", "test@example.com")
         result = MagicMock()
         result.fetchall.return_value = [account_row]
         mock_session.execute.return_value = result
@@ -129,10 +123,7 @@ class TestPeriodicSyncCalendar:
         """jobs_enqueued should include both contacts and calendar sync jobs."""
         from worker import periodic_sync_all_accounts
 
-        account_row = MagicMock()
-        account_row.__getitem__ = lambda self, idx: (
-            "user-1" if idx == 0 else "test@example.com"
-        )
+        account_row = ("user-1", "test@example.com")
         result = MagicMock()
         result.fetchall.return_value = [account_row]
         mock_session.execute.return_value = result
@@ -152,14 +143,8 @@ class TestPeriodicSyncCalendar:
         """Calendar sync failure for one account shouldn't block other accounts."""
         from worker import periodic_sync_all_accounts
 
-        account1 = MagicMock()
-        account1.__getitem__ = lambda self, idx: (
-            "user-1" if idx == 0 else "a@example.com"
-        )
-        account2 = MagicMock()
-        account2.__getitem__ = lambda self, idx: (
-            "user-2" if idx == 0 else "b@example.com"
-        )
+        account1 = ("user-1", "a@example.com")
+        account2 = ("user-2", "b@example.com")
         result = MagicMock()
         result.fetchall.return_value = [account1, account2]
         mock_session.execute.return_value = result

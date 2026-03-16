@@ -77,11 +77,11 @@ def upgrade() -> None:
         ),
     )
 
-    # Index for webhook channel lookup
+    # Composite index for webhook channel lookup (queries by both columns)
     op.create_index(
         "ix_calendar_sync_tokens_channel_id",
         "calendar_sync_tokens",
-        ["channel_id"],
+        ["channel_id", "channel_resource_id"],
         unique=False,
     )
 
