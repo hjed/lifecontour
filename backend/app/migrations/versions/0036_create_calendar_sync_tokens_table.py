@@ -95,8 +95,8 @@ def upgrade() -> None:
 
     # Migrate existing per-account sync tokens to per-calendar rows.
     # We join user_google_integration (which has the old token) with calendars
-    # to create one row per synced calendar. If no calendars table exists yet,
-    # we create a single "primary" entry per account that has a token.
+    # (created in migration 0010) to create one row per synced calendar.
+    # For accounts that have no calendar rows yet, COALESCE falls back to 'primary'.
     op.execute(
         sa.text("""
             INSERT INTO calendar_sync_tokens

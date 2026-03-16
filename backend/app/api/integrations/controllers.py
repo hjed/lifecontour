@@ -1021,6 +1021,61 @@ async def trigger_calendar_sync(
         ) from e
 
 
+def _validate_webhook_headers(
+    channel_id: str | None,
+    resource_id: str | None,
+) -> None:
+    """Validate required Google webhook headers are present.
+
+    Raises HTTPException(404) if either header is missing.
+    """
+    if not channel_id or not resource_id:
+        raise HTTPException(status_code=404, detail="Missing channel or resource ID")
+
+
+async def _lookup_webhook_channel(
+    session: Any,
+    channel_id: str,
+    resource_id: str,
+) -> Any:
+    """Look up a webhook channel in the database.
+
+    Returns the matching row or raises HTTPException(404) if not found.
+    """
+    from sqlalchemy import text
+
+    stmt = text("""
+        SELECT user_id, google_account_email, google_calendar_id
+        FROM calendar_sync_tokens
+        WHERE channel_id = :channel_id
+        AND channel_resource_id = :resource_id
+    """)
+    result = await session.execute(
+        stmt,
+        {"channel_id": channel_id, "resource_id": resource_id},
+    )
+    row = result.fetchone()
+
+    if not row:
+        logger.warning(
+            "Unknown webhook channel",
+            channel_id=channel_id,
+            resource_id=resource_id,
+        )
+        raise HTTPException(status_code=404, detail="Unknown channel")
+
+    return row
+
+
+def _should_enqueue_sync(resource_state: str) -> bool:
+    """Determine if a webhook resource_state should trigger a sync.
+
+    The 'sync' state is just a channel confirmation — no sync needed.
+    All other states ('exists', 'update', etc.) indicate actual data changes.
+    """
+    return resource_state != "sync"
+
+
 @router.post(
     "/google/calendar/webhook",
     responses={
@@ -1046,40 +1101,20 @@ async def receive_calendar_webhook(
     resource_id = request.headers.get("X-Goog-Resource-ID")
     resource_state = request.headers.get("X-Goog-Resource-State", "")
 
-    if not channel_id or not resource_id:
-        raise HTTPException(status_code=404, detail="Missing channel or resource ID")
+    _validate_webhook_headers(channel_id, resource_id)
 
     # Validate channel against database
     try:
         async with db_manager.get_session() as session:
-            from sqlalchemy import text
-
-            stmt = text("""
-                SELECT user_id, google_account_email, google_calendar_id
-                FROM calendar_sync_tokens
-                WHERE channel_id = :channel_id
-                AND channel_resource_id = :resource_id
-            """)
-            result = await session.execute(
-                stmt,
-                {"channel_id": channel_id, "resource_id": resource_id},
+            row = await _lookup_webhook_channel(
+                session,
+                channel_id,
+                resource_id,  # type: ignore[arg-type]
             )
-            row = result.fetchone()
-
-            if not row:
-                logger.warning(
-                    "Unknown webhook channel",
-                    channel_id=channel_id,
-                    resource_id=resource_id,
-                )
-                raise HTTPException(status_code=404, detail="Unknown channel")
-
             user_id = row.user_id
             google_account_email = row.google_account_email
 
-        # Handle sync notification (skip "sync" state — that's just the initial
-        # confirmation when the channel is created)
-        if resource_state == "sync":
+        if not _should_enqueue_sync(resource_state):
             logger.info(
                 "Webhook channel sync confirmation received",
                 channel_id=channel_id,

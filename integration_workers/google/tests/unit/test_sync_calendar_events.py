@@ -52,8 +52,10 @@ class TestSyncCalendarEvents:
 
     @pytest.fixture(autouse=True)
     def mock_metrics_collector(self):
-        """Mock the metrics_collector to prevent real metrics calls."""
-        with patch("worker.metrics_collector") as mock_mc:
+        """Mock the metrics_collector with spec to catch API misuse."""
+        from core_shared.metrics import MetricsCollector
+
+        with patch("worker.metrics_collector", spec_set=MetricsCollector) as mock_mc:
             yield mock_mc
 
     @pytest.fixture

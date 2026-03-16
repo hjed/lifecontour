@@ -1,73 +1,78 @@
-"""Unit tests for calendar webhook receive endpoint validation.
+"""Unit tests for calendar webhook receive endpoint.
 
-Tests the receive_calendar_webhook endpoint for header validation,
-channel lookup, and sync enqueue behavior.
-
-Note: Tests call the endpoint function directly since Dishka's @inject
-decorator doesn't expose __wrapped__. We import and call the raw function
-before it gets decorated.
+Tests the receive_calendar_webhook endpoint logic by extracting and calling
+the core webhook processing logic. Covers header validation, DB channel
+lookup, and sync enqueue behavior.
 """
 
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from starlette.requests import Request
-
-
-def _make_request(
-    headers: dict[str, str] | None = None,
-) -> MagicMock:
-    """Create a mock Request with given headers."""
-    mock_request = MagicMock(spec=Request)
-    header_dict = headers or {}
-    mock_request.headers = header_dict
-    return mock_request
+from fastapi import HTTPException
+from sqlalchemy import text
 
 
 class TestWebhookHeaderValidation:
-    """Tests for webhook header validation logic."""
+    """Tests for webhook header extraction and validation."""
 
     @pytest.mark.asyncio
-    async def test_raises_404_when_missing_channel_id(self) -> None:
-        """Should raise 404 when X-Goog-Channel-ID is missing."""
-        headers = {"X-Goog-Resource-ID": "res-123"}
-        # Missing channel_id → should effectively reach the HTTPException
-        channel_id = headers.get("X-Goog-Channel-ID")
-        resource_id = headers.get("X-Goog-Resource-ID")
+    async def test_missing_channel_id_raises_404(self) -> None:
+        """Missing X-Goog-Channel-ID should raise 404."""
+        from app.api.integrations.controllers import _validate_webhook_headers
 
-        assert channel_id is None
-        assert resource_id is not None
-        # The endpoint would raise HTTPException(404)
+        with pytest.raises(HTTPException) as exc_info:
+            _validate_webhook_headers(
+                channel_id=None,
+                resource_id="res-123",
+            )
+        assert exc_info.value.status_code == 404
 
     @pytest.mark.asyncio
-    async def test_raises_404_when_missing_resource_id(self) -> None:
-        """Should raise 404 when X-Goog-Resource-ID is missing."""
-        headers = {"X-Goog-Channel-ID": "chan-123"}
-        channel_id = headers.get("X-Goog-Channel-ID")
-        resource_id = headers.get("X-Goog-Resource-ID")
+    async def test_missing_resource_id_raises_404(self) -> None:
+        """Missing X-Goog-Resource-ID should raise 404."""
+        from app.api.integrations.controllers import _validate_webhook_headers
 
-        assert channel_id is not None
-        assert resource_id is None
+        with pytest.raises(HTTPException) as exc_info:
+            _validate_webhook_headers(
+                channel_id="chan-123",
+                resource_id=None,
+            )
+        assert exc_info.value.status_code == 404
+
+    @pytest.mark.asyncio
+    async def test_both_headers_present_passes(self) -> None:
+        """Both headers present should not raise."""
+        from app.api.integrations.controllers import _validate_webhook_headers
+
+        # Should not raise
+        _validate_webhook_headers(
+            channel_id="chan-123",
+            resource_id="res-123",
+        )
 
 
 class TestWebhookChannelLookup:
-    """Tests for webhook channel database lookup logic."""
+    """Tests for webhook channel database lookup."""
 
     @pytest.mark.asyncio
     async def test_unknown_channel_raises_404(self) -> None:
-        """When no DB row matches, a 404 should be returned."""
-        # Simulates the DB lookup returning None
+        """When no DB row matches, should raise 404."""
+        from app.api.integrations.controllers import _lookup_webhook_channel
+
         mock_session = AsyncMock()
         mock_result = MagicMock()
-        mock_result.fetchone.return_value = None  # No matching channel
+        mock_result.fetchone.return_value = None
         mock_session.execute.return_value = mock_result
 
-        row = mock_result.fetchone()
-        assert row is None  # Would trigger 404 in the endpoint
+        with pytest.raises(HTTPException) as exc_info:
+            await _lookup_webhook_channel(mock_session, "unknown-chan", "unknown-res")
+        assert exc_info.value.status_code == 404
 
     @pytest.mark.asyncio
     async def test_known_channel_returns_user_info(self) -> None:
-        """When a channel matches, should return user info for sync enqueue."""
+        """When a channel matches, should return the row data."""
+        from app.api.integrations.controllers import _lookup_webhook_channel
+
         mock_row = MagicMock()
         mock_row.user_id = "user-1"
         mock_row.google_account_email = "test@example.com"
@@ -76,27 +81,37 @@ class TestWebhookChannelLookup:
         mock_result = MagicMock()
         mock_result.fetchone.return_value = mock_row
 
-        row = mock_result.fetchone()
-        assert row is not None
+        mock_session = AsyncMock()
+        mock_session.execute.return_value = mock_result
+
+        row = await _lookup_webhook_channel(mock_session, "valid-chan", "valid-res")
         assert row.user_id == "user-1"
         assert row.google_account_email == "test@example.com"
 
 
 class TestWebhookSyncBehavior:
-    """Tests for webhook sync enqueue behavior."""
+    """Tests for webhook sync enqueue decisions."""
 
     @pytest.mark.asyncio
     async def test_sync_state_should_not_enqueue(self) -> None:
         """The 'sync' resource_state is a channel confirmation — no sync needed."""
-        resource_state = "sync"
-        # In the endpoint, "sync" state returns {"status": "ok"} without enqueueing
-        assert resource_state == "sync"
+        from app.api.integrations.controllers import _should_enqueue_sync
+
+        assert _should_enqueue_sync("sync") is False
 
     @pytest.mark.asyncio
-    async def test_exists_state_should_enqueue_sync(self) -> None:
-        """The 'exists' state means actual data change — should trigger sync."""
-        resource_state = "exists"
-        assert resource_state != "sync"  # Should trigger enqueue
+    async def test_exists_state_should_enqueue(self) -> None:
+        """The 'exists' state means data changed — should trigger sync."""
+        from app.api.integrations.controllers import _should_enqueue_sync
+
+        assert _should_enqueue_sync("exists") is True
+
+    @pytest.mark.asyncio
+    async def test_update_state_should_enqueue(self) -> None:
+        """The 'update' state means data changed — should trigger sync."""
+        from app.api.integrations.controllers import _should_enqueue_sync
+
+        assert _should_enqueue_sync("update") is True
 
     @pytest.mark.asyncio
     async def test_enqueue_uses_smart_sync_type(self) -> None:

@@ -4,8 +4,7 @@ Tests the _save_calendar_sync_token and _load_calendar_sync_token functions
 that store tokens per-calendar in the calendar_sync_tokens table.
 """
 
-from typing import Any
-from unittest.mock import AsyncMock, MagicMock, call
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -99,9 +98,7 @@ class TestLoadCalendarSyncToken:
         return AsyncMock()
 
     @pytest.mark.asyncio
-    async def test_load_returns_token_when_found(
-        self, mock_session: AsyncMock
-    ) -> None:
+    async def test_load_returns_token_when_found(self, mock_session: AsyncMock) -> None:
         """Should return the sync token when one exists."""
         from worker import _load_calendar_sync_token
 
@@ -133,9 +130,7 @@ class TestLoadCalendarSyncToken:
         assert token is None
 
     @pytest.mark.asyncio
-    async def test_load_queries_by_calendar_id(
-        self, mock_session: AsyncMock
-    ) -> None:
+    async def test_load_queries_by_calendar_id(self, mock_session: AsyncMock) -> None:
         """Load should query by the specific calendar_id, not just user/account."""
         from worker import _load_calendar_sync_token
 
@@ -161,9 +156,7 @@ class TestLoadCalendarSyncToken:
         result_mock.scalar.return_value = None
         mock_session.execute.return_value = result_mock
 
-        await _load_calendar_sync_token(
-            mock_session, "user-1", "test@example.com"
-        )
+        await _load_calendar_sync_token(mock_session, "user-1", "test@example.com")
 
         params = mock_session.execute.call_args[0][1]
         assert params["google_calendar_id"] == "primary"

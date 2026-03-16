@@ -47,6 +47,7 @@ class TestWatchEvents:
             webhook_url="https://example.com/webhook",
         )
 
+        assert result is not None
         mock_service.events().watch.assert_called_once()
         call_kwargs = mock_service.events().watch.call_args
         body = call_kwargs.kwargs.get("body", call_kwargs[1].get("body"))
@@ -130,9 +131,7 @@ class TestSetupCalendarWebhook:
         }
 
     @pytest.mark.asyncio
-    async def test_skips_when_no_webhook_base_url(
-        self, mock_ctx: dict
-    ) -> None:
+    async def test_skips_when_no_webhook_base_url(self, mock_ctx: dict) -> None:
         """Should return skipped status when webhook_base_url is empty."""
         from worker import setup_calendar_webhook
 
@@ -153,10 +152,12 @@ class TestSetupCalendarWebhook:
         from worker import setup_calendar_webhook
 
         mock_client = MagicMock()
-        mock_client.watch_events = AsyncMock(return_value={
-            "resourceId": "res-id-789",
-            "expiration": "1711580400000",
-        })
+        mock_client.watch_events = AsyncMock(
+            return_value={
+                "resourceId": "res-id-789",
+                "expiration": "1711580400000",
+            }
+        )
 
         with (
             patch("worker.settings") as mock_settings,
@@ -182,10 +183,12 @@ class TestSetupCalendarWebhook:
         from worker import setup_calendar_webhook
 
         mock_client = MagicMock()
-        mock_client.watch_events = AsyncMock(return_value={
-            "resourceId": "res-id",
-            "expiration": "1711580400000",
-        })
+        mock_client.watch_events = AsyncMock(
+            return_value={
+                "resourceId": "res-id",
+                "expiration": "1711580400000",
+            }
+        )
 
         with (
             patch("worker.settings") as mock_settings,
@@ -198,7 +201,10 @@ class TestSetupCalendarWebhook:
             )
 
         webhook_url = mock_client.watch_events.call_args.kwargs["webhook_url"]
-        assert webhook_url == "https://my-app.example.com/api/integrations/google/calendar/webhook"
+        assert (
+            webhook_url
+            == "https://my-app.example.com/api/integrations/google/calendar/webhook"
+        )
 
     @pytest.mark.asyncio
     async def test_handles_watch_api_error(
