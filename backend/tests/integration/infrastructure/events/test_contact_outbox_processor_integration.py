@@ -979,3 +979,101 @@ class TestContactOutboxProcessorIntegration:
 
         assert contact_row is not None
         assert contact_row[1:] == ("Existing", "Contact")
+
+    @pytest.mark.asyncio
+    async def test_process_legacy_google_contacts_event_normalizes_to_google(
+        self,
+        clean_database: AsyncConnection,
+        sample_contact_data: dict[str, Any],
+    ):
+        """Events with legacy 'google_contacts' integration_source should be normalized to 'google'.
+
+        Migration 0029 renamed google_contacts → google in the sync_metadata
+        check constraint but did not update existing outbox events. The processor
+        must normalize the legacy value to avoid a CheckViolationError.
+        """
+        external_id = f"people/legacy-source-{uuid4()}"
+
+        # Insert an outbox event with the LEGACY integration source
+        now = self._naive_utc_now()
+        event_id = f"test-event-{uuid4()}"
+        event_data = {
+            "integration_source": "google_contacts",  # <-- legacy value
+            "external_id": external_id,
+            "contact_data": sample_contact_data,
+            "sync_timestamp": datetime.now(UTC).isoformat(),
+            "sync_type": "created",
+            "etag": f"etag-{uuid4()}",
+        }
+
+        await clean_database.execute(
+            text("""
+                INSERT INTO outbox_events
+                (event_id, event_type, aggregate_id, event_data, occurred_at, retry_count, created_at)
+                VALUES (:event_id, :event_type, :aggregate_id, :event_data, :occurred_at, :retry_count, :created_at)
+            """),
+            {
+                "event_id": event_id,
+                "event_type": "contact.created",
+                "aggregate_id": 0,
+                "event_data": json.dumps(event_data),
+                "occurred_at": now,
+                "retry_count": 0,
+                "created_at": now,
+            },
+        )
+
+        # Run the outbox processor — this must NOT raise a CheckViolationError
+        await self._run_outbox_processor(clean_database)
+
+        # Verify the contact was created
+        contact_row = await self._fetch_contact_by_name(
+            clean_database,
+            first_name="John",
+            last_name="Doe",
+        )
+        assert contact_row is not None, (
+            "Contact should be created despite legacy source"
+        )
+
+        contact_id = contact_row[0]
+
+        # Verify the external reference was created with the normalized value
+        result = await clean_database.execute(
+            text("""
+                SELECT external_system
+                FROM external_references
+                WHERE internal_entity_type = 'contact'
+                AND internal_entity_id = :contact_id
+            """),
+            {"contact_id": contact_id},
+        )
+        ref_row = result.fetchone()
+        assert ref_row is not None, "External reference should be created"
+        assert ref_row[0] == "google", (
+            f"external_system should be normalized to 'google', got '{ref_row[0]}'"
+        )
+
+        # Verify the sync metadata was created with 'google' (not 'google_contacts')
+        result = await clean_database.execute(
+            text("""
+                SELECT integration_source
+                FROM sync_metadata
+                WHERE internal_id = :contact_id
+            """),
+            {"contact_id": contact_id},
+        )
+        sync_row = result.fetchone()
+        assert sync_row is not None, "Sync metadata should be created"
+        assert sync_row[0] == "google", (
+            f"integration_source should be 'google', got '{sync_row[0]}'"
+        )
+
+        # Verify the event was marked as processed (not failed)
+        event_state = await self._fetch_outbox_event_state(
+            clean_database,
+            event_id=event_id,
+        )
+        assert event_state is not None
+        assert event_state[1] is not None, "Event should be marked as processed"
+        assert event_state[0] == 0, "Retry count should remain 0"

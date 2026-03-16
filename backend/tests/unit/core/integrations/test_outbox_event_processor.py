@@ -760,3 +760,129 @@ class TestOutboxEventProcessor:
         # Verify changed_by was passed as keyword argument
         call_kwargs = mock_contact_service.update_contact.call_args
         assert call_kwargs.kwargs.get("changed_by") == "google_sync"
+
+    @pytest.mark.asyncio
+    async def test_process_contact_created_normalizes_legacy_integration_source(
+        self,
+        processor: OutboxEventProcessor,
+        mock_contact_service: AsyncMock,
+        mock_connection: AsyncConnection,
+        mock_external_ref_service: AsyncMock,
+        mock_sync_metadata_repo: AsyncMock,
+    ):
+        """Test that contact.created with legacy 'google_contacts' normalizes to 'google'."""
+        # Create event with legacy integration_source
+        legacy_event = OutboxEvent(
+            id=uuid4(),
+            event_type="contact.created",
+            event_data={
+                "integration_source": "google_contacts",
+                "external_id": "people/c999888777",
+                "contact_data": {
+                    "first_name": "Legacy",
+                    "last_name": "Contact",
+                    "middle_name": None,
+                    "nick_name": None,
+                    "company": None,
+                    "job_title": None,
+                    "is_favourite": False,
+                    "methods": [],
+                    "addresses": [],
+                    "notes": [],
+                    "tags": [],
+                },
+                "sync_timestamp": datetime.now(UTC).isoformat(),
+                "sync_type": "created",
+            },
+            created_at=datetime.now(UTC),
+            processed_at=None,
+            retry_count=0,
+        )
+
+        expected_contact = Contact(id=456, first_name="Legacy", last_name="Contact")
+        mock_contact_service.create_contact.return_value = expected_contact
+        mock_contact_service.get_contact_by_email.return_value = None
+
+        result = await processor.process_event(legacy_event)
+
+        assert result["status"] == "success"
+        assert result["integration_source"] == "google"
+
+        # Verify sync metadata was called with normalized 'google', not 'google_contacts'
+        mock_sync_metadata_repo.upsert.assert_called_once()
+        upsert_kwargs = mock_sync_metadata_repo.upsert.call_args[1]
+        assert upsert_kwargs["integration_source"] == "google"
+
+        # Verify external reference was called with normalized 'google'
+        mock_external_ref_service.create_external_reference.assert_called_once()
+        ref_kwargs = mock_external_ref_service.create_external_reference.call_args[1]
+        assert ref_kwargs["external_system"] == "google"
+
+        # Verify changed_by uses the normalized source
+        call_kwargs = mock_contact_service.create_contact.call_args
+        assert call_kwargs.kwargs.get("changed_by") == "google_sync"
+
+    @pytest.mark.asyncio
+    async def test_process_contact_updated_normalizes_legacy_integration_source(
+        self,
+        processor: OutboxEventProcessor,
+        mock_contact_service: AsyncMock,
+        mock_connection: AsyncConnection,
+        mock_external_ref_service: AsyncMock,
+        mock_sync_metadata_repo: AsyncMock,
+    ):
+        """Test that contact.updated with legacy 'google_contacts' normalizes to 'google'."""
+        legacy_event = OutboxEvent(
+            id=uuid4(),
+            event_type="contact.updated",
+            event_data={
+                "integration_source": "google_contacts",
+                "external_id": "people/c999888777",
+                "contact_data": {
+                    "first_name": "Updated",
+                    "last_name": "Legacy",
+                    "middle_name": None,
+                    "nick_name": None,
+                    "company": None,
+                    "job_title": None,
+                    "is_favourite": False,
+                    "methods": [],
+                    "addresses": [],
+                    "notes": [],
+                    "tags": [],
+                },
+                "sync_timestamp": datetime.now(UTC).isoformat(),
+                "sync_type": "updated",
+            },
+            created_at=datetime.now(UTC),
+            processed_at=None,
+            retry_count=0,
+        )
+
+        existing_contact = Contact(id=456, first_name="Legacy", last_name="Contact")
+        mock_contact_service.find_contact_by_external_reference.return_value = (
+            existing_contact
+        )
+        mock_contact_service.get_contact_by_id.return_value = existing_contact
+        mock_contact_service.update_contact.return_value = existing_contact
+
+        result = await processor.process_event(legacy_event)
+
+        assert result["status"] == "success"
+        assert result["integration_source"] == "google"
+
+        # Verify lookup used normalized 'google'
+        mock_contact_service.find_contact_by_external_reference.assert_called_once_with(
+            integration_source="google",
+            external_id="people/c999888777",
+            transaction=mock_connection,
+        )
+
+        # Verify sync metadata was called with normalized 'google'
+        mock_sync_metadata_repo.upsert.assert_called_once()
+        upsert_kwargs = mock_sync_metadata_repo.upsert.call_args[1]
+        assert upsert_kwargs["integration_source"] == "google"
+
+        # Verify changed_by uses the normalized source
+        call_kwargs = mock_contact_service.update_contact.call_args
+        assert call_kwargs.kwargs.get("changed_by") == "google_sync"
