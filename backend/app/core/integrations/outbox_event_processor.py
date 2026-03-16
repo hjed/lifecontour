@@ -40,6 +40,18 @@ EVENT_TYPE_CONTACT_CREATED = "contact.created"
 EVENT_TYPE_CONTACT_UPDATED = "contact.updated"
 EVENT_TYPE_SYNC_COMPLETED = "sync.completed"
 
+# Legacy integration source aliases.
+# Migration 0029 renamed 'google_contacts' to 'google', but pre-existing
+# outbox events may still carry the old value in their JSONB event_data.
+_INTEGRATION_SOURCE_ALIASES: dict[str, str] = {
+    "google_contacts": "google",
+}
+
+
+def _normalize_integration_source(raw: str) -> str:
+    """Map legacy integration source names to their canonical equivalents."""
+    return _INTEGRATION_SOURCE_ALIASES.get(raw, raw)
+
 
 def _normalize_email_dedup_key(value: str) -> str:
     """Build a stable deduplication key for email methods."""
@@ -526,7 +538,9 @@ class OutboxEventProcessor:
     async def _process_contact_created(self, event: OutboxEvent) -> dict[str, Any]:
         """Process a contact.created event."""
         event_data: dict[str, Any] = cast(dict[str, Any], event.event_data)
-        integration_source: str = event_data["integration_source"]
+        integration_source: str = _normalize_integration_source(
+            event_data["integration_source"]
+        )
         external_id: str = event_data["external_id"]
         contact_data = self._normalize_contact_data(event_data["contact_data"])
 
@@ -714,7 +728,9 @@ class OutboxEventProcessor:
         3. Updates contact and sync metadata atomically
         """
         event_data: dict[str, Any] = cast(dict[str, Any], event.event_data)
-        integration_source: str = event_data["integration_source"]
+        integration_source: str = _normalize_integration_source(
+            event_data["integration_source"]
+        )
         external_id: str = event_data["external_id"]
         contact_data = self._normalize_contact_data(event_data["contact_data"])
 
@@ -884,8 +900,10 @@ class OutboxEventProcessor:
 
     def _process_sync_completed(self, event: OutboxEvent) -> dict[str, Any]:
         """Process a sync.completed event."""
-        event_data = event.event_data
-        integration_source = event_data["integration_source"]
+        event_data: dict[str, Any] = cast(dict[str, Any], event.event_data)
+        integration_source = _normalize_integration_source(
+            event_data["integration_source"]
+        )
         google_account_email = event_data["google_account_email"]
         metrics = event_data["metrics"]
 
