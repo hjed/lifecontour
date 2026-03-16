@@ -309,7 +309,7 @@ async def _load_tag_names_for_contact(
     tags_stmt = text("""
         WITH RECURSIVE tag_paths AS (
             -- Base case: root tags (no parent)
-            SELECT t.id, t.name, t.name AS full_path
+            SELECT t.id, t.name, t.name::TEXT AS full_path
             FROM tags t
             WHERE t.parent_id IS NULL
             UNION ALL
@@ -352,7 +352,7 @@ async def _load_tag_names_for_contacts_batch(
     tags_stmt = text("""
         WITH RECURSIVE tag_paths AS (
             -- Base case: root tags (no parent)
-            SELECT t.id, t.name, t.name AS full_path
+            SELECT t.id, t.name, t.name::TEXT AS full_path
             FROM tags t
             WHERE t.parent_id IS NULL
             UNION ALL
