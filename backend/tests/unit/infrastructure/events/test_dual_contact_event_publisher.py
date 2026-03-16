@@ -7,7 +7,7 @@ correctly.
 """
 
 from datetime import datetime
-from unittest.mock import AsyncMock, create_autospec
+from unittest.mock import create_autospec
 
 import pytest
 
@@ -122,9 +122,7 @@ class TestDualContactEventPublisher:
         mock_outbox_pub.publish_batch.assert_awaited_once_with(events)
 
     @pytest.mark.asyncio
-    async def test_publish_batch_empty(
-        self, publisher, mock_sql_pub, mock_outbox_pub
-    ):
+    async def test_publish_batch_empty(self, publisher, mock_sql_pub, mock_outbox_pub):
         """An empty batch should still be delegated to both publishers."""
         await publisher.publish_batch([])
 
