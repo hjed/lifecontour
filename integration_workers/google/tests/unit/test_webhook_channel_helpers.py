@@ -159,6 +159,10 @@ class TestSetupCalendarWebhook:
             }
         )
 
+        mock_result = MagicMock()
+        mock_result.fetchone.return_value = None
+        mock_session.execute.return_value = mock_result
+
         with (
             patch("worker.settings") as mock_settings,
             patch("worker._create_google_client", return_value=mock_client),
@@ -172,8 +176,48 @@ class TestSetupCalendarWebhook:
         assert result["status"] == "success"
         assert result["resource_id"] == "res-id-789"
         mock_client.watch_events.assert_called_once()
-        mock_session.execute.assert_called_once()  # UPSERT for channel metadata
+        assert mock_session.execute.call_count == 2  # SELECT existing, then UPSERT
         mock_session.commit.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_stops_existing_channel_if_exists(
+        self, mock_ctx: dict, mock_session: AsyncMock
+    ) -> None:
+        """Should stop existing channel if one is registered in the database."""
+        from worker import setup_calendar_webhook
+
+        mock_client = MagicMock()
+        mock_client.watch_events = AsyncMock(
+            return_value={
+                "resourceId": "res-id-123",
+                "expiration": "1711580400000",
+            }
+        )
+        mock_client.stop_channel = AsyncMock()
+
+        mock_existing_row = MagicMock()
+        mock_existing_row.channel_id = "old-channel-id"
+        mock_existing_row.channel_resource_id = "old-resource-id"
+
+        mock_result = MagicMock()
+        mock_result.fetchone.return_value = mock_existing_row
+        mock_session.execute.return_value = mock_result
+
+        with (
+            patch("worker.settings") as mock_settings,
+            patch("worker._create_google_client", return_value=mock_client),
+        ):
+            mock_settings.webhook_base_url = "https://example.com"
+
+            result = await setup_calendar_webhook(
+                mock_ctx, "test@example.com", "user-1", "cal-1"
+            )
+
+        assert result["status"] == "success"
+        mock_client.stop_channel.assert_called_once_with(
+            channel_id="old-channel-id", resource_id="old-resource-id"
+        )
+        mock_client.watch_events.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_constructs_webhook_url_correctly(
@@ -189,6 +233,10 @@ class TestSetupCalendarWebhook:
                 "expiration": "1711580400000",
             }
         )
+
+        mock_result = MagicMock()
+        mock_result.fetchone.return_value = None
+        mock_session.execute.return_value = mock_result
 
         with (
             patch("worker.settings") as mock_settings,
@@ -215,6 +263,10 @@ class TestSetupCalendarWebhook:
 
         mock_client = MagicMock()
         mock_client.watch_events = AsyncMock(side_effect=Exception("API Error"))
+
+        mock_result = MagicMock()
+        mock_result.fetchone.return_value = None
+        mock_session.execute.return_value = mock_result
 
         with (
             patch("worker.settings") as mock_settings,
