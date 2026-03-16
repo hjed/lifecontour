@@ -1,0 +1,201 @@
+/**
+ * E2E Tests for Journal Contact Search (Typeahead)
+ *
+ * Tests that the ContactSearchCombobox on the journal detail page
+ * correctly filters contacts by search query rather than always
+ * returning the first page of all contacts.
+ *
+ * Regression test for bug: typeahead ignored search input and always
+ * displayed the first page of contacts.
+ */
+
+import { test, expect } from './fixtures';
+import { TestDataManager } from './data-management';
+import type { Page } from '@playwright/test';
+
+/**
+ * Poll the contact search API until MeiliSearch has indexed the target contact.
+ * Uses the same pattern as journals-list.spec.ts for waiting on MeiliSearch indexing.
+ */
+async function waitForContactSearchIndexing(
+  page: Page,
+  searchTerm: string,
+  expectedName: string,
+  timeoutSeconds: number = 30
+): Promise<void> {
+  let indexed = false;
+  for (let attempt = 0; attempt < timeoutSeconds && !indexed; attempt++) {
+    await page.waitForTimeout(1000);
+
+    const response = await page.evaluate(
+      async ({ term }) => {
+        try {
+          const res = await fetch(
+            `/api/search/contacts?q=${encodeURIComponent(term)}&limit=20`
+          );
+          if (!res.ok) return { ok: false, names: [] as string[] };
+          const data = await res.json();
+          const names = (data.data ?? []).map(
+            (c: { attributes?: { first_name?: string; last_name?: string } }) =>
+              `${c.attributes?.first_name ?? ''} ${c.attributes?.last_name ?? ''}`.trim()
+          );
+          return { ok: true, names };
+        } catch {
+          return { ok: false, names: [] as string[] };
+        }
+      },
+      { term: searchTerm }
+    );
+
+    if (
+      response.ok &&
+      response.names.some((n: string) =>
+        n.toLowerCase().includes(expectedName.toLowerCase())
+      )
+    ) {
+      indexed = true;
+    }
+  }
+
+  if (!indexed) {
+    throw new Error(
+      `Contact "${expectedName}" was not indexed in MeiliSearch within ${timeoutSeconds} seconds for search term "${searchTerm}"`
+    );
+  }
+}
+
+test.describe('Journal Contact Search (Typeahead)', () => {
+  test.describe('Contact search filtering', () => {
+    test('should filter contacts by search query in the journal add-contact typeahead', async ({
+      authenticatedPage,
+      testCleanup,
+    }) => {
+      const page = authenticatedPage;
+      const dataManager = new TestDataManager(page);
+
+      // Create two contacts with distinct names
+      const contacts = await dataManager.createContacts([
+        { firstName: 'Zephyr', lastName: 'Uniquename' },
+        { firstName: 'Barnaby', lastName: 'Otherperson' },
+      ]);
+
+      // Create a journal to test on
+      const journal = await dataManager.createJournal({
+        title: 'Contact Search Test',
+        content: 'Testing that contact search filters correctly.',
+        event_date_range: {
+          start: '2026-01-18T10:00:00Z',
+          end: '2026-01-18T10:30:00Z',
+        },
+        types: ['note'],
+      });
+
+      testCleanup(async () => await dataManager.cleanup());
+
+      // Wait for contacts to be indexed in MeiliSearch
+      await waitForContactSearchIndexing(page, 'Zephyr', 'Zephyr Uniquename');
+      await waitForContactSearchIndexing(
+        page,
+        'Barnaby',
+        'Barnaby Otherperson'
+      );
+
+      // Navigate to journal detail page
+      await page.goto(`/journals/${journal.id}`);
+      await page.waitForLoadState('networkidle');
+
+      // Open the add contact popover
+      const addContactButton = page.getByTestId('add-contact-button');
+      await expect(addContactButton).toBeVisible();
+      await addContactButton.click();
+
+      // Type a specific search term to filter contacts
+      const contactSearchCombobox = page.getByPlaceholder(
+        'Search for a contact...'
+      );
+      await expect(contactSearchCombobox).toBeVisible();
+      await contactSearchCombobox.fill('Zephyr');
+
+      // Wait for the search results listbox to appear
+      await expect(page.getByRole('listbox')).toBeVisible({ timeout: 10000 });
+
+      // Verify the matching contact IS shown
+      const zephyrContactName = `${contacts[0].firstName} ${contacts[0].lastName}`;
+      await expect(
+        page.getByRole('option', { name: zephyrContactName })
+      ).toBeVisible();
+
+      // Verify the non-matching contact is NOT shown
+      const barnabyContactName = `${contacts[1].firstName} ${contacts[1].lastName}`;
+      await expect(
+        page.getByRole('option', { name: barnabyContactName })
+      ).not.toBeVisible();
+    });
+
+    test('should select a searched contact and add it to the journal', async ({
+      authenticatedPage,
+      testCleanup,
+    }) => {
+      const page = authenticatedPage;
+      const dataManager = new TestDataManager(page);
+
+      // Create a contact
+      const contact = await dataManager.createContact({
+        firstName: 'Querencia',
+        lastName: 'Typeahead',
+      });
+
+      // Create a journal
+      const journal = await dataManager.createJournal({
+        title: 'Contact Selection Test',
+        content: 'Testing that selecting a searched contact works.',
+        event_date_range: {
+          start: '2026-01-19T10:00:00Z',
+          end: '2026-01-19T10:30:00Z',
+        },
+        types: ['note'],
+      });
+
+      testCleanup(async () => await dataManager.cleanup());
+
+      // Wait for the contact to be indexed in MeiliSearch
+      await waitForContactSearchIndexing(
+        page,
+        'Querencia',
+        'Querencia Typeahead'
+      );
+
+      // Navigate to journal detail page
+      await page.goto(`/journals/${journal.id}`);
+      await page.waitForLoadState('networkidle');
+
+      // Open the add contact popover
+      const addContactButton = page.getByTestId('add-contact-button');
+      await expect(addContactButton).toBeVisible();
+      await addContactButton.click();
+
+      // Type the contact's name to search
+      const contactName = `${contact.firstName} ${contact.lastName}`;
+      const contactSearchCombobox = page.getByPlaceholder(
+        'Search for a contact...'
+      );
+      await expect(contactSearchCombobox).toBeVisible();
+      await contactSearchCombobox.fill(contact.firstName);
+
+      // Wait for the search results and select the contact
+      await expect(page.getByRole('listbox')).toBeVisible({ timeout: 10000 });
+      await page.getByRole('option', { name: contactName }).click();
+
+      // Verify the contact was selected (shown in the "Selected:" text)
+      await expect(page.getByText(`Selected: ${contactName}`)).toBeVisible();
+
+      // Confirm the addition
+      await page.getByRole('button', { name: 'Add', exact: true }).click();
+
+      // Verify the contact badge appears on the journal
+      await expect(
+        page.getByTestId(`contact-badge-${contact.id}`)
+      ).toBeVisible();
+    });
+  });
+});

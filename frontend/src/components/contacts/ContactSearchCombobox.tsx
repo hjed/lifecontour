@@ -53,7 +53,7 @@ async function searchContacts(query: string): Promise<ContactListResponse> {
   }
 
   const response = await fetch(
-    `${API_ENDPOINTS.CONTACTS.BASE}?search=${encodeURIComponent(query)}&limit=20`,
+    `${API_ENDPOINTS.SEARCH.CONTACTS}?q=${encodeURIComponent(query)}&limit=20`,
     {
       method: 'GET',
       credentials: 'include',
