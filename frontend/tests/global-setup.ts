@@ -353,24 +353,9 @@ async function ensureLocalDockerServices(
 }
 
 async function verifyCoreServiceHealth(
-  dependencies: GlobalSetupDependencies,
-  dockerComposeCmd: string,
-  projectRoot: string,
-  dockerTestEnv: NodeJS.ProcessEnv
+  dependencies: GlobalSetupDependencies
 ): Promise<void> {
   dependencies.logger.log('🔍 Checking backend API readiness...');
-  await dependencies.waitForService(
-    `http://localhost:${BACKEND_TEST_PORT}/api/health/ready`
-  );
-
-  dependencies.execCommand(
-    `${dockerComposeCmd} --profile test --env-file .env.test exec -T backend alembic upgrade head`,
-    'Ensuring backend database schema is up to date',
-    projectRoot,
-    { env: dockerTestEnv }
-  );
-
-  dependencies.logger.log('🔍 Re-checking backend API readiness...');
   await dependencies.waitForService(
     `http://localhost:${BACKEND_TEST_PORT}/api/health/ready`
   );
@@ -445,12 +430,7 @@ export async function runGlobalSetup(
       );
     }
 
-    await verifyCoreServiceHealth(
-      dependencies,
-      dockerComposeCmd,
-      projectRoot,
-      dockerTestEnv
-    );
+    await verifyCoreServiceHealth(dependencies);
 
     dependencies.logger.log('🔍 Checking MeiliSearch health...');
     await dependencies.waitForService(
