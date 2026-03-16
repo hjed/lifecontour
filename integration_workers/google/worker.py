@@ -2619,7 +2619,8 @@ async def _load_calendar_sync_token(
             "google_calendar_id": google_calendar_id,
         },
     )
-    return result.scalar()
+    from typing import cast
+    return cast(str | None, result.scalar())
 
 
 async def sync_calendar_events(
@@ -2696,8 +2697,6 @@ async def sync_calendar_events(
                     "No synced calendars found",
                     google_account_email=google_account_email,
                 )
-                metrics["completed_at"] = datetime.now(UTC).isoformat()
-                return {"status": "success", **metrics}
 
             for cal_row in synced_calendars:
                 if not cal_row.is_synced_to_google:
@@ -2995,6 +2994,42 @@ async def setup_calendar_webhook(
     try:
         async with session_factory() as session:
             client = _create_google_client(session, user_id, google_account_email)
+
+            # Stop existing channel if one exists
+            stmt = text("""
+                SELECT channel_id, channel_resource_id
+                FROM calendar_sync_tokens
+                WHERE user_id = :user_id
+                AND google_account_email = :email
+                AND google_calendar_id = :google_calendar_id
+                AND channel_id IS NOT NULL
+                AND channel_resource_id IS NOT NULL
+            """)
+            existing_result = await session.execute(
+                stmt,
+                {
+                    "user_id": str(user_id),
+                    "email": google_account_email,
+                    "google_calendar_id": google_calendar_id,
+                },
+            )
+            existing_row = existing_result.fetchone()
+            if existing_row:
+                try:
+                    await client.stop_channel(
+                        channel_id=existing_row.channel_id,
+                        resource_id=existing_row.channel_resource_id,
+                    )
+                    logger.info(
+                        "Stopped previous calendar webhook channel",
+                        channel_id=existing_row.channel_id,
+                    )
+                except Exception as e:
+                    logger.warning(
+                        "Failed to stop previous watch channel",
+                        channel_id=existing_row.channel_id,
+                        error=str(e),
+                    )
 
             # Register watch channel with Google
             result = await client.watch_events(
