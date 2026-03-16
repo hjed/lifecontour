@@ -1590,13 +1590,16 @@ class ContactService:
         Returns:
             Expanded list including original IDs plus all descendant IDs
         """
+        if not tag_ids:
+            return []
+
         expanded: set[int] = set(tag_ids)
-        for tag_id in tag_ids:
-            descendants = await self.tag_hierarchy.get_all_descendants(tag_id)
-            for descendant in descendants:
-                if descendant.id is not None:
-                    expanded.add(descendant.id)
-        return list(expanded)
+        descendants = await self.tag_hierarchy.get_all_descendants_bulk(tag_ids)
+        for descendant in descendants:
+            if descendant.id is not None:
+                expanded.add(descendant.id)
+
+        return sorted(expanded)
 
     async def get_contacts_paginated(
         self,

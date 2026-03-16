@@ -78,7 +78,7 @@ class TestSyncCalendarEvents:
 
     @pytest.mark.asyncio
     async def test_sync_ignores_non_synced_calendars(
-        self, mock_ctx: dict, mock_session: AsyncMock
+        self, mock_ctx: dict[str, Any], mock_session: AsyncMock
     ) -> None:
         """When no calendars have is_synced_to_google=true, no events should be processed."""
         from worker import sync_calendar_events
@@ -101,7 +101,7 @@ class TestSyncCalendarEvents:
 
     @pytest.mark.asyncio
     async def test_sync_creates_outbox_events_for_new_events(
-        self, mock_ctx: dict, mock_session: AsyncMock
+        self, mock_ctx: dict[str, Any], mock_session: AsyncMock
     ) -> None:
         """New events with no existing link should create journal_event.created outbox events."""
         from worker import sync_calendar_events
@@ -150,7 +150,7 @@ class TestSyncCalendarEvents:
 
     @pytest.mark.asyncio
     async def test_sync_skips_unchanged_events(
-        self, mock_ctx: dict, mock_session: AsyncMock
+        self, mock_ctx: dict[str, Any], mock_session: AsyncMock
     ) -> None:
         """Events with same ETag as stored should not create outbox events."""
         from worker import sync_calendar_events
@@ -200,7 +200,7 @@ class TestSyncCalendarEvents:
 
     @pytest.mark.asyncio
     async def test_sync_saves_calendar_sync_token(
-        self, mock_ctx: dict, mock_session: AsyncMock
+        self, mock_ctx: dict[str, Any], mock_session: AsyncMock
     ) -> None:
         """After successful sync, sync token should be saved to DB."""
         from worker import sync_calendar_events
@@ -241,7 +241,7 @@ class TestSyncCalendarEvents:
 
     @pytest.mark.asyncio
     async def test_sync_falls_back_to_full_on_missing_token(
-        self, mock_ctx: dict, mock_session: AsyncMock
+        self, mock_ctx: dict[str, Any], mock_session: AsyncMock
     ) -> None:
         """When no token exists, should do full sync with time_min."""
         from worker import sync_calendar_events
@@ -282,7 +282,7 @@ class TestSyncCalendarEvents:
 
     @pytest.mark.asyncio
     async def test_sync_paginates_events(
-        self, mock_ctx: dict, mock_session: AsyncMock
+        self, mock_ctx: dict[str, Any], mock_session: AsyncMock
     ) -> None:
         """Should follow nextPageToken until exhausted, collecting all events."""
         from worker import sync_calendar_events

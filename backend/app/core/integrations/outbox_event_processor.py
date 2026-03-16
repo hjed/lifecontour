@@ -434,10 +434,43 @@ class OutboxEventProcessor:
             parent_tag = resolved_by_name.get(parent_name)
             if child_tag and parent_tag and parent_tag.id is not None:
                 if child_tag.parent_id != parent_tag.id:
+                    if await self._would_create_cycle(parent_tag.id, child_tag.id):
+                        logger.warning(
+                            "Skip setting parent due to cycle",
+                            child_id=child_tag.id,
+                            parent_id=parent_tag.id,
+                        )
+                        continue
                     child_tag.parent_id = parent_tag.id
                     await self.tag_repo.save(child_tag)
 
         return resolved_tags
+
+    async def _would_create_cycle(self, parent_id: int, child_id: int | None) -> bool:
+        """Check if setting parent_id would create a circular reference."""
+        if child_id is None:
+            return False
+
+        if parent_id == child_id:
+            return True
+
+        current_id: int | None = parent_id
+        visited = set()
+
+        while current_id is not None:
+            if current_id in visited:
+                return True
+            if current_id == child_id:
+                return True
+
+            visited.add(current_id)
+            current_tag = await self.tag_repo.find_by_id(current_id)
+            if current_tag:
+                current_id = current_tag.parent_id
+            else:
+                break
+
+        return False
 
     async def _update_synced_tags_reference(
         self,

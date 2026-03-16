@@ -15,10 +15,8 @@ Usage:
 
 import argparse
 import asyncio
-import json
 import sys
 from datetime import datetime
-from typing import Any
 
 import httpx
 
@@ -235,9 +233,7 @@ async def main():
         print("\n💥 Integration architecture verification failed!")
         print("\nTroubleshooting tips:")
         print("1. Make sure Docker services are running: docker-compose up -d")
-        print(
-            "2. Check service logs: docker-compose logs backend google-worker"
-        )
+        print("2. Check service logs: docker-compose logs backend google-worker")
         print("3. Verify Redis is accessible: docker-compose logs redis")
         print("4. Check network connectivity between services")
         sys.exit(1)

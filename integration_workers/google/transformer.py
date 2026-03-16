@@ -375,15 +375,15 @@ class GoogleContactTransformer:
             return []
 
         tags: list[Tag] = []
-        for i, segment in enumerate(segments):
+        for segment in segments:
             try:
                 sanitized = self._sanitize_tag_name(segment)
                 if sanitized:
                     tag = Tag(name=TagName(sanitized))
                     # For child tags in a hierarchy, set _parent_name so
                     # serialization can carry the relationship info.
-                    if i > 0 and tags:
-                        tag._parent_name = tags[i - 1].name.value  # type: ignore[attr-defined]
+                    if tags:
+                        tag._parent_name = tags[-1].name.value  # type: ignore[attr-defined]
                     tags.append(tag)
             except ValueError:
                 logger.debug(
@@ -441,13 +441,12 @@ class GoogleContactTransformer:
         Sanitize a string to make it valid for TagName.
 
         TagName only allows alphanumeric, hyphens, underscores, and ampersands.
-        The '/' character is NOT sanitized here — it is split before this method
-        is called (in _create_tags_from_membership).
+        The '/' character should be split before this method is called.
         """
         if not name or not name.strip():
             return None
 
-        sanitized = re.sub(r"[^a-zA-Z0-9_&/-]", "-", name.strip())
+        sanitized = re.sub(r"[^a-zA-Z0-9_&-]", "-", name.strip())
         sanitized = re.sub(r"-+", "-", sanitized)
         sanitized = sanitized.strip("-")
 

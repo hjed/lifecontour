@@ -308,21 +308,23 @@ async def _load_tag_names_for_contact(
     """
     tags_stmt = text("""
         WITH RECURSIVE tag_paths AS (
-            -- Base case: root tags (no parent)
-            SELECT t.id, t.name, t.name::TEXT AS full_path
+            -- Base case: tags assigned to this contact
+            SELECT t.id, t.parent_id, t.name::TEXT AS path, t.id AS original_tag_id
             FROM tags t
-            WHERE t.parent_id IS NULL
+            INNER JOIN contact_tags ct ON t.id = ct.tag_id
+            WHERE ct.contact_id = :contact_id
+
             UNION ALL
-            -- Recursive case: child tags
-            SELECT t.id, t.name, tp.full_path || '/' || t.name AS full_path
+
+            -- Recursive case: prepend parent name
+            SELECT t.id, t.parent_id, t.name || '/' || tp.path AS path, tp.original_tag_id
             FROM tags t
-            INNER JOIN tag_paths tp ON t.parent_id = tp.id
+            INNER JOIN tag_paths tp ON tp.parent_id = t.id
         )
-        SELECT tp.full_path AS name
-        FROM tag_paths tp
-        INNER JOIN contact_tags ct ON tp.id = ct.tag_id
-        WHERE ct.contact_id = :contact_id
-        ORDER BY tp.full_path ASC
+        SELECT path AS name
+        FROM tag_paths
+        WHERE parent_id IS NULL
+        ORDER BY path ASC
     """)
     tags_result = await session.execute(tags_stmt, {"contact_id": contact_id})
     return [row.name for row in tags_result.fetchall()]
@@ -351,21 +353,23 @@ async def _load_tag_names_for_contacts_batch(
 
     tags_stmt = text("""
         WITH RECURSIVE tag_paths AS (
-            -- Base case: root tags (no parent)
-            SELECT t.id, t.name, t.name::TEXT AS full_path
+            -- Base case: tags assigned to the contacts
+            SELECT t.id, t.parent_id, t.name::TEXT AS path, ct.contact_id
             FROM tags t
-            WHERE t.parent_id IS NULL
+            INNER JOIN contact_tags ct ON t.id = ct.tag_id
+            WHERE ct.contact_id = ANY(:contact_ids)
+
             UNION ALL
-            -- Recursive case: child tags
-            SELECT t.id, t.name, tp.full_path || '/' || t.name AS full_path
+
+            -- Recursive case: prepend parent name
+            SELECT t.id, t.parent_id, t.name || '/' || tp.path AS path, tp.contact_id
             FROM tags t
-            INNER JOIN tag_paths tp ON t.parent_id = tp.id
+            INNER JOIN tag_paths tp ON tp.parent_id = t.id
         )
-        SELECT ct.contact_id, tp.full_path AS name
-        FROM tag_paths tp
-        INNER JOIN contact_tags ct ON tp.id = ct.tag_id
-        WHERE ct.contact_id = ANY(:contact_ids)
-        ORDER BY ct.contact_id, tp.full_path ASC
+        SELECT contact_id, path AS name
+        FROM tag_paths
+        WHERE parent_id IS NULL
+        ORDER BY contact_id, path ASC
     """)
     tags_result = await session.execute(tags_stmt, {"contact_ids": contact_ids})
 

@@ -17,7 +17,7 @@ from worker import push_contacts_to_google
 
 
 @pytest_asyncio.fixture
-async def push_contact_data(db_session: AsyncSession) -> dict:
+async def push_contact_data(db_session: AsyncSession) -> dict:  # type: ignore[type-arg]
     """Create a contact with tags for push testing.
 
     Returns:
@@ -79,7 +79,7 @@ class TestPushContactsWithRealDB:
     """Integration tests for push_contacts_to_google with real database."""
 
     async def test_create_push_writes_sync_metadata(
-        self, db_session: AsyncSession, push_contact_data: dict
+        self, db_session: AsyncSession, push_contact_data: dict  # type: ignore[type-arg]
     ) -> None:
         """Test that pushing a new contact writes sync_metadata to the DB."""
         contact_id = push_contact_data["contact_id"]
@@ -127,7 +127,7 @@ class TestPushContactsWithRealDB:
         assert row.sync_status == "success"
 
     async def test_update_push_updates_sync_metadata(
-        self, db_session: AsyncSession, push_contact_data: dict
+        self, db_session: AsyncSession, push_contact_data: dict  # type: ignore[type-arg]
     ) -> None:
         """Test that updating a contact updates sync_metadata in the DB."""
         contact_id = push_contact_data["contact_id"]
@@ -188,7 +188,7 @@ class TestPushContactsWithRealDB:
         assert row.sync_status == "success"
 
     async def test_push_includes_memberships_in_payload(
-        self, db_session: AsyncSession, push_contact_data: dict
+        self, db_session: AsyncSession, push_contact_data: dict  # type: ignore[type-arg]
     ) -> None:
         """Test that push includes group memberships from tag mapping."""
         contact_id = push_contact_data["contact_id"]
@@ -276,7 +276,7 @@ class TestPushConflictHandling:
     """Integration tests for conflict handling during push."""
 
     async def test_412_conflict_increments_conflict_count(
-        self, db_session: AsyncSession, push_contact_data: dict
+        self, db_session: AsyncSession, push_contact_data: dict  # type: ignore[type-arg]
     ) -> None:
         """Test that a 412 Precondition Failed from Google is recorded as conflict."""
         from unittest.mock import PropertyMock
@@ -318,7 +318,7 @@ class TestPushConflictHandling:
         assert result["error_count"] == 1
 
     async def test_500_error_increments_error_count(
-        self, db_session: AsyncSession, push_contact_data: dict
+        self, db_session: AsyncSession, push_contact_data: dict  # type: ignore[type-arg]
     ) -> None:
         """Test that a 500 error from Google is recorded in metrics."""
         from unittest.mock import PropertyMock
