@@ -314,6 +314,43 @@ async def _load_tag_names_for_contact(
     return [row.name for row in tags_result.fetchall()]
 
 
+async def _load_tag_names_for_contacts_batch(
+    session: AsyncSession, contact_ids: list[int]
+) -> dict[int, list[str]]:
+    """
+    Load tag names for multiple contacts in a single query.
+
+    More efficient than calling _load_tag_names_for_contact per contact
+    when processing batches.
+
+    Args:
+        session: Database session
+        contact_ids: List of contact IDs
+
+    Returns:
+        Mapping of contact_id → sorted list of tag name strings.
+        Contacts with no tags will have an empty list.
+    """
+    if not contact_ids:
+        return {}
+
+    tags_stmt = text("""
+        SELECT ct.contact_id, t.name
+        FROM tags t
+        INNER JOIN contact_tags ct ON t.id = ct.tag_id
+        WHERE ct.contact_id = ANY(:contact_ids)
+        ORDER BY ct.contact_id, t.name ASC
+    """)
+    tags_result = await session.execute(
+        tags_stmt, {"contact_ids": contact_ids}
+    )
+
+    result: dict[int, list[str]] = {cid: [] for cid in contact_ids}
+    for row in tags_result.fetchall():
+        result[row.contact_id].append(row.name)
+    return result
+
+
 def _transform_names(contact: dict[str, Any]) -> list[dict[str, Any]]:
     """Transform contact names to Google Person format."""
     name_data: dict[str, Any] = {}
@@ -2286,15 +2323,16 @@ async def push_local_contacts_to_google(
                 forward_group_mapping
             )
 
-            # Collect all tag names across contacts to pre-create groups.
-            # Tags are loaded again per-contact in _load_full_contact, but
-            # we need all names upfront to ensure groups exist before push.
+            # Collect all tag names across contacts with a single batch query.
+            # Tags are loaded again per-contact in _load_full_contact, but we
+            # need all unique names upfront to ensure groups exist before push.
+            contact_ids = [c["id"] for c in contacts_to_push]
+            tags_by_contact = await _load_tag_names_for_contacts_batch(
+                session, contact_ids
+            )
             all_tag_names: set[str] = set()
-            for contact in contacts_to_push:
-                tag_names = await _load_tag_names_for_contact(
-                    session, contact["id"]
-                )
-                all_tag_names.update(tag_names)
+            for tag_list in tags_by_contact.values():
+                all_tag_names.update(tag_list)
 
             # Ensure groups exist for all tags
             if all_tag_names:

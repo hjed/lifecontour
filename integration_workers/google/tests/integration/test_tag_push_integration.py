@@ -1,8 +1,9 @@
 """
 Integration tests for tag push functions against a real database.
 
-Tests that raw SQL queries in _load_tag_names_for_contact and
-_load_full_contact execute correctly against the actual schema.
+Tests that raw SQL queries in _load_tag_names_for_contact,
+_load_tag_names_for_contacts_batch, and _load_full_contact execute
+correctly against the actual schema.
 """
 
 import pytest
@@ -10,7 +11,11 @@ import pytest_asyncio
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from worker import _load_full_contact, _load_tag_names_for_contact
+from worker import (
+    _load_full_contact,
+    _load_tag_names_for_contact,
+    _load_tag_names_for_contacts_batch,
+)
 
 
 @pytest_asyncio.fixture
@@ -262,3 +267,77 @@ class TestLoadFullContactIntegration:
         assert full_data["methods"] == []
         assert full_data["addresses"] == []
         assert full_data["notes"] == []
+
+
+@pytest.mark.asyncio
+class TestLoadTagNamesForContactsBatchIntegration:
+    """Integration tests for batch tag loading with real database."""
+
+    async def test_batch_loads_tags_for_multiple_contacts(
+        self, db_session: AsyncSession
+    ) -> None:
+        """Test that batch loading retrieves tags for several contacts."""
+        # Create two contacts
+        r1 = await db_session.execute(
+            text(
+                "INSERT INTO contacts (first_name, last_name) "
+                "VALUES ('Batch', 'One') RETURNING id"
+            )
+        )
+        cid1 = r1.scalar_one()
+
+        r2 = await db_session.execute(
+            text(
+                "INSERT INTO contacts (first_name, last_name) "
+                "VALUES ('Batch', 'Two') RETURNING id"
+            )
+        )
+        cid2 = r2.scalar_one()
+
+        # Create tags
+        t1 = (await db_session.execute(
+            text("INSERT INTO tags (name) VALUES ('alpha') RETURNING id")
+        )).scalar_one()
+        t2 = (await db_session.execute(
+            text("INSERT INTO tags (name) VALUES ('beta') RETURNING id")
+        )).scalar_one()
+
+        # Assign: contact 1 gets both, contact 2 gets beta only
+        await db_session.execute(
+            text(
+                "INSERT INTO contact_tags (contact_id, tag_id) "
+                "VALUES (:c1, :t1), (:c1, :t2), (:c2, :t2)"
+            ),
+            {"c1": cid1, "t1": t1, "t2": t2, "c2": cid2},
+        )
+        await db_session.flush()
+
+        result = await _load_tag_names_for_contacts_batch(
+            db_session, [cid1, cid2]
+        )
+
+        assert result[cid1] == ["alpha", "beta"]
+        assert result[cid2] == ["beta"]
+
+    async def test_batch_returns_empty_for_tagless_contacts(
+        self, db_session: AsyncSession
+    ) -> None:
+        """Test that contacts with no tags get empty lists in batch result."""
+        r = await db_session.execute(
+            text(
+                "INSERT INTO contacts (first_name, last_name) "
+                "VALUES ('NoTag', 'Batch') RETURNING id"
+            )
+        )
+        cid = r.scalar_one()
+        await db_session.flush()
+
+        result = await _load_tag_names_for_contacts_batch(db_session, [cid])
+
+        assert result[cid] == []
+
+    async def test_batch_empty_input(self, db_session: AsyncSession) -> None:
+        """Test that empty input returns empty dict without querying."""
+        result = await _load_tag_names_for_contacts_batch(db_session, [])
+
+        assert result == {}

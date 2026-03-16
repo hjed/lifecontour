@@ -4,7 +4,7 @@ Tests for local → Google tag push logic.
 
 TDD: Tests written first before implementation.
 Covers tag loading, tag→membership transformation, group pre-creation,
-no-op detection, and push payload verification.
+and push payload verification.
 """
 
 import sys
@@ -52,6 +52,51 @@ class TestLoadTagNamesForContact:
         tag_names = await _load_tag_names_for_contact(mock_session, contact_id=42)
 
         assert tag_names == []
+
+
+class TestLoadTagNamesForContactsBatch:
+    """Unit tests for batch tag loading function."""
+
+    @pytest.fixture
+    def mock_session(self):
+        return AsyncMock()
+
+    @pytest.mark.asyncio
+    async def test_loads_tags_for_multiple_contacts(self, mock_session):
+        """Test batch loading returns tags grouped by contact ID."""
+        from worker import _load_tag_names_for_contacts_batch
+
+        row1 = MagicMock()
+        row1.contact_id = 1
+        row1.name = "Friends"
+        row2 = MagicMock()
+        row2.contact_id = 1
+        row2.name = "Work"
+        row3 = MagicMock()
+        row3.contact_id = 2
+        row3.name = "Family"
+
+        mock_result = MagicMock()
+        mock_result.fetchall.return_value = [row1, row2, row3]
+        mock_session.execute.return_value = mock_result
+
+        result = await _load_tag_names_for_contacts_batch(
+            mock_session, [1, 2, 3]
+        )
+
+        assert result[1] == ["Friends", "Work"]
+        assert result[2] == ["Family"]
+        assert result[3] == []  # No tags for contact 3
+
+    @pytest.mark.asyncio
+    async def test_returns_empty_dict_for_no_contacts(self, mock_session):
+        """Test batch loading with empty input returns empty dict."""
+        from worker import _load_tag_names_for_contacts_batch
+
+        result = await _load_tag_names_for_contacts_batch(mock_session, [])
+
+        assert result == {}
+        mock_session.execute.assert_not_called()
 
 
 class TestLoadFullContactIncludesTags:
