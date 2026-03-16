@@ -57,8 +57,36 @@ class ContactProvider(Provider):
     @provide(provides=ContactEventPublisher)
     def get_contact_event_publisher(
         self, connection: AsyncConnection
-    ) -> SqlContactEventPublisher:
-        return SqlContactEventPublisher(connection)
+    ) -> ContactEventPublisher:
+        from collections.abc import Sequence
+
+        from app.core.contacts.models.repositories import DomainEventProtocol
+        from app.infrastructure.events.outbox_event_publisher import (
+            OutboxEventPublisher,
+        )
+
+        class DualContactEventPublisher(ContactEventPublisher):
+            def __init__(
+                self,
+                sql_pub: SqlContactEventPublisher,
+                outbox_pub: OutboxEventPublisher,
+            ):
+                self.sql_pub = sql_pub
+                self.outbox_pub = outbox_pub
+
+            async def publish(self, event: DomainEventProtocol) -> None:
+                await self.sql_pub.publish(event)
+                await self.outbox_pub.publish(event)
+
+            async def publish_batch(
+                self, events: Sequence[DomainEventProtocol]
+            ) -> None:
+                await self.sql_pub.publish_batch(events)
+                await self.outbox_pub.publish_batch(events)
+
+        return DualContactEventPublisher(
+            SqlContactEventPublisher(connection), OutboxEventPublisher(connection)
+        )
 
     @provide(provides=ContactRelationshipRepository)
     def get_contact_relationship_repository(

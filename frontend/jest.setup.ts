@@ -52,7 +52,6 @@ jest.mock('@/lib/constants', () => ({
     },
     CONTACTS: {
       BASE: '/api/contacts',
-      SEARCH: '/api/contacts/search',
     },
     SEARCH: {
       CONTACTS: '/api/search/contacts',
