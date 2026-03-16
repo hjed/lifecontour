@@ -414,6 +414,54 @@ class GoogleAPIClient:
                 )
             raise e
 
+    async def create_contact_group(self, name: str) -> dict[str, Any]:
+        """
+        Create a new contact group in Google People API.
+
+        Args:
+            name: Display name for the new contact group
+
+        Returns:
+            Created contact group data including resourceName
+
+        Raises:
+            HttpError: If API request fails
+            GoogleAuthTokensNotFoundError: If authentication tokens are missing
+        """
+        try:
+            service = await self._get_people_service()
+
+            logger.info(
+                "Creating Google contact group",
+                google_account_email=self.google_account_email,
+                group_name=name,
+            )
+
+            result = (
+                service.contactGroups()
+                .create(body={"contactGroup": {"name": name}})
+                .execute()
+            )
+
+            logger.info(
+                "Successfully created Google contact group",
+                google_account_email=self.google_account_email,
+                group_name=name,
+                resource_name=result.get("resourceName"),
+            )
+
+            return cast(dict[str, Any], result)
+
+        except HttpError as e:
+            logger.error(
+                "Google API error while creating contact group",
+                google_account_email=self.google_account_email,
+                group_name=name,
+                error=str(e),
+                status_code=e.resp.status,
+            )
+            raise e
+
     # Calendar API Operations
 
     async def list_calendars(

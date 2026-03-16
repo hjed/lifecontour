@@ -118,15 +118,16 @@ The sequence reflects both user priority and technical dependency:
 **PR Size:** ~5-8 files
 
 **Acceptance Criteria:**
-- [ ] Local tag changes push back to Google where supported.
-- [ ] Conflict handling preserves local-wins behaviour using the existing ETag/version-hash flow.
-- [ ] Sync-origin metadata needed by the future activity feed is captured without exposing half-finished UI.
-- [ ] No-op exports do not create user-visible change entries.
+- [x] Local tag changes push back to Google where supported.
+- [x] Conflict handling preserves local-wins behaviour using the existing ETag/version-hash flow.
+- [x] Sync-origin metadata needed by the future activity feed is captured without exposing half-finished UI.
+- [x] No-op exports do not create user-visible change entries.
 
 **Required Test Coverage:**
-- **Unit:** push payload shaping, conflict classification, no-op detection.
-- **Integration:** mocked Google API push/conflict scenarios with real database metadata updates.
-- **E2E:** trigger a local tag change and verify the sync workflow completes without regressing visible contact state.
+- [x] **Unit:** push payload shaping, conflict classification, no-op detection.
+- [x] **Unit:** provenance tracking (`changed_by` passthrough from outbox to history service).
+- [x] **Integration:** mocked Google API push/conflict scenarios with real database metadata updates.
+- [x] **E2E:** trigger a local tag change and verify the sync workflow completes without regressing visible contact state.
 
 ### ITER2.6-002: Hierarchical Tags in Domain, API, Filtering, and Sidebar
 **Objective:** Make tag hierarchy a real product capability instead of a partial data model detail.

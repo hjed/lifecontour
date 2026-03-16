@@ -543,16 +543,23 @@ class OutboxEventProcessor:
 
         contact_action = "created"
 
+        # Derive provenance from integration source
+        sync_changed_by = f"{integration_source}_sync"
+
         # Create or update the contact using the contact service.
         try:
             if matched_contact is None:
                 created_contact = await self.contact_service.create_contact(
-                    contact, self.connection
+                    contact,
+                    self.connection,
+                    changed_by=sync_changed_by,
                 )
             else:
                 contact.id = matched_contact.id
                 created_contact = await self.contact_service.update_contact(
-                    contact, self.connection
+                    contact,
+                    self.connection,
+                    changed_by=sync_changed_by,
                 )
                 contact_action = "reconciled"
                 logger.info(
@@ -754,9 +761,12 @@ class OutboxEventProcessor:
             raise PermanentOutboxEventProcessingError(str(e)) from e
 
         # Update the contact using the contact service
+        sync_changed_by = f"{integration_source}_sync"
         try:
             updated_contact = await self.contact_service.update_contact(
-                updated_contact_data, self.connection
+                updated_contact_data,
+                self.connection,
+                changed_by=sync_changed_by,
             )
         except Exception as e:
             raise OutboxEventProcessingError(

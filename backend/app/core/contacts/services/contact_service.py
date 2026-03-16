@@ -210,7 +210,10 @@ class ContactService:
         raise error
 
     async def create_contact(
-        self, contact: Contact, transaction: AsyncConnection
+        self,
+        contact: Contact,
+        transaction: AsyncConnection,
+        changed_by: str = "system",
     ) -> Contact:
         """
         Create a new contact with transaction management.
@@ -271,7 +274,9 @@ class ContactService:
             )
 
             # Publish creation event
-            await self._publish_contact_created_event(complete_contact, transaction)
+            await self._publish_contact_created_event(
+                complete_contact, transaction, changed_by=changed_by
+            )
 
             return complete_contact
 
@@ -283,6 +288,7 @@ class ContactService:
         self,
         contact: Contact,
         transaction: AsyncConnection,
+        changed_by: str = "system",
     ) -> Contact:
         """
         Update an existing contact with transaction management.
@@ -344,7 +350,10 @@ class ContactService:
             # Publish update events if there were changes
             if changed_fields:
                 await self._publish_contact_updated_events(
-                    complete_contact, changed_fields, transaction
+                    complete_contact,
+                    changed_fields,
+                    transaction,
+                    changed_by=changed_by,
                 )
 
             return complete_contact
@@ -845,13 +854,28 @@ class ContactService:
         return saved_contact
 
     async def _publish_contact_created_event(
-        self, contact: Contact, transaction: AsyncConnection
+        self,
+        contact: Contact,
+        transaction: AsyncConnection,
+        changed_by: str = "system",
     ) -> None:
-        """Publish contact created event."""
+        """Publish contact created event.
+
+        Args:
+            contact: The created contact
+            transaction: Database transaction
+            changed_by: Provenance identifier (e.g. "google_sync").
+                Threaded for future use when creation history recording
+                is implemented with proper frontend rendering support.
+        """
         if contact.id is None:
             raise ContactValidationError(
                 "id", "Contact ID is required for event publishing"
             )
+        # TODO: Record creation in field history once the frontend
+        # ActivityItem can render creation events distinctly from
+        # field-change entries (currently would display as
+        # "Added Created: ...").
         event = ContactCreated(
             contact.id,
             contact.first_name,
@@ -936,6 +960,7 @@ class ContactService:
         contact: Contact,
         changed_fields: dict[str, Any],
         transaction: AsyncConnection,
+        changed_by: str = "system",
     ) -> None:
         """Publish contact updated events and record history."""
         if contact.id is None:
@@ -943,7 +968,10 @@ class ContactService:
                 "id", "Contact ID is required for event publishing"
             )
         await self.history_service.record_contact_change(
-            contact.id, changed_fields, _transaction=transaction
+            contact.id,
+            changed_fields,
+            changed_by=changed_by,
+            _transaction=transaction,
         )
 
         event = ContactUpdated(contact.id, changed_fields, transaction=transaction)
