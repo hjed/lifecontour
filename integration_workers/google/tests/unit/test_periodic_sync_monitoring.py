@@ -53,7 +53,7 @@ class TestPeriodicSyncLogging:
         # Verify result
         assert result["status"] == "success"
         assert result["accounts_found"] == 2
-        assert result["jobs_enqueued"] == 2
+        assert result["jobs_enqueued"] == 4  # 2 accounts × 2 jobs (contacts + calendar)
 
         # Verify logs contain periodic sync markers
         # The function logs "Starting periodic sync for all Google accounts"
@@ -115,7 +115,7 @@ class TestPeriodicSyncLogging:
 
         # Verify metrics in result
         assert result["accounts_found"] == 3
-        assert result["jobs_enqueued"] == 3
+        assert result["jobs_enqueued"] == 6  # 3 accounts × 2 jobs (contacts + calendar)
         assert result["errors"] == []
 
     @pytest.mark.asyncio
@@ -149,7 +149,7 @@ class TestPeriodicSyncLogging:
         # Verify error handling
         assert result["accounts_found"] == 1
         assert result["jobs_enqueued"] == 0
-        assert len(result["errors"]) == 1
+        assert len(result["errors"]) == 2  # Both contacts + calendar jobs fail
         assert "Redis connection failed" in result["errors"][0]
 
         # Verify error was logged
@@ -183,8 +183,15 @@ class TestPeriodicSyncLogging:
         await worker.periodic_sync_all_accounts(ctx)
 
         # Verify enqueue_job was called with 'smart' sync type
-        mock_redis.enqueue_job.assert_called_once()
-        call_args = mock_redis.enqueue_job.call_args
-        assert call_args[0][0] == "sync_google_contacts"  # Function name
-        assert call_args[0][3] == "smart"  # sync_type parameter
-        assert call_args.kwargs["_queue_name"] == worker.ARQ_QUEUE_NAME
+        # Verify enqueue_job was called with 'smart' sync type for both jobs
+        # First call: sync_google_contacts, second call: sync_calendar_events
+        assert mock_redis.enqueue_job.call_count == 2
+        contacts_call = mock_redis.enqueue_job.call_args_list[0]
+        assert contacts_call[0][0] == "sync_google_contacts"
+        assert contacts_call[0][3] == "smart"
+        assert contacts_call.kwargs["_queue_name"] == worker.ARQ_QUEUE_NAME
+
+        calendar_call = mock_redis.enqueue_job.call_args_list[1]
+        assert calendar_call[0][0] == "sync_calendar_events"
+        assert calendar_call[0][3] == "smart"
+        assert calendar_call.kwargs["_queue_name"] == worker.ARQ_QUEUE_NAME

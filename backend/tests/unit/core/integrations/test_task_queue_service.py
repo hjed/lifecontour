@@ -465,3 +465,72 @@ class TestTaskQueueService:
         assert "Failed to broadcast event to any integration queue" in str(
             exc_info.value
         )
+
+    @pytest.mark.asyncio
+    async def test_enqueue_calendar_sync_success(
+        self, service: TaskQueueService, mock_redis_pool: AsyncMock
+    ):
+        """Test successful calendar sync job enqueueing."""
+        mock_job = MagicMock()
+        mock_job.job_id = "cal-job-123"
+        mock_redis_pool.enqueue_job.return_value = mock_job
+
+        # Mock database session and repository
+        mock_session = MagicMock()
+        mock_conn = AsyncMock()
+        mock_session.connection = AsyncMock(return_value=mock_conn)
+
+        mock_begin_ctx = MagicMock()
+        mock_begin_ctx.__aenter__ = AsyncMock(return_value=None)
+        mock_begin_ctx.__aexit__ = AsyncMock(return_value=None)
+        mock_session.begin = MagicMock(return_value=mock_begin_ctx)
+
+        mock_get_session_ctx = MagicMock()
+        mock_get_session_ctx.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_get_session_ctx.__aexit__ = AsyncMock(return_value=None)
+
+        service.db_manager.get_session = MagicMock(return_value=mock_get_session_ctx)  # type: ignore[method-assign]
+
+        with patch(
+            "app.core.integrations.task_queue_service.SyncJobRepository"
+        ) as mock_repo_class:
+            mock_repo = AsyncMock()
+            mock_repo_class.return_value = mock_repo
+
+            mock_redis_pool.hset = AsyncMock()
+            mock_redis_pool.expire = AsyncMock()
+
+            job_id = await service.enqueue_calendar_sync(
+                google_account_email="test@example.com",
+                user_id=123,
+                sync_type="smart",
+            )
+
+            # Verify job targets sync_calendar_events (not sync_google_contacts)
+            mock_redis_pool.enqueue_job.assert_called_once_with(
+                "sync_calendar_events",
+                "test@example.com",
+                123,
+                "smart",
+                _job_timeout=300,
+                _defer_until=None,
+                _queue_name=ARQ_QUEUE_NAME,
+            )
+
+            assert job_id == "cal-job-123"
+
+    @pytest.mark.asyncio
+    async def test_enqueue_calendar_sync_failure(
+        self, service: TaskQueueService, mock_redis_pool: AsyncMock
+    ):
+        """Test calendar sync job enqueueing failure."""
+        mock_redis_pool.enqueue_job.side_effect = Exception("Redis connection failed")
+
+        with pytest.raises(Exception) as exc_info:
+            await service.enqueue_calendar_sync(
+                google_account_email="test@example.com",
+                user_id=123,
+                sync_type="smart",
+            )
+
+        assert "Redis connection failed" in str(exc_info.value)

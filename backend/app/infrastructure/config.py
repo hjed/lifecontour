@@ -161,6 +161,12 @@ class Settings(BaseSettings):
         default="", description="OpenTelemetry resource attributes"
     )
 
+    # Webhook settings
+    webhook_base_url: str = Field(
+        default="",
+        description="Public HTTPS base URL for receiving webhook callbacks (e.g. https://example.com)",
+    )
+
     @field_validator("log_level")
     @classmethod
     def validate_log_level(cls, v: str) -> str:

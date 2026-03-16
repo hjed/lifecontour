@@ -949,3 +949,168 @@ async def list_google_calendars(
             status_code=502,
             detail="Failed to fetch Google Calendars",
         ) from e
+
+
+# Calendar Sync Endpoints
+
+
+@router.post(
+    "/google/calendar/sync",
+    responses={
+        400: {"description": "Invalid sync parameters"},
+        503: {"description": "Task queue service unavailable"},
+        500: {"description": "An unexpected error occurred"},
+    },
+)
+@inject
+async def trigger_calendar_sync(
+    request: SyncJobRequest,
+    user: FromDishka[SessionUser],
+    oauth_service: FromDishka[OAuthService],
+    db_manager: FromDishka[IntegrationDatabaseManager],
+    task_queue_service: FromDishka[TaskQueueService],
+) -> SyncJobJsonApiResponse:
+    """
+    Trigger a Google Calendar synchronization job.
+
+    This endpoint queues a background sync job for the authenticated user's
+    Google Calendar events. The job will run asynchronously in the worker.
+    """
+    try:
+        async with db_manager.get_session() as session:
+            connection = await session.connection()
+            google_account_email = (
+                await oauth_service.get_connected_google_account_email(
+                    user.id, connection
+                )
+            )
+
+        sync_type = request.sync_type.value
+        if request.force_full_sync:
+            sync_type = SyncType.FULL.value
+
+        job_id = await task_queue_service.enqueue_calendar_sync(
+            google_account_email=google_account_email,
+            user_id=user.id,
+            sync_type=sync_type,
+        )
+
+        job = await task_queue_service.get_sync_job_details(
+            job_id=job_id, user_id=user.id
+        )
+
+        return SyncJobJsonApiResponse(data=_build_sync_job_data(job))
+
+    except ValueError as e:
+        logger.error("Invalid calendar sync parameters", error=str(e), exc_info=True)
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid sync parameters: {str(e)}",
+        ) from e
+    except ConnectionError as e:
+        logger.error("Task queue connection failed", error=str(e), exc_info=True)
+        raise HTTPException(
+            status_code=503,
+            detail="Task queue service is temporarily unavailable",
+        ) from e
+    except Exception as e:
+        logger.error("Failed to enqueue calendar sync job", error=str(e), exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail="An unexpected error occurred while queueing the calendar sync job",
+        ) from e
+
+
+@router.post(
+    "/google/calendar/webhook",
+    responses={
+        200: {"description": "Notification acknowledged"},
+        404: {"description": "Unknown channel"},
+    },
+    include_in_schema=False,  # Hide from OpenAPI docs — not a user-facing endpoint
+)
+@inject
+async def receive_calendar_webhook(
+    request: Request,
+    db_manager: FromDishka[IntegrationDatabaseManager],
+    task_queue_service: FromDishka[TaskQueueService],
+) -> dict[str, str]:
+    """
+    Receive Google Calendar push notification.
+
+    This is an unauthenticated endpoint — Google push notifications don't carry
+    auth tokens. Validation is performed by checking the channel_id and
+    resource_id against the calendar_sync_tokens table.
+    """
+    channel_id = request.headers.get("X-Goog-Channel-ID")
+    resource_id = request.headers.get("X-Goog-Resource-ID")
+    resource_state = request.headers.get("X-Goog-Resource-State", "")
+
+    if not channel_id or not resource_id:
+        raise HTTPException(status_code=404, detail="Missing channel or resource ID")
+
+    # Validate channel against database
+    try:
+        async with db_manager.get_session() as session:
+            from sqlalchemy import text
+
+            stmt = text("""
+                SELECT user_id, google_account_email, google_calendar_id
+                FROM calendar_sync_tokens
+                WHERE channel_id = :channel_id
+                AND channel_resource_id = :resource_id
+            """)
+            result = await session.execute(
+                stmt,
+                {"channel_id": channel_id, "resource_id": resource_id},
+            )
+            row = result.fetchone()
+
+            if not row:
+                logger.warning(
+                    "Unknown webhook channel",
+                    channel_id=channel_id,
+                    resource_id=resource_id,
+                )
+                raise HTTPException(status_code=404, detail="Unknown channel")
+
+            user_id = row.user_id
+            google_account_email = row.google_account_email
+
+        # Handle sync notification (skip "sync" state — that's just the initial
+        # confirmation when the channel is created)
+        if resource_state == "sync":
+            logger.info(
+                "Webhook channel sync confirmation received",
+                channel_id=channel_id,
+            )
+            return {"status": "ok"}
+
+        # Enqueue calendar sync for the user
+        logger.info(
+            "Webhook triggered calendar sync",
+            channel_id=channel_id,
+            resource_state=resource_state,
+            google_account_email=google_account_email,
+            user_id=user_id,
+        )
+
+        await task_queue_service.enqueue_calendar_sync(
+            google_account_email=google_account_email,
+            user_id=user_id,
+            sync_type="smart",
+        )
+
+        return {"status": "ok"}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(
+            "Error processing calendar webhook",
+            channel_id=channel_id,
+            error=str(e),
+            exc_info=True,
+        )
+        # Return 200 even on error to avoid Google retrying
+        return {"status": "error", "detail": "Internal processing error"}

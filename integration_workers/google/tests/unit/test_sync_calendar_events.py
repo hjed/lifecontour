@@ -50,6 +50,12 @@ def _make_calendar_row(
 class TestSyncCalendarEvents:
     """Tests for the sync_calendar_events ARQ task."""
 
+    @pytest.fixture(autouse=True)
+    def mock_metrics_collector(self):
+        """Mock the metrics_collector to prevent real metrics calls."""
+        with patch("worker.metrics_collector") as mock_mc:
+            yield mock_mc
+
     @pytest.fixture
     def mock_session(self) -> AsyncMock:
         session = AsyncMock()

@@ -82,6 +82,9 @@ class WorkerSettings(BaseSettings):
     # Reserved google groups to ignore (by default just myContacts)
     google_reserved_groups: list[str] = ["myContacts"]
 
+    # Webhook configuration
+    webhook_base_url: str = ""  # Public HTTPS URL for webhook callbacks
+
 
 # Global settings instance
 settings = WorkerSettings()  # type: ignore[call-arg]
@@ -1435,13 +1438,13 @@ async def periodic_sync_all_accounts(ctx: dict[str, Any]) -> dict[str, Any]:
                 accounts_count=accounts_found,
             )
 
-            # Enqueue sync job for each account
+            # Enqueue sync jobs for each account (both contacts and calendar)
             for row in accounts:
                 user_id = row[0]
                 google_account_email = row[1]
 
+                # Enqueue contacts sync
                 try:
-                    # Enqueue individual sync job using ARQ pool from context
                     job = await ctx["redis"].enqueue_job(
                         "sync_google_contacts",
                         google_account_email,
@@ -1454,27 +1457,64 @@ async def periodic_sync_all_accounts(ctx: dict[str, Any]) -> dict[str, Any]:
                     if job:
                         jobs_enqueued += 1
                         logger.info(
-                            "Enqueued periodic sync job",
+                            "Enqueued periodic contacts sync job",
                             job_id=job.job_id,
                             google_account_email=google_account_email,
                             user_id=user_id,
                         )
                     else:
-                        error_msg = f"Failed to enqueue job for {google_account_email}"
+                        error_msg = f"Failed to enqueue contacts sync for {google_account_email}"
                         errors.append(error_msg)
                         logger.warning(
-                            "Failed to enqueue periodic sync job",
+                            "Failed to enqueue periodic contacts sync job",
                             google_account_email=google_account_email,
                             user_id=user_id,
                         )
 
                 except Exception as e:
-                    error_msg = (
-                        f"Error enqueueing job for {google_account_email}: {str(e)}"
-                    )
+                    error_msg = f"Error enqueueing contacts sync for {google_account_email}: {str(e)}"
                     errors.append(error_msg)
                     logger.error(
-                        "Error enqueueing periodic sync job",
+                        "Error enqueueing periodic contacts sync job",
+                        google_account_email=google_account_email,
+                        user_id=user_id,
+                        error=str(e),
+                        error_type=type(e).__name__,
+                    )
+
+                # Enqueue calendar events sync
+                try:
+                    cal_job = await ctx["redis"].enqueue_job(
+                        "sync_calendar_events",
+                        google_account_email,
+                        user_id,
+                        "smart",
+                        _job_timeout=600,
+                        _queue_name=ARQ_QUEUE_NAME,
+                    )
+
+                    if cal_job:
+                        jobs_enqueued += 1
+                        logger.info(
+                            "Enqueued periodic calendar sync job",
+                            job_id=cal_job.job_id,
+                            google_account_email=google_account_email,
+                            user_id=user_id,
+                        )
+                    else:
+                        error_msg = f"Failed to enqueue calendar sync for {google_account_email}"
+                        errors.append(error_msg)
+                        logger.warning(
+                            "Failed to enqueue periodic calendar sync job",
+                            google_account_email=google_account_email,
+                            user_id=user_id,
+                        )
+
+                except Exception as e:
+                    error_msg = f"Error enqueueing calendar sync for {google_account_email}: {str(e)}"
+                    errors.append(error_msg)
+                    logger.error(
+                        "Error enqueueing periodic calendar sync job",
                         google_account_email=google_account_email,
                         user_id=user_id,
                         error=str(e),
@@ -2523,32 +2563,66 @@ async def _save_calendar_sync_token(
     new_sync_token: str,
     user_id: str | int,
     google_account_email: str,
+    google_calendar_id: str = "primary",
 ) -> None:
-    """Persist a new calendar sync token using UPSERT semantics.
+    """Persist a calendar sync token per-calendar using UPSERT semantics.
 
-    Uses INSERT ... ON CONFLICT DO UPDATE to handle both new and existing
-    integration rows, matching the contacts _save_sync_token pattern.
+    Stores the sync token in the calendar_sync_tokens table, keyed by
+    (user_id, google_account_email, google_calendar_id). This ensures each
+    calendar gets its own sync token for proper incremental sync.
     """
     save_token_stmt = text("""
-        INSERT INTO user_google_integration
-            (user_id, google_account_email, calendar_events_sync_token,
-             created_at, updated_at)
+        INSERT INTO calendar_sync_tokens
+            (user_id, google_account_email, google_calendar_id,
+             sync_token, last_synced_at, created_at, updated_at)
         VALUES
-            (:user_id, :email, :sync_token, :updated_at, :updated_at)
-        ON CONFLICT (user_id, google_account_email)
+            (:user_id, :email, :google_calendar_id,
+             :sync_token, :now, :now, :now)
+        ON CONFLICT (user_id, google_account_email, google_calendar_id)
         DO UPDATE SET
-            calendar_events_sync_token = EXCLUDED.calendar_events_sync_token,
+            sync_token = EXCLUDED.sync_token,
+            last_synced_at = EXCLUDED.last_synced_at,
             updated_at = EXCLUDED.updated_at
     """)
+    now = datetime.now(UTC)
     await session.execute(
         save_token_stmt,
         {
             "sync_token": new_sync_token,
-            "updated_at": datetime.now(UTC),
+            "now": now,
             "user_id": str(user_id),
             "email": google_account_email,
+            "google_calendar_id": google_calendar_id,
         },
     )
+
+
+async def _load_calendar_sync_token(
+    session: Any,
+    user_id: str | int,
+    google_account_email: str,
+    google_calendar_id: str = "primary",
+) -> str | None:
+    """Load a per-calendar sync token from the calendar_sync_tokens table.
+
+    Returns None if no token exists for this calendar.
+    """
+    token_stmt = text("""
+        SELECT sync_token
+        FROM calendar_sync_tokens
+        WHERE user_id = :user_id
+        AND google_account_email = :email
+        AND google_calendar_id = :google_calendar_id
+    """)
+    result = await session.execute(
+        token_stmt,
+        {
+            "user_id": str(user_id),
+            "email": google_account_email,
+            "google_calendar_id": google_calendar_id,
+        },
+    )
+    return result.scalar()
 
 
 async def sync_calendar_events(
@@ -2635,18 +2709,10 @@ async def sync_calendar_events(
                 google_calendar_id = cal_row.google_calendar_id or "primary"
                 calendar_id = cal_row.calendar_id
 
-                # Get existing sync token for this calendar
-                token_stmt = text("""
-                    SELECT calendar_events_sync_token
-                    FROM user_google_integration
-                    WHERE user_id = :user_id
-                    AND google_account_email = :email
-                """)
-                token_result = await session.execute(
-                    token_stmt,
-                    {"user_id": str(user_id), "email": google_account_email},
+                # Get existing per-calendar sync token
+                existing_sync_token = await _load_calendar_sync_token(
+                    session, user_id, google_account_email, google_calendar_id
                 )
-                existing_sync_token = token_result.scalar()
 
                 # Decide whether to use sync token or time_min
                 use_sync_token = sync_type != "full" and existing_sync_token is not None
@@ -2816,7 +2882,11 @@ async def sync_calendar_events(
                 # Save sync token only when this calendar processed without errors
                 if new_sync_token and calendar_errors == 0:
                     await _save_calendar_sync_token(
-                        session, new_sync_token, user_id, google_account_email
+                        session,
+                        new_sync_token,
+                        user_id,
+                        google_account_email,
+                        google_calendar_id,
                     )
                 elif new_sync_token and calendar_errors > 0:
                     logger.warning(
@@ -2839,6 +2909,28 @@ async def sync_calendar_events(
             **metrics,
         )
 
+        # Record observability metrics
+        metrics_collector.record_job_duration(
+            job_type="calendar_sync", duration_seconds=duration
+        )
+        metrics_collector.increment_job_total(
+            job_type="calendar_sync", status="success"
+        )
+        metrics_collector.increment_items_processed(
+            sync_type="calendar_inbound",
+            action="created",
+            count=metrics["events_created"],
+        )
+        metrics_collector.increment_items_processed(
+            sync_type="calendar_inbound",
+            action="updated",
+            count=metrics["events_updated"],
+        )
+        if metrics["errors"] > 0:
+            metrics_collector.increment_sync_errors(
+                sync_type="calendar_inbound", count=metrics["errors"]
+            )
+
         return {"status": "success", **metrics}
 
     except Exception as e:
@@ -2851,6 +2943,12 @@ async def sync_calendar_events(
             error_type=type(e).__name__,
             duration_seconds=duration,
         )
+        # Record failure metrics
+        metrics_collector.record_job_duration(
+            job_type="calendar_sync", duration_seconds=duration
+        )
+        metrics_collector.increment_job_total(job_type="calendar_sync", status="error")
+        metrics_collector.increment_sync_errors(sync_type="calendar_inbound")
         return {
             "status": "error",
             "google_account_email": google_account_email,
@@ -2858,6 +2956,121 @@ async def sync_calendar_events(
             "error_type": type(e).__name__,
             "worker_id": settings.worker_id,
             "failed_at": datetime.now(UTC).isoformat(),
+        }
+
+
+async def setup_calendar_webhook(
+    ctx: dict[str, Any],
+    google_account_email: str,
+    user_id: str | int,
+    google_calendar_id: str,
+    **kwargs: Any,
+) -> dict[str, Any]:
+    """
+    Set up a Google Calendar push notification channel for a calendar.
+
+    Registers a webhook with Google Calendar API and persists the channel
+    metadata in the calendar_sync_tokens table.
+    """
+    import uuid
+
+    logger.info(
+        "Setting up calendar webhook",
+        google_account_email=google_account_email,
+        google_calendar_id=google_calendar_id,
+        user_id=user_id,
+    )
+
+    if not settings.webhook_base_url:
+        logger.warning(
+            "webhook_base_url not configured, skipping webhook setup",
+            google_account_email=google_account_email,
+            google_calendar_id=google_calendar_id,
+        )
+        return {"status": "skipped", "reason": "webhook_base_url not configured"}
+
+    session_factory = ctx["session_factory"]
+    channel_id = str(uuid.uuid4())
+    webhook_url = f"{settings.webhook_base_url.rstrip('/')}/api/integrations/google/calendar/webhook"
+
+    try:
+        async with session_factory() as session:
+            client = _create_google_client(session, user_id, google_account_email)
+
+            # Register watch channel with Google
+            result = await client.watch_events(
+                calendar_id=google_calendar_id,
+                channel_id=channel_id,
+                webhook_url=webhook_url,
+            )
+
+            resource_id = result.get("resourceId", "")
+            expiration_ms = result.get("expiration")
+            channel_expiration = None
+            if expiration_ms:
+                channel_expiration = datetime.fromtimestamp(
+                    int(expiration_ms) / 1000, tz=UTC
+                )
+
+            # Persist channel metadata in calendar_sync_tokens
+            upsert_stmt = text("""
+                INSERT INTO calendar_sync_tokens
+                    (user_id, google_account_email, google_calendar_id,
+                     channel_id, channel_resource_id, channel_expiration,
+                     created_at, updated_at)
+                VALUES
+                    (:user_id, :email, :google_calendar_id,
+                     :channel_id, :resource_id, :channel_expiration,
+                     :now, :now)
+                ON CONFLICT (user_id, google_account_email, google_calendar_id)
+                DO UPDATE SET
+                    channel_id = EXCLUDED.channel_id,
+                    channel_resource_id = EXCLUDED.channel_resource_id,
+                    channel_expiration = EXCLUDED.channel_expiration,
+                    updated_at = EXCLUDED.updated_at
+            """)
+            now = datetime.now(UTC)
+            await session.execute(
+                upsert_stmt,
+                {
+                    "user_id": str(user_id),
+                    "email": google_account_email,
+                    "google_calendar_id": google_calendar_id,
+                    "channel_id": channel_id,
+                    "resource_id": resource_id,
+                    "channel_expiration": channel_expiration,
+                    "now": now,
+                },
+            )
+            await session.commit()
+
+        logger.info(
+            "Calendar webhook setup complete",
+            channel_id=channel_id,
+            resource_id=resource_id,
+            channel_expiration=str(channel_expiration),
+            google_calendar_id=google_calendar_id,
+        )
+
+        return {
+            "status": "success",
+            "channel_id": channel_id,
+            "resource_id": resource_id,
+            "channel_expiration": str(channel_expiration),
+        }
+
+    except Exception as e:
+        logger.error(
+            "Failed to setup calendar webhook",
+            google_account_email=google_account_email,
+            google_calendar_id=google_calendar_id,
+            error=str(e),
+            error_type=type(e).__name__,
+        )
+        return {
+            "status": "error",
+            "error": str(e),
+            "error_type": type(e).__name__,
         }
 
 
@@ -2871,6 +3084,7 @@ class GoogleWorkerSettings(WorkerSettingsBase):
         push_local_contacts_to_google,
         process_journal_event,
         sync_calendar_events,
+        setup_calendar_webhook,
         periodic_sync_all_accounts,  # Wrapper for periodic cron syncs
     ]
 
