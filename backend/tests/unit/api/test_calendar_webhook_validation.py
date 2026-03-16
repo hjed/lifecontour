@@ -113,6 +113,20 @@ class TestWebhookSyncBehavior:
         assert _should_enqueue_sync("update") is True
 
     @pytest.mark.asyncio
+    async def test_empty_state_should_not_enqueue(self) -> None:
+        """Empty resource_state (missing header) should not trigger sync."""
+        from app.api.integrations.controllers import _should_enqueue_sync
+
+        assert _should_enqueue_sync("") is False
+
+    @pytest.mark.asyncio
+    async def test_unknown_state_should_not_enqueue(self) -> None:
+        """Unknown resource_state values should not trigger sync."""
+        from app.api.integrations.controllers import _should_enqueue_sync
+
+        assert _should_enqueue_sync("invalid") is False
+
+    @pytest.mark.asyncio
     async def test_enqueue_uses_smart_sync_type(self) -> None:
         """Webhook-triggered syncs should use 'smart' sync type."""
         mock_tqs = AsyncMock()

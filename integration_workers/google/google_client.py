@@ -624,7 +624,7 @@ class GoogleAPIClient:
                 calendar_id=calendar_id,
                 error=str(e),
             )
-            raise e
+            raise
 
     async def stop_channel(self, channel_id: str, resource_id: str) -> None:
         """Stop a push notification channel.
@@ -651,4 +651,4 @@ class GoogleAPIClient:
                 channel_id=channel_id,
                 error=str(e),
             )
-            raise e
+            raise

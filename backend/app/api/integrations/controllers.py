@@ -1067,13 +1067,18 @@ async def _lookup_webhook_channel(
     return row
 
 
+# Google push notification resource states that indicate actual data changes.
+_ENQUEUE_STATES = frozenset({"exists", "update", "not_exists"})
+
+
 def _should_enqueue_sync(resource_state: str) -> bool:
     """Determine if a webhook resource_state should trigger a sync.
 
-    The 'sync' state is just a channel confirmation — no sync needed.
-    All other states ('exists', 'update', etc.) indicate actual data changes.
+    Only the known Google states that indicate data changes trigger a sync.
+    The 'sync' state (channel confirmation) and unknown/empty values are
+    ignored to avoid spurious syncs from malformed requests.
     """
-    return resource_state != "sync"
+    return resource_state in _ENQUEUE_STATES
 
 
 @router.post(
@@ -1102,14 +1107,16 @@ async def receive_calendar_webhook(
     resource_state = request.headers.get("X-Goog-Resource-State", "")
 
     _validate_webhook_headers(channel_id, resource_id)
+    # After validation, both are guaranteed non-None
+    assert channel_id is not None
+    assert resource_id is not None
 
-    # Validate channel against database
     try:
         async with db_manager.get_session() as session:
             row = await _lookup_webhook_channel(
                 session,
                 channel_id,
-                resource_id,  # type: ignore[arg-type]
+                resource_id,
             )
             user_id = row.user_id
             google_account_email = row.google_account_email
@@ -1147,5 +1154,6 @@ async def receive_calendar_webhook(
             error=str(e),
             exc_info=True,
         )
-        # Return 200 even on error to avoid Google retrying
+        # Return 200 for unexpected internal errors to avoid Google retrying.
+        # (HTTPExceptions for missing headers/unknown channels are re-raised above.)
         return {"status": "error", "detail": "Internal processing error"}

@@ -6,7 +6,7 @@ PostgreSQL database to verify that sync metadata is correctly persisted
 and that conflict handling (409 ETag mismatch) works end-to-end.
 """
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 import pytest_asyncio
