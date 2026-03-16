@@ -2911,7 +2911,7 @@ async def sync_calendar_events(
 
         # Record observability metrics
         metrics_collector.record_job_duration(
-            job_type="calendar_sync", duration_seconds=duration
+            job_type="calendar_sync", status="success", duration=duration
         )
         metrics_collector.increment_job_total(
             job_type="calendar_sync", status="success"
@@ -2928,7 +2928,7 @@ async def sync_calendar_events(
         )
         if metrics["errors"] > 0:
             metrics_collector.increment_sync_errors(
-                sync_type="calendar_inbound", count=metrics["errors"]
+                sync_type="calendar_inbound", error_type="processing_error"
             )
 
         return {"status": "success", **metrics}
@@ -2945,10 +2945,12 @@ async def sync_calendar_events(
         )
         # Record failure metrics
         metrics_collector.record_job_duration(
-            job_type="calendar_sync", duration_seconds=duration
+            job_type="calendar_sync", status="error", duration=duration
         )
         metrics_collector.increment_job_total(job_type="calendar_sync", status="error")
-        metrics_collector.increment_sync_errors(sync_type="calendar_inbound")
+        metrics_collector.increment_sync_errors(
+            sync_type="calendar_inbound", error_type=type(e).__name__
+        )
         return {
             "status": "error",
             "google_account_email": google_account_email,
