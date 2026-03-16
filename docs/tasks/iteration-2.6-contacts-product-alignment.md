@@ -126,8 +126,8 @@ The sequence reflects both user priority and technical dependency:
 **Required Test Coverage:**
 - [x] **Unit:** push payload shaping, conflict classification, no-op detection.
 - [x] **Unit:** provenance tracking (`changed_by` passthrough from outbox to history service).
-- [ ] **Integration:** mocked Google API push/conflict scenarios with real database metadata updates.
-- [ ] **E2E:** trigger a local tag change and verify the sync workflow completes without regressing visible contact state.
+- [x] **Integration:** mocked Google API push/conflict scenarios with real database metadata updates.
+- [x] **E2E:** trigger a local tag change and verify the sync workflow completes without regressing visible contact state.
 
 ### ITER2.6-002: Hierarchical Tags in Domain, API, Filtering, and Sidebar
 **Objective:** Make tag hierarchy a real product capability instead of a partial data model detail.
