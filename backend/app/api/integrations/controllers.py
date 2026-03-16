@@ -9,7 +9,7 @@ This module provides REST API endpoints for:
 
 import urllib.parse
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, cast
 
 import aiohttp
 import structlog
@@ -1045,7 +1045,7 @@ async def _lookup_webhook_channel(
     from sqlalchemy import text
 
     stmt = text("""
-        SELECT user_id, google_account_email, google_calendar_id
+        SELECT user_id, google_account_email
         FROM calendar_sync_tokens
         WHERE channel_id = :channel_id
         AND channel_resource_id = :resource_id
@@ -1107,9 +1107,9 @@ async def receive_calendar_webhook(
     resource_state = request.headers.get("X-Goog-Resource-State", "")
 
     _validate_webhook_headers(channel_id, resource_id)
-    # After validation, both are guaranteed non-None
-    assert channel_id is not None
-    assert resource_id is not None
+    # After validation, both are guaranteed non-None strings
+    channel_id = cast(str, channel_id)
+    resource_id = cast(str, resource_id)
 
     try:
         async with db_manager.get_session() as session:
