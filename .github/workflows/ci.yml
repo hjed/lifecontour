@@ -166,7 +166,7 @@ jobs:
 
     services:
       postgres:
-        image: postgres:15
+        image: postgres:18-alpine
         env:
           POSTGRES_PASSWORD: testpass
           POSTGRES_USER: testuser
@@ -307,7 +307,7 @@ jobs:
 
     services:
       postgres:
-        image: postgres:16-alpine
+        image: postgres:18-alpine
         env:
           POSTGRES_DB: personal_management_test
           POSTGRES_USER: postgres
@@ -396,7 +396,7 @@ jobs:
 
     services:
       postgres:
-        image: postgres:16-alpine
+        image: postgres:18-alpine
         env:
           POSTGRES_DB: personal_management_test
           POSTGRES_USER: postgres
@@ -410,7 +410,7 @@ jobs:
           - 5433:5432
 
       meilisearch:
-        image: getmeili/meilisearch:v1.2
+        image: getmeili/meilisearch:v1.38
         env:
           MEILI_MASTER_KEY: test_master_key
           MEILI_ENV: development

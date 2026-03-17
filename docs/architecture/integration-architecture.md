@@ -502,7 +502,7 @@ services:
       - redis_data:/data
 
   db:
-    image: postgres:15-alpine
+    image: postgres:18-alpine
     environment:
       - POSTGRES_DB=personal_management
       - POSTGRES_USER=postgres

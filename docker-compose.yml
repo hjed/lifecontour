@@ -19,7 +19,7 @@ services:
   # ============================================================================
 
   database:
-    image: postgres:15-alpine
+    image: postgres:18-alpine
     container_name: ${CONTAINER_PREFIX:-pms}-postgres
     profiles: [dev, test, test-backend, prod]
     environment:
@@ -59,7 +59,7 @@ services:
       - personal-management
 
   meilisearch:
-    image: getmeili/meilisearch:v1.2
+    image: getmeili/meilisearch:v1.38
     container_name: ${CONTAINER_PREFIX:-pms}-meilisearch
     profiles: [dev, test, test-backend, prod]
     environment:

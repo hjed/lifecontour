@@ -92,6 +92,12 @@ class Settings(BaseSettings):
     search_index_prefix: str = Field(
         default="pms_", description="Prefix for search indices"
     )
+    enable_reindex_endpoint: bool = Field(
+        default=False,
+        description="Enable the /api/search/reindex admin endpoint. "
+        "Disabled by default for safety — set ENABLE_REINDEX_ENDPOINT=true "
+        "when performing MeiliSearch upgrades or index rebuilds.",
+    )
 
     # Session settings
     session_secret_key: str = Field(
