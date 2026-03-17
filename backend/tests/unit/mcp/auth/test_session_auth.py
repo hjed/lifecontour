@@ -94,16 +94,20 @@ class TestSessionAuthMiddleware:
         assert response.status_code == 401
 
     @pytest.mark.asyncio
-    async def test_non_mcp_path_bypasses_auth(self, middleware, mock_call_next):
-        """Test that non-MCP paths bypass authentication."""
-        # Setup request for non-MCP path
+    async def test_all_paths_enforce_auth(self, middleware, mock_call_next):
+        """Test that auth is enforced for any path reaching the middleware.
+
+        Since the middleware is exclusively mounted on the MCP sub-app,
+        all requests reaching it are MCP requests regardless of path.
+        """
+        # Setup request for an arbitrary path with no session
         mock_request = Mock(spec=Request)
         mock_request.url = Mock()
-        mock_request.url.path = "/api/contacts"
+        mock_request.url.path = "/mcp"
         mock_request.session = {}  # No session
 
         # Process request
         response = await middleware.dispatch(mock_request, mock_call_next)
 
-        # Should pass through without authentication
-        assert response.status_code == 200
+        # Should return 401 — auth is always enforced
+        assert response.status_code == 401
