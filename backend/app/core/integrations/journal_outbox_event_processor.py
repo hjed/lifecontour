@@ -891,10 +891,10 @@ class JournalOutboxEventProcessor:
             event: OutboxEvent to persist
         """
         import json
-        from datetime import UTC, datetime
+        from datetime import datetime
         from uuid import uuid4
 
-        now = datetime.now(UTC)
+        now = datetime.utcnow()
         await self.connection.execute(
             text("""
                 INSERT INTO outbox_events
