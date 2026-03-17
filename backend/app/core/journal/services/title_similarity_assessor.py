@@ -212,6 +212,9 @@ Confidence score (0.0-1.0):"""
     def _parse_score(text: str) -> float | None:
         """Parse a float score from Gemini's text response.
 
+        Only matches numbers in the valid [0.0, 1.0] range to avoid
+        picking up unrelated numbers like years or timestamps.
+
         Args:
             text: Raw text response from Gemini
 
@@ -219,10 +222,13 @@ Confidence score (0.0-1.0):"""
             Parsed float or None if parsing fails
         """
         try:
-            # Try to find a decimal number in the response
-            match = re.search(r"(\d+\.?\d*)", text.strip())
-            if match:
-                return float(match.group(1))
+            # Match numbers that could be valid scores: 0, 0.x, 1, 1.0
+            # Rejects values > 1.0 (e.g. years like 2026) at the regex level
+            matches = re.findall(r"\b([01]\.?\d*)\b", text.strip())
+            for m in matches:
+                val = float(m)
+                if 0.0 <= val <= 1.0:
+                    return val
             return None
         except (ValueError, AttributeError):
             return None

@@ -223,7 +223,6 @@ class TestJournalOutboxEventProcessor:
             _mock_resolve_contact(100),  # contact resolver
             _mock_empty_rels(),  # existing relationships
             _mock_empty_result(),  # create relationship
-            _mock_empty_result(),  # _save_outbox_event (match detection)
         ]
 
         result = await processor.process_event(event)
@@ -236,7 +235,7 @@ class TestJournalOutboxEventProcessor:
         assert result["status"] == "success"
         assert result["event_type"] == "journal_event.created"
         assert result["journal_id"] == 42
-        assert mock_connection.execute.call_count == 6
+        assert mock_connection.execute.call_count == 5
 
     @pytest.mark.asyncio
     async def test_process_journal_event_created_no_invitees(
@@ -258,8 +257,8 @@ class TestJournalOutboxEventProcessor:
         result = await processor.process_event(event)
 
         assert result["status"] == "success"
-        # 3 DB calls: calendar info + external link + save_outbox_event (no relationship calls)
-        assert mock_connection.execute.call_count == 3
+        # 2 DB calls: calendar info + external link (no relationship calls, no match detection)
+        assert mock_connection.execute.call_count == 2
 
     # ── journal_event.updated ──────────────────────────────────────────
 
@@ -541,7 +540,6 @@ class TestJournalOutboxEventProcessor:
             _mock_resolve_contact(100),  # resolve_by_email
             _mock_empty_rels(),  # _get_relationships_by_type (INVITEE only)
             _mock_empty_result(),  # _create_contact_relationship
-            _mock_empty_result(),  # _save_outbox_event (match detection)
         ]
 
         await processor.process_event(event)
@@ -611,14 +609,13 @@ class TestJournalOutboxEventProcessor:
             _mock_empty_result(),  # _create_external_event_link
             resolve_no_match,  # resolve_by_email → None
             _mock_empty_rels(),  # _get_relationships_by_type
-            _mock_empty_result(),  # _save_outbox_event (match detection)
         ]
 
         result = await processor.process_event(event)
 
         assert result["status"] == "success"
-        # 5 calls: calendar, link, resolve, get_rels, save_outbox_event (no create since email unresolved)
-        assert mock_connection.execute.call_count == 5
+        # 4 calls: calendar, link, resolve, get_rels (no create since email unresolved, no match detection)
+        assert mock_connection.execute.call_count == 4
 
     # ── InboundFieldMerger applied during update ─────────────────────
 

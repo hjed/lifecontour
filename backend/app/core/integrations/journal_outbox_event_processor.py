@@ -187,7 +187,8 @@ class JournalOutboxEventProcessor:
         )
 
         # Phase 1: Emit match detection event (same transaction)
-        if created_journal.event_date_range:
+        # Only emit if match detection is wired (has Gemini API key)
+        if created_journal.event_date_range and self.match_candidate_detector is not None:
             detection_event = OutboxEvent.create_match_detection_event(
                 journal_id=created_journal.id,
                 user_id=created_journal.user_id,
@@ -890,16 +891,24 @@ class JournalOutboxEventProcessor:
             event: OutboxEvent to persist
         """
         import json
+        from datetime import UTC, datetime
+        from uuid import uuid4
 
+        now = datetime.now(UTC)
         await self.connection.execute(
             text("""
-                INSERT INTO outbox_events (event_type, event_data, aggregate_id)
-                VALUES (:event_type, :event_data, :aggregate_id)
+                INSERT INTO outbox_events
+                (event_id, event_type, aggregate_id, event_data, occurred_at, retry_count, created_at)
+                VALUES (:event_id, :event_type, :aggregate_id, :event_data, :occurred_at, :retry_count, :created_at)
             """),
             {
+                "event_id": str(uuid4()),
                 "event_type": event.event_type,
-                "event_data": json.dumps(event.event_data),
                 "aggregate_id": event.aggregate_id,
+                "event_data": json.dumps(event.event_data),
+                "occurred_at": now,
+                "retry_count": 0,
+                "created_at": now,
             },
         )
 

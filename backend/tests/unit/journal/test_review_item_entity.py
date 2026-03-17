@@ -27,7 +27,6 @@ class TestReviewItem:
 
     def test_create_valid_review_item(self):
         """Test creating a review item with all required fields."""
-        now = datetime.now(UTC)
 
         item = ReviewItem(
             user_id="test-user-123",
