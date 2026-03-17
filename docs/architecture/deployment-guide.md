@@ -127,7 +127,7 @@ version: '3.8'
 
 services:
   postgres:
-    image: postgres:15-alpine
+    image: postgres:18-alpine
     environment:
       POSTGRES_DB: personal_crm_dev
       POSTGRES_USER: dev_user
@@ -201,7 +201,7 @@ version: '3.8'
 
 services:
   postgres:
-    image: postgres:15-alpine
+    image: postgres:18-alpine
     restart: unless-stopped
     environment:
       POSTGRES_DB: personal_crm_prod
@@ -283,7 +283,7 @@ services:
     restart: unless-stopped
 
   backup:
-    image: postgres:15-alpine
+    image: postgres:18-alpine
     volumes:
       - postgres_prod_data:/var/lib/postgresql/data
       - backup-storage:/backup
@@ -682,6 +682,48 @@ jobs:
 ```
 
 ## Backup and Recovery
+
+### Upgrading PostgreSQL Major Versions (Docker Deployments)
+
+When upgrading between major PostgreSQL versions (e.g., from 15 to 18), the data directory format changes and existing volumes cannot be reused directly. You will encounter a "database files are incompatible with server" error if you attempt to start a new major version container using the old volume.
+
+To perform a safe upgrade:
+
+1. **Backup Existing Data**:
+   Ensure the current container is running, and perform a full database dump to a safe location.
+   ```bash
+   # Export all data to a SQL file
+   docker compose exec postgres pg_dumpall -U postgres > upgrade_backup.sql
+   ```
+
+2. **Stop and Remove Old Database**:
+   ```bash
+   docker compose down
+   # Remove the old volume to prevent incompatibility errors
+   # Replace the volume name with your actual project volume (e.g., personal-crm_postgres_prod_data)
+   docker volume rm personal-crm_postgres_prod_data
+   ```
+
+3. **Update Docker Compose Image**:
+   Update your `docker-compose.yml` (and/or `docker-compose.prod.yml`) to use the new PostgreSQL image tag (e.g., `postgres:18-alpine`).
+
+4. **Start New Database Container**:
+   ```bash
+   docker compose up -d postgres
+   ```
+   Wait a few moments for the new database container to initialize its fresh volume.
+
+5. **Restore Data**:
+   ```bash
+   # Import the exported SQL file into the new database
+   cat upgrade_backup.sql | docker compose exec -T postgres psql -U postgres
+   ```
+
+6. **Restart All Services**:
+   ```bash
+   docker compose up -d
+   ```
+   Verify that your data is intact and the application functions correctly.
 
 ### PostgreSQL Backup Strategy
 ```bash

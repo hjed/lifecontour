@@ -166,7 +166,7 @@ jobs:
 
     services:
       postgres:
-        image: postgres:15
+        image: postgres:18-alpine
         env:
           POSTGRES_PASSWORD: testpass
           POSTGRES_USER: testuser
@@ -307,7 +307,7 @@ jobs:
 
     services:
       postgres:
-        image: postgres:16-alpine
+        image: postgres:18-alpine
         env:
           POSTGRES_DB: personal_management_test
           POSTGRES_USER: postgres
@@ -396,7 +396,7 @@ jobs:
 
     services:
       postgres:
-        image: postgres:16-alpine
+        image: postgres:18-alpine
         env:
           POSTGRES_DB: personal_management_test
           POSTGRES_USER: postgres
