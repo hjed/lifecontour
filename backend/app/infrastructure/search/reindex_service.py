@@ -24,8 +24,19 @@ from app.infrastructure.search.meilisearch_client import (
 
 logger = structlog.get_logger()
 
-# Maximum number of documents to push in a single batch
+# Maximum number of documents to push in a single MeiliSearch batch
 BATCH_SIZE = 100
+
+# Number of IDs to fetch from DB per batch for document building
+DB_BATCH_SIZE = 100
+
+
+@dataclass
+class SingleReindexResult:
+    """Result of a single-entity re-index operation."""
+
+    count: int
+    duration_ms: int
 
 
 @dataclass
@@ -67,32 +78,34 @@ class ReindexService:
         """
         start = time.monotonic()
 
-        contacts_count = await self.reindex_contacts()
-        journals_count = await self.reindex_journals()
+        contacts_result = await self.reindex_contacts()
+        journals_result = await self.reindex_journals()
 
         duration_ms = int((time.monotonic() - start) * 1000)
 
         logger.info(
             "Full re-index completed",
-            contacts_indexed=contacts_count,
-            journals_indexed=journals_count,
+            contacts_indexed=contacts_result.count,
+            journals_indexed=journals_result.count,
             duration_ms=duration_ms,
         )
 
         return ReindexResult(
-            contacts_indexed=contacts_count,
-            journals_indexed=journals_count,
+            contacts_indexed=contacts_result.count,
+            journals_indexed=journals_result.count,
             duration_ms=duration_ms,
         )
 
-    async def reindex_contacts(self) -> int:
+    async def reindex_contacts(self) -> SingleReindexResult:
         """Re-index all contacts from PostgreSQL.
 
         Clears the contacts index and rebuilds it from the database.
+        Fetches and indexes documents in batches to control memory usage.
 
         Returns:
-            Number of contacts indexed.
+            SingleReindexResult with count and duration.
         """
+        start = time.monotonic()
         index_name = get_index_name("contacts")
 
         self._ensure_index_exists(index_name, CONTACTS_INDEX_SETTINGS)
@@ -110,29 +123,38 @@ class ReindexService:
 
         if not contact_ids:
             logger.info("No contacts to re-index")
-            return 0
+            duration_ms = int((time.monotonic() - start) * 1000)
+            return SingleReindexResult(count=0, duration_ms=duration_ms)
 
-        # Fetch and index in batches
-        documents: list[dict[str, Any]] = []
-        for contact_id in contact_ids:
-            doc = await self._fetch_contact_document(contact_id)
-            if doc:
-                documents.append(doc)
+        # Fetch and index in DB-sized batches to limit memory
+        total_indexed = 0
+        for batch_start in range(0, len(contact_ids), DB_BATCH_SIZE):
+            batch_ids = contact_ids[batch_start : batch_start + DB_BATCH_SIZE]
+            documents: list[dict[str, Any]] = []
 
-        if documents:
-            self._batch_add_documents(index_name, documents)
+            for contact_id in batch_ids:
+                doc = await self._fetch_contact_document(contact_id)
+                if doc:
+                    documents.append(doc)
 
-        logger.info("Contacts re-indexed", count=len(documents))
-        return len(documents)
+            if documents:
+                self._batch_add_documents(index_name, documents)
+                total_indexed += len(documents)
 
-    async def reindex_journals(self) -> int:
+        duration_ms = int((time.monotonic() - start) * 1000)
+        logger.info("Contacts re-indexed", count=total_indexed, duration_ms=duration_ms)
+        return SingleReindexResult(count=total_indexed, duration_ms=duration_ms)
+
+    async def reindex_journals(self) -> SingleReindexResult:
         """Re-index all journals from PostgreSQL.
 
         Clears the journals index and rebuilds it from the database.
+        Fetches and indexes documents in batches to control memory usage.
 
         Returns:
-            Number of journals indexed.
+            SingleReindexResult with count and duration.
         """
+        start = time.monotonic()
         index_name = get_index_name("journals")
 
         self._ensure_index_exists(index_name, JOURNAL_INDEX_SETTINGS)
@@ -150,20 +172,27 @@ class ReindexService:
 
         if not journal_ids:
             logger.info("No journals to re-index")
-            return 0
+            duration_ms = int((time.monotonic() - start) * 1000)
+            return SingleReindexResult(count=0, duration_ms=duration_ms)
 
-        # Fetch and index in batches
-        documents: list[dict[str, Any]] = []
-        for journal_id in journal_ids:
-            doc = await self._fetch_journal_document(journal_id)
-            if doc:
-                documents.append(doc)
+        # Fetch and index in DB-sized batches to limit memory
+        total_indexed = 0
+        for batch_start in range(0, len(journal_ids), DB_BATCH_SIZE):
+            batch_ids = journal_ids[batch_start : batch_start + DB_BATCH_SIZE]
+            documents: list[dict[str, Any]] = []
 
-        if documents:
-            self._batch_add_documents(index_name, documents)
+            for journal_id in batch_ids:
+                doc = await self._fetch_journal_document(journal_id)
+                if doc:
+                    documents.append(doc)
 
-        logger.info("Journals re-indexed", count=len(documents))
-        return len(documents)
+            if documents:
+                self._batch_add_documents(index_name, documents)
+                total_indexed += len(documents)
+
+        duration_ms = int((time.monotonic() - start) * 1000)
+        logger.info("Journals re-indexed", count=total_indexed, duration_ms=duration_ms)
+        return SingleReindexResult(count=total_indexed, duration_ms=duration_ms)
 
     def _ensure_index_exists(self, index_name: str, settings: dict[str, Any]) -> None:
         """Ensure a MeiliSearch index exists with the correct settings.
@@ -323,7 +352,8 @@ class ReindexService:
     async def _fetch_journal_document(self, journal_id: int) -> dict[str, Any] | None:
         """Fetch a single journal's search document from the database.
 
-        Uses the same query pattern as JournalIndexingService._fetch_complete_journal_data.
+        Uses the same query pattern as
+        JournalIndexingService._fetch_complete_journal_data.
 
         Args:
             journal_id: ID of the journal.
@@ -349,17 +379,27 @@ class ReindexService:
             types_result = await self.db_connection.execute(
                 text("""
                     SELECT
-                        CASE WHEN jci.journal_id IS NOT NULL THEN 'EVENT' END as event_type,
-                        CASE WHEN jmd.journal_id IS NOT NULL THEN 'MOOD_RATING' END as mood_type,
-                        CASE WHEN jpd.journal_id IS NOT NULL THEN 'PLAN' END as plan_type,
-                        CASE WHEN jtd.journal_id IS NOT NULL THEN 'TRAVEL' END as travel_type,
-                        CASE WHEN jpad.journal_id IS NOT NULL THEN 'PHOTO_ALBUM' END as photo_type
+                        CASE WHEN jci.journal_id IS NOT NULL
+                            THEN 'EVENT' END as event_type,
+                        CASE WHEN jmd.journal_id IS NOT NULL
+                            THEN 'MOOD_RATING' END as mood_type,
+                        CASE WHEN jpd.journal_id IS NOT NULL
+                            THEN 'PLAN' END as plan_type,
+                        CASE WHEN jtd.journal_id IS NOT NULL
+                            THEN 'TRAVEL' END as travel_type,
+                        CASE WHEN jpad.journal_id IS NOT NULL
+                            THEN 'PHOTO_ALBUM' END as photo_type
                     FROM journals j
-                    LEFT JOIN journal_calendar_info jci ON j.id = jci.journal_id
-                    LEFT JOIN journal_mood_data jmd ON j.id = jmd.journal_id
-                    LEFT JOIN journal_plan_data jpd ON j.id = jpd.journal_id
-                    LEFT JOIN journal_travel_data jtd ON j.id = jtd.journal_id
-                    LEFT JOIN journal_photo_album_data jpad ON j.id = jpad.journal_id
+                    LEFT JOIN journal_calendar_info jci
+                        ON j.id = jci.journal_id
+                    LEFT JOIN journal_mood_data jmd
+                        ON j.id = jmd.journal_id
+                    LEFT JOIN journal_plan_data jpd
+                        ON j.id = jpd.journal_id
+                    LEFT JOIN journal_travel_data jtd
+                        ON j.id = jtd.journal_id
+                    LEFT JOIN journal_photo_album_data jpad
+                        ON j.id = jpad.journal_id
                     WHERE j.id = :journal_id
                 """),
                 {"journal_id": journal_id},
@@ -421,12 +461,16 @@ class ReindexService:
                 "user_id": journal_row.user_id,
                 "title": journal_row.title,
                 "content": journal_row.content,
-                "event_date_range_start": journal_row.event_date_range_start.isoformat()
-                if journal_row.event_date_range_start
-                else None,
-                "event_date_range_end": journal_row.event_date_range_end.isoformat()
-                if journal_row.event_date_range_end
-                else None,
+                "event_date_range_start": (
+                    journal_row.event_date_range_start.isoformat()
+                    if journal_row.event_date_range_start
+                    else None
+                ),
+                "event_date_range_end": (
+                    journal_row.event_date_range_end.isoformat()
+                    if journal_row.event_date_range_end
+                    else None
+                ),
                 "types": types,
                 "contact_ids": contact_ids,
                 "tag_ids": tag_ids,

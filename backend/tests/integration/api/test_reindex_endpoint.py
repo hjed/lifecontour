@@ -14,6 +14,13 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 
+@pytest.fixture
+def test_settings(test_settings):
+    """Override test_settings to enable the reindex endpoint."""
+    # Pydantic Settings objects are frozen — create a new one with the flag
+    return test_settings.model_copy(update={"enable_reindex_endpoint": True})
+
+
 @pytest_asyncio.fixture
 async def sample_contacts(async_connection: AsyncConnection) -> list[int]:
     """Create sample contacts in the database and return their IDs."""
@@ -130,6 +137,7 @@ class TestReindexEndpoint:
         assert data["status"] == "completed"
         assert data["contacts_indexed"] == 3
         assert data["journals_indexed"] == 0
+        assert data["duration_ms"] >= 0
 
     @pytest.mark.asyncio
     async def test_reindex_journals_only(
@@ -154,6 +162,7 @@ class TestReindexEndpoint:
         assert data["status"] == "completed"
         assert data["contacts_indexed"] == 0
         assert data["journals_indexed"] == 2
+        assert data["duration_ms"] >= 0
 
     @pytest.mark.asyncio
     async def test_reindex_with_empty_database(
@@ -174,6 +183,7 @@ class TestReindexEndpoint:
         assert data["status"] == "completed"
         assert data["contacts_indexed"] == 0
         assert data["journals_indexed"] == 0
+        assert data["duration_ms"] >= 0
 
     @pytest.mark.asyncio
     async def test_reindex_contacts_includes_contact_methods_and_tags(
@@ -277,3 +287,44 @@ class TestReindexEndpoint:
 
         # Without session cookie, we expect a redirect or 401
         assert response.status_code in (302, 401, 403)
+
+    @pytest.mark.asyncio
+    async def test_reindex_returns_422_for_invalid_entity_type(
+        self,
+        authenticated_client,
+    ) -> None:
+        """Test that an invalid entity_type returns 422 validation error."""
+        response = await authenticated_client.post(
+            "/api/search/reindex?entity_type=invalid"
+        )
+
+        # FastAPI may return 400 or 422 depending on query validation
+        assert response.status_code in (400, 422)
+
+    @pytest.mark.asyncio
+    async def test_reindex_returns_404_when_feature_disabled(
+        self,
+        async_connection: AsyncConnection,
+        test_settings,
+        test_user,
+    ) -> None:
+        """Test that the endpoint returns 404 when feature flag is disabled."""
+        # Create settings with the flag explicitly disabled
+        disabled_settings = test_settings.model_copy(
+            update={"enable_reindex_endpoint": False}
+        )
+
+        # Use the _authenticated_client_context to create a client with
+        # these specific settings
+        from tests.integration.conftest import _authenticated_client_context
+
+        async with _authenticated_client_context(
+            async_connection, disabled_settings, test_user
+        ) as client:
+            response = await client.post("/api/search/reindex")
+
+        assert response.status_code == 404
+        body = response.json()
+        # Check for "disabled" in the response body (may be in 'detail' or 'message')
+        body_text = str(body).lower()
+        assert "disabled" in body_text or "not found" in body_text

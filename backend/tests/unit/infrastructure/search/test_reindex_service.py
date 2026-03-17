@@ -9,7 +9,11 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from app.infrastructure.search.reindex_service import ReindexResult, ReindexService
+from app.infrastructure.search.reindex_service import (
+    ReindexResult,
+    ReindexService,
+    SingleReindexResult,
+)
 
 
 class TestReindexService:
@@ -155,9 +159,11 @@ class TestReindexService:
             "app.infrastructure.search.reindex_service.get_index_name",
             return_value="pms_contacts",
         ):
-            count = await service.reindex_contacts()
+            result = await service.reindex_contacts()
 
-        assert count == 2
+        assert isinstance(result, SingleReindexResult)
+        assert result.count == 2
+        assert result.duration_ms >= 0
         mock_index.delete_all_documents.assert_called_once()
         mock_index.add_documents.assert_called_once()
         docs = mock_index.add_documents.call_args[0][0]
@@ -181,9 +187,11 @@ class TestReindexService:
             "app.infrastructure.search.reindex_service.get_index_name",
             return_value="pms_journals",
         ):
-            count = await service.reindex_journals()
+            result = await service.reindex_journals()
 
-        assert count == 2
+        assert isinstance(result, SingleReindexResult)
+        assert result.count == 2
+        assert result.duration_ms >= 0
         mock_index.delete_all_documents.assert_called_once()
         mock_index.add_documents.assert_called_once()
         docs = mock_index.add_documents.call_args[0][0]
@@ -199,14 +207,23 @@ class TestReindexService:
     ) -> None:
         """Test that reindex_all returns a ReindexResult with both counts."""
         with (
-            patch.object(service, "reindex_contacts", return_value=5),
-            patch.object(service, "reindex_journals", return_value=3),
+            patch.object(
+                service,
+                "reindex_contacts",
+                return_value=SingleReindexResult(count=5, duration_ms=100),
+            ),
+            patch.object(
+                service,
+                "reindex_journals",
+                return_value=SingleReindexResult(count=3, duration_ms=50),
+            ),
         ):
             result = await service.reindex_all()
 
         assert isinstance(result, ReindexResult)
         assert result.contacts_indexed == 5
         assert result.journals_indexed == 3
+        assert result.duration_ms >= 0
 
     @pytest.mark.unit
     @pytest.mark.asyncio
@@ -228,9 +245,10 @@ class TestReindexService:
             "app.infrastructure.search.reindex_service.get_index_name",
             return_value="pms_contacts",
         ):
-            count = await service.reindex_contacts()
+            result = await service.reindex_contacts()
 
-        assert count == 0
+        assert result.count == 0
+        assert result.duration_ms >= 0
         mock_index.delete_all_documents.assert_called_once()
         mock_index.add_documents.assert_not_called()
 
@@ -288,9 +306,9 @@ class TestReindexService:
             "app.infrastructure.search.reindex_service.get_index_name",
             return_value="pms_contacts",
         ):
-            count = await service.reindex_contacts()
+            result = await service.reindex_contacts()
 
-        assert count == 1
+        assert result.count == 1
         docs = mock_index.add_documents.call_args[0][0]
         assert len(docs) == 1
         assert docs[0]["first_name"] == "Alice"
@@ -305,3 +323,11 @@ class TestReindexService:
         assert result.contacts_indexed == 10
         assert result.journals_indexed == 5
         assert result.duration_ms == 1234
+
+    @pytest.mark.unit
+    @pytest.mark.asyncio
+    async def test_single_reindex_result_dataclass(self) -> None:
+        """Test SingleReindexResult dataclass properties."""
+        result = SingleReindexResult(count=10, duration_ms=500)
+        assert result.count == 10
+        assert result.duration_ms == 500
