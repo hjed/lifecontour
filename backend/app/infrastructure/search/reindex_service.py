@@ -6,6 +6,7 @@ Used during MeiliSearch upgrades or when the search index needs
 to be rebuilt from scratch.
 """
 
+import asyncio
 import time
 from dataclasses import dataclass
 from typing import Any
@@ -24,11 +25,11 @@ from app.infrastructure.search.meilisearch_client import (
 
 logger = structlog.get_logger()
 
-# Maximum number of documents to push in a single MeiliSearch batch
-BATCH_SIZE = 100
-
-# Number of IDs to fetch from DB per batch for document building
+# Number of IDs to fetch from DB per page for document building
 DB_BATCH_SIZE = 100
+
+# Maximum number of documents to push in a single MeiliSearch batch
+MEILI_BATCH_SIZE = 100
 
 
 @dataclass
@@ -52,10 +53,13 @@ class ReindexService:
     """Bulk re-indexing from PostgreSQL to MeiliSearch.
 
     Reads all data from the database and pushes it to MeiliSearch,
-    replacing any existing index contents. Useful for:
+    replacing any existing document contents. Useful for:
     - MeiliSearch version upgrades (wipe volume + re-index)
     - Recovery from corrupted indices
     - Initial index population
+
+    MeiliSearch client calls are synchronous and are run in a threadpool
+    to avoid blocking the async event loop.
     """
 
     def __init__(self, db_connection: AsyncConnection) -> None:
@@ -70,8 +74,8 @@ class ReindexService:
     async def reindex_all(self) -> ReindexResult:
         """Re-index all entity types from PostgreSQL into MeiliSearch.
 
-        Deletes existing indices, recreates them with proper settings,
-        and bulk-inserts all records.
+        Ensures indices exist with correct settings, clears existing
+        documents, and bulk-inserts all records from PostgreSQL.
 
         Returns:
             ReindexResult with counts and duration.
@@ -99,8 +103,9 @@ class ReindexService:
     async def reindex_contacts(self) -> SingleReindexResult:
         """Re-index all contacts from PostgreSQL.
 
-        Clears the contacts index and rebuilds it from the database.
-        Fetches and indexes documents in batches to control memory usage.
+        Ensures the contacts index exists with correct settings, clears
+        existing documents, then fetches and indexes contacts using
+        keyset pagination to avoid loading all IDs into memory at once.
 
         Returns:
             SingleReindexResult with count and duration.
@@ -108,28 +113,29 @@ class ReindexService:
         start = time.monotonic()
         index_name = get_index_name("contacts")
 
-        self._ensure_index_exists(index_name, CONTACTS_INDEX_SETTINGS)
+        await self._ensure_index_exists(index_name, CONTACTS_INDEX_SETTINGS)
 
         # Clear existing documents
-        index = self.client.index(index_name)
-        task = index.delete_all_documents()
-        self.client.wait_for_task(task.task_uid)
+        await self._run_sync(lambda: self._delete_all_documents(index_name))
 
-        # Fetch all contact IDs
-        result = await self.db_connection.execute(
-            text("SELECT id FROM contacts ORDER BY id")
-        )
-        contact_ids = [row.id for row in result.fetchall()]
-
-        if not contact_ids:
-            logger.info("No contacts to re-index")
-            duration_ms = int((time.monotonic() - start) * 1000)
-            return SingleReindexResult(count=0, duration_ms=duration_ms)
-
-        # Fetch and index in DB-sized batches to limit memory
+        # Fetch and index using keyset pagination
         total_indexed = 0
-        for batch_start in range(0, len(contact_ids), DB_BATCH_SIZE):
-            batch_ids = contact_ids[batch_start : batch_start + DB_BATCH_SIZE]
+        last_id = 0
+
+        while True:
+            result = await self.db_connection.execute(
+                text(
+                    "SELECT id FROM contacts WHERE id > :last_id "
+                    "ORDER BY id LIMIT :batch_size"
+                ),
+                {"last_id": last_id, "batch_size": DB_BATCH_SIZE},
+            )
+            batch_ids = [row.id for row in result.fetchall()]
+
+            if not batch_ids:
+                break
+
+            last_id = batch_ids[-1]
             documents: list[dict[str, Any]] = []
 
             for contact_id in batch_ids:
@@ -138,7 +144,9 @@ class ReindexService:
                     documents.append(doc)
 
             if documents:
-                self._batch_add_documents(index_name, documents)
+                await self._run_sync(
+                    lambda docs=documents: self._batch_add_documents(index_name, docs)
+                )
                 total_indexed += len(documents)
 
         duration_ms = int((time.monotonic() - start) * 1000)
@@ -148,8 +156,9 @@ class ReindexService:
     async def reindex_journals(self) -> SingleReindexResult:
         """Re-index all journals from PostgreSQL.
 
-        Clears the journals index and rebuilds it from the database.
-        Fetches and indexes documents in batches to control memory usage.
+        Ensures the journals index exists with correct settings, clears
+        existing documents, then fetches and indexes journals using
+        keyset pagination to avoid loading all IDs into memory at once.
 
         Returns:
             SingleReindexResult with count and duration.
@@ -157,28 +166,29 @@ class ReindexService:
         start = time.monotonic()
         index_name = get_index_name("journals")
 
-        self._ensure_index_exists(index_name, JOURNAL_INDEX_SETTINGS)
+        await self._ensure_index_exists(index_name, JOURNAL_INDEX_SETTINGS)
 
         # Clear existing documents
-        index = self.client.index(index_name)
-        task = index.delete_all_documents()
-        self.client.wait_for_task(task.task_uid)
+        await self._run_sync(lambda: self._delete_all_documents(index_name))
 
-        # Fetch all journal IDs
-        result = await self.db_connection.execute(
-            text("SELECT id FROM journals ORDER BY id")
-        )
-        journal_ids = [row.id for row in result.fetchall()]
-
-        if not journal_ids:
-            logger.info("No journals to re-index")
-            duration_ms = int((time.monotonic() - start) * 1000)
-            return SingleReindexResult(count=0, duration_ms=duration_ms)
-
-        # Fetch and index in DB-sized batches to limit memory
+        # Fetch and index using keyset pagination
         total_indexed = 0
-        for batch_start in range(0, len(journal_ids), DB_BATCH_SIZE):
-            batch_ids = journal_ids[batch_start : batch_start + DB_BATCH_SIZE]
+        last_id = 0
+
+        while True:
+            result = await self.db_connection.execute(
+                text(
+                    "SELECT id FROM journals WHERE id > :last_id "
+                    "ORDER BY id LIMIT :batch_size"
+                ),
+                {"last_id": last_id, "batch_size": DB_BATCH_SIZE},
+            )
+            batch_ids = [row.id for row in result.fetchall()]
+
+            if not batch_ids:
+                break
+
+            last_id = batch_ids[-1]
             documents: list[dict[str, Any]] = []
 
             for journal_id in batch_ids:
@@ -187,31 +197,53 @@ class ReindexService:
                     documents.append(doc)
 
             if documents:
-                self._batch_add_documents(index_name, documents)
+                await self._run_sync(
+                    lambda docs=documents: self._batch_add_documents(index_name, docs)
+                )
                 total_indexed += len(documents)
 
         duration_ms = int((time.monotonic() - start) * 1000)
         logger.info("Journals re-indexed", count=total_indexed, duration_ms=duration_ms)
         return SingleReindexResult(count=total_indexed, duration_ms=duration_ms)
 
-    def _ensure_index_exists(self, index_name: str, settings: dict[str, Any]) -> None:
+    async def _ensure_index_exists(
+        self, index_name: str, settings: dict[str, Any]
+    ) -> None:
         """Ensure a MeiliSearch index exists with the correct settings.
+
+        Creates the index if missing, and always applies the latest
+        settings so that upgrades or config changes take effect.
 
         Args:
             index_name: Name of the index.
             settings: Index settings to apply.
         """
-        try:
-            index = self.client.index(index_name)
-            index.get_stats()
-        except MeilisearchError:
-            logger.info("Creating search index", index_name=index_name)
-            task = self.client.create_index(index_name, {"primaryKey": "id"})
-            self.client.wait_for_task(task.task_uid)
 
+        def _sync_ensure() -> None:
+            try:
+                index = self.client.index(index_name)
+                index.get_stats()
+            except MeilisearchError:
+                logger.info("Creating search index", index_name=index_name)
+                task = self.client.create_index(index_name, {"primaryKey": "id"})
+                self.client.wait_for_task(task.task_uid)
+
+            # Always apply latest settings (handles upgrades / config changes)
             index = self.client.index(index_name)
             task = index.update_settings(settings)
             self.client.wait_for_task(task.task_uid)
+
+        await self._run_sync(_sync_ensure)
+
+    def _delete_all_documents(self, index_name: str) -> None:
+        """Delete all documents from a MeiliSearch index.
+
+        Args:
+            index_name: Name of the index.
+        """
+        index = self.client.index(index_name)
+        task = index.delete_all_documents()
+        self.client.wait_for_task(task.task_uid)
 
     def _batch_add_documents(
         self, index_name: str, documents: list[dict[str, Any]]
@@ -223,8 +255,8 @@ class ReindexService:
             documents: Documents to add.
         """
         index = self.client.index(index_name)
-        for i in range(0, len(documents), BATCH_SIZE):
-            batch = documents[i : i + BATCH_SIZE]
+        for i in range(0, len(documents), MEILI_BATCH_SIZE):
+            batch = documents[i : i + MEILI_BATCH_SIZE]
             task = index.add_documents(batch)
             self.client.wait_for_task(task.task_uid)
             logger.debug(
@@ -233,6 +265,14 @@ class ReindexService:
                 batch_start=i,
                 batch_size=len(batch),
             )
+
+    @staticmethod
+    async def _run_sync(func: Any) -> Any:
+        """Run a synchronous function in a threadpool.
+
+        Prevents blocking the async event loop during MeiliSearch client calls.
+        """
+        return await asyncio.to_thread(func)
 
     async def _fetch_contact_document(self, contact_id: int) -> dict[str, Any] | None:
         """Fetch a single contact's search document from the database.
