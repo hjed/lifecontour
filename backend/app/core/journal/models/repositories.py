@@ -1490,7 +1490,7 @@ class ReviewItemRepository(ABC):
     """
 
     @abstractmethod
-    async def create(self, review_item: ReviewItem) -> ReviewItem:
+    async def create(self, review_item: ReviewItem) -> tuple[ReviewItem, bool]:
         """
         Create a review item.
 
@@ -1501,7 +1501,8 @@ class ReviewItemRepository(ABC):
             review_item: The review item to create
 
         Returns:
-            The created review item with id and timestamps
+            A tuple of (ReviewItem, bool) where the bool indicates if the item was newly created
+            (True) or already existed (False).
         """
         pass
 

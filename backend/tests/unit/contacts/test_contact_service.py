@@ -819,8 +819,8 @@ class TestContactService:
         child_tag_1 = Tag(name=TagName("child1"), id=2, parent_id=parent_tag_id)
         child_tag_2 = Tag(name=TagName("child2"), id=3, parent_id=parent_tag_id)
 
-        mock_tag_repo.get_children.side_effect = lambda tag_id: (
-            [child_tag_1, child_tag_2] if tag_id == parent_tag_id else []
+        mock_tag_repo.get_descendants_for_tags.side_effect = lambda tag_ids: (
+            [child_tag_1, child_tag_2] if parent_tag_id in tag_ids else []
         )
         mock_contact_repo.get_contacts_by_filters.return_value = []
 
@@ -843,8 +843,8 @@ class TestContactService:
         parent_tag_id = 10
         child_tag = Tag(name=TagName("child"), id=20, parent_id=parent_tag_id)
 
-        mock_tag_repo.get_children.side_effect = lambda tag_id: (
-            [child_tag] if tag_id == parent_tag_id else []
+        mock_tag_repo.get_descendants_for_tags.side_effect = lambda tag_ids: (
+            [child_tag] if parent_tag_id in tag_ids else []
         )
         mock_contact_repo.get_contacts_count_by_filters.return_value = 5
 
@@ -864,7 +864,7 @@ class TestContactService:
         """Test that a leaf tag (no children) passes through unchanged."""
         # Arrange: tag 5 has no children
         leaf_tag_id = 5
-        mock_tag_repo.get_children.return_value = []
+        mock_tag_repo.get_descendants_for_tags.return_value = []
         mock_contact_repo.get_contacts_by_filters.return_value = []
 
         # Act
@@ -887,8 +887,8 @@ class TestContactService:
         child_tag = Tag(name=TagName("child"), id=2, parent_id=parent_tag_id)
         leaf_tag_id = 5
 
-        mock_tag_repo.get_children.side_effect = lambda tag_id: (
-            [child_tag] if tag_id == parent_tag_id else []
+        mock_tag_repo.get_descendants_for_tags.side_effect = lambda tag_ids: (
+            [child_tag] if parent_tag_id in tag_ids else []
         )
         mock_contact_repo.get_contacts_by_filters.return_value = []
 
@@ -913,6 +913,6 @@ class TestContactService:
         # Act
         await contact_service.get_contacts_paginated(limit=10, offset=0, tag_ids=None)
 
-        # Assert: get_children should never be called
-        mock_tag_repo.get_children.assert_not_called()
+        # Assert: get_descendants_for_tags should never be called
+        mock_tag_repo.get_descendants_for_tags.assert_not_called()
         mock_contact_repo.get_all.assert_called_once()

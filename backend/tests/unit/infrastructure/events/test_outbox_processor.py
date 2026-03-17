@@ -711,3 +711,84 @@ class TestOutboxProcessor:
 
         assert mock_repository.mark_as_processed.call_count == 1
         mock_repository.mark_as_processed.assert_called_once_with("journal-event")
+
+    @pytest.mark.asyncio
+    async def test_process_journal_review_detect_matches(
+        self, processor, mock_search_indexer
+    ):
+        """Test processing journal_review.detect_matches events route to _process_journal_sync_event."""
+        # Arrange
+        events = [
+            OutboxEvent(
+                id=1,
+                event_id="journal-review-event",
+                event_type="journal_review.detect_matches",
+                aggregate_id=42,
+                event_data={
+                    "journal_id": 1,
+                    "user_id": "user123",
+                    "journal_title": "Test Journal",
+                    "event_date_range_start": "2024-01-01T10:00:00Z",
+                    "event_date_range_end": "2024-01-01T11:00:00Z",
+                },
+                occurred_at=datetime(2024, 1, 1, 10, 0, 0),
+                processed_at=None,
+                retry_count=0,
+                created_at=datetime(2024, 1, 1, 10, 0, 0),
+            )
+        ]
+
+        mock_conn = AsyncMock()
+
+        @asynccontextmanager
+        async def mock_begin():
+            yield mock_conn
+
+        @asynccontextmanager
+        async def mock_begin_nested():
+            yield mock_conn
+
+        mock_conn.begin_nested = mock_begin_nested
+
+        mock_engine = AsyncMock()
+        mock_engine.begin = mock_begin
+
+        mock_repository = MagicMock()
+        mock_repository.get_unprocessed_events = AsyncMock(return_value=events)
+        mock_repository.mark_as_processed = AsyncMock()
+
+        with (
+            patch(
+                "app.infrastructure.events.outbox_processor.get_async_database_engine",
+                return_value=mock_engine,
+            ),
+            patch(
+                "app.infrastructure.events.outbox_processor.OutboxRepository",
+                return_value=mock_repository,
+            ),
+            patch(
+                "app.infrastructure.events.outbox_processor.SearchIndexer",
+                return_value=mock_search_indexer,
+            ),
+            patch.object(
+                processor,
+                "_process_journal_sync_event",
+                new_callable=AsyncMock,
+            ) as mock_process_journal_sync_event,
+        ):
+            # Act
+            await processor.process_events()
+
+        # Assert
+        # Should not go to SearchIndexer
+        mock_search_indexer.process_event.assert_not_called()
+
+        # Should go to _process_journal_sync_event
+        mock_process_journal_sync_event.assert_called_once_with(
+            events[0], mock_search_indexer.db_connection
+        )
+
+        # Ensure marked as processed
+        mock_repository.mark_as_processed.assert_called_once_with(
+            "journal-review-event"
+        )

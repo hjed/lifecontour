@@ -40,7 +40,7 @@ class SqlReviewItemRepository(ReviewItemRepository):
             updated_at=row.updated_at,
         )
 
-    async def create(self, review_item: ReviewItem) -> ReviewItem:
+    async def create(self, review_item: ReviewItem) -> tuple[ReviewItem, bool]:
         """Create a review item with idempotency.
 
         Uses ON CONFLICT DO NOTHING on the (source_journal_id, candidate_journal_id)
@@ -89,11 +89,14 @@ class SqlReviewItemRepository(ReviewItemRepository):
                 review_item.candidate_journal_id,
             )
             if existing:
-                return existing
-            # Should not reach here, but return original as fallback
-            return review_item
+                return existing, False
+            # Should not reach here
+            raise RuntimeError(
+                f"Failed to find existing review item after ON CONFLICT DO NOTHING "
+                f"for source={review_item.source_journal_id}, candidate={review_item.candidate_journal_id}"
+            )
 
-        return self._row_to_review_item(row)
+        return self._row_to_review_item(row), True
 
     async def find_pending_by_journal_id(self, journal_id: int) -> list[ReviewItem]:
         """Find all pending review items where a journal is the source."""

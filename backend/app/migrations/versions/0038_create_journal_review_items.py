@@ -26,7 +26,7 @@ def upgrade() -> None:
     op.create_table(
         "journal_review_items",
         sa.Column("id", sa.Integer(), primary_key=True, autoincrement=True),
-        sa.Column("user_id", sa.VARCHAR(length=255), nullable=False),
+        sa.Column("user_id", sa.VARCHAR(length=50), nullable=False),
         sa.Column(
             "source_journal_id",
             sa.Integer(),

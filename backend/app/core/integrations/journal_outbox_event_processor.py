@@ -14,7 +14,6 @@ import structlog
 from core_shared.models.journals import (
     EventDateRange,
     Journal,
-    ReviewItem,
 )
 from core_shared.models.journals.journal_contact_relationship import (
     JournalContactRelationship,
@@ -92,7 +91,6 @@ class JournalOutboxEventProcessor:
         journal_service: JournalService,
         connection: AsyncConnection,
         match_candidate_detector: Any = None,
-        review_item_repository: Any = None,
     ) -> None:
         """
         Initialize the journal outbox event processor.
@@ -101,13 +99,11 @@ class JournalOutboxEventProcessor:
             journal_service: Service for journal operations
             connection: Database connection for transactions
             match_candidate_detector: Optional detector for match candidates
-            review_item_repository: Optional repository for review items
         """
         self.journal_service = journal_service
         self.connection = connection
         self.contact_resolver = ContactResolver(connection)
         self.match_candidate_detector = match_candidate_detector
-        self.review_item_repository = review_item_repository
 
     async def process_event(self, event: OutboxEvent) -> dict[str, Any]:
         """
@@ -136,8 +132,6 @@ class JournalOutboxEventProcessor:
             return await self._process_journal_conflicted(event)
         if event.event_type == EVENT_TYPE_JOURNAL_EVENT_CANCELLED:
             return await self._process_journal_cancelled(event)
-        if event.event_type == EVENT_TYPE_JOURNAL_REVIEW_DETECT_MATCHES:
-            return await self._process_match_detection(event)
 
         raise JournalOutboxEventProcessingError(
             f"Unknown journal event type: {event.event_type}"
@@ -186,9 +180,12 @@ class JournalOutboxEventProcessor:
             contact_relationships=contact_relationships,
         )
 
-        # Phase 1: Emit match detection event (same transaction)
-        # Only emit if match detection is wired (has Gemini API key)
-        if created_journal.event_date_range and self.match_candidate_detector is not None:
+        # Emit match detection event for the outbox to process asynchronously.
+        # We only do this if the match detection dependency is wired (i.e., Gemini is configured).
+        if (
+            created_journal.event_date_range
+            and self.match_candidate_detector is not None
+        ):
             detection_event = OutboxEvent.create_match_detection_event(
                 journal_id=created_journal.id,
                 user_id=created_journal.user_id,
@@ -884,8 +881,9 @@ class JournalOutboxEventProcessor:
     async def _save_outbox_event(self, event: OutboxEvent) -> None:
         """Save a new outbox event within the current transaction.
 
-        This ensures the Phase 2 detection event is committed atomically
-        with the journal creation in Phase 1.
+        Detection event is handled in MatchDetectionEventProcessor.
+        This ensures the match detection event is committed atomically
+        with the journal creation.
 
         Args:
             event: OutboxEvent to persist
@@ -911,120 +909,3 @@ class JournalOutboxEventProcessor:
                 "created_at": now,
             },
         )
-
-    async def _process_match_detection(self, event: OutboxEvent) -> dict[str, Any]:
-        """
-        Process a journal_review.detect_matches event (Phase 2).
-
-        Queries same-day journals, runs AI similarity assessment via
-        MatchCandidateDetector, and creates ReviewItems for matches.
-
-        This runs in its own outbox event — if it fails (e.g. Gemini
-        timeout), the outbox will retry with standard semantics.
-        """
-        from datetime import datetime as dt
-
-        from app.core.journal.services.match_candidate_detector import (
-            CandidateJournalData,
-        )
-
-        if self.match_candidate_detector is None or self.review_item_repository is None:
-            logger.warning(
-                "Match detection dependencies not available, skipping",
-                event_id=event.id,
-            )
-            return {
-                "status": "skipped",
-                "event_type": EVENT_TYPE_JOURNAL_REVIEW_DETECT_MATCHES,
-                "reason": "dependencies_not_available",
-            }
-
-        event_data: dict[str, Any] = event.event_data  # type: ignore
-        journal_id = event_data["journal_id"]
-        user_id = event_data["user_id"]
-        journal_title = event_data["journal_title"]
-        journal_content = event_data.get("journal_content", "")
-        start_str = event_data["event_date_range_start"]
-        end_str = event_data["event_date_range_end"]
-
-        incoming_start = dt.fromisoformat(start_str)
-        incoming_end = dt.fromisoformat(end_str)
-
-        # Query same-day journals for the user (excluding the source journal)
-        same_day_rows = await self.connection.execute(
-            text("""
-                SELECT j.id, j.title, j.content,
-                       j.event_date_range_start, j.event_date_range_end
-                FROM journals j
-                WHERE j.user_id = :user_id
-                  AND j.id != :journal_id
-                  AND DATE(j.event_date_range_start) = DATE(:start_date)
-            """),
-            {
-                "user_id": user_id,
-                "journal_id": journal_id,
-                "start_date": incoming_start,
-            },
-        )
-        rows = same_day_rows.fetchall()
-
-        if not rows:
-            logger.info(
-                "No same-day journals found for match detection",
-                journal_id=journal_id,
-            )
-            return {
-                "status": "success",
-                "event_type": EVENT_TYPE_JOURNAL_REVIEW_DETECT_MATCHES,
-                "journal_id": journal_id,
-                "candidates_found": 0,
-            }
-
-        existing_journals = [
-            CandidateJournalData(
-                id=row.id,
-                title=row.title,
-                content=row.content or "",
-                event_date_range_start=row.event_date_range_start,
-                event_date_range_end=row.event_date_range_end,
-            )
-            for row in rows
-        ]
-
-        # Run AI-assisted match detection
-        candidates = await self.match_candidate_detector.detect_candidates(
-            incoming_title=journal_title,
-            incoming_content=journal_content,
-            incoming_start=incoming_start,
-            incoming_end=incoming_end,
-            existing_journals=existing_journals,
-        )
-
-        # Create review items for each match candidate
-        review_items_created = 0
-        for candidate in candidates:
-            review_item = ReviewItem(
-                user_id=user_id,
-                source_journal_id=journal_id,
-                candidate_journal_id=candidate.journal_id,
-                reason=candidate.reason,
-                confidence_score=candidate.confidence_score,
-                details=candidate.details,
-            )
-            await self.review_item_repository.create(review_item)
-            review_items_created += 1
-
-        logger.info(
-            "Match detection completed",
-            journal_id=journal_id,
-            candidates_found=len(candidates),
-            review_items_created=review_items_created,
-        )
-
-        return {
-            "status": "success",
-            "event_type": EVENT_TYPE_JOURNAL_REVIEW_DETECT_MATCHES,
-            "journal_id": journal_id,
-            "candidates_found": len(candidates),
-            "review_items_created": review_items_created,
-        }

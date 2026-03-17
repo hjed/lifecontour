@@ -97,8 +97,9 @@ class TestReviewItemRepositoryCreate:
             candidate_journal_id=candidate.id,  # type: ignore[arg-type]
         )
 
-        created = await review_item_repository.create(review_item)
+        created, is_new = await review_item_repository.create(review_item)
 
+        assert is_new is True
         assert created.id is not None
         assert created.created_at is not None
         assert created.updated_at is not None
@@ -130,7 +131,7 @@ class TestReviewItemRepositoryCreate:
             details=details,
         )
 
-        created = await review_item_repository.create(review_item)
+        created, _ = await review_item_repository.create(review_item)
 
         assert created.details == details
 
@@ -150,16 +151,18 @@ class TestReviewItemRepositoryCreate:
             candidate_journal_id=candidate.id,  # type: ignore[arg-type]
             confidence_score=0.8,
         )
-        created_first = await review_item_repository.create(first)
+        created_first, is_new_first = await review_item_repository.create(first)
 
         second = _make_review_item(
             source_journal_id=source.id,  # type: ignore[arg-type]
             candidate_journal_id=candidate.id,  # type: ignore[arg-type]
             confidence_score=0.95,  # Different score
         )
-        created_second = await review_item_repository.create(second)
+        created_second, is_new_second = await review_item_repository.create(second)
 
         # Should return the existing item (same ID, original score)
+        assert is_new_first is True
+        assert is_new_second is False
         assert created_second.id == created_first.id
         assert created_second.confidence_score == 0.8  # Original, not 0.95
 
@@ -180,7 +183,7 @@ class TestReviewItemRepositoryCreate:
             reason=ReviewReason.EXTERNAL_LINK_MATCH,
         )
 
-        created = await review_item_repository.create(review_item)
+        created, _ = await review_item_repository.create(review_item)
 
         assert created.reason == ReviewReason.EXTERNAL_LINK_MATCH
 
@@ -204,7 +207,7 @@ class TestReviewItemRepositoryCreate:
             details=None,
         )
 
-        created = await review_item_repository.create(review_item)
+        created, _ = await review_item_repository.create(review_item)
 
         assert created.details is None
 
