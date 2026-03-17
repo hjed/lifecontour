@@ -21,6 +21,7 @@ from app.api.search.schemas import (
     ContactSearchResponse,
     GlobalSearchMeta,
     GlobalSearchResponse,
+    ReindexResponse,
     SearchHealthResponse,
     SearchResultAttributes,
     SearchResultMeta,
@@ -33,6 +34,7 @@ from app.api.search.utils import (
 )
 from app.core.search.exceptions import SearchServiceUnavailableError
 from app.infrastructure.auth.models import SessionUser
+from app.infrastructure.search.reindex_service import ReindexService
 from app.infrastructure.search.search_service import SearchService
 
 logger = structlog.get_logger()
@@ -278,6 +280,52 @@ def get_search_suggestions(
         )
         # For suggestions, we gracefully degrade instead of raising exceptions
         return SearchSuggestionsResponse(suggestions=[], query=q)
+
+
+@authenticated_router.post("/reindex", response_model=ReindexResponse)
+@inject
+async def reindex_search(
+    reindex_service: FromDishka[ReindexService],
+    user: FromDishka[SessionUser],  # Require authentication
+    entity_type: str | None = Query(
+        default=None,
+        description="Entity type to re-index: 'contacts', 'journals', or omit for all",
+    ),
+) -> ReindexResponse:
+    """
+    Trigger a bulk re-index of search data from the database.
+
+    Rebuilds MeiliSearch indices by reading all data from PostgreSQL.
+    Use this after MeiliSearch upgrades or to recover from corrupted indices.
+    """
+    try:
+        if entity_type == "contacts":
+            count = await reindex_service.reindex_contacts()
+            return ReindexResponse(
+                status="completed",
+                contacts_indexed=count,
+                journals_indexed=0,
+                duration_ms=0,
+            )
+        elif entity_type == "journals":
+            count = await reindex_service.reindex_journals()
+            return ReindexResponse(
+                status="completed",
+                contacts_indexed=0,
+                journals_indexed=count,
+                duration_ms=0,
+            )
+        else:
+            result = await reindex_service.reindex_all()
+            return ReindexResponse(
+                status="completed",
+                contacts_indexed=result.contacts_indexed,
+                journals_indexed=result.journals_indexed,
+                duration_ms=result.duration_ms,
+            )
+    except MeilisearchError as e:
+        logger.error("MeiliSearch error during re-index", error=str(e))
+        raise SearchServiceUnavailableError("MeiliSearch", str(e)) from e
 
 
 @public_router.get("/health", response_model=SearchHealthResponse)
