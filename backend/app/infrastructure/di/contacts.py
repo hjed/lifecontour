@@ -29,6 +29,7 @@ from app.core.contacts.services import (
     ContactValidationService,
     TagHierarchyService,
 )
+from app.infrastructure.events.outbox_event_publisher import OutboxEventPublisher
 from app.infrastructure.search.search_service import SearchService
 
 
@@ -56,9 +57,17 @@ class ContactProvider(Provider):
 
     @provide(provides=ContactEventPublisher)
     def get_contact_event_publisher(
-        self, connection: AsyncConnection
-    ) -> SqlContactEventPublisher:
-        return SqlContactEventPublisher(connection)
+        self,
+        connection: AsyncConnection,
+        outbox_pub: OutboxEventPublisher,
+    ) -> ContactEventPublisher:
+        from app.infrastructure.events.dual_contact_event_publisher import (
+            DualContactEventPublisher,
+        )
+
+        return DualContactEventPublisher(
+            SqlContactEventPublisher(connection), outbox_pub
+        )
 
     @provide(provides=ContactRelationshipRepository)
     def get_contact_relationship_repository(

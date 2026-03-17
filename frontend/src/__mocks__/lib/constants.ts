@@ -8,7 +8,11 @@ export const API_ENDPOINTS = {
   },
   CONTACTS: {
     BASE: '/api/contacts',
-    SEARCH: '/api/contacts/search',
+  },
+  SEARCH: {
+    CONTACTS: '/api/search/contacts',
+    GLOBAL: '/api/search/global',
+    SUGGESTIONS: '/api/search/suggestions',
   },
 };
 

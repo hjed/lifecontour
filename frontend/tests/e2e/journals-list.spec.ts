@@ -6,6 +6,7 @@
  */
 
 import { test, expect } from './fixtures';
+import { waitForContactSearchIndexing } from './utils/test-helpers';
 
 test.describe('Journal List Page', () => {
   test.describe('Basic Display', () => {
@@ -511,6 +512,13 @@ test.describe('Journal List Page', () => {
         await dataManager.cleanup();
       });
 
+      // Wait for MeiliSearch to index the contacts before searching
+      await waitForContactSearchIndexing(
+        page,
+        contacts[0].firstName,
+        `${contacts[0].firstName} ${contacts[0].lastName}`
+      );
+
       // Navigate to journals page
       await page.goto('/journals');
       await page.waitForLoadState('networkidle');
@@ -782,6 +790,13 @@ test.describe('Journal List Page', () => {
       testCleanup(async () => {
         await dataManager.cleanup();
       });
+
+      // Wait for MeiliSearch to index the contact before searching
+      await waitForContactSearchIndexing(
+        page,
+        contacts[0].firstName,
+        `${contacts[0].firstName} ${contacts[0].lastName}`
+      );
 
       // Navigate to journals page
       await page.goto('/journals');

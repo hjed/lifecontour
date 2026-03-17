@@ -7,6 +7,7 @@
 
 import { test, expect } from './fixtures';
 import { TestDataManager } from './data-management';
+import { waitForContactSearchIndexing } from './utils/test-helpers';
 
 // Helper to get ordinal suffix for a day number (e.g., 1 -> 'st')
 function getOrdinal(n: number) {
@@ -508,6 +509,13 @@ test.describe('Journal Detail Page', () => {
       });
 
       testCleanup(async () => await dataManager.cleanup());
+
+      // Wait for MeiliSearch to index the contact before searching
+      await waitForContactSearchIndexing(
+        page,
+        contact.firstName,
+        `${contact.firstName} ${contact.lastName}`
+      );
 
       await page.goto(`/journals/${journal.id}`);
       await page.waitForLoadState('networkidle');

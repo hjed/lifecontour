@@ -1418,3 +1418,46 @@ export class ReliableWaiter {
     await this.page.waitForLoadState('networkidle', { timeout: 10000 });
   }
 }
+
+/**
+ * Wait until MeiliSearch has indexed a contact matching the given search term.
+ *
+ * Uses Playwright's `expect.toPass()` for idiomatic retry/timeout behaviour
+ * instead of manual `waitForTimeout` loops.  The request is made via
+ * `page.request.get()` so it works even when the page has not navigated yet
+ * (relative URLs resolve against the configured `baseURL`).
+ *
+ * Required because `ContactSearchCombobox` searches via MeiliSearch
+ * (`/api/search/contacts`) rather than the REST list endpoint, so newly
+ * created contacts must be indexed before they appear in search results.
+ */
+export async function waitForContactSearchIndexing(
+  page: Page,
+  searchTerm: string,
+  expectedName: string,
+  timeoutMs: number = 30_000
+): Promise<void> {
+  await expect(async () => {
+    const res = await page.request.get(
+      `/api/search/contacts?q=${encodeURIComponent(searchTerm)}&limit=20`
+    );
+    expect(res.ok()).toBe(true);
+
+    const data = await res.json();
+    const names = (
+      (data.data as Array<{
+        attributes?: { first_name?: string; last_name?: string };
+      }>) ?? []
+    ).map(c =>
+      `${c.attributes?.first_name ?? ''} ${c.attributes?.last_name ?? ''}`.trim()
+    );
+
+    const found = names.some((n: string) =>
+      n.toLowerCase().includes(expectedName.toLowerCase())
+    );
+    expect(found).toBe(true);
+  }).toPass({
+    timeout: timeoutMs,
+    intervals: [1_000, 1_000, 2_000, 2_000, 5_000],
+  });
+}
