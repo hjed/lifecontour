@@ -120,7 +120,9 @@ class OutboxProcessor:
             # Route contact sync events to OutboxEventProcessor
             if event.event_type.startswith("contact."):
                 await self._process_contact_event(event, search_indexer.db_connection)
-            elif event.event_type.startswith("journal_event."):
+            elif event.event_type.startswith(
+                "journal_event."
+            ) or event.event_type.startswith("journal_review."):
                 await self._process_journal_sync_event(
                     event, search_indexer.db_connection
                 )
@@ -231,8 +233,11 @@ class OutboxProcessor:
         """
         Process inbound journal sync events using JournalOutboxEventProcessor.
 
+        Handles both journal_event.* (Phase 1: create/update journals) and
+        journal_review.* (Phase 2: detect matches) events.
+
         Args:
-            event: Journal sync event (journal_event.created, .updated, .conflicted)
+            event: Journal sync or review event
             connection: Database connection for transaction
         """
         from app.core.integrations.journal_outbox_event_processor import (
@@ -241,7 +246,17 @@ class OutboxProcessor:
         from app.core.journal.adapters.sql.journal_repository import (
             SqlJournalRepository,
         )
+        from app.core.journal.adapters.sql.review_item_repository import (
+            SqlReviewItemRepository,
+        )
         from app.core.journal.services.journal_service import JournalService
+        from app.core.journal.services.match_candidate_detector import (
+            MatchCandidateDetector,
+        )
+        from app.core.journal.services.title_similarity_assessor import (
+            GeminiTitleSimilarityAssessor,
+        )
+        from app.infrastructure.config import get_settings
         from app.infrastructure.events.outbox_event_publisher import (
             OutboxEventPublisher,
         )
@@ -254,8 +269,24 @@ class OutboxProcessor:
             event_publisher=event_publisher,
         )
 
+        # Create match detection dependencies
+        settings = get_settings()
+        review_item_repo = SqlReviewItemRepository(connection)
+        similarity_assessor = GeminiTitleSimilarityAssessor(
+            api_key=settings.gemini_api_key,
+            model=settings.gemini_model,
+        )
+        match_detector = MatchCandidateDetector(
+            similarity_assessor=similarity_assessor,
+        )
+
         # Create and run processor
-        processor = JournalOutboxEventProcessor(journal_service, connection)
+        processor = JournalOutboxEventProcessor(
+            journal_service=journal_service,
+            connection=connection,
+            match_candidate_detector=match_detector,
+            review_item_repository=review_item_repo,
+        )
         result = await processor.process_event(event)
 
         logger.info(

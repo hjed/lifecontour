@@ -30,6 +30,7 @@ from .repositories import (
     OutdoorActivityDataRepository,
     PhotoAlbumDataRepository,
     PlanDataRepository,
+    ReviewItemRepository,
     RouteRepository,
     TravelDataRepository,
 )
@@ -67,4 +68,5 @@ __all__ = [
     "JoggingDataRepository",
     "KayakingDataRepository",
     "OutdoorActivityDataRepository",
+    "ReviewItemRepository",
 ]

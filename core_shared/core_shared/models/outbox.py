@@ -199,6 +199,48 @@ class OutboxEvent(Base):
             aggregate_id=existing_journal_id or 0,
         )
 
+    @classmethod
+    def create_match_detection_event(
+        cls,
+        journal_id: int,
+        user_id: str,
+        journal_title: str,
+        journal_content: str,
+        event_date_range_start: str,
+        event_date_range_end: str,
+    ) -> "OutboxEvent":
+        """
+        Create an outbox event to trigger match candidate detection.
+
+        This is the Phase 2 event in the two-phase outbox pattern:
+        Phase 1 creates the journal + emits this event (same transaction),
+        Phase 2 processes this event to detect matches via AI assessment.
+
+        Args:
+            journal_id: ID of the newly created journal
+            user_id: User who owns the journal
+            journal_title: Title for similarity comparison
+            journal_content: Content for similarity comparison
+            event_date_range_start: ISO start datetime for date gating
+            event_date_range_end: ISO end datetime for date gating
+
+        Returns:
+            OutboxEvent instance ready to be saved
+        """
+        return cls(
+            event_type="journal_review.detect_matches",
+            event_data={
+                "journal_id": journal_id,
+                "user_id": user_id,
+                "journal_title": journal_title,
+                "journal_content": journal_content,
+                "event_date_range_start": event_date_range_start,
+                "event_date_range_end": event_date_range_end,
+                "created_at": datetime.now(UTC).isoformat(),
+            },
+            aggregate_id=journal_id,
+        )
+
     def is_failed(self) -> bool:
         """Check if the event has failed processing."""
         return bool(self.retry_count >= 3 and self.processed_at is None)

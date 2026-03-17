@@ -86,6 +86,7 @@ from .mood_data import MoodData
 from .outdoor_activity_data import OutdoorActivityData
 from .photo_album_data import PhotoAlbumData
 from .plan_data import PlanData, PlanDocument
+from .review_item import ReviewItem, ReviewReason
 from .travel_data import (
     TravelAccommodation,
     TravelData,
@@ -149,10 +150,12 @@ __all__ = [
     "KayakingData",
     "CrossCountrySkiingData",
     "JoggingData",
+    "ReviewItem",
     # Enums
     "EventState",
     "JournalType",
     "JournalContactRelationshipType",
+    "ReviewReason",
     # Exceptions
     "JournalDomainError",
     "JournalCycleError",

@@ -142,6 +142,16 @@ class Settings(BaseSettings):
     immich_base_url: str = Field(default="", description="Immich instance base URL")
     immich_api_key: str = Field(default="", description="Immich API key")
 
+    # Gemini AI settings (for journal match detection)
+    gemini_api_key: str = Field(
+        default="",
+        description="Google Gemini API key for AI-assisted journal matching",
+    )
+    gemini_model: str = Field(
+        default="gemini-2.0-flash",
+        description="Gemini model to use for similarity assessment",
+    )
+
     # Observability
     enable_telemetry: bool = Field(
         default=False, description="Enable OpenTelemetry instrumentation"

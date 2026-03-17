@@ -42,6 +42,7 @@ dependencies = [
     "cryptography>=41.0.0",
     "aiohttp>=3.9.0",
     "gpxpy>=1.6.0",
+    "google-generativeai>=0.8.0",
 ]
 
 [tool.uv.sources]
@@ -132,6 +133,7 @@ module = [
     "opentelemetry.exporter.otlp.proto.http.trace_exporter",
     "googleapiclient.*",
     "gpxpy.*",
+    "google.generativeai.*",
 ]
 ignore_missing_imports = true
 
