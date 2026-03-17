@@ -138,7 +138,7 @@ services:
       - postgres_dev_data:/var/lib/postgresql/data
 
   meilisearch:
-    image: getmeili/meilisearch:v1.2
+    image: getmeili/meilisearch:v1.38
     environment:
       MEILI_MASTER_KEY: dev_master_key
       MEILI_ENV: development
@@ -216,7 +216,7 @@ services:
       retries: 3
 
   meilisearch:
-    image: getmeili/meilisearch:v1.2
+    image: getmeili/meilisearch:v1.38
     restart: unless-stopped
     environment:
       MEILI_MASTER_KEY: ${MEILISEARCH_MASTER_KEY}

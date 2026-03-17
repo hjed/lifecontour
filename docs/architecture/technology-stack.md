@@ -42,7 +42,7 @@ This document outlines the technology choices optimized for AI assistant underst
 - **Search Engine**: MeiliSearch with official Python SDK (meilisearch-python)
 
 ### Search and Event Processing
-- **Search Engine**: MeiliSearch 1.2+ (fast, typo-tolerant search)
+- **Search Engine**: MeiliSearch 1.38+ (fast, typo-tolerant search)
 - **Search Client**: meilisearch-python (official Python SDK)
 - **Search Architecture**: Event-driven indexing via transactional outbox pattern
 - **Event Publishing**: Transactional outbox pattern with FastAPI background tasks
@@ -153,7 +153,7 @@ personal-management-system/
 - **Backend Container**: Python FastAPI with UV
 - **Frontend Container**: Next.js with pnpm
 - **Database Container**: PostgreSQL 15+
-- **Search Container**: MeiliSearch 1.2+
+- **Search Container**: MeiliSearch 1.38+
 - **Queue Container**: Redis 7+ for ARQ task queue
 - **Worker Containers**: Separate containers per integration (optional)
 - **Reverse Proxy**: nginx for routing
@@ -193,7 +193,7 @@ For detailed testing patterns, implementation guidelines, and examples, see [Tes
 - **Backend**: Python FastAPI with UV dependencies
 - **Frontend**: Next.js with pnpm dependencies
 - **Database**: PostgreSQL 15+ with persistent volumes
-- **Search**: MeiliSearch 1.2+ with persistent volumes
+- **Search**: MeiliSearch 1.38+ with persistent volumes
 - **Queue**: Redis 7+ for task queue
 - **Workers**: Integration worker processes (optional separate containers)
 - **Proxy**: nginx for routing and SSL termination

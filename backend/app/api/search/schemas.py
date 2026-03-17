@@ -133,3 +133,12 @@ class SearchHealthResponse(BaseModel):
         default_factory=list, description="Index information"
     )
     error: str | None = Field(default=None, description="Error message if any")
+
+
+class ReindexResponse(BaseModel):
+    """Response model for re-index operations."""
+
+    status: str = Field(..., description="Operation status")
+    contacts_indexed: int = Field(..., description="Number of contacts indexed")
+    journals_indexed: int = Field(..., description="Number of journals indexed")
+    duration_ms: int = Field(..., description="Operation duration in milliseconds")

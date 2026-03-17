@@ -5,9 +5,11 @@ Handles search-related HTTP endpoints including contact search,
 global search, and search suggestions following JSON API specification.
 """
 
+from typing import Literal
+
 import structlog
 from dishka.integrations.fastapi import FromDishka, inject
-from fastapi import APIRouter, Query, Request
+from fastapi import APIRouter, HTTPException, Query, Request
 from meilisearch.errors import MeilisearchError
 
 from app.api.common.schemas import (
@@ -21,6 +23,7 @@ from app.api.search.schemas import (
     ContactSearchResponse,
     GlobalSearchMeta,
     GlobalSearchResponse,
+    ReindexResponse,
     SearchHealthResponse,
     SearchResultAttributes,
     SearchResultMeta,
@@ -33,6 +36,8 @@ from app.api.search.utils import (
 )
 from app.core.search.exceptions import SearchServiceUnavailableError
 from app.infrastructure.auth.models import SessionUser
+from app.infrastructure.config import Settings
+from app.infrastructure.search.reindex_service import ReindexService
 from app.infrastructure.search.search_service import SearchService
 
 logger = structlog.get_logger()
@@ -278,6 +283,63 @@ def get_search_suggestions(
         )
         # For suggestions, we gracefully degrade instead of raising exceptions
         return SearchSuggestionsResponse(suggestions=[], query=q)
+
+
+@authenticated_router.post("/reindex", response_model=ReindexResponse)
+@inject
+async def reindex_search(
+    reindex_service: FromDishka[ReindexService],
+    settings: FromDishka[Settings],
+    user: FromDishka[SessionUser],
+    entity_type: Literal["contacts", "journals"] | None = Query(
+        default=None,
+        description="Entity type to re-index: 'contacts', 'journals', or omit for all",
+    ),
+) -> ReindexResponse:
+    """
+    Trigger a bulk re-index of search data from the database.
+
+    Rebuilds MeiliSearch indices by reading all data from PostgreSQL.
+    Use this after MeiliSearch upgrades or to recover from corrupted indices.
+
+    Gated behind the ENABLE_REINDEX_ENDPOINT environment variable
+    (disabled by default for safety).
+    """
+    if not settings.enable_reindex_endpoint:
+        raise HTTPException(
+            status_code=404,
+            detail="Re-index endpoint is disabled. "
+            "Set ENABLE_REINDEX_ENDPOINT=true to enable.",
+        )
+
+    try:
+        if entity_type == "contacts":
+            result = await reindex_service.reindex_contacts()
+            return ReindexResponse(
+                status="completed",
+                contacts_indexed=result.count,
+                journals_indexed=0,
+                duration_ms=result.duration_ms,
+            )
+        elif entity_type == "journals":
+            result = await reindex_service.reindex_journals()
+            return ReindexResponse(
+                status="completed",
+                contacts_indexed=0,
+                journals_indexed=result.count,
+                duration_ms=result.duration_ms,
+            )
+        else:
+            full_result = await reindex_service.reindex_all()
+            return ReindexResponse(
+                status="completed",
+                contacts_indexed=full_result.contacts_indexed,
+                journals_indexed=full_result.journals_indexed,
+                duration_ms=full_result.duration_ms,
+            )
+    except MeilisearchError as e:
+        logger.error("MeiliSearch error during re-index", error=str(e))
+        raise SearchServiceUnavailableError("MeiliSearch", str(e)) from e
 
 
 @public_router.get("/health", response_model=SearchHealthResponse)
