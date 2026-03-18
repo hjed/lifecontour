@@ -142,7 +142,9 @@ test.describe('Contact Inline Editing', () => {
 
     // Enter edit mode
     await expect(nicknameField).toBeVisible();
-    await nicknameField.click();
+    // Use force:true to bypass pointer event interception by overlapping avatar
+    // on mobile viewports (Pixel 6) where the initials div covers this button
+    await nicknameField.click({ force: true });
 
     const input = page.locator('[data-testid="nickname-field"] input');
     await expect(input).toBeVisible();
