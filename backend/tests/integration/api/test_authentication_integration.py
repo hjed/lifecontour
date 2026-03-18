@@ -143,14 +143,11 @@ class TestAuthenticationIntegration:
             "params": {"name": "get_contact", "arguments": {"contact_id": 1}},
         }
         response = client.post(
-            "/mcp-server/mcp",
+            "/mcp-server",
             json=mcp_request,
             headers={"Host": "localhost", "Content-Type": "application/json"},
         )
         assert response.status_code == 401
-        data = response.json()
-        assert "error" in data
-        assert "Unauthorized" in data["error"]
 
     def test_mcp_search_contacts_requires_auth(self, client):
         """Test that MCP search_contacts tool requires authentication."""
@@ -159,14 +156,11 @@ class TestAuthenticationIntegration:
             "params": {"name": "search_contacts", "arguments": {"query": "test"}},
         }
         response = client.post(
-            "/mcp-server/mcp",
+            "/mcp-server",
             json=mcp_request,
             headers={"Host": "localhost", "Content-Type": "application/json"},
         )
         assert response.status_code == 401
-        data = response.json()
-        assert "error" in data
-        assert "Unauthorized" in data["error"]
 
     def test_mcp_create_contact_requires_auth(self, client):
         """Test that MCP create_contact tool requires authentication."""
@@ -178,14 +172,11 @@ class TestAuthenticationIntegration:
             },
         }
         response = client.post(
-            "/mcp-server/mcp",
+            "/mcp-server",
             json=mcp_request,
             headers={"Host": "localhost", "Content-Type": "application/json"},
         )
         assert response.status_code == 401
-        data = response.json()
-        assert "error" in data
-        assert "Unauthorized" in data["error"]
 
     def test_mcp_list_contacts_requires_auth(self, client):
         """Test that MCP list_contacts tool requires authentication."""
@@ -194,14 +185,11 @@ class TestAuthenticationIntegration:
             "params": {"name": "list_contacts", "arguments": {"page": 1}},
         }
         response = client.post(
-            "/mcp-server/mcp",
+            "/mcp-server",
             json=mcp_request,
             headers={"Host": "localhost", "Content-Type": "application/json"},
         )
         assert response.status_code == 401
-        data = response.json()
-        assert "error" in data
-        assert "Unauthorized" in data["error"]
 
     def test_mcp_global_search_requires_auth(self, client):
         """Test that MCP global_search tool requires authentication."""
@@ -210,11 +198,8 @@ class TestAuthenticationIntegration:
             "params": {"name": "global_search", "arguments": {"query": "test"}},
         }
         response = client.post(
-            "/mcp-server/mcp",
+            "/mcp-server",
             json=mcp_request,
             headers={"Host": "localhost", "Content-Type": "application/json"},
         )
         assert response.status_code == 401
-        data = response.json()
-        assert "error" in data
-        assert "Unauthorized" in data["error"]

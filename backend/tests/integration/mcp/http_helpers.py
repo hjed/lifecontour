@@ -86,7 +86,7 @@ def mcp_headers(session_id: str | None = None) -> dict[str, str]:
 async def initialize_mcp_session(authenticated_client: Any) -> str:
     """Initialize a streamable HTTP MCP session and return the session id."""
     initialize_response = await authenticated_client.post(
-        "/mcp-server/mcp",
+        "/mcp-server",
         json={
             "jsonrpc": "2.0",
             "id": 1,
@@ -108,7 +108,7 @@ async def initialize_mcp_session(authenticated_client: Any) -> str:
     assert isinstance(session_id, str)
 
     initialized_response = await authenticated_client.post(
-        "/mcp-server/mcp",
+        "/mcp-server",
         json={
             "jsonrpc": "2.0",
             "method": "notifications/initialized",

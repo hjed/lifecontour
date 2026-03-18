@@ -7,7 +7,7 @@ middleware setup, and route registration.
 
 import asyncio
 from collections.abc import AsyncGenerator
-from contextlib import AsyncExitStack, asynccontextmanager
+from contextlib import asynccontextmanager
 
 import structlog
 from dishka.integrations.fastapi import setup_dishka
@@ -91,33 +91,16 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             endpoint=settings.otel_exporter_otlp_endpoint,
         )
 
-    mcp_app = getattr(app.state, "mcp_app", None)
-    mcp_lifespan = getattr(mcp_app, "lifespan", None) if mcp_app is not None else None
-
     # Start background tasks
     outbox_task = None
     try:
-        async with AsyncExitStack() as exit_stack:
-            if mcp_lifespan is not None:
-                await exit_stack.enter_async_context(mcp_lifespan(mcp_app))
-                logger.info(
-                    "MCP: Mounted app lifespan started",
-                    endpoint=f"{settings.mcp_mount_path}/mcp",
-                )
+        # Start outbox processor background task
+        outbox_task = asyncio.create_task(
+            run_outbox_processor_loop(container, interval_seconds=10)
+        )
+        logger.info("Outbox processor background task started")
 
-            # Start outbox processor background task
-            outbox_task = asyncio.create_task(
-                run_outbox_processor_loop(container, interval_seconds=10)
-            )
-            logger.info("Outbox processor background task started")
-
-            yield
-
-        if mcp_lifespan is not None:
-            logger.info(
-                "MCP: Mounted app lifespan stopped",
-                endpoint=f"{settings.mcp_mount_path}/mcp",
-            )
+        yield
 
     finally:
         # Cleanup background tasks
@@ -188,13 +171,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         allowed_hosts=settings.allowed_hosts,
     )
 
-    # CORS middleware
+    # CORS middleware — include MCP-specific headers for browser clients
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origins,
         allow_credentials=True,
         allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH"],
         allow_headers=["*"],
+        expose_headers=["mcp-session-id", "mcp-protocol-version"],
     )
 
     register_error_handlers(app)
@@ -217,13 +201,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         logger = structlog.get_logger()
         logger.info("MCP: Mounting MCP server", mount_path=settings.mcp_mount_path)
 
-        mcp_app = create_mcp_app(container, disable_auth=settings.disable_auth)
+        mcp_app = create_mcp_app(container, settings)
         app.state.mcp_app = mcp_app
         app.mount(settings.mcp_mount_path, mcp_app)  # type: ignore[arg-type]
 
         logger.info(
             "MCP: Server mounted successfully",
-            endpoint=f"{settings.mcp_mount_path}/mcp",
+            endpoint=settings.mcp_mount_path,
         )
 
     return app

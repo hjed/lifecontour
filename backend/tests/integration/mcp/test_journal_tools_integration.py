@@ -269,7 +269,7 @@ class TestJournalToolsIntegration:
             session_id = await initialize_mcp_session(authenticated_client)
 
             response = await authenticated_client.post(
-                "/mcp-server/mcp",
+                "/mcp-server",
                 json={
                     "jsonrpc": "2.0",
                     "id": 2,
@@ -335,7 +335,7 @@ class TestJournalToolsIntegration:
             assert journal_response.status_code == 201
 
             response = await authenticated_client.post(
-                "/mcp-server/mcp",
+                "/mcp-server",
                 json={
                     "jsonrpc": "2.0",
                     "id": 2,
@@ -784,7 +784,7 @@ class TestActivityMcpToolsMountedIntegration:
         arguments: dict[str, Any],
     ) -> dict[str, Any]:
         response = await authenticated_client.post(
-            "/mcp-server/mcp",
+            "/mcp-server",
             json={
                 "jsonrpc": "2.0",
                 "id": 2,

@@ -37,8 +37,8 @@ class TestMCPFastAPIIntegration:
 
     def test_mcp_endpoint_exists(self, client):
         """Test that MCP endpoint is accessible."""
-        # MCP endpoint should be mounted at /mcp-server/mcp
-        response = client.get("/mcp-server/mcp")
+        # MCP endpoint should be mounted at /mcp-server
+        response = client.get("/mcp-server")
 
         # Should not return 404 (endpoint exists)
         # May return 401 (authentication required) or other status
@@ -48,7 +48,7 @@ class TestMCPFastAPIIntegration:
         """Test that MCP endpoint requires authentication."""
         # Try to access MCP endpoint without session
         # Use a simple GET request first to check if endpoint exists
-        response = client.get("/mcp-server/mcp")
+        response = client.get("/mcp-server")
 
         # Should require authentication (401) or be a valid MCP response
         # FastMCP might return different status codes for different request types
@@ -90,5 +90,5 @@ class TestMCPFastAPIIntegration:
         client = TestClient(app)
 
         # Should be mounted at custom path
-        response = client.get("/custom-mcp/mcp")
+        response = client.get("/custom-mcp")
         assert response.status_code != 404

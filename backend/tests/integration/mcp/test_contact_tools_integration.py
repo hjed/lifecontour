@@ -681,7 +681,7 @@ class TestContactToolsIntegration:
         async with authenticated_lifespan_client() as authenticated_client:
             session_id = await initialize_mcp_session(authenticated_client)
             response = await authenticated_client.post(
-                "/mcp-server/mcp",
+                "/mcp-server",
                 json={
                     "jsonrpc": "2.0",
                     "id": 2,

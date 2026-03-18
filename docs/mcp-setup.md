@@ -4,7 +4,7 @@ This document describes how to set up and configure the MCP (Model Context Proto
 
 ## Overview
 
-The MCP server provides AI access to personal management data through the Model Context Protocol. It's built using FastMCP v2 and integrates seamlessly with the existing FastAPI application.
+The MCP server provides AI access to personal management data through the Model Context Protocol. It's built using FastMCP v3 and integrates seamlessly with the existing FastAPI application.
 
 ## Architecture
 
@@ -15,19 +15,18 @@ The MCP implementation follows the same domain-based architecture as the rest of
 ```
 backend/app/mcp/
 ├── __init__.py
-├── server.py              # Main FastMCP server composition
+├── server.py              # Main FastMCP server composition + OAuth auth factory
 ├── domains/               # Domain-specific MCP tools
 │   ├── __init__.py
 │   ├── contacts/          # Contact domain MCP tools
 │   │   ├── __init__.py
 │   │   ├── tools.py       # Contact MCP tools
 │   │   └── schemas.py     # Contact MCP schemas
-│   ├── journal/           # Future: Journal domain MCP tools
+│   ├── journals/          # Journal domain MCP tools
 │   ├── calendar/          # Future: Calendar domain MCP tools
 │   └── photos/            # Future: Photos domain MCP tools
 ├── auth/                  # MCP authentication
-│   ├── __init__.py
-│   └── session_auth.py    # Session-based auth integration
+│   └── __init__.py
 └── shared/                # Shared MCP utilities
     ├── __init__.py
     └── dependencies.py    # MCP dependency injection helpers
@@ -38,8 +37,8 @@ backend/app/mcp/
 The MCP server is mounted as a sub-application in the main FastAPI app:
 
 - **Mount Path**: `/mcp-server` (configurable via `MCP_MOUNT_PATH`)
-- **MCP Endpoint**: `/mcp-server/mcp`
-- **Authentication**: Shared OAuth session with REST API
+- **MCP Endpoint**: `/mcp-server`
+- **Authentication**: OAuth via FastMCP's built-in providers (GitHub, Google, Discord, or generic OAuth)
 - **Transport**: Streamable HTTP for web compatibility
 
 ## Configuration
@@ -52,6 +51,7 @@ Add these to your `.env` file:
 # MCP Configuration
 MCP_ENABLED=true
 MCP_MOUNT_PATH=/mcp-server
+MCP_BASE_URL=http://localhost:8000    # External base URL for OAuth callbacks
 ```
 
 ### Settings
@@ -63,6 +63,7 @@ class Settings(BaseSettings):
     # MCP settings
     mcp_enabled: bool = Field(default=True, description="Enable MCP server")
     mcp_mount_path: str = Field(default="/mcp-server", description="MCP server mount path")
+    mcp_base_url: str = Field(default="http://localhost:8000", description="External base URL for MCP OAuth")
 ```
 
 ## Available Tools
@@ -96,17 +97,34 @@ AI-friendly JSON containing:
 
 ## Authentication
 
-The MCP server uses the same OAuth session authentication as the REST API:
+The MCP server uses OAuth authentication via FastMCP's built-in providers:
 
-1. **Session Validation**: Requests must include valid session cookies
-2. **User Context**: Authenticated user information is available to MCP tools
-3. **Authorization**: Same permissions as REST API endpoints
+1. **OAuth Proxy**: FastMCP acts as an OAuth proxy, bridging MCP clients with your configured OAuth provider
+2. **Provider Auto-Selection**: The first configured provider is used (priority: generic OAuth → GitHub → Google → Discord)
+3. **User Context**: Authenticated user information is available to MCP tools via OAuth tokens
 
-### Session Requirements
+### OAuth Provider Setup
 
-- Valid OAuth session (GitHub, Microsoft, Discord, or generic OAuth2)
-- Session must contain user data: `id`, `email`, `name`, `provider`
-- Session cookies must be included in MCP requests
+The MCP auth factory auto-selects based on configured OAuth credentials in your `.env`:
+
+| Provider | Required Settings |
+|----------|------------------|
+| Generic OAuth | `OAUTH_CLIENT_ID`, `OAUTH_CLIENT_SECRET`, `OAUTH_AUTHORIZATION_URL`, `OAUTH_TOKEN_URL` |
+| GitHub | `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET` |
+| Google | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` |
+| Discord | `DISCORD_CLIENT_ID`, `DISCORD_CLIENT_SECRET` |
+
+### OAuth Callback URL
+
+> **Important**: You must register the MCP callback URL as an authorized redirect URI in your OAuth provider's app settings:
+>
+> ```
+> {MCP_BASE_URL}{MCP_MOUNT_PATH}/auth/callback
+> ```
+>
+> For example: `https://your-domain.com/mcp-server/auth/callback`
+>
+> This is separate from the frontend OAuth callback URL.
 
 ## Development
 
@@ -194,6 +212,7 @@ Check logs for MCP-specific messages:
 
 ## References
 
-- [FastMCP v2 Documentation](https://gofastmcp.com/llms.txt)
-- [FastAPI Integration Guide](https://gofastmcp.com/deployment/asgi.md)
+- [FastMCP v3 Documentation](https://gofastmcp.com)
+- [FastMCP Auth Providers](https://gofastmcp.com/servers/auth)
+- [FastMCP FastAPI Integration](https://gofastmcp.com/integrations/fastapi)
 - [Model Context Protocol Specification](https://modelcontextprotocol.io/)

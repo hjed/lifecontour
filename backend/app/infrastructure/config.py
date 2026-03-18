@@ -88,6 +88,10 @@ class Settings(BaseSettings):
     mcp_mount_path: str = Field(
         default="/mcp-server", description="MCP server mount path"
     )
+    mcp_base_url: str = Field(
+        default="http://localhost:8000",
+        description="External base URL for MCP OAuth (e.g. https://your-domain.com)",
+    )
     meilisearch_api_key: str = Field(default="", description="MeiliSearch API key")
     search_index_prefix: str = Field(
         default="pms_", description="Prefix for search indices"
