@@ -202,13 +202,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         logger.info("MCP: Mounting MCP server", mount_path=settings.mcp_mount_path)
 
         mcp_app = create_mcp_app(container, settings)
-        app.state.mcp_app = mcp_app
-        app.mount(settings.mcp_mount_path, mcp_app)  # type: ignore[arg-type]
+        if mcp_app is not None:
+            app.state.mcp_app = mcp_app
+            app.mount(settings.mcp_mount_path, mcp_app)  # type: ignore[arg-type]
 
-        logger.info(
-            "MCP: Server mounted successfully",
-            endpoint=settings.mcp_mount_path,
-        )
+            logger.info(
+                "MCP: Server mounted successfully",
+                endpoint=settings.mcp_mount_path,
+            )
+        else:
+            logger.warning("MCP: Server NOT mounted — no valid auth provider available")
 
     return app
 

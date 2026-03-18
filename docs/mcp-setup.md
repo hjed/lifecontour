@@ -108,8 +108,8 @@ The MCP server uses OAuth authentication via FastMCP's built-in providers:
 The MCP auth factory auto-selects based on configured OAuth credentials in your `.env`:
 
 | Provider | Required Settings |
-|----------|------------------|
-| Generic OAuth | `OAUTH_CLIENT_ID`, `OAUTH_CLIENT_SECRET`, `OAUTH_AUTHORIZATION_URL`, `OAUTH_TOKEN_URL` |
+|---|---|
+| Generic OAuth | `OAUTH_CLIENT_ID`, `OAUTH_CLIENT_SECRET`, `OAUTH_AUTHORIZATION_URL`, `OAUTH_TOKEN_URL`, `OAUTH_INTROSPECTION_URL` |
 | GitHub | `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET` |
 | Google | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` |
 | Discord | `DISCORD_CLIENT_ID`, `DISCORD_CLIENT_SECRET` |

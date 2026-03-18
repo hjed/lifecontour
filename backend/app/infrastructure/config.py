@@ -140,6 +140,10 @@ class Settings(BaseSettings):
     oauth_userinfo_url: str = Field(
         default="", description="Generic OAuth user info URL"
     )
+    oauth_introspection_url: str = Field(
+        default="",
+        description="Generic OAuth RFC 7662 token introspection URL for MCP auth",
+    )
 
     # External services
     google_client_id: str = Field(default="", description="Google OAuth client ID")

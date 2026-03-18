@@ -33,7 +33,7 @@ class TestCreateMcpAuthProvider:
         assert result is None
 
     def test_returns_none_when_no_providers_configured(self) -> None:
-        """When no OAuth credentials are set, returns None."""
+        """When no OAuth credentials are set and auth not disabled, returns None."""
         settings = self._settings()
         result = _create_mcp_auth_provider(settings)
         assert result is None
@@ -45,7 +45,7 @@ class TestCreateMcpAuthProvider:
             oauth_client_secret="generic-secret",
             oauth_authorization_url="https://auth.example.com/authorize",
             oauth_token_url="https://auth.example.com/token",
-            oauth_userinfo_url="https://auth.example.com/userinfo",
+            oauth_introspection_url="https://auth.example.com/introspect",
             github_client_id="github-id",
             github_client_secret="github-secret",
         )
@@ -120,18 +120,42 @@ class TestCreateMcpAuthProvider:
         )
         result = _create_mcp_auth_provider(settings)
         assert result is not None
-        # GitHubProvider stores base_url — check it includes the mount path
-        assert hasattr(result, "_base_url") or hasattr(result, "base_url")
+        assert str(result.base_url) == "https://example.com/mcp"
 
-    def test_generic_oauth_requires_all_fields(self) -> None:
-        """Generic OAuth is not selected when only some fields are set."""
+    def test_base_url_normalized_trailing_slash(self) -> None:
+        """Trailing slash on base URL and missing leading slash on mount path are handled."""
+        settings = self._settings(
+            mcp_base_url="https://example.com/",
+            mcp_mount_path="mcp-server",
+            github_client_id="gh-id",
+            github_client_secret="gh-secret",
+        )
+        result = _create_mcp_auth_provider(settings)
+        assert result is not None
+        assert str(result.base_url) == "https://example.com/mcp-server"
+
+    def test_base_url_normalized_double_slash(self) -> None:
+        """Double slashes between base URL and mount path are prevented."""
+        settings = self._settings(
+            mcp_base_url="https://example.com/",
+            mcp_mount_path="/mcp-server",
+            github_client_id="gh-id",
+            github_client_secret="gh-secret",
+        )
+        result = _create_mcp_auth_provider(settings)
+        assert result is not None
+        assert str(result.base_url) == "https://example.com/mcp-server"
+
+    def test_generic_oauth_requires_introspection_url(self) -> None:
+        """Generic OAuth is not selected when introspection URL is missing."""
         settings = self._settings(
             oauth_client_id="generic-id",
             oauth_client_secret="generic-secret",
-            # Missing oauth_authorization_url and oauth_token_url
+            oauth_authorization_url="https://auth.example.com/authorize",
+            oauth_token_url="https://auth.example.com/token",
+            # Missing oauth_introspection_url — falls through to None
         )
         result = _create_mcp_auth_provider(settings)
-        # Should not select generic OAuth — all 4 fields are required
         assert result is None
 
     @pytest.mark.parametrize(
@@ -141,6 +165,7 @@ class TestCreateMcpAuthProvider:
             "oauth_token_url",
             "oauth_client_id",
             "oauth_client_secret",
+            "oauth_introspection_url",
         ],
     )
     def test_generic_oauth_skipped_with_missing_field(self, missing_field: str) -> None:
@@ -150,9 +175,10 @@ class TestCreateMcpAuthProvider:
             "oauth_client_secret": "secret",
             "oauth_authorization_url": "https://auth.example.com/authorize",
             "oauth_token_url": "https://auth.example.com/token",
-            "oauth_userinfo_url": "https://auth.example.com/userinfo",
+            "oauth_introspection_url": "https://auth.example.com/introspect",
         }
         fields[missing_field] = ""
-        settings = self._settings(**fields)
-        result = _create_mcp_auth_provider(settings)
+        # With only generic OAuth fields (some missing), should return None
+        # because no fallback provider is configured either
+        result = _create_mcp_auth_provider(self._settings(**fields))
         assert result is None

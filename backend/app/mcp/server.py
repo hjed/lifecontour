@@ -39,7 +39,9 @@ def _create_mcp_auth_provider(
         logger.warning("MCP: Authentication disabled — no OAuth provider configured")
         return None
 
-    base_url = f"{settings.mcp_base_url}{settings.mcp_mount_path}"
+    base_url = (
+        f"{settings.mcp_base_url.rstrip('/')}/{settings.mcp_mount_path.strip('/')}"
+    )
 
     # Generic OAuth provider (preferred)
     if (
@@ -47,6 +49,7 @@ def _create_mcp_auth_provider(
         and settings.oauth_client_secret
         and settings.oauth_authorization_url
         and settings.oauth_token_url
+        and settings.oauth_introspection_url
     ):
         from fastmcp.server.auth import OAuthProxy
         from fastmcp.server.auth.providers.introspection import (
@@ -54,7 +57,7 @@ def _create_mcp_auth_provider(
         )
 
         token_verifier = IntrospectionTokenVerifier(
-            introspection_url=settings.oauth_userinfo_url,
+            introspection_url=settings.oauth_introspection_url,
             client_id=settings.oauth_client_id,
             client_secret=settings.oauth_client_secret,
         )
@@ -106,8 +109,11 @@ def _create_mcp_auth_provider(
             base_url=base_url,
         )
 
-    logger.warning(
-        "MCP: No OAuth provider configured — MCP server will have no authentication"
+    logger.error(
+        "MCP: No OAuth provider configured and authentication is not disabled. "
+        "MCP server will NOT be mounted. Set at least one OAuth provider "
+        "(OAUTH_*, GITHUB_*, GOOGLE_*, or DISCORD_* credentials) or set "
+        "DISABLE_AUTH=true for development."
     )
     return None
 
@@ -165,7 +171,7 @@ def create_mcp_server(settings: Settings) -> FastMCP:
     return mcp
 
 
-def create_mcp_app(container: AsyncContainer, settings: Settings) -> object:
+def create_mcp_app(container: AsyncContainer, settings: Settings) -> object | None:
     """
     Create FastMCP ASGI app with OAuth auth and Dishka integration.
 
@@ -174,7 +180,8 @@ def create_mcp_app(container: AsyncContainer, settings: Settings) -> object:
         settings: Application settings for OAuth and path configuration
 
     Returns:
-        ASGI application ready for mounting in FastAPI
+        ASGI application ready for mounting in FastAPI, or None if MCP
+        cannot be started (e.g. no auth provider configured).
     """
     logger.info("MCP: Creating FastMCP ASGI application")
 
