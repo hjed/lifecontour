@@ -80,7 +80,7 @@ class MatchDetectionEventProcessor:
         incoming_start = dt.fromisoformat(start_str)
         incoming_end = dt.fromisoformat(end_str)
 
-        # Fix 7: Use a range predicate instead of DATE() wrapping so the query remains index-friendly.
+        # Use a range predicate instead of DATE() wrapping so the query remains index-friendly.
         day_start = dt(
             incoming_start.year,
             incoming_start.month,

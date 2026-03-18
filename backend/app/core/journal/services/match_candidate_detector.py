@@ -150,10 +150,12 @@ class MatchCandidateDetector:
                     )
             except Exception:
                 logger.exception(
-                    "Failed to assess similarity for candidate",
+                    "Failed to assess similarity for candidate, skipping",
                     candidate_journal_id=journal.id,
                 )
-                raise
+                # Skip this candidate so the rest can still be processed
+                # and the outbox event can complete successfully.
+                continue
 
         # Sort by confidence descending
         candidates.sort(key=lambda c: c.confidence_score, reverse=True)

@@ -71,6 +71,18 @@ class GeminiTitleSimilarityAssessor:
         self._api_key = api_key
         self._model = model
 
+    # Maximum characters of content/description to include in prompts.
+    # Keeps prompt size bounded to avoid exceeding model token limits,
+    # reduce latency/cost, and limit sensitive-data exposure.
+    _MAX_CONTENT_CHARS = 2000
+
+    @classmethod
+    def _truncate_content(cls, content: str) -> str:
+        """Truncate content to the maximum allowed length."""
+        if len(content) <= cls._MAX_CONTENT_CHARS:
+            return content
+        return content[: cls._MAX_CONTENT_CHARS] + "... [truncated]"
+
     def _build_prompt(
         self,
         title_a: str,
@@ -97,6 +109,9 @@ class GeminiTitleSimilarityAssessor:
         Returns:
             Formatted prompt string
         """
+        desc_a = self._truncate_content(content_a) if content_a else "(no description)"
+        desc_b = self._truncate_content(content_b) if content_b else "(no description)"
+
         return f"""You are evaluating whether two calendar events refer to the same real-world event.
 Compare the following two events and respond with ONLY a decimal number between 0.0 and 1.0
 representing your confidence that they are the same event.
@@ -109,13 +124,13 @@ Consider: titles, descriptions, timing overlap, and duration similarity.
 
 Event A:
 - Title: {title_a}
-- Description: {content_a or "(no description)"}
+- Description: {desc_a}
 - Start: {start_a.isoformat()}
 - End: {end_a.isoformat()}
 
 Event B:
 - Title: {title_b}
-- Description: {content_b or "(no description)"}
+- Description: {desc_b}
 - Start: {start_b.isoformat()}
 - End: {end_b.isoformat()}
 
@@ -185,28 +200,26 @@ Confidence score (0.0-1.0):"""
 
         Raises:
             asyncio.TimeoutError: If the call exceeds timeout
+            Exception: Transport/API errors are re-raised so the outbox
+                       retry mechanism can handle transient outages.
         """
-        try:
-            import google.generativeai as genai
+        import google.generativeai as genai
 
-            genai.configure(api_key=self._api_key)
-            model = genai.GenerativeModel(self._model)
+        genai.configure(api_key=self._api_key)
+        model = genai.GenerativeModel(self._model)
 
-            response = await asyncio.wait_for(
-                asyncio.to_thread(model.generate_content, prompt),
-                timeout=self.TIMEOUT_SECONDS,
-            )
+        # Let transport / API / auth errors propagate for outbox retry.
+        # Only swallow response-shape / parse errors below.
+        response = await asyncio.wait_for(
+            asyncio.to_thread(model.generate_content, prompt),
+            timeout=self.TIMEOUT_SECONDS,
+        )
 
-            if response and response.text:
-                return self._parse_score(response.text)
-            return None
+        if response and response.text:
+            return self._parse_score(response.text)
 
-        except TimeoutError:
-            logger.error("Gemini API call timed out", timeout=self.TIMEOUT_SECONDS)
-            raise
-        except Exception as e:
-            logger.error("Gemini API call failed", error=str(e))
-            return None
+        logger.warning("Gemini returned empty response")
+        return None
 
     @staticmethod
     def _parse_score(text: str) -> float | None:

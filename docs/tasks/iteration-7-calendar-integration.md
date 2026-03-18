@@ -264,7 +264,7 @@ This phase fills two product-specification gaps discovered during Phase 3 comple
 **Acceptance Criteria:**
 - [x] Detect likely matches using title similarity, same start date, and similar end time or duration.
 - [x] Preserve uncertain matches as review items rather than silently auto-merging.
-- [x] Distinguish between likely external-link matches, likely duplicate journals, and general “needs review” cases.
+- [ ] The review item model will distinguish between likely external-link matches, likely duplicate journals, and general “needs review” cases.
 - [x] Keep the candidate-generation rules centralized rather than duplicated across sync and merge code.
 
 **Required Test Coverage:**
