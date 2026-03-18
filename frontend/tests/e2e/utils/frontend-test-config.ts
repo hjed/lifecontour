@@ -33,7 +33,7 @@ export const OAUTH_PUBLIC_TEST_PORT =
   workspaceEnv.OAUTH_PUBLIC_TEST_PORT || '4446';
 export const OAUTH_ADMIN_TEST_PORT =
   workspaceEnv.OAUTH_ADMIN_TEST_PORT || '4447';
-export const OAUTH_UI_TEST_PORT = workspaceEnv.OAUTH_UI_TEST_PORT || '3482';
+export const OAUTH_UI_TEST_PORT = workspaceEnv.OAUTH_UI_TEST_PORT || '3002';
 export const DB_TEST_PORT = workspaceEnv.DB_TEST_PORT || '5433';
 export const MEILI_TEST_PORT = workspaceEnv.MEILI_TEST_PORT || '7701';
 export const CONTAINER_PREFIX = workspaceEnv.CONTAINER_PREFIX || 'pms';

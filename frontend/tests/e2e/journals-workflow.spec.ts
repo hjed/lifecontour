@@ -219,7 +219,7 @@ test.describe('Journal Complete Workflows', () => {
 
       // Step 1: Navigate to create page
       await page.goto('/journals/new');
-      await page.waitForLoadState('networkidle');
+      await page.waitForLoadState('load');
 
       // Step 2: Try to submit without filling in title
       const createButton = page.getByRole('button', {
