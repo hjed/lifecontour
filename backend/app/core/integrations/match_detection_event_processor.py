@@ -61,7 +61,7 @@ class MatchDetectionEventProcessor:
         if self.match_candidate_detector is None or self.review_item_repository is None:
             logger.warning(
                 "Match detection dependencies not available, skipping",
-                event_id=event.id,
+                event_id=event.event_id,
             )
             return {
                 "status": "skipped",
@@ -77,8 +77,8 @@ class MatchDetectionEventProcessor:
         start_str = event_data["event_date_range_start"]
         end_str = event_data["event_date_range_end"]
 
-        incoming_start = dt.fromisoformat(start_str)
-        incoming_end = dt.fromisoformat(end_str)
+        incoming_start = dt.fromisoformat(start_str.replace("Z", "+00:00"))
+        incoming_end = dt.fromisoformat(end_str.replace("Z", "+00:00"))
 
         # Use a range predicate instead of DATE() wrapping so the query remains index-friendly.
         day_start = dt(

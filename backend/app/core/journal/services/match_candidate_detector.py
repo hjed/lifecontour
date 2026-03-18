@@ -11,7 +11,10 @@ from typing import Any
 import structlog
 from core_shared.models.journals.review_item import ReviewReason
 
-from app.core.journal.services.title_similarity_assessor import TitleSimilarityAssessor
+from app.core.journal.services.title_similarity_assessor import (
+    SimilarityAssessmentError,
+    TitleSimilarityAssessor,
+)
 
 logger = structlog.get_logger()
 
@@ -40,14 +43,7 @@ class CandidateJournalData:
 
 @dataclass(frozen=True)
 class MatchCandidate:
-    """A detected match candidate with scoring details.
-
-    Attributes:
-        journal_id: ID of the existing journal that matches
-        reason: Why this was flagged (duplicate, needs review, etc.)
-        confidence_score: 0.0-1.0 overall confidence
-        details: Additional details about the match
-    """
+    """A journal that may be a match for an incoming event."""
 
     journal_id: int
     reason: ReviewReason
@@ -56,13 +52,10 @@ class MatchCandidate:
 
 
 class MatchCandidateDetector:
-    """Detects match candidates for incoming journals.
+    """Detects potential match candidates for a new journal entry.
 
-    Uses a two-step process:
-    1. Date gate: Only consider journals on the same day (fast filter)
-    2. AI assessment: Use TitleSimilarityAssessor for detailed comparison
-
-    The detector is stateless and injected via DI.
+    Uses an AI-based similarity assessor to compare incoming events
+    against existing journals on the same day.
     """
 
     CONFIDENCE_THRESHOLD = 0.6
@@ -84,22 +77,21 @@ class MatchCandidateDetector:
         incoming_end: datetime,
         existing_journals: list[CandidateJournalData],
     ) -> list[MatchCandidate]:
-        """Detect match candidates from existing journals.
-
-        Centralized scoring rules:
-        1. Same start date required (date gate)
-        2. AI similarity assessment via TitleSimilarityAssessor
-        3. Candidates above threshold classified by confidence level
+        """Detect potential match candidates for an incoming event.
 
         Args:
-            incoming_title: Title of the incoming journal
-            incoming_content: Content of the incoming journal
-            incoming_start: Start datetime of the incoming journal
-            incoming_end: End datetime of the incoming journal
+            incoming_title: Title of the incoming event
+            incoming_content: Content/description of the incoming event
+            incoming_start: Start datetime of the incoming event
+            incoming_end: End datetime of the incoming event
             existing_journals: List of existing journals to compare against
 
         Returns:
             List of match candidates sorted by confidence (descending)
+
+        Raises:
+            Exception: Transport/API errors from the similarity assessor
+                propagate so the outbox retry mechanism can handle them.
         """
         if not existing_journals:
             return []
@@ -115,6 +107,9 @@ class MatchCandidateDetector:
             return []
 
         # Step 2: AI assessment for each same-day journal
+        # SimilarityAssessmentError (parse/response-shape failures) are caught
+        # and the candidate is skipped. Transport/API errors propagate so the
+        # outbox retry mechanism can handle transient outages.
         candidates: list[MatchCandidate] = []
         for journal in same_day:
             try:
@@ -148,13 +143,11 @@ class MatchCandidateDetector:
                             },
                         )
                     )
-            except Exception:
-                logger.exception(
-                    "Failed to assess similarity for candidate, skipping",
+            except SimilarityAssessmentError:
+                logger.warning(
+                    "Unparseable similarity response, skipping candidate",
                     candidate_journal_id=journal.id,
                 )
-                # Skip this candidate so the rest can still be processed
-                # and the outbox event can complete successfully.
                 continue
 
         # Sort by confidence descending

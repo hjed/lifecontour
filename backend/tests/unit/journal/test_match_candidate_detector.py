@@ -11,6 +11,7 @@ from app.core.journal.services.match_candidate_detector import (
     MatchCandidateDetector,
 )
 from app.core.journal.services.title_similarity_assessor import (
+    SimilarityAssessmentError,
     TitleSimilarityAssessor,
 )
 
@@ -357,3 +358,77 @@ class TestMatchCandidateDetector:
             start_b=base_start + timedelta(hours=1),
             end_b=base_end + timedelta(hours=1),
         )
+
+    async def test_assessment_error_skips_candidate_processes_rest(
+        self,
+        detector: MatchCandidateDetector,
+        mock_assessor: AsyncMock,
+        base_start: datetime,
+        base_end: datetime,
+    ) -> None:
+        """Test that SimilarityAssessmentError skips the candidate but processes rest."""
+        # First call raises parse error, second returns valid score
+        mock_assessor.assess_similarity.side_effect = [
+            SimilarityAssessmentError("unparseable"),
+            0.9,
+        ]
+
+        existing = [
+            CandidateJournalData(
+                id=1,
+                title="Event A",
+                content="",
+                event_date_range_start=base_start,
+                event_date_range_end=base_end,
+            ),
+            CandidateJournalData(
+                id=2,
+                title="Event B",
+                content="",
+                event_date_range_start=base_start,
+                event_date_range_end=base_end,
+            ),
+        ]
+
+        result = await detector.detect_candidates(
+            incoming_title="Team Meeting",
+            incoming_content="",
+            incoming_start=base_start,
+            incoming_end=base_end,
+            existing_journals=existing,
+        )
+
+        # First candidate skipped due to parse error, second processed
+        assert len(result) == 1
+        assert result[0].journal_id == 2
+
+    async def test_transport_error_propagates_for_retry(
+        self,
+        detector: MatchCandidateDetector,
+        mock_assessor: AsyncMock,
+        base_start: datetime,
+        base_end: datetime,
+    ) -> None:
+        """Test that transport/API errors propagate for outbox retry."""
+        mock_assessor.assess_similarity.side_effect = ConnectionError(
+            "Gemini API unavailable"
+        )
+
+        existing = [
+            CandidateJournalData(
+                id=1,
+                title="Event A",
+                content="",
+                event_date_range_start=base_start,
+                event_date_range_end=base_end,
+            ),
+        ]
+
+        with pytest.raises(ConnectionError, match="Gemini API unavailable"):
+            await detector.detect_candidates(
+                incoming_title="Team Meeting",
+                incoming_content="",
+                incoming_start=base_start,
+                incoming_end=base_end,
+                existing_journals=existing,
+            )

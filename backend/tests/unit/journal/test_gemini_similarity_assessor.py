@@ -7,6 +7,7 @@ import pytest
 
 from app.core.journal.services.title_similarity_assessor import (
     GeminiTitleSimilarityAssessor,
+    SimilarityAssessmentError,
 )
 
 
@@ -114,30 +115,29 @@ class TestGeminiTitleSimilarityAssessor:
                     end_b=sample_dates["end_b"],
                 )
 
-    async def test_handles_invalid_gemini_response(
+    async def test_unparseable_response_raises_assessment_error(
         self,
         assessor: GeminiTitleSimilarityAssessor,
         sample_dates: dict[str, datetime],
     ) -> None:
-        """Test that an invalid Gemini response returns 0.0 (safe default)."""
+        """Test that an unparseable Gemini response raises SimilarityAssessmentError."""
         with patch.object(
             assessor,
             "_call_gemini",
             new_callable=AsyncMock,
             return_value=None,
         ):
-            score = await assessor.assess_similarity(
-                title_a="Event A",
-                content_a="",
-                start_a=sample_dates["start_a"],
-                end_a=sample_dates["end_a"],
-                title_b="Event B",
-                content_b="",
-                start_b=sample_dates["start_b"],
-                end_b=sample_dates["end_b"],
-            )
-
-            assert score == 0.0
+            with pytest.raises(SimilarityAssessmentError):
+                await assessor.assess_similarity(
+                    title_a="Event A",
+                    content_a="",
+                    start_a=sample_dates["start_a"],
+                    end_a=sample_dates["end_a"],
+                    title_b="Event B",
+                    content_b="",
+                    start_b=sample_dates["start_b"],
+                    end_b=sample_dates["end_b"],
+                )
 
     async def test_clamps_score_above_one(
         self,

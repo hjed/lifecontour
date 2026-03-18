@@ -14,6 +14,16 @@ import structlog
 logger = structlog.get_logger()
 
 
+class SimilarityAssessmentError(Exception):
+    """Raised when a similarity assessment fails due to an unparseable response.
+
+    This is a non-transient error that indicates the AI model returned a response
+    that could not be interpreted as a valid similarity score. Callers should
+    catch this to skip the failed candidate while allowing transport/API errors
+    to propagate for outbox retry.
+    """
+
+
 @runtime_checkable
 class TitleSimilarityAssessor(Protocol):
     """Protocol for assessing similarity between two calendar events.
@@ -179,12 +189,9 @@ Confidence score (0.0-1.0):"""
         score = await self._call_gemini(prompt)
 
         if score is None:
-            logger.warning(
-                "Gemini returned invalid response, defaulting to 0.0",
-                title_a=title_a,
-                title_b=title_b,
+            raise SimilarityAssessmentError(
+                f"Gemini returned unparseable response for '{title_a}' vs '{title_b}'"
             )
-            return 0.0
 
         # Clamp to valid range
         return max(0.0, min(1.0, score))
