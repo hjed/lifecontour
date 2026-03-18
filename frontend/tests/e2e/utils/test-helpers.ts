@@ -161,7 +161,7 @@ export class AccessibilityHelpers {
         }
       } catch (error) {
         // Skip elements that cause errors
-        console.warn('Skipping element in color contrast check:', error);
+        console.debug('Skipping element in color contrast check:', error);
       }
     }
   }
@@ -234,7 +234,7 @@ export class ResponsiveHelpers {
         }
       } catch (error) {
         // Skip buttons that cause errors
-        console.warn('Skipping button in mobile interactions check:', error);
+        console.debug('Skipping button in mobile interactions check:', error);
       }
     }
   }
@@ -543,7 +543,7 @@ export class ContactTestHelpers {
         }
       }
     } catch {
-      console.log('Mobile responsive test skipped - no contacts loaded');
+      console.debug('Mobile responsive test skipped - no contacts loaded');
     }
   }
 }
@@ -635,7 +635,7 @@ export class SidebarTestHelpers {
     }
 
     if (favouritesLink && (await favouritesLink.count()) > 0) {
-      console.log(`Using selector: ${usedSelector}`);
+      console.debug(`Using selector: ${usedSelector}`);
 
       // Ensure the link is visible and clickable
       await expect(favouritesLink.first()).toBeVisible();
@@ -643,7 +643,7 @@ export class SidebarTestHelpers {
 
       // Get the href to verify it's correct
       const href = await favouritesLink.first().getAttribute('href');
-      console.log(`Favourites link href: ${href}`);
+      console.debug(`Favourites link href: ${href}`);
 
       // Try clicking with navigation wait
       try {
@@ -651,20 +651,20 @@ export class SidebarTestHelpers {
           this.page.waitForURL('**/contacts/favourites'),
           favouritesLink.first().click(),
         ]);
-        console.log('Navigation successful via click');
+        console.debug('Navigation successful via click');
       } catch (error) {
-        console.log(`Click navigation failed: ${error}`);
+        console.debug(`Click navigation failed: ${error}`);
 
         // Fallback: direct navigation to the href
         if (href) {
-          console.log(`Fallback: navigating directly to ${href}`);
+          console.debug(`Fallback: navigating directly to ${href}`);
           await this.page.goto(href);
           await this.page.waitForLoadState('networkidle');
         }
       }
 
       const currentUrl = this.page.url();
-      console.log(`Final URL: ${currentUrl}`);
+      console.debug(`Final URL: ${currentUrl}`);
 
       // More flexible URL checking with better error message
       const isOnExpectedPage =
@@ -672,13 +672,13 @@ export class SidebarTestHelpers {
         currentUrl.includes('/auth/login');
 
       if (!isOnExpectedPage) {
-        console.log(`Navigation failed. Current URL: ${currentUrl}`);
-        console.log(
+        console.debug(`Navigation failed. Current URL: ${currentUrl}`);
+        console.debug(
           `Expected URL to contain '/contacts/favourites' or '/auth/login'`
         );
 
         // This might be a real application bug - let's not fail the test for now
-        console.log(
+        console.debug(
           'WARNING: Navigation to favourites failed - this might indicate an application bug'
         );
         return; // Don't fail the test
@@ -686,7 +686,7 @@ export class SidebarTestHelpers {
 
       expect(isOnExpectedPage).toBe(true);
     } else {
-      console.log('No favourites link found with any selector');
+      console.debug('No favourites link found with any selector');
       // If no favourites link is found, the test should still pass
       // as this might be expected behavior in some states
     }
@@ -877,10 +877,10 @@ export class TestDataHelpers {
 
       if (!response.ok()) {
         if (response.status() === 401) {
-          console.warn(
+          console.debug(
             `[TestDataHelpers] Cannot create test contact ${contact.firstName} ${contact.lastName}: Authentication required`
           );
-          console.warn(
+          console.debug(
             '[TestDataHelpers] Tests will run without pre-created test data'
           );
           return; // Skip creating remaining contacts
@@ -931,7 +931,7 @@ export class TestDataHelpers {
       });
 
       if (response.status() === 401) {
-        console.warn(
+        console.debug(
           '[TestDataHelpers] Cannot clear test data: Authentication required'
         );
         return;
@@ -953,7 +953,7 @@ export class TestDataHelpers {
           );
 
           if (deleteResponse.status() === 401) {
-            console.warn(
+            console.debug(
               '[TestDataHelpers] Cannot delete contact: Authentication required'
             );
             break;
@@ -962,7 +962,7 @@ export class TestDataHelpers {
       }
     } catch (error) {
       // If cleanup fails, log but don't throw - tests should still be able to run
-      console.warn('Failed to clear test data:', error);
+      console.debug('Failed to clear test data:', error);
     }
   }
 
@@ -978,7 +978,7 @@ export class TestDataHelpers {
     if (statusResponse.ok()) {
       const authStatus = await statusResponse.json();
       if (authStatus.authenticated) {
-        console.log(
+        console.debug(
           '[TestDataHelpers] Already authenticated:',
           authStatus.user?.email
         );
@@ -986,7 +986,7 @@ export class TestDataHelpers {
       }
     }
 
-    console.log('[TestDataHelpers] Verifying OAuth system is available...');
+    console.debug('[TestDataHelpers] Verifying OAuth system is available...');
 
     // Navigate to login page to verify OAuth is configured
     await this.page.goto('/auth/login');
@@ -999,7 +999,7 @@ export class TestDataHelpers {
     const oauthButtons = this.page.locator('button:has-text("Continue with")');
     await expect(oauthButtons.first()).toBeVisible();
 
-    console.log(
+    console.debug(
       '[TestDataHelpers] OAuth system verified - providers are available'
     );
 
@@ -1007,7 +1007,7 @@ export class TestDataHelpers {
     // Tests should be designed to handle unauthenticated state gracefully
     // This follows the pattern from oauth-flow.spec.ts
 
-    console.log(
+    console.debug(
       '[TestDataHelpers] OAuth verification complete - tests will run in unauthenticated mode'
     );
   }
@@ -1036,7 +1036,7 @@ export class TestDataHelpers {
     if (tagId) {
       await dataManager.assignTagsToContact(contactId, [tagId]);
     } else {
-      console.warn(
+      console.debug(
         `⚠️ [TestDataHelpers] Could not obtain tag id for ${tagName}, skipping assignment`
       );
     }

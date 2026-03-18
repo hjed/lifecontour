@@ -1,4 +1,5 @@
 import { test, expect } from './fixtures';
+
 import { JournalType } from '../../src/types/journals';
 
 // Using authenticated context to access journal details directly

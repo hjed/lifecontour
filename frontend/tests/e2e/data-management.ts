@@ -6,6 +6,7 @@
  */
 
 import { Page } from '@playwright/test';
+
 import { TestContact, TestJournal } from './fixtures';
 
 /**
@@ -87,22 +88,26 @@ export class TestDataManager {
 
     try {
       // Debug: Check authentication and cookies
-
-      const authTestResponse = await this.page.request.get('/api/auth/status');
-      if (authTestResponse.ok()) {
-        const authData = await authTestResponse.json();
-        console.log(`🔐 [Data Manager] Auth test successful:`, authData);
-      } else {
-        console.log(
-          `🔐 [Data Manager] Auth test failed: ${authTestResponse.status()}`
-        );
-        const errorText = await authTestResponse.text();
-        console.log(`🔐 [Data Manager] Auth error response:`, errorText);
-        const contextCookies = await this.page.context().cookies();
-        console.log(
-          `🔐 [Data Manager] Context has ${contextCookies.length} cookies:`,
-          contextCookies.map(c => c.name).join(', ')
-        );
+      // Verify authentication applies - only run if debugging is enabled
+      // The actual auth validation is done in the fixtures
+      if (process.env.DEBUG_E2E) {
+        const authTestResponse =
+          await this.page.request.get('/api/auth/status');
+        if (authTestResponse.ok()) {
+          const authData = await authTestResponse.json();
+          console.log(`🔐 [Data Manager] Auth test successful:`, authData);
+        } else {
+          console.log(
+            `🔐 [Data Manager] Auth test failed: ${authTestResponse.status()}`
+          );
+          const errorText = await authTestResponse.text();
+          console.log(`🔐 [Data Manager] Auth error response:`, errorText);
+          const contextCookies = await this.page.context().cookies();
+          console.log(
+            `🔐 [Data Manager] Context has ${contextCookies.length} cookies:`,
+            contextCookies.map(c => c.name).join(', ')
+          );
+        }
       }
 
       // Make API request to create contact (JSON API format)
