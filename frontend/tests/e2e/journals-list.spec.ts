@@ -540,11 +540,12 @@ test.describe('Journal List Page', () => {
       await contactCombobox.fill(contacts[0].firstName);
 
       // Wait for search results to appear by waiting for the option to be visible
-      const aliceOption = page
-        .getByText(
-          new RegExp(`${contacts[0].firstName}.*${contacts[0].lastName}`, 'i')
-        )
-        .first();
+      const aliceOption = page.getByRole('option', {
+        name: new RegExp(
+          `${contacts[0].firstName}.*${contacts[0].lastName}`,
+          'i'
+        ),
+      });
       await expect(aliceOption).toBeVisible();
 
       // Start waiting for API response before clicking the contact
@@ -865,11 +866,12 @@ test.describe('Journal List Page', () => {
       await contactCombobox.fill(contacts[0].firstName);
 
       // Wait for search results to appear by waiting for the option to be visible
-      const charlieOption = page
-        .getByText(
-          new RegExp(`${contacts[0].firstName}.*${contacts[0].lastName}`, 'i')
-        )
-        .first();
+      const charlieOption = page.getByRole('option', {
+        name: new RegExp(
+          `${contacts[0].firstName}.*${contacts[0].lastName}`,
+          'i'
+        ),
+      });
       await expect(charlieOption).toBeVisible();
 
       // Start waiting for API response before clicking the contact

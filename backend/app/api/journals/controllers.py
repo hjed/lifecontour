@@ -125,16 +125,40 @@ async def _populate_contact_names(
     """Populate the names of contacts in a JournalResource."""
     if not resource.attributes.contacts:
         return
+
+    # Gather needed contact IDs
+    contact_ids_to_fetch = set()
     for contact_schema in resource.attributes.contacts:
         contact_id = int(contact_schema.id)
-        if contact_id not in contact_cache:
-            contact = await contact_repo.find_by_id(contact_id)
+        if contact_id not in contact_cache and not contact_schema.name:
+            contact_ids_to_fetch.add(contact_id)
+
+    # Fetch all concurrently
+    if contact_ids_to_fetch:
+        import asyncio
+
+        async def fetch_contact(cid: int) -> tuple[int, Any]:
+            return cid, await contact_repo.find_by_id(cid)
+
+        results = await asyncio.gather(
+            *(fetch_contact(cid) for cid in contact_ids_to_fetch)
+        )
+        for cid, contact in results:
             if contact:
-                name = f"{contact.first_name} {contact.last_name}".strip()
-                contact_cache[contact_id] = name if name else f"Contact {contact_id}"
+                # Null-safe formatter: filter out None or empty names
+                name_parts = [
+                    part for part in (contact.first_name, contact.last_name) if part
+                ]
+                name = " ".join(name_parts)
+                contact_cache[cid] = name if name else f"Contact {cid}"
             else:
-                contact_cache[contact_id] = f"Unknown Contact {contact_id}"
-        contact_schema.name = contact_cache[contact_id]
+                contact_cache[cid] = f"Unknown Contact {cid}"
+
+    # Set names
+    for contact_schema in resource.attributes.contacts:
+        contact_id = int(contact_schema.id)
+        if contact_id in contact_cache:
+            contact_schema.name = contact_cache[contact_id]
 
 
 def _parse_optional_uuid(value: Any, field_name: str) -> UUID | None:
