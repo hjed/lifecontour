@@ -562,10 +562,17 @@ test.describe('Journal List Page', () => {
       // Wait for the API response to complete
       await responsePromise;
 
-      // Verify only Alice's journal is visible
+      // Verify only Alice's journal is shown
       await expect(
-        page.getByRole('heading', { name: /Meeting with Alice/i })
+        page.getByRole('heading', {
+          name: /Meeting with Alice/i,
+        })
       ).toBeVisible();
+
+      // Verify contact name is visible on the journal card
+      await expect(
+        page.getByTestId(`contact-${contacts[0].id}`).first()
+      ).toContainText(`${contacts[0].firstName} ${contacts[0].lastName}`);
 
       // Verify other journals are not visible
       await expect(
