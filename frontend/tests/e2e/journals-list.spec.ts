@@ -531,14 +531,20 @@ test.describe('Journal List Page', () => {
       }
 
       // Use contact filter combobox - find by role and placeholder
+      // Use the unique firstName (e.g. Alice_60417bb1) to avoid matching
+      // stale MeiliSearch entries from previous test runs/retries
       const contactCombobox = page.getByRole('combobox', {
         name: /search for a contact/i,
       });
       await contactCombobox.click();
-      await contactCombobox.fill('Alice');
+      await contactCombobox.fill(contacts[0].firstName);
 
       // Wait for search results to appear by waiting for the option to be visible
-      const aliceOption = page.getByText(/Alice.*Smith/i).first();
+      const aliceOption = page
+        .getByText(
+          new RegExp(`${contacts[0].firstName}.*${contacts[0].lastName}`, 'i')
+        )
+        .first();
       await expect(aliceOption).toBeVisible();
 
       // Start waiting for API response before clicking the contact
@@ -843,15 +849,20 @@ test.describe('Journal List Page', () => {
       const noteCheckbox = filtersSection.getByLabel('Note', { exact: true });
       await noteCheckbox.check();
 
-      // Apply contact filter (Charlie)
+      // Apply contact filter (Charlie) using unique firstName to avoid
+      // matching stale MeiliSearch entries from previous test runs/retries
       const contactCombobox = page.getByRole('combobox', {
         name: /search for a contact/i,
       });
       await contactCombobox.click();
-      await contactCombobox.fill('Charlie');
+      await contactCombobox.fill(contacts[0].firstName);
 
       // Wait for search results to appear by waiting for the option to be visible
-      const charlieOption = page.getByText(/Charlie.*Brown/i).first();
+      const charlieOption = page
+        .getByText(
+          new RegExp(`${contacts[0].firstName}.*${contacts[0].lastName}`, 'i')
+        )
+        .first();
       await expect(charlieOption).toBeVisible();
 
       // Start waiting for API response before clicking the contact

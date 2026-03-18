@@ -257,7 +257,7 @@ class TestJournalOutboxEventProcessor:
         result = await processor.process_event(event)
 
         assert result["status"] == "success"
-        # Only 2 DB calls: calendar info + external link (no relationship calls)
+        # 2 DB calls: calendar info + external link (no relationship calls, no match detection)
         assert mock_connection.execute.call_count == 2
 
     # ── journal_event.updated ──────────────────────────────────────────
@@ -614,7 +614,7 @@ class TestJournalOutboxEventProcessor:
         result = await processor.process_event(event)
 
         assert result["status"] == "success"
-        # 4 calls: calendar, link, resolve, get_rels (no create since email unresolved)
+        # 4 calls: calendar, link, resolve, get_rels (no create since email unresolved, no match detection)
         assert mock_connection.execute.call_count == 4
 
     # ── InboundFieldMerger applied during update ─────────────────────

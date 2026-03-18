@@ -1,7 +1,13 @@
 """Repository interfaces for the journal domain."""
 
+from __future__ import annotations
+
 from abc import ABC, abstractmethod
+from typing import TYPE_CHECKING
 from uuid import UUID
+
+if TYPE_CHECKING:
+    from core_shared.models.journals.review_item import ReviewItem
 
 from core_shared.models.journals import (
     AbseilingData,
@@ -1471,5 +1477,44 @@ class CrossCountrySkiingDataRepository(ABC):
 
         Args:
             journal_id: The journal ID to delete cross-country skiing data for
+        """
+        pass
+
+
+class ReviewItemRepository(ABC):
+    """
+    Repository interface for review item operations.
+
+    Review items represent potential matches between journals that need
+    user review before merging or dismissing.
+    """
+
+    @abstractmethod
+    async def create(self, review_item: ReviewItem) -> tuple[ReviewItem, bool]:
+        """
+        Create a review item.
+
+        Uses ON CONFLICT DO NOTHING for idempotency on the
+        (source_journal_id, candidate_journal_id) unique constraint.
+
+        Args:
+            review_item: The review item to create
+
+        Returns:
+            A tuple of (ReviewItem, bool) where the bool indicates if the item was newly created
+            (True) or already existed (False).
+        """
+        pass
+
+    @abstractmethod
+    async def find_pending_by_journal_id(self, journal_id: int) -> list[ReviewItem]:
+        """
+        Find all pending review items where a journal is the source.
+
+        Args:
+            journal_id: The source journal ID to look up
+
+        Returns:
+            List of pending review items for the journal
         """
         pass

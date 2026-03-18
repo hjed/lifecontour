@@ -11,7 +11,10 @@ from typing import Any
 from uuid import UUID
 
 import structlog
-from core_shared.models.journals import EventDateRange, Journal
+from core_shared.models.journals import (
+    EventDateRange,
+    Journal,
+)
 from core_shared.models.journals.journal_contact_relationship import (
     JournalContactRelationship,
 )
@@ -31,6 +34,7 @@ EVENT_TYPE_JOURNAL_EVENT_CREATED = "journal_event.created"
 EVENT_TYPE_JOURNAL_EVENT_UPDATED = "journal_event.updated"
 EVENT_TYPE_JOURNAL_EVENT_CONFLICTED = "journal_event.conflicted"
 EVENT_TYPE_JOURNAL_EVENT_CANCELLED = "journal_event.cancelled"
+EVENT_TYPE_JOURNAL_REVIEW_DETECT_MATCHES = "journal_review.detect_matches"
 
 
 class JournalOutboxEventProcessingError(Exception):
@@ -86,6 +90,7 @@ class JournalOutboxEventProcessor:
         self,
         journal_service: JournalService,
         connection: AsyncConnection,
+        match_candidate_detector: Any = None,
     ) -> None:
         """
         Initialize the journal outbox event processor.
@@ -93,10 +98,12 @@ class JournalOutboxEventProcessor:
         Args:
             journal_service: Service for journal operations
             connection: Database connection for transactions
+            match_candidate_detector: Optional detector for match candidates
         """
         self.journal_service = journal_service
         self.connection = connection
         self.contact_resolver = ContactResolver(connection)
+        self.match_candidate_detector = match_candidate_detector
 
     async def process_event(self, event: OutboxEvent) -> dict[str, Any]:
         """
@@ -172,6 +179,26 @@ class JournalOutboxEventProcessor:
             journal_id=created_journal.id,
             contact_relationships=contact_relationships,
         )
+
+        # Emit match detection event for the outbox to process asynchronously.
+        # We only do this if the match detection dependency is wired (i.e., Gemini is configured).
+        if (
+            created_journal.event_date_range
+            and self.match_candidate_detector is not None
+        ):
+            detection_event = OutboxEvent.create_match_detection_event(
+                journal_id=created_journal.id,
+                user_id=created_journal.user_id,
+                journal_title=created_journal.title,
+                journal_content=created_journal.content or "",
+                event_date_range_start=created_journal.event_date_range.start.isoformat(),
+                event_date_range_end=created_journal.event_date_range.end.isoformat(),
+            )
+            await self._save_outbox_event(detection_event)
+            logger.info(
+                "Emitted match detection event for new journal",
+                journal_id=created_journal.id,
+            )
 
         logger.info(
             "Created journal from inbound sync event",
@@ -848,5 +875,37 @@ class JournalOutboxEventProcessor:
                 "journal_id": journal_id,
                 "contact_id": contact_id,
                 "relationship_type": relationship_type.value,
+            },
+        )
+
+    async def _save_outbox_event(self, event: OutboxEvent) -> None:
+        """Save a new outbox event within the current transaction.
+
+        Detection event is handled in MatchDetectionEventProcessor.
+        This ensures the match detection event is committed atomically
+        with the journal creation.
+
+        Args:
+            event: OutboxEvent to persist
+        """
+        import json
+        from datetime import datetime
+        from uuid import uuid4
+
+        now = datetime.utcnow()
+        await self.connection.execute(
+            text("""
+                INSERT INTO outbox_events
+                (event_id, event_type, aggregate_id, event_data, occurred_at, retry_count, created_at)
+                VALUES (:event_id, :event_type, :aggregate_id, :event_data, :occurred_at, :retry_count, :created_at)
+            """),
+            {
+                "event_id": str(uuid4()),
+                "event_type": event.event_type,
+                "aggregate_id": event.aggregate_id,
+                "event_data": json.dumps(event.event_data),
+                "occurred_at": now,
+                "retry_count": 0,
+                "created_at": now,
             },
         )

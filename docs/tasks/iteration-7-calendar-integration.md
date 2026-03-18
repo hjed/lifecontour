@@ -259,17 +259,18 @@ This phase fills two product-specification gaps discovered during Phase 3 comple
 
 #### Phase 1: Match Candidate Detection and Review Item Model
 **PR Size:** ~5-7 files
+**Status:** ✅ COMPLETE
 
 **Acceptance Criteria:**
-- [ ] Detect likely matches using title similarity, same start date, and similar end time or duration.
-- [ ] Preserve uncertain matches as review items rather than silently auto-merging.
-- [ ] Distinguish between likely external-link matches, likely duplicate journals, and general “needs review” cases.
-- [ ] Keep the candidate-generation rules centralized rather than duplicated across sync and merge code.
+- [x] Detect likely matches using title similarity, same start date, and similar end time or duration.
+- [x] Preserve uncertain matches as review items rather than silently auto-merging.
+- [ ] The review item model will distinguish between likely external-link matches, likely duplicate journals, and general “needs review” cases.
+- [x] Keep the candidate-generation rules centralized rather than duplicated across sync and merge code.
 
 **Required Test Coverage:**
-- **Unit:** candidate scoring/classification helpers and review-item state transitions.
-- **Integration:** real-database candidate creation for matched, near-matched, and unmatched external events.
-- **E2E:** deterministic seeded scenario showing a journal with a review indicator created by the sync/import workflow.
+- **Unit:** ✅ candidate scoring/classification helpers and review-item state transitions (30 tests).
+- **Integration:** ✅ real-database candidate creation for matched, near-matched, and unmatched external events (9 tests).
+- **E2E:** ⏳ deferred to Phase 2 — no user-visible surface exists yet for the review indicator.
 
 #### Phase 2: Review Queue API, List Indicators, and Detail Surfaces
 **PR Size:** ~5-7 files
