@@ -234,11 +234,11 @@ This phase fills two product-specification gaps discovered during Phase 3 comple
 **PR Size:** ~5-7 files
 
 **Acceptance Criteria:**
-- [ ] Manual scheduling, event-driven scheduling, and webhook-triggered sync all use the same idempotent sync path.
-- [ ] Retry and failure handling follow the integration architecture rather than ad hoc retry loops.
-- [ ] Sync progress, failure, and timing information are observable enough for user-facing sync states and operator debugging.
-- [ ] Webhook or polling entry points feed the same outbox-driven inbound path and do not bypass the same validation and state tracking used by manual sync.
-- [ ] Sync tokens are persisted per-calendar (keyed by `google_calendar_id` or internal `calendar_id`) rather than per-account, since Google Calendar sync tokens are per-calendar and per-query. Requires a schema migration (new table or per-calendar column) and updated load/save logic in the worker.
+- [x] Manual scheduling, event-driven scheduling, and webhook-triggered sync all use the same idempotent sync path.
+- [x] Retry and failure handling follow the integration architecture rather than ad hoc retry loops.
+- [x] Sync progress, failure, and timing information are observable enough for user-facing sync states and operator debugging.
+- [x] Webhook or polling entry points feed the same outbox-driven inbound path and do not bypass the same validation and state tracking used by manual sync.
+- [x] Sync tokens are persisted per-calendar (keyed by `google_calendar_id` or internal `calendar_id`) rather than per-account, since Google Calendar sync tokens are per-calendar and per-query. Requires a schema migration (new table or per-calendar column) and updated load/save logic in the worker.
 
 **Required Test Coverage:**
 - **Unit:** scheduling, idempotency-key, and retry classification helpers.

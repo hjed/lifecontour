@@ -36,7 +36,11 @@ class SessionAuthMiddleware(BaseHTTPMiddleware):
         self, request: Request, call_next: Callable[[Request], Awaitable[Response]]
     ) -> Response:
         """
-        Process request and validate session for MCP endpoints.
+        Process request and validate session.
+
+        This middleware is exclusively mounted on the MCP sub-app, so all
+        requests reaching it are MCP requests. Authentication is always
+        enforced (unless explicitly disabled via ``disable_auth``).
 
         Args:
             request: The incoming HTTP request
@@ -45,10 +49,6 @@ class SessionAuthMiddleware(BaseHTTPMiddleware):
         Returns:
             Response from the next handler or 401 if authentication fails
         """
-        # Only apply authentication to MCP endpoints
-        if not self._is_mcp_request(request):
-            return await call_next(request)
-
         # If authentication is disabled, create a mock user
         if self.disable_auth:
             from app.infrastructure.auth.models import SessionUser
@@ -91,18 +91,6 @@ class SessionAuthMiddleware(BaseHTTPMiddleware):
         )
 
         return await call_next(request)
-
-    def _is_mcp_request(self, request: Request) -> bool:
-        """
-        Check if the request is for an MCP endpoint.
-
-        Args:
-            request: The HTTP request to check
-
-        Returns:
-            True if this is an MCP request, False otherwise
-        """
-        return request.url.path.startswith("/mcp-server/")
 
     def _get_session_user(self, request: Request) -> SessionUser | None:
         """
