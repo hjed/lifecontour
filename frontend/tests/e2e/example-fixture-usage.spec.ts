@@ -6,6 +6,7 @@
  */
 
 import { test, expect } from './fixtures';
+
 import { ReliableWaiter } from './utils/test-helpers';
 
 test.describe('Example: Fixture-Based Testing', () => {

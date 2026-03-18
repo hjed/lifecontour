@@ -8,6 +8,7 @@
  */
 
 import { test, expect } from './fixtures';
+
 import {
   FRONTEND_TEST_CALLBACK_URL,
   FRONTEND_TEST_LOGIN_URL,

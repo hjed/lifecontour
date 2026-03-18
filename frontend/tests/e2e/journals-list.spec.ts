@@ -546,7 +546,8 @@ test.describe('Journal List Page', () => {
         response =>
           response.url().includes('/api/journals') &&
           response.url().includes('contact_id') &&
-          response.status() === 200
+          response.status() === 200 &&
+          response.request().method() === 'GET'
       );
 
       // Select Alice - this triggers the API call

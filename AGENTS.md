@@ -111,6 +111,7 @@ if (tagCount > 0) {
 - **Test-Driven Development**: Write tests first, then implement functionality
 - **Real Database Testing**: Use Docker PostgreSQL for integration tests
 - **Accessibility**: ARIA attributes, keyboard navigation, screen reader support
+- **Debugging**: E2E tests should not pollute standard output. Use standard `console.debug()` for detailed logging during local debugging instead of console.log.
 ## Code Quality Checks
 
 **Always run quality checks before completing any task:**
