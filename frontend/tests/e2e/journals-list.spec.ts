@@ -540,11 +540,12 @@ test.describe('Journal List Page', () => {
       await contactCombobox.fill(contacts[0].firstName);
 
       // Wait for search results to appear by waiting for the option to be visible
-      const aliceOption = page
-        .getByText(
-          new RegExp(`${contacts[0].firstName}.*${contacts[0].lastName}`, 'i')
-        )
-        .first();
+      const aliceOption = page.getByRole('option', {
+        name: new RegExp(
+          `${contacts[0].firstName}.*${contacts[0].lastName}`,
+          'i'
+        ),
+      });
       await expect(aliceOption).toBeVisible();
 
       // Start waiting for API response before clicking the contact
@@ -562,10 +563,17 @@ test.describe('Journal List Page', () => {
       // Wait for the API response to complete
       await responsePromise;
 
-      // Verify only Alice's journal is visible
+      // Verify only Alice's journal is shown
       await expect(
-        page.getByRole('heading', { name: /Meeting with Alice/i })
+        page.getByRole('heading', {
+          name: /Meeting with Alice/i,
+        })
       ).toBeVisible();
+
+      // Verify contact name is visible on the journal card
+      await expect(
+        page.getByTestId(`contact-${contacts[0].id}`).first()
+      ).toContainText(`${contacts[0].firstName} ${contacts[0].lastName}`);
 
       // Verify other journals are not visible
       await expect(
@@ -858,11 +866,12 @@ test.describe('Journal List Page', () => {
       await contactCombobox.fill(contacts[0].firstName);
 
       // Wait for search results to appear by waiting for the option to be visible
-      const charlieOption = page
-        .getByText(
-          new RegExp(`${contacts[0].firstName}.*${contacts[0].lastName}`, 'i')
-        )
-        .first();
+      const charlieOption = page.getByRole('option', {
+        name: new RegExp(
+          `${contacts[0].firstName}.*${contacts[0].lastName}`,
+          'i'
+        ),
+      });
       await expect(charlieOption).toBeVisible();
 
       // Start waiting for API response before clicking the contact

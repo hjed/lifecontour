@@ -142,6 +142,9 @@ test.describe('Contact Inline Editing', () => {
 
     // Enter edit mode
     await expect(nicknameField).toBeVisible();
+    // Scroll into view first to ensure the field is visible on mobile viewports
+    // where it may be below the fold due to the large avatar
+    await nicknameField.scrollIntoViewIfNeeded();
     await nicknameField.click();
 
     const input = page.locator('[data-testid="nickname-field"] input');

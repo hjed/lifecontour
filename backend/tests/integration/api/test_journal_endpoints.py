@@ -167,6 +167,63 @@ class TestJournalCRUDEndpoints:
         assert "meta" in data
         assert "links" in data
 
+    async def test_get_journal_with_contact(self, integration_api_client):
+        """Test retrieving a journal with a related contact to ensure name is populated."""
+        # 1. Create a contact
+        contact_data = {
+            "data": {
+                "type": "contacts",
+                "attributes": {
+                    "first_name": "Integration",
+                    "last_name": "TestUser",
+                    "contact_methods": [],
+                    "addresses": [],
+                    "notes": [],
+                },
+            }
+        }
+        contact_response = await integration_api_client.post(
+            "/api/contacts", json=contact_data
+        )
+        assert contact_response.status_code == 201
+        contact_id = contact_response.json()["data"]["id"]
+
+        # 2. Create a journal
+        create_data = create_journal_request_data(
+            title="Journal with Contact",
+            content="Get test content",
+        )
+        create_response = await integration_api_client.post(
+            "/api/journals", json=create_data
+        )
+        assert create_response.status_code == 201
+        journal_id = create_response.json()["data"]["id"]
+
+        # 3. Add contact relationship
+        relationship_data = {
+            "data": {
+                "type": "journal-contact-relationships",
+                "attributes": {
+                    "contact_id": str(contact_id),
+                    "relationship_type": "PARTICIPANT",
+                },
+            }
+        }
+        rel_response = await integration_api_client.post(
+            f"/api/journals/{journal_id}/relationships/contacts", json=relationship_data
+        )
+        assert rel_response.status_code == 200
+
+        # 4. Get the journal and verify contact name is populated
+        response = await integration_api_client.get(f"/api/journals/{journal_id}")
+        assert response.status_code == 200
+        data = response.json()
+        contacts = data["data"]["attributes"]["contacts"]
+
+        assert len(contacts) == 1
+        assert contacts[0]["id"] == str(contact_id)
+        assert contacts[0]["name"] == "Integration TestUser"
+
 
 @pytest.mark.integration
 class TestJournalUpdateEndpoints:

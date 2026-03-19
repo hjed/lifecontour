@@ -53,6 +53,7 @@ from app.api.journals.schemas import (
     JournalTypeDataUpdateRequest,
     JournalUpdateRequest,
 )
+from app.core.contacts.models.repositories import ContactRepository
 from app.core.journal.models.repositories import (
     AbseilingDataRepository,
     BushwalkingDataRepository,
@@ -114,6 +115,56 @@ def _parse_journal_type(type_str: str) -> JournalType:
     except ValueError:
         # Fall back to enum name (uppercase like "MOOD_RATING")
         return JournalType[type_str.upper()]
+
+
+async def _populate_contact_names(
+    resource: JournalResource,
+    contact_repo: ContactRepository,
+    contact_cache: dict[int, str],
+) -> None:
+    """Populate the names of contacts in a JournalResource."""
+    if not resource.attributes.contacts:
+        return
+
+    # Gather IDs that need fetching
+    contact_ids_to_fetch = [
+        int(cs.id)
+        for cs in resource.attributes.contacts
+        if int(cs.id) not in contact_cache and not cs.name
+    ]
+
+    # Bulk fetch names in a single query
+    if contact_ids_to_fetch:
+        name_rows = await contact_repo.find_names_by_ids(contact_ids_to_fetch)
+        for cid, (first_name, last_name) in name_rows.items():
+            # Null-safe formatter: filter out None or empty name parts
+            name_parts = [part for part in (first_name, last_name) if part]
+            name = " ".join(name_parts)
+            contact_cache[cid] = name if name else f"Contact {cid}"
+
+        # Mark any IDs not found in the database
+        for cid in contact_ids_to_fetch:
+            if cid not in contact_cache:
+                contact_cache[cid] = f"Unknown Contact {cid}"
+
+    # Set names from cache
+    for contact_schema in resource.attributes.contacts:
+        contact_id = int(contact_schema.id)
+        if contact_id in contact_cache:
+            contact_schema.name = contact_cache[contact_id]
+
+
+async def _build_journal_response(
+    journal_resource: JournalResource,
+    contact_repo: ContactRepository,
+) -> JournalResponse:
+    """Build a JournalResponse with populated contact names.
+
+    Shared helper used by all endpoints returning a single JournalResponse
+    to ensure consistent contact name population.
+    """
+    await _populate_contact_names(journal_resource, contact_repo, {})
+    return JournalResponse(data=journal_resource)
 
 
 def _parse_optional_uuid(value: Any, field_name: str) -> UUID | None:
@@ -693,6 +744,7 @@ async def list_journals(
     contact_relationship_repo: FromDishka[JournalContactRelationshipRepository],
     tag_repo: FromDishka[JournalTagRepository],
     route_repo: FromDishka[RouteRepository],
+    contact_repo: FromDishka[ContactRepository],
     user: FromDishka[SessionUser],  # Require authentication
     page: Annotated[int, Query(description="Page number", ge=1)] = 1,
     limit: Annotated[int, Query(description="Items per page", ge=1, le=100)] = 20,
@@ -752,7 +804,7 @@ async def list_journals(
     journal_resources = []
     for journal in journals:
         # Enrich journal with types, contacts, tags, etc.
-        types, type_data, _, _, _, _ = await _enrich_journal_data(
+        types, type_data, contacts, tags, calendar, _ = await _enrich_journal_data(
             journal,
             calendar_info_repo,
             calendar_repo,
@@ -776,9 +828,20 @@ async def list_journals(
         )
 
         resource = JournalConverter.to_resource(
-            journal, base_url, types=types, type_data=type_data
+            journal,
+            base_url,
+            types=types,
+            type_data=type_data,
+            contacts=contacts,
+            tags=tags,
+            calendar=calendar,
         )
         journal_resources.append(resource)
+
+    # Populate contact names for the resources
+    contact_cache: dict[int, str] = {}
+    for resource in journal_resources:
+        await _populate_contact_names(resource, contact_repo, contact_cache)
 
     meta = create_pagination_meta(total_count, page, limit)
     links = create_pagination_links(
@@ -941,6 +1004,7 @@ async def get_journal(
     contact_relationship_repo: FromDishka[JournalContactRelationshipRepository],
     tag_repo: FromDishka[JournalTagRepository],
     route_repo: FromDishka[RouteRepository],
+    contact_repo: FromDishka[ContactRepository],
     user: FromDishka[SessionUser],  # Require authentication
 ) -> JournalResponse:
     """
@@ -981,7 +1045,7 @@ async def get_journal(
         journal, base_url, types, type_data, contacts, tags, calendar
     )
 
-    return JournalResponse(data=journal_resource)
+    return await _build_journal_response(journal_resource, contact_repo)
 
 
 async def _process_journal_types(
@@ -1474,6 +1538,7 @@ async def create_journal(
     contact_relationship_repo: FromDishka[JournalContactRelationshipRepository],
     tag_repo: FromDishka[JournalTagRepository],
     route_repo: FromDishka[RouteRepository],
+    contact_repo: FromDishka[ContactRepository],
     connection: FromDishka[AsyncConnection],
     user: FromDishka[SessionUser],  # Require authentication
 ) -> JournalResponse:
@@ -1578,7 +1643,7 @@ async def create_journal(
         created_journal, base_url, types, type_data, contacts, tags, calendar
     )
 
-    return JournalResponse(data=journal_resource)
+    return await _build_journal_response(journal_resource, contact_repo)
 
 
 @router.put("/{journal_id}")
@@ -1606,6 +1671,7 @@ async def update_journal(
     contact_relationship_repo: FromDishka[JournalContactRelationshipRepository],
     tag_repo: FromDishka[JournalTagRepository],
     route_repo: FromDishka[RouteRepository],
+    contact_repo: FromDishka[ContactRepository],
     connection: FromDishka[AsyncConnection],
     user: FromDishka[SessionUser],  # Require authentication
 ) -> JournalResponse:
@@ -1673,7 +1739,7 @@ async def update_journal(
         saved_journal, base_url, types, type_data, contacts, tags, calendar
     )
 
-    return JournalResponse(data=journal_resource)
+    return await _build_journal_response(journal_resource, contact_repo)
 
 
 @router.patch("/{journal_id}")
@@ -1701,6 +1767,7 @@ async def partial_update_journal(
     contact_relationship_repo: FromDishka[JournalContactRelationshipRepository],
     tag_repo: FromDishka[JournalTagRepository],
     route_repo: FromDishka[RouteRepository],
+    contact_repo: FromDishka[ContactRepository],
     connection: FromDishka[AsyncConnection],
     user: FromDishka[SessionUser],  # Require authentication
 ) -> JournalResponse:
@@ -1814,7 +1881,7 @@ async def partial_update_journal(
         saved_journal, base_url, types, type_data, contacts, tags, calendar
     )
 
-    return JournalResponse(data=journal_resource)
+    return await _build_journal_response(journal_resource, contact_repo)
 
 
 @router.delete("/{journal_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -1863,6 +1930,7 @@ async def add_type_to_journal(
     contact_relationship_repo: FromDishka[JournalContactRelationshipRepository],
     tag_repo: FromDishka[JournalTagRepository],
     route_repo: FromDishka[RouteRepository],
+    contact_repo: FromDishka[ContactRepository],
     connection: FromDishka[AsyncConnection],
     user: FromDishka[SessionUser],  # Require authentication
 ) -> JournalResponse:
@@ -1947,7 +2015,7 @@ async def add_type_to_journal(
         updated_journal, base_url, types, type_data, contacts, tags, calendar
     )
 
-    return JournalResponse(data=journal_resource)
+    return await _build_journal_response(journal_resource, contact_repo)
 
 
 @router.delete("/{journal_id}/types/{journal_type}")
@@ -1975,6 +2043,7 @@ async def remove_type_from_journal(
     contact_relationship_repo: FromDishka[JournalContactRelationshipRepository],
     tag_repo: FromDishka[JournalTagRepository],
     route_repo: FromDishka[RouteRepository],
+    contact_repo: FromDishka[ContactRepository],
     connection: FromDishka[AsyncConnection],
     user: FromDishka[SessionUser],  # Require authentication
 ) -> JournalResponse:
@@ -2056,7 +2125,7 @@ async def remove_type_from_journal(
         updated_journal, base_url, types, type_data, contacts, tags, calendar
     )
 
-    return JournalResponse(data=journal_resource)
+    return await _build_journal_response(journal_resource, contact_repo)
 
 
 async def _update_event_type_data(
@@ -2426,6 +2495,7 @@ async def update_type_data(
     contact_relationship_repo: FromDishka[JournalContactRelationshipRepository],
     tag_repo: FromDishka[JournalTagRepository],
     route_repo: FromDishka[RouteRepository],
+    contact_repo: FromDishka[ContactRepository],
     connection: FromDishka[AsyncConnection],
     user: FromDishka[SessionUser],  # Require authentication
 ) -> JournalResponse:
@@ -2546,7 +2616,7 @@ async def update_type_data(
         updated_journal, base_url, types, type_data, contacts, tags, calendar
     )
 
-    return JournalResponse(data=journal_resource)
+    return await _build_journal_response(journal_resource, contact_repo)
 
 
 # Relationship Management Endpoints
@@ -2575,6 +2645,7 @@ async def add_contact_to_journal(
     contact_relationship_repo: FromDishka[JournalContactRelationshipRepository],
     tag_repo: FromDishka[JournalTagRepository],
     route_repo: FromDishka[RouteRepository],
+    contact_repo: FromDishka[ContactRepository],
     connection: FromDishka[AsyncConnection],
     user: FromDishka[SessionUser],  # Require authentication
 ) -> JournalResponse:
@@ -2652,7 +2723,7 @@ async def add_contact_to_journal(
         updated_journal, base_url, types, type_data, contacts, tags, calendar
     )
 
-    return JournalResponse(data=journal_resource)
+    return await _build_journal_response(journal_resource, contact_repo)
 
 
 @router.delete("/{journal_id}/relationships/contacts/{contact_id}/{relationship_type}")
@@ -2681,6 +2752,7 @@ async def remove_contact_from_journal(
     contact_relationship_repo: FromDishka[JournalContactRelationshipRepository],
     tag_repo: FromDishka[JournalTagRepository],
     route_repo: FromDishka[RouteRepository],
+    contact_repo: FromDishka[ContactRepository],
     connection: FromDishka[AsyncConnection],
     user: FromDishka[SessionUser],  # Require authentication
 ) -> JournalResponse:
@@ -2753,7 +2825,7 @@ async def remove_contact_from_journal(
         updated_journal, base_url, types, type_data, contacts, tags, calendar
     )
 
-    return JournalResponse(data=journal_resource)
+    return await _build_journal_response(journal_resource, contact_repo)
 
 
 @router.post("/{journal_id}/relationships/tags")
@@ -2781,6 +2853,7 @@ async def add_tag_to_journal(
     contact_relationship_repo: FromDishka[JournalContactRelationshipRepository],
     tag_repo: FromDishka[JournalTagRepository],
     route_repo: FromDishka[RouteRepository],
+    contact_repo: FromDishka[ContactRepository],
     connection: FromDishka[AsyncConnection],
     user: FromDishka[SessionUser],  # Require authentication
 ) -> JournalResponse:
@@ -2845,7 +2918,7 @@ async def add_tag_to_journal(
         updated_journal, base_url, types, type_data, contacts, tags, calendar
     )
 
-    return JournalResponse(data=journal_resource)
+    return await _build_journal_response(journal_resource, contact_repo)
 
 
 @router.delete("/{journal_id}/relationships/tags/{tag_id}")
@@ -2873,6 +2946,7 @@ async def remove_tag_from_journal(
     contact_relationship_repo: FromDishka[JournalContactRelationshipRepository],
     tag_repo: FromDishka[JournalTagRepository],
     route_repo: FromDishka[RouteRepository],
+    contact_repo: FromDishka[ContactRepository],
     connection: FromDishka[AsyncConnection],
     user: FromDishka[SessionUser],  # Require authentication
 ) -> JournalResponse:
@@ -2932,4 +3006,4 @@ async def remove_tag_from_journal(
         updated_journal, base_url, types, type_data, contacts, tags, calendar
     )
 
-    return JournalResponse(data=journal_resource)
+    return await _build_journal_response(journal_resource, contact_repo)

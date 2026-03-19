@@ -46,6 +46,17 @@ class ContactRepository(ABC):
         pass
 
     @abstractmethod
+    async def find_names_by_ids(
+        self, contact_ids: list[int]
+    ) -> dict[int, tuple[str | None, str | None]]:
+        """Fetch (first_name, last_name) for multiple contacts in a single query.
+
+        Returns a dict mapping contact_id to (first_name, last_name).
+        Only contacts that exist are included in the result.
+        """
+        pass
+
+    @abstractmethod
     async def find_by_email(self, email: str) -> Contact | None:
         """Find a contact by email address."""
         pass
