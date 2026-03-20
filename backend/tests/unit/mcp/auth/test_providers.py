@@ -47,21 +47,19 @@ class TestCreateMCPAuthProvider:
         result = create_mcp_auth_provider(settings)
         assert result is None
 
-    def test_returns_none_when_no_webhook_base_url_but_providers_configured(
+    def test_raises_when_no_webhook_base_url_but_providers_configured(
         self,
     ) -> None:
-        """Missing webhook_base_url with configured providers should return None.
+        """Missing webhook_base_url with configured providers should raise."""
+        import pytest
 
-        OAuth credentials serve both web UI login and MCP auth. When
-        WEBHOOK_BASE_URL is missing, MCP runs without auth (warning logged).
-        """
         settings = _settings(
             webhook_base_url="",
             github_client_id="id",
             github_client_secret="secret",
         )
-        result = create_mcp_auth_provider(settings)
-        assert result is None
+        with pytest.raises(RuntimeError, match="WEBHOOK_BASE_URL"):
+            create_mcp_auth_provider(settings)
 
     def test_returns_none_when_no_webhook_base_url_and_no_providers(self) -> None:
         """Missing webhook_base_url without any providers should return None."""

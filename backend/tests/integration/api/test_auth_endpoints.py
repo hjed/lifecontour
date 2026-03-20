@@ -23,6 +23,7 @@ def test_settings(db_config):
         ),
         session_secret_key="test-session-secret",
         allowed_hosts=["*"],  # Allow all hosts for testing
+        webhook_base_url="http://localhost:8000",
         github_client_id="test_github_client_id",
         github_client_secret="test_github_client_secret",
         microsoft_client_id="test_microsoft_client_id",

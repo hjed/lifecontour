@@ -43,16 +43,12 @@ def create_mcp_auth_provider(settings: Settings) -> AuthProvider | None:
     base_url = _get_mcp_base_url(settings)
     if not base_url:
         if _has_any_provider_configured(settings):
-            # OAuth credentials serve both web UI login and MCP auth.
-            # Without WEBHOOK_BASE_URL, MCP OAuth cannot be configured,
-            # but the web UI OAuth flow still works independently.
-            logger.warning(
-                "MCP: OAuth providers are configured but WEBHOOK_BASE_URL is "
-                "not set. MCP will run without authentication. Set "
-                "WEBHOOK_BASE_URL to enable MCP OAuth auth."
+            raise RuntimeError(
+                "WEBHOOK_BASE_URL must be configured to use MCP OAuth auth. "
+                "Set WEBHOOK_BASE_URL or disable auth explicitly via "
+                "DISABLE_AUTH=true."
             )
-        else:
-            logger.info("MCP: No OAuth providers configured, MCP auth unavailable")
+        logger.info("MCP: No OAuth providers configured, MCP auth unavailable")
         return None
 
     # Priority 1: Generic OAuth provider
