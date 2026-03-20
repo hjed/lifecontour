@@ -42,9 +42,13 @@ def create_mcp_auth_provider(settings: Settings) -> AuthProvider | None:
 
     base_url = _get_mcp_base_url(settings)
     if not base_url:
-        logger.warning(
-            "MCP: No webhook_base_url configured, cannot create OAuth provider"
-        )
+        if _has_any_provider_configured(settings):
+            raise RuntimeError(
+                "WEBHOOK_BASE_URL must be configured to use MCP OAuth auth. "
+                "Set WEBHOOK_BASE_URL or disable auth explicitly via "
+                "DISABLE_AUTH=true."
+            )
+        logger.info("MCP: No OAuth providers configured, MCP auth unavailable")
         return None
 
     # Priority 1: Generic OAuth provider
@@ -57,6 +61,17 @@ def create_mcp_auth_provider(settings: Settings) -> AuthProvider | None:
         logger.info(
             "MCP: Configuring generic OAuth provider",
             provider_name=settings.oauth_provider_name or "generic",
+        )
+        # DebugTokenVerifier is the only TokenVerifier implementation in
+        # FastMCP and is required by OAuthProxy. Named providers (GitHub,
+        # Azure, Discord) have their own built-in verification. For
+        # generic OAuth, tokens are validated via the upstream provider's
+        # authorization flow; DebugTokenVerifier handles the local JWT
+        # that OAuthProxy issues after a successful upstream exchange.
+        logger.warning(
+            "MCP: Generic OAuth uses DebugTokenVerifier for local token "
+            "validation. Consider using a named provider (GitHub, Azure, "
+            "Discord) for stronger token verification."
         )
         return OAuthProxy(
             upstream_authorization_endpoint=settings.oauth_authorization_url,
@@ -116,3 +131,13 @@ def _get_mcp_base_url(settings: Settings) -> str:
     base = settings.webhook_base_url.rstrip("/")
     mount = settings.mcp_mount_path.rstrip("/")
     return f"{base}{mount}"
+
+
+def _has_any_provider_configured(settings: Settings) -> bool:
+    """Check if any OAuth provider credentials are configured."""
+    return bool(
+        (settings.oauth_client_id and settings.oauth_client_secret)
+        or (settings.github_client_id and settings.github_client_secret)
+        or (settings.microsoft_client_id and settings.microsoft_client_secret)
+        or (settings.discord_client_id and settings.discord_client_secret)
+    )

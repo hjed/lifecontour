@@ -229,8 +229,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         # Mount .well-known discovery routes at root level (required by MCP spec)
         if auth_provider is not None:
             well_known_routes = auth_provider.get_well_known_routes(mcp_path="/mcp")
-            for route in well_known_routes:
-                app.routes.insert(0, route)
+            # Insert all .well-known routes at the front while preserving order
+            app.routes[0:0] = well_known_routes
             logger.info(
                 "MCP: Mounted .well-known OAuth discovery routes",
                 route_count=len(well_known_routes),

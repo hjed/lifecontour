@@ -3,6 +3,7 @@
 from collections.abc import Callable
 from typing import Any, TypeVar, cast
 
+import structlog
 from dishka import AsyncContainer
 from fastmcp.dependencies import Depends
 from fastmcp.server.dependencies import get_http_request
@@ -15,6 +16,15 @@ from app.infrastructure.events.outbox_event_publisher import OutboxEventPublishe
 from app.infrastructure.search.search_service import SearchService
 
 T = TypeVar("T")
+
+logger = structlog.get_logger()
+
+_DEV_USER = SessionUser(
+    id="dev-user",
+    email="dev@example.com",
+    name="Development User",
+    provider="development",
+)
 
 
 def _get_request_container() -> AsyncContainer:
@@ -59,15 +69,14 @@ def get_session_user() -> SessionUser:
 
     When OAuth auth is enabled, the user identity is extracted from the
     FastMCP access token claims (populated by the OAuth provider).
-    When auth is disabled (dev mode), falls back to the Dishka-provided
-    SessionUser (dev user).
+    When auth is disabled (dev mode), returns a deterministic dev user.
     """
-    try:
-        from fastmcp.server.dependencies import get_access_token
+    from fastmcp.server.dependencies import get_access_token
 
-        token = get_access_token()
-        if token is None:
-            raise ValueError("No access token")
+    token = get_access_token()
+
+    if token is not None:
+        # Authenticated via OAuth — extract user identity from token claims
         claims = token.claims or {}
         return SessionUser(
             id=str(claims.get("sub") or claims.get("id") or token.client_id),
@@ -80,15 +89,11 @@ def get_session_user() -> SessionUser:
             ),
             provider="mcp-oauth",
         )
-    except Exception:
-        # No access token available — auth is disabled (dev mode).
-        # Fall back to request.state.user if set, or raise.
-        request = get_http_request()
-        if hasattr(request.state, "user"):
-            return cast(SessionUser, request.state.user)
-        raise RuntimeError(
-            "No authenticated user found in MCP request context"
-        ) from None
+
+    # No access token — auth is disabled (dev mode).
+    # Return the same dev user used by the DI container.
+    logger.debug("MCP: No access token, using dev user")
+    return _DEV_USER
 
 
 def get_current_user_id() -> str:
