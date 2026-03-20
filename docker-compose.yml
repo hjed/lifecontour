@@ -209,6 +209,7 @@ services:
       OAUTH_TOKEN_URL: ${OAUTH_TOKEN_URL:-http://oauth-provider:4444/oauth2/token}
       OAUTH_USERINFO_URL: ${OAUTH_USERINFO_URL:-http://oauth-provider:4444/userinfo}
       FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3000}
+      WEBHOOK_BASE_URL: ${WEBHOOK_BASE_URL:-http://localhost:8000}
       DISABLE_AUTH: ${DISABLE_AUTH:-false}
     volumes:
       - ./backend:/app
