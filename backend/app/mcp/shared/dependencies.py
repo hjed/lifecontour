@@ -19,13 +19,6 @@ T = TypeVar("T")
 
 logger = structlog.get_logger()
 
-_DEV_USER = SessionUser(
-    id="dev-user",
-    email="dev@example.com",
-    name="Development User",
-    provider="development",
-)
-
 
 def _get_request_container() -> AsyncContainer:
     """Resolve the Dishka container for the current MCP HTTP request."""
@@ -64,12 +57,13 @@ def mcp_depends(
     return Depends(cast(Callable[..., object], dependency))
 
 
-def get_session_user() -> SessionUser:
+async def get_session_user() -> SessionUser:
     """Get the authenticated session user for the current MCP request.
 
     When OAuth auth is enabled, the user identity is extracted from the
     FastMCP access token claims (populated by the OAuth provider).
-    When auth is disabled (dev mode), returns a deterministic dev user.
+    When auth is disabled (dev mode), resolves the SessionUser from the
+    Dishka container to stay consistent with API endpoint user identity.
     """
     from fastmcp.server.dependencies import get_access_token
 
@@ -91,14 +85,16 @@ def get_session_user() -> SessionUser:
         )
 
     # No access token — auth is disabled (dev mode).
-    # Return the same dev user used by the DI container.
-    logger.debug("MCP: No access token, using dev user")
-    return _DEV_USER
+    # Resolve SessionUser from Dishka container so MCP tools use
+    # the same user identity as API endpoints.
+    logger.debug("MCP: No access token, resolving user from DI container")
+    return cast(SessionUser, await _resolve_dependency(SessionUser))
 
 
-def get_current_user_id() -> str:
+async def get_current_user_id() -> str:
     """Get the current authenticated user id for the MCP request."""
-    return get_session_user().id
+    user = await get_session_user()
+    return user.id
 
 
 async def get_async_connection() -> AsyncConnection:

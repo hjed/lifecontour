@@ -1678,7 +1678,7 @@ def register_journal_tools(mcp: FastMCP[None]) -> None:
             raise ValueError(f"Invalid journal data: {e}") from e
 
         # Get current user ID from auth context
-        user_id = get_current_user_id()
+        user_id = await get_current_user_id()
 
         # Create repositories
         repos = _create_journal_tool_repositories(db_connection)
@@ -2200,7 +2200,7 @@ def register_journal_tools(mcp: FastMCP[None]) -> None:
         Raises:
             ValueError: If invalid filter values are provided
         """
-        user_id = get_current_user_id()
+        user_id = await get_current_user_id()
         repos = _create_journal_tool_repositories(db_connection)
         type_filters = _parse_type_filters(types)
 
@@ -2292,7 +2292,7 @@ def register_journal_tools(mcp: FastMCP[None]) -> None:
         db_connection: AsyncConnection = mcp_depends(get_async_connection),
     ) -> str:
         """Search activity journals with effective activity-type filtering."""
-        user_id = get_current_user_id()
+        user_id = await get_current_user_id()
         repos = _create_journal_tool_repositories(db_connection)
         total_hits = await _count_activity_rows(
             db_connection,
@@ -2352,7 +2352,7 @@ def register_journal_tools(mcp: FastMCP[None]) -> None:
         db_connection: AsyncConnection = mcp_depends(get_async_connection),
     ) -> str:
         """Aggregate activity totals, breakdowns, and personal records."""
-        user_id = get_current_user_id()
+        user_id = await get_current_user_id()
         overall_stats_row = await _fetch_activity_overall_stats_row(
             db_connection,
             user_id,
@@ -2459,7 +2459,7 @@ def register_journal_tools(mcp: FastMCP[None]) -> None:
         if normalized_interval not in {"day", "week", "month", "year"}:
             raise ValueError("interval must be one of: day, week, month, year")
 
-        user_id = get_current_user_id()
+        user_id = await get_current_user_id()
         trend_rows = await _fetch_activity_trend_rows(
             db_connection,
             user_id,
@@ -2499,7 +2499,7 @@ def register_journal_tools(mcp: FastMCP[None]) -> None:
         db_connection: AsyncConnection = mcp_depends(get_async_connection),
     ) -> str:
         """Return route usage history across route-aware activity journals."""
-        user_id = get_current_user_id()
+        user_id = await get_current_user_id()
         repos = _create_journal_tool_repositories(db_connection)
 
         try:
@@ -2768,7 +2768,7 @@ def register_journal_tools(mcp: FastMCP[None]) -> None:
         """
         List all calendars available for EVENT journals.
         """
-        user_id = get_current_user_id()
+        user_id = await get_current_user_id()
         calendar_repo = SqlCalendarRepository(db_connection)
 
         calendars = await calendar_repo.get_all(user_id=user_id)
@@ -2811,7 +2811,7 @@ def register_journal_tools(mcp: FastMCP[None]) -> None:
         """
         Create a new calendar to be used with EVENT journals.
         """
-        user_id = get_current_user_id()
+        user_id = await get_current_user_id()
         calendar_repo = SqlCalendarRepository(db_connection)
 
         new_calendar = Calendar(
@@ -2856,7 +2856,7 @@ def register_journal_tools(mcp: FastMCP[None]) -> None:
         """
         Update an existing calendar.
         """
-        user_id = get_current_user_id()
+        user_id = await get_current_user_id()
         calendar_repo = SqlCalendarRepository(db_connection)
 
         calendar_uuid = _parse_calendar_id(calendar_id)
@@ -2900,7 +2900,7 @@ def register_journal_tools(mcp: FastMCP[None]) -> None:
         """
         Delete a calendar. Will fail if the calendar is in use.
         """
-        user_id = get_current_user_id()
+        user_id = await get_current_user_id()
         calendar_repo = SqlCalendarRepository(db_connection)
 
         calendar_uuid = _parse_calendar_id(calendar_id)
