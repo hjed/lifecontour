@@ -99,6 +99,55 @@ test.describe('Contact Journals Display', () => {
       ).toBeVisible();
     });
 
+    test('should display contact name instead of Contact <id> on related journals', async ({
+      authenticatedPage,
+    }) => {
+      const page = authenticatedPage;
+      const dataManager = new TestDataManager(page);
+
+      // Create a contact
+      const contact = await dataManager.createContact({
+        firstName: 'Alice',
+        lastName: 'Smith',
+        email: 'alice.smith@example.com',
+      });
+
+      // Create a journal related to this contact
+      const journal = await dataManager.createJournal({
+        title: 'Meeting with Alice',
+        content: 'Discussed project plans',
+        event_date_range: {
+          start: '2024-01-15T10:00:00Z',
+          end: '2024-01-15T11:00:00Z',
+        },
+        contacts: [
+          { contact_id: contact.id, relationship_type: 'PARTICIPANT' },
+        ],
+      });
+
+      // Navigate to contact detail page
+      await page.goto(`/contacts/${contact.id}`);
+
+      // Wait for page to load by checking for contact name
+      await expect(
+        page.getByText(`${contact.firstName} ${contact.lastName}`)
+      ).toBeVisible();
+
+      // Verify journals section is visible
+      await navigateToContactAndWaitForJournals(page, contact.id);
+
+      // Verify the journal title is displayed
+      const journalCard = page.locator('article', { hasText: journal.title });
+      await expect(journalCard).toBeVisible();
+
+      // Verify that the contact's name is rendered in the journal's contact badges
+      // It should NOT render as "Contact <id>"
+      await expect(journalCard.getByText('Alice Smith')).toBeVisible();
+      await expect(
+        journalCard.getByText(`Contact ${contact.id}`)
+      ).not.toBeVisible();
+    });
+
     test('should group journals by relationship type with collapsible sections', async ({
       authenticatedPage,
     }) => {

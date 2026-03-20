@@ -9,7 +9,6 @@ from datetime import datetime
 
 import structlog
 from core_shared.models.contacts.exceptions import ContactValidationError
-from core_shared.models.journals import Journal
 from dishka.integrations.fastapi import FromDishka, inject
 from fastapi import APIRouter, Query, Request, status
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
@@ -46,12 +45,12 @@ from app.api.contacts.schemas import (
     TagAssignmentRequest,
     TagListResponse,
 )
-from app.api.journals.controllers import _enrich_journal_data
-from app.api.journals.converters import JournalConverter
+from app.api.journals.controllers import _build_journal_list_resources
 from app.api.journals.schemas import JournalListResponse
 from app.core.contacts.models.exceptions import (
     ContactNotFoundError,
 )
+from app.core.contacts.models.repositories import ContactRepository
 from app.core.contacts.services import ContactService
 from app.core.contacts.services.contact_history_service import ContactHistoryService
 from app.core.journal.models.repositories import (
@@ -798,6 +797,7 @@ async def get_contact_journals(
     skiing_data_repo: FromDishka[CrossCountrySkiingDataRepository],
     tag_repo: FromDishka[JournalTagRepository],
     route_repo: FromDishka[RouteRepository],
+    contact_repo: FromDishka[ContactRepository],
     _user: FromDishka[SessionUser],  # Require authentication
     page: int = Query(default=1, description=PAGE_NUMBER_DESCRIPTION, ge=1),
     limit: int = Query(
@@ -855,85 +855,31 @@ async def get_contact_journals(
         limit=pagination.limit,
     )
 
-    # Include descendants of the journals on this page, even if those descendants
-    # have no direct relationship to the contact.
-    journal_ids_in_page = [j.id for j in journals if j.id is not None]
-    descendant_journals = await journal_service.find_descendants_for_user(
+    journal_resources = await _build_journal_list_resources(
+        journals=journals,
         user_id=_user.id,
-        ancestor_ids=journal_ids_in_page,
-        max_depth=5,
+        base_url=base_url,
+        journal_service=journal_service,
+        contact_repo=contact_repo,
+        calendar_info_repo=calendar_info_repo,
+        calendar_repo=calendar_repo,
+        mood_data_repo=mood_data_repo,
+        plan_data_repo=plan_data_repo,
+        travel_data_repo=travel_data_repo,
+        photo_album_data_repo=photo_album_data_repo,
+        fitness_data_repo=fitness_data_repo,
+        outdoor_activity_data_repo=outdoor_activity_data_repo,
+        bushwalking_data_repo=bushwalking_data_repo,
+        jogging_data_repo=jogging_data_repo,
+        abseiling_data_repo=abseiling_data_repo,
+        canyoning_data_repo=canyoning_data_repo,
+        climbing_data_repo=climbing_data_repo,
+        kayaking_data_repo=kayaking_data_repo,
+        skiing_data_repo=skiing_data_repo,
+        contact_relationship_repo=contact_relationship_repo,
+        tag_repo=tag_repo,
+        route_repo=route_repo,
     )
-
-    # Return the paginated (directly-related) journals plus their descendants.
-    seen_ids: set[int] = set()
-    all_journals: list[Journal] = []
-    for j in [*journals, *descendant_journals]:
-        if j.id is None:
-            continue
-        if j.id in seen_ids:
-            continue
-        seen_ids.add(j.id)
-        all_journals.append(j)
-
-    # Batch-load parents + children counts (tenant-safe) for hierarchy fields
-    returned_ids = {j.id for j in all_journals if j.id is not None}
-    parent_ids = list({j.parent_id for j in all_journals if j.parent_id is not None})
-    missing_parent_ids = [pid for pid in parent_ids if pid not in returned_ids]
-    parent_journals = await journal_service.find_journals_by_ids_for_user(
-        user_id=_user.id, journal_ids=missing_parent_ids
-    )
-    parent_by_id = {
-        **{p.id: p for p in parent_journals if p.id is not None},
-        **{j.id: j for j in all_journals if j.id is not None},
-    }
-
-    returned_ids_list = [j.id for j in all_journals if j.id is not None]
-    children_count_by_parent_id = await journal_service.count_children_for_parents(
-        user_id=_user.id, parent_ids=returned_ids_list
-    )
-
-    # Enrich journals with type data, contacts, tags, etc.
-    journal_resources = []
-    for journal in all_journals:
-        types, type_data, contacts, tags, calendar, routes = await _enrich_journal_data(
-            journal,
-            calendar_info_repo,
-            calendar_repo,
-            mood_data_repo,
-            plan_data_repo,
-            travel_data_repo,
-            photo_album_data_repo,
-            fitness_data_repo,
-            contact_relationship_repo,
-            tag_repo,
-            route_repo,
-            outdoor_activity_data_repo,
-            bushwalking_data_repo,
-            jogging_data_repo,
-            abseiling_data_repo,
-            canyoning_data_repo,
-            climbing_data_repo,
-            kayaking_data_repo,
-            skiing_data_repo,
-            include_routes=False,
-        )
-        parent = parent_by_id.get(journal.parent_id) if journal.parent_id else None
-        children_count = (
-            children_count_by_parent_id.get(journal.id, 0) if journal.id else 0
-        )
-        journal_resource = JournalConverter.to_resource(
-            journal,
-            base_url,
-            types,
-            type_data,
-            contacts,
-            tags,
-            calendar,
-            routes=routes,
-            parent=parent,
-            children_count=children_count,
-        )
-        journal_resources.append(journal_resource)
 
     # Create pagination metadata
     meta = create_pagination_meta(total_count, page, limit)
