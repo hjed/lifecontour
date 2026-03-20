@@ -160,7 +160,9 @@ class TestGoogleContactTransformer:
         contact = transformer.transform_person(sample_google_person)
 
         email_methods = [
-            cm for cm in contact.methods if cm.method_type == MethodType.EMAIL  # type: ignore[union-attr]
+            cm
+            for cm in contact.methods
+            if cm.method_type == MethodType.EMAIL  # type: ignore[union-attr]
         ]
         assert len(email_methods) == 2
 
@@ -181,7 +183,9 @@ class TestGoogleContactTransformer:
         contact = transformer.transform_person(sample_google_person)
 
         phone_methods = [
-            cm for cm in contact.methods if cm.method_type == MethodType.PHONE  # type: ignore[union-attr]
+            cm
+            for cm in contact.methods
+            if cm.method_type == MethodType.PHONE  # type: ignore[union-attr]
         ]
         assert len(phone_methods) == 1
 
@@ -284,7 +288,9 @@ class TestGoogleContactTransformer:
 
         # Should only include valid email
         email_methods = [
-            cm for cm in contact.methods if cm.method_type == MethodType.EMAIL  # type: ignore[union-attr]
+            cm
+            for cm in contact.methods
+            if cm.method_type == MethodType.EMAIL  # type: ignore[union-attr]
         ]
         assert len(email_methods) == 1
         assert email_methods[0].value == "valid@example.com"
@@ -304,7 +310,9 @@ class TestGoogleContactTransformer:
         contact = transformer.transform_person(person)
 
         email_methods = [
-            cm for cm in contact.methods if cm.method_type == MethodType.EMAIL  # type: ignore[union-attr]
+            cm
+            for cm in contact.methods
+            if cm.method_type == MethodType.EMAIL  # type: ignore[union-attr]
         ]
         assert len(email_methods) == 1
         assert email_methods[0].value == "valid@example.com"
@@ -324,7 +332,9 @@ class TestGoogleContactTransformer:
         contact = transformer.transform_person(person)
 
         phone_methods = [
-            cm for cm in contact.methods if cm.method_type == MethodType.PHONE  # type: ignore[union-attr]
+            cm
+            for cm in contact.methods
+            if cm.method_type == MethodType.PHONE  # type: ignore[union-attr]
         ]
         assert len(phone_methods) == 1
         assert phone_methods[0].value == "+61 400 123 456"

@@ -1188,8 +1188,7 @@ async def _perform_full_sync(
 
         # Determine which contacts already exist via sync metadata
         batch_external_ids = [
-            google_person.resource_name
-            for google_person, _ in serialized_contacts
+            google_person.resource_name for google_person, _ in serialized_contacts
         ]
         existing_external_ids = await _find_existing_external_ids(
             session, batch_external_ids, "google"
@@ -2711,6 +2710,7 @@ async def _load_calendar_sync_token(
         },
     )
     from typing import cast
+
     return cast(str | None, result.scalar())
 
 
@@ -3183,7 +3183,9 @@ async def setup_calendar_webhook(
             "Calendar webhook setup complete",
             channel_id=channel_id,
             resource_id=resource_id,
-            channel_expiration=channel_expiration.isoformat() if channel_expiration else None,
+            channel_expiration=channel_expiration.isoformat()
+            if channel_expiration
+            else None,
             google_calendar_id=google_calendar_id,
         )
 
@@ -3191,7 +3193,9 @@ async def setup_calendar_webhook(
             "status": "success",
             "channel_id": channel_id,
             "resource_id": resource_id,
-            "channel_expiration": channel_expiration.isoformat() if channel_expiration else None,
+            "channel_expiration": channel_expiration.isoformat()
+            if channel_expiration
+            else None,
         }
 
     except Exception as e:

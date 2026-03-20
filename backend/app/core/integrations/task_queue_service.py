@@ -108,7 +108,6 @@ class TaskQueueService:
                 google_account_email,
                 user_id,
                 sync_type,
-                _job_timeout=self.settings.task_queue_job_timeout_seconds,
                 _defer_until=None,  # Run immediately
                 _queue_name=ARQ_QUEUE_NAME,
             )
@@ -190,7 +189,6 @@ class TaskQueueService:
                 google_account_email,
                 user_id,
                 sync_type,
-                _job_timeout=self.settings.task_queue_job_timeout_seconds,
                 _defer_until=None,
                 _queue_name=ARQ_QUEUE_NAME,
             )
@@ -280,7 +278,6 @@ class TaskQueueService:
                     "process_journal_event",
                     event_type,
                     event_data,
-                    _job_timeout=self.settings.task_queue_job_timeout_seconds,
                     _defer_until=None,
                     _queue_name=queue_name,
                 )
