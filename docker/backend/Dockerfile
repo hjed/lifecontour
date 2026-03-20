@@ -25,8 +25,8 @@ RUN apt-get update && apt-get install -y \
 # Install UV for dependency management
 RUN pip install uv
 
-# Create app user (for security)
-RUN groupadd -r appuser && useradd -r -g appuser appuser
+# Create app user with home directory (FastMCP OAuthProxy needs writable home for token storage)
+RUN groupadd -r appuser && useradd -r -m -g appuser appuser
 
 # Set working directory
 WORKDIR /app
