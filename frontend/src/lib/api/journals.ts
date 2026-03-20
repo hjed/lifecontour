@@ -244,6 +244,39 @@ async function deleteJournal(id: string): Promise<void> {
   }
 }
 
+async function mergeJournal(
+  targetId: string,
+  sourceId: string
+): Promise<JournalResponse> {
+  const requestData = {
+    type: 'journal-merge' as const,
+    attributes: {
+      source_journal_id: sourceId,
+    },
+  };
+
+  const response = await fetch(
+    `${API_ENDPOINTS.JOURNALS.BY_ID(targetId)}/merge`,
+    {
+      method: 'POST',
+      credentials: 'include',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ data: requestData }),
+    }
+  );
+
+  if (!response.ok) {
+    const errorData: JsonApiErrorResponse = await response.json();
+    throw new Error(
+      errorData.errors?.[0]?.detail || 'Failed to merge journals'
+    );
+  }
+
+  return response.json();
+}
+
 async function updateJournalField(
   journalId: string,
   fieldName: string,
@@ -764,6 +797,29 @@ export function useDeleteJournal() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: journalKeys.all });
       toast.success(SUCCESS_MESSAGES.JOURNAL_DELETED);
+    },
+    onError: (error: Error) => {
+      toast.error(error.message);
+    },
+  });
+}
+
+export function useMergeJournal() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({
+      targetId,
+      sourceId,
+    }: {
+      targetId: string;
+      sourceId: string;
+    }) => mergeJournal(targetId, sourceId),
+    onSuccess: (_, { targetId, sourceId }) => {
+      queryClient.invalidateQueries({ queryKey: journalKeys.detail(targetId) });
+      queryClient.invalidateQueries({ queryKey: journalKeys.detail(sourceId) });
+      queryClient.invalidateQueries({ queryKey: journalKeys.lists() });
+      toast.success('Journals merged successfully');
     },
     onError: (error: Error) => {
       toast.error(error.message);

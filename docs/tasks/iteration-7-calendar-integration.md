@@ -320,10 +320,12 @@ This phase fills two product-specification gaps discovered during Phase 3 comple
 - [ ] Non-duplicate tags, contact relationships, child journals, and external references are preserved on the survivor.
 - [ ] Duplicate links collapse cleanly rather than duplicating remote references.
 - [ ] The default merge path prefers non-empty over empty values where no user decision is needed.
+- [ ] Basic merge journal API.
+- [ ] UI for selecting mergable journals and merging them when there are no decisions required.
 
 **Required Test Coverage:**
 - **Unit:** survivor selection helpers, duplicate-collapsing rules, non-empty merge defaults.
-- **Integration:** real-database merge tests preserving children, contacts, tags, and external refs.
+- **Integration:** real-database merge tests preserving children, contacts, tags, and external refs. API merge tests.
 - **E2E:** deterministic merge of an obvious duplicate pair through the nearest real user workflow.
 
 #### Phase 2: Conflicting Value Resolution and Manual-Journal Precedence

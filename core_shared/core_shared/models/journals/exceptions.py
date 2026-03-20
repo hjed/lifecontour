@@ -261,3 +261,10 @@ class GPXParsingError(JournalDomainError):
 
     def __init__(self, message: str):
         super().__init__(message, 422)
+
+
+class JournalMergeConflictError(JournalDomainError):
+    """Exception raised when there is a conflict in merging journals."""
+
+    def __init__(self, message: str):
+        super().__init__(message, 409)

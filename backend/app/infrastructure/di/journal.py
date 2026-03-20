@@ -67,6 +67,7 @@ from app.core.journal.models.repositories import (
     RouteRepository,
     TravelDataRepository,
 )
+from app.core.journal.services.journal_merge_service import JournalMergeService
 from app.core.journal.services.journal_service import JournalService
 from app.core.journal.services.route_service import RouteService
 from app.infrastructure.events.outbox_event_publisher import OutboxEventPublisher
@@ -206,6 +207,18 @@ class JournalProvider(Provider):
     ) -> JournalService:
         """Provide a JournalService instance."""
         return JournalService(
+            journal_repo=journal_repo,
+            event_publisher=event_publisher,
+        )
+
+    @provide(scope=Scope.REQUEST)
+    def journal_merge_service(
+        self,
+        journal_repo: JournalRepository,
+        event_publisher: OutboxEventPublisher,
+    ) -> JournalMergeService:
+        """Provide a JournalMergeService instance."""
+        return JournalMergeService(
             journal_repo=journal_repo,
             event_publisher=event_publisher,
         )
