@@ -340,6 +340,11 @@ class TestGoogleWorker:
             patch(
                 "worker.OutboxEvent.create_contact_sync_event", return_value=MagicMock()
             ),
+            patch(
+                "worker._find_existing_external_ids",
+                new_callable=AsyncMock,
+                return_value=set(),
+            ),
         ):
             result = await _perform_full_sync(
                 session=mock_session,
@@ -349,13 +354,172 @@ class TestGoogleWorker:
                 user_id=1,
             )
 
-        assert result == {"contacts_created": 1}
+        assert result == {"contacts_created": 1, "contacts_updated": 0}
         assert metrics["contacts_processed"] == 1
         mock_process.assert_called_once()
         assert mock_session.add.call_count == 1
         mock_save_sync_token.assert_awaited_once_with(
             mock_session, "test@example.com", "sync-token-123", 1
         )
+
+    @pytest.mark.asyncio
+    async def test_perform_full_sync_uses_created_for_new_contacts(self):
+        """Test full sync uses sync_type='created' for contacts without existing sync metadata."""
+        from worker import _perform_full_sync
+
+        mock_session = AsyncMock()
+        mock_session.add = MagicMock()
+        mock_client = AsyncMock()
+        mock_client.list_connections.return_value = {
+            "connections": [
+                {"resourceName": "people/new1", "etag": "etag-new1"},
+            ],
+            "nextSyncToken": "sync-token-new",
+        }
+        metrics = {"contacts_processed": 0, "errors": 0}
+        processed_contacts = [
+            (
+                MagicMock(resource_name="people/new1", etag="etag-new1"),
+                {"first_name": "New", "methods": [], "addresses": [], "notes": [], "tags": []},
+            )
+        ]
+
+        mock_create_event = MagicMock(return_value=MagicMock())
+
+        with (
+            patch("worker._process_contacts_batch", return_value=processed_contacts),
+            patch("worker._save_sync_token", new_callable=AsyncMock),
+            patch(
+                "worker.OutboxEvent.create_contact_sync_event", mock_create_event
+            ),
+            patch(
+                "worker._find_existing_external_ids",
+                new_callable=AsyncMock,
+                return_value=set(),
+            ),
+        ):
+            result = await _perform_full_sync(
+                session=mock_session,
+                client=mock_client,
+                google_account_email="test@example.com",
+                metrics=metrics,
+                user_id=1,
+            )
+
+        assert result["contacts_created"] == 1
+        assert result["contacts_updated"] == 0
+        mock_create_event.assert_called_once()
+        _, kwargs = mock_create_event.call_args
+        assert kwargs["sync_type"] == "created"
+
+    @pytest.mark.asyncio
+    async def test_perform_full_sync_uses_updated_for_existing_contacts(self):
+        """Test full sync uses sync_type='updated' for contacts with existing sync metadata."""
+        from worker import _perform_full_sync
+
+        mock_session = AsyncMock()
+        mock_session.add = MagicMock()
+        mock_client = AsyncMock()
+        mock_client.list_connections.return_value = {
+            "connections": [
+                {"resourceName": "people/existing1", "etag": "etag-existing1"},
+            ],
+            "nextSyncToken": "sync-token-existing",
+        }
+        metrics = {"contacts_processed": 0, "errors": 0}
+        processed_contacts = [
+            (
+                MagicMock(resource_name="people/existing1", etag="etag-existing1"),
+                {"first_name": "Existing", "methods": [], "addresses": [], "notes": [], "tags": []},
+            )
+        ]
+
+        mock_create_event = MagicMock(return_value=MagicMock())
+
+        with (
+            patch("worker._process_contacts_batch", return_value=processed_contacts),
+            patch("worker._save_sync_token", new_callable=AsyncMock),
+            patch(
+                "worker.OutboxEvent.create_contact_sync_event", mock_create_event
+            ),
+            patch(
+                "worker._find_existing_external_ids",
+                new_callable=AsyncMock,
+                return_value={"people/existing1"},
+            ),
+        ):
+            result = await _perform_full_sync(
+                session=mock_session,
+                client=mock_client,
+                google_account_email="test@example.com",
+                metrics=metrics,
+                user_id=1,
+            )
+
+        assert result["contacts_created"] == 0
+        assert result["contacts_updated"] == 1
+        mock_create_event.assert_called_once()
+        _, kwargs = mock_create_event.call_args
+        assert kwargs["sync_type"] == "updated"
+
+    @pytest.mark.asyncio
+    async def test_perform_full_sync_mixed_new_and_existing(self):
+        """Test full sync correctly differentiates new and existing contacts in same batch."""
+        from worker import _perform_full_sync
+
+        mock_session = AsyncMock()
+        mock_session.add = MagicMock()
+        mock_client = AsyncMock()
+        mock_client.list_connections.return_value = {
+            "connections": [
+                {"resourceName": "people/new1", "etag": "etag-new1"},
+                {"resourceName": "people/existing1", "etag": "etag-existing1"},
+            ],
+            "nextSyncToken": "sync-token-mixed",
+        }
+        metrics = {"contacts_processed": 0, "errors": 0}
+        processed_contacts = [
+            (
+                MagicMock(resource_name="people/new1", etag="etag-new1"),
+                {"first_name": "New", "methods": [], "addresses": [], "notes": [], "tags": []},
+            ),
+            (
+                MagicMock(resource_name="people/existing1", etag="etag-existing1"),
+                {"first_name": "Existing", "methods": [], "addresses": [], "notes": [], "tags": []},
+            ),
+        ]
+
+        mock_create_event = MagicMock(return_value=MagicMock())
+
+        with (
+            patch("worker._process_contacts_batch", return_value=processed_contacts),
+            patch("worker._save_sync_token", new_callable=AsyncMock),
+            patch(
+                "worker.OutboxEvent.create_contact_sync_event", mock_create_event
+            ),
+            patch(
+                "worker._find_existing_external_ids",
+                new_callable=AsyncMock,
+                return_value={"people/existing1"},
+            ),
+        ):
+            result = await _perform_full_sync(
+                session=mock_session,
+                client=mock_client,
+                google_account_email="test@example.com",
+                metrics=metrics,
+                user_id=1,
+            )
+
+        assert result["contacts_created"] == 1
+        assert result["contacts_updated"] == 1
+        assert mock_create_event.call_count == 2
+
+        # Verify sync_types match the expected values
+        calls = mock_create_event.call_args_list
+        sync_types = {call.kwargs["external_id"]: call.kwargs["sync_type"] for call in calls}
+        assert sync_types["people/new1"] == "created"
+        assert sync_types["people/existing1"] == "updated"
 
     @pytest.mark.asyncio
     async def test_perform_incremental_sync_uses_partial_batch_processing(self):

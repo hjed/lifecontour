@@ -1096,6 +1096,43 @@ async def _create_transformer(
     return GoogleContactTransformer(translator=translator)
 
 
+async def _find_existing_external_ids(
+    session: AsyncSession,
+    external_ids: list[str],
+    integration_source: str,
+) -> set[str]:
+    """
+    Find which external IDs already have sync metadata.
+
+    Args:
+        session: Database session
+        external_ids: List of external IDs to check
+        integration_source: Integration source (e.g., 'google')
+
+    Returns:
+        Set of external IDs that already have sync metadata
+    """
+    if not external_ids:
+        return set()
+
+    # Use ANY() with array parameter for efficient batch lookup
+    stmt = text("""
+        SELECT external_id
+        FROM sync_metadata
+        WHERE integration_source = :integration_source
+          AND external_id = ANY(:external_ids)
+    """)
+
+    result = await session.execute(
+        stmt,
+        {
+            "integration_source": integration_source,
+            "external_ids": external_ids,
+        },
+    )
+    return {row[0] for row in result.fetchall()}
+
+
 async def _perform_full_sync(
     session: AsyncSession,
     client: GoogleAPIClient,
@@ -1123,7 +1160,8 @@ async def _perform_full_sync(
     logger.info("Starting full sync", google_account_email=google_account_email)
 
     page_token = None
-    total_processed = 0
+    created_count = 0
+    updated_count = 0
     transformer = await _create_transformer(client)
 
     while True:
@@ -1148,22 +1186,42 @@ async def _perform_full_sync(
             metrics,
         )
 
+        # Determine which contacts already exist via sync metadata
+        batch_external_ids = [
+            google_person.resource_name
+            for google_person, _ in serialized_contacts
+        ]
+        existing_external_ids = await _find_existing_external_ids(
+            session, batch_external_ids, "google"
+        )
+
         # Process each contact using outbox pattern
         for google_person, contact_data in serialized_contacts:
             try:
+                # Use 'updated' for contacts that already have sync metadata,
+                # 'created' for new contacts
+                sync_type = (
+                    "updated"
+                    if google_person.resource_name in existing_external_ids
+                    else "created"
+                )
+
                 # Create outbox event for contact sync
                 outbox_event = OutboxEvent.create_contact_sync_event(
                     contact_data=contact_data,
                     integration_source="google",
                     external_id=google_person.resource_name,
-                    sync_type="created",
+                    sync_type=sync_type,
                     etag=google_person.etag,
                 )
 
                 # Add to session (will be committed with transaction)
                 session.add(outbox_event)
 
-                total_processed += 1
+                if sync_type == "created":
+                    created_count += 1
+                else:
+                    updated_count += 1
                 metrics["contacts_processed"] += 1
 
             except Exception as e:
@@ -1186,13 +1244,16 @@ async def _perform_full_sync(
             session, google_account_email, contacts_response.next_sync_token, user_id
         )
 
+    total_processed = created_count + updated_count
     logger.info(
         "Full sync completed",
         google_account_email=google_account_email,
         total_processed=total_processed,
+        created_count=created_count,
+        updated_count=updated_count,
     )
 
-    return {"contacts_created": total_processed}
+    return {"contacts_created": created_count, "contacts_updated": updated_count}
 
 
 async def _perform_incremental_sync(
