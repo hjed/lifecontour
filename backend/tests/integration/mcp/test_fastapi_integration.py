@@ -178,8 +178,13 @@ class TestMCPOAuthIntegration:
         # Should return 401 or 307 (redirect to login) — not affected by MCP OAuth
         assert response.status_code in [401, 307]
 
-    def test_misconfigured_auth_fails_closed(self, db_config):
-        """Test that missing webhook_base_url with providers configured fails at startup."""
+    def test_misconfigured_auth_warns_and_falls_back(self, db_config):
+        """Test that missing webhook_base_url with providers logs warning and runs without MCP auth.
+
+        OAuth credentials serve both web UI login and MCP auth. When
+        WEBHOOK_BASE_URL is missing, MCP cannot configure OAuth but the
+        app should still start — MCP just runs unauthenticated.
+        """
         settings = Settings(
             database_url=db_config.get_async_url().replace(
                 "postgresql+asyncpg://", "postgresql://"
@@ -191,6 +196,6 @@ class TestMCPOAuthIntegration:
             github_client_secret="test-github-client-secret",
             allowed_hosts=["*"],
         )
-        # Should raise RuntimeError at app creation — fail closed
-        with pytest.raises(RuntimeError, match="WEBHOOK_BASE_URL"):
-            create_app(settings)
+        # App should create successfully — MCP runs without auth
+        app = create_app(settings)
+        assert app is not None
