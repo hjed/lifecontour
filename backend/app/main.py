@@ -217,13 +217,29 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         logger = structlog.get_logger()
         logger.info("MCP: Mounting MCP server", mount_path=settings.mcp_mount_path)
 
-        mcp_app = create_mcp_app(container, disable_auth=settings.disable_auth)
+        # Create OAuth auth provider from configured settings
+        from app.mcp.auth.providers import create_mcp_auth_provider
+
+        auth_provider = create_mcp_auth_provider(settings)
+
+        mcp_app = create_mcp_app(container, auth_provider=auth_provider)
         app.state.mcp_app = mcp_app
         app.mount(settings.mcp_mount_path, mcp_app)  # type: ignore[arg-type]
+
+        # Mount .well-known discovery routes at root level (required by MCP spec)
+        if auth_provider is not None:
+            well_known_routes = auth_provider.get_well_known_routes(mcp_path="/mcp")
+            for route in well_known_routes:
+                app.routes.insert(0, route)
+            logger.info(
+                "MCP: Mounted .well-known OAuth discovery routes",
+                route_count=len(well_known_routes),
+            )
 
         logger.info(
             "MCP: Server mounted successfully",
             endpoint=f"{settings.mcp_mount_path}/mcp",
+            auth_enabled=auth_provider is not None,
         )
 
     return app

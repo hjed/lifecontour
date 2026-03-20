@@ -2,30 +2,34 @@
 FastMCP server setup and configuration.
 
 Creates and configures the FastMCP server with domain-specific tools,
-authentication middleware, and AI-optimized instructions.
+OAuth authentication via FastMCP's built-in providers, and AI-optimized
+instructions.
 """
 
 import structlog
 from dishka import AsyncContainer
 from dishka.integrations.starlette import setup_dishka
 from fastmcp import FastMCP
-from starlette.middleware import Middleware
+from fastmcp.server.auth.auth import AuthProvider
 
-from app.mcp.auth.session_auth import SessionAuthMiddleware
 from app.mcp.domains.contacts.tools import register_contact_tools
 from app.mcp.domains.journals.tools import register_journal_tools
 
 logger = structlog.get_logger()
 
 
-def create_mcp_server() -> FastMCP[None]:
+def create_mcp_server(auth: AuthProvider | None = None) -> FastMCP[None]:
     """
     Create and configure FastMCP server with all domain tools.
+
+    Args:
+        auth: Optional OAuth provider for MCP authentication.
+              None means no authentication (dev mode / disable_auth).
 
     Returns:
         Configured FastMCP server instance with registered tools
     """
-    logger.info("MCP: Creating FastMCP server")
+    logger.info("MCP: Creating FastMCP server", auth_enabled=auth is not None)
 
     # Create FastMCP server with AI-optimized instructions
     mcp: FastMCP[None] = FastMCP(
@@ -48,6 +52,7 @@ def create_mcp_server() -> FastMCP[None]:
         The system maintains data privacy and requires valid authentication.
         All operations are logged for audit purposes.
         """,
+        auth=auth,
     )
 
     # Register domain-specific tools
@@ -65,32 +70,37 @@ def create_mcp_server() -> FastMCP[None]:
     return mcp
 
 
-def create_mcp_app(container: AsyncContainer, disable_auth: bool = False) -> object:
+def create_mcp_app(
+    container: AsyncContainer,
+    auth_provider: AuthProvider | None = None,
+) -> object:
     """
-    Create FastMCP ASGI app with authentication middleware and Dishka integration.
+    Create FastMCP ASGI app with Dishka integration and optional OAuth auth.
 
     Args:
         container: Dishka container for dependency injection
-        disable_auth: Whether to disable authentication for development
+        auth_provider: Optional OAuth provider for MCP authentication.
+                       None means no authentication (dev mode).
 
     Returns:
         ASGI application ready for mounting in FastAPI
     """
-    logger.info("MCP: Creating FastMCP ASGI application")
+    logger.info(
+        "MCP: Creating FastMCP ASGI application",
+        auth_enabled=auth_provider is not None,
+    )
 
-    # Create MCP server
-    mcp = create_mcp_server()
+    # Create MCP server with auth
+    mcp = create_mcp_server(auth=auth_provider)
 
-    # Create middleware stack with auth configuration
-    middleware = [Middleware(SessionAuthMiddleware, disable_auth=disable_auth)]
-
-    # Create HTTP app with session authentication middleware
-    app = mcp.http_app(path="/mcp", middleware=middleware)
+    # Create HTTP app — FastMCP handles auth internally via the provider
+    app = mcp.http_app(path="/mcp")
 
     # Set up Dishka integration with the Starlette app
     setup_dishka(container, app)
 
     logger.info(
-        "MCP: ASGI application created with authentication middleware and Dishka integration"
+        "MCP: ASGI application created",
+        auth_type=type(auth_provider).__name__ if auth_provider else "none",
     )
     return app

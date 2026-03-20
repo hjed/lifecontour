@@ -55,12 +55,40 @@ def mcp_depends(
 
 
 def get_session_user() -> SessionUser:
-    """Get the authenticated session user for the current MCP request."""
-    request = get_http_request()
-    if not hasattr(request.state, "user"):
-        raise RuntimeError("No authenticated user found in MCP request context")
+    """Get the authenticated session user for the current MCP request.
 
-    return cast(SessionUser, request.state.user)
+    When OAuth auth is enabled, the user identity is extracted from the
+    FastMCP access token claims (populated by the OAuth provider).
+    When auth is disabled (dev mode), falls back to the Dishka-provided
+    SessionUser (dev user).
+    """
+    try:
+        from fastmcp.server.dependencies import get_access_token
+
+        token = get_access_token()
+        if token is None:
+            raise ValueError("No access token")
+        claims = token.claims or {}
+        return SessionUser(
+            id=str(claims.get("sub") or claims.get("id") or token.client_id),
+            email=str(claims.get("email", "")),
+            name=str(
+                claims.get("name")
+                or claims.get("login")
+                or claims.get("username")
+                or ""
+            ),
+            provider="mcp-oauth",
+        )
+    except Exception:
+        # No access token available — auth is disabled (dev mode).
+        # Fall back to request.state.user if set, or raise.
+        request = get_http_request()
+        if hasattr(request.state, "user"):
+            return cast(SessionUser, request.state.user)
+        raise RuntimeError(
+            "No authenticated user found in MCP request context"
+        ) from None
 
 
 def get_current_user_id() -> str:

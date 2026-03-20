@@ -1,6 +1,7 @@
 """
 MCP authentication and authorization.
 
-Provides session-based authentication integration for MCP tools,
-reusing the existing OAuth session management system.
+Provides OAuth-based authentication integration for MCP tools
+using FastMCP's built-in OAuth proxy providers (GitHubProvider,
+AzureProvider, DiscordProvider, OAuthProxy).
 """
