@@ -116,6 +116,9 @@ class Settings(BaseSettings):
     microsoft_client_secret: str = Field(
         default="", description="Microsoft OAuth client secret"
     )
+    microsoft_tenant_id: str = Field(
+        default="common", description="Microsoft/Azure AD tenant ID"
+    )
     discord_client_id: str = Field(default="", description="Discord OAuth client ID")
     discord_client_secret: str = Field(
         default="", description="Discord OAuth client secret"

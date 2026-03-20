@@ -14,15 +14,20 @@ class TestMCPServer:
     """Test MCP server creation and configuration."""
 
     def test_create_mcp_server(self):
-        """Test MCP server creation."""
+        """Test MCP server creation without auth."""
         server = create_mcp_server()
 
         # Should create FastMCP instance
         assert server is not None
         assert hasattr(server, "tool")  # Should have tool decorator
 
+    def test_create_mcp_server_with_auth_none(self):
+        """Test MCP server creation with auth=None (dev mode)."""
+        server = create_mcp_server(auth=None)
+        assert server is not None
+
     def test_create_mcp_app(self):
-        """Test MCP ASGI app creation."""
+        """Test MCP ASGI app creation without auth."""
         container = create_container()
         app = create_mcp_app(container)
 
@@ -30,6 +35,23 @@ class TestMCPServer:
         assert app is not None
         # Should be callable (ASGI app)
         assert callable(app)
+
+    @patch("app.mcp.server.create_mcp_server")
+    def test_create_mcp_app_with_auth_provider(self, mock_create_server):
+        """Test MCP ASGI app creation with auth provider."""
+        from unittest.mock import MagicMock
+
+        # Mock the FastMCP server to avoid AuthProvider validation
+        mock_mcp = MagicMock()
+        mock_mcp.http_app.return_value = MagicMock()
+        mock_create_server.return_value = mock_mcp
+
+        container = create_container()
+        mock_auth = MagicMock()
+        app = create_mcp_app(container, auth_provider=mock_auth)
+
+        assert app is not None
+        mock_create_server.assert_called_once_with(auth=mock_auth)
 
     @patch("app.mcp.server.register_contact_tools")
     def test_server_registers_contact_tools(self, mock_register):

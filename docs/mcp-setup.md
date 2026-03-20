@@ -27,7 +27,7 @@ backend/app/mcp/
 │   └── photos/            # Future: Photos domain MCP tools
 ├── auth/                  # MCP authentication
 │   ├── __init__.py
-│   └── session_auth.py    # Session-based auth integration
+│   └── providers.py       # OAuth provider factory
 └── shared/                # Shared MCP utilities
     ├── __init__.py
     └── dependencies.py    # MCP dependency injection helpers
@@ -96,17 +96,55 @@ AI-friendly JSON containing:
 
 ## Authentication
 
-The MCP server uses the same OAuth session authentication as the REST API:
+The MCP server uses FastMCP's built-in OAuth proxy authentication, providing full OAuth 2.1 compliance with `.well-known` discovery endpoints. This enables MCP clients (Claude Desktop, etc.) to authenticate using the same OAuth providers configured for the web UI.
 
-1. **Session Validation**: Requests must include valid session cookies
-2. **User Context**: Authenticated user information is available to MCP tools
-3. **Authorization**: Same permissions as REST API endpoints
+### How It Works
 
-### Session Requirements
+1. **Provider Selection**: The first configured OAuth provider is used (priority: Generic > GitHub > Microsoft > Discord)
+2. **OAuth Proxy**: FastMCP acts as an OAuth proxy, forwarding authorization to the upstream provider
+3. **`.well-known` Discovery**: Standard OAuth discovery endpoints are exposed at root level
+4. **Token Validation**: FastMCP issues its own JWT tokens after validating with the upstream provider
 
-- Valid OAuth session (GitHub, Microsoft, Discord, or generic OAuth2)
-- Session must contain user data: `id`, `email`, `name`, `provider`
-- Session cookies must be included in MCP requests
+### Configuration
+
+The MCP OAuth auth reuses the existing OAuth provider credentials and the `WEBHOOK_BASE_URL` setting:
+
+```bash
+# Required for MCP OAuth (public URL of your server)
+WEBHOOK_BASE_URL=https://your-server.example.com
+
+# One of these OAuth providers must be configured:
+
+# Generic OAuth (highest priority)
+OAUTH_CLIENT_ID=your-client-id
+OAUTH_CLIENT_SECRET=your-client-secret
+OAUTH_AUTHORIZATION_URL=https://auth.example.com/authorize
+OAUTH_TOKEN_URL=https://auth.example.com/token
+
+# GitHub
+GITHUB_CLIENT_ID=your-github-client-id
+GITHUB_CLIENT_SECRET=your-github-client-secret
+
+# Microsoft / Azure AD
+MICROSOFT_CLIENT_ID=your-ms-client-id
+MICROSOFT_CLIENT_SECRET=your-ms-client-secret
+MICROSOFT_TENANT_ID=common  # optional, defaults to "common"
+
+# Discord
+DISCORD_CLIENT_ID=your-discord-client-id
+DISCORD_CLIENT_SECRET=your-discord-client-secret
+```
+
+### Discovery Endpoints
+
+When auth is enabled, the following `.well-known` endpoints are available:
+
+- `/.well-known/oauth-authorization-server/mcp-server` — OAuth authorization server metadata
+- `/.well-known/oauth-protected-resource/mcp-server/mcp` — Protected resource metadata
+
+### Development Mode
+
+Set `DISABLE_AUTH=true` to disable OAuth for local development. MCP endpoints will be accessible without authentication.
 
 ## Development
 
