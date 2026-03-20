@@ -125,15 +125,7 @@ test.describe('Contact Journals Display', () => {
         ],
       });
 
-      // Navigate to contact detail page
-      await page.goto(`/contacts/${contact.id}`);
-
-      // Wait for page to load by checking for contact name
-      await expect(
-        page.getByText(`${contact.firstName} ${contact.lastName}`)
-      ).toBeVisible();
-
-      // Verify journals section is visible
+      // Navigate to contact detail page and wait for journals section
       await navigateToContactAndWaitForJournals(page, contact.id);
 
       // Verify the journal title is displayed

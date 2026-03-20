@@ -9,6 +9,7 @@ from datetime import datetime
 
 import structlog
 from core_shared.models.contacts.exceptions import ContactValidationError
+from core_shared.models.journals import Journal
 from dishka.integrations.fastapi import FromDishka, inject
 from fastapi import APIRouter, Query, Request, status
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
@@ -855,8 +856,28 @@ async def get_contact_journals(
         limit=pagination.limit,
     )
 
+    # Include descendants of the journals on this page, even if those descendants
+    # have no direct relationship to the contact.
+    journal_ids_in_page = [j.id for j in journals if j.id is not None]
+    descendant_journals = await journal_service.find_descendants_for_user(
+        user_id=_user.id,
+        ancestor_ids=journal_ids_in_page,
+        max_depth=5,
+    )
+
+    # Return the paginated (directly-related) journals plus their descendants.
+    seen_ids: set[int] = set()
+    all_journals: list[Journal] = []
+    for j in [*journals, *descendant_journals]:
+        if j.id is None:
+            continue
+        if j.id in seen_ids:
+            continue
+        seen_ids.add(j.id)
+        all_journals.append(j)
+
     journal_resources = await _build_journal_list_resources(
-        journals=journals,
+        journals=all_journals,
         user_id=_user.id,
         base_url=base_url,
         journal_service=journal_service,

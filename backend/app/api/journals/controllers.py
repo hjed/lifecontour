@@ -746,19 +746,15 @@ async def _build_journal_list_resources(
     tag_repo: JournalTagRepository,
     route_repo: RouteRepository,
 ) -> list[JournalResource]:
-    """Helper to consistently build journal list responses with hierarchy and enriched data."""
-    # Include descendants of the journals on this page
-    journal_ids_in_page = [j.id for j in journals if j.id is not None]
-    descendant_journals = await journal_service.find_descendants_for_user(
-        user_id=user_id,
-        ancestor_ids=journal_ids_in_page,
-        max_depth=5,
-    )
+    """Helper to consistently build journal list responses with enriched data.
 
-    # Return the paginated journals plus their descendants.
+    The number of returned resources will not exceed the size of the paginated
+    `journals` input (modulo de-duplication by ID), so that callers that
+    paginate based on the input list have consistent `meta` and pagination links.
+    """
     seen_ids: set[int] = set()
     all_journals: list[Journal] = []
-    for j in [*journals, *descendant_journals]:
+    for j in journals:
         if j.id is None:
             continue
         if j.id in seen_ids:

@@ -51,10 +51,11 @@ test.describe('Contact Relationships', () => {
     // Click Add Relationship
     await page.getByRole('button', { name: 'Add Relationship' }).click();
 
-    // Click the Relationship Type combobox/select.
-    // Usually it's a combobox, let's open it and verify options.
-    const typeLabel = page.getByLabel('Relationship Type');
-    await typeLabel.click();
+    const addRelationshipDialog = page.getByRole('dialog', {
+      name: 'Add New Relationship',
+    });
+    const typeTrigger = addRelationshipDialog.getByRole('combobox');
+    await typeTrigger.click();
 
     // Verify that relationship types are loaded ("Parent", "Child", etc)
     // We expect at least these options to be in the listbox.
@@ -66,7 +67,7 @@ test.describe('Contact Relationships', () => {
       listbox.getByRole('option', { name: 'Child', exact: true })
     ).toBeVisible();
     await expect(
-      listbox.getByRole('option', { name: 'Spouse/Partner', exact: true })
+      listbox.getByRole('option', { name: 'Partner', exact: true })
     ).toBeVisible();
 
     // Select the first option
