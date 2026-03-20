@@ -380,7 +380,13 @@ class TestGoogleWorker:
         processed_contacts = [
             (
                 MagicMock(resource_name="people/new1", etag="etag-new1"),
-                {"first_name": "New", "methods": [], "addresses": [], "notes": [], "tags": []},
+                {
+                    "first_name": "New",
+                    "methods": [],
+                    "addresses": [],
+                    "notes": [],
+                    "tags": [],
+                },
             )
         ]
 
@@ -389,9 +395,7 @@ class TestGoogleWorker:
         with (
             patch("worker._process_contacts_batch", return_value=processed_contacts),
             patch("worker._save_sync_token", new_callable=AsyncMock),
-            patch(
-                "worker.OutboxEvent.create_contact_sync_event", mock_create_event
-            ),
+            patch("worker.OutboxEvent.create_contact_sync_event", mock_create_event),
             patch(
                 "worker._find_existing_external_ids",
                 new_callable=AsyncMock,
@@ -430,7 +434,13 @@ class TestGoogleWorker:
         processed_contacts = [
             (
                 MagicMock(resource_name="people/existing1", etag="etag-existing1"),
-                {"first_name": "Existing", "methods": [], "addresses": [], "notes": [], "tags": []},
+                {
+                    "first_name": "Existing",
+                    "methods": [],
+                    "addresses": [],
+                    "notes": [],
+                    "tags": [],
+                },
             )
         ]
 
@@ -439,9 +449,7 @@ class TestGoogleWorker:
         with (
             patch("worker._process_contacts_batch", return_value=processed_contacts),
             patch("worker._save_sync_token", new_callable=AsyncMock),
-            patch(
-                "worker.OutboxEvent.create_contact_sync_event", mock_create_event
-            ),
+            patch("worker.OutboxEvent.create_contact_sync_event", mock_create_event),
             patch(
                 "worker._find_existing_external_ids",
                 new_callable=AsyncMock,
@@ -481,11 +489,23 @@ class TestGoogleWorker:
         processed_contacts = [
             (
                 MagicMock(resource_name="people/new1", etag="etag-new1"),
-                {"first_name": "New", "methods": [], "addresses": [], "notes": [], "tags": []},
+                {
+                    "first_name": "New",
+                    "methods": [],
+                    "addresses": [],
+                    "notes": [],
+                    "tags": [],
+                },
             ),
             (
                 MagicMock(resource_name="people/existing1", etag="etag-existing1"),
-                {"first_name": "Existing", "methods": [], "addresses": [], "notes": [], "tags": []},
+                {
+                    "first_name": "Existing",
+                    "methods": [],
+                    "addresses": [],
+                    "notes": [],
+                    "tags": [],
+                },
             ),
         ]
 
@@ -494,9 +514,7 @@ class TestGoogleWorker:
         with (
             patch("worker._process_contacts_batch", return_value=processed_contacts),
             patch("worker._save_sync_token", new_callable=AsyncMock),
-            patch(
-                "worker.OutboxEvent.create_contact_sync_event", mock_create_event
-            ),
+            patch("worker.OutboxEvent.create_contact_sync_event", mock_create_event),
             patch(
                 "worker._find_existing_external_ids",
                 new_callable=AsyncMock,
@@ -517,7 +535,9 @@ class TestGoogleWorker:
 
         # Verify sync_types match the expected values
         calls = mock_create_event.call_args_list
-        sync_types = {call.kwargs["external_id"]: call.kwargs["sync_type"] for call in calls}
+        sync_types = {
+            call.kwargs["external_id"]: call.kwargs["sync_type"] for call in calls
+        }
         assert sync_types["people/new1"] == "created"
         assert sync_types["people/existing1"] == "updated"
 

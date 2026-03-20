@@ -107,7 +107,6 @@ class TestTaskQueueService:
                 "test@example.com",
                 123,
                 "smart",
-                _job_timeout=300,
                 _defer_until=None,
                 _queue_name=ARQ_QUEUE_NAME,
             )
@@ -441,7 +440,6 @@ class TestTaskQueueService:
             "process_journal_event",
             event_type,
             event_data,
-            _job_timeout=300,
             _defer_until=None,
             _queue_name=ARQ_QUEUE_NAME,
         )
@@ -512,7 +510,6 @@ class TestTaskQueueService:
                 "test@example.com",
                 123,
                 "smart",
-                _job_timeout=300,
                 _defer_until=None,
                 _queue_name=ARQ_QUEUE_NAME,
             )
