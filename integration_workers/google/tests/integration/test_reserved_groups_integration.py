@@ -152,6 +152,7 @@ class TestReservedGroupsIntegration:
 
             assert result is not None
             assert result.get("contacts_created") == 1
+            assert result.get("contacts_updated") == 0
 
             # Check the outbox event payload to ensure mapping worked properly
             result_outbox = await db_session.execute(

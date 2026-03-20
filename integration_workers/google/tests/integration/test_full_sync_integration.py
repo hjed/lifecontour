@@ -115,6 +115,7 @@ class TestFullSyncIntegration:
             # Result should show at least some metrics
             assert result is not None
             assert result.get("contacts_created") == 2
+            assert result.get("contacts_updated") == 0
 
             # Validate that the token was updated in db
             result_db = await db_session.execute(
