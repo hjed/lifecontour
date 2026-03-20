@@ -7,13 +7,15 @@ middleware setup, and route registration.
 
 import asyncio
 from collections.abc import AsyncGenerator
-from contextlib import AsyncExitStack, asynccontextmanager
+from contextlib import asynccontextmanager
+from typing import Any
 
 import structlog
 from dishka.integrations.fastapi import setup_dishka
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
+from fastmcp.utilities.lifespan import combine_lifespans
 from opentelemetry import trace
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
@@ -91,33 +93,16 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             endpoint=settings.otel_exporter_otlp_endpoint,
         )
 
-    mcp_app = getattr(app.state, "mcp_app", None)
-    mcp_lifespan = getattr(mcp_app, "lifespan", None) if mcp_app is not None else None
-
     # Start background tasks
     outbox_task = None
     try:
-        async with AsyncExitStack() as exit_stack:
-            if mcp_lifespan is not None:
-                await exit_stack.enter_async_context(mcp_lifespan(mcp_app))
-                logger.info(
-                    "MCP: Mounted app lifespan started",
-                    endpoint=f"{settings.mcp_mount_path}/mcp",
-                )
+        # Start outbox processor background task
+        outbox_task = asyncio.create_task(
+            run_outbox_processor_loop(container, interval_seconds=10)
+        )
+        logger.info("Outbox processor background task started")
 
-            # Start outbox processor background task
-            outbox_task = asyncio.create_task(
-                run_outbox_processor_loop(container, interval_seconds=10)
-            )
-            logger.info("Outbox processor background task started")
-
-            yield
-
-        if mcp_lifespan is not None:
-            logger.info(
-                "MCP: Mounted app lifespan stopped",
-                endpoint=f"{settings.mcp_mount_path}/mcp",
-            )
+        yield
 
     finally:
         # Cleanup background tasks
@@ -141,6 +126,28 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     if settings is None:
         settings = get_settings()
 
+    # Create Dishka container once, shared between main app and MCP
+    container = create_container(settings)
+
+    # Create MCP app early so its lifespan can be combined with the parent app's.
+    # FastMCP's StreamableHTTPSessionManager requires its lifespan to be passed
+    # to the parent ASGI app's constructor — see https://gofastmcp.com/deployment/http
+    mcp_app = None
+    if settings.mcp_enabled:
+        from app.mcp.auth.providers import create_mcp_auth_provider
+
+        auth_provider = create_mcp_auth_provider(settings)
+        mcp_app = create_mcp_app(container, auth_provider=auth_provider)
+    else:
+        auth_provider = None
+
+    # Combine our lifespan with MCP lifespan using FastMCP's utility
+    combined_lifespan: Any = lifespan
+    if mcp_app is not None:
+        mcp_lifespan = getattr(mcp_app, "lifespan", None)
+        if mcp_lifespan is not None:
+            combined_lifespan = combine_lifespans(lifespan, mcp_lifespan)
+
     app = FastAPI(
         title="Personal CRM & Journal System",
         description="A personal relationship management and journaling system with AI integration",
@@ -148,14 +155,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         docs_url="/api/docs" if settings.debug else None,
         redoc_url="/api/redoc" if settings.debug else None,
         openapi_url="/api/openapi.json" if settings.debug else None,
-        lifespan=lifespan,
+        lifespan=combined_lifespan,
     )
 
     # Setup Dishka dependency injection
-    container = create_container(settings)
     app.state.settings = settings
     app.state.dishka_container = container  # Store for lifespan access
-    app.state.mcp_app = None
+    app.state.mcp_app = mcp_app
     setup_dishka(container, app)
 
     # Import routers after Dishka setup to avoid type annotation issues
@@ -212,18 +218,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(tags_router, prefix="/api", tags=["tags"])
     app.include_router(integrations_router, prefix="/api", tags=["integrations"])
 
-    # Mount MCP server if enabled
-    if settings.mcp_enabled:
-        logger = structlog.get_logger()
-        logger.info("MCP: Mounting MCP server", mount_path=settings.mcp_mount_path)
+    # Mount MCP server if enabled (mcp_app was already created above for lifespan)
+    if settings.mcp_enabled and mcp_app is not None:
+        mcp_logger = structlog.get_logger()
+        mcp_logger.info("MCP: Mounting MCP server", mount_path=settings.mcp_mount_path)
 
-        # Create OAuth auth provider from configured settings
-        from app.mcp.auth.providers import create_mcp_auth_provider
-
-        auth_provider = create_mcp_auth_provider(settings)
-
-        mcp_app = create_mcp_app(container, auth_provider=auth_provider)
-        app.state.mcp_app = mcp_app
         app.mount(settings.mcp_mount_path, mcp_app)  # type: ignore[arg-type]
 
         # Mount .well-known discovery routes at root level (required by MCP spec)
@@ -231,12 +230,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             well_known_routes = auth_provider.get_well_known_routes(mcp_path="/mcp")
             # Insert all .well-known routes at the front while preserving order
             app.routes[0:0] = well_known_routes
-            logger.info(
+            mcp_logger.info(
                 "MCP: Mounted .well-known OAuth discovery routes",
                 route_count=len(well_known_routes),
             )
 
-        logger.info(
+        mcp_logger.info(
             "MCP: Server mounted successfully",
             endpoint=f"{settings.mcp_mount_path}/mcp",
             auth_enabled=auth_provider is not None,

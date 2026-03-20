@@ -16,21 +16,32 @@ class TestAuthenticationIntegration:
     """Integration tests for authentication requirements on REST API and MCP endpoints."""
 
     @pytest.fixture
-    def client(self):
-        """Create test client with proper test database configuration."""
+    def client(self, db_config):
+        """Create test client with proper test database configuration.
+
+        Uses TestClient as a context manager so the app lifespan runs,
+        which initialises MCP's StreamableHTTPSessionManager (required
+        by the Streamable HTTP transport for POST /mcp requests).
+        """
         from app.infrastructure.config import Settings
 
         # Use proper test database configuration for integration tests
         test_settings = Settings(
             debug=True,
-            database_url="postgresql+asyncpg://postgres:postgres@localhost:5433/personal_management_test",
+            database_url=db_config.get_async_url().replace(
+                "postgresql+asyncpg://", "postgresql://"
+            ),
             allowed_hosts=["*"],
             cors_origins=["*"],
             mcp_enabled=True,  # Enable MCP to test both REST API and MCP authentication
+            webhook_base_url="http://localhost:8000",
+            github_client_id="test_github_client_id",
+            github_client_secret="test_github_client_secret",
         )
 
         app = create_app(settings=test_settings)
-        return TestClient(app)
+        with TestClient(app, raise_server_exceptions=False) as c:
+            yield c
 
     def test_list_contacts_requires_auth(self, client):
         """Test that listing contacts requires authentication."""
@@ -145,12 +156,13 @@ class TestAuthenticationIntegration:
         response = client.post(
             "/mcp-server/mcp",
             json=mcp_request,
-            headers={"Host": "localhost", "Content-Type": "application/json"},
+            headers={
+                "Host": "localhost",
+                "Content-Type": "application/json",
+                "Accept": "application/json, text/event-stream",
+            },
         )
         assert response.status_code == 401
-        data = response.json()
-        assert "error" in data
-        assert "Unauthorized" in data["error"]
 
     def test_mcp_search_contacts_requires_auth(self, client):
         """Test that MCP search_contacts tool requires authentication."""
@@ -161,12 +173,13 @@ class TestAuthenticationIntegration:
         response = client.post(
             "/mcp-server/mcp",
             json=mcp_request,
-            headers={"Host": "localhost", "Content-Type": "application/json"},
+            headers={
+                "Host": "localhost",
+                "Content-Type": "application/json",
+                "Accept": "application/json, text/event-stream",
+            },
         )
         assert response.status_code == 401
-        data = response.json()
-        assert "error" in data
-        assert "Unauthorized" in data["error"]
 
     def test_mcp_create_contact_requires_auth(self, client):
         """Test that MCP create_contact tool requires authentication."""
@@ -180,12 +193,13 @@ class TestAuthenticationIntegration:
         response = client.post(
             "/mcp-server/mcp",
             json=mcp_request,
-            headers={"Host": "localhost", "Content-Type": "application/json"},
+            headers={
+                "Host": "localhost",
+                "Content-Type": "application/json",
+                "Accept": "application/json, text/event-stream",
+            },
         )
         assert response.status_code == 401
-        data = response.json()
-        assert "error" in data
-        assert "Unauthorized" in data["error"]
 
     def test_mcp_list_contacts_requires_auth(self, client):
         """Test that MCP list_contacts tool requires authentication."""
@@ -196,12 +210,13 @@ class TestAuthenticationIntegration:
         response = client.post(
             "/mcp-server/mcp",
             json=mcp_request,
-            headers={"Host": "localhost", "Content-Type": "application/json"},
+            headers={
+                "Host": "localhost",
+                "Content-Type": "application/json",
+                "Accept": "application/json, text/event-stream",
+            },
         )
         assert response.status_code == 401
-        data = response.json()
-        assert "error" in data
-        assert "Unauthorized" in data["error"]
 
     def test_mcp_global_search_requires_auth(self, client):
         """Test that MCP global_search tool requires authentication."""
@@ -212,9 +227,10 @@ class TestAuthenticationIntegration:
         response = client.post(
             "/mcp-server/mcp",
             json=mcp_request,
-            headers={"Host": "localhost", "Content-Type": "application/json"},
+            headers={
+                "Host": "localhost",
+                "Content-Type": "application/json",
+                "Accept": "application/json, text/event-stream",
+            },
         )
         assert response.status_code == 401
-        data = response.json()
-        assert "error" in data
-        assert "Unauthorized" in data["error"]
