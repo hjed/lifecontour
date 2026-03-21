@@ -12,6 +12,7 @@ import {
   DialogTrigger,
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
+import { Label } from '@/components/ui/label';
 import { JournalSearchCombobox } from './JournalSearchCombobox';
 import { useMergeJournal } from '@/lib/api/journals';
 import { JournalResource } from '@/types/journals';
@@ -75,8 +76,9 @@ export function MergeJournalDialog({
 
         <div className='space-y-4 py-4'>
           <div className='flex flex-col gap-2'>
-            <span className='text-sm font-medium'>Find Source Journal</span>
+            <Label htmlFor='merge-journal-search'>Find Source Journal</Label>
             <JournalSearchCombobox
+              inputId='merge-journal-search'
               onSelect={setSelectedJournal}
               excludeJournalId={targetJournalId}
               placeholder='Search by title...'
@@ -92,7 +94,7 @@ export function MergeJournalDialog({
         </div>
 
         <DialogFooter>
-          <Button variant='outline' onClick={() => setOpen(false)}>
+          <Button variant='outline' onClick={() => handleOpenChange(false)}>
             Cancel
           </Button>
           <Button

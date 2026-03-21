@@ -52,6 +52,11 @@ class JournalMergeService:
         if not source:
             raise JournalNotFoundError(source_id)
 
+        if target.user_id != source.user_id:
+            raise JournalMergeConflictError(
+                "Cannot merge journals belonging to different users"
+            )
+
         changed_fields: dict[str, Any] = {}
 
         # 1. Base Fields (prefer non-empty, concatenate content)
@@ -204,33 +209,17 @@ class JournalMergeService:
                 )
             )
 
-        stmt = text("""
-            SELECT jeel.external_event_id, c.google_calendar_id
-            FROM journal_external_event_links jeel
-            JOIN calendars c ON jeel.calendar_id = c.id
-            WHERE jeel.journal_id = :source_id AND jeel.external_event_id IS NOT NULL
-        """)
-        result = await transaction.execute(stmt, {"source_id": source_id})
-        external_identifiers: dict[str, list[dict[str, Any]]] = {}
-        for row in result.fetchall():
-            if "google" not in external_identifiers:
-                external_identifiers["google"] = []
-            external_identifiers["google"].append(
-                {
-                    "external_event_id": row.external_event_id,
-                    "google_calendar_id": row.google_calendar_id,
-                }
-            )
-
         await self.journal_repo.delete(source_id)
 
-        # Deleting source can have many cascaded foreign key drops
-        # but the outbox logic wants external_ids published to Meilisearch
+        # Deleting source can have many cascaded foreign key drops.
+        # For merge-deletions, do not publish external identifiers so that
+        # external integrations (e.g. Google Calendar) do not delete events
+        # that have been preserved on the target journal.
         await self.event_publisher.publish(
             JournalDeleted(
                 source_id,
                 user_id=source.user_id,
-                external_identifiers=external_identifiers,
+                external_identifiers={},
                 transaction=transaction,
             )
         )

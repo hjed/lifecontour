@@ -698,7 +698,9 @@ export class TestDataManager {
   async createJournal(journalData: JournalCreateRequest): Promise<TestJournal> {
     // Make journal titles unique to avoid conflicts using UUID
     const uniqueId = this.generateUniqueId();
-    const uniqueTitle = `${journalData.title}_${uniqueId}`;
+    const uniqueTitle = journalData.title.includes('_')
+      ? journalData.title
+      : `${journalData.title}_${uniqueId}`;
 
     console.log(`📝 [Data Manager] Creating journal: ${uniqueTitle}`);
 

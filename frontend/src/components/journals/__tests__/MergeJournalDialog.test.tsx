@@ -64,7 +64,7 @@ describe('MergeJournalDialog', () => {
     expect(screen.getByTestId('exclude-id')).toHaveTextContent(targetJournalId);
   });
 
-  it('disables merge button untill a source journal is selected', async () => {
+  it('disables merge button until a source journal is selected', async () => {
     const user = userEvent.setup();
     render(<MergeJournalDialog targetJournalId={targetJournalId} />);
 

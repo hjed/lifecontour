@@ -66,7 +66,8 @@ app.get('/login', async (req, res) => {
     res.redirect(acceptResponse.data.redirect_to);
 
   } catch (error) {
-    console.error('🔐 [Login] Error processing login:', JSON.stringify(error.response?.data || error.message));
+    console.error('🔐 [Login] Error processing login:', error.message);
+    console.error('🔐 [Login] Error data:', JSON.stringify(error.response?.data || {}));
     res.status(500).json({
       error: 'Login processing failed',
       details: error.response?.data || error.message

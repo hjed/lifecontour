@@ -251,7 +251,7 @@ async function mergeJournal(
   const requestData = {
     type: 'journal-merge' as const,
     attributes: {
-      source_journal_id: sourceId,
+      source_journal_id: Number(sourceId),
     },
   };
 
@@ -270,7 +270,7 @@ async function mergeJournal(
   if (!response.ok) {
     const errorData: JsonApiErrorResponse = await response.json();
     throw new Error(
-      errorData.errors?.[0]?.detail || 'Failed to merge journals'
+      errorData.errors?.[0]?.detail || ERROR_MESSAGES.UPDATE_FAILED
     );
   }
 

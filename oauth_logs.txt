@@ -1,0 +1,14 @@
+
+up to date, audited 106 packages in 1s
+
+22 packages are looking for funding
+  run `npm fund` for details
+
+found 0 vulnerabilities
+
+> oauth-login-consent-service@1.0.0 start
+> node app.js
+
+🔐 OAuth Login/Consent Service running on port 3001
+🔗 Hydra Admin URL: http://oauth-provider:4445
+🧪 Auto-accepting all login/consent requests for E2E testing

@@ -2039,9 +2039,9 @@ async def merge_journal(
 
     # Validation against identical journal ID
     if journal_id == source_id:
-        raise HTTPException(
-            status_code=400, detail="Cannot merge a journal into itself"
-        )
+        from core_shared.models.journals.exceptions import JournalMergeConflictError
+
+        raise JournalMergeConflictError("Cannot merge a journal into itself")
 
     await journal_merge_service.merge_journals(
         target_id=journal_id, source_id=source_id, transaction=connection
