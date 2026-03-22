@@ -60,12 +60,22 @@ class GoogleGroupNameTranslator:
         Returns:
             The translated name, or the fallback name, or None
         """
-        if not resource_name:
-            return fallback_name
+        if resource_name:
+            mapped_name = self.group_mapping.get(resource_name)
+            if mapped_name:
+                return mapped_name
 
-        # Look up the name in the mapping provided by listContactGroups
-        mapped_name = self.group_mapping.get(resource_name)
-        if mapped_name:
-            return mapped_name
+            # Also try to extract and map the raw group ID
+            if resource_name.startswith("contactGroups/"):
+                group_id = resource_name.replace("contactGroups/", "", 1)
+                mapped_name = self.group_mapping.get(group_id)
+                if mapped_name:
+                    return mapped_name
+
+        # Fallback to checking the fallback_name in the mapping, as it's often the raw ID
+        if fallback_name:
+            mapped_name = self.group_mapping.get(fallback_name)
+            if mapped_name:
+                return mapped_name
 
         return fallback_name
