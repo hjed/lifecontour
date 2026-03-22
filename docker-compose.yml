@@ -41,7 +41,7 @@ services:
       - personal-management
 
   redis:
-    image: redis:7-alpine
+    image: redis:8-alpine
     container_name: ${CONTAINER_PREFIX:-pms}-redis
     profiles: [dev, test, test-backend, prod]
     command: redis-server --appendonly yes
