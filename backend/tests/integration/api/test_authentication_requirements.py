@@ -15,14 +15,8 @@ class TestAuthenticationRequirements:
     """Test that API endpoints require authentication."""
 
     @pytest.fixture
-    def client(self):
+    def client(self, test_settings: Settings):
         """Create test client with test database configuration."""
-        test_settings = Settings(
-            debug=True,
-            allowed_hosts=["*"],  # Allow all hosts for testing
-            cors_origins=["*"],
-        )
-
         app = create_app(settings=test_settings)
 
         # Note: With Dishka, dependencies are automatically handled

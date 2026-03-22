@@ -4,45 +4,8 @@ Integration tests for health check endpoints.
 Tests the health check endpoints with real database connectivity.
 """
 
-import os
-
 import pytest
 from fastapi.testclient import TestClient
-
-from app.infrastructure.config import get_settings
-from app.infrastructure.database import get_database_engine
-from app.main import create_app
-
-
-@pytest.fixture
-def integration_test_client():
-    # Set environment variables for test database and allowed hosts
-    original_db_url = os.environ.get("DATABASE_URL")
-    original_allowed_hosts = os.environ.get("ALLOWED_HOSTS")
-    os.environ["ALLOWED_HOSTS"] = '["*"]'
-
-    # Clear the cached settings and database engine
-    get_settings.cache_clear()
-    get_database_engine.cache_clear()
-
-    try:
-        app = create_app()
-        yield TestClient(app)
-    finally:
-        # Restore original environment
-        if original_db_url:
-            os.environ["DATABASE_URL"] = original_db_url
-        elif "DATABASE_URL" in os.environ:
-            del os.environ["DATABASE_URL"]
-
-        if original_allowed_hosts:
-            os.environ["ALLOWED_HOSTS"] = original_allowed_hosts
-        elif "ALLOWED_HOSTS" in os.environ:
-            del os.environ["ALLOWED_HOSTS"]
-
-        # Clear cache again to restore original settings
-        get_settings.cache_clear()
-        get_database_engine.cache_clear()
 
 
 @pytest.mark.integration
