@@ -10,10 +10,7 @@ from Google Contacts API, and updates them.
 import argparse
 import asyncio
 import os
-import re
 import sys
-from collections.abc import Mapping
-from typing import Any
 
 import asyncpg
 
@@ -25,7 +22,6 @@ try:
     from google_auth_service import GoogleAuthService
     from google_client import GoogleAPIClient
     from worker import _build_contact_group_mapping
-    from core_shared.database.engine import create_async_engine_from_url
 except ImportError as e:
     print(f"Error importing required modules: {e}")
     print("Make sure this script is run from the project root or with inside a configured venv.")
@@ -34,7 +30,7 @@ except ImportError as e:
 
 async def fix_google_tags(db_url: str, google_account_email: str) -> None:
     """Find and fix tags with 16-character hex hash names."""
-    print(f"Connecting to database at {db_url}...")
+    print("Connecting to database...")
 
     # Connect directly with asyncpg for simplicity in a one-off script
     conn = await asyncpg.connect(db_url)
@@ -107,18 +103,24 @@ async def fix_google_tags(db_url: str, google_account_email: str) -> None:
                     # Assuming junction table is contact_tags with contact_id and tag_id
                     try:
                         async with conn.transaction():
-                            # Update references (might fail if the contact already has the correct tag)
+                            # First delete old references that would cause a unique constraint conflict
+                            # i.e. where the contact already has the target tag
+                            delete_dupes = """
+                                DELETE FROM contact_tags
+                                WHERE tag_id = $2
+                                AND contact_id IN (
+                                    SELECT contact_id FROM contact_tags WHERE tag_id = $1
+                                )
+                            """
+                            await conn.execute(delete_dupes, existing, tag_id)
+
+                            # Then update the remaining references
                             update_refs = """
                                 UPDATE contact_tags
                                 SET tag_id = $1
                                 WHERE tag_id = $2
-                                ON CONFLICT (contact_id, tag_id) DO NOTHING
                             """
                             await conn.execute(update_refs, existing, tag_id)
-
-                            # Delete old references that weren't updated due to ON CONFLICT DO NOTHING
-                            delete_refs = "DELETE FROM contact_tags WHERE tag_id = $1"
-                            await conn.execute(delete_refs, tag_id)
 
                             # Delete the hash tag
                             delete_tag = "DELETE FROM tags WHERE id = $1"
