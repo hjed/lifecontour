@@ -9,7 +9,7 @@
  * - Loading states and error handling
  */
 
-import { useState, useCallback, useRef, useMemo } from 'react';
+import { useState, useCallback, useRef, useMemo, useEffect } from 'react';
 import { toast } from 'sonner';
 
 export interface UseInlineEditOptions {
@@ -72,6 +72,20 @@ export function useInlineEdit(
 
   // Keep track of original value for rollback
   const originalValueRef = useRef(normalizedInitialValue);
+  const prevInitialValueRef = useRef(initialValue);
+
+  // Sync external changes (e.g. from react-query refetches) when not actively editing
+  useEffect(() => {
+    if (initialValue !== prevInitialValueRef.current) {
+      prevInitialValueRef.current = initialValue;
+      if (!isEditing && initialValue !== undefined) {
+        const normalized = initialValue ?? '';
+        setDisplayValue(normalized);
+        setValue(normalized);
+        originalValueRef.current = normalized;
+      }
+    }
+  }, [initialValue, isEditing]);
 
   const startEdit = useCallback(() => {
     setIsEditing(true);

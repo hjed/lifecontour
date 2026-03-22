@@ -581,7 +581,33 @@ class OAuthService:
                 detail="User info URL not configured for generic provider",
             )
 
-        resp = await client.get(self.settings.oauth_userinfo_url, token=token)
+        # Use httpx directly to ensure Authorization header is set perfectly
+        # Authlib's .get() might fail when passed a raw dict from a manual token exchange
+        access_token = token.get("access_token")
+        if not access_token:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="No access token provided for userinfo",
+            )
+
+        async with httpx.AsyncClient() as http_client:
+            resp = await http_client.get(
+                self.settings.oauth_userinfo_url,
+                headers={"Authorization": f"Bearer {access_token}"},
+            )
+
+        if resp.status_code != 200:
+            logger.error(
+                "Failed to fetch user info",
+                provider=provider,
+                status_code=resp.status_code,
+                response_text=resp.text[:200],
+            )
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Failed to fetch user information",
+            )
+
         user_data = resp.json()
 
         return OAuthUserInfo(

@@ -38,6 +38,7 @@ export interface CalendarCreateRequest {
 
 export interface JournalCreateRequest {
   title: string;
+  exactTitle?: boolean;
   content: string;
   event_date_range: {
     start: string;
@@ -698,7 +699,10 @@ export class TestDataManager {
   async createJournal(journalData: JournalCreateRequest): Promise<TestJournal> {
     // Make journal titles unique to avoid conflicts using UUID
     const uniqueId = this.generateUniqueId();
-    const uniqueTitle = `${journalData.title}_${uniqueId}`;
+    // Only bypass if it already ends with _ followed by an alphanumeric ID
+    const uniqueTitle = /_[a-z0-9]{8,12}$/i.test(journalData.title)
+      ? journalData.title
+      : `${journalData.title}_${uniqueId}`;
 
     console.log(`📝 [Data Manager] Creating journal: ${uniqueTitle}`);
 

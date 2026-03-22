@@ -46,6 +46,7 @@ import { JournalTypeManager } from './JournalTypeManager';
 import { InlineEditHeading } from './InlineEditHeading';
 import { JournalContentInline } from './JournalContentInline';
 import { InlineEditDateRange } from './InlineEditDateRange';
+import { MergeJournalDialog } from './MergeJournalDialog';
 import { validateRequired } from '@/lib/validation';
 import {
   useUpdateJournal,
@@ -278,13 +279,15 @@ export function JournalDetailView({
             </div>
 
             {/* Action Buttons */}
-            <div className='flex gap-2'>
+            <div className='flex items-center gap-2'>
+              <MergeJournalDialog targetJournalId={journal.id} />
               <Button
                 variant='outline'
                 size='sm'
                 onClick={handleDelete}
                 disabled={deleteJournal.isPending}
                 aria-label='Delete journal'
+                className='text-destructive hover:bg-destructive/10'
               >
                 <Trash2 className='h-4 w-4' />
               </Button>

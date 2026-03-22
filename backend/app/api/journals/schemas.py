@@ -632,6 +632,28 @@ class JournalTagAddRequest(JsonApiCreateRequest[JournalTagAddData]):
     pass
 
 
+# Merge Management Schemas
+class MergeJournalAttributes(BaseModel):
+    """Attributes for merging a journal."""
+
+    source_journal_id: int = Field(
+        ..., description="ID of the journal to merge into this one"
+    )
+
+
+class MergeJournalData(BaseModel):
+    """Data for merging a journal."""
+
+    type: str = Field(default="journal-merge", description=RESOURCE_TYPE_DESC)
+    attributes: MergeJournalAttributes = Field(..., description="Merge attributes")
+
+
+class MergeJournalRequest(JsonApiCreateRequest[MergeJournalData]):
+    """Request model for merging journals."""
+
+    pass
+
+
 # Calendar Management Schemas
 class CalendarAttributes(BaseModel):
     """Calendar attributes."""

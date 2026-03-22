@@ -104,25 +104,51 @@ class JournalIndexingService:
 
     def _ensure_journals_index_exists(self, index_name: str) -> None:
         """
-        Ensure the journals index exists with proper settings.
+        Ensure the journals search index exists and is configured.
 
         Args:
             index_name: Name of the journals index
         """
+        needs_creation = False
+        needs_settings = False
+        needs_primary_key = False
+
         try:
             # Try to get the index
             index = self.client.index(index_name)
-            index.get_stats()
+
+            # Fetch info grabs the primaryKey attribute
+            index.fetch_info()
+            if not getattr(index, "primary_key", None):
+                needs_primary_key = True
+
+            # Check if settings are configured (implicit creation leaves them empty)
+            filterable = index.get_filterable_attributes()
+            if not filterable or "user_id" not in filterable:
+                needs_settings = True
 
         except MeilisearchError:
+            needs_creation = True
+            needs_settings = True
+            # creation sets primaryKey, so needs_primary_key stays False
+
+        if needs_creation:
             # Index doesn't exist, create it
             logger.info("Creating journals search index", index_name=index_name)
-
-            # Create the index
             task = self.client.create_index(index_name, {"primaryKey": "id"})
             self.client.wait_for_task(task.task_uid)
 
+        if needs_primary_key:
+            logger.info("Setting primary key for existing index", index_name=index_name)
+            index = self.client.index(index_name)
+            task = index.update(primary_key="id")
+            self.client.wait_for_task(task.task_uid)
+
+        if needs_settings:
             # Configure the index settings
+            logger.info(
+                "Configuring journals search index settings", index_name=index_name
+            )
             index = self.client.index(index_name)
             task = index.update_settings(JOURNAL_INDEX_SETTINGS)
             self.client.wait_for_task(task.task_uid)

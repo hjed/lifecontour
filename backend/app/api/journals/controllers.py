@@ -52,6 +52,7 @@ from app.api.journals.schemas import (
     JournalTypeAddRequest,
     JournalTypeDataUpdateRequest,
     JournalUpdateRequest,
+    MergeJournalRequest,
 )
 from app.core.contacts.models.repositories import ContactRepository
 from app.core.journal.models.repositories import (
@@ -74,6 +75,7 @@ from app.core.journal.models.repositories import (
     RouteRepository,
     TravelDataRepository,
 )
+from app.core.journal.services.journal_merge_service import JournalMergeService
 from app.core.journal.services.journal_service import JournalService
 from app.core.search.exceptions import SearchServiceUnavailableError
 from app.infrastructure.auth.models import SessionUser
@@ -1995,6 +1997,124 @@ async def delete_journal(
         raise JournalNotFoundError(journal_id)
 
     await journal_service.delete_journal(journal_id, connection)
+
+
+# Merge Endpoint
+@router.post("/{journal_id}/merge", status_code=status.HTTP_200_OK)
+@inject
+async def merge_journal(
+    journal_id: int,
+    request: Request,
+    merge_request: MergeJournalRequest,
+    journal_merge_service: FromDishka[JournalMergeService],
+    journal_service: FromDishka[JournalService],
+    calendar_info_repo: FromDishka[CalendarInfoRepository],
+    calendar_repo: FromDishka[CalendarRepository],
+    mood_data_repo: FromDishka[MoodDataRepository],
+    plan_data_repo: FromDishka[PlanDataRepository],
+    travel_data_repo: FromDishka[TravelDataRepository],
+    photo_album_data_repo: FromDishka[PhotoAlbumDataRepository],
+    fitness_data_repo: FromDishka[FitnessDataRepository],
+    outdoor_activity_data_repo: FromDishka[OutdoorActivityDataRepository],
+    bushwalking_data_repo: FromDishka[BushwalkingDataRepository],
+    jogging_data_repo: FromDishka[JoggingDataRepository],
+    abseiling_data_repo: FromDishka[AbseilingDataRepository],
+    canyoning_data_repo: FromDishka[CanyoningDataRepository],
+    climbing_data_repo: FromDishka[ClimbingDataRepository],
+    kayaking_data_repo: FromDishka[KayakingDataRepository],
+    skiing_data_repo: FromDishka[CrossCountrySkiingDataRepository],
+    contact_relationship_repo: FromDishka[JournalContactRelationshipRepository],
+    tag_repo: FromDishka[JournalTagRepository],
+    route_repo: FromDishka[RouteRepository],
+    contact_repo: FromDishka[ContactRepository],
+    connection: FromDishka[AsyncConnection],
+    user: FromDishka[SessionUser],  # Require authentication
+) -> JournalResponse:
+    """
+    Merge another journal into this one.
+
+    Preserves data according to Phase 1 rules.
+    """
+    source_id = merge_request.data.attributes.source_journal_id
+
+    # Validation against identical journal ID
+    if journal_id == source_id:
+        from core_shared.models.journals.exceptions import JournalMergeConflictError
+
+        raise JournalMergeConflictError("Cannot merge a journal into itself")
+
+    # Ownership and existence checks for both target and source journals
+    target_journal_for_user = await journal_service.get_journal(journal_id)
+    if not target_journal_for_user:
+        raise JournalNotFoundError(journal_id)
+
+    source_journal_for_user = await journal_service.get_journal(source_id)
+    if not source_journal_for_user:
+        raise JournalNotFoundError(source_id)
+
+    # Ensure both journals belong to the authenticated user to prevent cross-tenant merges
+    target_user_id = str(getattr(target_journal_for_user, "user_id", ""))
+    source_user_id = str(getattr(source_journal_for_user, "user_id", ""))
+    auth_user_id = str(getattr(user, "id", ""))
+
+    if target_user_id != auth_user_id or source_user_id != auth_user_id:
+        from fastapi import HTTPException, status
+
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You do not have permission to merge these journals.",
+        )
+
+    await journal_merge_service.merge_journals(
+        target_id=journal_id, source_id=source_id, transaction=connection
+    )
+
+    # Get enriched target journal to return
+    target_journal = await journal_service.get_journal(journal_id)
+    if not target_journal:
+        raise JournalNotFoundError(journal_id)
+
+    (
+        types,
+        type_data,
+        contacts,
+        tags,
+        calendar,
+        routes,
+    ) = await _enrich_journal_data(
+        target_journal,
+        calendar_info_repo,
+        calendar_repo,
+        mood_data_repo,
+        plan_data_repo,
+        travel_data_repo,
+        photo_album_data_repo,
+        fitness_data_repo,
+        contact_relationship_repo,
+        tag_repo,
+        route_repo,
+        outdoor_activity_data_repo,
+        bushwalking_data_repo,
+        jogging_data_repo,
+        abseiling_data_repo,
+        canyoning_data_repo,
+        climbing_data_repo,
+        kayaking_data_repo,
+        skiing_data_repo,
+        include_routes=False,
+    )
+
+    base_url = get_request_base_url(request)
+    resource = JournalConverter.to_resource(
+        journal=target_journal,
+        types=types,
+        type_data=type_data,
+        contacts=contacts,
+        tags=tags,
+        calendar=calendar,
+        base_url=base_url,
+    )
+    return await _build_journal_response(resource, contact_repo)
 
 
 # Type Management Endpoints

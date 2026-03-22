@@ -190,17 +190,24 @@ async function hasExpectedOAuthClientRedirect(
   callbackUrl: string
 ): Promise<boolean> {
   try {
-    const response = await fetch(
-      `http://localhost:${OAUTH_ADMIN_TEST_PORT}/admin/clients/test-client-id`
-    );
+    const url = `http://localhost:${OAUTH_ADMIN_TEST_PORT}/admin/clients/test-client-id`;
+    console.log(`Checking client at ${url} expecting callback: ${callbackUrl}`);
+    const response = await fetch(url);
 
     if (!response.ok) {
+      console.log(
+        `Client check failed: ${response.status} ${response.statusText}`
+      );
       return false;
     }
 
     const client = (await response.json()) as { redirect_uris?: string[] };
-    return client.redirect_uris?.includes(callbackUrl) ?? false;
-  } catch {
+    console.log(`Found client redirect uris:`, client.redirect_uris);
+    const hasMatch = client.redirect_uris?.includes(callbackUrl) ?? false;
+    console.log(`Matched? ${hasMatch}`);
+    return hasMatch;
+  } catch (err) {
+    console.error(`Client check error:`, err);
     return false;
   }
 }
@@ -219,6 +226,7 @@ function removeExistingContainers(): void {
     `${CONTAINER_PREFIX}-oauth`,
     `${CONTAINER_PREFIX}-oauth-login-consent`,
     `${CONTAINER_PREFIX}-oauth-init`,
+    `${CONTAINER_PREFIX}-oauth-provider-volume-init`,
     `${CONTAINER_PREFIX}-backend`,
     `${CONTAINER_PREFIX}-google-worker`,
   ];
@@ -364,6 +372,21 @@ async function verifyCoreServiceHealth(
   await dependencies.waitForService(
     `http://localhost:${OAUTH_ADMIN_TEST_PORT}/health/ready`
   );
+
+  dependencies.logger.log('🔍 Waiting for OAuth client to be created...');
+  const maxRetries = 20;
+  for (let i = 0; i < maxRetries; i++) {
+    const hasClient = await dependencies.hasExpectedOAuthClientRedirect(
+      FRONTEND_TEST_CALLBACK_URL
+    );
+    if (hasClient) {
+      break;
+    }
+    if (i === maxRetries - 1) {
+      throw new Error('Timeout waiting for OAuth client initialization');
+    }
+    await new Promise(resolve => setTimeout(resolve, 1000));
+  }
 }
 
 function handleGlobalSetupFailure(
