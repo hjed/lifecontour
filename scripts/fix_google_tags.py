@@ -27,7 +27,7 @@ sys.path.insert(
 
 try:
     from google_client import GoogleAPIClient
-    from worker import _build_contact_group_mapping
+    from group_mapping import _build_contact_group_mapping
 except ImportError as e:
     print(f"Error importing required modules: {e}")
     print(
@@ -105,8 +105,13 @@ async def fix_google_tags(db_url: str, google_account_email: str) -> None:
 
         auth_service = ScriptAuthService()
 
-        print("Fetching Google contact groups to build translation mapping...")
-        client = GoogleAPIClient(auth_service, google_account_email)
+        client = GoogleAPIClient(
+            auth_service=auth_service,  # type: ignore[arg-type]
+            google_account_email=google_account_email,
+            google_client_id="dummy_client_id",
+            google_client_secret="dummy_client_secret",
+            user_id="script_user",
+        )
 
         # Re-use our newly fixed mapping logic
         group_mapping = await _build_contact_group_mapping(client)
@@ -204,7 +209,7 @@ async def fix_google_tags(db_url: str, google_account_email: str) -> None:
         await conn.close()
 
 
-def main():
+def main() -> None:
     parser = argparse.ArgumentParser(
         description="Fix imported Google Contact tags that show as hashes"
     )
