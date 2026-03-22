@@ -36,6 +36,10 @@ updates:
           - "sqlalchemy*"
           - "alembic*"
           - "psycopg*"
+      minor-and-patch:
+        update-types:
+          - "patch"
+          - "minor"
 
   - package-ecosystem: "npm"
     directory: "/frontend"
@@ -75,7 +79,10 @@ updates:
         applies-to: version-updates
         patterns:
           - "eslint*"
-
+      minor-and-patch:
+        update-types:
+          - "patch"
+          - "minor"
 
   # GitHub Actions
   - package-ecosystem: "github-actions"
