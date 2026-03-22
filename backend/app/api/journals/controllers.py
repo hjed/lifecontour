@@ -721,6 +721,115 @@ async def delete_journal_tag(
     return None
 
 
+async def _build_journal_list_resources(
+    journals: list[Journal],
+    user_id: str,
+    base_url: str,
+    journal_service: JournalService,
+    contact_repo: ContactRepository,
+    calendar_info_repo: CalendarInfoRepository,
+    calendar_repo: CalendarRepository,
+    mood_data_repo: MoodDataRepository,
+    plan_data_repo: PlanDataRepository,
+    travel_data_repo: TravelDataRepository,
+    photo_album_data_repo: PhotoAlbumDataRepository,
+    fitness_data_repo: FitnessDataRepository,
+    outdoor_activity_data_repo: OutdoorActivityDataRepository,
+    bushwalking_data_repo: BushwalkingDataRepository,
+    jogging_data_repo: JoggingDataRepository,
+    abseiling_data_repo: AbseilingDataRepository,
+    canyoning_data_repo: CanyoningDataRepository,
+    climbing_data_repo: ClimbingDataRepository,
+    kayaking_data_repo: KayakingDataRepository,
+    skiing_data_repo: CrossCountrySkiingDataRepository,
+    contact_relationship_repo: JournalContactRelationshipRepository,
+    tag_repo: JournalTagRepository,
+    route_repo: RouteRepository,
+) -> list[JournalResource]:
+    """Helper to consistently build journal list responses with enriched data.
+
+    The number of returned resources will not exceed the size of the paginated
+    `journals` input (modulo de-duplication by ID), so that callers that
+    paginate based on the input list have consistent `meta` and pagination links.
+    """
+    seen_ids: set[int] = set()
+    all_journals: list[Journal] = []
+    for j in journals:
+        if j.id is None:
+            continue
+        if j.id in seen_ids:
+            continue
+        seen_ids.add(j.id)
+        all_journals.append(j)
+
+    # Batch-load parents + children counts
+    returned_ids = {j.id for j in all_journals if j.id is not None}
+    parent_ids = list({j.parent_id for j in all_journals if j.parent_id is not None})
+    missing_parent_ids = [pid for pid in parent_ids if pid not in returned_ids]
+    parent_journals = await journal_service.find_journals_by_ids_for_user(
+        user_id=user_id, journal_ids=missing_parent_ids
+    )
+    parent_by_id = {
+        **{p.id: p for p in parent_journals if p.id is not None},
+        **{j.id: j for j in all_journals if j.id is not None},
+    }
+
+    returned_ids_list = [j.id for j in all_journals if j.id is not None]
+    children_count_by_parent_id = await journal_service.count_children_for_parents(
+        user_id=user_id, parent_ids=returned_ids_list
+    )
+
+    # Enrich journals
+    journal_resources = []
+    for journal in all_journals:
+        types, type_data, contacts, tags, calendar, routes = await _enrich_journal_data(
+            journal,
+            calendar_info_repo,
+            calendar_repo,
+            mood_data_repo,
+            plan_data_repo,
+            travel_data_repo,
+            photo_album_data_repo,
+            fitness_data_repo,
+            contact_relationship_repo,
+            tag_repo,
+            route_repo,
+            outdoor_activity_data_repo,
+            bushwalking_data_repo,
+            jogging_data_repo,
+            abseiling_data_repo,
+            canyoning_data_repo,
+            climbing_data_repo,
+            kayaking_data_repo,
+            skiing_data_repo,
+            include_routes=False,
+        )
+        parent = parent_by_id.get(journal.parent_id) if journal.parent_id else None
+        children_count = (
+            children_count_by_parent_id.get(journal.id, 0) if journal.id else 0
+        )
+        resource = JournalConverter.to_resource(
+            journal,
+            base_url,
+            types=types,
+            type_data=type_data,
+            contacts=contacts,
+            tags=tags,
+            calendar=calendar,
+            routes=routes,
+            parent=parent,
+            children_count=children_count,
+        )
+        journal_resources.append(resource)
+
+    # Populate contact names
+    contact_cache: dict[int, str] = {}
+    for resource in journal_resources:
+        await _populate_contact_names(resource, contact_repo, contact_cache)
+
+    return journal_resources
+
+
 @router.get("")
 @inject
 async def list_journals(
@@ -801,47 +910,31 @@ async def list_journals(
     )
 
     # Convert to resources with enriched data
-    journal_resources = []
-    for journal in journals:
-        # Enrich journal with types, contacts, tags, etc.
-        types, type_data, contacts, tags, calendar, _ = await _enrich_journal_data(
-            journal,
-            calendar_info_repo,
-            calendar_repo,
-            mood_data_repo,
-            plan_data_repo,
-            travel_data_repo,
-            photo_album_data_repo,
-            fitness_data_repo,
-            contact_relationship_repo,
-            tag_repo,
-            route_repo,
-            outdoor_activity_data_repo,
-            bushwalking_data_repo,
-            jogging_data_repo,
-            abseiling_data_repo,
-            canyoning_data_repo,
-            climbing_data_repo,
-            kayaking_data_repo,
-            skiing_data_repo,
-            include_routes=False,
-        )
-
-        resource = JournalConverter.to_resource(
-            journal,
-            base_url,
-            types=types,
-            type_data=type_data,
-            contacts=contacts,
-            tags=tags,
-            calendar=calendar,
-        )
-        journal_resources.append(resource)
-
-    # Populate contact names for the resources
-    contact_cache: dict[int, str] = {}
-    for resource in journal_resources:
-        await _populate_contact_names(resource, contact_repo, contact_cache)
+    journal_resources = await _build_journal_list_resources(
+        journals=journals,
+        user_id=user.id,
+        base_url=base_url,
+        journal_service=journal_service,
+        contact_repo=contact_repo,
+        calendar_info_repo=calendar_info_repo,
+        calendar_repo=calendar_repo,
+        mood_data_repo=mood_data_repo,
+        plan_data_repo=plan_data_repo,
+        travel_data_repo=travel_data_repo,
+        photo_album_data_repo=photo_album_data_repo,
+        fitness_data_repo=fitness_data_repo,
+        outdoor_activity_data_repo=outdoor_activity_data_repo,
+        bushwalking_data_repo=bushwalking_data_repo,
+        jogging_data_repo=jogging_data_repo,
+        abseiling_data_repo=abseiling_data_repo,
+        canyoning_data_repo=canyoning_data_repo,
+        climbing_data_repo=climbing_data_repo,
+        kayaking_data_repo=kayaking_data_repo,
+        skiing_data_repo=skiing_data_repo,
+        contact_relationship_repo=contact_relationship_repo,
+        tag_repo=tag_repo,
+        route_repo=route_repo,
+    )
 
     meta = create_pagination_meta(total_count, page, limit)
     links = create_pagination_links(

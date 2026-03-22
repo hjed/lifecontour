@@ -132,7 +132,9 @@ services:
     command: ["serve", "-c", "/etc/config/hydra/hydra.yml", "all", "--dev"]
 
   oauth-login-consent:
-    image: node:18-alpine
+    build:
+      context: docker/oauth-login-consent
+      dockerfile: Dockerfile
     container_name: ${CONTAINER_PREFIX:-pms}-oauth-login-consent
     profiles: [dev, test]
     working_dir: /app
@@ -141,7 +143,7 @@ services:
     ports:
       - "${OAUTH_UI_PORT:-3001}:3001"
     environment:
-      - HYDRA_ADMIN_URL=http://oauth-provider:4445
+      - HYDRA_ADMIN_URL=http://${CONTAINER_PREFIX:-pms}-oauth:4445
       - PORT=3001
       - NODE_ENV=${NODE_ENV:-development}
     depends_on:
@@ -162,7 +164,7 @@ services:
     volumes:
       - ./docker/oauth-provider/init-oauth.sh:/init-oauth.sh:ro
     environment:
-      - OAUTH_PROVIDER_HOST=oauth-provider
+      - OAUTH_PROVIDER_HOST=${CONTAINER_PREFIX:-pms}-oauth
       - OAUTH_ADMIN_PORT=4445
       - CLIENT_ID=${OAUTH_CLIENT_ID:-dev-client-id}
       - CLIENT_SECRET=${OAUTH_CLIENT_SECRET:-dev-client-secret}
@@ -188,16 +190,16 @@ services:
     container_name: ${CONTAINER_PREFIX:-pms}-backend
     profiles: [dev, test, prod]
     environment:
-      DATABASE_URL: postgresql://${DB_USER:-postgres}:${DB_PASSWORD:-postgres}@database:5432/${DB_NAME:-personal_management}
+      DATABASE_URL: postgresql://${DB_USER:-postgres}:${DB_PASSWORD:-postgres}@${CONTAINER_PREFIX:-pms}-postgres:5432/${DB_NAME:-personal_management}
       DEBUG: ${DEBUG:-true}
       LOG_LEVEL: ${LOG_LEVEL:-DEBUG}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000,http://frontend:3000}
       ALLOWED_HOSTS: ${ALLOWED_HOSTS:-localhost,127.0.0.1,backend,*}
-      MEILISEARCH_URL: http://meilisearch:7700
+      MEILISEARCH_URL: http://${CONTAINER_PREFIX:-pms}-meilisearch:7700
       MEILISEARCH_API_KEY: ${MEILI_MASTER_KEY:-dev_master_key_change_in_production}
       SESSION_SECRET_KEY: ${SESSION_SECRET_KEY:-dev_session_secret_change_in_production}
       SEARCH_INDEX_PREFIX: ${SEARCH_INDEX_PREFIX:-pms_}
-      REDIS_URL: redis://redis:6379
+      REDIS_URL: redis://${CONTAINER_PREFIX:-pms}-redis:6379
       ENABLE_TELEMETRY: ${ENABLE_TELEMETRY:-true}
       OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-http://jaeger:4318}
       OTEL_SERVICE_NAME: ${OTEL_SERVICE_NAME:-personal-management-backend}
@@ -206,8 +208,8 @@ services:
       OAUTH_CLIENT_ID: ${OAUTH_CLIENT_ID:-dev-client-id}
       OAUTH_CLIENT_SECRET: ${OAUTH_CLIENT_SECRET:-dev-client-secret}
       OAUTH_AUTHORIZATION_URL: ${OAUTH_AUTHORIZATION_URL:-http://localhost:4444/oauth2/auth}
-      OAUTH_TOKEN_URL: ${OAUTH_TOKEN_URL:-http://oauth-provider:4444/oauth2/token}
-      OAUTH_USERINFO_URL: ${OAUTH_USERINFO_URL:-http://oauth-provider:4444/userinfo}
+      OAUTH_TOKEN_URL: ${OAUTH_TOKEN_URL:-http://${CONTAINER_PREFIX:-pms}-oauth:4444/oauth2/token}
+      OAUTH_USERINFO_URL: ${OAUTH_USERINFO_URL:-http://${CONTAINER_PREFIX:-pms}-oauth:4444/userinfo}
       FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3000}
       WEBHOOK_BASE_URL: ${WEBHOOK_BASE_URL:-http://localhost:8000}
       DISABLE_AUTH: ${DISABLE_AUTH:-false}
@@ -286,9 +288,9 @@ services:
     container_name: ${CONTAINER_PREFIX:-pms}-google-worker
     profiles: [dev, test, prod]
     environment:
-      DATABASE_URL: postgresql://${DB_USER:-postgres}:${DB_PASSWORD:-postgres}@database:5432/${DB_NAME:-personal_management}
-      REDIS_URL: redis://redis:6379
-      REDIS_HOST: redis  # For integration tests
+      DATABASE_URL: postgresql://${DB_USER:-postgres}:${DB_PASSWORD:-postgres}@${CONTAINER_PREFIX:-pms}-postgres:5432/${DB_NAME:-personal_management}
+      REDIS_URL: redis://${CONTAINER_PREFIX:-pms}-redis:6379
+      REDIS_HOST: ${CONTAINER_PREFIX:-pms}-redis  # For integration tests
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-dev-google-client-id}
       GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-dev-google-client-secret}
       ENCRYPTION_KEY: ${ENCRYPTION_KEY:-KzC1vYhL3bQpT_x5Ue8q0Wl1MvX-oVwYwK9cQx7lKHg=}

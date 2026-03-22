@@ -165,6 +165,8 @@ echo "DEBUG: Client creation returned HTTP code: $CREATE_HTTP_CODE"
 
 if [ "$CREATE_HTTP_CODE" = "201" ] || [ "$CREATE_HTTP_CODE" = "200" ]; then
     print_success "OAuth client created successfully!"
+elif [ "$CREATE_HTTP_CODE" = "409" ]; then
+    print_warning "OAuth client already exists (HTTP 409). Proceeding."
 else
     print_error "Failed to create OAuth client (HTTP $CREATE_HTTP_CODE)"
     print_error "Response from Hydra:"

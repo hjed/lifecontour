@@ -66,7 +66,7 @@ app.get('/login', async (req, res) => {
     res.redirect(acceptResponse.data.redirect_to);
 
   } catch (error) {
-    console.error('🔐 [Login] Error processing login:', error.message);
+    console.error('🔐 [Login] Error processing login:', JSON.stringify(error.response?.data || error.message));
     res.status(500).json({
       error: 'Login processing failed',
       details: error.response?.data || error.message
@@ -110,6 +110,11 @@ app.get('/consent', async (req, res) => {
             email: 'test@example.com',
             name: 'Test User',
             provider: 'generic'
+          },
+          userinfo: {
+            email: 'test@example.com',
+            name: 'Test User',
+            provider: 'generic'
           }
         }
       },
@@ -122,7 +127,7 @@ app.get('/consent', async (req, res) => {
     res.redirect(acceptResponse.data.redirect_to);
 
   } catch (error) {
-    console.error('🔐 [Consent] Error processing consent:', error.message);
+    console.error('🔐 [Consent] Error processing consent:', JSON.stringify(error.response?.data || error.message));
     res.status(500).json({
       error: 'Consent processing failed',
       details: error.response?.data || error.message
