@@ -82,7 +82,7 @@ test.describe('Contact Journals Display', () => {
 
       // Wait for page to load by checking for contact name
       await expect(
-        page.getByText(`${contact.firstName} ${contact.lastName}`)
+        page.getByText(`${contact.firstName} ${contact.lastName}`).first()
       ).toBeVisible();
 
       // Verify journals section is visible
@@ -129,12 +129,14 @@ test.describe('Contact Journals Display', () => {
       await navigateToContactAndWaitForJournals(page, contact.id);
 
       // Verify the journal title is displayed
-      const journalCard = page.locator('article', { hasText: journal.title });
+      const journalCard = page.getByTestId(`journal-${journal.id}`);
       await expect(journalCard).toBeVisible();
 
       // Verify that the contact's name is rendered in the journal's contact badges
       // It should NOT render as "Contact <id>"
-      await expect(journalCard.getByText('Alice Smith')).toBeVisible();
+      await expect(
+        journalCard.getByText(`${contact.firstName} ${contact.lastName}`)
+      ).toBeVisible();
       await expect(
         journalCard.getByText(`Contact ${contact.id}`)
       ).not.toBeVisible();

@@ -51,10 +51,16 @@ test.describe('Contact Relationships', () => {
     // Click Add Relationship
     await page.getByRole('button', { name: 'Add Relationship' }).click();
 
-    const addRelationshipDialog = page.getByRole('dialog', {
-      name: 'Add New Relationship',
-    });
-    const typeTrigger = addRelationshipDialog.getByRole('combobox');
+    const formContainer = page
+      .locator('div.bg-card')
+      .filter({
+        has: page.getByRole('heading', { name: 'Add New Relationship' }),
+      })
+      .first();
+    const typeTrigger = formContainer
+      .locator('.space-y-2')
+      .filter({ hasText: 'Relationship Type' })
+      .getByRole('combobox');
     await typeTrigger.click();
 
     // Verify that relationship types are loaded ("Parent", "Child", etc)

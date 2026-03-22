@@ -175,38 +175,11 @@ app.post('/consent', async (req, res) => {
   }
 });
 
-// API endpoint to create OAuth client
-app.post('/api/clients', async (req, res) => {
-  try {
-    const client = {
-      client_id: 'dev-client-id',
-      client_secret: 'dev-client-secret',
-      grant_types: ['authorization_code', 'refresh_token'],
-      response_types: ['code'],
-      scope: 'openid profile email',
-      redirect_uris: ['http://localhost:3000/auth/callback'],
-      token_endpoint_auth_method: 'client_secret_post'
-    };
 
-    const response = await axios.post(`${HYDRA_ADMIN_URL}/admin/clients`, client);
-    res.json(response.data);
-  } catch (error) {
-    console.error('Error creating client:', error.message);
-    res.status(500).json({ error: 'Failed to create client' });
-  }
-});
 
 app.listen(PORT, () => {
   console.log(`🔐 OAuth2 Development UI running on http://localhost:${PORT}`);
   console.log(`🔧 Hydra Admin URL: ${HYDRA_ADMIN_URL}`);
 
-  // Auto-create development client
-  setTimeout(async () => {
-    try {
-      await axios.post(`http://localhost:${PORT}/api/clients`);
-      console.log('✅ Development OAuth client created');
-    } catch (error) {
-      console.log('ℹ️  OAuth client may already exist');
-    }
-  }, 5000);
+
 });
