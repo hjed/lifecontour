@@ -15,8 +15,15 @@ import sys
 import asyncpg
 
 # Add required paths
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../integration_workers/google")))
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../core_shared")))
+sys.path.insert(
+    0,
+    os.path.abspath(
+        os.path.join(os.path.dirname(__file__), "../integration_workers/google")
+    ),
+)
+sys.path.insert(
+    0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../core_shared"))
+)
 
 try:
     from google_auth_service import GoogleAuthService
@@ -24,7 +31,9 @@ try:
     from worker import _build_contact_group_mapping
 except ImportError as e:
     print(f"Error importing required modules: {e}")
-    print("Make sure this script is run from the project root or with inside a configured venv.")
+    print(
+        "Make sure this script is run from the project root or with inside a configured venv."
+    )
     sys.exit(1)
 
 
@@ -49,7 +58,9 @@ async def fix_google_tags(db_url: str, google_account_email: str) -> None:
         bad_tags = await conn.fetch(tags_query, hex_pattern)
 
         if not bad_tags:
-            print("No tags matching the 16-character hex pattern found in the database. Nothing to fix.")
+            print(
+                "No tags matching the 16-character hex pattern found in the database. Nothing to fix."
+            )
             return
 
         print(f"Found {len(bad_tags)} tags that appear to be Google Contact hashes.")
@@ -70,7 +81,9 @@ async def fix_google_tags(db_url: str, google_account_email: str) -> None:
         group_mapping = await _build_contact_group_mapping(client)
 
         if not group_mapping:
-            print("Failed to fetch group mapping or mapping is empty. Cannot translate tags.")
+            print(
+                "Failed to fetch group mapping or mapping is empty. Cannot translate tags."
+            )
             return
 
         print(f"Successfully retrieved {len(group_mapping)} contact group mappings.")
@@ -97,7 +110,9 @@ async def fix_google_tags(db_url: str, google_account_email: str) -> None:
                 existing = await conn.fetchval(check_query, correct_name)
 
                 if existing:
-                    print(f"  Tag '{correct_name}' already exists (ID {existing}). Merging contacts into it.")
+                    print(
+                        f"  Tag '{correct_name}' already exists (ID {existing}). Merging contacts into it."
+                    )
 
                     # Update contact_tags to point to the existing correct tag
                     # Assuming junction table is contact_tags with contact_id and tag_id
@@ -126,7 +141,9 @@ async def fix_google_tags(db_url: str, google_account_email: str) -> None:
                             delete_tag = "DELETE FROM tags WHERE id = $1"
                             await conn.execute(delete_tag, tag_id)
 
-                        print(f"  Successfully merged tag '{hash_name}' into existing tag.")
+                        print(
+                            f"  Successfully merged tag '{hash_name}' into existing tag."
+                        )
                         fixes_applied += 1
 
                     except Exception as e:
@@ -143,26 +160,35 @@ async def fix_google_tags(db_url: str, google_account_email: str) -> None:
                         print(f"  Failed to rename tag: {e}")
                         fixes_failed += 1
             else:
-                print(f"Could not find translation for hash '{hash_name}' in Google Contact Groups.")
+                print(
+                    f"Could not find translation for hash '{hash_name}' in Google Contact Groups."
+                )
                 fixes_failed += 1
 
-        print(f"\nSummary: {fixes_applied} tags fixed, {fixes_failed} tags could not be fixed.")
+        print(
+            f"\nSummary: {fixes_applied} tags fixed, {fixes_failed} tags could not be fixed."
+        )
 
     finally:
         await conn.close()
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Fix imported Google Contact tags that show as hashes")
+    parser = argparse.ArgumentParser(
+        description="Fix imported Google Contact tags that show as hashes"
+    )
     parser.add_argument(
         "--db-url",
-        default=os.environ.get("DATABASE_URL", "postgresql://user:password@localhost:5432/pms"),
-        help="Database connection URL"
+        default=os.environ.get(
+            "DATABASE_URL",
+            "postgresql://dev_user:dev_password@localhost:5432/personal_management_dev",
+        ),
+        help="Database connection URL",
     )
     parser.add_argument(
         "--email",
         required=True,
-        help="Google account email address to fetch contact groups for"
+        help="Google account email address to fetch contact groups for",
     )
 
     args = parser.parse_args()

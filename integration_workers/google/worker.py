@@ -1044,6 +1044,7 @@ async def _build_contact_group_mapping(client: GoogleAPIClient) -> dict[str, str
     group_mapping: dict[str, str] = {}
     try:
         page_token: str | None = None
+        groups_processed_count = 0
         while True:
             groups_data = await client.list_contact_groups(
                 page_size=1000, page_token=page_token
@@ -1054,6 +1055,7 @@ async def _build_contact_group_mapping(client: GoogleAPIClient) -> dict[str, str
                 hasattr(groups_response, "contact_groups")
                 and groups_response.contact_groups
             ):
+                groups_processed_count += len(groups_response.contact_groups)
                 for group in groups_response.contact_groups:
                     name_to_use = group.formatted_name or group.name
                     if group.resource_name and name_to_use:
@@ -1076,7 +1078,8 @@ async def _build_contact_group_mapping(client: GoogleAPIClient) -> dict[str, str
 
         logger.info(
             "Successfully built contact group translation mapping",
-            groups_count=len(group_mapping),
+            groups_count=groups_processed_count,
+            mapping_entries_count=len(group_mapping),
         )
     except Exception as e:
         logger.error(
