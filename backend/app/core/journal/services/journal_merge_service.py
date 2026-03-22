@@ -61,8 +61,9 @@ class JournalMergeService:
 
         # 1. Base Fields (prefer non-empty, concatenate content)
         if source.title and target.title and source.title != target.title:
-            raise JournalMergeConflictError(
-                f"Conflicting titles: '{target.title}' vs '{source.title}'"
+            # If titles conflict, keep the target title but log it
+            logger.debug(
+                f"Merge title conflict resolved by keeping target title: '{target.title}' vs '{source.title}'"
             )
         elif source.title and not target.title:
             target.title = source.title
@@ -73,10 +74,15 @@ class JournalMergeService:
             and target.event_date_range
             and source.event_date_range != target.event_date_range
         ):
-            raise JournalMergeConflictError("Conflicting event date ranges")
+            logger.debug(
+                f"Merge date conflict resolved by keeping target date: '{target.event_date_range}' vs '{source.event_date_range}'"
+            )
         elif source.event_date_range and not target.event_date_range:
             target.event_date_range = source.event_date_range
-            changed_fields["event_date_range"] = source.event_date_range
+            changed_fields["event_date_range"] = {
+                "start": source.event_date_range.start.isoformat(),
+                "end": source.event_date_range.end.isoformat(),
+            }
 
         if source.content and target.content and source.content != target.content:
             target.content = f"{target.content}\n\n---\n\n{source.content}"
@@ -89,10 +95,18 @@ class JournalMergeService:
         # But only track them in changed_fields if they changed
         await self.journal_repo.save(target)
 
+        # Prevent cycles: if target is a descendant of source, reject
+        ancestors = await self.journal_repo.get_ancestors(target_id)
+        if any(a.id == source_id for a in ancestors):
+            raise JournalMergeConflictError(
+                "Target journal cannot be a descendant of the source journal"
+            )
+
         # 2. Re-parent hierarchy
+        # Do not reparent the target journal to itself if it was a child of the source
         await transaction.execute(
             text(
-                "UPDATE journals SET parent_id = :target_id WHERE parent_id = :source_id"
+                "UPDATE journals SET parent_id = :target_id WHERE parent_id = :source_id AND id != :target_id"
             ),
             {"target_id": target_id, "source_id": source_id},
         )
@@ -129,15 +143,14 @@ class JournalMergeService:
         # 6. Move External Links (deduplicate)
         await transaction.execute(
             text("""
-                INSERT INTO journal_external_event_links (journal_id, calendar_id, external_event_id, updated_at)
-                SELECT :target_id, calendar_id, external_event_id, updated_at
+                INSERT INTO journal_external_event_links (journal_id, calendar_id, external_event_id, updated_at, sync_capability, sync_status)
+                SELECT :target_id, calendar_id, external_event_id, updated_at, sync_capability, sync_status
                 FROM journal_external_event_links source_links
                 WHERE journal_id = :source_id
                 AND NOT EXISTS (
                     SELECT 1 FROM journal_external_event_links target_links
                     WHERE target_links.journal_id = :target_id
                     AND target_links.calendar_id = source_links.calendar_id
-                    AND target_links.external_event_id = source_links.external_event_id
                 )
             """),
             {"target_id": target_id, "source_id": source_id},

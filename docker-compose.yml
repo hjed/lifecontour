@@ -101,11 +101,23 @@ services:
     networks:
       - personal-management
 
+  oauth-provider-volume-init:
+    image: busybox
+    container_name: ${CONTAINER_PREFIX:-pms}-oauth-volume-init
+    profiles: [dev, test, prod]
+    user: root
+    command: chown -R 65532:65532 /data
+    volumes:
+      - hydra_data:/data
+    networks:
+      - personal-management
+
   oauth-provider:
     image: oryd/hydra:v25.4.0
     container_name: ${CONTAINER_PREFIX:-pms}-oauth
     profiles: [dev, test, prod]
-    user: root
+    user: "65532:65532"
+    working_dir: /
     environment:
       - DSN=${OAUTH_DSN:-sqlite:///data/hydra.sqlite?_fk=true}
       - URLS_SELF_ISSUER=${OAUTH_ISSUER:-http://localhost:4444}
@@ -118,6 +130,8 @@ services:
       - SERVE_COOKIES_SAME_SITE_MODE=Lax
       - SERVE_COOKIES_SAME_SITE_LEGACY_WORKAROUND=true
     depends_on:
+      oauth-provider-volume-init:
+        condition: service_completed_successfully
       database:
         condition: service_healthy
     volumes:
@@ -219,6 +233,7 @@ services:
       FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3000}
       WEBHOOK_BASE_URL: ${WEBHOOK_BASE_URL:-http://localhost:8000}
       DISABLE_AUTH: ${DISABLE_AUTH:-false}
+      HOME: /app/.cache
     volumes:
       - ./backend:/app
       - ./core_shared:/core_shared
@@ -381,5 +396,4 @@ volumes:
 
 networks:
   personal-management:
-    name: personal-management
     driver: bridge

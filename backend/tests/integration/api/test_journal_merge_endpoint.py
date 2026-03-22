@@ -73,11 +73,11 @@ async def test_merge_journal_endpoint_success(
 
 
 @pytest.mark.asyncio
-async def test_merge_journal_conflict(
+async def test_merge_journal_different_titles(
     authenticated_client: AsyncClient,
     clean_database: None,
 ) -> None:
-    """Test merging journals with conflicting titles raises 409."""
+    """Test merging journals with different titles succeeds and targets title wins."""
     # Create journals with conflicting titles
     target_res = await authenticated_client.post(
         "/api/journals",
@@ -126,5 +126,7 @@ async def test_merge_journal_conflict(
         },
     )
 
-    assert merge_res.status_code == 409
-    assert "Conflicting titles" in merge_res.json()["errors"][0]["detail"]
+    assert merge_res.status_code == 200
+    data = merge_res.json()["data"]["attributes"]
+    assert data["title"] == "Target Title"
+    assert data["content"] == "Target Content\n\n---\n\nSource Content"

@@ -265,6 +265,7 @@ def run_tests() -> bool:
             "MEILISEARCH_URL": f"http://localhost:{workspace_env.get('MEILI_TEST_PORT', '7701')}",
             "MEILISEARCH_API_KEY": "test_master_key",
             "DATABASE_URL": f"postgresql://postgres:postgres@localhost:{workspace_env.get('DB_TEST_PORT', '5433')}/personal_management_test",
+            "REDIS_URL": f"redis://localhost:{workspace_env.get('REDIS_TEST_PORT', '6380')}",
         }
     )
 

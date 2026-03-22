@@ -2043,6 +2043,28 @@ async def merge_journal(
 
         raise JournalMergeConflictError("Cannot merge a journal into itself")
 
+    # Ownership and existence checks for both target and source journals
+    target_journal_for_user = await journal_service.get_journal(journal_id)
+    if not target_journal_for_user:
+        raise JournalNotFoundError(journal_id)
+
+    source_journal_for_user = await journal_service.get_journal(source_id)
+    if not source_journal_for_user:
+        raise JournalNotFoundError(source_id)
+
+    # Ensure both journals belong to the authenticated user to prevent cross-tenant merges
+    target_user_id = str(getattr(target_journal_for_user, "user_id", ""))
+    source_user_id = str(getattr(source_journal_for_user, "user_id", ""))
+    auth_user_id = str(getattr(user, "id", ""))
+
+    if target_user_id != auth_user_id or source_user_id != auth_user_id:
+        from fastapi import HTTPException, status
+
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You do not have permission to merge these journals.",
+        )
+
     await journal_merge_service.merge_journals(
         target_id=journal_id, source_id=source_id, transaction=connection
     )
