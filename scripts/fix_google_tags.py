@@ -26,7 +26,6 @@ sys.path.insert(
 )
 
 try:
-    from google_auth_service import GoogleAuthService
     from google_client import GoogleAPIClient
     from worker import _build_contact_group_mapping
 except ImportError as e:
@@ -67,12 +66,44 @@ async def fix_google_tags(db_url: str, google_account_email: str) -> None:
 
         print(f"Authenticating with Google for account {google_account_email}...")
 
-        # We need the Google OAuth credentials configured in the environment
-        # or we could fetch the refresh token from the DB.
-        # But GoogleAuthService from the worker knows how to initialize given an email
+        # We fetch the encrypted token from the DB and decrypt it locally.
+        encryption_key = os.environ.get("ENCRYPTION_KEY")
+        if not encryption_key:
+            print(
+                "Error: ENCRYPTION_KEY environment variable is required to decrypt Google tokens."
+            )
+            print("Set it using: export ENCRYPTION_KEY=...")
+            return
 
-        # Initialize the auth service
-        auth_service = GoogleAuthService()
+        query = "SELECT encrypted_access_token FROM user_google_auth WHERE google_account_email = $1 LIMIT 1"
+        encrypted_token = await conn.fetchval(query, google_account_email)
+
+        if not encrypted_token:
+            print(
+                f"Error: Could not find Google credentials for {google_account_email} in database."
+            )
+            return
+
+        from cryptography.fernet import Fernet
+
+        fernet = Fernet(encryption_key.encode())
+        if isinstance(encrypted_token, str):
+            encrypted_token = encrypted_token.encode()
+
+        try:
+            access_token = fernet.decrypt(encrypted_token).decode()
+        except Exception as e:
+            print(f"Error decrypting token: {e}")
+            return
+
+        # Initialize the dummy auth service
+        class ScriptAuthService:
+            async def get_access_token(
+                self, user_id: str, google_account_email: str
+            ) -> str:
+                return access_token
+
+        auth_service = ScriptAuthService()
 
         print("Fetching Google contact groups to build translation mapping...")
         client = GoogleAPIClient(auth_service, google_account_email)

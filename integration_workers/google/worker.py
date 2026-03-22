@@ -1061,13 +1061,6 @@ async def _build_contact_group_mapping(client: GoogleAPIClient) -> dict[str, str
                     if group.resource_name and name_to_use:
                         group_mapping[group.resource_name] = name_to_use
 
-                        # Also map the raw ID for robustness against API inconsistencies
-                        if group.resource_name.startswith("contactGroups/"):
-                            group_id = group.resource_name.replace(
-                                "contactGroups/", "", 1
-                            )
-                            group_mapping[group_id] = name_to_use
-
             if (
                 hasattr(groups_response, "next_page_token")
                 and groups_response.next_page_token
