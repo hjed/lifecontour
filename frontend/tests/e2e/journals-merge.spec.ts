@@ -17,6 +17,7 @@ test.describe('Journal Merge Workflow', () => {
     const journals = await dataManager.createJournals([
       {
         title: sourceTitle,
+        exactTitle: true,
         content: 'Source interesting content',
         event_date_range: {
           start: '2026-02-11T14:00:00Z',
@@ -26,6 +27,7 @@ test.describe('Journal Merge Workflow', () => {
       },
       {
         title: targetTitle,
+        exactTitle: true,
         content: 'Target beginning content',
         event_date_range: {
           start: '2026-02-11T14:00:00Z',

@@ -38,6 +38,7 @@ export interface CalendarCreateRequest {
 
 export interface JournalCreateRequest {
   title: string;
+  exactTitle?: boolean;
   content: string;
   event_date_range: {
     start: string;
