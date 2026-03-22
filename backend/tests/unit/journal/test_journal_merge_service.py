@@ -10,14 +10,16 @@ from core_shared.models.journals import (
 )
 
 from app.core.journal.services.journal_merge_service import (
-    JournalMergeConflictError,
     JournalMergeService,
 )
 
 
 @pytest.fixture
-def mock_journal_repo():
-    return AsyncMock()
+def mock_journal_repo(mock_transaction):
+    mock_repo = AsyncMock()
+    mock_repo.get_ancestors.return_value = []
+    mock_repo.conn = mock_transaction
+    return mock_repo
 
 
 @pytest.fixture
@@ -86,7 +88,7 @@ class TestJournalMergeService:
         mock_journal_repo.delete.assert_called_once_with(2)
 
     @pytest.mark.asyncio
-    async def test_merge_journals_raises_conflict_on_title(
+    async def test_merge_journals_resolves_differing_titles_with_target_title(
         self, merge_service, mock_journal_repo, mock_transaction
     ):
         target = create_test_journal(id=1, title="Target Title")
@@ -95,9 +97,12 @@ class TestJournalMergeService:
         mock_journal_repo.find_by_id.side_effect = lambda j_id: (
             target if j_id == 1 else source
         )
+        mock_journal_repo.save.return_value = target
 
-        with pytest.raises(JournalMergeConflictError):
-            await merge_service.merge_journals(1, 2, mock_transaction)
+        result = await merge_service.merge_journals(1, 2, mock_transaction)
+
+        assert result.title == "Target Title"
+        mock_journal_repo.save.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_merge_relationship_queries_executed(

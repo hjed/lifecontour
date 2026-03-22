@@ -226,6 +226,7 @@ function removeExistingContainers(): void {
     `${CONTAINER_PREFIX}-oauth`,
     `${CONTAINER_PREFIX}-oauth-login-consent`,
     `${CONTAINER_PREFIX}-oauth-init`,
+    `${CONTAINER_PREFIX}-oauth-provider-volume-init`,
     `${CONTAINER_PREFIX}-backend`,
     `${CONTAINER_PREFIX}-google-worker`,
   ];

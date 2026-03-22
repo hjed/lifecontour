@@ -57,6 +57,15 @@ class JournalMergeService:
                 "Cannot merge journals belonging to different users"
             )
 
+        # Ensure atomicity: the repository and this service must use the same transaction
+        if (
+            hasattr(self.journal_repo, "conn")
+            and self.journal_repo.conn is not transaction
+        ):
+            raise RuntimeError(
+                "Merge failed: Repository connection does not match the provided transaction"
+            )
+
         changed_fields: dict[str, Any] = {}
 
         # 1. Base Fields (prefer non-empty, concatenate content)
@@ -150,7 +159,8 @@ class JournalMergeService:
                 AND NOT EXISTS (
                     SELECT 1 FROM journal_external_event_links target_links
                     WHERE target_links.journal_id = :target_id
-                    AND target_links.calendar_id = source_links.calendar_id
+                    AND target_links.calendar_id IS NOT DISTINCT FROM source_links.calendar_id
+                    AND target_links.external_event_id IS NOT DISTINCT FROM source_links.external_event_id
                 )
             """),
             {"target_id": target_id, "source_id": source_id},

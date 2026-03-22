@@ -396,4 +396,5 @@ volumes:
 
 networks:
   personal-management:
+    name: personal-management
     driver: bridge
