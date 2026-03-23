@@ -10,6 +10,7 @@ from Google Contacts API, and updates them.
 import argparse
 import asyncio
 import os
+import re
 import sys
 
 import asyncpg
@@ -139,6 +140,12 @@ async def fix_google_tags(db_url: str, google_account_email: str) -> None:
                 correct_name = group_mapping.get(f"contactGroups/{hash_name}")
 
             if correct_name:
+                # Sanitize the Google Contact Group name to match `tags.name` constraints
+                correct_name = re.sub(r"[^a-zA-Z0-9_&-]", "-", correct_name.strip())
+                correct_name = re.sub(r"-+", "-", correct_name)
+                correct_name = correct_name.strip("-")
+
+            if correct_name:
                 print(f"Translating tag ID {tag_id}: '{hash_name}' -> '{correct_name}'")
 
                 # Check if a tag with the correct name already exists to avoid unique constraint violations
@@ -188,7 +195,7 @@ async def fix_google_tags(db_url: str, google_account_email: str) -> None:
                 else:
                     # Rename the tag
                     try:
-                        update_query = "UPDATE tags SET name = $1 WHERE id = $2"
+                        update_query = "UPDATE tags SET name = $1, updated_at = NOW() WHERE id = $2"
                         await conn.execute(update_query, correct_name, tag_id)
                         print(f"  Successfully renamed tag '{hash_name}'.")
                         fixes_applied += 1
