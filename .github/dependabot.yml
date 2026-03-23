@@ -21,7 +21,6 @@ updates:
       - "backend"
     groups:
       development-dependencies:
-        cooldown: 3
         dependency-type: "development"
       google:
         applies-to: version-updates
