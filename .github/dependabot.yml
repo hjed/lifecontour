@@ -21,6 +21,7 @@ updates:
       - "backend"
     groups:
       development-dependencies:
+        cooldown: 3
         dependency-type: "development"
       google:
         applies-to: version-updates
@@ -37,9 +38,17 @@ updates:
           - "alembic*"
           - "psycopg*"
       minor-and-patch:
+        applies-to: version-updates
+        dependency-type: "production"
         update-types:
           - "patch"
           - "minor"
+        exclude-patterns:
+          - "google*"
+          - "pydantic*"
+          - "sqlalchemy*"
+          - "alembic*"
+          - "psycopg*"
 
   - package-ecosystem: "npm"
     directory: "/frontend"
@@ -80,9 +89,18 @@ updates:
         patterns:
           - "eslint*"
       minor-and-patch:
+        applies-to: version-updates
         update-types:
           - "patch"
           - "minor"
+        exclude-patterns:
+          - "eslint*"
+          - "jest*"
+          - "@types/jest*"
+          - "react*"
+          - "@types/react*"
+          - "@tanstack*"
+          - "@radix-ui*"
 
   # GitHub Actions
   - package-ecosystem: "github-actions"
