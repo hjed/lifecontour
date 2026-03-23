@@ -51,6 +51,82 @@ class JournalMergeService:
         target = await self.journal_repo.find_by_id(target_id)
         source = await self.journal_repo.find_by_id(source_id)
 
+        self._validate_merge_preconditions(
+            target, source, target_id, source_id, transaction
+        )
+
+        # for type checking, we can assert target and source are not None here
+        # because _validate_merge_preconditions raises if they are
+        assert target is not None
+        assert source is not None
+
+        # Prevent cycles: if target is a descendant of source, reject
+        ancestors = await self.journal_repo.get_ancestors(target_id)
+        if any(a.id == source_id for a in ancestors):
+            raise JournalMergeConflictError(
+                "Target journal cannot be a descendant of the source journal"
+            )
+
+        changed_fields: dict[str, Any] = {}
+        overrides = overrides or {}
+
+        # Determine default base survivor based on manual journal precedence
+        default_survivor, default_loser = await self._determine_precedence(
+            target_id, source_id, target, source, transaction
+        )
+
+        # 1. Base Fields (Overrides > Precedence > Concatenate content)
+        self._apply_base_field_overrides(
+            target, source, default_survivor, default_loser, overrides, changed_fields
+        )
+
+        # Save target core fields regardless to ensure they are updated
+        await self.journal_repo.save(target)
+
+        # 2. Re-parent hierarchy
+        await self._reparent_hierarchy(target_id, source_id, transaction)
+
+        # 3. Move routes
+        await self._move_routes(target_id, source_id, transaction)
+
+        # 4. Move tags (ignore duplicates)
+        await self._move_tags(target_id, source_id, transaction)
+
+        # 5. Move Contact Relationships
+        await self._move_contact_relationships(target_id, source_id, transaction)
+
+        # 6. Move External Links (deduplicate)
+        await self._move_external_links(target_id, source_id, transaction)
+
+        # 7. Type Data Scalable merge
+        await self._merge_type_data(
+            target_id,
+            source_id,
+            default_survivor,
+            source,
+            overrides,
+            changed_fields,
+            transaction,
+        )
+
+        # 8. Publish Events & Cleanup Source
+        await self._publish_events_and_cleanup(
+            target_id, source_id, source, changed_fields, transaction
+        )
+
+        logger.info(
+            "Journals merged successfully", target_id=target_id, source_id=source_id
+        )
+        return target
+
+    def _validate_merge_preconditions(
+        self,
+        target: Journal | None,
+        source: Journal | None,
+        target_id: int,
+        source_id: int,
+        transaction: AsyncConnection,
+    ) -> None:
         if not target:
             raise JournalNotFoundError(target_id)
         if not source:
@@ -61,7 +137,6 @@ class JournalMergeService:
                 "Cannot merge journals belonging to different users"
             )
 
-        # Ensure atomicity: the repository and this service must use the same transaction
         if (
             hasattr(self.journal_repo, "conn")
             and self.journal_repo.conn is not transaction
@@ -70,10 +145,14 @@ class JournalMergeService:
                 "Merge failed: Repository connection does not match the provided transaction"
             )
 
-        changed_fields: dict[str, Any] = {}
-        overrides = overrides or {}
-
-        # Determine default base survivor based on manual journal precedence
+    async def _determine_precedence(
+        self,
+        target_id: int,
+        source_id: int,
+        target: Journal,
+        source: Journal,
+        transaction: AsyncConnection,
+    ) -> tuple[Journal, Journal]:
         source_cal_res = await transaction.execute(
             text("SELECT 1 FROM journal_calendar_info WHERE journal_id = :id"),
             {"id": source_id},
@@ -85,22 +164,25 @@ class JournalMergeService:
         source_is_event = source_cal_res.fetchone() is not None
         target_is_event = target_cal_res.fetchone() is not None
 
-        # Manual journal precedence: prefer non-event over event journal
         if target_is_event and not source_is_event:
-            default_survivor = source
-            default_loser = target
-        else:
-            default_survivor = target
-            default_loser = source
+            return source, target
+        return target, source
 
-        # 1. Base Fields (Overrides > Precedence > Concatenate content)
+    def _apply_base_field_overrides(
+        self,
+        target: Journal,
+        source: Journal,
+        default_survivor: Journal,
+        default_loser: Journal,
+        overrides: dict[str, Any],
+        changed_fields: dict[str, Any],
+    ) -> None:
         new_title = overrides.get("title")
         if new_title:
             if target.title != new_title:
                 target.title = new_title
                 changed_fields["title"] = new_title
         else:
-            # Fallback to default precedence if no override
             if source.title and target.title and source.title != target.title:
                 if target.title != default_survivor.title:
                     target.title = default_survivor.title
@@ -170,19 +252,9 @@ class JournalMergeService:
                 target.content = source.content
                 changed_fields["content"] = target.content
 
-        # Save target core fields regardless to ensure they are updated
-        # But only track them in changed_fields if they changed
-        await self.journal_repo.save(target)
-
-        # Prevent cycles: if target is a descendant of source, reject
-        ancestors = await self.journal_repo.get_ancestors(target_id)
-        if any(a.id == source_id for a in ancestors):
-            raise JournalMergeConflictError(
-                "Target journal cannot be a descendant of the source journal"
-            )
-
-        # 2. Re-parent hierarchy
-        # Do not reparent the target journal to itself if it was a child of the source
+    async def _reparent_hierarchy(
+        self, target_id: int, source_id: int, transaction: AsyncConnection
+    ) -> None:
         await transaction.execute(
             text(
                 "UPDATE journals SET parent_id = :target_id WHERE parent_id = :source_id AND id != :target_id"
@@ -190,9 +262,19 @@ class JournalMergeService:
             {"target_id": target_id, "source_id": source_id},
         )
 
-        # Type entries are implicit from the tables themselves so we do not need a journal_types table
+    async def _move_routes(
+        self, target_id: int, source_id: int, transaction: AsyncConnection
+    ) -> None:
+        await transaction.execute(
+            text(
+                "UPDATE routes SET journal_id = :target_id WHERE journal_id = :source_id"
+            ),
+            {"target_id": target_id, "source_id": source_id},
+        )
 
-        # 4. Move tags (ignore duplicates)
+    async def _move_tags(
+        self, target_id: int, source_id: int, transaction: AsyncConnection
+    ) -> None:
         await transaction.execute(
             text("""
                 INSERT INTO journal_tag_assignments (journal_id, tag_id)
@@ -202,7 +284,9 @@ class JournalMergeService:
             {"target_id": target_id, "source_id": source_id},
         )
 
-        # 5. Move Contact Relationships
+    async def _move_contact_relationships(
+        self, target_id: int, source_id: int, transaction: AsyncConnection
+    ) -> None:
         await transaction.execute(
             text("""
                 INSERT INTO journal_contact_relationships (journal_id, contact_id, relationship_type)
@@ -219,7 +303,9 @@ class JournalMergeService:
             {"target_id": target_id, "source_id": source_id},
         )
 
-        # 6. Move External Links (deduplicate)
+    async def _move_external_links(
+        self, target_id: int, source_id: int, transaction: AsyncConnection
+    ) -> None:
         await transaction.execute(
             text("""
                 INSERT INTO journal_external_event_links (journal_id, calendar_id, external_event_id, updated_at, sync_capability, sync_status)
@@ -236,7 +322,16 @@ class JournalMergeService:
             {"target_id": target_id, "source_id": source_id},
         )
 
-        # 7. Type Data Scalable merge
+    async def _merge_type_data(
+        self,
+        target_id: int,
+        source_id: int,
+        default_survivor: Journal,
+        source: Journal,
+        overrides: dict[str, Any],
+        changed_fields: dict[str, Any],
+        transaction: AsyncConnection,
+    ) -> None:
         table_names = set(_JOURNAL_TYPE_TABLE_MAP.values())
         for table_name in table_names:
             source_row_res = await transaction.execute(
@@ -267,9 +362,6 @@ class JournalMergeService:
                 updates = []
                 update_params = {"target_id": target_id}
 
-                # Fetch overrides for this type
-                # _JOURNAL_TYPE_TABLE_MAP Maps Enum names to table names. Keys might be uppercase or lowercase.
-                # We need all matching Enum names for this table name to check for overrides.
                 type_enum_names = [
                     k
                     for k, v in _JOURNAL_TYPE_TABLE_MAP.items()
@@ -292,8 +384,6 @@ class JournalMergeService:
                     s_val = source_dict[col]
                     t_val = target_dict[col]
 
-                    # If the source row is explicitly chosen as default survivor based on precedence,
-                    # we should override target values with source values
                     if (
                         default_survivor is source
                         and s_val is not None
@@ -301,7 +391,6 @@ class JournalMergeService:
                     ):
                         updates.append(f"{col} = :{col}")
                         update_params[col] = s_val
-                    # Otherwise keep concatenation/merging logic (fill nulls)
                     elif s_val is not None and t_val is None:
                         updates.append(f"{col} = :{col}")
                         update_params[col] = s_val
@@ -321,6 +410,14 @@ class JournalMergeService:
                     {"source_id": source_id},
                 )
 
+    async def _publish_events_and_cleanup(
+        self,
+        target_id: int,
+        source_id: int,
+        source: Journal,
+        changed_fields: dict[str, Any],
+        transaction: AsyncConnection,
+    ) -> None:
         if changed_fields:
             await self.event_publisher.publish(
                 JournalUpdated(target_id, changed_fields, transaction=transaction)
@@ -334,10 +431,6 @@ class JournalMergeService:
 
         await self.journal_repo.delete(source_id)
 
-        # Deleting source can have many cascaded foreign key drops.
-        # For merge-deletions, do not publish external identifiers so that
-        # external integrations (e.g. Google Calendar) do not delete events
-        # that have been preserved on the target journal.
         await self.event_publisher.publish(
             JournalDeleted(
                 source_id,
@@ -346,8 +439,3 @@ class JournalMergeService:
                 transaction=transaction,
             )
         )
-
-        logger.info(
-            "Journals merged successfully", target_id=target_id, source_id=source_id
-        )
-        return target

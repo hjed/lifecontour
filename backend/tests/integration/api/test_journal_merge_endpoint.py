@@ -233,3 +233,86 @@ async def test_merge_journal_with_overrides(
     # Source should be deleted
     get_source_res = await authenticated_client.get(f"/api/journals/{source_id}")
     assert get_source_res.status_code == 404
+
+
+@pytest.mark.integration
+async def test_merge_journal_with_route(
+    authenticated_client: AsyncClient,
+    async_connection: AsyncConnection,
+) -> None:
+    """Test that routes are correctly moved from source to target journal during merge."""
+    from core_shared.models.route import Route
+
+    from app.core.journal.adapters.sql.route_repository import SqlRouteRepository
+
+    # Create target journal
+    target_res = await authenticated_client.post(
+        "/api/journals",
+        json={
+            "data": {
+                "type": "journals",
+                "attributes": {
+                    "title": "Target Journal",
+                    "content": "Target content",
+                    "event_date_range": {
+                        "start": "2024-01-01T00:00:00Z",
+                        "end": "2024-01-01T01:00:00Z",
+                    },
+                },
+            }
+        },
+    )
+    assert target_res.status_code == 201
+    target_id = int(target_res.json()["data"]["id"])
+
+    # Create source journal
+    source_res = await authenticated_client.post(
+        "/api/journals",
+        json={
+            "data": {
+                "type": "journals",
+                "attributes": {
+                    "title": "Source Journal",
+                    "content": "Source content",
+                    "event_date_range": {
+                        "start": "2024-01-02T00:00:00Z",
+                        "end": "2024-01-02T01:00:00Z",
+                    },
+                },
+            }
+        },
+    )
+    assert source_res.status_code == 201
+    source_id = int(source_res.json()["data"]["id"])
+
+    # Directly create a route associated with the source journal
+    route_repo = SqlRouteRepository(async_connection)
+    test_route = Route(
+        journal_id=source_id,
+        name="Test Route for Merge",
+        description="This route should be moved to Target Journal.",
+    )
+    saved_route = await route_repo.save(test_route)
+    assert saved_route.id is not None
+
+    # Merge source into target
+    merge_res = await authenticated_client.post(
+        f"/api/journals/{target_id}/merge",
+        json={
+            "data": {
+                "type": "journal-merge",
+                "attributes": {"source_journal_id": source_id},
+            }
+        },
+    )
+    assert merge_res.status_code == 200
+
+    # Verify route ownership moved to target
+    routes = await route_repo.find_by_journal_id(target_id)
+    assert len(routes) == 1
+    assert routes[0].id == saved_route.id
+    assert routes[0].name == "Test Route for Merge"
+
+    # Verify source doesn't have it anymore (although source is deleted)
+    routes_source = await route_repo.find_by_journal_id(source_id)
+    assert len(routes_source) == 0
