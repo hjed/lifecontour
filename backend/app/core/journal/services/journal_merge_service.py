@@ -34,7 +34,11 @@ class JournalMergeService:
         self.event_publisher = event_publisher
 
     async def merge_journals(
-        self, target_id: int, source_id: int, transaction: AsyncConnection
+        self,
+        target_id: int,
+        source_id: int,
+        transaction: AsyncConnection,
+        overrides: dict[str, Any] | None = None,
     ) -> Journal:
         """
         Merge source_id journal into target_id journal.
@@ -67,38 +71,104 @@ class JournalMergeService:
             )
 
         changed_fields: dict[str, Any] = {}
+        overrides = overrides or {}
 
-        # 1. Base Fields (prefer non-empty, concatenate content)
-        if source.title and target.title and source.title != target.title:
-            # If titles conflict, keep the target title but log it
-            logger.debug(
-                f"Merge title conflict resolved by keeping target title: '{target.title}' vs '{source.title}'"
-            )
-        elif source.title and not target.title:
-            target.title = source.title
-            changed_fields["title"] = source.title
+        # Determine default base survivor based on manual journal precedence
+        source_cal_res = await transaction.execute(
+            text("SELECT 1 FROM journal_calendar_info WHERE journal_id = :id"),
+            {"id": source_id},
+        )
+        target_cal_res = await transaction.execute(
+            text("SELECT 1 FROM journal_calendar_info WHERE journal_id = :id"),
+            {"id": target_id},
+        )
+        source_is_event = source_cal_res.fetchone() is not None
+        target_is_event = target_cal_res.fetchone() is not None
 
-        if (
-            source.event_date_range
-            and target.event_date_range
-            and source.event_date_range != target.event_date_range
-        ):
-            logger.debug(
-                f"Merge date conflict resolved by keeping target date: '{target.event_date_range}' vs '{source.event_date_range}'"
-            )
-        elif source.event_date_range and not target.event_date_range:
-            target.event_date_range = source.event_date_range
-            changed_fields["event_date_range"] = {
-                "start": source.event_date_range.start.isoformat(),
-                "end": source.event_date_range.end.isoformat(),
-            }
+        # Manual journal precedence: prefer non-event over event journal
+        if target_is_event and not source_is_event:
+            default_survivor = source
+            default_loser = target
+        else:
+            default_survivor = target
+            default_loser = source
 
-        if source.content and target.content and source.content != target.content:
-            target.content = f"{target.content}\n\n---\n\n{source.content}"
-            changed_fields["content"] = target.content
-        elif source.content and not target.content:
-            target.content = source.content
-            changed_fields["content"] = target.content
+        # 1. Base Fields (Overrides > Precedence > Concatenate content)
+        new_title = overrides.get("title")
+        if new_title:
+            if target.title != new_title:
+                target.title = new_title
+                changed_fields["title"] = new_title
+        else:
+            # Fallback to default precedence if no override
+            if source.title and target.title and source.title != target.title:
+                if target.title != default_survivor.title:
+                    target.title = default_survivor.title
+                    changed_fields["title"] = default_survivor.title
+                logger.debug(
+                    f"Merge title conflict resolved by keeping '{target.title}' vs '{default_loser.title}'"
+                )
+            elif source.title and not target.title:
+                target.title = source.title
+                changed_fields["title"] = source.title
+
+        new_date_range = overrides.get("event_date_range")
+        if new_date_range:
+            from datetime import datetime
+
+            if isinstance(new_date_range, dict):
+                start_dt = new_date_range["start"]
+                if isinstance(start_dt, str):
+                    start_dt = datetime.fromisoformat(start_dt)
+                end_dt = new_date_range["end"]
+                if isinstance(end_dt, str):
+                    end_dt = datetime.fromisoformat(end_dt)
+                new_event_date_range = type(target.event_date_range)(
+                    start=start_dt, end=end_dt
+                )
+            else:
+                new_event_date_range = new_date_range
+
+            if target.event_date_range != new_event_date_range:
+                target.event_date_range = new_event_date_range
+                changed_fields["event_date_range"] = {
+                    "start": target.event_date_range.start.isoformat(),
+                    "end": target.event_date_range.end.isoformat(),
+                }
+        else:
+            if (
+                source.event_date_range
+                and target.event_date_range
+                and source.event_date_range != target.event_date_range
+            ):
+                if target.event_date_range != default_survivor.event_date_range:
+                    target.event_date_range = default_survivor.event_date_range
+                    changed_fields["event_date_range"] = {
+                        "start": target.event_date_range.start.isoformat(),
+                        "end": target.event_date_range.end.isoformat(),
+                    }
+                logger.debug(
+                    f"Merge date conflict resolved by keeping '{target.event_date_range}' vs '{default_loser.event_date_range}'"
+                )
+            elif source.event_date_range and not target.event_date_range:
+                target.event_date_range = source.event_date_range
+                changed_fields["event_date_range"] = {
+                    "start": source.event_date_range.start.isoformat(),
+                    "end": source.event_date_range.end.isoformat(),
+                }
+
+        new_content = overrides.get("content")
+        if new_content:
+            if target.content != new_content:
+                target.content = new_content
+                changed_fields["content"] = new_content
+        else:
+            if source.content and target.content and source.content != target.content:
+                target.content = f"{target.content}\n\n---\n\n{source.content}"
+                changed_fields["content"] = target.content
+            elif source.content and not target.content:
+                target.content = source.content
+                changed_fields["content"] = target.content
 
         # Save target core fields regardless to ensure they are updated
         # But only track them in changed_fields if they changed
@@ -197,12 +267,42 @@ class JournalMergeService:
                 updates = []
                 update_params = {"target_id": target_id}
 
+                # Fetch overrides for this type
+                # _JOURNAL_TYPE_TABLE_MAP Maps Enum names to table names. Keys might be uppercase or lowercase.
+                # We need all matching Enum names for this table name to check for overrides.
+                type_enum_names = [
+                    k
+                    for k, v in _JOURNAL_TYPE_TABLE_MAP.items()
+                    if v == table_name and k.isupper()
+                ]
+                type_overrides = {}
+                for tenum in type_enum_names:
+                    type_overrides.update(overrides.get("type_data", {}).get(tenum, {}))
+
                 for col in source_dict.keys():
                     if col in ("id", "journal_id"):
                         continue
+
+                    if col in type_overrides:
+                        if type_overrides[col] != target_dict[col]:
+                            updates.append(f"{col} = :{col}")
+                            update_params[col] = type_overrides[col]
+                        continue
+
                     s_val = source_dict[col]
                     t_val = target_dict[col]
-                    if s_val is not None and t_val is None:
+
+                    # If the source row is explicitly chosen as default survivor based on precedence,
+                    # we should override target values with source values
+                    if (
+                        default_survivor is source
+                        and s_val is not None
+                        and t_val != s_val
+                    ):
+                        updates.append(f"{col} = :{col}")
+                        update_params[col] = s_val
+                    # Otherwise keep concatenation/merging logic (fill nulls)
+                    elif s_val is not None and t_val is None:
                         updates.append(f"{col} = :{col}")
                         update_params[col] = s_val
 

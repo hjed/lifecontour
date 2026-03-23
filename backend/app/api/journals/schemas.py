@@ -633,11 +633,28 @@ class JournalTagAddRequest(JsonApiCreateRequest[JournalTagAddData]):
 
 
 # Merge Management Schemas
+class MergeOverrides(BaseModel):
+    """Explicit conflict resolution overrides."""
+
+    title: str | None = Field(default=None, description="Explicit title to keep")
+    content: str | None = Field(default=None, description="Explicit content to keep")
+    event_date_range: EventDateRangeSchema | None = Field(
+        default=None, description="Explicit date range to keep"
+    )
+    type_data: dict[str, dict[str, Any]] | None = Field(
+        default=None,
+        description="Type-specific data overrides (e.g. {'MOOD_RATING': {'mood_value': 8}})",
+    )
+
+
 class MergeJournalAttributes(BaseModel):
     """Attributes for merging a journal."""
 
     source_journal_id: int = Field(
         ..., description="ID of the journal to merge into this one"
+    )
+    overrides: MergeOverrides | None = Field(
+        default=None, description="Explicit conflict resolution overrides"
     )
 
 

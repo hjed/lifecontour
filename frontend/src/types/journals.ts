@@ -347,6 +347,18 @@ export interface JournalUpdateRequest {
 }
 
 // Filter Types
+export interface ContactJournalsFilters {
+  relationship_type?: string;
+  page?: number;
+  limit?: number;
+}
+
+export interface MergeOverrides {
+  title?: string | null;
+  content?: string | null;
+  event_date_range?: { start: string; end: string } | null;
+  type_data?: Record<string, Record<string, unknown>> | null;
+}
 export interface JournalFilters {
   search?: string;
   types?: JournalType[];

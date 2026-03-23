@@ -16,6 +16,7 @@ import {
   JournalContactRelationshipType,
   JournalTag,
   JournalCalendar,
+  MergeOverrides,
 } from '@/types/journals';
 import { JsonApiErrorResponse } from '@/types/api';
 import {
@@ -246,12 +247,14 @@ async function deleteJournal(id: string): Promise<void> {
 
 async function mergeJournal(
   targetId: string,
-  sourceId: string
+  sourceId: string,
+  overrides?: MergeOverrides
 ): Promise<JournalResponse> {
   const requestData = {
     type: 'journal-merge' as const,
     attributes: {
       source_journal_id: Number(sourceId),
+      ...(overrides ? { overrides } : {}),
     },
   };
 
@@ -811,10 +814,12 @@ export function useMergeJournal() {
     mutationFn: ({
       targetId,
       sourceId,
+      overrides,
     }: {
       targetId: string;
       sourceId: string;
-    }) => mergeJournal(targetId, sourceId),
+      overrides?: MergeOverrides;
+    }) => mergeJournal(targetId, sourceId, overrides),
     onSuccess: (_, { targetId, sourceId }) => {
       queryClient.invalidateQueries({ queryKey: journalKeys.detail(targetId) });
       queryClient.invalidateQueries({ queryKey: journalKeys.detail(sourceId) });
