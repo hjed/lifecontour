@@ -32,6 +32,38 @@ test.describe('Contact Management - Authenticated User', () => {
     expect(pageContent).toBeTruthy();
   });
 
+  test('should display contact details with tags properly', async ({
+    authenticatedPage,
+    testCleanup,
+  }) => {
+    const dataManager = new TestDataManager(authenticatedPage);
+
+    const contact = await dataManager.createContact({
+      firstName: 'Tagged',
+      lastName: 'Contact',
+      tags: ['TestDetailTag'],
+    });
+
+    testCleanup(async () => {
+      await authenticatedPage.request.delete(`/api/contacts/${contact.id}`);
+    });
+
+    await authenticatedPage.goto(`/contacts/${contact.id}`);
+
+    // Verify page loads without error 418 or other crashes
+    await expect(authenticatedPage).toHaveTitle(/Personal Management System/);
+
+    // Check that contact name is loaded
+    await expect(
+      authenticatedPage.getByText(`${contact.firstName} ${contact.lastName}`)
+    ).toBeVisible();
+
+    // Verify tag is displayed using the specific test ID
+    await expect(
+      authenticatedPage.getByTestId('tag-TestDetailTag').first()
+    ).toBeVisible();
+  });
+
   test('should load contact details page successfully when authenticated', async ({
     authenticatedPage,
   }) => {

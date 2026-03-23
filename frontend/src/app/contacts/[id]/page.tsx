@@ -13,7 +13,11 @@ import { ArrowLeft, Trash2, Calendar } from 'lucide-react';
 
 import { format } from 'date-fns';
 import { enAU } from 'date-fns/locale';
-import { useContact, useDeleteContact } from '@/lib/api/contacts';
+import {
+  useContact,
+  useDeleteContact,
+  useContactTags,
+} from '@/lib/api/contacts';
 import { generateDisplayName } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -57,7 +61,11 @@ const TagsCard = ({
       <CardContent>
         <div className='flex flex-wrap gap-2'>
           {tags.map(tag => (
-            <Badge key={tag.id} variant='secondary'>
+            <Badge
+              key={tag.id}
+              variant='secondary'
+              data-testid={`tag-${tag.attributes.name}`}
+            >
               {tag.attributes.name}
             </Badge>
           ))}
@@ -82,6 +90,9 @@ function ContactDetailPageContent() {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
   const { data: contactData, isLoading, error } = useContact(contactId);
+  const { data: tagsData } = useContactTags(contactId, {
+    enabled: !!contactData,
+  });
 
   const deleteContactMutation = useDeleteContact();
 
@@ -137,7 +148,7 @@ function ContactDetailPageContent() {
     contact.attributes.first_name,
     contact.attributes.last_name || ''
   );
-  const tags = contact.relationships?.tags?.data || [];
+  const tags = tagsData?.data || [];
 
   return (
     <div className='container mx-auto px-4 py-8'>
