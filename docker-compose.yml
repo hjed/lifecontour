@@ -113,7 +113,7 @@ services:
       - personal-management
 
   oauth-provider:
-    image: oryd/hydra:v25.4.0
+    image: oryd/hydra:v26.2.0
     container_name: ${CONTAINER_PREFIX:-pms}-oauth
     profiles: [dev, test, prod]
     user: "65532:65532"
