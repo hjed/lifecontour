@@ -39,11 +39,12 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 # Import from the installed core_shared package
-from api_models import ListConnectionsResponse, ListContactGroupsResponse
+from api_models import ListConnectionsResponse
 
 # Import worker-specific services
 from google_auth_service import GoogleAuthService
 from google_client import GoogleAPIClient
+from group_mapping import _build_contact_group_mapping
 from group_translator import GoogleGroupNameTranslator
 from transformer import GoogleContactTransformer
 
@@ -1037,46 +1038,6 @@ def _process_contacts_batch(
             metrics["errors"] = metrics.get("errors", 0) + 1
 
     return serialized_contacts
-
-
-async def _build_contact_group_mapping(client: GoogleAPIClient) -> dict[str, str]:
-    """Fetch contact groups and build the translation mapping."""
-    group_mapping: dict[str, str] = {}
-    try:
-        page_token: str | None = None
-        while True:
-            groups_data = await client.list_contact_groups(
-                page_size=1000, page_token=page_token
-            )
-            groups_response = ListContactGroupsResponse(**groups_data)
-
-            if (
-                hasattr(groups_response, "contact_groups")
-                and groups_response.contact_groups
-            ):
-                for group in groups_response.contact_groups:
-                    name_to_use = group.formatted_name or group.name
-                    if group.resource_name and name_to_use:
-                        group_mapping[group.resource_name] = name_to_use
-
-            if (
-                hasattr(groups_response, "next_page_token")
-                and groups_response.next_page_token
-            ):
-                page_token = groups_response.next_page_token
-            else:
-                break
-
-        logger.info(
-            "Successfully built contact group translation mapping",
-            groups_count=len(group_mapping),
-        )
-    except Exception as e:
-        logger.error(
-            "Failed to fetch contact groups for translation, proceeding with empty mapping",
-            error=str(e),
-        )
-    return group_mapping
 
 
 async def _create_transformer(

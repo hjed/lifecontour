@@ -42,3 +42,32 @@ def test_translate_unmapped_returns_default() -> None:
     )
     assert translator.translate("contactGroups/999", fallback_name=None) is None
     assert translator.translate(None, fallback_name="Fallback") == "Fallback"
+
+
+def test_translate_uses_raw_id_fallback() -> None:
+    """Test that translate strips contactGroups/ and tries raw ID if exact match fails."""
+    # Mapping might only have the raw hash ID because of API response quirks in _build_contact_group_mapping
+    mapping = {
+        "123abc456": "New Friends",
+    }
+    translator = GoogleGroupNameTranslator(reserved_group_ids=[], group_mapping=mapping)
+
+    # resource_name is fully qualified, but it should still match the raw ID mapping
+    assert translator.translate("contactGroups/123abc456") == "New Friends"
+
+
+def test_translate_uses_fallback_name_as_mapping_key() -> None:
+    """Test that if resource_name is missing/unmatched, fallback_name is used as a lookup key."""
+    mapping = {
+        "789xyz": "Old Coworkers",
+    }
+    translator = GoogleGroupNameTranslator(reserved_group_ids=[], group_mapping=mapping)
+
+    # Ensure it works when resource_name is completely missing (falling back to lookup via fallback_name)
+    assert translator.translate(None, fallback_name="789xyz") == "Old Coworkers"
+
+    # Ensure it works when resource_name is present but unmatched
+    assert (
+        translator.translate("contactGroups/unmatched", fallback_name="789xyz")
+        == "Old Coworkers"
+    )
