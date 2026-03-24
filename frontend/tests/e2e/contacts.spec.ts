@@ -97,6 +97,36 @@ test.describe('Contact Management - Authenticated User', () => {
     expect(bodyText).toBeTruthy();
   });
 
+  test('should display tag names (not IDs) on contact cards in the list view', async ({
+    authenticatedPage,
+    testCleanup,
+  }) => {
+    const dataManager = new TestDataManager(authenticatedPage);
+    const tagName = 'ListViewTag';
+
+    const contact = await dataManager.createContact({
+      firstName: 'TagDisplay',
+      lastName: 'Test',
+      tags: [tagName],
+    });
+
+    testCleanup(async () => {
+      await dataManager.cleanup();
+    });
+
+    await authenticatedPage.goto('/contacts');
+
+    const contactCard = authenticatedPage.getByTestId(`contact-${contact.id}`);
+    await expect(contactCard).toBeVisible();
+
+    // Tag should show its name, not "Tag {id}"
+    await expect(contactCard.getByTestId(`tag-${tagName}`)).toBeVisible();
+
+    // Should NOT show fallback "Tag <number>" pattern
+    const tagBadges = contactCard.locator('[data-testid^="tag-Tag "]');
+    await expect(tagBadges).toHaveCount(0);
+  });
+
   test('should load contacts beyond the first page with infinite scroll', async ({
     authenticatedPage,
     testCleanup,

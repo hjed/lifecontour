@@ -57,20 +57,16 @@ export function ContactCard({ contact }: ContactCardProps) {
         {/* Tags */}
         {contact.tags.length > 0 && (
           <div className='flex flex-wrap gap-1'>
-            {contact.tags.map(tag => {
-              const tagName = tag.attributes?.name || `Tag ${tag.id}`;
-              const testId = `tag-${tagName}`;
-              return (
-                <Badge
-                  key={tag.id}
-                  variant='secondary'
-                  className='text-xs'
-                  data-testid={testId}
-                >
-                  {tagName}
-                </Badge>
-              );
-            })}
+            {contact.tags.map(tag => (
+              <Badge
+                key={tag.id}
+                variant='secondary'
+                className='text-xs'
+                data-testid={`tag-${tag.attributes.name}`}
+              >
+                {tag.attributes.name}
+              </Badge>
+            ))}
           </div>
         )}
 

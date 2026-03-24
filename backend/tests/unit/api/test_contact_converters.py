@@ -160,6 +160,13 @@ class TestContactConverter:
         assert len(resource.attributes.notes) == 1
         assert resource.relationships is not None
         assert resource.relationships.tags is not None
+        # Verify tag relationships include full attributes (not just type/id)
+        tag_data = resource.relationships.tags["data"]
+        assert len(tag_data) == 1
+        assert tag_data[0]["type"] == "tags"
+        assert tag_data[0]["id"] == "1"
+        assert tag_data[0]["attributes"]["name"] == "work"
+        assert "color" not in tag_data[0]["attributes"]  # None values excluded
         assert resource.links is not None
         assert resource.links.self == "http://localhost:8000/api/contacts/1"
 
