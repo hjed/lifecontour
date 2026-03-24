@@ -87,6 +87,7 @@ updates:
         applies-to: version-updates
         patterns:
           - "eslint*"
+          - "@typescript-eslint*"
       minor-and-patch:
         applies-to: version-updates
         update-types:
@@ -100,6 +101,7 @@ updates:
           - "@types/react*"
           - "@tanstack*"
           - "@radix-ui*"
+          - "@typescript-eslint*"
 
   # GitHub Actions
   - package-ecosystem: "github-actions"
