@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { JournalResource } from '@/types/journals';
-import { MergeOverrides } from '@/types/journals';
+import type { JournalResource, MergeOverrides } from '@/types/journals';
 import {
   Dialog,
   DialogContent,
@@ -17,12 +16,12 @@ import { Textarea } from '@/components/ui/textarea';
 import { ScrollArea } from '@/components/ui/scroll-area';
 
 interface MergeResolutionDialogProps {
-  targetJournal: JournalResource | null;
-  sourceJournal: JournalResource | null;
-  open: boolean;
-  isPending: boolean;
-  onOpenChange: (open: boolean) => void;
-  onResolve: (overrides: MergeOverrides) => void;
+  readonly targetJournal: JournalResource | null;
+  readonly sourceJournal: JournalResource | null;
+  readonly open: boolean;
+  readonly isPending: boolean;
+  readonly onOpenChange: (open: boolean) => void;
+  readonly onResolve: (overrides: MergeOverrides) => void;
 }
 
 interface Conflict {
@@ -31,6 +30,12 @@ interface Conflict {
   targetValue: any;
   sourceValue: any;
   isText: boolean;
+}
+
+export type ResolutionChoice = 'target' | 'source' | 'custom';
+export interface FieldResolution {
+  choice: ResolutionChoice;
+  customValue?: any;
 }
 
 export function MergeResolutionDialog({
@@ -43,10 +48,7 @@ export function MergeResolutionDialog({
 }: MergeResolutionDialogProps) {
   const [conflicts, setConflicts] = useState<Conflict[] | null>(null);
   const [resolutions, setResolutions] = useState<
-    Record<
-      string,
-      { choice: 'target' | 'source' | 'custom'; customValue?: any }
-    >
+    Record<string, FieldResolution>
   >({});
 
   useEffect(() => {
@@ -113,20 +115,14 @@ export function MergeResolutionDialog({
     // Type Data
     if (source.type_data && target.type_data) {
       Object.keys(source.type_data).forEach(typeKey => {
-        if (
-          target.type_data &&
-          target.type_data[typeKey as keyof typeof target.type_data]
-        ) {
-          const sourceObj = source.type_data![
-            typeKey as keyof typeof source.type_data
-          ] as Record<string, any>;
-          const targetObj = target.type_data[
-            typeKey as keyof typeof target.type_data
-          ] as Record<string, any>;
+        const tKey = typeKey as keyof typeof target.type_data;
+        const targetObj = target.type_data?.[tKey];
+        const sourceObj = source.type_data?.[tKey];
 
+        if (targetObj && sourceObj) {
           Object.keys(sourceObj).forEach(fieldKey => {
-            const sVal = sourceObj[fieldKey];
-            const tVal = targetObj[fieldKey];
+            const sVal = (sourceObj as Record<string, unknown>)[fieldKey];
+            const tVal = (targetObj as Record<string, unknown>)[fieldKey];
             if (
               sVal !== null &&
               tVal !== null &&

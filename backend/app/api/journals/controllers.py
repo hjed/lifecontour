@@ -3201,7 +3201,7 @@ async def remove_tag_from_journal(
         raise JournalNotFoundError(journal_id)
 
     # Fetch all enrichment data
-    types, type_data, contacts, tags, calendar, routes = await _enrich_journal_data(
+    types, type_data, contacts, tags, calendar, _ = await _enrich_journal_data(
         updated_journal,
         calendar_info_repo,
         calendar_repo,

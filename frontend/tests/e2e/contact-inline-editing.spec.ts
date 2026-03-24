@@ -1,33 +1,33 @@
 import { test, expect } from './fixtures';
 import type { Page } from '@playwright/test';
 
+/**
+ * Helper function to wait for and verify a field update API request
+ */
+async function waitForFieldUpdateRequest(
+  page: Page,
+  contactId: string,
+  fieldName: string,
+  expectedValue: string
+) {
+  const requestPromise = page.waitForRequest(
+    req =>
+      req.url().includes(`/api/contacts/${contactId}/fields/${fieldName}`) &&
+      req.method() === 'PATCH',
+    { timeout: 10000 }
+  );
+
+  const apiRequest = await requestPromise;
+  const requestBody = apiRequest.postDataJSON();
+
+  // Verify request format matches backend expectations
+  expect(requestBody).toHaveProperty('data');
+  expect(requestBody.data).toHaveProperty('type', 'contact_fields');
+  expect(requestBody.data).toHaveProperty('attributes');
+  expect(requestBody.data.attributes).toHaveProperty('value', expectedValue);
+}
+
 test.describe('Contact Inline Editing', () => {
-  /**
-   * Helper function to wait for and verify a field update API request
-   */
-  async function waitForFieldUpdateRequest(
-    page: Page,
-    contactId: string,
-    fieldName: string,
-    expectedValue: string
-  ) {
-    const requestPromise = page.waitForRequest(
-      req =>
-        req.url().includes(`/api/contacts/${contactId}/fields/${fieldName}`) &&
-        req.method() === 'PATCH',
-      { timeout: 10000 }
-    );
-
-    const apiRequest = await requestPromise;
-    const requestBody = apiRequest.postDataJSON();
-
-    // Verify request format matches backend expectations
-    expect(requestBody).toHaveProperty('data');
-    expect(requestBody.data).toHaveProperty('type', 'contact_fields');
-    expect(requestBody.data).toHaveProperty('attributes');
-    expect(requestBody.data.attributes).toHaveProperty('value', expectedValue);
-  }
-
   test('should display contact detail page', async ({ contactsWithData }) => {
     const { page, contacts } = contactsWithData;
     const contact = contacts[0];

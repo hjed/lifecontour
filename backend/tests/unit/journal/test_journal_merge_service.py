@@ -64,6 +64,32 @@ def create_test_journal(
     )
 
 
+def _mock_type_data_execute(query, params=None):
+    q_str = str(query)
+    mock_res = MagicMock()
+    if "journal_types" in q_str and "SELECT" in q_str:
+        row = MagicMock()
+        row.type = "MOOD_RATING"
+        mock_res.fetchall.return_value = [row]
+        mock_res.fetchone.return_value = None
+    elif "journal_mood_data" in q_str and "SELECT" in q_str:
+        if params and (params.get("id") == 1 or params.get("target_id") == 1):
+            row = MagicMock()
+            row._mapping = {"journal_id": 1, "mood_value": 5, "energy_level": 5}
+            mock_res.fetchone.return_value = row
+        elif params and (params.get("id") == 2 or params.get("source_id") == 2):
+            row = MagicMock()
+            row._mapping = {"journal_id": 2, "mood_value": 8, "energy_level": 8}
+            mock_res.fetchone.return_value = row
+        else:
+            mock_res.fetchone.return_value = None
+        mock_res.fetchall.return_value = []
+    else:
+        mock_res.fetchone.return_value = None
+        mock_res.fetchall.return_value = []
+    return mock_res
+
+
 class TestJournalMergeService:
     @pytest.mark.asyncio
     async def test_merge_journals_basic_fields(
@@ -171,36 +197,7 @@ class TestJournalMergeService:
         )
         mock_journal_repo.save.return_value = target
 
-        # Mock the db responses for type data
-        def mock_execute(query, params=None):
-            q_str = str(query)
-            mock_res = MagicMock()
-            if "journal_types" in q_str and "SELECT" in q_str:
-                row = MagicMock()
-                row.type = "MOOD_RATING"
-                mock_res.fetchall.return_value = [row]
-                mock_res.fetchone.return_value = None
-            elif "journal_calendar_info" in q_str and "SELECT" in q_str:
-                mock_res.fetchone.return_value = None
-                mock_res.fetchall.return_value = []
-            elif "journal_mood_data" in q_str and "SELECT" in q_str:
-                if params and (params.get("id") == 1 or params.get("target_id") == 1):
-                    row = MagicMock()
-                    row._mapping = {"journal_id": 1, "mood_value": 5, "energy_level": 5}
-                    mock_res.fetchone.return_value = row
-                elif params and (params.get("id") == 2 or params.get("source_id") == 2):
-                    row = MagicMock()
-                    row._mapping = {"journal_id": 2, "mood_value": 8, "energy_level": 8}
-                    mock_res.fetchone.return_value = row
-                else:
-                    mock_res.fetchone.return_value = None
-                mock_res.fetchall.return_value = []
-            else:
-                mock_res.fetchone.return_value = None
-                mock_res.fetchall.return_value = []
-            return mock_res
-
-        mock_transaction.execute.side_effect = mock_execute
+        mock_transaction.execute.side_effect = _mock_type_data_execute
 
         overrides = {"type_data": {"MOOD_RATING": {"mood_value": 8, "energy_level": 5}}}
 
