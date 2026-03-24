@@ -153,6 +153,8 @@ class TestJournalToolsIntegration:
                 "get_route_history",
                 "link_journal_to_contact",
                 "get_contact_journals",
+                "merge_journals",
+                "get_merge_candidates",
             ]
 
             for expected_tool in expected_tools:
@@ -1466,3 +1468,336 @@ class TestActivityMcpToolsMountedIntegration:
         assert payload["activity_types"] == ["ROUTE"]
         assert payload["entries"][0]["journal_title"] == "Brick workout"
         assert payload["entries"][0]["activity_type"] == "ROUTE"
+
+
+class TestMergeMcpToolsMountedIntegration:
+    """Mounted MCP tests for merge tools."""
+
+    async def _call_tool(
+        self,
+        authenticated_client: Any,
+        session_id: str,
+        tool_name: str,
+        arguments: dict[str, Any],
+    ) -> dict[str, Any]:
+        response = await authenticated_client.post(
+            "/mcp-server/mcp",
+            json={
+                "jsonrpc": "2.0",
+                "id": 2,
+                "method": "tools/call",
+                "params": {"name": tool_name, "arguments": arguments},
+            },
+            headers=mcp_headers(session_id),
+        )
+        assert response.status_code == 200
+        return extract_mcp_json_payload(response.text)
+
+    @pytest.mark.asyncio
+    async def test_merge_journals_simple(
+        self,
+        authenticated_lifespan_client,
+        clean_database: AsyncConnection,
+    ) -> None:
+        """Merge two simple journals via MCP — target absorbs source content."""
+        async with authenticated_lifespan_client() as authenticated_client:
+            # Create target journal via REST API
+            target_response = await authenticated_client.post(
+                "/api/journals",
+                json={
+                    "data": {
+                        "type": "journals",
+                        "attributes": {
+                            "title": "Target Journal",
+                            "content": "Target content",
+                            "event_date_range": {
+                                "start": "2024-06-01T00:00:00Z",
+                                "end": "2024-06-01T23:59:59Z",
+                            },
+                        },
+                    }
+                },
+            )
+            assert target_response.status_code == 201
+            target_id = int(target_response.json()["data"]["id"])
+
+            # Create source journal via REST API
+            source_response = await authenticated_client.post(
+                "/api/journals",
+                json={
+                    "data": {
+                        "type": "journals",
+                        "attributes": {
+                            "title": "Source Journal",
+                            "content": "Source content",
+                            "event_date_range": {
+                                "start": "2024-06-01T00:00:00Z",
+                                "end": "2024-06-01T23:59:59Z",
+                            },
+                        },
+                    }
+                },
+            )
+            assert source_response.status_code == 201
+            source_id = int(source_response.json()["data"]["id"])
+
+            # Merge via MCP
+            session_id = await initialize_mcp_session(authenticated_client)
+            import json
+
+            payload = await self._call_tool(
+                authenticated_client,
+                session_id,
+                "merge_journals",
+                {
+                    "target_journal_id": target_id,
+                    "merge_data": json.dumps({"source_journal_id": source_id}),
+                },
+            )
+
+        # Target should have combined content
+        assert payload["id"] == target_id
+        assert "Target content" in payload["content"]
+        assert "Source content" in payload["content"]
+
+    @pytest.mark.asyncio
+    async def test_merge_journals_with_title_override(
+        self,
+        authenticated_lifespan_client,
+        clean_database: AsyncConnection,
+    ) -> None:
+        """Merge with explicit title override via MCP."""
+        async with authenticated_lifespan_client() as authenticated_client:
+            target_response = await authenticated_client.post(
+                "/api/journals",
+                json={
+                    "data": {
+                        "type": "journals",
+                        "attributes": {
+                            "title": "Original Target Title",
+                            "content": "Target body",
+                            "event_date_range": {
+                                "start": "2024-07-01T00:00:00Z",
+                                "end": "2024-07-01T23:59:59Z",
+                            },
+                        },
+                    }
+                },
+            )
+            assert target_response.status_code == 201
+            target_id = int(target_response.json()["data"]["id"])
+
+            source_response = await authenticated_client.post(
+                "/api/journals",
+                json={
+                    "data": {
+                        "type": "journals",
+                        "attributes": {
+                            "title": "Source Title",
+                            "content": "Source body",
+                            "event_date_range": {
+                                "start": "2024-07-01T00:00:00Z",
+                                "end": "2024-07-01T23:59:59Z",
+                            },
+                        },
+                    }
+                },
+            )
+            assert source_response.status_code == 201
+            source_id = int(source_response.json()["data"]["id"])
+
+            session_id = await initialize_mcp_session(authenticated_client)
+            import json
+
+            payload = await self._call_tool(
+                authenticated_client,
+                session_id,
+                "merge_journals",
+                {
+                    "target_journal_id": target_id,
+                    "merge_data": json.dumps(
+                        {
+                            "source_journal_id": source_id,
+                            "overrides": {"title": "Custom Merged Title"},
+                        }
+                    ),
+                },
+            )
+
+        assert payload["id"] == target_id
+        assert payload["title"] == "Custom Merged Title"
+
+    @pytest.mark.asyncio
+    async def test_merge_journals_self_merge_returns_error(
+        self,
+        authenticated_lifespan_client,
+        clean_database: AsyncConnection,
+    ) -> None:
+        """Self-merge returns a domain error payload."""
+        async with authenticated_lifespan_client() as authenticated_client:
+            target_response = await authenticated_client.post(
+                "/api/journals",
+                json={
+                    "data": {
+                        "type": "journals",
+                        "attributes": {
+                            "title": "Self Merge",
+                            "content": "Body",
+                            "event_date_range": {
+                                "start": "2024-08-01T00:00:00Z",
+                                "end": "2024-08-01T23:59:59Z",
+                            },
+                        },
+                    }
+                },
+            )
+            assert target_response.status_code == 201
+            journal_id = int(target_response.json()["data"]["id"])
+
+            session_id = await initialize_mcp_session(authenticated_client)
+            import json
+
+            payload = await self._call_tool(
+                authenticated_client,
+                session_id,
+                "merge_journals",
+                {
+                    "target_journal_id": journal_id,
+                    "merge_data": json.dumps({"source_journal_id": journal_id}),
+                },
+            )
+
+        assert "error" in payload
+        assert (
+            "merge" in payload["message"].lower()
+            or "itself" in payload["message"].lower()
+        )
+
+    @pytest.mark.asyncio
+    async def test_merge_journals_not_found_returns_error(
+        self,
+        authenticated_lifespan_client,
+        clean_database: AsyncConnection,
+    ) -> None:
+        """Merging with a non-existent source returns not-found."""
+        async with authenticated_lifespan_client() as authenticated_client:
+            target_response = await authenticated_client.post(
+                "/api/journals",
+                json={
+                    "data": {
+                        "type": "journals",
+                        "attributes": {
+                            "title": "Existing",
+                            "content": "Body",
+                            "event_date_range": {
+                                "start": "2024-09-01T00:00:00Z",
+                                "end": "2024-09-01T23:59:59Z",
+                            },
+                        },
+                    }
+                },
+            )
+            assert target_response.status_code == 201
+            target_id = int(target_response.json()["data"]["id"])
+
+            session_id = await initialize_mcp_session(authenticated_client)
+            import json
+
+            payload = await self._call_tool(
+                authenticated_client,
+                session_id,
+                "merge_journals",
+                {
+                    "target_journal_id": target_id,
+                    "merge_data": json.dumps({"source_journal_id": 999999}),
+                },
+            )
+
+        assert "error" in payload
+
+    @pytest.mark.asyncio
+    async def test_get_merge_candidates_returns_overlapping_journals(
+        self,
+        authenticated_lifespan_client,
+        clean_database: AsyncConnection,
+    ) -> None:
+        """get_merge_candidates returns journals with overlapping date ranges."""
+        async with authenticated_lifespan_client() as authenticated_client:
+            # Create target journal
+            target_response = await authenticated_client.post(
+                "/api/journals",
+                json={
+                    "data": {
+                        "type": "journals",
+                        "attributes": {
+                            "title": "Target for candidates",
+                            "content": "Looking for candidates",
+                            "event_date_range": {
+                                "start": "2024-10-01T00:00:00Z",
+                                "end": "2024-10-01T23:59:59Z",
+                            },
+                        },
+                    }
+                },
+            )
+            assert target_response.status_code == 201
+            target_id = int(target_response.json()["data"]["id"])
+
+            # Create overlapping journal
+            overlap_response = await authenticated_client.post(
+                "/api/journals",
+                json={
+                    "data": {
+                        "type": "journals",
+                        "attributes": {
+                            "title": "Overlapping Journal",
+                            "content": "Same day event",
+                            "event_date_range": {
+                                "start": "2024-10-01T10:00:00Z",
+                                "end": "2024-10-01T12:00:00Z",
+                            },
+                        },
+                    }
+                },
+            )
+            assert overlap_response.status_code == 201
+            overlap_id = int(overlap_response.json()["data"]["id"])
+
+            # Create non-overlapping journal (different date)
+            nonoverlap_response = await authenticated_client.post(
+                "/api/journals",
+                json={
+                    "data": {
+                        "type": "journals",
+                        "attributes": {
+                            "title": "Different Day",
+                            "content": "Not a candidate",
+                            "event_date_range": {
+                                "start": "2024-12-01T00:00:00Z",
+                                "end": "2024-12-01T23:59:59Z",
+                            },
+                        },
+                    }
+                },
+            )
+            assert nonoverlap_response.status_code == 201
+
+            session_id = await initialize_mcp_session(authenticated_client)
+            payload = await self._call_tool(
+                authenticated_client,
+                session_id,
+                "get_merge_candidates",
+                {"journal_id": target_id},
+            )
+
+        assert payload["target_journal_id"] == target_id
+        assert payload["target_title"] == "Target for candidates"
+        candidate_ids = [c["id"] for c in payload["candidates"]]
+        assert overlap_id in candidate_ids
+        assert len(payload["candidates"]) >= 1
+        # Verify candidate has expected structure
+        candidate = next(c for c in payload["candidates"] if c["id"] == overlap_id)
+        assert candidate["title"] == "Overlapping Journal"
+        assert "content_excerpt" in candidate
+        assert "event_date_range" in candidate
+        assert "summary" in candidate

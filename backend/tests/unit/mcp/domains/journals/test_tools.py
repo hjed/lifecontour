@@ -65,6 +65,8 @@ class TestJournalTools:
                 "delete_journal",
                 "get_contact_journals",
                 "link_journal_to_contact",
+                "merge_journals",
+                "get_merge_candidates",
             ]
 
             for expected_tool in expected_tools:
@@ -348,3 +350,96 @@ class TestUpdateEventData:
             )
 
         calendar_info_repo.save.assert_not_awaited()
+
+
+class TestMergeToolRegistration:
+    """Test merge tool registration and schema."""
+
+    @pytest.fixture
+    def mcp_server(self):
+        from typing import Any
+
+        mcp: Any = FastMCP("TestServer")
+        register_journal_tools(mcp)
+        return mcp
+
+    @pytest.mark.asyncio
+    async def test_merge_journals_tool_registration(self, mcp_server):
+        """Test that merge_journals tool is registered with correct schema."""
+        async with Client(mcp_server) as client:
+            tools_response = await client.list_tools()
+            tools = (
+                tools_response.tools
+                if hasattr(tools_response, "tools")
+                else tools_response
+            )
+
+            merge_tool = next((t for t in tools if t.name == "merge_journals"), None)
+            assert merge_tool is not None, "merge_journals tool not found"
+            assert merge_tool.description is not None
+            assert "merge" in merge_tool.description.lower()
+            assert merge_tool.inputSchema is not None
+
+            properties = merge_tool.inputSchema.get("properties", {})
+            assert "target_journal_id" in properties
+            assert "merge_data" in properties
+            assert properties["merge_data"]["type"] == "string"
+
+    @pytest.mark.asyncio
+    async def test_get_merge_candidates_tool_registration(self, mcp_server):
+        """Test that get_merge_candidates tool is registered with correct schema."""
+        async with Client(mcp_server) as client:
+            tools_response = await client.list_tools()
+            tools = (
+                tools_response.tools
+                if hasattr(tools_response, "tools")
+                else tools_response
+            )
+
+            candidates_tool = next(
+                (t for t in tools if t.name == "get_merge_candidates"), None
+            )
+            assert candidates_tool is not None, "get_merge_candidates tool not found"
+            assert candidates_tool.description is not None
+            assert candidates_tool.inputSchema is not None
+
+            properties = candidates_tool.inputSchema.get("properties", {})
+            assert "journal_id" in properties
+            assert "limit" in properties
+
+
+class TestMergeJournalMCPRequestSchema:
+    """Test MergeJournalMCPRequest Pydantic schema validation."""
+
+    def test_valid_request_parses_correctly(self):
+        from app.mcp.domains.journals.schemas import MergeJournalMCPRequest
+
+        data = {"source_journal_id": 42}
+        request = MergeJournalMCPRequest.model_validate(data)
+        assert request.source_journal_id == 42
+        assert request.overrides is None
+
+    def test_request_with_overrides_parses_correctly(self):
+        from app.mcp.domains.journals.schemas import MergeJournalMCPRequest
+
+        data = {
+            "source_journal_id": 42,
+            "overrides": {
+                "title": "Merged title",
+                "content": "Merged content",
+                "type_data": {"MOOD_RATING": {"mood_value": 8}},
+            },
+        }
+        request = MergeJournalMCPRequest.model_validate(data)
+        assert request.source_journal_id == 42
+        assert request.overrides is not None
+        assert request.overrides["title"] == "Merged title"
+        assert request.overrides["type_data"]["MOOD_RATING"]["mood_value"] == 8
+
+    def test_request_missing_source_journal_id_raises(self):
+        from pydantic import ValidationError
+
+        from app.mcp.domains.journals.schemas import MergeJournalMCPRequest
+
+        with pytest.raises(ValidationError, match="source_journal_id"):
+            MergeJournalMCPRequest.model_validate({})

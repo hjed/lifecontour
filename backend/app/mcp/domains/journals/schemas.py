@@ -275,3 +275,50 @@ class JournalUpdateRequest(BaseModel):
         default=None, description="Replace all contact relationships"
     )
     tags: list[str] | None = Field(default=None, description="Replace all tags")
+
+
+class MergeJournalMCPRequest(BaseModel):
+    """AI-friendly journal merge request format.
+
+    Parsed from the JSON string provided by the AI agent when calling
+    the ``merge_journals`` MCP tool.
+    """
+
+    source_journal_id: int = Field(
+        description="ID of the journal to merge into the target (this journal will be deleted)"
+    )
+    overrides: dict[str, Any] | None = Field(
+        default=None,
+        description=(
+            "Optional explicit conflict resolution overrides. Supported keys: "
+            "'title' (str), 'content' (str), 'event_date_range' ({start, end}), "
+            "'type_data' ({TYPE: {field: value}})"
+        ),
+    )
+
+
+class MergeCandidateResult(BaseModel):
+    """AI-friendly merge candidate summary."""
+
+    id: int = Field(description="Journal ID")
+    title: str = Field(description=JOURNAL_TITLE_DESC)
+    content_excerpt: str = Field(description="First ~200 chars of content")
+    event_date_range: EventDateRangeSchema = Field(description="Event date range")
+    types: list[str] = Field(default_factory=list, description="Journal types")
+    tags: list[str] = Field(default_factory=list, description="Tag names")
+    summary: str = Field(description="AI-friendly summary of why this is a candidate")
+
+
+class MergeCandidatesResponse(BaseModel):
+    """AI-friendly merge candidates response."""
+
+    target_journal_id: int = Field(
+        description="The journal for which candidates were found"
+    )
+    target_title: str = Field(description="Title of the target journal")
+    candidates: list[MergeCandidateResult] = Field(
+        description="Journals that could potentially be merged with the target"
+    )
+    summary: str = Field(
+        description="AI-friendly summary of merge candidates and recommendations"
+    )
