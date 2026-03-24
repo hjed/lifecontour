@@ -186,7 +186,7 @@ class GoogleAPIClient:
 
             request_params: dict[str, Any] = {
                 "pageSize": min(page_size, 1000),
-                "groupFields": "metadata,groupType,memberCount,name,formattedName",
+                "groupFields": "metadata,groupType,memberCount,name",
             }
 
             if page_token:
