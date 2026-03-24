@@ -138,13 +138,15 @@ class ContactConverter:
             relationships=relationship_resources,
         )
 
-        # Create relationships (tags will be handled separately)
+        # Create relationships (tags included with full attributes)
         relationships = None
         if contact.tags:
             relationships = ContactRelationships(
                 tags={
                     "data": [
-                        {"type": "tags", "id": str(tag.id)}
+                        TagConverter.to_resource(tag, base_url).model_dump(
+                            exclude_none=True
+                        )
                         for tag in contact.tags
                         if tag.id
                     ]
