@@ -145,7 +145,8 @@ test.describe('Contact Inline Editing', () => {
     // Scroll into view first to ensure the field is visible on mobile viewports
     // where it may be below the fold due to the large avatar
     await nicknameField.scrollIntoViewIfNeeded();
-    await nicknameField.click();
+    // Use force: true because sticky headers/appbars might intercept the click on small viewports in CI
+    await nicknameField.click({ force: true });
 
     const input = page.locator('[data-testid="nickname-field"] input');
     await expect(input).toBeVisible();
