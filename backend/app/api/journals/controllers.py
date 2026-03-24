@@ -2065,8 +2065,17 @@ async def merge_journal(
             detail="You do not have permission to merge these journals.",
         )
 
+    overrides_dict = None
+    if merge_request.data.attributes.overrides:
+        overrides_dict = merge_request.data.attributes.overrides.model_dump(
+            exclude_unset=True
+        )
+
     await journal_merge_service.merge_journals(
-        target_id=journal_id, source_id=source_id, transaction=connection
+        target_id=journal_id,
+        source_id=source_id,
+        transaction=connection,
+        overrides=overrides_dict,
     )
 
     # Get enriched target journal to return
@@ -3192,7 +3201,7 @@ async def remove_tag_from_journal(
         raise JournalNotFoundError(journal_id)
 
     # Fetch all enrichment data
-    types, type_data, contacts, tags, calendar, routes = await _enrich_journal_data(
+    types, type_data, contacts, tags, calendar, _ = await _enrich_journal_data(
         updated_journal,
         calendar_info_repo,
         calendar_repo,

@@ -57,6 +57,10 @@ jest.mock('@/lib/api/journals', () => ({
     mutateAsync: mockUpdateField,
     isPending: false,
   }),
+  useJournal: () => ({
+    data: { data: null },
+    isPending: false,
+  }),
   useMergeJournal: () => ({
     mutateAsync: jest.fn(),
     isPending: false,

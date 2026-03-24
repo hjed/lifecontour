@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MergeJournalDialog } from '../MergeJournalDialog';
 import { useMergeJournal } from '@/lib/api/journals';
@@ -7,6 +7,7 @@ import { useMergeJournal } from '@/lib/api/journals';
 jest.mock('@/lib/api/journals', () => ({
   useMergeJournal: jest.fn(),
   useSearchJournals: jest.fn(), // If needed by children
+  useJournal: jest.fn(),
 }));
 
 // Mock the combobox to simplify testing the dialog state machine
@@ -42,6 +43,22 @@ describe('MergeJournalDialog', () => {
       mutateAsync: mutateAsyncMock,
       isPending: false,
     });
+
+    // Mock useJournal to avoid 'is not a function' TypeError
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { useJournal } = require('@/lib/api/journals');
+    useJournal.mockImplementation((id: string) => {
+      if (!id) return { data: { data: null }, isPending: false };
+      return {
+        data: {
+          data: {
+            id,
+            attributes: { title: id === 'target-456' ? 'Target' : 'Source' },
+          },
+        },
+        isPending: false,
+      };
+    });
   });
 
   it('renders merge button and opens dialog on click', async () => {
@@ -71,7 +88,7 @@ describe('MergeJournalDialog', () => {
     await user.click(screen.getByRole('button', { name: /Merge journal/i }));
 
     const mergeBtn = screen.getByRole('button', {
-      name: /Merge and Delete Source/i,
+      name: /Next/i,
     });
     expect(mergeBtn).toBeDisabled();
 
@@ -85,43 +102,19 @@ describe('MergeJournalDialog', () => {
     expect(mergeBtn).not.toBeDisabled();
   });
 
-  it('calls merge api and closes dialog on successful merge', async () => {
+  it('opens resolution dialog when Next is clicked', async () => {
     const user = userEvent.setup();
     render(<MergeJournalDialog targetJournalId={targetJournalId} />);
 
     await user.click(screen.getByRole('button', { name: /Merge journal/i }));
     await user.click(screen.getByTestId('select-mock-journal'));
 
-    const mergeBtn = screen.getByRole('button', {
-      name: /Merge and Delete Source/i,
+    const nextBtn = screen.getByRole('button', {
+      name: /Next/i,
     });
-    await user.click(mergeBtn);
+    await user.click(nextBtn);
 
-    expect(mutateAsyncMock).toHaveBeenCalledWith({
-      targetId: targetJournalId,
-      sourceId: 'source-123',
-    });
-
-    // Dialog should be closed
-    await waitFor(() => {
-      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
-    });
-  });
-
-  it('shows pending state when merging', async () => {
-    (useMergeJournal as jest.Mock).mockReturnValue({
-      mutateAsync: mutateAsyncMock,
-      isPending: true,
-    });
-
-    const user = userEvent.setup();
-    render(<MergeJournalDialog targetJournalId={targetJournalId} />);
-
-    await user.click(screen.getByRole('button', { name: /Merge journal/i }));
-    await user.click(screen.getByTestId('select-mock-journal'));
-
-    const mergeBtn = screen.getByRole('button', { name: /Merging.../i });
-    expect(mergeBtn).toBeInTheDocument();
-    expect(mergeBtn).toBeDisabled();
+    // The resolution dialog should be opened (indicated by its title)
+    expect(screen.getByText(/Resolve Merge Conflicts/i)).toBeInTheDocument();
   });
 });
