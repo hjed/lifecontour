@@ -174,7 +174,6 @@ class TestJournalMergeService:
         # Mock the db responses for type data
         def mock_execute(query, params=None):
             q_str = str(query)
-            print(f"DEBUG: execute called with query {q_str} and params {params}")
             mock_res = MagicMock()
             if "journal_types" in q_str and "SELECT" in q_str:
                 row = MagicMock()

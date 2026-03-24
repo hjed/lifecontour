@@ -368,8 +368,9 @@ class JournalMergeService:
                     if v == table_name and k.isupper()
                 ]
                 type_overrides = {}
+                type_data_overrides = overrides.get("type_data") or {}
                 for tenum in type_enum_names:
-                    type_overrides.update(overrides.get("type_data", {}).get(tenum, {}))
+                    type_overrides.update(type_data_overrides.get(tenum, {}))
 
                 for col in source_dict.keys():
                     if col in ("id", "journal_id"):

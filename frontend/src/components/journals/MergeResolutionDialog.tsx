@@ -41,7 +41,7 @@ export function MergeResolutionDialog({
   onOpenChange,
   onResolve,
 }: MergeResolutionDialogProps) {
-  const [conflicts, setConflicts] = useState<Conflict[]>([]);
+  const [conflicts, setConflicts] = useState<Conflict[] | null>(null);
   const [resolutions, setResolutions] = useState<
     Record<
       string,
@@ -52,7 +52,7 @@ export function MergeResolutionDialog({
   useEffect(() => {
     if (!targetJournal || !sourceJournal) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
-      setConflicts([]);
+      setConflicts(null);
       return;
     }
 
@@ -175,6 +175,7 @@ export function MergeResolutionDialog({
   };
 
   const handleSubmit = () => {
+    if (!conflicts) return;
     const overrides: MergeOverrides = {};
 
     conflicts.forEach(conflict => {
@@ -221,6 +222,21 @@ export function MergeResolutionDialog({
 
   // If there are no conflicts, we shouldn't really be in this dialog,
   // but if we are, we can just show a message.
+  if (conflicts === null) {
+    return (
+      <Dialog open={open} onOpenChange={onOpenChange}>
+        <DialogContent className='sm:max-w-md'>
+          <DialogHeader>
+            <DialogTitle>Loading Conflicts</DialogTitle>
+            <DialogDescription>
+              Comparing journals for merge conflicts...
+            </DialogDescription>
+          </DialogHeader>
+        </DialogContent>
+      </Dialog>
+    );
+  }
+
   if (conflicts.length === 0) {
     return (
       <Dialog open={open} onOpenChange={onOpenChange}>
