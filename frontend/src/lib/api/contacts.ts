@@ -41,6 +41,7 @@ export const contactKeys = {
     [...contactKeys.infiniteLists(), filters] as const,
   details: () => [...contactKeys.all, 'detail'] as const,
   detail: (id: string) => [...contactKeys.details(), id] as const,
+  tags: (id: string) => [...contactKeys.detail(id), 'tags'] as const,
   searches: () => [...contactKeys.all, 'search'] as const,
   search: (query: string) => [...contactKeys.searches(), query] as const,
   infiniteSearches: () => [...contactKeys.searches(), 'infinite'] as const,
@@ -246,6 +247,27 @@ async function deleteContact(id: string): Promise<void> {
   }
 }
 
+async function fetchContactTags(contactId: string): Promise<TagListResponse> {
+  const response = await fetch(
+    `${API_ENDPOINTS.CONTACTS.BASE}/${contactId}/tags`,
+    {
+      credentials: 'include',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    }
+  );
+
+  if (!response.ok) {
+    const errorData: JsonApiErrorResponse = await response.json();
+    throw new Error(
+      errorData.errors?.[0]?.detail || ERROR_MESSAGES.FETCH_FAILED
+    );
+  }
+
+  return response.json();
+}
+
 async function searchContacts(
   query: string,
   options: {
@@ -363,6 +385,18 @@ export function useContact(id: string) {
     queryKey: contactKeys.detail(id),
     queryFn: () => fetchContact(id),
     enabled: !!id,
+    staleTime: 5 * 60 * 1000, // 5 minutes
+  });
+}
+
+export function useContactTags(
+  id: string,
+  options: { enabled?: boolean } = {}
+) {
+  return useQuery({
+    queryKey: contactKeys.tags(id),
+    queryFn: () => fetchContactTags(id),
+    enabled: options.enabled !== false && !!id,
     staleTime: 5 * 60 * 1000, // 5 minutes
   });
 }
