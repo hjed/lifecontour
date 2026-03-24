@@ -10,6 +10,7 @@ import {
   useDeleteContact,
   useToggleContactFavourite,
   useUpdateContactField,
+  useContactTags,
 } from '@/lib/api/contacts';
 import { ContactResponse } from '@/types/contacts';
 import {
@@ -22,6 +23,7 @@ import {
 // Mock the contacts API hooks
 jest.mock('@/lib/api/contacts', () => ({
   useContact: jest.fn(),
+  useContactTags: jest.fn(),
   useUpdateContact: jest.fn(),
   useDeleteContact: jest.fn(),
   useToggleContactFavourite: jest.fn(),
@@ -74,6 +76,9 @@ jest.mock('next/navigation', () => ({
 setupMocks.dateFns();
 
 const mockUseContact = useContact as jest.MockedFunction<typeof useContact>;
+const mockUseContactTags = useContactTags as jest.MockedFunction<
+  typeof useContactTags
+>;
 const mockUseUpdateContact = useUpdateContact as jest.MockedFunction<
   typeof useUpdateContact
 >;
@@ -112,6 +117,12 @@ describe('ContactDetailPage', () => {
       mutate: jest.fn(),
       isPending: false,
       isError: false,
+      error: null,
+    } as any);
+
+    mockUseContactTags.mockReturnValue({
+      data: { data: [] },
+      isLoading: false,
       error: null,
     } as any);
 
