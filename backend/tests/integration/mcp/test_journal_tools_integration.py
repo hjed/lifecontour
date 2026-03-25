@@ -5,6 +5,7 @@ Tests the full MCP journal tools with real database integration
 using Dishka dependency injection patterns.
 """
 
+import json
 from datetime import UTC, datetime, timedelta
 from typing import Any, cast
 from unittest.mock import AsyncMock, Mock
@@ -471,6 +472,143 @@ class TestJournalToolsIntegration:
         # Verify the relationships were retrieved
         assert len(relationships) >= 1
         assert any(r.journal_id == sample_journal_id for r in relationships)
+
+    @pytest.mark.asyncio
+    async def test_create_journal_with_parent_id_integration(
+        self, authenticated_lifespan_client, sample_journal_id: int
+    ) -> None:
+        async with authenticated_lifespan_client() as authenticated_client:
+            session_id = await initialize_mcp_session(authenticated_client)
+
+            response = await authenticated_client.post(
+                "/mcp-server/mcp",
+                json={
+                    "jsonrpc": "2.0",
+                    "id": 2,
+                    "method": "tools/call",
+                    "params": {
+                        "name": "create_journal_entry",
+                        "arguments": {
+                            "journal_data": json.dumps(
+                                {
+                                    "title": "Child Journal",
+                                    "content": "This is a child journal",
+                                    "event_date_range": {
+                                        "start": "2024-01-15T00:00:00Z",
+                                        "end": "2024-01-15T01:00:00Z",
+                                    },
+                                    "parent_id": sample_journal_id,
+                                }
+                            )
+                        },
+                    },
+                },
+                headers=mcp_headers(session_id),
+            )
+
+            assert response.status_code == 200
+            payload = extract_mcp_json_payload(response.text)
+
+            assert "error" not in payload
+            assert payload["title"] == "Child Journal"
+            assert payload["parent"]["id"] == sample_journal_id
+
+    @pytest.mark.asyncio
+    async def test_update_journal_parent_id_integration(
+        self, authenticated_lifespan_client, sample_journal_id: int
+    ) -> None:
+        # First create a child journal
+        async with authenticated_lifespan_client() as authenticated_client:
+            session_id = await initialize_mcp_session(authenticated_client)
+
+            create_response = await authenticated_client.post(
+                "/mcp-server/mcp",
+                json={
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": "tools/call",
+                    "params": {
+                        "name": "create_journal_entry",
+                        "arguments": {
+                            "journal_data": json.dumps(
+                                {
+                                    "title": "Independent Journal",
+                                    "content": "Will be moved to under parent",
+                                    "event_date_range": {
+                                        "start": "2024-01-15T00:00:00Z",
+                                        "end": "2024-01-15T01:00:00Z",
+                                    },
+                                }
+                            )
+                        },
+                    },
+                },
+                headers=mcp_headers(session_id),
+            )
+
+            create_payload = extract_mcp_json_payload(create_response.text)
+            child_id = create_payload["id"]
+
+            # Now update the parent_id
+            update_response = await authenticated_client.post(
+                "/mcp-server/mcp",
+                json={
+                    "jsonrpc": "2.0",
+                    "id": 2,
+                    "method": "tools/call",
+                    "params": {
+                        "name": "update_journal_entry",
+                        "arguments": {
+                            "journal_id": child_id,
+                            "journal_data": json.dumps(
+                                {"parent_id": sample_journal_id}
+                            ),
+                        },
+                    },
+                },
+                headers=mcp_headers(session_id),
+            )
+
+            assert update_response.status_code == 200
+            update_payload = extract_mcp_json_payload(update_response.text)
+
+            assert "error" not in update_payload
+            assert update_payload["title"] == "Independent Journal"
+            assert update_payload["parent"]["id"] == sample_journal_id
+
+    @pytest.mark.asyncio
+    async def test_update_journal_parent_id_cycle_rejected(
+        self, authenticated_lifespan_client, sample_journal_id: int
+    ) -> None:
+        async with authenticated_lifespan_client() as authenticated_client:
+            session_id = await initialize_mcp_session(authenticated_client)
+
+            # Try to set the journal as its own parent
+            response = await authenticated_client.post(
+                "/mcp-server/mcp",
+                json={
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": "tools/call",
+                    "params": {
+                        "name": "update_journal_entry",
+                        "arguments": {
+                            "journal_id": sample_journal_id,
+                            "journal_data": json.dumps(
+                                {"parent_id": sample_journal_id}
+                            ),
+                        },
+                    },
+                },
+                headers=mcp_headers(session_id),
+            )
+
+            assert response.status_code == 200
+            payload = extract_mcp_json_payload(response.text)
+
+            # Since JournalCycleError maps to 400 Bad Request in API, it should map to Journal error in MCP
+            assert payload["error"] == "Journal error"
+            assert "cannot be its own parent" in payload["message"]
 
 
 class TestFetchJournalTypesAndDataNewActivityTypes:

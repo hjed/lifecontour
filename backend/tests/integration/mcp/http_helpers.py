@@ -69,7 +69,9 @@ def extract_mcp_json_payload(response_body: Any) -> dict[str, Any]:
             continue
         return candidate
 
-    raise AssertionError("Could not find MCP JSON payload in response")
+    raise AssertionError(
+        f"Could not find MCP JSON payload in response: {response_body}"
+    )
 
 
 def mcp_headers(session_id: str | None = None) -> dict[str, str]:

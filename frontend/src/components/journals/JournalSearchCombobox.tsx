@@ -1,31 +1,37 @@
 /**
- * JournalSearchCombobox component for searching and selecting journals.
+ * JournalSearchCombobox component for searching and selecting parent journals.
  *
- * Provides a searchable combobox interface similar to ContactSearchCombobox.
+ * Provides a searchable combobox interface for selecting parent journals with
+ * debounced search, keyboard navigation, and proper accessibility.
+ * Uses the existing GET /api/journals?search= endpoint.
  */
 
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
-import { useSearchJournals } from '@/lib/api/journals';
-import { Search, FileText } from 'lucide-react';
+import { useQuery } from '@tanstack/react-query';
+import { Search, Book } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent } from '@/components/ui/card';
-import { JournalResource } from '@/types/journals';
+import { JournalResource, JournalListResponse } from '@/types/journals';
+import { API_ENDPOINTS } from '@/lib/constants';
 
+// Constants
 const SEARCH_DEBOUNCE_MS = 300;
-const BLUR_DELAY_MS = 200;
+const BLUR_DELAY_MS = 200; // Delay to prevent dropdown from closing before click events are processed
 
 interface JournalSearchComboboxProps {
   readonly onSelect: (journal: JournalResource) => void;
   readonly placeholder?: string;
   readonly inputId?: string;
   readonly excludeJournalId?: string;
+  readonly value?: string; // Currently selected title (optional)
   readonly className?: string;
   readonly disabled?: boolean;
 }
 
+// Debounce hook
 function useDebounce<T>(value: T, delay: number): T {
   const [debouncedValue, setDebouncedValue] = useState<T>(value);
 
@@ -42,34 +48,64 @@ function useDebounce<T>(value: T, delay: number): T {
   return debouncedValue;
 }
 
+// Search journals API function
+async function searchJournals(query: string): Promise<JournalListResponse> {
+  if (!query.trim()) {
+    return { data: [], meta: { total: 0, page: 1, size: 20, pages: 1 } };
+  }
+
+  const response = await fetch(
+    `${API_ENDPOINTS.JOURNALS.BASE}?search=${encodeURIComponent(query)}&size=20`,
+    {
+      method: 'GET',
+      credentials: 'include',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    }
+  );
+
+  if (!response.ok) {
+    throw new Error('Failed to search journals');
+  }
+
+  return response.json();
+}
+
 export function JournalSearchCombobox({
   onSelect,
   placeholder = 'Search journals...',
   inputId,
   excludeJournalId,
+  value = '',
   className,
   disabled = false,
 }: JournalSearchComboboxProps) {
-  const [searchQuery, setSearchQuery] = useState('');
+  const [searchQuery, setSearchQuery] = useState(value);
   const [showResults, setShowResults] = useState(false);
   const [selectedIndex, setSelectedIndex] = useState(-1);
   const debouncedQuery = useDebounce(searchQuery, SEARCH_DEBOUNCE_MS);
   const blurTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
+  // Search query
   const {
     data: searchResults,
     isLoading,
     error,
-  } = useSearchJournals(
-    debouncedQuery,
-    { limit: 20 },
-    { enabled: debouncedQuery.length > 0 }
-  );
+  } = useQuery({
+    queryKey: ['journals', 'search', debouncedQuery],
+    queryFn: () => searchJournals(debouncedQuery),
+    enabled: debouncedQuery.length > 0,
+    staleTime: 30000, // 30 seconds
+  });
 
+  // Filter out excluded journal (to prevent self-cycles)
   const filteredJournals =
-    searchResults?.data?.filter(journal => journal.id !== excludeJournalId) ||
-    [];
+    searchResults?.data?.filter(
+      (journal: JournalResource) => String(journal.id) !== excludeJournalId
+    ) || [];
 
+  // Cleanup timeout on unmount
   useEffect(() => {
     return () => {
       if (blurTimeoutRef.current) {
@@ -80,7 +116,7 @@ export function JournalSearchCombobox({
 
   const handleSelect = (journal: JournalResource) => {
     onSelect(journal);
-    setSearchQuery('');
+    setSearchQuery(journal.attributes.title);
     setShowResults(false);
     setSelectedIndex(-1);
   };
@@ -132,9 +168,11 @@ export function JournalSearchCombobox({
           onKeyDown={handleKeyDown}
           onFocus={() => searchQuery && setShowResults(true)}
           onBlur={() => {
+            // Clear any existing timeout
             if (blurTimeoutRef.current) {
               clearTimeout(blurTimeoutRef.current);
             }
+            // Set new timeout
             blurTimeoutRef.current = setTimeout(
               () => setShowResults(false),
               BLUR_DELAY_MS
@@ -181,30 +219,39 @@ export function JournalSearchCombobox({
                 role='listbox'
                 className='m-0 list-none p-0'
               >
-                {filteredJournals.map((journal, index) => {
-                  const isSelected = index === selectedIndex;
-                  const title = journal.attributes.title || 'Untitled Journal';
-
-                  return (
-                    <li
-                      key={journal.id}
-                      role='option'
-                      aria-selected={isSelected}
-                    >
-                      <button
-                        type='button'
-                        className={cn(
-                          'hover:bg-muted flex w-full items-center gap-2 p-3 text-left',
-                          isSelected && 'bg-muted'
-                        )}
-                        onClick={() => handleSelect(journal)}
+                {filteredJournals.map(
+                  (journal: JournalResource, index: number) => {
+                    const isSelected = index === selectedIndex;
+                    return (
+                      <li
+                        key={journal.id}
+                        role='option'
+                        aria-selected={isSelected}
                       >
-                        <FileText className='text-muted-foreground h-4 w-4 flex-shrink-0' />
-                        <span className='truncate'>{title}</span>
-                      </button>
-                    </li>
-                  );
-                })}
+                        <button
+                          type='button'
+                          className={cn(
+                            'hover:bg-muted flex w-full flex-col items-start gap-1 p-3 text-left',
+                            isSelected && 'bg-muted'
+                          )}
+                          onClick={() => handleSelect(journal)}
+                        >
+                          <div className='flex w-full items-center gap-2'>
+                            <Book className='text-muted-foreground h-4 w-4 shrink-0' />
+                            <span className='flex-1 truncate font-medium'>
+                              {journal.attributes.title}
+                            </span>
+                            <span className='text-muted-foreground shrink-0 text-xs'>
+                              {new Date(
+                                journal.attributes.event_date_range.start
+                              ).toLocaleDateString()}
+                            </span>
+                          </div>
+                        </button>
+                      </li>
+                    );
+                  }
+                )}
               </ul>
             )}
           </CardContent>

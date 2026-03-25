@@ -77,6 +77,7 @@ import {
   TravelTypeEditor,
   PhotoAlbumTypeEditor,
 } from './type-editors';
+import { JournalSearchCombobox } from './JournalSearchCombobox';
 
 // Form validation schema
 const formSchema = z.object({
@@ -87,6 +88,7 @@ const formSchema = z.object({
   }),
   content: z.string(),
   types: z.array(z.nativeEnum(JournalType)),
+  parentId: z.number().nullable().optional(),
 });
 
 type FormValues = z.infer<typeof formSchema>;
@@ -371,6 +373,7 @@ export function JournalCreateForm({ onCancel }: JournalCreateFormProps = {}) {
       },
       content: '',
       types: [],
+      parentId: undefined,
     },
   });
 
@@ -511,6 +514,7 @@ export function JournalCreateForm({ onCancel }: JournalCreateFormProps = {}) {
           end: endDate.toISOString(),
         },
         types: values.types,
+        parent_id: values.parentId ?? undefined,
         ...(Object.keys(submittedTypeData).length > 0 && {
           type_data: submittedTypeData,
         }),
@@ -563,6 +567,27 @@ export function JournalCreateForm({ onCancel }: JournalCreateFormProps = {}) {
               <FormControl>
                 <Input placeholder='Enter journal title' {...field} />
               </FormControl>
+              <FormMessage />
+            </FormItem>
+          )}
+        />
+
+        <FormField
+          control={form.control}
+          name='parentId'
+          render={({ field }) => (
+            <FormItem>
+              <FormLabel>Parent Journal</FormLabel>
+              <FormControl>
+                <JournalSearchCombobox
+                  onSelect={journal => field.onChange(parseInt(journal.id, 10))}
+                  placeholder='Search for a parent journal...'
+                  className='w-full'
+                />
+              </FormControl>
+              <FormDescription>
+                Optional: Link this journal entry to a parent entry
+              </FormDescription>
               <FormMessage />
             </FormItem>
           )}

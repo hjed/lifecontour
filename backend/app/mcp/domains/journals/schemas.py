@@ -275,6 +275,7 @@ class JournalUpdateRequest(BaseModel):
         default=None, description="Replace all contact relationships"
     )
     tags: list[str] | None = Field(default=None, description="Replace all tags")
+    parent_id: int | None = Field(default=None, description="Parent journal ID")
 
 
 class MergeJournalMCPRequest(BaseModel):

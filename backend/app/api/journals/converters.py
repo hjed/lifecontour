@@ -144,6 +144,26 @@ class JournalConverter:
         }
 
     @staticmethod
+    def _convert_children(
+        children: list[Journal] | None,
+    ) -> list[dict[str, Any]] | None:
+        """Convert child journals to summaries."""
+        if children is None:
+            return None
+
+        return [
+            {
+                "id": str(child.id),
+                "title": child.title,
+                # Frontend ChildJournalSummary also expects `types` and optional `date`,
+                # but we will just pass empty types and none date if they are not joined
+                # properly, to satisfy typescript requirements
+                "types": [],
+            }
+            for child in children
+        ]
+
+    @staticmethod
     def _create_relationships(
         tags: list[JournalTag] | None,
         contacts: list[JournalContactRelationship] | None,
@@ -195,6 +215,7 @@ class JournalConverter:
         tags: list[JournalTag] | None = None,
         calendar: Calendar | None = None,
         parent: Journal | None = None,
+        children: list[Journal] | None = None,
         children_count: int | None = None,
         routes: list[Route] | None = None,
     ) -> JournalResource:
@@ -210,6 +231,7 @@ class JournalConverter:
             tags: Journal tags
             calendar: Calendar (for EVENT type)
             parent: Parent journal
+            children: Child journals
             children_count: Number of child journals
 
         Returns:
@@ -222,6 +244,7 @@ class JournalConverter:
         tag_schemas = JournalConverter._convert_tags(tags)
         calendar_schema = JournalConverter._convert_calendar(calendar)
         parent_summary = JournalConverter._convert_parent(parent)
+        children_summaries = JournalConverter._convert_children(children)
 
         # Create attributes
         attributes = JournalAttributes(
@@ -238,6 +261,7 @@ class JournalConverter:
             tags=tag_schemas,
             calendar=calendar_schema,
             parent=parent_summary,
+            children=children_summaries,
             children_count=children_count,
         )
 

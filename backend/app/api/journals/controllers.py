@@ -1136,8 +1136,43 @@ async def get_journal(
         skiing_data_repo,
     )
 
+    # Fetch parent journal if it exists
+    parent = None
+    if journal.parent_id:
+        try:
+            parent = await journal_service.get_journal(journal.parent_id)
+        except JournalNotFoundError:
+            pass
+
+    # Fetch children count
+    children_count = 0
+    children = []
+    if journal.id:
+        children_counts = await journal_service.count_children_for_parents(
+            user_id=user.id, parent_ids=[journal.id]
+        )
+        children_count = children_counts.get(journal.id, 0)
+
+        # Fetch children summary details
+        if children_count > 0:
+            children = await journal_service.get_journals_paginated(
+                user_id=user.id,
+                offset=0,
+                limit=100,
+                parent_id=journal.id,
+            )
+
     journal_resource = JournalConverter.to_resource(
-        journal, base_url, types, type_data, contacts, tags, calendar
+        journal,
+        base_url,
+        types=types,
+        type_data=type_data,
+        contacts=contacts,
+        tags=tags,
+        calendar=calendar,
+        parent=parent,
+        children=children,
+        children_count=children_count,
     )
 
     return await _build_journal_response(journal_resource, contact_repo)
@@ -1734,8 +1769,21 @@ async def create_journal(
         include_routes=True,
     )
 
+    parent = (
+        await journal_service.get_journal(created_journal.parent_id)
+        if created_journal.parent_id
+        else None
+    )
+
     journal_resource = JournalConverter.to_resource(
-        created_journal, base_url, types, type_data, contacts, tags, calendar
+        journal=created_journal,
+        base_url=base_url,
+        types=types,
+        type_data=type_data,
+        contacts=contacts,
+        tags=tags,
+        calendar=calendar,
+        parent=parent,
     )
 
     return await _build_journal_response(journal_resource, contact_repo)
@@ -1830,8 +1878,40 @@ async def update_journal(
         include_routes=True,
     )
 
+    parent = (
+        await journal_service.get_journal(saved_journal.parent_id)
+        if saved_journal.parent_id
+        else None
+    )
+
+    children_count = 0
+    children = []
+    if saved_journal.id:
+        children_counts = await journal_service.count_children_for_parents(
+            user_id=user.id, parent_ids=[saved_journal.id]
+        )
+        children_count = children_counts.get(saved_journal.id, 0)
+
+        # Fetch children summary details
+        if children_count > 0:
+            children = await journal_service.get_journals_paginated(
+                user_id=user.id,
+                offset=0,
+                limit=100,
+                parent_id=saved_journal.id,
+            )
+
     journal_resource = JournalConverter.to_resource(
-        saved_journal, base_url, types, type_data, contacts, tags, calendar
+        journal=saved_journal,
+        base_url=base_url,
+        types=types,
+        type_data=type_data,
+        contacts=contacts,
+        tags=tags,
+        calendar=calendar,
+        parent=parent,
+        children=children,
+        children_count=children_count,
     )
 
     return await _build_journal_response(journal_resource, contact_repo)
@@ -1972,8 +2052,40 @@ async def partial_update_journal(
         include_routes=True,
     )
 
+    parent = (
+        await journal_service.get_journal(saved_journal.parent_id)
+        if saved_journal.parent_id
+        else None
+    )
+
+    children_count = 0
+    children = []
+    if saved_journal.id:
+        children_counts = await journal_service.count_children_for_parents(
+            user_id=user.id, parent_ids=[saved_journal.id]
+        )
+        children_count = children_counts.get(saved_journal.id, 0)
+
+        # Fetch children summary details
+        if children_count > 0:
+            children = await journal_service.get_journals_paginated(
+                user_id=user.id,
+                offset=0,
+                limit=100,
+                parent_id=saved_journal.id,
+            )
+
     journal_resource = JournalConverter.to_resource(
-        saved_journal, base_url, types, type_data, contacts, tags, calendar
+        journal=saved_journal,
+        base_url=base_url,
+        types=types,
+        type_data=type_data,
+        contacts=contacts,
+        tags=tags,
+        calendar=calendar,
+        parent=parent,
+        children=children,
+        children_count=children_count,
     )
 
     return await _build_journal_response(journal_resource, contact_repo)
