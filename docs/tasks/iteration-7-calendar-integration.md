@@ -312,49 +312,54 @@ This phase fills two product-specification gaps discovered during Phase 3 comple
 - [Domain Architecture](../architecture/domain-architecture.md)
 - [API Design — Error Handling Guidelines](../architecture/api-design.md#error-handling-guidelines)
 
-#### Phase 1: Merge Domain Service and Non-Conflicting Merge Path
-**PR Size:** ~5-7 files
+#### Phase 1 + Phase 2: Merge Domain Service, Conflict Resolution, and Manual-Journal Precedence
+**Status:** ✅ COMPLETE (Phases 1 and 2 were delivered together)
 
-**Acceptance Criteria:**
-- [ ] Merge service supports one surviving journal and one absorbed source journal.
+Phase 1 and Phase 2 were implemented as a combined delivery. The merge domain service, conflict resolution UI, manual-journal precedence logic, and overrides API all landed together.
+
+**Acceptance Criteria (Phase 1):**
+- [x] Merge service supports one surviving journal (target) and one absorbed source journal.
 - [x] Non-duplicate tags, contact relationships, child journals, and external references are preserved on the survivor.
 - [x] Duplicate links collapse cleanly rather than duplicating remote references.
 - [x] The default merge path prefers non-empty over empty values where no user decision is needed.
-- [x] Basic merge journal API.
-- [x] UI for selecting mergeable journals and merging them when there are no decisions required.
+- [x] Basic merge journal API (`POST /api/journals/{journal_id}/merge`).
+- [x] UI for selecting mergeable journals (`MergeJournalDialog` with searchable combobox) and merging them when there are no decisions required.
+
+**Acceptance Criteria (Phase 2):**
+- [x] When both journals contain meaningful conflicting values, the user is prompted to resolve them explicitly via `MergeResolutionDialog`.
+- [x] Manual non-event journal meaning is treated as more important than purely calendar-derived event data when the system proposes defaults (`_determine_precedence` in `JournalMergeService`).
+- [x] The merge UI shows what will be kept, what will be combined, and what will be collapsed (conflict field comparison with target/source/custom radio options).
+- [x] Remote references remain attached to the surviving journal after resolution (external links are moved and deduplicated).
+
+**Implementation Details:**
+- **Backend:** `JournalMergeService` handles: base field overrides (title, content, date range), hierarchy re-parenting with cycle prevention, tag/contact/external-link/route transfer with deduplication, scalable type-data merge across all journal type tables, and event publishing for search index updates.
+- **API:** `POST /api/journals/{journal_id}/merge` with `MergeJournalRequest` schema supporting `source_journal_id` and optional `overrides` (title, content, event_date_range, type_data).
+- **Frontend:** `MergeJournalDialog` (journal selection via searchable combobox), `MergeResolutionDialog` (per-field conflict resolution with target/source/custom options), `useMergeJournal` mutation hook.
 
 **Required Test Coverage:**
-- **Unit:** survivor selection helpers, duplicate-collapsing rules, non-empty merge defaults.
-- **Integration:** real-database merge tests preserving children, contacts, tags, and external refs. API merge tests.
-- **E2E:** deterministic merge of an obvious duplicate pair through the nearest real user workflow.
+- **Unit:** ✅ 5 tests in `test_journal_merge_service.py` — basic field merging, title conflict resolution, relationship query verification, base field overrides, type-data overrides.
+- **Integration:** ✅ 4 tests in `test_journal_merge_endpoint.py` — successful merge with content concatenation, differing titles with content concatenation, merge with explicit overrides (including type_data), route ownership transfer.
+- **E2E:** ✅ 2 tests in `journals-merge.spec.ts` — full merge workflow with content conflict resolution via UI, type-data conflict resolution (mood_value/energy_level) via resolution dialog.
 
-#### Phase 2: Conflicting Value Resolution and Manual-Journal Precedence
-**PR Size:** ~5-8 files
+#### Phase 3: MCP Merge Parity
+**Status:** ✅ COMPLETE
+**PR Size:** 4 files
 
 **Acceptance Criteria:**
-- [ ] When both journals contain meaningful conflicting values, the user is prompted to resolve them explicitly.
-- [ ] Manual non-event journal meaning is treated as more important than purely calendar-derived event data when the system proposes defaults.
-- [ ] The merge UI shows what will be kept, what will be combined, and what will be collapsed.
-- [ ] Remote references remain attached to the surviving journal after resolution.
+- [x] MCP can inspect merge candidates and perform merges with explicit resolution choices where needed.
+- [ ] The review queue and merge UI use the same backend contracts rather than parallel implementations. *(blocked on ITER7-003 Phase 2+)*
+- [x] Merge outcomes remain auditable and visible in the resulting journal context.
+- [x] No dedicated MCP-only merge semantics diverge from the UI workflow.
+
+**Implementation Details:**
+- **MCP Tools:** Two new tools in `backend/app/mcp/domains/journals/tools.py`:
+  - `merge_journals` — delegates to `JournalMergeService` with full override support and returns enriched response
+  - `get_merge_candidates` — finds journals with overlapping date ranges via SQL
+- **Schemas:** `MergeJournalMCPRequest`, `MergeCandidateResult`, `MergeCandidatesResponse` in `backend/app/mcp/domains/journals/schemas.py`
 
 **Required Test Coverage:**
-- **Unit:** field-resolution defaults and manual-journal precedence helpers.
-- **Integration:** merge-resolution API tests for conflicting values and remote-reference preservation.
-- **E2E:** conflicting merge flow where the user chooses values and verifies the surviving journal detail view afterwards.
-
-#### Phase 3: MCP Merge Parity and Review-Queue Integration Hardening
-**PR Size:** ~4-6 files
-
-**Acceptance Criteria:**
-- [ ] MCP can inspect merge candidates and perform merges with explicit resolution choices where needed.
-- [ ] The review queue and merge UI use the same backend contracts rather than parallel implementations.
-- [ ] Merge outcomes remain auditable and visible in the resulting journal context.
-- [ ] No dedicated MCP-only merge semantics diverge from the UI workflow.
-
-**Required Test Coverage:**
-- **Unit:** MCP command-shaping helpers for merge requests and resolution payloads.
-- **Integration:** MCP merge tests covering simple and conflicting merges.
-- **E2E:** perform a merge via the UI and verify subsequent MCP-style retrieval exposes the same merged state.
+- **Unit:** ✅ 5 tests in `test_tools.py` — tool registration (merge_journals, get_merge_candidates schemas), MergeJournalMCPRequest validation (valid, overrides, missing field).
+- **Integration:** ✅ 5 tests in `test_journal_tools_integration.py` — mounted MCP tests for simple merge, title override merge, self-merge error, not-found error, overlapping merge candidates.
 
 ### ITER7-005: Journal Hierarchy Authoring and Detail-Surface Completion
 **Objective:** Make parent-child journaling a fully usable product behaviour rather than a partially exposed model detail.

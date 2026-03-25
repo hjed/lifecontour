@@ -87,6 +87,7 @@ from app.core.journal.adapters.sql.plan_data_repository import SqlPlanDataReposi
 from app.core.journal.adapters.sql.route_repository import SqlRouteRepository
 from app.core.journal.adapters.sql.travel_data_repository import SqlTravelDataRepository
 from app.core.journal.models.journal_tag import JournalTag
+from app.core.journal.services.journal_merge_service import JournalMergeService
 from app.core.journal.services.journal_service import JournalService
 from app.infrastructure.events.outbox_event_publisher import OutboxEventPublisher
 from app.mcp.domains.journals.converters import JournalConverter
@@ -102,6 +103,9 @@ from app.mcp.domains.journals.schemas import (
     JournalSearchResponse,
     JournalSearchResult,
     JournalUpdateRequest,
+    MergeCandidateResult,
+    MergeCandidatesResponse,
+    MergeJournalMCPRequest,
     RouteHistoryEntry,
     RouteHistoryResponse,
     RouteSummary,
@@ -2940,3 +2944,229 @@ def register_journal_tools(mcp: FastMCP[None]) -> None:
         return MCPResponseBuilder.success_response(
             DeleteCalendarResponse(summary=f"Deleted calendar '{calendar.name}'")
         )
+
+    @mcp.tool
+    @mcp_unified_error_handler("merge_journals", "journal")
+    async def merge_journals(
+        target_journal_id: Annotated[
+            int,
+            Field(description="The ID of the journal to keep (the merge target)"),
+        ],
+        merge_data: Annotated[
+            str,
+            Field(
+                description=(
+                    "JSON string with merge parameters. Required key: "
+                    '"source_journal_id" (int) — the journal to absorb and delete. '
+                    'Optional key: "overrides" (object) — explicit conflict resolution '
+                    'with keys: "title" (str), "content" (str), '
+                    '"event_date_range" ({start, end}), '
+                    '"type_data" ({TYPE: {field: value}})'
+                )
+            ),
+        ],
+        db_connection: AsyncConnection = mcp_depends(get_async_connection),
+        event_publisher: OutboxEventPublisher = mcp_depends(get_outbox_event_publisher),
+    ) -> str:
+        """
+        Merge a source journal into a target journal.
+
+        The source journal's content, tags, contacts, type data, routes,
+        and child journals are absorbed into the target. The source is then
+        deleted. Use 'overrides' to resolve conflicts explicitly (title,
+        content, date range, or type-specific data).
+
+        Call get_merge_candidates first to find suitable merge targets.
+
+        Args:
+            target_journal_id: ID of the journal to keep
+            merge_data: JSON string containing source_journal_id and optional overrides
+
+        Returns:
+            JSON string containing the merged target journal with all combined data
+        """
+        merge_request = MergeJournalMCPRequest.model_validate_json(merge_data)
+
+        repos = _create_journal_tool_repositories(db_connection)
+
+        # Verify ownership — both journals must belong to the current user
+        user_id = await get_current_user_id()
+        target = await repos.journal_repo.find_by_id(target_journal_id)
+        if not target or target.user_id != user_id:
+            raise JournalNotFoundError(target_journal_id)
+        source = await repos.journal_repo.find_by_id(merge_request.source_journal_id)
+        if not source or source.user_id != user_id:
+            raise JournalNotFoundError(merge_request.source_journal_id)
+
+        merge_service = JournalMergeService(repos.journal_repo, event_publisher)
+
+        merged_journal = await merge_service.merge_journals(
+            target_id=target_journal_id,
+            source_id=merge_request.source_journal_id,
+            transaction=db_connection,
+            overrides=merge_request.overrides,
+        )
+
+        # Fetch enriched target
+        types, type_data = await _fetch_journal_types_and_data(
+            target_journal_id,
+            repos.calendar_info_repo,
+            repos.mood_data_repo,
+            repos.plan_data_repo,
+            repos.travel_data_repo,
+            repos.photo_album_data_repo,
+            repos.fitness_data_repo,
+            repos.outdoor_activity_data_repo,
+            repos.bushwalking_data_repo,
+            repos.jogging_data_repo,
+            repos.abseiling_data_repo,
+            repos.canyoning_data_repo,
+            repos.climbing_data_repo,
+            repos.kayaking_data_repo,
+            repos.cross_country_skiing_data_repo,
+        )
+
+        contacts = await _fetch_contact_relationships_with_names(
+            target_journal_id,
+            repos.contact_relationship_repo,
+            repos.contact_repo,
+        )
+
+        journal_tags = await repos.tag_repo.get_tags_for_journal(target_journal_id)
+
+        response = JournalConverter.to_response(
+            journal=merged_journal,
+            types=types,
+            type_data=type_data,
+            contacts=contacts,
+            tags=journal_tags,
+        )
+
+        return MCPResponseBuilder.success_response(response)
+
+    @mcp.tool
+    @mcp_unified_error_handler("get_merge_candidates", "journal")
+    async def get_merge_candidates(
+        journal_id: Annotated[
+            int,
+            Field(description="The ID of the journal to find merge candidates for"),
+        ],
+        limit: Annotated[
+            int,
+            Field(
+                default=10,
+                description="Maximum number of candidates to return (default: 10)",
+            ),
+        ] = 10,
+        db_connection: AsyncConnection = mcp_depends(get_async_connection),
+    ) -> str:
+        """
+        Find journals that could be merged with a given journal.
+
+        Returns journals with overlapping date ranges belonging to the same
+        user, ordered by start date. Use this before merge_journals
+        to identify suitable merge targets.
+
+        Args:
+            journal_id: The journal to find candidates for
+            limit: Maximum number of candidates to return
+
+        Returns:
+            JSON string with merge candidate summaries and AI recommendations
+        """
+        repos = _create_journal_tool_repositories(db_connection)
+
+        target = await repos.journal_repo.find_by_id(journal_id)
+        if not target:
+            raise JournalNotFoundError(journal_id)
+
+        # Find journals with overlapping date ranges for the same user
+        query = text("""
+            SELECT j.id, j.title, j.content,
+                   j.event_date_range_start, j.event_date_range_end
+            FROM journals j
+            WHERE j.user_id = :user_id
+              AND j.id != :journal_id
+              AND j.event_date_range_start <= :end_date
+              AND j.event_date_range_end >= :start_date
+            ORDER BY j.event_date_range_start
+            LIMIT :limit
+        """)
+
+        result = await db_connection.execute(
+            query,
+            {
+                "user_id": target.user_id,
+                "journal_id": journal_id,
+                "start_date": target.event_date_range.start,
+                "end_date": target.event_date_range.end,
+                "limit": max(1, min(limit, 50)),
+            },
+        )
+        rows = result.fetchall()
+
+        candidates: list[MergeCandidateResult] = []
+        for row in rows:
+            candidate_id = int(row[0])
+            candidate_title = str(row[1])
+            candidate_content = str(row[2]) if row[2] else ""
+            candidate_start = row[3]
+            candidate_end = row[4]
+
+            # Fetch types and tags for each candidate
+            c_types, _ = await _fetch_journal_types_and_data(
+                candidate_id,
+                repos.calendar_info_repo,
+                repos.mood_data_repo,
+                repos.plan_data_repo,
+                repos.travel_data_repo,
+                repos.photo_album_data_repo,
+                repos.fitness_data_repo,
+                repos.outdoor_activity_data_repo,
+                repos.bushwalking_data_repo,
+                repos.jogging_data_repo,
+                repos.abseiling_data_repo,
+                repos.canyoning_data_repo,
+                repos.climbing_data_repo,
+                repos.kayaking_data_repo,
+                repos.cross_country_skiing_data_repo,
+            )
+            c_tags = await repos.tag_repo.get_tags_for_journal(candidate_id)
+            tag_names = [t.name for t in c_tags]
+
+            content_excerpt = candidate_content[:200]
+            candidates.append(
+                MergeCandidateResult(
+                    id=candidate_id,
+                    title=candidate_title,
+                    content_excerpt=content_excerpt,
+                    event_date_range=EventDateRangeSchema(
+                        start=candidate_start,
+                        end=candidate_end,
+                    ),
+                    types=c_types,
+                    tags=tag_names,
+                    summary=(
+                        f"'{candidate_title}' ({', '.join(c_types)}) "
+                        f"overlaps with target date range"
+                    ),
+                )
+            )
+
+        summary_text = (
+            f"Found {len(candidates)} merge candidate(s) for "
+            f"'{target.title}' (ID: {journal_id})"
+        )
+        if candidates:
+            summary_text += ". Review each candidate and use merge_journals to combine."
+        else:
+            summary_text += ". No journals with overlapping date ranges found."
+
+        response = MergeCandidatesResponse(
+            target_journal_id=journal_id,
+            target_title=target.title,
+            candidates=candidates,
+            summary=summary_text,
+        )
+
+        return MCPResponseBuilder.success_response(response)
