@@ -342,6 +342,7 @@ class ContactRelationshipConverter:
             relationship_type=relationship.relationship_type.value,
             from_contact_id=relationship.from_contact_id,
             to_contact_id=relationship.to_contact_id,
+            to_contact_name=relationship.to_contact_name,
             created_at=relationship.created_at,
             updated_at=relationship.updated_at,
         )

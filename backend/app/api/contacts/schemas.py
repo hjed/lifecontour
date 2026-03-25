@@ -120,6 +120,10 @@ class ContactRelationshipAttributes(BaseModel):
     to_contact_id: int = Field(
         ..., description="ID of the contact receiving the relationship"
     )
+    to_contact_name: str | None = Field(
+        default=None,
+        description="Display name of the related contact (denormalized for display)",
+    )
     created_at: datetime | None = Field(
         default=None, description="Relationship creation timestamp"
     )

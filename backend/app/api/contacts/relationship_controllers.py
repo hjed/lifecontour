@@ -49,6 +49,11 @@ async def get_contact_relationships(
 
     relationships = await relationship_service.get_relationships_for_contact(contact_id)
 
+    # Resolve contact names for display
+    relationships = await relationship_service.resolve_relationship_contact_names(
+        relationships, contact_id
+    )
+
     relationship_resources = [
         ContactRelationshipConverter.to_resource(relationship, base_url)
         for relationship in relationships
@@ -88,6 +93,11 @@ async def get_contact_relationship(
             "relationship",
             f"Relationship {relationship_id} does not belong to contact {contact_id}",
         )
+
+    # Resolve contact name for display
+    [relationship] = await relationship_service.resolve_relationship_contact_names(
+        [relationship], contact_id
+    )
 
     relationship_resource = ContactRelationshipConverter.to_resource(
         relationship, base_url

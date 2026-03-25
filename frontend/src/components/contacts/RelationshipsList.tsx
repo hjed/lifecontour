@@ -133,6 +133,7 @@ export function RelationshipsList({
               <RelationshipItem
                 key={relationship.id}
                 relationship={relationship}
+                currentContactId={contactId}
                 onUpdate={data =>
                   handleUpdateRelationship(relationship.id, data)
                 }
