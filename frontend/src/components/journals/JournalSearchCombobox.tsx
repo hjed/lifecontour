@@ -55,7 +55,7 @@ async function searchJournals(query: string): Promise<JournalListResponse> {
   }
 
   const response = await fetch(
-    `${API_ENDPOINTS.JOURNALS.BASE}?search=${encodeURIComponent(query)}&size=20`,
+    `${API_ENDPOINTS.JOURNALS.BASE}?search=${encodeURIComponent(query)}&limit=20`,
     {
       method: 'GET',
       credentials: 'include',

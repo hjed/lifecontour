@@ -1891,7 +1891,7 @@ def register_journal_tools(mcp: FastMCP[None]) -> None:
             )
             changed_fields["event_date_range"] = request.event_date_range
 
-        if request.parent_id is not None:
+        if "parent_id" in request.model_fields_set:
             existing_journal.parent_id = request.parent_id
             changed_fields["parent_id"] = request.parent_id
 

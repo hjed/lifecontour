@@ -10,15 +10,15 @@ def test_journal_update_request_accepts_parent_id():
     request = JournalUpdateRequest(title="Updated Title", parent_id=2)
     assert request.parent_id == 2
 
-    # Null parent_id (explicitly removing parent)
+    # Null parent_id (explicitly removing parent) — should be in model_fields_set
     request_null = JournalUpdateRequest(title="Updated Title", parent_id=None)
     assert request_null.parent_id is None
+    assert "parent_id" in request_null.model_fields_set
 
-    # Missing parent_id (not changing parent)
+    # Missing parent_id (not changing parent) — should NOT be in model_fields_set
     request_missing = JournalUpdateRequest(title="Updated Title")
-    # The default behavior for pydantic fields not provided is typically None or omitted
-    # Let's see what the behavior is when we implement it
     assert request_missing.parent_id is None
+    assert "parent_id" not in request_missing.model_fields_set
 
 
 def test_journal_update_request_invalid_parent_id():

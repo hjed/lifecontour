@@ -730,15 +730,17 @@ async def _fetch_parent_and_children(
 ) -> tuple[Journal | None, list[Journal], int]:
     """Fetch parent journal, children list, and children count for a journal.
 
+    Parent lookup is user-scoped to prevent cross-tenant data leakage.
+
     Returns:
         A tuple of (parent, children, children_count).
     """
     parent = None
     if journal.parent_id:
-        try:
-            parent = await journal_service.get_journal(journal.parent_id)
-        except JournalNotFoundError:
-            pass
+        parents = await journal_service.find_journals_by_ids_for_user(
+            user_id=user_id, journal_ids=[journal.parent_id]
+        )
+        parent = parents[0] if parents else None
 
     children_count = 0
     children: list[Journal] = []

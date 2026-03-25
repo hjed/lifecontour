@@ -18,7 +18,7 @@ test.describe('Journal Hierarchy', () => {
         }
       }
     } catch (e) {
-      console.error('Cleanup failed:', e);
+      console.debug('Cleanup failed:', e);
     }
   });
 
