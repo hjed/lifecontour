@@ -27,8 +27,7 @@ export interface SearchResultAttributes {
   [key: string]: unknown;
 }
 
-export interface SearchResultResource
-  extends JsonApiResource<SearchResultAttributes> {
+export interface SearchResultResource extends JsonApiResource<SearchResultAttributes> {
   type: 'search_results';
 }
 
@@ -58,8 +57,7 @@ export interface ContactSearchResponse {
   meta: ContactSearchMeta;
 }
 
-export interface GlobalSearchResponse
-  extends JsonApiCollectionResponse<SearchResultResource> {
+export interface GlobalSearchResponse extends JsonApiCollectionResponse<SearchResultResource> {
   meta: GlobalSearchMeta;
 }
 

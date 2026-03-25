@@ -73,6 +73,11 @@ updates:
         applies-to: version-updates
         patterns:
           - "@tanstack*"
+      next:
+        applies-to: version-updates
+        patterns:
+          - "next*"
+          - "eslint-config-next"
       react:
         applies-to: version-updates
         patterns:
@@ -102,6 +107,7 @@ updates:
           - "@tanstack*"
           - "@radix-ui*"
           - "@typescript-eslint*"
+          - "next*"
 
   # GitHub Actions
   - package-ecosystem: "github-actions"

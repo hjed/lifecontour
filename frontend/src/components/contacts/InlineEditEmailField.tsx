@@ -13,8 +13,10 @@ import { cn } from '@/lib/utils';
 import { validateEmail } from '@/lib/validation';
 import { InlineEditField, type InlineEditFieldProps } from './InlineEditField';
 
-export interface InlineEditEmailFieldProps
-  extends Omit<InlineEditFieldProps, 'fieldType' | 'validation'> {
+export interface InlineEditEmailFieldProps extends Omit<
+  InlineEditFieldProps,
+  'fieldType' | 'validation'
+> {
   /** Whether to show email icon in view mode */
   readonly showIcon?: boolean;
   /** Custom validation function (will be combined with email validation) */
