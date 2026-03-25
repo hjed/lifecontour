@@ -2988,6 +2988,16 @@ def register_journal_tools(mcp: FastMCP[None]) -> None:
         merge_request = MergeJournalMCPRequest.model_validate_json(merge_data)
 
         repos = _create_journal_tool_repositories(db_connection)
+
+        # Verify ownership — both journals must belong to the current user
+        user_id = await get_current_user_id()
+        target = await repos.journal_repo.find_by_id(target_journal_id)
+        if not target or target.user_id != user_id:
+            raise JournalNotFoundError(target_journal_id)
+        source = await repos.journal_repo.find_by_id(merge_request.source_journal_id)
+        if not source or source.user_id != user_id:
+            raise JournalNotFoundError(merge_request.source_journal_id)
+
         merge_service = JournalMergeService(repos.journal_repo, event_publisher)
 
         merged_journal = await merge_service.merge_journals(
@@ -3054,7 +3064,7 @@ def register_journal_tools(mcp: FastMCP[None]) -> None:
         Find journals that could be merged with a given journal.
 
         Returns journals with overlapping date ranges belonging to the same
-        user, ordered by date-range overlap. Use this before merge_journals
+        user, ordered by start date. Use this before merge_journals
         to identify suitable merge targets.
 
         Args:
@@ -3090,7 +3100,7 @@ def register_journal_tools(mcp: FastMCP[None]) -> None:
                 "journal_id": journal_id,
                 "start_date": target.event_date_range.start,
                 "end_date": target.event_date_range.end,
-                "limit": limit,
+                "limit": max(1, min(limit, 50)),
             },
         )
         rows = result.fetchall()
