@@ -40,8 +40,8 @@ from app.api.contacts.schemas import (
     ContactMethodResource,
     ContactNoteAttributes,
     ContactNoteResource,
-    ContactRelationshipAttributes,
     ContactRelationshipResource,
+    ContactRelationshipResponseAttributes,
     ContactRelationships,
     ContactResource,
     TagAttributes,
@@ -340,10 +340,11 @@ class ContactRelationshipConverter:
         relationship: ContactRelationship, base_url: str = ""
     ) -> ContactRelationshipResource:
         """Convert ContactRelationship domain entity to API resource."""
-        attributes = ContactRelationshipAttributes(
+        attributes = ContactRelationshipResponseAttributes(
             relationship_type=relationship.relationship_type.value,
             from_contact_id=relationship.from_contact_id,
             to_contact_id=relationship.to_contact_id,
+            to_contact_name=relationship.to_contact_name,
             created_at=relationship.created_at,
             updated_at=relationship.updated_at,
         )

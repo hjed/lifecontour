@@ -49,6 +49,11 @@ async def get_contact_relationships(
 
     relationships = await relationship_service.get_relationships_for_contact(contact_id)
 
+    # Resolve contact names for display
+    relationships = await relationship_service.resolve_relationship_contact_names(
+        relationships, contact_id
+    )
+
     relationship_resources = [
         ContactRelationshipConverter.to_resource(relationship, base_url)
         for relationship in relationships
@@ -88,6 +93,11 @@ async def get_contact_relationship(
             "relationship",
             f"Relationship {relationship_id} does not belong to contact {contact_id}",
         )
+
+    # Resolve contact name for display
+    [relationship] = await relationship_service.resolve_relationship_contact_names(
+        [relationship], contact_id
+    )
 
     relationship_resource = ContactRelationshipConverter.to_resource(
         relationship, base_url
@@ -139,6 +149,13 @@ async def create_contact_relationship(
         primary_relationship = created_relationship[0]
     else:
         primary_relationship = created_relationship
+
+    # Resolve contact name for display consistency
+    [
+        primary_relationship
+    ] = await relationship_service.resolve_relationship_contact_names(
+        [primary_relationship], contact_id
+    )
 
     relationship_resource = ContactRelationshipConverter.to_resource(
         primary_relationship, base_url
@@ -198,6 +215,13 @@ async def update_contact_relationship(
         relationship_type=RelationshipType(
             relationship_request.data.attributes.relationship_type
         ),
+    )
+
+    # Resolve contact name for display consistency
+    [
+        updated_relationship
+    ] = await relationship_service.resolve_relationship_contact_names(
+        [updated_relationship], contact_id
     )
 
     relationship_resource = ContactRelationshipConverter.to_resource(

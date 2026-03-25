@@ -548,6 +548,50 @@ export class TestDataManager {
   }
 
   /**
+   * Create a relationship between two contacts via API
+   */
+  async createRelationship(
+    fromContactId: string,
+    toContactId: string,
+    relationshipType: string
+  ): Promise<void> {
+    console.log(
+      `🔗 [Data Manager] Creating relationship: ${fromContactId} -> ${toContactId} (${relationshipType})`
+    );
+
+    const response = await this.page.request.post(
+      `/api/contacts/${fromContactId}/relationships`,
+      {
+        headers: {
+          'Content-Type': 'application/vnd.api+json',
+          Accept: 'application/vnd.api+json',
+        },
+        data: {
+          data: {
+            type: 'contact_relationships',
+            attributes: {
+              from_contact_id: Number(fromContactId),
+              to_contact_id: Number(toContactId),
+              relationship_type: relationshipType,
+            },
+          },
+        },
+      }
+    );
+
+    if (!response.ok()) {
+      const errorBody = await response.text();
+      throw new Error(
+        `Failed to create relationship: ${response.status()} - ${errorBody}`
+      );
+    }
+
+    console.log(
+      `✅ [Data Manager] Relationship created: ${fromContactId} -> ${toContactId}`
+    );
+  }
+
+  /**
    * Create a journal tag via API
    */
   async createJournalTag(

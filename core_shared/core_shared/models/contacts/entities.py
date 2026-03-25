@@ -295,6 +295,7 @@ class ContactRelationship:
     to_contact_id: int
     relationship_type: RelationshipType
     id: int | None = None
+    to_contact_name: str | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None
 

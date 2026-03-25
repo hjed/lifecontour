@@ -189,6 +189,70 @@ test.describe('Contact Management - Authenticated User', () => {
     await expect.poll(async () => contactCards.count()).toBe(totalContacts);
     await expect(laterPageContact).toBeVisible();
   });
+
+  test('should display relationship with linked contact name and clickable link', async ({
+    authenticatedPage,
+    testCleanup,
+  }) => {
+    const dataManager = new TestDataManager(authenticatedPage);
+
+    // Create two contacts
+    const contacts = await dataManager.createContacts([
+      { firstName: 'Alice', lastName: 'RelTest' },
+      { firstName: 'Bob', lastName: 'RelTest' },
+    ]);
+
+    const alice = contacts[0];
+    const bob = contacts[1];
+
+    if (!alice || !bob) {
+      throw new Error('Failed to create test contacts');
+    }
+
+    // Create a relationship: Alice -> Bob (partner)
+    await dataManager.createRelationship(alice.id, bob.id, 'partner');
+
+    testCleanup(async () => {
+      await dataManager.cleanup();
+    });
+
+    // Navigate to Alice's detail page
+    await authenticatedPage.goto(`/contacts/${alice.id}`);
+    await expect(authenticatedPage).toHaveTitle(/Personal Management System/);
+
+    // Wait for the contact name to be visible
+    await expect(
+      authenticatedPage
+        .getByText(`${alice.firstName} ${alice.lastName}`)
+        .first()
+    ).toBeVisible();
+
+    // Verify the Relationships section is visible
+    await expect(
+      authenticatedPage.getByRole('heading', { name: 'Relationships' })
+    ).toBeVisible();
+
+    // Verify the relationship type is shown
+    await expect(authenticatedPage.getByText('Partner')).toBeVisible();
+
+    // Verify the linked contact name is shown and is a link
+    const contactLink = authenticatedPage.getByTestId(
+      `relationship-contact-link-${bob.id}`
+    );
+    await expect(contactLink).toBeVisible();
+    await expect(contactLink).toContainText(bob.firstName);
+
+    // Click the link to navigate to Bob's profile
+    await contactLink.click();
+    await expect(authenticatedPage).toHaveURL(
+      new RegExp(`/contacts/${bob.id}`)
+    );
+
+    // Verify we're now on Bob's detail page
+    await expect(
+      authenticatedPage.getByText(`${bob.firstName} ${bob.lastName}`).first()
+    ).toBeVisible();
+  });
 });
 
 test.describe('Contact Management - Unauthenticated User', () => {

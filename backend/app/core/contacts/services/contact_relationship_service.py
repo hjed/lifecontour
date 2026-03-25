@@ -256,3 +256,47 @@ class ContactRelationshipService:
                         "relationship",
                         "Partner relationship already exists between these contacts",
                     )
+
+    async def resolve_relationship_contact_names(
+        self,
+        relationships: list[ContactRelationship],
+        viewing_contact_id: int,
+    ) -> list[ContactRelationship]:
+        """
+        Populate to_contact_name on each relationship with the other contact's display name.
+
+        For each relationship, determines the "other" contact (the one that is not
+        the viewing contact) and sets to_contact_name to their display name.
+
+        Args:
+            relationships: List of relationships to resolve names for
+            viewing_contact_id: ID of the contact whose detail page is being viewed
+
+        Returns:
+            The same list of relationships with to_contact_name populated
+        """
+        # Collect unique contact IDs that need resolution
+        contact_ids: set[int] = set()
+        for rel in relationships:
+            if rel.from_contact_id == viewing_contact_id:
+                contact_ids.add(rel.to_contact_id)
+            else:
+                contact_ids.add(rel.from_contact_id)
+
+        # Batch-fetch contacts
+        contact_names: dict[int, str] = {}
+        for cid in contact_ids:
+            contact = await self.contact_repo.find_by_id(cid)
+            if contact:
+                contact_names[cid] = contact.get_display_name()
+
+        # Set to_contact_name on each relationship
+        for rel in relationships:
+            other_id = (
+                rel.to_contact_id
+                if rel.from_contact_id == viewing_contact_id
+                else rel.from_contact_id
+            )
+            rel.to_contact_name = contact_names.get(other_id)
+
+        return relationships

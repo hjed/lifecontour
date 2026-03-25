@@ -33,6 +33,7 @@ const mockRelationship: ContactRelationshipResource = {
   attributes: {
     from_contact_id: 1,
     to_contact_id: 2,
+    to_contact_name: 'Jane Smith',
     relationship_type: RelationshipType.PARTNER,
     created_at: '2024-01-01T00:00:00Z',
     updated_at: '2024-01-01T00:00:00Z',
@@ -81,6 +82,7 @@ describe('RelationshipItem', () => {
       <Wrapper>
         <RelationshipItem
           relationship={mockRelationship}
+          currentContactId='1'
           onUpdate={mockOnUpdate}
           onDelete={mockOnDelete}
         />
@@ -90,12 +92,73 @@ describe('RelationshipItem', () => {
     expect(screen.getByText('Partner')).toBeInTheDocument();
   });
 
+  it('renders linked contact name as a link', () => {
+    const Wrapper = createWrapper();
+    render(
+      <Wrapper>
+        <RelationshipItem
+          relationship={mockRelationship}
+          currentContactId='1'
+          onUpdate={mockOnUpdate}
+          onDelete={mockOnDelete}
+        />
+      </Wrapper>
+    );
+
+    const contactLink = screen.getByText('Jane Smith');
+    expect(contactLink).toBeInTheDocument();
+    expect(contactLink).toHaveAttribute('href', '/contacts/2');
+  });
+
+  it('links to from_contact_id when current contact is the to_contact', () => {
+    const Wrapper = createWrapper();
+    render(
+      <Wrapper>
+        <RelationshipItem
+          relationship={mockRelationship}
+          currentContactId='2'
+          onUpdate={mockOnUpdate}
+          onDelete={mockOnDelete}
+        />
+      </Wrapper>
+    );
+
+    const contactLink = screen.getByText('Jane Smith');
+    expect(contactLink).toHaveAttribute('href', '/contacts/1');
+  });
+
+  it('renders without contact name when not provided', () => {
+    const relationshipWithoutName: ContactRelationshipResource = {
+      ...mockRelationship,
+      attributes: {
+        ...mockRelationship.attributes,
+        to_contact_name: undefined,
+      },
+    };
+
+    const Wrapper = createWrapper();
+    render(
+      <Wrapper>
+        <RelationshipItem
+          relationship={relationshipWithoutName}
+          currentContactId='1'
+          onUpdate={mockOnUpdate}
+          onDelete={mockOnDelete}
+        />
+      </Wrapper>
+    );
+
+    expect(screen.getByText('Partner')).toBeInTheDocument();
+    expect(screen.queryByRole('link')).not.toBeInTheDocument();
+  });
+
   it('shows edit and delete buttons', () => {
     const Wrapper = createWrapper();
     render(
       <Wrapper>
         <RelationshipItem
           relationship={mockRelationship}
+          currentContactId='1'
           onUpdate={mockOnUpdate}
           onDelete={mockOnDelete}
         />
@@ -113,6 +176,7 @@ describe('RelationshipItem', () => {
       <Wrapper>
         <RelationshipItem
           relationship={mockRelationship}
+          currentContactId='1'
           onUpdate={mockOnUpdate}
           onDelete={mockOnDelete}
         />
@@ -134,6 +198,7 @@ describe('RelationshipItem', () => {
       <Wrapper>
         <RelationshipItem
           relationship={mockRelationship}
+          currentContactId='1'
           onUpdate={mockOnUpdate}
           onDelete={mockOnDelete}
         />
@@ -153,6 +218,7 @@ describe('RelationshipItem', () => {
       <Wrapper>
         <RelationshipItem
           relationship={mockRelationship}
+          currentContactId='1'
           onUpdate={mockOnUpdate}
           onDelete={mockOnDelete}
         />
@@ -181,6 +247,7 @@ describe('RelationshipItem', () => {
       <Wrapper>
         <RelationshipItem
           relationship={mockRelationship}
+          currentContactId='1'
           onUpdate={mockOnUpdate}
           onDelete={mockOnDelete}
         />
@@ -203,6 +270,7 @@ describe('RelationshipItem', () => {
       <Wrapper>
         <RelationshipItem
           relationship={mockRelationship}
+          currentContactId='1'
           onUpdate={mockOnUpdate}
           onDelete={mockOnDelete}
           disabled={true}
@@ -225,6 +293,7 @@ describe('RelationshipItem', () => {
       <Wrapper>
         <RelationshipItem
           relationship={mockRelationship}
+          currentContactId='1'
           onUpdate={mockOnUpdate}
           onDelete={mockOnDelete}
         />
@@ -251,6 +320,7 @@ describe('RelationshipItem', () => {
       <Wrapper>
         <RelationshipItem
           relationship={relationshipWithUnknownType}
+          currentContactId='1'
           onUpdate={mockOnUpdate}
           onDelete={mockOnDelete}
         />
@@ -267,6 +337,7 @@ describe('RelationshipItem', () => {
       <Wrapper>
         <RelationshipItem
           relationship={mockRelationship}
+          currentContactId='1'
           onUpdate={mockOnUpdate}
           onDelete={mockOnDelete}
         />

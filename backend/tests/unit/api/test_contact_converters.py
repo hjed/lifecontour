@@ -186,6 +186,7 @@ class TestContactConverter:
             from_contact_id=1,
             to_contact_id=2,
             relationship_type=RelationshipType.FRIEND,
+            to_contact_name="Jane Smith",
             created_at=datetime(2024, 1, 1, tzinfo=UTC),
         )
         if contact.relationships is None:
@@ -205,6 +206,64 @@ class TestContactConverter:
         )
         assert resource.attributes.relationships[0].attributes.from_contact_id == 1
         assert resource.attributes.relationships[0].attributes.to_contact_id == 2
+        assert (
+            resource.attributes.relationships[0].attributes.to_contact_name
+            == "Jane Smith"
+        )
+
+
+class TestContactRelationshipConverter:
+    """Test ContactRelationshipConverter methods."""
+
+    def test_to_resource(self):
+        """Test converting ContactRelationship to API resource."""
+        from app.api.contacts.converters import ContactRelationshipConverter
+
+        relationship = ContactRelationship(
+            id=1,
+            from_contact_id=1,
+            to_contact_id=2,
+            relationship_type=RelationshipType.PARTNER,
+            to_contact_name="Jane Smith",
+            created_at=datetime(2024, 1, 1, tzinfo=UTC),
+            updated_at=datetime(2024, 1, 2, tzinfo=UTC),
+        )
+
+        resource = ContactRelationshipConverter.to_resource(
+            relationship, "http://localhost:8000"
+        )
+
+        assert resource.type == "contact_relationships"
+        assert resource.id == "1"
+        assert resource.attributes.relationship_type == "partner"
+        assert resource.attributes.from_contact_id == 1
+        assert resource.attributes.to_contact_id == 2
+        assert resource.attributes.to_contact_name == "Jane Smith"
+        assert resource.attributes.created_at == datetime(2024, 1, 1, tzinfo=UTC)
+        assert resource.attributes.updated_at == datetime(2024, 1, 2, tzinfo=UTC)
+        assert resource.links is not None
+        assert (
+            resource.links.self
+            == "http://localhost:8000/api/contacts/1/relationships/1"
+        )
+
+    def test_to_resource_without_contact_name(self):
+        """Test converting ContactRelationship without to_contact_name."""
+        from app.api.contacts.converters import ContactRelationshipConverter
+
+        relationship = ContactRelationship(
+            id=2,
+            from_contact_id=3,
+            to_contact_id=4,
+            relationship_type=RelationshipType.FRIEND,
+            created_at=datetime(2024, 1, 1, tzinfo=UTC),
+        )
+
+        resource = ContactRelationshipConverter.to_resource(relationship)
+
+        assert resource.id == "2"
+        assert resource.attributes.to_contact_name is None
+        assert resource.links is None
 
 
 class TestTagConverter:

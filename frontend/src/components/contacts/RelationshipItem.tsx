@@ -8,6 +8,7 @@
 'use client';
 
 import { useState } from 'react';
+import Link from 'next/link';
 import { Edit2, Trash2, Check, X, User } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
@@ -27,6 +28,7 @@ import {
 
 interface RelationshipItemProps {
   readonly relationship: ContactRelationshipResource;
+  readonly currentContactId: string;
   readonly onUpdate: (data: ContactRelationshipFormData) => void;
   readonly onDelete: () => void;
   readonly disabled?: boolean;
@@ -34,6 +36,7 @@ interface RelationshipItemProps {
 
 export function RelationshipItem({
   relationship,
+  currentContactId,
   onUpdate,
   onDelete,
   disabled = false,
@@ -53,6 +56,14 @@ export function RelationshipItem({
     );
     return typeData?.display_name || type;
   };
+
+  // Determine the "other" contact's ID for linking
+  const otherContactId =
+    relationship.attributes.from_contact_id === Number(currentContactId)
+      ? relationship.attributes.to_contact_id
+      : relationship.attributes.from_contact_id;
+
+  const contactName = relationship.attributes.to_contact_name;
 
   const handleEdit = () => {
     setIsEditing(true);
@@ -145,6 +156,18 @@ export function RelationshipItem({
         <span className='font-medium'>
           {getTypeDisplayName(relationship.attributes.relationship_type)}
         </span>
+        {contactName && (
+          <>
+            <span className='text-muted-foreground mx-1'>—</span>
+            <Link
+              href={`/contacts/${otherContactId}`}
+              className='text-primary hover:underline'
+              data-testid={`relationship-contact-link-${otherContactId}`}
+            >
+              {contactName}
+            </Link>
+          </>
+        )}
       </div>
       <div className='flex items-center gap-1'>
         <Button
