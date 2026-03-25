@@ -125,8 +125,8 @@ class TestMCPOAuthIntegration:
 
     def test_well_known_oauth_metadata_exists(self, auth_client):
         """Test that .well-known OAuth metadata endpoint exists when auth enabled."""
-        # The authorization server .well-known is scoped to the mount path
-        response = auth_client.get("/.well-known/oauth-authorization-server/mcp-server")
+        # The authorization server .well-known is scoped to the root issuer URL
+        response = auth_client.get("/.well-known/oauth-authorization-server")
         assert response.status_code == 200
         data = response.json()
         assert "authorization_endpoint" in data
@@ -168,7 +168,7 @@ class TestMCPOAuthIntegration:
         app = create_app(settings)
         client = TestClient(app)
 
-        response = client.get("/.well-known/oauth-authorization-server/mcp-server")
+        response = client.get("/.well-known/oauth-authorization-server")
         assert response.status_code == 404
 
     def test_api_auth_still_uses_session_cookies(self, auth_client):

@@ -80,6 +80,7 @@ def create_mcp_auth_provider(settings: Settings) -> AuthProvider | None:
             upstream_client_secret=settings.oauth_client_secret,
             token_verifier=DebugTokenVerifier(),
             base_url=base_url,
+            issuer_url=_get_mcp_issuer_url(settings),
         )
 
     # Priority 2: GitHub
@@ -89,6 +90,7 @@ def create_mcp_auth_provider(settings: Settings) -> AuthProvider | None:
             client_id=settings.github_client_id,
             client_secret=settings.github_client_secret,
             base_url=base_url,
+            issuer_url=_get_mcp_issuer_url(settings),
         )
 
     # Priority 3: Microsoft / Azure AD
@@ -102,6 +104,7 @@ def create_mcp_auth_provider(settings: Settings) -> AuthProvider | None:
             client_secret=settings.microsoft_client_secret,
             tenant_id=settings.microsoft_tenant_id,
             base_url=base_url,
+            issuer_url=_get_mcp_issuer_url(settings),
             required_scopes=["openid", "profile", "email"],
         )
 
@@ -112,6 +115,7 @@ def create_mcp_auth_provider(settings: Settings) -> AuthProvider | None:
             client_id=settings.discord_client_id,
             client_secret=settings.discord_client_secret,
             base_url=base_url,
+            issuer_url=_get_mcp_issuer_url(settings),
         )
 
     logger.info("MCP: No OAuth providers configured, MCP auth unavailable")
@@ -131,6 +135,19 @@ def _get_mcp_base_url(settings: Settings) -> str:
     base = settings.webhook_base_url.rstrip("/")
     mount = settings.mcp_mount_path.rstrip("/")
     return f"{base}{mount}"
+
+
+def _get_mcp_issuer_url(settings: Settings) -> str:
+    """Compute the MCP issuer URL from settings.
+
+    The issuer_url is the root URL WITHOUT the mount path prefix.
+    Per RFC 8414, path-aware discovery uses the issuer to construct
+    .well-known paths. Setting this to the root URL ensures discovery
+    works with path-aware clients.
+    """
+    if not settings.webhook_base_url:
+        return ""
+    return settings.webhook_base_url.rstrip("/")
 
 
 def _has_any_provider_configured(settings: Settings) -> bool:

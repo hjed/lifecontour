@@ -6,16 +6,91 @@ OAuth authentication via FastMCP's built-in providers, and AI-optimized
 instructions.
 """
 
+import json
+
 import structlog
 from dishka import AsyncContainer
 from dishka.integrations.starlette import setup_dishka
 from fastmcp import FastMCP
 from fastmcp.server.auth.auth import AuthProvider
+from fastmcp.server.auth.middleware import RequireAuthMiddleware
+from starlette.types import Send
 
 from app.mcp.domains.contacts.tools import register_contact_tools
 from app.mcp.domains.journals.tools import register_journal_tools
 
 logger = structlog.get_logger()
+
+
+async def _patched_send_auth_error(
+    self: RequireAuthMiddleware,
+    send: Send,
+    status_code: int,
+    error: str,
+    description: str,
+) -> None:
+    """Enhanced authentication mistake responder with RFC 9728 compliant Link Header."""
+    # Enhance error descriptions based on error type
+    enhanced_description = description
+
+    if error == "invalid_token" and status_code == 401:
+        # This is the "Authentication required" error
+        enhanced_description = (
+            "Authentication failed. The provided bearer token is invalid, expired, or no longer recognized by the server. "
+            "To resolve: clear authentication tokens in your MCP client and reconnect. "
+            "Your client should automatically re-register and obtain new tokens."
+        )
+
+    # Build WWW-Authenticate header value
+    www_auth_parts = [
+        f'error="{error}"',
+        f'error_description="{enhanced_description}"',
+    ]
+    if self.resource_metadata_url:
+        www_auth_parts.append(f'resource_metadata="{self.resource_metadata_url}"')
+
+    www_authenticate = f"Bearer {', '.join(www_auth_parts)}"
+
+    # Send response
+    body = {"error": error, "error_description": enhanced_description}
+    body_bytes = json.dumps(body).encode()
+
+    headers = [
+        (b"content-type", b"application/json"),
+        (b"content-length", str(len(body_bytes)).encode()),
+        (b"www-authenticate", www_authenticate.encode()),
+    ]
+
+    # --- BUG FIX: ADD MISSING LINK HEADER FOR RFC 9728 COMPLIANCE ---
+    if self.resource_metadata_url:
+        link_val = f'<{self.resource_metadata_url}>; rel="oauth-protected-resource"'
+        headers.append((b"link", link_val.encode()))
+
+    await send(
+        {
+            "type": "http.response.start",
+            "status": status_code,
+            "headers": headers,
+        }
+    )
+
+    await send(
+        {
+            "type": "http.response.body",
+            "body": body_bytes,
+        }
+    )
+
+    # FastMCP uses structlog too so we can just use the standard logger
+    logger.info(
+        "MCP Auth error returned",
+        error=error,
+        status=status_code,
+    )
+
+
+# Apply the monkeypatch globally before any routes are created
+RequireAuthMiddleware._send_auth_error = _patched_send_auth_error  # type: ignore[method-assign]
 
 
 def create_mcp_server(auth: AuthProvider | None = None) -> FastMCP[None]:
