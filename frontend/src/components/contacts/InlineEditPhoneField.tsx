@@ -17,8 +17,10 @@ import {
 } from 'libphonenumber-js';
 import { InlineEditField, type InlineEditFieldProps } from './InlineEditField';
 
-export interface InlineEditPhoneFieldProps
-  extends Omit<InlineEditFieldProps, 'fieldType' | 'validation'> {
+export interface InlineEditPhoneFieldProps extends Omit<
+  InlineEditFieldProps,
+  'fieldType' | 'validation'
+> {
   /** Whether to show phone icon in view mode */
   readonly showIcon?: boolean;
   /** Custom validation function (will be combined with phone validation) */
