@@ -83,9 +83,9 @@ async def _patched_send_auth_error(
 
     # FastMCP uses structlog too so we can just use the standard logger
     logger.info(
-        "MCP Auth error returned: %s (status=%d)",
-        error,
-        status_code,
+        "MCP Auth error returned",
+        error=error,
+        status=status_code,
     )
 
 
