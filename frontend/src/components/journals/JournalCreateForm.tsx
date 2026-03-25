@@ -580,7 +580,9 @@ export function JournalCreateForm({ onCancel }: JournalCreateFormProps = {}) {
               <FormLabel>Parent Journal</FormLabel>
               <FormControl>
                 <JournalSearchCombobox
-                  onSelect={journal => field.onChange(parseInt(journal.id, 10))}
+                  onSelect={journal =>
+                    field.onChange(Number.parseInt(journal.id, 10))
+                  }
                   placeholder='Search for a parent journal...'
                   className='w-full'
                 />

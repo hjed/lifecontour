@@ -723,6 +723,42 @@ async def delete_journal_tag(
     return None
 
 
+async def _fetch_parent_and_children(
+    journal: Journal,
+    user_id: str,
+    journal_service: JournalService,
+) -> tuple[Journal | None, list[Journal], int]:
+    """Fetch parent journal, children list, and children count for a journal.
+
+    Returns:
+        A tuple of (parent, children, children_count).
+    """
+    parent = None
+    if journal.parent_id:
+        try:
+            parent = await journal_service.get_journal(journal.parent_id)
+        except JournalNotFoundError:
+            pass
+
+    children_count = 0
+    children: list[Journal] = []
+    if journal.id:
+        children_counts = await journal_service.count_children_for_parents(
+            user_id=user_id, parent_ids=[journal.id]
+        )
+        children_count = children_counts.get(journal.id, 0)
+
+        if children_count > 0:
+            children = await journal_service.get_journals_paginated(
+                user_id=user_id,
+                offset=0,
+                limit=100,
+                parent_id=journal.id,
+            )
+
+    return parent, children, children_count
+
+
 async def _build_journal_list_resources(
     journals: list[Journal],
     user_id: str,
@@ -1136,31 +1172,9 @@ async def get_journal(
         skiing_data_repo,
     )
 
-    # Fetch parent journal if it exists
-    parent = None
-    if journal.parent_id:
-        try:
-            parent = await journal_service.get_journal(journal.parent_id)
-        except JournalNotFoundError:
-            pass
-
-    # Fetch children count
-    children_count = 0
-    children = []
-    if journal.id:
-        children_counts = await journal_service.count_children_for_parents(
-            user_id=user.id, parent_ids=[journal.id]
-        )
-        children_count = children_counts.get(journal.id, 0)
-
-        # Fetch children summary details
-        if children_count > 0:
-            children = await journal_service.get_journals_paginated(
-                user_id=user.id,
-                offset=0,
-                limit=100,
-                parent_id=journal.id,
-            )
+    parent, children, children_count = await _fetch_parent_and_children(
+        journal, user.id, journal_service
+    )
 
     journal_resource = JournalConverter.to_resource(
         journal,
@@ -1878,28 +1892,9 @@ async def update_journal(
         include_routes=True,
     )
 
-    parent = (
-        await journal_service.get_journal(saved_journal.parent_id)
-        if saved_journal.parent_id
-        else None
+    parent, children, children_count = await _fetch_parent_and_children(
+        saved_journal, user.id, journal_service
     )
-
-    children_count = 0
-    children = []
-    if saved_journal.id:
-        children_counts = await journal_service.count_children_for_parents(
-            user_id=user.id, parent_ids=[saved_journal.id]
-        )
-        children_count = children_counts.get(saved_journal.id, 0)
-
-        # Fetch children summary details
-        if children_count > 0:
-            children = await journal_service.get_journals_paginated(
-                user_id=user.id,
-                offset=0,
-                limit=100,
-                parent_id=saved_journal.id,
-            )
 
     journal_resource = JournalConverter.to_resource(
         journal=saved_journal,
@@ -2052,28 +2047,9 @@ async def partial_update_journal(
         include_routes=True,
     )
 
-    parent = (
-        await journal_service.get_journal(saved_journal.parent_id)
-        if saved_journal.parent_id
-        else None
+    parent, children, children_count = await _fetch_parent_and_children(
+        saved_journal, user.id, journal_service
     )
-
-    children_count = 0
-    children = []
-    if saved_journal.id:
-        children_counts = await journal_service.count_children_for_parents(
-            user_id=user.id, parent_ids=[saved_journal.id]
-        )
-        children_count = children_counts.get(saved_journal.id, 0)
-
-        # Fetch children summary details
-        if children_count > 0:
-            children = await journal_service.get_journals_paginated(
-                user_id=user.id,
-                offset=0,
-                limit=100,
-                parent_id=saved_journal.id,
-            )
 
     journal_resource = JournalConverter.to_resource(
         journal=saved_journal,

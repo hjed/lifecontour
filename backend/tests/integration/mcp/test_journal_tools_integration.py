@@ -608,7 +608,7 @@ class TestJournalToolsIntegration:
 
             # Since JournalCycleError maps to 400 Bad Request in API, it should map to Journal error in MCP
             assert payload["error"] == "Journal error"
-            assert "cannot be its own parent" in payload["message"]
+            assert "would create a cycle" in payload["message"]
 
 
 class TestFetchJournalTypesAndDataNewActivityTypes:
