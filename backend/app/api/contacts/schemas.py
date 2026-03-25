@@ -111,7 +111,7 @@ class TagResource(BaseModel):
 
 # Contact Relationship Schemas
 class ContactRelationshipAttributes(BaseModel):
-    """Contact relationship attributes."""
+    """Contact relationship attributes for create/update requests."""
 
     relationship_type: str = Field(..., description="Type of relationship")
     from_contact_id: int = Field(
@@ -119,10 +119,6 @@ class ContactRelationshipAttributes(BaseModel):
     )
     to_contact_id: int = Field(
         ..., description="ID of the contact receiving the relationship"
-    )
-    to_contact_name: str | None = Field(
-        default=None,
-        description="Display name of the related contact (denormalized for display)",
     )
     created_at: datetime | None = Field(
         default=None, description="Relationship creation timestamp"
@@ -132,12 +128,25 @@ class ContactRelationshipAttributes(BaseModel):
     )
 
 
+class ContactRelationshipResponseAttributes(ContactRelationshipAttributes):
+    """Contact relationship attributes for API responses.
+
+    Extends the base attributes with server-derived fields that are
+    not client-writable.
+    """
+
+    to_contact_name: str | None = Field(
+        default=None,
+        description="Display name of the related contact (server-derived, read-only)",
+    )
+
+
 class ContactRelationshipResource(BaseModel):
     """Contact relationship resource following JSON API specification."""
 
     type: str = Field(default="contact_relationships", description="Resource type")
     id: str = Field(..., description="Resource identifier")
-    attributes: ContactRelationshipAttributes = Field(
+    attributes: ContactRelationshipResponseAttributes = Field(
         ..., description="Relationship attributes"
     )
     links: JsonApiLinks | None = Field(default=None, description="Resource links")

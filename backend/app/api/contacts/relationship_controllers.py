@@ -150,6 +150,13 @@ async def create_contact_relationship(
     else:
         primary_relationship = created_relationship
 
+    # Resolve contact name for display consistency
+    [
+        primary_relationship
+    ] = await relationship_service.resolve_relationship_contact_names(
+        [primary_relationship], contact_id
+    )
+
     relationship_resource = ContactRelationshipConverter.to_resource(
         primary_relationship, base_url
     )
@@ -208,6 +215,13 @@ async def update_contact_relationship(
         relationship_type=RelationshipType(
             relationship_request.data.attributes.relationship_type
         ),
+    )
+
+    # Resolve contact name for display consistency
+    [
+        updated_relationship
+    ] = await relationship_service.resolve_relationship_contact_names(
+        [updated_relationship], contact_id
     )
 
     relationship_resource = ContactRelationshipConverter.to_resource(
