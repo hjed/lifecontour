@@ -81,6 +81,9 @@ def create_mcp_auth_provider(settings: Settings) -> AuthProvider | None:
             token_verifier=DebugTokenVerifier(),
             base_url=base_url,
             issuer_url=_get_mcp_issuer_url(settings),
+            extra_authorize_params={"scope": settings.oauth_scopes}
+            if settings.oauth_scopes
+            else None,
         )
 
     # Priority 2: GitHub

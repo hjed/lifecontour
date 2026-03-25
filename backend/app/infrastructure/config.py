@@ -139,6 +139,10 @@ class Settings(BaseSettings):
     oauth_userinfo_url: str = Field(
         default="", description="Generic OAuth user info URL"
     )
+    oauth_scopes: str = Field(
+        default="openid profile email",
+        description="Generic OAuth scopes (space-separated)",
+    )
 
     # External services
     google_client_id: str = Field(default="", description="Google OAuth client ID")
