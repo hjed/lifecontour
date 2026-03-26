@@ -170,19 +170,29 @@ test.describe('Journal Detail Page', () => {
       const startLabel = formatAriaLabel(startDate);
       const endLabel = formatAriaLabel(endDate);
 
+      // Get the month name for each date to scope clicks to the correct
+      // calendar grid.  Dates at month boundaries can appear as overflow
+      // days in an adjacent month's grid, causing strict-mode violations.
+      const startMonth = startDate.toLocaleDateString('en-US', {
+        month: 'long',
+      });
+      const endMonth = endDate.toLocaleDateString('en-US', { month: 'long' });
+
       // Get the save button reference early
       const saveButton = page.getByTestId('journal-date-range-field-save');
 
-      // Click start date
-      const startButton = page.getByRole('button', { name: startLabel });
+      // Click start date – scoped to its month grid
+      const startGrid = page.getByRole('grid', { name: startMonth });
+      const startButton = startGrid.getByRole('button', { name: startLabel });
       await expect(startButton).toBeVisible();
       await startButton.click();
 
       // Wait for the calendar to update by checking the save button state
       await expect(saveButton).toBeVisible();
 
-      // Click end date
-      const endButton = page.getByRole('button', { name: endLabel });
+      // Click end date – scoped to its month grid
+      const endGrid = page.getByRole('grid', { name: endMonth });
+      const endButton = endGrid.getByRole('button', { name: endLabel });
       await expect(endButton).toBeVisible();
       await endButton.click();
 
