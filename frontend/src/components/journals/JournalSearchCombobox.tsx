@@ -87,6 +87,11 @@ export function JournalSearchCombobox({
   const debouncedQuery = useDebounce(searchQuery, SEARCH_DEBOUNCE_MS);
   const blurTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
+  // Sync searchQuery when the value prop changes externally (e.g., edit flow)
+  useEffect(() => {
+    setSearchQuery(value);
+  }, [value]);
+
   // Search query
   const {
     data: searchResults,

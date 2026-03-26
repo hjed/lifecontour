@@ -57,8 +57,26 @@ test.describe('Journal Hierarchy', () => {
     expect(match).not.toBeNull();
     const parentId = match![1];
 
-    // Ensure parent journal was fully indexed by meilisearch so combobox finds it
-    await page.waitForTimeout(1500);
+    // Wait for parent journal to be indexed so the combobox search can find it
+    await expect
+      .poll(
+        async () => {
+          const response = await page.request.get(
+            `/api/journals/search?q=${encodeURIComponent(parentTitle)}`
+          );
+          if (!response.ok()) {
+            return false;
+          }
+          const data = await response.json();
+          return data.data?.some(
+            (j: Record<string, unknown>) => String(j.id) === parentId
+          );
+        },
+        {
+          timeout: 30000,
+        }
+      )
+      .toBeTruthy();
 
     // 2. Create the child journal
     const childTitle = `E2E Hierarchy Child - ${Date.now()}`;
