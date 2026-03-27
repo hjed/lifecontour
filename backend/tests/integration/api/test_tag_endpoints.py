@@ -238,3 +238,99 @@ class TestTagEndpointsHierarchy:
         returned_ids = [int(c["id"]) for c in data["data"]]
         assert child_contact_id in returned_ids
         assert parent_contact_id not in returned_ids
+
+    # ---- Test 7: Hierarchical tag names with / persist correctly ----
+
+    async def test_create_tag_with_slash_in_name(self, tag_api_client):
+        """Test creating a tag with '/' in the name for hierarchical path."""
+        tag = await self._create_tag(tag_api_client, "work/engineering")
+
+        assert tag["attributes"]["name"] == "work/engineering"
+
+        # Verify it appears in the tag list
+        response = await tag_api_client.get("/api/tags")
+        assert response.status_code == 200
+
+        data = response.json()
+        tag_names = [t["attributes"]["name"] for t in data["data"]]
+        assert "work/engineering" in tag_names
+
+    async def test_create_tag_with_deep_hierarchical_name(self, tag_api_client):
+        """Test creating a tag with multi-level hierarchy in name."""
+        tag = await self._create_tag(tag_api_client, "org/dept/team")
+
+        assert tag["attributes"]["name"] == "org/dept/team"
+
+    @pytest.mark.parametrize("invalid_name", ["/leading", "trailing/", "a//b"], ids=str)
+    async def test_create_tag_with_invalid_hierarchical_name_rejected(
+        self, tag_api_client, invalid_name
+    ):
+        """Test that invalid hierarchical tag names are rejected at the domain layer.
+
+        TagName raises ValueError for invalid patterns, which propagates through
+        the ASGI transport as an unhandled exception. The unit tests in
+        test_value_objects.py verify the exact validation rules. This integration
+        test confirms the API does not silently accept invalid names.
+        """
+        request_data = {
+            "data": {
+                "type": "tags",
+                "attributes": {"name": invalid_name},
+            }
+        }
+        with pytest.raises(ValueError):
+            await tag_api_client.post("/api/tags", json=request_data)
+
+    # ---- Test 8: Combined favourite + parent tag filter ----
+
+    async def test_filter_by_parent_tag_and_favourite(self, tag_api_client):
+        """Filtering by parent tag + favourite=true returns only favourite+descendant contacts."""
+        parent = await self._create_tag(tag_api_client, "network")
+        parent_id = int(parent["id"])
+        child = await self._create_tag(
+            tag_api_client, "professional", parent_id=parent_id
+        )
+        child_id = int(child["id"])
+
+        # Create two contacts with child tag: one favourite, one not
+        fav_contact = await self._create_contact(tag_api_client, "FavContact")
+        fav_contact_id = int(fav_contact["id"])
+        await self._assign_tag_to_contact(tag_api_client, fav_contact_id, child_id)
+        # Toggle favourite on
+        toggle_resp = await tag_api_client.post(
+            f"/api/contacts/{fav_contact_id}/favourite"
+        )
+        assert toggle_resp.status_code == 200
+
+        non_fav_contact = await self._create_contact(tag_api_client, "NonFavContact")
+        non_fav_contact_id = int(non_fav_contact["id"])
+        await self._assign_tag_to_contact(tag_api_client, non_fav_contact_id, child_id)
+
+        # Filter: parent tag + favourite
+        response = await tag_api_client.get(
+            f"/api/contacts?tag_ids={parent_id}&favourite=true"
+        )
+        assert response.status_code == 200
+
+        data = response.json()
+        returned_ids = [int(c["id"]) for c in data["data"]]
+        assert fav_contact_id in returned_ids
+        assert non_fav_contact_id not in returned_ids
+
+    # ---- Test 9: Flat tags still work ----
+
+    async def test_flat_tag_filtering_unchanged(self, tag_api_client):
+        """Flat tags without parents continue to work as before."""
+        tag = await self._create_tag(tag_api_client, "flat-tag")
+        tag_id = int(tag["id"])
+
+        contact = await self._create_contact(tag_api_client, "FlatTagContact")
+        contact_id = int(contact["id"])
+        await self._assign_tag_to_contact(tag_api_client, contact_id, tag_id)
+
+        response = await tag_api_client.get(f"/api/contacts?tag_ids={tag_id}")
+        assert response.status_code == 200
+
+        data = response.json()
+        returned_ids = [int(c["id"]) for c in data["data"]]
+        assert contact_id in returned_ids

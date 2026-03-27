@@ -98,7 +98,7 @@ class TestInvalidTagNameError:
     def test_create_error(self):
         """Test creating InvalidTagNameError."""
         error = InvalidTagNameError("invalid tag")
-        expected_message = "Tag name 'invalid tag' contains invalid characters. Only alphanumeric, -, _, & allowed"
+        expected_message = "Tag name 'invalid tag' contains invalid characters. Only alphanumeric, -, _, &, / allowed"
         assert str(error) == expected_message
         assert error.message == expected_message
         assert error.status_code == 400

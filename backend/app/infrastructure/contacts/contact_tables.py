@@ -161,7 +161,9 @@ tags_table = Table(
         nullable=False,
     ),
     UniqueConstraint("name"),
-    CheckConstraint("name ~ '^[a-zA-Z0-9_&-]+$'", name="ck_tags_name_format"),
+    CheckConstraint(
+        "name ~ '^[a-zA-Z0-9_&-]+(/[a-zA-Z0-9_&-]+)*$'", name="ck_tags_name_format"
+    ),
 )
 
 # Contact tags table (many-to-many)

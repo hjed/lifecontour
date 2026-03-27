@@ -233,6 +233,23 @@ class TestTagName:
             assert tag_name.value == name
             assert str(tag_name) == name
 
+    def test_valid_hierarchical_tag_names(self):
+        """Test valid hierarchical tag names with / delimiter."""
+        valid_hierarchical_names = [
+            "work/engineering",
+            "family/extended",
+            "a/b",
+            "a/b/c",
+            "work/eng/backend",
+            "client&partner/vip",
+            "high_priority/urgent",
+            "tag-1/tag-2",
+        ]
+        for name in valid_hierarchical_names:
+            tag_name = TagName(name)
+            assert tag_name.value == name
+            assert str(tag_name) == name
+
     def test_empty_tag_name_raises_error(self):
         """Test empty tag name raises ValueError."""
         with pytest.raises(ValueError, match="Tag name cannot be empty"):
@@ -247,10 +264,27 @@ class TestTagName:
             "tag$dollar",
             "tag%percent",
             "tag.dot",
-            "tag/slash",
             "tag\\backslash",
         ]
         for invalid_name in invalid_names:
+            with pytest.raises(
+                ValueError, match="Tag name contains invalid characters"
+            ):
+                TagName(invalid_name)
+
+    def test_invalid_hierarchical_tag_name_patterns(self):
+        """Test invalid hierarchical tag name patterns raise ValueError."""
+        invalid_hierarchical_names = [
+            "/leading",
+            "trailing/",
+            "a//b",
+            "/",
+            "//",
+            "a///b",
+            "/a/b",
+            "a/b/",
+        ]
+        for invalid_name in invalid_hierarchical_names:
             with pytest.raises(
                 ValueError, match="Tag name contains invalid characters"
             ):

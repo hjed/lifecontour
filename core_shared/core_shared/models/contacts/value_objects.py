@@ -129,10 +129,11 @@ class TagName:
         if not self.value:
             raise ValueError("Tag name cannot be empty")
 
-        # Only alphanumeric, hyphens, underscores, and ampersands
-        if not re.match(r"^[a-zA-Z0-9_&-]+$", self.value):
+        # Alphanumeric, hyphens, underscores, ampersands, with / as hierarchy delimiter
+        # Each segment separated by / must be non-empty and follow the same character rules
+        if not re.match(r"^[a-zA-Z0-9_&-]+(/[a-zA-Z0-9_&-]+)*$", self.value):
             raise ValueError(
-                f"Tag name contains invalid characters. Only alphanumeric, -, _, & allowed: {self.value}"
+                f"Tag name contains invalid characters. Only alphanumeric, -, _, &, / allowed: {self.value}"
             )
 
         if len(self.value) > 100:
