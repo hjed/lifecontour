@@ -761,6 +761,74 @@ async def _fetch_parent_and_children(
     return parent, children, children_count
 
 
+async def _fetch_children_types(
+    children: list[Journal],
+    calendar_info_repo: CalendarInfoRepository,
+    mood_data_repo: MoodDataRepository,
+    plan_data_repo: PlanDataRepository,
+    travel_data_repo: TravelDataRepository,
+    photo_album_data_repo: PhotoAlbumDataRepository,
+    fitness_data_repo: FitnessDataRepository,
+    outdoor_activity_data_repo: OutdoorActivityDataRepository,
+    bushwalking_data_repo: BushwalkingDataRepository,
+    jogging_data_repo: JoggingDataRepository,
+    abseiling_data_repo: AbseilingDataRepository,
+    canyoning_data_repo: CanyoningDataRepository,
+    climbing_data_repo: ClimbingDataRepository,
+    kayaking_data_repo: KayakingDataRepository,
+    skiing_data_repo: CrossCountrySkiingDataRepository,
+) -> dict[int, list[str]]:
+    """Fetch only the type names for each child journal (lightweight).
+
+    Unlike ``_enrich_journal_data`` this skips contacts, tags, calendar
+    details, type_data, and routes — we only need the type *names* for the
+    child summary shown in the UI.
+
+    Returns:
+        Mapping of journal ID to list of type name strings.
+    """
+    result: dict[int, list[str]] = {}
+
+    for child in children:
+        if child.id is None:
+            continue
+        journal_id = child.id
+        types: list[str] = []
+
+        if await calendar_info_repo.find_by_journal_id(journal_id):
+            types.append(JournalType.EVENT.value)
+        if await mood_data_repo.find_by_journal_id(journal_id):
+            types.append(JournalType.MOOD_RATING.value)
+        if await plan_data_repo.find_by_journal_id(journal_id):
+            types.append(JournalType.PLAN.value)
+        if await travel_data_repo.find_by_journal_id(journal_id):
+            types.append(JournalType.TRAVEL.value)
+        if await photo_album_data_repo.find_by_journal_id(journal_id):
+            types.append(JournalType.PHOTO_ALBUM.value)
+        if await fitness_data_repo.find_by_journal_id(journal_id):
+            types.append(JournalType.FITNESS.value)
+        if await outdoor_activity_data_repo.find_by_journal_id(journal_id):
+            types.append(JournalType.OUTDOOR_ACTIVITY.value)
+        if await bushwalking_data_repo.find_by_journal_id(journal_id):
+            types.append(JournalType.BUSHWALKING.value)
+        if await jogging_data_repo.find_by_journal_id(journal_id):
+            types.append(JournalType.JOGGING.value)
+        if await abseiling_data_repo.find_by_journal_id(journal_id):
+            types.append(JournalType.ABSEILING_TRIP.value)
+        if await canyoning_data_repo.find_by_journal_id(journal_id):
+            types.append(JournalType.CANYONING.value)
+        if await climbing_data_repo.find_by_journal_id(journal_id):
+            types.append(JournalType.CLIMBING.value)
+        if await kayaking_data_repo.find_by_journal_id(journal_id):
+            types.append(JournalType.KAYAKING.value)
+        if await skiing_data_repo.find_by_journal_id(journal_id):
+            types.append(JournalType.CROSS_COUNTRY_SKIING.value)
+
+        result[journal_id] = types
+
+    return result
+
+
 async def _build_journal_list_resources(
     journals: list[Journal],
     user_id: str,
@@ -1178,6 +1246,24 @@ async def get_journal(
         journal, user.id, journal_service
     )
 
+    children_types = await _fetch_children_types(
+        children,
+        calendar_info_repo,
+        mood_data_repo,
+        plan_data_repo,
+        travel_data_repo,
+        photo_album_data_repo,
+        fitness_data_repo,
+        outdoor_activity_data_repo,
+        bushwalking_data_repo,
+        jogging_data_repo,
+        abseiling_data_repo,
+        canyoning_data_repo,
+        climbing_data_repo,
+        kayaking_data_repo,
+        skiing_data_repo,
+    )
+
     journal_resource = JournalConverter.to_resource(
         journal,
         base_url,
@@ -1189,6 +1275,7 @@ async def get_journal(
         parent=parent,
         children=children,
         children_count=children_count,
+        children_types=children_types,
     )
 
     return await _build_journal_response(journal_resource, contact_repo)
@@ -1898,6 +1985,24 @@ async def update_journal(
         saved_journal, user.id, journal_service
     )
 
+    children_types = await _fetch_children_types(
+        children,
+        calendar_info_repo,
+        mood_data_repo,
+        plan_data_repo,
+        travel_data_repo,
+        photo_album_data_repo,
+        fitness_data_repo,
+        outdoor_activity_data_repo,
+        bushwalking_data_repo,
+        jogging_data_repo,
+        abseiling_data_repo,
+        canyoning_data_repo,
+        climbing_data_repo,
+        kayaking_data_repo,
+        skiing_data_repo,
+    )
+
     journal_resource = JournalConverter.to_resource(
         journal=saved_journal,
         base_url=base_url,
@@ -1909,6 +2014,7 @@ async def update_journal(
         parent=parent,
         children=children,
         children_count=children_count,
+        children_types=children_types,
     )
 
     return await _build_journal_response(journal_resource, contact_repo)
@@ -2053,6 +2159,24 @@ async def partial_update_journal(
         saved_journal, user.id, journal_service
     )
 
+    children_types = await _fetch_children_types(
+        children,
+        calendar_info_repo,
+        mood_data_repo,
+        plan_data_repo,
+        travel_data_repo,
+        photo_album_data_repo,
+        fitness_data_repo,
+        outdoor_activity_data_repo,
+        bushwalking_data_repo,
+        jogging_data_repo,
+        abseiling_data_repo,
+        canyoning_data_repo,
+        climbing_data_repo,
+        kayaking_data_repo,
+        skiing_data_repo,
+    )
+
     journal_resource = JournalConverter.to_resource(
         journal=saved_journal,
         base_url=base_url,
@@ -2064,6 +2188,7 @@ async def partial_update_journal(
         parent=parent,
         children=children,
         children_count=children_count,
+        children_types=children_types,
     )
 
     return await _build_journal_response(journal_resource, contact_repo)

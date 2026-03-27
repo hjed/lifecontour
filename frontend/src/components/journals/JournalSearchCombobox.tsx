@@ -23,6 +23,7 @@ const BLUR_DELAY_MS = 200; // Delay to prevent dropdown from closing before clic
 
 interface JournalSearchComboboxProps {
   readonly onSelect: (journal: JournalResource) => void;
+  readonly onClear?: () => void;
   readonly placeholder?: string;
   readonly inputId?: string;
   readonly excludeJournalId?: string;
@@ -74,6 +75,7 @@ async function searchJournals(query: string): Promise<JournalListResponse> {
 
 export function JournalSearchCombobox({
   onSelect,
+  onClear,
   placeholder = 'Search journals...',
   inputId,
   excludeJournalId,
@@ -131,6 +133,11 @@ export function JournalSearchCombobox({
     setSearchQuery(value);
     setShowResults(value.length > 0);
     setSelectedIndex(-1);
+    // If the user clears the input, notify the parent so it can reset
+    // its stored selection (e.g. parentId) to stay in sync.
+    if (!value && onClear) {
+      onClear();
+    }
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {

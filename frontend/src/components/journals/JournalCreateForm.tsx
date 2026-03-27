@@ -583,6 +583,7 @@ export function JournalCreateForm({ onCancel }: JournalCreateFormProps = {}) {
                   onSelect={journal =>
                     field.onChange(Number.parseInt(journal.id, 10))
                   }
+                  onClear={() => field.onChange(null)}
                   placeholder='Search for a parent journal...'
                   className='w-full'
                 />
