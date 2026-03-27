@@ -796,37 +796,62 @@ export class TestDataManager {
         requestData.data.attributes.parent_id = journalData.parent_id;
       }
 
-      const response = await this.page.request.post('/api/journals', {
-        headers: {
-          'Content-Type': 'application/vnd.api+json',
-        },
-        data: JSON.stringify(requestData),
-      });
+      // Retry loop to handle transient 500 errors (database contention in CI)
+      const maxRetries = 3;
+      let lastError: Error | undefined;
+      for (let attempt = 1; attempt <= maxRetries; attempt++) {
+        const response = await this.page.request.post('/api/journals', {
+          headers: {
+            'Content-Type': 'application/vnd.api+json',
+          },
+          data: JSON.stringify(requestData),
+        });
 
-      if (!response.ok()) {
+        if (response.ok()) {
+          const responseData = await response.json();
+          const journalId = responseData.data.id;
+          const journalAttributes = responseData.data.attributes;
+
+          // Track for cleanup
+          this.createdJournalIds.push(journalId);
+
+          console.debug(`✅ [Data Manager] Created journal ${journalId}`);
+
+          return {
+            id: journalId,
+            title: journalAttributes.title,
+            content: journalAttributes.content,
+            event_date_range: journalAttributes.event_date_range,
+            types: journalAttributes.types || [],
+            contacts: journalAttributes.contacts || [],
+            tags: journalAttributes.tags || [],
+          };
+        }
+
+        const statusCode = response.status();
+        const responseText = await response.text();
+
+        // Only retry on server errors (5xx)
+        if (statusCode >= 500 && attempt < maxRetries) {
+          console.debug(
+            `⚠️ [Data Manager] Journal creation attempt ${attempt}/${maxRetries} ` +
+              `got ${statusCode}, retrying after delay...`
+          );
+          await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
+          lastError = new Error(
+            `Failed to create journal: ${statusCode} ${responseText}`
+          );
+          continue;
+        }
+
+        // Non-retryable error or final attempt — throw immediately
         throw new Error(
-          `Failed to create journal: ${response.status()} ${await response.text()}`
+          `Failed to create journal: ${statusCode} ${responseText}`
         );
       }
 
-      const responseData = await response.json();
-      const journalId = responseData.data.id;
-      const journalAttributes = responseData.data.attributes;
-
-      // Track for cleanup
-      this.createdJournalIds.push(journalId);
-
-      console.log(`✅ [Data Manager] Created journal ${journalId}`);
-
-      return {
-        id: journalId,
-        title: journalAttributes.title,
-        content: journalAttributes.content,
-        event_date_range: journalAttributes.event_date_range,
-        types: journalAttributes.types || [],
-        contacts: journalAttributes.contacts || [],
-        tags: journalAttributes.tags || [],
-      };
+      // Should not reach here, but satisfy TypeScript
+      throw lastError ?? new Error('Failed to create journal after retries');
     } catch (error) {
       console.error(`❌ [Data Manager] Failed to create journal:`, error);
       throw error;
