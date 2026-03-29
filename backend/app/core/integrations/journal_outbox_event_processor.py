@@ -327,8 +327,14 @@ class JournalOutboxEventProcessor:
             )
         if updated_journal.event_date_range != existing_journal.event_date_range:
             changed_fields["event_date_range"] = (
-                existing_journal.event_date_range,
-                updated_journal.event_date_range,
+                {
+                    "start": existing_journal.event_date_range.start.isoformat(),
+                    "end": existing_journal.event_date_range.end.isoformat(),
+                },
+                {
+                    "start": updated_journal.event_date_range.start.isoformat(),
+                    "end": updated_journal.event_date_range.end.isoformat(),
+                },
             )
 
         # Update via journal service (only if fields actually changed)

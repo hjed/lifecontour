@@ -161,3 +161,57 @@ class TestCalendarInfoTimeValidation:
             match=f"Location cannot exceed {MAX_LOCATION_LENGTH}",
         ):
             CalendarInfo(journal_id=1, calendar_id=calendar_id, location=long_location)
+
+    def test_end_time_before_start_valid_when_event_spans_multiple_days(self):
+        """Multi-day events can have start_time > end_time (crossing midnight).
+
+        When event_start_date and event_end_date are provided and differ,
+        the validation combines date+time to check ordering, allowing e.g.
+        23:00 on day 1 to 01:00 on day 2.
+        """
+        from datetime import date
+
+        calendar_id = uuid4()
+        # This should NOT raise — the event spans from Oct 27 23:00 to Oct 28 01:00
+        calendar_info = CalendarInfo(
+            journal_id=1,
+            calendar_id=calendar_id,
+            start_time=time(23, 0),
+            end_time=time(1, 0),
+            event_start_date=date(2023, 10, 27),
+            event_end_date=date(2023, 10, 28),
+        )
+        assert calendar_info.start_time == time(23, 0)
+        assert calendar_info.end_time == time(1, 0)
+
+    def test_end_time_before_start_still_rejected_on_same_day(self):
+        """Same-day events with reversed times should still be rejected."""
+        from datetime import date
+
+        calendar_id = uuid4()
+        with pytest.raises(
+            CalendarInfoValidationError,
+            match="end_time must be after or equal to start_time",
+        ):
+            CalendarInfo(
+                journal_id=1,
+                calendar_id=calendar_id,
+                start_time=time(17, 0),
+                end_time=time(9, 0),
+                event_start_date=date(2023, 10, 27),
+                event_end_date=date(2023, 10, 27),
+            )
+
+    def test_end_time_before_start_rejected_without_dates(self):
+        """Without dates, reversed times are still rejected (backward compat)."""
+        calendar_id = uuid4()
+        with pytest.raises(
+            CalendarInfoValidationError,
+            match="end_time must be after or equal to start_time",
+        ):
+            CalendarInfo(
+                journal_id=1,
+                calendar_id=calendar_id,
+                start_time=time(17, 0),
+                end_time=time(9, 0),
+            )
