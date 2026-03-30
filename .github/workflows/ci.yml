@@ -213,7 +213,7 @@ jobs:
         run: uv run pytest -m unit --cov=app --cov-report=xml --cov-report=term-missing
 
       - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v5
+        uses: codecov/codecov-action@v6
         with:
           file: ./backend/coverage.xml
           flags: backend-unit
@@ -257,7 +257,7 @@ jobs:
         run: uv run pytest --cov=core_shared --cov-report=xml --cov-report=term-missing
 
       - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v5
+        uses: codecov/codecov-action@v6
         with:
           files: ./core_shared/coverage.xml
           flags: core-shared-unit
@@ -616,7 +616,7 @@ jobs:
         run: pnpm test:coverage
 
       - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v5
+        uses: codecov/codecov-action@v6
         with:
           file: ./frontend/coverage/lcov.info
           flags: frontend
