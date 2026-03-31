@@ -23,9 +23,15 @@ export default async function NewJournalPage({
   searchParams,
 }: NewJournalPageProps) {
   const params = await searchParams;
-  const defaultParentId = params.parentId
+  const parsedParentId = params.parentId
     ? Number.parseInt(params.parentId, 10)
     : undefined;
+  const defaultParentId =
+    parsedParentId !== undefined &&
+    Number.isFinite(parsedParentId) &&
+    parsedParentId > 0
+      ? parsedParentId
+      : undefined;
 
   return (
     <AuthGuard>

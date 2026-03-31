@@ -8,7 +8,7 @@
 
 'use client';
 
-import { useCallback, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import type { Route } from 'next';
 import {
@@ -370,6 +370,9 @@ export function JournalCreateForm({
     defaultParentId ? String(defaultParentId) : ''
   );
   const defaultParentTitle = parentJournalData?.data?.attributes?.title ?? '';
+  // Track whether user has manually changed the parent selector,
+  // preventing the async title fetch from overwriting their selection
+  const parentUserModified = useRef(false);
 
   const isPending = isCreatingJournal || isCreatingRoute;
 
@@ -590,12 +593,18 @@ export function JournalCreateForm({
               <FormLabel>Parent Journal</FormLabel>
               <FormControl>
                 <JournalSearchCombobox
-                  onSelect={journal =>
-                    field.onChange(Number.parseInt(journal.id, 10))
-                  }
-                  onClear={() => field.onChange(null)}
+                  onSelect={journal => {
+                    parentUserModified.current = true;
+                    field.onChange(Number.parseInt(journal.id, 10));
+                  }}
+                  onClear={() => {
+                    parentUserModified.current = true;
+                    field.onChange(null);
+                  }}
                   placeholder='Search for a parent journal...'
-                  value={defaultParentTitle}
+                  value={
+                    !parentUserModified.current ? defaultParentTitle : undefined
+                  }
                   className='w-full'
                 />
               </FormControl>
