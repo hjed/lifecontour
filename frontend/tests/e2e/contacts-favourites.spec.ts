@@ -136,7 +136,9 @@ test.describe('Contacts Page - Favourites Functionality', () => {
     await expect(emptyContactsPage).toHaveTitle(/Personal Management System/);
 
     // Wait for authentication to complete and page to load
-    await emptyContactsPage.waitForLoadState('networkidle');
+    await expect(
+      emptyContactsPage.locator('main, [role="main"]').first()
+    ).toBeVisible();
 
     // Wait for the empty state to appear (this ensures loading is complete)
     await expect(emptyContactsPage.getByText('0 contacts found')).toBeVisible();

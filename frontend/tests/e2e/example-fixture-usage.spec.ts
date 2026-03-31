@@ -181,14 +181,14 @@ test.describe('Example: Fixture-Based Testing', () => {
       await page.goto('/contacts');
 
       // Wait for contacts to load
-      await page.waitForLoadState('networkidle');
+      await expect(page.locator('main, [role="main"]').first()).toBeVisible();
 
       // Use search functionality
       const searchInput = page.locator('[data-testid="search-input"]');
       await searchInput.fill(contacts[0].firstName);
 
       // Wait for search results to update
-      await page.waitForLoadState('networkidle');
+      await expect(page.locator('main, [role="main"]').first()).toBeVisible();
 
       // Should filter to show only matching contacts
       const contactCard = page.locator(
@@ -208,7 +208,7 @@ test.describe('Example: Fixture-Based Testing', () => {
       await searchInput.clear();
 
       // Wait for search results to update
-      await page.waitForLoadState('networkidle');
+      await expect(page.locator('main, [role="main"]').first()).toBeVisible();
 
       // All contacts should be visible again
       for (const contact of contacts) {
@@ -262,7 +262,9 @@ test.describe('Example: Fixture-Based Testing', () => {
       await authenticatedPage.goto('/contacts');
 
       // Wait for the page to load and process the error
-      await authenticatedPage.waitForLoadState('networkidle');
+      await expect(
+        authenticatedPage.locator('main, [role="main"]').first()
+      ).toBeVisible();
 
       // Should show error state (React Query retries will complete automatically)
       // Need longer timeout for React Query retries to complete

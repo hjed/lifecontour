@@ -19,7 +19,7 @@ test.describe('Journal List Page', () => {
       await page.goto('/journals');
 
       // Wait for page to load
-      await page.waitForLoadState('networkidle');
+      await expect(page.locator('main, [role="main"]').first()).toBeVisible();
 
       // Verify page title
       await expect(page.locator('h1')).toContainText('Journals');
@@ -42,7 +42,7 @@ test.describe('Journal List Page', () => {
       await page.goto('/journals');
 
       // Wait for page to load
-      await page.waitForLoadState('networkidle');
+      await expect(page.locator('main, [role="main"]').first()).toBeVisible();
 
       // Verify empty state is displayed
       await expect(page.getByText(/no journals found/i)).toBeVisible();
@@ -57,7 +57,7 @@ test.describe('Journal List Page', () => {
 
       // Navigate to journals page
       await page.goto('/journals');
-      await page.waitForLoadState('networkidle');
+      await expect(page.locator('main, [role="main"]').first()).toBeVisible();
 
       // Wait for journals to be indexed in MeiliSearch
       // The outbox processor runs every 10 seconds, so we poll until journals are indexed
@@ -144,7 +144,7 @@ test.describe('Journal List Page', () => {
 
       // Navigate to journals page
       await page.goto('/journals');
-      await page.waitForLoadState('networkidle');
+      await expect(page.locator('main, [role="main"]').first()).toBeVisible();
 
       // Verify all journals are initially visible
       for (const journal of journals) {
@@ -249,7 +249,7 @@ test.describe('Journal List Page', () => {
 
       // Navigate to journals page
       await page.goto('/journals');
-      await page.waitForLoadState('networkidle');
+      await expect(page.locator('main, [role="main"]').first()).toBeVisible();
 
       // Wait for journals to be indexed in MeiliSearch
       // Increased timeout to 30 seconds to handle indexing delays when running as part of full test suite
@@ -387,7 +387,7 @@ test.describe('Journal List Page', () => {
 
       // Navigate to journals page
       await page.goto('/journals');
-      await page.waitForLoadState('networkidle');
+      await expect(page.locator('main, [role="main"]').first()).toBeVisible();
 
       // Verify all journals are initially visible
       for (const journal of journals) {
@@ -521,7 +521,7 @@ test.describe('Journal List Page', () => {
 
       // Navigate to journals page
       await page.goto('/journals');
-      await page.waitForLoadState('networkidle');
+      await expect(page.locator('main, [role="main"]').first()).toBeVisible();
 
       // Verify all journals are initially visible
       for (const journal of journals) {
@@ -644,7 +644,7 @@ test.describe('Journal List Page', () => {
 
       // Navigate to journals page
       await page.goto('/journals');
-      await page.waitForLoadState('networkidle');
+      await expect(page.locator('main, [role="main"]').first()).toBeVisible();
 
       // Verify all journals are initially visible
       await expect(
@@ -815,7 +815,7 @@ test.describe('Journal List Page', () => {
 
       // Navigate to journals page
       await page.goto('/journals');
-      await page.waitForLoadState('networkidle');
+      await expect(page.locator('main, [role="main"]').first()).toBeVisible();
 
       // Apply date filter (February 2026)
       const dateRangeButton = page.getByRole('button', {
@@ -974,7 +974,7 @@ test.describe('Journal List Page', () => {
 
       // Navigate to journals page
       await page.goto('/journals');
-      await page.waitForLoadState('networkidle');
+      await expect(page.locator('main, [role="main"]').first()).toBeVisible();
 
       // Verify all journals are initially visible
       await expect(
@@ -1186,7 +1186,7 @@ test.describe('Journal List Page', () => {
 
       // Navigate to journals page
       await page.goto('/journals');
-      await page.waitForLoadState('networkidle');
+      await expect(page.locator('main, [role="main"]').first()).toBeVisible();
 
       // Click on the first journal link
       const firstJournal = journals[0];

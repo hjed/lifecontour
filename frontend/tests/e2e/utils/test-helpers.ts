@@ -328,7 +328,9 @@ export class ContactTestHelpers {
     }
 
     // If we reach here, we're authenticated and can test the actual functionality
-    await this.page.waitForLoadState('networkidle'); // Wait for page to fully load
+    await expect(
+      this.page.locator('main, [role="main"]').first()
+    ).toBeVisible(); // Wait for page to fully load
   }
 
   /**
@@ -354,12 +356,11 @@ export class ContactTestHelpers {
     await this.page.goto(url);
     await expect(this.page).toHaveTitle(/Personal Management System/);
 
-    // Wait for any redirects to complete
-    await this.page.waitForLoadState('networkidle');
+    // Should not be redirected to login (auto-waits for redirect)
+    await expect(this.page).not.toHaveURL(/\/auth\/login/);
 
     const currentUrl = this.page.url();
 
-    // Should not be redirected to login
     if (currentUrl.includes('/auth/login')) {
       throw new Error(
         `Test requires authentication. Please ensure user is logged in before running authenticated tests. Current URL: ${currentUrl}`
@@ -378,8 +379,8 @@ export class ContactTestHelpers {
     await this.page.goto(url);
     await expect(this.page).toHaveTitle(/Personal Management System/);
 
-    // Wait for any redirects to complete
-    await this.page.waitForLoadState('networkidle');
+    // Wait for any redirects to complete (auto-waits)
+    await expect(this.page).toHaveURL(/\/auth\/login/);
 
     const currentUrl = this.page.url();
 
@@ -446,7 +447,7 @@ export class ContactTestHelpers {
       await expect(firstButton).toBeEnabled();
 
       await firstButton.click();
-      await this.page.waitForLoadState('networkidle'); // Wait for state changes
+      // Optimistic UI updates, no wait needed
 
       // Button should still be present and enabled after click
       await expect(firstButton).toBeEnabled();
@@ -480,7 +481,9 @@ export class ContactTestHelpers {
    */
   async testPageStructure(): Promise<void> {
     // Wait for page to load
-    await this.page.waitForLoadState('networkidle');
+    await expect(
+      this.page.locator('main, [role="main"]').first()
+    ).toBeVisible();
 
     // Page should have proper title
     await expect(this.page).toHaveTitle(/Personal Management System/);
@@ -659,7 +662,9 @@ export class SidebarTestHelpers {
         if (href) {
           console.debug(`Fallback: navigating directly to ${href}`);
           await this.page.goto(href);
-          await this.page.waitForLoadState('networkidle');
+          await expect(
+            this.page.locator('main, [role="main"]').first()
+          ).toBeVisible();
         }
       }
 
@@ -791,7 +796,7 @@ export class SidebarTestHelpers {
     await expect(navLink.first()).toBeEnabled();
 
     await navLink.first().click();
-    await this.page.waitForLoadState('networkidle');
+    // Navigation wait handled by URL assertion below
 
     const currentUrl = this.page.url();
     const isOnExpectedPage =
@@ -1265,7 +1270,7 @@ export async function verifyPageLoadsSuccessfully(
     await expect(page).toHaveTitle(expectedTitlePattern);
   }
 
-  await page.waitForLoadState('networkidle');
+  await expect(page.locator('body')).not.toBeEmpty();
   await verifyPageHasContent(page);
 }
 
@@ -1323,7 +1328,9 @@ export class ReliableWaiter {
     await expect(this.page).toHaveURL(/\/contacts\/\d+$/, { timeout });
 
     // Wait for the page to be in a stable state
-    await this.page.waitForLoadState('networkidle', { timeout });
+    await expect(this.page.locator('main, [role="main"]').first()).toBeVisible({
+      timeout,
+    });
 
     // Wait for the contact avatar to be visible (indicates page structure loaded)
     await expect(
@@ -1357,7 +1364,9 @@ export class ReliableWaiter {
     await expect(this.page).toHaveURL(/\/contacts\/?(\?.*)?$/, { timeout });
 
     // Wait for the page to be in a stable state
-    await this.page.waitForLoadState('networkidle', { timeout });
+    await expect(this.page.locator('main, [role="main"]').first()).toBeVisible({
+      timeout,
+    });
 
     // Wait for the main heading
     await expect(this.page.locator('h1')).toContainText('Contacts', {
@@ -1389,7 +1398,9 @@ export class ReliableWaiter {
     ]);
 
     // Wait for the page to be stable after redirect
-    await this.page.waitForLoadState('networkidle', { timeout: 10000 });
+    await expect(this.page.locator('main, [role="main"]').first()).toBeVisible({
+      timeout: 10000,
+    });
   }
 
   /**
@@ -1415,7 +1426,9 @@ export class ReliableWaiter {
     }
 
     // Wait for page to be stable
-    await this.page.waitForLoadState('networkidle', { timeout: 10000 });
+    await expect(this.page.locator('main, [role="main"]').first()).toBeVisible({
+      timeout: 10000,
+    });
   }
 }
 

@@ -15,7 +15,7 @@ test.describe('Journal Complete Workflows', () => {
 
       // Step 1: Navigate to journals page
       await page.goto('/journals');
-      await page.waitForLoadState('networkidle');
+      await expect(page.locator('main, [role="main"]').first()).toBeVisible();
 
       // Step 2: Verify journals are displayed
       await expect(page.locator('h1')).toContainText('Journals');
@@ -62,7 +62,7 @@ test.describe('Journal Complete Workflows', () => {
 
       // Step 1: Navigate to journals page
       await page.goto('/journals');
-      await page.waitForLoadState('networkidle');
+      await expect(page.locator('main, [role="main"]').first()).toBeVisible();
 
       // Step 2: Apply type filter
       const filtersSection = page.locator('[data-testid="journal-filters"]');
@@ -85,7 +85,9 @@ test.describe('Journal Complete Workflows', () => {
           await page
             .getByRole('heading', { name: new RegExp(noteJournal.title, 'i') })
             .click();
-          await page.waitForLoadState('networkidle');
+          await expect(
+            page.locator('main, [role="main"]').first()
+          ).toBeVisible();
 
           // Step 5: Verify we're on the detail page
           expect(page.url()).toContain(`/journals/${noteJournal.id}`);
@@ -108,7 +110,7 @@ test.describe('Journal Complete Workflows', () => {
 
       // Step 1: Navigate to journals page
       await page.goto('/journals');
-      await page.waitForLoadState('networkidle');
+      await expect(page.locator('main, [role="main"]').first()).toBeVisible();
 
       // Step 2: Verify empty state is displayed
       await expect(page.getByText(/no journals found/i)).toBeVisible();
@@ -139,7 +141,7 @@ test.describe('Journal Complete Workflows', () => {
 
       // Step 1: Navigate to journals page
       await page.goto('/journals');
-      await page.waitForLoadState('networkidle');
+      await expect(page.locator('main, [role="main"]').first()).toBeVisible();
 
       // Step 2: Click new journal link
       const newLink = page.getByRole('link', { name: /new journal/i });
@@ -164,7 +166,7 @@ test.describe('Journal Complete Workflows', () => {
 
       // Step 1: Navigate to create page
       await page.goto('/journals/new');
-      await page.waitForLoadState('networkidle');
+      await expect(page.locator('main, [role="main"]').first()).toBeVisible();
 
       // Step 2: Verify we're on the create page
       await expect(
@@ -241,7 +243,7 @@ test.describe('Journal Complete Workflows', () => {
 
       // Step 1: Navigate to create page
       await page.goto('/journals/new');
-      await page.waitForLoadState('networkidle');
+      await expect(page.locator('main, [role="main"]').first()).toBeVisible();
 
       // Step 2: Click cancel button
       const cancelButton = page.getByRole('button', { name: /cancel/i });
@@ -261,7 +263,7 @@ test.describe('Journal Complete Workflows', () => {
 
       // Step 1: Navigate to journals page
       await page.goto('/journals');
-      await page.waitForLoadState('networkidle');
+      await expect(page.locator('main, [role="main"]').first()).toBeVisible();
 
       // Step 2: Find the filter toggle button
       const filterToggle = page.getByRole('button', { name: /filter/i });

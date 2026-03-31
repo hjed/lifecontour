@@ -124,7 +124,9 @@ test.describe('Login Page - Unauthenticated Users', () => {
       await unauthenticatedPage.goto('/auth/login');
 
       // Wait for providers to load
-      await unauthenticatedPage.waitForLoadState('networkidle');
+      await expect(
+        unauthenticatedPage.locator('main, [role="main"]').first()
+      ).toBeVisible();
 
       // Track the actual login request triggered by the OAuth button click
       const requestPromise = unauthenticatedPage.waitForRequest(
@@ -164,7 +166,9 @@ test.describe('Login Page - Unauthenticated Users', () => {
       await unauthenticatedPage.goto('/auth/login');
 
       // Wait for providers to load
-      await unauthenticatedPage.waitForLoadState('networkidle');
+      await expect(
+        unauthenticatedPage.locator('main, [role="main"]').first()
+      ).toBeVisible();
 
       // Mock network failure for login endpoint
       await unauthenticatedPage.route('**/api/auth/login', route => {
@@ -203,7 +207,9 @@ test.describe('Login Page - Unauthenticated Users', () => {
       await unauthenticatedPage.goto('/auth/login');
 
       // Wait for providers to load
-      await unauthenticatedPage.waitForLoadState('networkidle');
+      await expect(
+        unauthenticatedPage.locator('main, [role="main"]').first()
+      ).toBeVisible();
 
       // All OAuth buttons should remain clickable even if there are errors
       const oauthButtons = unauthenticatedPage.locator(
@@ -357,7 +363,9 @@ test.describe('Login Page - Unauthenticated Users', () => {
       await unauthenticatedPage.setViewportSize({ width: 375, height: 667 });
 
       // Wait for providers to load
-      await unauthenticatedPage.waitForLoadState('networkidle');
+      await expect(
+        unauthenticatedPage.locator('main, [role="main"]').first()
+      ).toBeVisible();
 
       // Check OAuth buttons specifically for mobile touch targets
       const oauthButtons = unauthenticatedPage.locator(
@@ -470,7 +478,9 @@ test.describe('Login Page - Unauthenticated Users', () => {
       await unauthenticatedPage.goto('/auth/login');
 
       // Wait for providers to load
-      await unauthenticatedPage.waitForLoadState('networkidle');
+      await expect(
+        unauthenticatedPage.locator('main, [role="main"]').first()
+      ).toBeVisible();
 
       // Check for Australian English spellings and terminology
       const content = await unauthenticatedPage.textContent('body');
