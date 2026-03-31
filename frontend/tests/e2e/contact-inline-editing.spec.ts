@@ -96,8 +96,7 @@ test.describe('Contact Inline Editing', () => {
     await input.press('Enter');
     await verifyRequest;
 
-    // Wait for the UI to update
-    await page.waitForLoadState('networkidle');
+    // Wait for the UI to update (element-based wait instead of networkidle)
     await expect(firstNameField).toContainText('UpdatedFirstName');
   });
 
@@ -126,7 +125,7 @@ test.describe('Contact Inline Editing', () => {
     await input.press('Enter');
     await verifyRequest;
 
-    await page.waitForLoadState('networkidle');
+    // Wait for the UI to update (element-based wait instead of networkidle)
     await expect(lastNameField).toContainText('UpdatedLastName');
   });
 
@@ -141,10 +140,9 @@ test.describe('Contact Inline Editing', () => {
     const nicknameField = page.locator('[data-testid="nickname-field"]');
 
     // Enter edit mode
-    // Scroll into view to the center of the viewport to ensure it is not obscured by a sticky mobile header
-    await nicknameField.evaluate(node =>
-      node.scrollIntoView({ block: 'center' })
-    );
+    // Playwright's click() auto-scrolls the element into view, so no manual
+    // scrollIntoView is needed. The previous manual scroll + click pattern
+    // caused a race condition in Firefox.
     await nicknameField.click();
 
     const input = page.locator('[data-testid="nickname-field"] input');
@@ -162,7 +160,7 @@ test.describe('Contact Inline Editing', () => {
     await input.press('Enter');
     await verifyRequest;
 
-    await page.waitForLoadState('networkidle');
+    // Wait for the UI to update (element-based wait instead of networkidle)
     await expect(nicknameField).toContainText('UpdatedNickname');
   });
 

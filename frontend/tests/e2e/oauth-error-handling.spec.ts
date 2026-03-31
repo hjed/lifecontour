@@ -92,6 +92,9 @@ test.describe('OAuth Error Handling', () => {
 
     for (const scenario of errorScenarios) {
       await page.goto(`/auth/callback?${scenario.params}`);
+      // Wait for the page to settle after navigation - Firefox needs this
+      // when rapidly navigating in a loop
+      await page.waitForLoadState('domcontentloaded');
 
       // Wait for error handling - either error element or redirect to login
       await expect(async () => {
@@ -99,7 +102,7 @@ test.describe('OAuth Error Handling', () => {
           (await page.locator(ERROR_SELECTOR).count()) > 0;
         const redirectedToLogin = page.url().includes('/auth/login');
         expect(hasErrorElement || redirectedToLogin).toBe(true);
-      }).toPass({ timeout: 5000 });
+      }).toPass({ timeout: 10000 });
     }
   });
 
@@ -142,6 +145,9 @@ test.describe('OAuth Error Handling', () => {
 
     for (const url of malformedUrls) {
       await page.goto(url);
+      // Wait for the page to settle after navigation - Firefox needs this
+      // when rapidly navigating in a loop
+      await page.waitForLoadState('domcontentloaded');
 
       // Verify page handles malformed URL gracefully
       await expect(async () => {
