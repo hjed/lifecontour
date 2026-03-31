@@ -144,6 +144,35 @@ class JournalConverter:
         }
 
     @staticmethod
+    def _convert_children(
+        children: list[Journal] | None,
+        children_types: dict[int, list[str]] | None = None,
+    ) -> list[dict[str, Any]] | None:
+        """Convert child journals to summaries.
+
+        Args:
+            children: Child journal entities.
+            children_types: Mapping of journal ID to list of type strings.
+        """
+        if children is None:
+            return None
+
+        types_map = children_types or {}
+        return [
+            {
+                "id": str(child.id),
+                "title": child.title,
+                "types": types_map.get(child.id, []) if child.id else [],
+                "date": (
+                    child.event_date_range.start.isoformat()
+                    if child.event_date_range and child.event_date_range.start
+                    else None
+                ),
+            }
+            for child in children
+        ]
+
+    @staticmethod
     def _create_relationships(
         tags: list[JournalTag] | None,
         contacts: list[JournalContactRelationship] | None,
@@ -195,8 +224,10 @@ class JournalConverter:
         tags: list[JournalTag] | None = None,
         calendar: Calendar | None = None,
         parent: Journal | None = None,
+        children: list[Journal] | None = None,
         children_count: int | None = None,
         routes: list[Route] | None = None,
+        children_types: dict[int, list[str]] | None = None,
     ) -> JournalResource:
         """
         Convert Journal domain entity to API resource.
@@ -210,7 +241,9 @@ class JournalConverter:
             tags: Journal tags
             calendar: Calendar (for EVENT type)
             parent: Parent journal
+            children: Child journals
             children_count: Number of child journals
+            children_types: Mapping of child journal ID to type lists
 
         Returns:
             JournalResource following JSON API specification
@@ -222,6 +255,9 @@ class JournalConverter:
         tag_schemas = JournalConverter._convert_tags(tags)
         calendar_schema = JournalConverter._convert_calendar(calendar)
         parent_summary = JournalConverter._convert_parent(parent)
+        children_summaries = JournalConverter._convert_children(
+            children, children_types
+        )
 
         # Create attributes
         attributes = JournalAttributes(
@@ -238,6 +274,7 @@ class JournalConverter:
             tags=tag_schemas,
             calendar=calendar_schema,
             parent=parent_summary,
+            children=children_summaries,
             children_count=children_count,
         )
 

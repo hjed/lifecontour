@@ -1802,6 +1802,10 @@ def register_journal_tools(mcp: FastMCP[None]) -> None:
             repos.tag_repo,
         )
 
+        parent = None
+        if created_journal.parent_id is not None:
+            parent = await repos.journal_repo.find_by_id(created_journal.parent_id)
+
         # Convert to AI-friendly response
         response = JournalConverter.to_response(
             journal=created_journal,
@@ -1809,6 +1813,7 @@ def register_journal_tools(mcp: FastMCP[None]) -> None:
             type_data=type_data,
             contacts=contacts,
             tags=tags,
+            parent=parent,
         )
 
         return MCPResponseBuilder.success_response(response)
@@ -1885,6 +1890,10 @@ def register_journal_tools(mcp: FastMCP[None]) -> None:
                 end=request.event_date_range.end,
             )
             changed_fields["event_date_range"] = request.event_date_range
+
+        if "parent_id" in request.model_fields_set:
+            existing_journal.parent_id = request.parent_id
+            changed_fields["parent_id"] = request.parent_id
 
         # Update journal
         updated_journal = await journal_service.update_journal(
@@ -2056,6 +2065,10 @@ def register_journal_tools(mcp: FastMCP[None]) -> None:
             repos.tag_repo,
         )
 
+        parent = None
+        if updated_journal.parent_id is not None:
+            parent = await repos.journal_repo.find_by_id(updated_journal.parent_id)
+
         # Convert to AI-friendly response
         response = JournalConverter.to_response(
             journal=updated_journal,
@@ -2063,6 +2076,7 @@ def register_journal_tools(mcp: FastMCP[None]) -> None:
             type_data=type_data,
             contacts=contacts,
             tags=tags,
+            parent=parent,
         )
 
         return MCPResponseBuilder.success_response(response)

@@ -424,6 +424,9 @@ class JournalAttributes(BaseModel):
     parent: dict[str, Any] | None = Field(
         default=None, description="Parent journal summary"
     )
+    children: list[dict[str, Any]] | None = Field(
+        default=None, description="List of child journal summaries"
+    )
     children_count: int | None = Field(
         default=None, description="Number of child journals"
     )

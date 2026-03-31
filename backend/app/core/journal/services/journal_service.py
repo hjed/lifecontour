@@ -426,8 +426,14 @@ class JournalService:
                 attempted_depth=parent_depth + 1,
             )
 
-        # Check for cycles (parent cannot be a descendant of the journal)
+        # Check for cycles (parent cannot be a descendant of the journal, or the journal itself)
         if journal_id is not None:
+            if parent_id == journal_id:
+                raise JournalCycleError(
+                    journal_id=journal_id,
+                    parent_id=parent_id,
+                )
+
             ancestors = await self.journal_repo.get_ancestors(parent_id)
             ancestor_ids = [a.id for a in ancestors if a.id is not None]
             if journal_id in ancestor_ids:

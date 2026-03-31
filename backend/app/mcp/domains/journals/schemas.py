@@ -12,6 +12,8 @@ from pydantic import BaseModel, Field
 
 # Field description constants
 JOURNAL_TITLE_DESC = "Journal title"
+JOURNAL_ID_DESC = "Journal ID"
+EVENT_DATE_RANGE_DESC = "Event date range"
 
 
 class EventDateRangeSchema(BaseModel):
@@ -42,7 +44,7 @@ class CalendarSchema(BaseModel):
 class JournalChildSummary(BaseModel):
     """AI-friendly child journal summary."""
 
-    id: int = Field(description="Journal ID")
+    id: int = Field(description=JOURNAL_ID_DESC)
     title: str = Field(description=JOURNAL_TITLE_DESC)
     summary: str = Field(description="Brief summary of the child journal")
 
@@ -66,9 +68,7 @@ class JournalResponse(BaseModel):
         description="AI-friendly summary of journal with context and key information"
     )
 
-    event_date_range: EventDateRangeSchema = Field(
-        description="Event date range (start and end)"
-    )
+    event_date_range: EventDateRangeSchema = Field(description=EVENT_DATE_RANGE_DESC)
 
     types: list[str] = Field(default_factory=list, description="List of journal types")
 
@@ -106,10 +106,10 @@ class JournalResponse(BaseModel):
 class JournalSearchResult(BaseModel):
     """AI-friendly journal search result format."""
 
-    id: int = Field(description="Journal ID")
+    id: int = Field(description=JOURNAL_ID_DESC)
     title: str = Field(description=JOURNAL_TITLE_DESC)
     content_excerpt: str = Field(description="Excerpt of journal content")
-    event_date_range: EventDateRangeSchema = Field(description="Event date range")
+    event_date_range: EventDateRangeSchema = Field(description=EVENT_DATE_RANGE_DESC)
     types: list[str] = Field(default_factory=list, description="Journal types")
     tags: list[str] = Field(default_factory=list, description="Tag names")
     highlighted: dict[str, str] = Field(
@@ -245,7 +245,7 @@ class JournalCreateRequest(BaseModel):
 
     title: str = Field(description=JOURNAL_TITLE_DESC)
     content: str = Field(description="Journal content (markdown)")
-    event_date_range: EventDateRangeSchema = Field(description="Event date range")
+    event_date_range: EventDateRangeSchema = Field(description=EVENT_DATE_RANGE_DESC)
     types: list[str] = Field(default_factory=list, description="Journal types to add")
     type_data: dict[str, dict[str, Any]] = Field(
         default_factory=dict,
@@ -275,6 +275,7 @@ class JournalUpdateRequest(BaseModel):
         default=None, description="Replace all contact relationships"
     )
     tags: list[str] | None = Field(default=None, description="Replace all tags")
+    parent_id: int | None = Field(default=None, description="Parent journal ID")
 
 
 class MergeJournalMCPRequest(BaseModel):
@@ -300,10 +301,10 @@ class MergeJournalMCPRequest(BaseModel):
 class MergeCandidateResult(BaseModel):
     """AI-friendly merge candidate summary."""
 
-    id: int = Field(description="Journal ID")
+    id: int = Field(description=JOURNAL_ID_DESC)
     title: str = Field(description=JOURNAL_TITLE_DESC)
     content_excerpt: str = Field(description="First ~200 chars of content")
-    event_date_range: EventDateRangeSchema = Field(description="Event date range")
+    event_date_range: EventDateRangeSchema = Field(description=EVENT_DATE_RANGE_DESC)
     types: list[str] = Field(default_factory=list, description="Journal types")
     tags: list[str] = Field(default_factory=list, description="Tag names")
     summary: str = Field(description="AI-friendly summary of why this is a candidate")
