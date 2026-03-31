@@ -105,7 +105,7 @@ test.describe('OAuth Docker Integration', () => {
 
     // Navigate to login page to check OAuth provider availability
     await page.goto('/auth/login');
-    await page.waitForLoadState('networkidle');
+    await expect(page.locator('main, [role="main"]').first()).toBeVisible();
 
     // Check if OAuth buttons are present (indicates backend OAuth is configured)
     const oauthButtons = page.locator('button:has-text("Continue with")');
@@ -157,7 +157,7 @@ test.describe('OAuth Docker Integration', () => {
     });
 
     await page.goto('/auth/login');
-    await page.waitForLoadState('networkidle');
+    await expect(page.locator('main, [role="main"]').first()).toBeVisible();
 
     const oauthButtons = page.locator('button:has-text("Continue with")');
     const buttonCount = await oauthButtons.count();
@@ -307,7 +307,7 @@ test.describe('OAuth Docker Integration', () => {
 
         // Navigate to login page to see if OAuth is configured
         await page.goto('/auth/login');
-        await page.waitForLoadState('networkidle');
+        await expect(page.locator('main, [role="main"]').first()).toBeVisible();
 
         const oauthButtons = page.locator('button:has-text("Continue with")');
         const buttonCount = await oauthButtons.count();

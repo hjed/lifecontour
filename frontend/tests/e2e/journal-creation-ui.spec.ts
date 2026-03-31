@@ -16,7 +16,7 @@ import { type Locator, type Page } from '@playwright/test';
 /** Navigate to /journals/new and wait for the page to be fully loaded. */
 async function navigateToNewJournal(page: Page) {
   await page.goto('/journals/new');
-  await page.waitForLoadState('networkidle');
+  await expect(page.locator('main, [role="main"]').first()).toBeVisible();
 }
 
 /** Fill the common journal fields and select the requested type. */

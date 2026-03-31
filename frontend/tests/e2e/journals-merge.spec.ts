@@ -70,7 +70,7 @@ test.describe('Journal Merge Workflow', () => {
 
     // Navigate to Target Journal detail page
     await page.goto(`/journals/${target.id}`);
-    await page.waitForLoadState('networkidle');
+    await expect(page.locator('main, [role="main"]').first()).toBeVisible();
 
     // Ensure we are on the target page
     await expect(
@@ -153,7 +153,7 @@ test.describe('Journal Merge Workflow', () => {
 
     // Now navigate back to journals list
     await page.goto('/journals');
-    await page.waitForLoadState('networkidle');
+    await expect(page.locator('main, [role="main"]').first()).toBeVisible();
 
     // The target journal should still be present
     await expect(
@@ -241,7 +241,7 @@ test.describe('Journal Merge Workflow', () => {
 
     // Navigate to Target Journal detail page
     await page.goto(`/journals/${target.id}`);
-    await page.waitForLoadState('networkidle');
+    await expect(page.locator('main, [role="main"]').first()).toBeVisible();
 
     // Find and click the merge action button
     const openMergeBtn = page.getByRole('button', { name: /merge journal/i });

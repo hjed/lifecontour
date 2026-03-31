@@ -30,7 +30,7 @@ test.describe('Journal Hierarchy', () => {
     // 1. Create the parent journal via API to save time (or UI, but UI is fine)
     const parentTitle = `E2E Hierarchy Parent - ${Date.now()}`;
     await page.goto('/journals/new');
-    await page.waitForLoadState('networkidle');
+    await expect(page.locator('main, [role="main"]').first()).toBeVisible();
 
     await page.getByLabel(/title/i).fill(parentTitle);
     await page.getByLabel(/content/i).fill('This is the parent journal.');
@@ -81,7 +81,7 @@ test.describe('Journal Hierarchy', () => {
     // 2. Create the child journal
     const childTitle = `E2E Hierarchy Child - ${Date.now()}`;
     await page.goto('/journals/new');
-    await page.waitForLoadState('networkidle');
+    await expect(page.locator('main, [role="main"]').first()).toBeVisible();
 
     // Fill basic details
     await page.getByLabel(/title/i).fill(childTitle);

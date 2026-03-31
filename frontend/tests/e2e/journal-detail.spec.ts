@@ -224,7 +224,7 @@ test.describe('Journal Detail Page', () => {
       if (journal) {
         // Navigate to journal detail page
         await page.goto(`/journals/${journal.id}`);
-        await page.waitForLoadState('networkidle');
+        await expect(page.locator('main, [role="main"]').first()).toBeVisible();
 
         // Verify type badges are displayed
         for (const type of journal.types || []) {
@@ -243,7 +243,7 @@ test.describe('Journal Detail Page', () => {
       if (eventJournal) {
         // Navigate to journal detail page
         await page.goto(`/journals/${eventJournal.id}`);
-        await page.waitForLoadState('networkidle');
+        await expect(page.locator('main, [role="main"]').first()).toBeVisible();
 
         // Verify EVENT type section is present
         const eventSection = page.getByText('Event Details');
@@ -267,7 +267,7 @@ test.describe('Journal Detail Page', () => {
       if (eventJournal) {
         // Navigate to journal detail page
         await page.goto(`/journals/${eventJournal.id}`);
-        await page.waitForLoadState('networkidle');
+        await expect(page.locator('main, [role="main"]').first()).toBeVisible();
 
         // Find and expand the Event Details section
         const eventSection = page.getByText('Event Details');
@@ -326,7 +326,7 @@ test.describe('Journal Detail Page', () => {
 
       // Navigate to journal detail page
       await page.goto(`/journals/${journalId}`);
-      await page.waitForLoadState('networkidle');
+      await expect(page.locator('main, [role="main"]').first()).toBeVisible();
 
       // Verify MOOD_RATING type section is present
       const moodSection = page.getByText('Mood & Energy');
@@ -440,7 +440,7 @@ test.describe('Journal Detail Page', () => {
       testCleanup(async () => await dataManager.cleanup());
 
       await page.goto(`/journals/${journal.id}`);
-      await page.waitForLoadState('networkidle');
+      await expect(page.locator('main, [role="main"]').first()).toBeVisible();
 
       // Add tag button should appear because there are unassigned tags
       const addTagButton = page.getByTestId('add-tag-button');
@@ -486,7 +486,7 @@ test.describe('Journal Detail Page', () => {
       testCleanup(async () => await dataManager.cleanup());
 
       await page.goto(`/journals/${journal.id}`);
-      await page.waitForLoadState('networkidle');
+      await expect(page.locator('main, [role="main"]').first()).toBeVisible();
 
       // Tag badge should be visible before removal
       const tagBadge = page.getByTestId(`tag-badge-${tag.id}`);
@@ -532,7 +532,7 @@ test.describe('Journal Detail Page', () => {
       );
 
       await page.goto(`/journals/${journal.id}`);
-      await page.waitForLoadState('networkidle');
+      await expect(page.locator('main, [role="main"]').first()).toBeVisible();
 
       // Open the add contact popover
       const addContactButton = page.getByTestId('add-contact-button');
@@ -588,7 +588,7 @@ test.describe('Journal Detail Page', () => {
       testCleanup(async () => await dataManager.cleanup());
 
       await page.goto(`/journals/${journal.id}`);
-      await page.waitForLoadState('networkidle');
+      await expect(page.locator('main, [role="main"]').first()).toBeVisible();
 
       // Contact badge should be visible before removal
       const contactBadge = page.getByTestId(`contact-badge-${contact.id}`);
@@ -641,7 +641,7 @@ test.describe('Journal Detail Page', () => {
       testCleanup(async () => await dataManager.cleanup());
 
       await page.goto(`/journals/${journal.id}`);
-      await page.waitForLoadState('networkidle');
+      await expect(page.locator('main, [role="main"]').first()).toBeVisible();
 
       // The calendar badge trigger should show the initially assigned calendar
       const calendarBadgeTrigger = page.getByTestId('calendar-badge-trigger');
@@ -741,7 +741,7 @@ test.describe('Journal Detail Page', () => {
 
       // Navigate to the detail page via browser (full stack E2E)
       await page.goto(`/journals/${journal.id}`);
-      await page.waitForLoadState('networkidle');
+      await expect(page.locator('main, [role="main"]').first()).toBeVisible();
 
       // Verify the journal loaded successfully
       await expect(page.getByTestId('journal-title-field')).toContainText(
@@ -839,7 +839,7 @@ test.describe('Journal Detail Page', () => {
       testCleanup(async () => await dataManager.cleanup());
 
       await page.goto(`/journals/${journal.id}`);
-      await page.waitForLoadState('networkidle');
+      await expect(page.locator('main, [role="main"]').first()).toBeVisible();
 
       // Expand the Mood & Energy section
       const moodSection = page.getByTestId('type-section-trigger-mood_rating');
@@ -876,7 +876,7 @@ test.describe('Journal Detail Page', () => {
 
       // Navigate to journal detail page
       await page.goto(`/journals/${journal.id}`);
-      await page.waitForLoadState('networkidle');
+      await expect(page.locator('main, [role="main"]').first()).toBeVisible();
 
       // Find and click the back button - use button role instead of link
       const backButton = page.getByRole('button', { name: /back/i });
