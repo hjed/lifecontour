@@ -489,6 +489,55 @@ class TestJournalOutboxEventProcessor:
         changed_fields = mock_journal_service.update_journal.call_args[0][1]
         assert "event_date_range" in changed_fields
 
+    @pytest.mark.asyncio
+    async def test_changed_fields_date_range_is_json_serializable(
+        self,
+        processor: "JournalOutboxEventProcessor",
+        mock_journal_service: AsyncMock,
+        mock_connection: AsyncMock,
+    ) -> None:
+        """event_date_range changed_fields must be JSON-serializable.
+
+        The outbox publisher calls json.dumps(event_data), so EventDateRange
+        objects in changed_fields would cause 'Object of type EventDateRange
+        is not JSON serializable' errors.
+        """
+        import json
+
+        event = _make_outbox_event(
+            event_type="journal_event.updated",
+            sync_action="updated",
+            existing_journal_id=42,
+        )
+
+        mock_connection.execute.side_effect = [
+            _mock_fetchone(_make_journal_row()),
+            _mock_fetchone(_make_link_row()),
+            _mock_empty_result(),
+            _mock_empty_result(),
+        ]
+
+        mock_journal_service.update_journal.return_value = _make_journal()
+
+        await processor.process_event(event)
+
+        changed_fields = mock_journal_service.update_journal.call_args[0][1]
+        assert "event_date_range" in changed_fields
+
+        # The old and new values must be JSON-serializable (dicts with ISO strings)
+        old_value, new_value = changed_fields["event_date_range"]
+        assert isinstance(old_value, dict), (
+            f"Expected dict, got {type(old_value).__name__}"
+        )
+        assert isinstance(new_value, dict), (
+            f"Expected dict, got {type(new_value).__name__}"
+        )
+        assert "start" in old_value
+        assert "end" in old_value
+
+        # Verify the entire changed_fields dict is JSON-serializable
+        json.dumps({"changed_fields": changed_fields})
+
     # ── Calendar info upsert updated_at ───────────────────────────────
 
     @pytest.mark.asyncio

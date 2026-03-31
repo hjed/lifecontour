@@ -7,8 +7,8 @@ This entity stores calendar-specific information like times, location,
 and sync settings for event-type journals.
 """
 
-from dataclasses import dataclass
-from datetime import datetime, time
+from dataclasses import dataclass, field
+from datetime import date, datetime, time
 from uuid import UUID
 
 from .constants import MAX_LOCATION_LENGTH
@@ -34,6 +34,10 @@ class CalendarInfo:
         location: Optional location string
         sync_invitees: Whether to sync invitees to Google Calendar
         event_state: Event participation state (invited/tentative/confirmed/cancelled)
+        event_start_date: Optional event start date for date-aware time validation
+            (not persisted — used only during construction to validate time ordering
+            for multi-day events that cross midnight)
+        event_end_date: Optional event end date (same as above)
         created_at: Creation timestamp
         updated_at: Last update timestamp
     """
@@ -46,6 +50,8 @@ class CalendarInfo:
     location: str | None = None
     sync_invitees: bool = False
     event_state: EventState = EventState.CONFIRMED
+    event_start_date: date | None = field(default=None, repr=False)
+    event_end_date: date | None = field(default=None, repr=False)
     created_at: datetime | None = None
     updated_at: datetime | None = None
 
@@ -78,6 +84,8 @@ class CalendarInfo:
         - If is_all_day is True, start_time and end_time should be None
         - If is_all_day is False, either both times are None or both are provided
         - If both times are provided, start_time must be <= end_time
+          (when event dates are provided, combines date+time for comparison
+          to properly handle multi-day events that cross midnight)
         """
         if self.is_all_day:
             # All-day events should not have times
@@ -96,7 +104,19 @@ class CalendarInfo:
 
             # If both provided, validate order
             if self.start_time is not None and self.end_time is not None:
-                if self.start_time > self.end_time:
+                if (
+                    self.event_start_date is not None
+                    and self.event_end_date is not None
+                ):
+                    # Use full date+time comparison for multi-day events
+                    start_dt = datetime.combine(self.event_start_date, self.start_time)
+                    end_dt = datetime.combine(self.event_end_date, self.end_time)
+                    if start_dt > end_dt:
+                        raise CalendarInfoValidationError(
+                            "end_time",
+                            "end_time must be after or equal to start_time",
+                        )
+                elif self.start_time > self.end_time:
                     raise CalendarInfoValidationError(
                         "end_time",
                         "end_time must be after or equal to start_time",

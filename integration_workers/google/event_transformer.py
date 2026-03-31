@@ -98,6 +98,8 @@ class GoogleEventTransformer:
             is_all_day=is_all_day,
             location=google_event.location,
             event_state=event_state,
+            event_start_date=start_dt.date(),
+            event_end_date=end_dt.date(),
         )
 
         return journal, calendar_info

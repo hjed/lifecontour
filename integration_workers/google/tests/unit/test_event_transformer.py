@@ -455,3 +455,94 @@ class TestGoogleEventTransformerEventState:
         assert result is not None
         _, calendar_info = result
         assert calendar_info.event_state == EventState.CONFIRMED
+
+
+class TestGoogleEventTransformerMultiDayEvents:
+    """Tests for multi-day timed events that span midnight."""
+
+    def test_multi_day_timed_event_preserves_times_with_date_context(self) -> None:
+        """Multi-day timed events should preserve times.
+
+        When a timed event spans multiple days (e.g. 23:00 to 01:00 next day),
+        CalendarInfo receives event dates for date-aware validation, allowing
+        start_time > end_time when the event spans midnight.
+        """
+        google_event = GoogleEvent.model_validate(
+            {
+                "id": "multi_day_timed",
+                "summary": "Overnight Event",
+                "start": {"dateTime": "2023-10-27T23:00:00Z"},
+                "end": {"dateTime": "2023-10-28T01:00:00Z"},
+                "status": "confirmed",
+            }
+        )
+        transformer = GoogleEventTransformer()
+        result = transformer.transform_event(google_event, "user1", uuid.uuid4())
+        assert result is not None
+        journal, calendar_info = result
+
+        # Full datetime precision preserved in EventDateRange
+        expected_start = datetime(2023, 10, 27, 23, 0, tzinfo=UTC)
+        expected_end = datetime(2023, 10, 28, 1, 0, tzinfo=UTC)
+        assert journal.event_date_range == EventDateRange(
+            start=expected_start, end=expected_end
+        )
+
+        # Times are preserved (not nulled) for multi-day timed events
+        from datetime import date, time
+
+        assert calendar_info.start_time == time(23, 0)
+        assert calendar_info.end_time == time(1, 0)
+        assert calendar_info.is_all_day is False
+        assert calendar_info.event_start_date == date(2023, 10, 27)
+        assert calendar_info.event_end_date == date(2023, 10, 28)
+
+    def test_multi_day_timed_event_spanning_several_days(self) -> None:
+        """Multi-day timed event spanning several days preserves times."""
+        google_event = GoogleEvent.model_validate(
+            {
+                "id": "multi_day_long",
+                "summary": "Conference",
+                "start": {"dateTime": "2023-10-27T09:00:00Z"},
+                "end": {"dateTime": "2023-10-29T17:00:00Z"},
+                "status": "confirmed",
+            }
+        )
+        transformer = GoogleEventTransformer()
+        result = transformer.transform_event(google_event, "user1", uuid.uuid4())
+        assert result is not None
+        journal, calendar_info = result
+
+        expected_start = datetime(2023, 10, 27, 9, 0, tzinfo=UTC)
+        expected_end = datetime(2023, 10, 29, 17, 0, tzinfo=UTC)
+        assert journal.event_date_range == EventDateRange(
+            start=expected_start, end=expected_end
+        )
+
+        from datetime import time
+
+        assert calendar_info.start_time == time(9, 0)
+        assert calendar_info.end_time == time(17, 0)
+        assert calendar_info.is_all_day is False
+
+    def test_same_day_event_still_has_times(self) -> None:
+        """Same-day timed events should still have CalendarInfo times."""
+        from datetime import time
+
+        google_event = GoogleEvent.model_validate(
+            {
+                "id": "same_day",
+                "summary": "Quick Meeting",
+                "start": {"dateTime": "2023-10-27T10:00:00Z"},
+                "end": {"dateTime": "2023-10-27T11:00:00Z"},
+                "status": "confirmed",
+            }
+        )
+        transformer = GoogleEventTransformer()
+        result = transformer.transform_event(google_event, "user1", uuid.uuid4())
+        assert result is not None
+        _, calendar_info = result
+
+        assert calendar_info.start_time == time(10, 0)
+        assert calendar_info.end_time == time(11, 0)
+        assert calendar_info.is_all_day is False
