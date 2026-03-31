@@ -30,10 +30,8 @@ export interface ContactMethodAttributes {
   is_primary: boolean;
 }
 
-export interface ContactMethodResource extends Omit<
-  JsonApiResource<ContactMethodAttributes>,
-  'relationships'
-> {
+export interface ContactMethodResource
+  extends Omit<JsonApiResource<ContactMethodAttributes>, 'relationships'> {
   type: 'contact_methods';
 }
 
@@ -49,10 +47,8 @@ export interface ContactAddressAttributes {
   is_primary: boolean;
 }
 
-export interface ContactAddressResource extends Omit<
-  JsonApiResource<ContactAddressAttributes>,
-  'relationships'
-> {
+export interface ContactAddressResource
+  extends Omit<JsonApiResource<ContactAddressAttributes>, 'relationships'> {
   type: 'contact_addresses';
 }
 
@@ -63,10 +59,8 @@ export interface ContactNoteAttributes {
   updated_at: string;
 }
 
-export interface ContactNoteResource extends Omit<
-  JsonApiResource<ContactNoteAttributes>,
-  'relationships'
-> {
+export interface ContactNoteResource
+  extends Omit<JsonApiResource<ContactNoteAttributes>, 'relationships'> {
   type: 'contact_notes';
 }
 
@@ -81,10 +75,8 @@ export interface TagAttributes {
   [key: string]: unknown;
 }
 
-export interface TagResource extends Omit<
-  JsonApiResource<TagAttributes>,
-  'relationships'
-> {
+export interface TagResource
+  extends Omit<JsonApiResource<TagAttributes>, 'relationships'> {
   type: 'tags';
 }
 
@@ -109,10 +101,11 @@ export interface ContactRelationshipAttributes {
   updated_at: string;
 }
 
-export interface ContactRelationshipResource extends Omit<
-  JsonApiResource<ContactRelationshipAttributes>,
-  'relationships'
-> {
+export interface ContactRelationshipResource
+  extends Omit<
+    JsonApiResource<ContactRelationshipAttributes>,
+    'relationships'
+  > {
   type: 'contact_relationships';
 }
 

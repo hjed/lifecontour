@@ -52,7 +52,7 @@ describe('JournalChildrenList', () => {
       expect(screen.getByText('Child Journal 2')).toBeInTheDocument();
     });
 
-    it('renders nothing when children array is empty', () => {
+    it('renders nothing when children array is empty and no parentId', () => {
       const { container } = render(<JournalChildrenList childJournals={[]} />);
 
       expect(container.firstChild).toBeNull();
@@ -83,6 +83,37 @@ describe('JournalChildrenList', () => {
 
       const link2 = screen.getByText('Child Journal 2').closest('a');
       expect(link2).toHaveAttribute('href', '/journals/child-2');
+    });
+  });
+
+  describe('Add Child Button', () => {
+    it('renders "Add Child" link with correct href when parentId is provided', () => {
+      render(
+        <JournalChildrenList childJournals={mockChildren} parentId='42' />
+      );
+
+      const addButton = screen.getByRole('link', {
+        name: /add child/i,
+      });
+      expect(addButton).toBeInTheDocument();
+      expect(addButton).toHaveAttribute('href', '/journals/new?parentId=42');
+    });
+
+    it('renders card with add button even when children array is empty', () => {
+      render(<JournalChildrenList childJournals={[]} parentId='42' />);
+
+      expect(screen.getByTestId('children-list')).toBeInTheDocument();
+      expect(
+        screen.getByRole('link', { name: /add child/i })
+      ).toBeInTheDocument();
+    });
+
+    it('does not render add button when parentId is not provided', () => {
+      render(<JournalChildrenList childJournals={mockChildren} />);
+
+      expect(
+        screen.queryByRole('link', { name: /add child/i })
+      ).not.toBeInTheDocument();
     });
   });
 

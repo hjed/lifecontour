@@ -2,6 +2,7 @@
  * Journal creation page.
  *
  * Provides a form for creating new journal entries.
+ * Supports pre-filling parent via ?parentId= query parameter.
  * Protected by authentication guard.
  */
 
@@ -14,7 +15,18 @@ export const metadata: Metadata = {
   description: 'Create a new journal entry',
 };
 
-export default function NewJournalPage() {
+interface NewJournalPageProps {
+  searchParams: Promise<{ parentId?: string }>;
+}
+
+export default async function NewJournalPage({
+  searchParams,
+}: NewJournalPageProps) {
+  const params = await searchParams;
+  const defaultParentId = params.parentId
+    ? Number.parseInt(params.parentId, 10)
+    : undefined;
+
   return (
     <AuthGuard>
       <div className='container mx-auto max-w-4xl px-4 py-8'>
@@ -29,7 +41,7 @@ export default function NewJournalPage() {
         </div>
 
         <div className='bg-card rounded-lg border p-6'>
-          <JournalCreateForm />
+          <JournalCreateForm defaultParentId={defaultParentId} />
         </div>
       </div>
     </AuthGuard>

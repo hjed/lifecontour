@@ -3,46 +3,67 @@
  *
  * Shows a list of child journals with links to navigate to them.
  * Displays title, date, and type information.
+ * Optionally provides an "Add Child Journal" action when parentId is given.
  */
 
 'use client';
 
 import Link from 'next/link';
 import type { Route } from 'next';
-import { ChevronRight, Calendar, FileText } from 'lucide-react';
+import { ChevronRight, Calendar, FileText, Plus } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { JournalType, type ChildJournalSummary } from '@/types/journals';
 import { JournalTypeBadges } from './JournalTypeBadges';
 
 interface JournalChildrenListProps {
   readonly childJournals: ChildJournalSummary[];
+  readonly parentId?: string;
   readonly className?: string;
 }
 
 /**
  * List component for displaying child journals.
- * Shows child journals with navigation links.
+ * Shows child journals with navigation links and an optional add-child action.
  */
 export function JournalChildrenList({
   childJournals,
+  parentId,
   className,
 }: JournalChildrenListProps) {
-  if (childJournals.length === 0) {
+  if (childJournals.length === 0 && !parentId) {
     return null;
   }
 
   return (
     <Card className={className} data-testid='children-list'>
-      <CardHeader>
+      <CardHeader className='flex flex-row items-center justify-between space-y-0'>
         <CardTitle className='text-lg'>Child Journals</CardTitle>
+        {parentId && (
+          <Button variant='outline' size='sm' asChild>
+            <Link
+              href={`/journals/new?parentId=${parentId}` as Route}
+              aria-label='Add child journal'
+            >
+              <Plus className='mr-1 h-4 w-4' />
+              Add Child
+            </Link>
+          </Button>
+        )}
       </CardHeader>
       <CardContent>
-        <div className='space-y-2'>
-          {childJournals.map(child => (
-            <ChildJournalItem key={child.id} child={child} />
-          ))}
-        </div>
+        {childJournals.length > 0 ? (
+          <div className='space-y-2'>
+            {childJournals.map(child => (
+              <ChildJournalItem key={child.id} child={child} />
+            ))}
+          </div>
+        ) : (
+          <p className='text-muted-foreground text-sm'>
+            No child journals yet. Click &quot;Add Child&quot; to create one.
+          </p>
+        )}
       </CardContent>
     </Card>
   );

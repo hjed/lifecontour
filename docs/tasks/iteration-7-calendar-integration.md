@@ -377,10 +377,10 @@ Phase 1 and Phase 2 were implemented as a combined delivery. The merge domain se
 **PR Size:** ~5-7 files
 
 **Acceptance Criteria:**
-- [ ] Journals can be created with an explicit parent through validated API/domain contracts.
-- [ ] Existing hierarchy rules remain enforced: single parent, no cycles, and configured depth limits.
-- [ ] MCP create/update flows can set or preserve parent-child structure where allowed.
-- [ ] Existing flat journal creation behaviour is not regressed.
+- [x] Journals can be created with an explicit parent through validated API/domain contracts.
+- [x] Existing hierarchy rules remain enforced: single parent, no cycles, and configured depth limits.
+- [x] MCP create/update flows can set or preserve parent-child structure where allowed.
+- [x] Existing flat journal creation behaviour is not regressed.
 
 **Required Test Coverage:**
 - **Unit:** parent validation, cycle prevention, and depth-rule helpers.
@@ -391,10 +391,10 @@ Phase 1 and Phase 2 were implemented as a combined delivery. The merge domain se
 **PR Size:** ~5-7 files
 
 **Acceptance Criteria:**
-- [ ] Users can create a child journal from the parent detail page.
-- [ ] The detail view exposes a context-menu or equivalent action to create a child journal in place.
-- [ ] Breadcrumbs remain accurate after create and edit flows.
-- [ ] Parent detail pages continue to show child journals clearly.
+- [x] Users can create a child journal from the parent detail page.
+- [x] The detail view exposes a context-menu or equivalent action to create a child journal in place.
+- [x] Breadcrumbs remain accurate after create and edit flows.
+- [x] Parent detail pages continue to show child journals clearly.
 
 **Required Test Coverage:**
 - **Unit:** detail-view action-state helpers and breadcrumb formatting where introduced.

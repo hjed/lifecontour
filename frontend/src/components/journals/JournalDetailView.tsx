@@ -372,10 +372,11 @@ export function JournalDetailView({
         </CardContent>
       </Card>
 
-      {/* Children List */}
-      {journal.children && journal.children.length > 0 && (
-        <JournalChildrenList childJournals={journal.children} />
-      )}
+      {/* Children List - Always shown for add-child functionality */}
+      <JournalChildrenList
+        childJournals={journal.children ?? []}
+        parentId={journal.id}
+      />
     </div>
   );
 }

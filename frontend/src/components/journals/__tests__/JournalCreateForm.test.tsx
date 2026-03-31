@@ -40,6 +40,11 @@ jest.mock('@/lib/api/journals', () => ({
     mutateAsync: mockMutateAsync,
     isPending: false,
   }),
+  useJournal: () => ({
+    data: undefined,
+    isLoading: false,
+    error: null,
+  }),
 }));
 
 // Mock next/navigation

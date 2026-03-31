@@ -256,10 +256,10 @@ describe('JournalDetailView', () => {
       expect(screen.getByTestId('children-list')).toBeInTheDocument();
     });
 
-    it('does not render children list when no children', () => {
+    it('always renders children list section for add child functionality', () => {
       renderWithQueryClient(<JournalDetailView journal={mockJournal} />);
 
-      expect(screen.queryByTestId('children-list')).not.toBeInTheDocument();
+      expect(screen.getByTestId('children-list')).toBeInTheDocument();
     });
   });
 

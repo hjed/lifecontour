@@ -40,7 +40,7 @@ import {
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Checkbox } from '@/components/ui/checkbox';
-import { useCreateJournal } from '@/lib/api/journals';
+import { useCreateJournal, useJournal } from '@/lib/api/journals';
 import { useCreateRoute } from '@/lib/api/routes';
 import { toast } from 'sonner';
 import {
@@ -351,15 +351,25 @@ function buildSubmittedTypeData(
 
 interface JournalCreateFormProps {
   readonly onCancel?: () => void;
+  readonly defaultParentId?: number;
 }
 
-export function JournalCreateForm({ onCancel }: JournalCreateFormProps = {}) {
+export function JournalCreateForm({
+  onCancel,
+  defaultParentId,
+}: JournalCreateFormProps = {}) {
   const router = useRouter();
   const { mutateAsync: createJournal, isPending: isCreatingJournal } =
     useCreateJournal();
   const { mutateAsync: createRoute, isPending: isCreatingRoute } =
     useCreateRoute();
   const [typeData, setTypeData] = useState<TypeDataState>({});
+
+  // Fetch parent journal title for pre-population
+  const { data: parentJournalData } = useJournal(
+    defaultParentId ? String(defaultParentId) : ''
+  );
+  const defaultParentTitle = parentJournalData?.data?.attributes?.title ?? '';
 
   const isPending = isCreatingJournal || isCreatingRoute;
 
@@ -373,7 +383,7 @@ export function JournalCreateForm({ onCancel }: JournalCreateFormProps = {}) {
       },
       content: '',
       types: [],
-      parentId: undefined,
+      parentId: defaultParentId ?? undefined,
     },
   });
 
@@ -585,6 +595,7 @@ export function JournalCreateForm({ onCancel }: JournalCreateFormProps = {}) {
                   }
                   onClear={() => field.onChange(null)}
                   placeholder='Search for a parent journal...'
+                  value={defaultParentTitle}
                   className='w-full'
                 />
               </FormControl>
