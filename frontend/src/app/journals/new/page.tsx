@@ -6,7 +6,7 @@
  * Protected by authentication guard.
  */
 
-import { Metadata } from 'next';
+import type { Metadata } from 'next';
 import { AuthGuard } from '@/components/auth/AuthGuard';
 import { JournalCreateForm } from '@/components/journals/JournalCreateForm';
 
@@ -16,7 +16,7 @@ export const metadata: Metadata = {
 };
 
 interface NewJournalPageProps {
-  searchParams: Promise<{ parentId?: string }>;
+  readonly searchParams: Promise<{ parentId?: string }>;
 }
 
 export default async function NewJournalPage({

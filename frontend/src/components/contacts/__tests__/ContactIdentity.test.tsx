@@ -71,8 +71,8 @@ describe('ContactIdentity', () => {
       const nicknameElement = screen.getByText((content, element) => {
         return Boolean(
           element?.tagName === 'SPAN' &&
-            element?.textContent?.includes('Johnny') &&
-            element?.className?.includes('text-muted-foreground')
+          element?.textContent?.includes('Johnny') &&
+          element?.className?.includes('text-muted-foreground')
         );
       });
       expect(nicknameElement).toBeInTheDocument();

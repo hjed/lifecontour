@@ -17,8 +17,10 @@ import {
 } from 'libphonenumber-js';
 import { InlineEditField, type InlineEditFieldProps } from './InlineEditField';
 
-export interface InlineEditPhoneFieldProps
-  extends Omit<InlineEditFieldProps, 'fieldType' | 'validation'> {
+export interface InlineEditPhoneFieldProps extends Omit<
+  InlineEditFieldProps,
+  'fieldType' | 'validation'
+> {
   /** Whether to show phone icon in view mode */
   readonly showIcon?: boolean;
   /** Custom validation function (will be combined with phone validation) */
@@ -88,7 +90,7 @@ export function InlineEditPhoneField({
         // If the input starts with +, treat as international
         if (phoneValue.trim().startsWith('+')) {
           const phoneNumber = parsePhoneNumberFromString(phoneValue);
-          if (phoneNumber && phoneNumber.isValid()) {
+          if (phoneNumber?.isValid()) {
             return phoneNumber.formatInternational();
           }
         } else {
@@ -97,7 +99,7 @@ export function InlineEditPhoneField({
             phoneValue,
             defaultCountry
           );
-          if (phoneNumber && phoneNumber.isValid()) {
+          if (phoneNumber?.isValid()) {
             return phoneNumber.formatNational();
           }
         }

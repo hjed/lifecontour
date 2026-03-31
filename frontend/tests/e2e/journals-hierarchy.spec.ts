@@ -22,22 +22,21 @@ test.describe('Journal Hierarchy', () => {
     }
   });
 
-  test('should create a child journal and display the parent reference', async ({
-    authenticatedPage,
-  }) => {
-    const page = authenticatedPage;
-
-    // 1. Create the parent journal via API to save time (or UI, but UI is fine)
-    const parentTitle = `E2E Hierarchy Parent - ${Date.now()}`;
+  // Helper to create a parent journal via the UI
+  async function createParentJournal(
+    page: any,
+    titlePrefix: string,
+    content: string
+  ) {
+    const parentTitle = `${titlePrefix} - ${Date.now()}`;
     await page.goto('/journals/new');
     await expect(page.locator('main, [role="main"]').first()).toBeVisible();
 
     await page.getByLabel(/title/i).fill(parentTitle);
-    await page.getByLabel(/content/i).fill('This is the parent journal.');
+    await page.getByLabel(/content/i).fill(content);
 
-    // Wait for the API response
     const parentResponsePromise = page.waitForResponse(
-      response =>
+      (response: any) =>
         response.url().includes('/api/journals') &&
         response.request().method() === 'POST' &&
         response.status() === 201
@@ -50,12 +49,55 @@ test.describe('Journal Hierarchy', () => {
 
     // Wait for redirect to detail page
     await page.waitForURL(/\/journals\/\d+/);
-
-    // Save parent ID from URL
     const parentUrl = page.url();
     const match = parentUrl.match(/\/journals\/(\d+)/);
     expect(match).not.toBeNull();
     const parentId = match![1];
+
+    return { parentTitle, parentId };
+  }
+
+  // Helper to verify the breadcrumb and children list rendering
+  async function verifyHierarchyLinks(
+    page: any,
+    childTitle: string,
+    parentTitle: string,
+    parentId: string
+  ) {
+    // Verify child detail page shows breadcrumb to parent
+    await page.waitForURL(/\/journals\/\d+/);
+    await expect(
+      page.getByRole('heading', { name: childTitle, exact: true }).first()
+    ).toBeVisible();
+
+    const parentLink = page.getByTestId('parent-link');
+    await expect(parentLink).toBeVisible();
+    await expect(parentLink).toHaveText(parentTitle);
+    await expect(parentLink).toHaveAttribute('href', `/journals/${parentId}`);
+
+    // Click parent breadcrumb to verify navigation back to parent
+    await parentLink.click();
+    await page.waitForURL(/\/journals\/\d+/);
+    await expect(
+      page.getByRole('heading', { name: parentTitle, exact: true }).first()
+    ).toBeVisible();
+
+    // Verify child journal appears in parent's children list
+    const childLink = page.getByRole('link', { name: childTitle });
+    await expect(childLink).toBeVisible();
+  }
+
+  test('should create a child journal and display the parent reference', async ({
+    authenticatedPage,
+  }) => {
+    const page = authenticatedPage;
+
+    // 1. Create the parent journal
+    const { parentTitle, parentId } = await createParentJournal(
+      page,
+      'E2E Hierarchy Parent',
+      'This is the parent journal.'
+    );
 
     // Wait for parent journal to be indexed so the combobox search can find it
     await expect
@@ -72,9 +114,7 @@ test.describe('Journal Hierarchy', () => {
             (j: Record<string, unknown>) => String(j.id) === parentId
           );
         },
-        {
-          timeout: 30000,
-        }
+        { timeout: 30000 }
       )
       .toBeTruthy();
 
@@ -83,23 +123,19 @@ test.describe('Journal Hierarchy', () => {
     await page.goto('/journals/new');
     await expect(page.locator('main, [role="main"]').first()).toBeVisible();
 
-    // Fill basic details
     await page.getByLabel(/title/i).fill(childTitle);
     await page.getByLabel(/content/i).fill('This is the child journal.');
 
     // Select parent journal using combobox
-    // The placeholder is 'Search for a parent journal...'
     await page.fill(
       'input[placeholder="Search for a parent journal..."]',
       'E2E Hierarchy Parent'
     );
 
-    // Wait for dropdown to show parent journal
     const parentOption = page.getByRole('option', { name: parentTitle });
     await expect(parentOption).toBeVisible({ timeout: 5000 });
     await parentOption.click();
 
-    // Wait for the API response
     const childResponsePromise = page.waitForResponse(
       response =>
         response.url().includes('/api/journals') &&
@@ -114,27 +150,8 @@ test.describe('Journal Hierarchy', () => {
     await childCreateButton.click();
     await childResponsePromise;
 
-    // 3. Verify parent breadcrumb on descendant's detail page
-    await page.waitForURL(/\/journals\/\d+/);
-    await expect(
-      page.getByRole('heading', { name: childTitle, exact: true }).first()
-    ).toBeVisible();
-
-    const parentLink = page.getByTestId('parent-link');
-    await expect(parentLink).toBeVisible();
-    await expect(parentLink).toHaveText(parentTitle);
-    await expect(parentLink).toHaveAttribute('href', `/journals/${parentId}`);
-
-    // Click parent breadcrumb to verify navigation
-    await parentLink.click();
-    await page.waitForURL(/\/journals\/\d+/);
-    await expect(
-      page.getByRole('heading', { name: parentTitle, exact: true }).first()
-    ).toBeVisible();
-
-    // 4. Verify child journal appears in parent's children list
-    const childLink = page.getByRole('link', { name: childTitle });
-    await expect(childLink).toBeVisible();
+    // 3. Verify links
+    await verifyHierarchyLinks(page, childTitle, parentTitle, parentId);
   });
 
   test('should create a child journal from the parent detail page', async ({
@@ -143,33 +160,11 @@ test.describe('Journal Hierarchy', () => {
     const page = authenticatedPage;
 
     // 1. Create parent journal
-    const parentTitle = `E2E Hierarchy Detail Parent - ${Date.now()}`;
-    await page.goto('/journals/new');
-    await page.waitForLoadState('networkidle');
-
-    await page.getByLabel(/title/i).fill(parentTitle);
-    await page
-      .getByLabel(/content/i)
-      .fill('Parent for detail-page child creation test.');
-
-    const parentResponsePromise = page.waitForResponse(
-      response =>
-        response.url().includes('/api/journals') &&
-        response.request().method() === 'POST' &&
-        response.status() === 201
+    const { parentTitle, parentId } = await createParentJournal(
+      page,
+      'E2E Hierarchy Detail Parent',
+      'Parent for detail-page child creation test.'
     );
-
-    const createButton = page.getByRole('button', { name: /create journal/i });
-    await expect(createButton).toBeEnabled();
-    await createButton.click();
-    await parentResponsePromise;
-
-    // Wait for redirect to detail page
-    await page.waitForURL(/\/journals\/\d+/);
-    const parentUrl = page.url();
-    const match = parentUrl.match(/\/journals\/(\d+)/);
-    expect(match).not.toBeNull();
-    const parentId = match![1];
 
     // 2. Click "Add Child" link from the detail page
     const addChildLink = page.getByRole('link', { name: /add child/i });
@@ -180,7 +175,7 @@ test.describe('Journal Hierarchy', () => {
     await page.waitForURL(/\/journals\/new\?parentId=/);
     expect(page.url()).toContain(`parentId=${parentId}`);
 
-    // 4. Verify the parent journal is pre-selected (its title should be visible in the combobox)
+    // 4. Verify the parent journal is pre-selected
     const parentInput = page.locator(
       'input[placeholder="Search for a parent journal..."]'
     );
@@ -205,25 +200,7 @@ test.describe('Journal Hierarchy', () => {
     await submitButton.click();
     await childResponsePromise;
 
-    // 6. Verify child detail page shows breadcrumb to parent
-    await page.waitForURL(/\/journals\/\d+/);
-    await expect(
-      page.getByRole('heading', { name: childTitle, exact: true }).first()
-    ).toBeVisible();
-
-    const parentLink = page.getByTestId('parent-link');
-    await expect(parentLink).toBeVisible();
-    await expect(parentLink).toHaveText(parentTitle);
-    await expect(parentLink).toHaveAttribute('href', `/journals/${parentId}`);
-
-    // 7. Navigate back to parent and verify child appears in children list
-    await parentLink.click();
-    await page.waitForURL(/\/journals\/\d+/);
-    await expect(
-      page.getByRole('heading', { name: parentTitle, exact: true }).first()
-    ).toBeVisible();
-
-    const childLink = page.getByRole('link', { name: childTitle });
-    await expect(childLink).toBeVisible();
+    // 6. Verify links
+    await verifyHierarchyLinks(page, childTitle, parentTitle, parentId);
   });
 });

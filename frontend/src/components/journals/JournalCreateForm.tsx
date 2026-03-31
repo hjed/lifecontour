@@ -603,7 +603,7 @@ export function JournalCreateForm({
                   }}
                   placeholder='Search for a parent journal...'
                   value={
-                    !parentUserModified.current ? defaultParentTitle : undefined
+                    parentUserModified.current ? undefined : defaultParentTitle
                   }
                   className='w-full'
                 />
