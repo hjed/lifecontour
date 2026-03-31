@@ -34,8 +34,8 @@ test.describe('Journal Detail Page', () => {
       // Navigate to journal detail page
       await page.goto(`/journals/${journal.id}`);
 
-      // Wait for page to load
-      await page.waitForLoadState('networkidle');
+      // Wait for page to load - use element-based wait instead of networkidle
+      await expect(page.getByTestId('journal-title-field')).toBeVisible();
 
       // Verify journal title is displayed (now in an inline editable field)
       const titleField = page.getByTestId('journal-title-field');
@@ -55,7 +55,9 @@ test.describe('Journal Detail Page', () => {
       await page.goto('/journals/999999');
 
       // Wait for page to load
-      await page.waitForLoadState('networkidle');
+      await expect(
+        page.getByRole('alert').filter({ hasText: /failed to load journal/i })
+      ).toBeVisible({ timeout: 15000 });
 
       // Verify error message is displayed in an alert
       // Filter for the alert that contains our error message (not the Next.js route announcer)
@@ -73,7 +75,7 @@ test.describe('Journal Detail Page', () => {
 
       // Navigate to journal detail page
       await page.goto(`/journals/${journal.id}`);
-      await page.waitForLoadState('networkidle');
+      await expect(page.getByTestId('journal-title-field')).toBeVisible();
 
       // Find the title field (it's a button in view mode, not a heading)
       const titleField = page.getByTestId('journal-title-field');
@@ -108,7 +110,7 @@ test.describe('Journal Detail Page', () => {
 
       // Navigate to journal detail page
       await page.goto(`/journals/${journal.id}`);
-      await page.waitForLoadState('networkidle');
+      await expect(page.getByTestId('journal-content')).toBeVisible();
 
       // Find the content field (it's a button in view mode)
       const contentField = page.getByTestId('journal-content');
@@ -145,7 +147,7 @@ test.describe('Journal Detail Page', () => {
 
       // Navigate to journal detail page
       await page.goto(`/journals/${journal.id}`);
-      await page.waitForLoadState('networkidle');
+      await expect(page.getByTestId('journal-date-range-field')).toBeVisible();
 
       // Find the date range field (it's a button in view mode)
       const dateField = page.getByTestId('journal-date-range-field');
@@ -157,8 +159,10 @@ test.describe('Journal Detail Page', () => {
       // Click to enter edit mode (this automatically opens the calendar)
       await dateField.click();
 
-      // Wait for the calendar to appear and be interactive
-      await page.waitForSelector('[role="grid"]', { state: 'visible' });
+      // Wait for the calendar to appear using web-first assertion (auto-retry)
+      // instead of legacy waitForSelector which doesn't retry
+      const calendarGrid = page.locator('[role="grid"]').first();
+      await expect(calendarGrid).toBeVisible();
 
       // Dynamically pick two dates: today + 1 and today + 3
       const today = new Date();

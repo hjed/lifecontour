@@ -103,9 +103,8 @@ export default defineConfig({
             'dom.push.enabled': false,
           },
         },
-        // Longer timeouts for Firefox
-        actionTimeout: 15000,
-        navigationTimeout: 45000,
+        // Firefox inherits global actionTimeout (20s) and navigationTimeout (60s)
+        // which are more generous than the previously set Firefox-specific values
       },
     },
 
