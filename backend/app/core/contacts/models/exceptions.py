@@ -44,7 +44,7 @@ class InvalidTagNameError(ContactDomainError):
 
     def __init__(self, tag_name: str):
         super().__init__(
-            f"Tag name '{tag_name}' contains invalid characters. Only alphanumeric, -, _, & allowed",
+            f"Tag name '{tag_name}' contains invalid characters. Only alphanumeric, -, _, &, / allowed",
             400,
         )
         self.tag_name = tag_name

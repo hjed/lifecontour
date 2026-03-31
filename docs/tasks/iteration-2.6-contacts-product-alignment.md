@@ -1,6 +1,6 @@
 # Iteration 2.6: Contacts Product Alignment & Intelligence
 
-**Status:** 🟡 PLANNED
+**Status:** 🟡 IN PROGRESS
 **Dependencies:** Iteration 2 (Google integration foundation), Iteration 2.5 (interactive contact editing foundation), existing contact search/indexing infrastructure
 **Goal:** Deliver the approved contacts product specification in clean, reviewable slices that build on the current contacts UI, Google Contacts sync, MCP tools, search, relationships, and activity foundations.
 
@@ -143,18 +143,19 @@ The sequence reflects both user priority and technical dependency:
 
 #### Phase 1: Hierarchy Contracts and Descendant Filtering
 **PR Size:** ~5-7 files
+**Status:** ✅ COMPLETE
 
 **Acceptance Criteria:**
-- [ ] Tags can have one parent and that relationship is exposed consistently through backend schemas and frontend types.
-- [ ] Update `TagName` validation to support `/` as the delimiter for hierarchical tags.
-- [ ] Descendant resolution is implemented centrally rather than duplicated across API, MCP and UI.
-- [ ] Filtering by a parent tag includes contacts assigned to descendant tags.
-- [ ] Existing flat-tag behaviour continues to work for tags without parents.
+- [x] Tags can have one parent and that relationship is exposed consistently through backend schemas and frontend types.
+- [x] Update `TagName` validation to support `/` as the delimiter for hierarchical tags.
+- [x] Descendant resolution is implemented centrally rather than duplicated across API, MCP and UI.
+- [x] Filtering by a parent tag includes contacts assigned to descendant tags.
+- [x] Existing flat-tag behaviour continues to work for tags without parents.
 
 **Required Test Coverage:**
-- **Unit:** parent/child validation, descendant resolution, filter expansion logic.
-- **Integration:** API filtering with parent tags, child-only assignments, and mixed favourite/search filters.
-- **E2E:** contacts list scenario proving a parent-tag filter returns child-tag-only contacts.
+- **Unit:** parent/child validation, descendant resolution, filter expansion logic. ✅
+- **Integration:** API filtering with parent tags, child-only assignments, and mixed favourite/search filters. ✅
+- **E2E:** contacts list scenario proving a parent-tag filter returns child-tag-only contacts. ✅ (existing test)
 
 #### Phase 2: Nested Sidebar Navigation
 **PR Size:** ~4-6 files
@@ -164,6 +165,7 @@ The sequence reflects both user priority and technical dependency:
 - [ ] Deeper levels are expandable/collapsible instead of always fully expanded.
 - [ ] The sidebar remains usable when there are no child tags and when several sibling tags exist.
 - [ ] Existing non-tag navigation items are not regressed.
+- [ ] If the tag list is longer than the page ensure that we can scroll through it.
 
 **Required Test Coverage:**
 - **Unit:** tree-shaping helpers for nested sidebar data.
