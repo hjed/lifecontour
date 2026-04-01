@@ -601,6 +601,9 @@ export function JournalCreateForm({
                     parentUserModified.current = true;
                     field.onChange(null);
                   }}
+                  onSearchChange={() => {
+                    parentUserModified.current = true;
+                  }}
                   placeholder='Search for a parent journal...'
                   value={
                     parentUserModified.current ? undefined : defaultParentTitle
