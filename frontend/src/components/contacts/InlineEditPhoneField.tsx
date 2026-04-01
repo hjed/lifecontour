@@ -90,7 +90,7 @@ export function InlineEditPhoneField({
         // If the input starts with +, treat as international
         if (phoneValue.trim().startsWith('+')) {
           const phoneNumber = parsePhoneNumberFromString(phoneValue);
-          if (phoneNumber && phoneNumber.isValid()) {
+          if (phoneNumber?.isValid()) {
             return phoneNumber.formatInternational();
           }
         } else {
@@ -99,7 +99,7 @@ export function InlineEditPhoneField({
             phoneValue,
             defaultCountry
           );
-          if (phoneNumber && phoneNumber.isValid()) {
+          if (phoneNumber?.isValid()) {
             return phoneNumber.formatNational();
           }
         }

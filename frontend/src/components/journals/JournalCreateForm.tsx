@@ -8,7 +8,7 @@
 
 'use client';
 
-import { useCallback, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import type { Route } from 'next';
 import {
@@ -40,7 +40,7 @@ import {
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Checkbox } from '@/components/ui/checkbox';
-import { useCreateJournal } from '@/lib/api/journals';
+import { useCreateJournal, useJournal } from '@/lib/api/journals';
 import { useCreateRoute } from '@/lib/api/routes';
 import { toast } from 'sonner';
 import {
@@ -351,15 +351,28 @@ function buildSubmittedTypeData(
 
 interface JournalCreateFormProps {
   readonly onCancel?: () => void;
+  readonly defaultParentId?: number;
 }
 
-export function JournalCreateForm({ onCancel }: JournalCreateFormProps = {}) {
+export function JournalCreateForm({
+  onCancel,
+  defaultParentId,
+}: JournalCreateFormProps = {}) {
   const router = useRouter();
   const { mutateAsync: createJournal, isPending: isCreatingJournal } =
     useCreateJournal();
   const { mutateAsync: createRoute, isPending: isCreatingRoute } =
     useCreateRoute();
   const [typeData, setTypeData] = useState<TypeDataState>({});
+
+  // Fetch parent journal title for pre-population
+  const { data: parentJournalData } = useJournal(
+    defaultParentId ? String(defaultParentId) : ''
+  );
+  const defaultParentTitle = parentJournalData?.data?.attributes?.title ?? '';
+  // Track whether user has manually changed the parent selector,
+  // preventing the async title fetch from overwriting their selection
+  const parentUserModified = useRef(false);
 
   const isPending = isCreatingJournal || isCreatingRoute;
 
@@ -373,7 +386,7 @@ export function JournalCreateForm({ onCancel }: JournalCreateFormProps = {}) {
       },
       content: '',
       types: [],
-      parentId: undefined,
+      parentId: defaultParentId ?? undefined,
     },
   });
 
@@ -580,11 +593,21 @@ export function JournalCreateForm({ onCancel }: JournalCreateFormProps = {}) {
               <FormLabel>Parent Journal</FormLabel>
               <FormControl>
                 <JournalSearchCombobox
-                  onSelect={journal =>
-                    field.onChange(Number.parseInt(journal.id, 10))
-                  }
-                  onClear={() => field.onChange(null)}
+                  onSelect={journal => {
+                    parentUserModified.current = true;
+                    field.onChange(Number.parseInt(journal.id, 10));
+                  }}
+                  onClear={() => {
+                    parentUserModified.current = true;
+                    field.onChange(null);
+                  }}
+                  onSearchChange={() => {
+                    parentUserModified.current = true;
+                  }}
                   placeholder='Search for a parent journal...'
+                  value={
+                    parentUserModified.current ? undefined : defaultParentTitle
+                  }
                   className='w-full'
                 />
               </FormControl>
