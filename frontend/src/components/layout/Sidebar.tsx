@@ -6,9 +6,11 @@
  * Features collapsible sections for Contacts and Journals with proper
  * icons, active state highlighting, mobile responsiveness, and global
  * state management via SidebarContext.
+ *
+ * Contact tags render as a nested tree with expand/collapse controls.
  */
 
-import { useState } from 'react';
+import { useState, useCallback } from 'react';
 import Link from 'next/link';
 import type { Route } from 'next';
 import { usePathname } from 'next/navigation';
@@ -20,6 +22,7 @@ import {
   Star,
   Menu,
   Settings,
+  Tag,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
@@ -31,8 +34,10 @@ import {
   SheetTitle,
   SheetTrigger,
 } from '@/components/ui/sheet';
+import { ScrollArea } from '@/components/ui/scroll-area';
 import { useSidebar, useSidebarAvailable } from '@/contexts/SidebarContext';
 import { useTags } from '@/lib/api/contacts';
+import { buildTagTree, TagTreeNode } from '@/lib/tags/buildTagTree';
 
 interface NavigationItem {
   readonly label: string;
@@ -45,6 +50,7 @@ interface NavigationSection {
   readonly label: string;
   readonly icon: React.ComponentType<{ className?: string }>;
   readonly items: NavigationItem[];
+  readonly tagTree?: TagTreeNode[];
   readonly defaultExpanded?: boolean;
 }
 
@@ -84,13 +90,11 @@ function useNavigationSections(): NavigationSection[] {
     { label: 'Favourites', href: '/contacts/favourites' as Route, icon: Star },
   ];
 
-  // Add dynamic tag items
+  let tagTree: TagTreeNode[] | undefined;
+
+  // Build tag tree from API data
   if (tagsData?.data && !tagsLoading && !tagsError) {
-    const tagItems = tagsData.data.map(tag => ({
-      label: tag.attributes.name,
-      href: `/contacts/tags/${tag.id}` as Route,
-    }));
-    contactItems.push(...tagItems);
+    tagTree = buildTagTree(tagsData.data);
   } else if (tagsLoading) {
     // Show loading placeholder - no href to disable the link entirely
     contactItems.push({
@@ -105,6 +109,7 @@ function useNavigationSections(): NavigationSection[] {
       icon: Users,
       defaultExpanded: true,
       items: contactItems,
+      tagTree,
     },
     {
       label: 'Journals',
@@ -119,6 +124,149 @@ function useNavigationSections(): NavigationSection[] {
       items: [{ label: 'Manage', href: '/integrations' as Route }],
     },
   ];
+}
+
+/**
+ * Recursive component that renders a tag tree node with expand/collapse.
+ */
+function TagTreeItem({
+  node,
+  depth,
+  expandedTags,
+  toggleTag,
+  isActiveLink: checkActiveLink,
+  onNavigate,
+}: {
+  readonly node: TagTreeNode;
+  readonly depth: number;
+  readonly expandedTags: Record<string, boolean>;
+  readonly toggleTag: (tagId: string) => void;
+  readonly isActiveLink: (href: Route) => boolean;
+  readonly onNavigate?: () => void;
+}) {
+  const hasChildren = node.children.length > 0;
+  const tagId = node.tag.id;
+  const isExpanded = expandedTags[tagId] ?? false;
+  const href = `/contacts/tags/${tagId}` as Route;
+  const isActive = checkActiveLink(href);
+  const indentClass = depth === 0 ? 'ml-0' : `ml-4`;
+
+  return (
+    <div
+      className={cn(indentClass)}
+      data-testid={`tag-tree-item-${node.tag.attributes.name.toLowerCase().replace(/\s+/g, '-')}`}
+    >
+      <div className='flex items-center'>
+        {/* Expand/collapse toggle for branches */}
+        {hasChildren ? (
+          <Button
+            variant='ghost'
+            size='sm'
+            className='h-6 w-6 shrink-0 p-0'
+            onClick={e => {
+              e.stopPropagation();
+              toggleTag(tagId);
+            }}
+            aria-expanded={isExpanded}
+            aria-label={`${isExpanded ? 'Collapse' : 'Expand'} ${node.tag.attributes.name}`}
+            data-testid={`tag-toggle-${node.tag.attributes.name.toLowerCase().replace(/\s+/g, '-')}`}
+          >
+            {isExpanded ? (
+              <ChevronDown className='h-3 w-3' aria-hidden='true' />
+            ) : (
+              <ChevronRight className='h-3 w-3' aria-hidden='true' />
+            )}
+          </Button>
+        ) : (
+          <span className='inline-block w-6 shrink-0' aria-hidden='true' />
+        )}
+
+        {/* Tag link */}
+        <Button
+          variant='ghost'
+          size='sm'
+          className={cn(
+            'h-auto min-w-0 flex-1 justify-start px-1 py-1.5 font-normal',
+            'hover:bg-accent hover:text-accent-foreground',
+            'focus-visible:ring-ring focus-visible:ring-2 focus-visible:ring-offset-2',
+            isActive && 'bg-accent text-accent-foreground font-medium'
+          )}
+          asChild
+        >
+          <Link
+            href={href}
+            onClick={onNavigate}
+            aria-current={isActive ? 'page' : undefined}
+            data-testid={`nav-link-${node.tag.attributes.name.toLowerCase().replace(/\s+/g, '-')}`}
+          >
+            <Tag className='mr-1.5 h-3 w-3 shrink-0' aria-hidden='true' />
+            <span className='truncate'>{node.tag.attributes.name}</span>
+          </Link>
+        </Button>
+      </div>
+
+      {/* Children (recursive) */}
+      {hasChildren && isExpanded && (
+        <div role='group' aria-label={`${node.tag.attributes.name} child tags`}>
+          {node.children.map(child => (
+            <TagTreeItem
+              key={child.tag.id}
+              node={child}
+              depth={depth + 1}
+              expandedTags={expandedTags}
+              toggleTag={toggleTag}
+              isActiveLink={checkActiveLink}
+              onNavigate={onNavigate}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Renders the complete tag tree in the sidebar.
+ */
+function TagTreeNavigation({
+  tree,
+  isActiveLink: checkActiveLink,
+  onNavigate,
+}: {
+  readonly tree: TagTreeNode[];
+  readonly isActiveLink: (href: Route) => boolean;
+  readonly onNavigate?: () => void;
+}) {
+  const [expandedTags, setExpandedTags] = useState<Record<string, boolean>>({});
+
+  const toggleTag = useCallback((tagId: string) => {
+    setExpandedTags(prev => ({
+      ...prev,
+      [tagId]: !prev[tagId],
+    }));
+  }, []);
+
+  if (tree.length === 0) {
+    return null;
+  }
+
+  return (
+    <ScrollArea className='max-h-[50vh]' data-testid='tag-tree-scroll-area'>
+      <div className='space-y-0.5' role='group' aria-label='Tags'>
+        {tree.map(node => (
+          <TagTreeItem
+            key={node.tag.id}
+            node={node}
+            depth={0}
+            expandedTags={expandedTags}
+            toggleTag={toggleTag}
+            isActiveLink={checkActiveLink}
+            onNavigate={onNavigate}
+          />
+        ))}
+      </div>
+    </ScrollArea>
+  );
 }
 
 /**
@@ -333,6 +481,15 @@ function SidebarContentInner({
                     </Button>
                   );
                 })}
+
+                {/* Nested tag tree */}
+                {section.tagTree && section.tagTree.length > 0 && (
+                  <TagTreeNavigation
+                    tree={section.tagTree}
+                    isActiveLink={isActiveLink}
+                    onNavigate={onNavigate}
+                  />
+                )}
               </div>
             )}
           </div>

@@ -181,8 +181,12 @@ describe('Sidebar Components', () => {
         'section-contacts'
       );
 
-      // Section groups have proper roles
-      const contactsGroup = screen.getByRole('group');
+      // Section groups have proper roles (use getAllByRole since tag tree also adds groups)
+      const groups = screen.getAllByRole('group');
+      const contactsGroup = groups.find(
+        g => g.getAttribute('aria-labelledby') === 'section-contacts-header'
+      );
+      expect(contactsGroup).toBeDefined();
       expect(contactsGroup).toHaveAttribute(
         'aria-labelledby',
         'section-contacts-header'

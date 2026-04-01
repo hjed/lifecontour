@@ -161,16 +161,16 @@ The sequence reflects both user priority and technical dependency:
 **PR Size:** ~4-6 files
 
 **Acceptance Criteria:**
-- [ ] The sidebar renders tags as a nested tree.
-- [ ] Deeper levels are expandable/collapsible instead of always fully expanded.
-- [ ] The sidebar remains usable when there are no child tags and when several sibling tags exist.
-- [ ] Existing non-tag navigation items are not regressed.
-- [ ] If the tag list is longer than the page ensure that we can scroll through it.
+- [x] The sidebar renders tags as a nested tree.
+- [x] Deeper levels are expandable/collapsible instead of always fully expanded.
+- [x] The sidebar remains usable when there are no child tags and when several sibling tags exist.
+- [x] Existing non-tag navigation items are not regressed.
+- [x] If the tag list is longer than the page ensure that we can scroll through it.
 
 **Required Test Coverage:**
-- **Unit:** tree-shaping helpers for nested sidebar data.
-- **Integration:** frontend data-fetch and type-contract tests against hierarchical responses.
-- **E2E:** sidebar expansion/collapse and tag navigation from the real contacts layout.
+- **Unit:** tree-shaping helpers for nested sidebar data. ✅
+- **Integration:** frontend data-fetch and type-contract tests against hierarchical responses. ✅
+- **E2E:** sidebar expansion/collapse and tag navigation from the real contacts layout. ✅
 
 #### Phase 3: Unify Tag Filtering with the Main Contacts List
 **PR Size:** ~5-7 files
