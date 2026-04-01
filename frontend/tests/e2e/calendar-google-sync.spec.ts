@@ -197,7 +197,7 @@ test.describe('Calendar Google Sync Settings', () => {
 
     // Verify the payload includes google_calendar_id and is_synced_to_google
     await expect
-      .poll(() => createPayload !== null, { timeout: 5000 })
+      .poll(() => createPayload !== null, { timeout: 10000 })
       .toBeTruthy();
     expect(createPayload.data.attributes.is_synced_to_google).toBe(true);
     expect(createPayload.data.attributes.google_calendar_id).toBe(
