@@ -7,6 +7,7 @@ from typing import Any
 import mcp.types as mcp_types
 
 _WRAPPER_KEYS = {
+    "_meta",
     "annotations",
     "content",
     "id",
@@ -54,7 +55,11 @@ def _iter_json_dicts(value: Any) -> list[dict[str, Any]]:
         return _iter_sse_json_dicts(value)
 
     if isinstance(value, dict):
-        return [value, *_collect_nested_json_dicts(value.values())]
+        # Exclude _meta values from recursion — fastmcp 3.2+ injects
+        # metadata dicts (e.g. {"fastmcp": {"wrap_result": true}}) that
+        # would otherwise be mistaken for application payloads.
+        child_values = [v for k, v in value.items() if k != "_meta"]
+        return [value, *_collect_nested_json_dicts(child_values)]
 
     if isinstance(value, list):
         return _collect_nested_json_dicts(value)
