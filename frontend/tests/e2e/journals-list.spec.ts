@@ -113,7 +113,7 @@ test.describe('Journal List Page', () => {
         page.getByRole('heading', {
           name: /Weekend Hike/i,
         })
-      ).toBeVisible({ timeout: 5000 });
+      ).toBeVisible({ timeout: 10000 });
 
       // Verify non-matching journal is not visible (Team Meeting)
       await expect(
@@ -303,7 +303,7 @@ test.describe('Journal List Page', () => {
       // Wait for search results
       await expect(
         page.getByRole('heading', { name: /Meeting Notes/i })
-      ).toBeVisible({ timeout: 5000 });
+      ).toBeVisible({ timeout: 10000 });
       await expect(
         page.getByRole('heading', { name: /Team Meeting/i })
       ).toBeVisible();

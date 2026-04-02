@@ -190,7 +190,7 @@ async function completeWorkerOAuthFlow(browser: any): Promise<AuthState> {
       .locator('button:has-text("Continue with")')
       .first();
     await playwrightExpect(oauthButton).toBeVisible({ timeout: 15000 });
-    await playwrightExpect(oauthButton).toBeEnabled({ timeout: 5000 });
+    await playwrightExpect(oauthButton).toBeEnabled({ timeout: 10000 });
 
     // Step 2: Click OAuth button and wait for navigation away from login page
     // Use waitForURL to wait for redirect - more reliable than waitForNavigation

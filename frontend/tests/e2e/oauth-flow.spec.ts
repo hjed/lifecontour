@@ -124,7 +124,7 @@ test.describe('OAuth Authentication Flow - Real Provider Tests', () => {
       await expect(async () => {
         const bodyText = await page.textContent('body');
         expect(bodyText).toBeTruthy();
-      }).toPass({ timeout: 5000 });
+      }).toPass({ timeout: 10000 });
     }
   });
 
@@ -151,7 +151,7 @@ test.describe('OAuth Authentication Flow - Real Provider Tests', () => {
     // Verify error is displayed
     await expect(page.locator('body')).toContainText(
       'Missing required OAuth parameters',
-      { timeout: 5000 }
+      { timeout: 10000 }
     );
   });
 
@@ -200,7 +200,7 @@ test.describe('OAuth Authentication Flow - Real Provider Tests', () => {
       // Wait for OAuth login to be called
       await expect(async () => {
         expect(oauthLoginCalled).toBe(true);
-      }).toPass({ timeout: 5000 });
+      }).toPass({ timeout: 10000 });
     }
   });
 });

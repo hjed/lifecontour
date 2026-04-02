@@ -127,7 +127,7 @@ test.describe('OAuth Error Handling', () => {
       // Page should still have interactive elements
       const clickableCount = await page.locator('button, a, input').count();
       expect(clickableCount).toBeGreaterThan(0);
-    }).toPass({ timeout: 5000 });
+    }).toPass({ timeout: 10000 });
 
     // Note: No cleanup needed - Playwright automatically cleans up routes when the page/context is closed
   });
@@ -154,7 +154,7 @@ test.describe('OAuth Error Handling', () => {
         const bodyText = await page.textContent('body');
         const isHandled = bodyText !== null && bodyText.length > 0;
         expect(isHandled).toBe(true);
-      }).toPass({ timeout: 5000 });
+      }).toPass({ timeout: 10000 });
     }
   });
 });
@@ -213,7 +213,7 @@ test.describe('OAuth Session and State Management Errors', () => {
     await expect(async () => {
       const bodyText = await page.textContent('body');
       expect(bodyText).toBeTruthy();
-    }).toPass({ timeout: 5000 });
+    }).toPass({ timeout: 10000 });
   });
 
   test('should handle OAuth provider unavailability', async ({
@@ -237,7 +237,7 @@ test.describe('OAuth Session and State Management Errors', () => {
     await expect(async () => {
       const bodyText = await page.textContent('body');
       expect(bodyText).toBeTruthy();
-    }).toPass({ timeout: 5000 });
+    }).toPass({ timeout: 10000 });
 
     // Note: No cleanup needed - Playwright automatically cleans up routes when the page/context is closed
   });

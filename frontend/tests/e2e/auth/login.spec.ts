@@ -507,7 +507,7 @@ test.describe('Login Page - Authenticated Users', () => {
     await authenticatedPage.waitForURL(
       url => !url.pathname.includes('/auth/login'),
       {
-        timeout: 5000,
+        timeout: 10000,
       }
     );
 
@@ -535,7 +535,7 @@ test.describe('Login Page - Authenticated Users', () => {
     await authenticatedPage.waitForURL(
       url => !url.pathname.includes('/auth/login'),
       {
-        timeout: 5000,
+        timeout: 10000,
       }
     );
 

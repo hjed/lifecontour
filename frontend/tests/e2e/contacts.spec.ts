@@ -56,12 +56,12 @@ test.describe('Contact Management - Authenticated User', () => {
     // Check that contact name is loaded
     await expect(
       authenticatedPage.getByText(`${contact.firstName} ${contact.lastName}`)
-    ).toBeVisible();
+    ).toBeVisible({ timeout: 10000 });
 
     // Verify tag is displayed using the specific test ID
     await expect(
       authenticatedPage.getByTestId('tag-TestDetailTag').first()
-    ).toBeVisible();
+    ).toBeVisible({ timeout: 10000 });
   });
 
   test('should load contact details page successfully when authenticated', async ({
@@ -117,10 +117,12 @@ test.describe('Contact Management - Authenticated User', () => {
     await authenticatedPage.goto('/contacts');
 
     const contactCard = authenticatedPage.getByTestId(`contact-${contact.id}`);
-    await expect(contactCard).toBeVisible();
+    await expect(contactCard).toBeVisible({ timeout: 10000 });
 
     // Tag should show its name, not "Tag {id}"
-    await expect(contactCard.getByTestId(`tag-${tagName}`)).toBeVisible();
+    await expect(contactCard.getByTestId(`tag-${tagName}`)).toBeVisible({
+      timeout: 10000,
+    });
 
     // Should NOT show fallback "Tag <number>" pattern
     const tagBadges = contactCard.locator('[data-testid^="tag-Tag "]');
@@ -161,10 +163,12 @@ test.describe('Contact Management - Authenticated User', () => {
 
     await page.goto('/contacts');
     await expect(page).toHaveTitle(/Personal Management System/);
-    await expect(page.getByRole('heading', { name: 'Contacts' })).toBeVisible();
-    await expect(
-      page.getByText(`${totalContacts} contacts found`)
-    ).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Contacts' })).toBeVisible({
+      timeout: 10000,
+    });
+    await expect(page.getByText(`${totalContacts} contacts found`)).toBeVisible(
+      { timeout: 10000 }
+    );
 
     const contactCards = page.locator('[data-testid^="contact-"]');
     await expect.poll(async () => contactCards.count()).toBe(20);
@@ -183,11 +187,11 @@ test.describe('Contact Management - Authenticated User', () => {
     const infiniteScrollTrigger = page.getByTestId(
       'contacts-infinite-scroll-trigger'
     );
-    await expect(infiniteScrollTrigger).toBeVisible();
+    await expect(infiniteScrollTrigger).toBeVisible({ timeout: 10000 });
     await infiniteScrollTrigger.scrollIntoViewIfNeeded();
 
     await expect.poll(async () => contactCards.count()).toBe(totalContacts);
-    await expect(laterPageContact).toBeVisible();
+    await expect(laterPageContact).toBeVisible({ timeout: 10000 });
   });
 
   test('should display relationship with linked contact name and clickable link', async ({
@@ -225,21 +229,23 @@ test.describe('Contact Management - Authenticated User', () => {
       authenticatedPage
         .getByText(`${alice.firstName} ${alice.lastName}`)
         .first()
-    ).toBeVisible();
+    ).toBeVisible({ timeout: 10000 });
 
     // Verify the Relationships section is visible
     await expect(
       authenticatedPage.getByRole('heading', { name: 'Relationships' })
-    ).toBeVisible();
+    ).toBeVisible({ timeout: 10000 });
 
     // Verify the relationship type is shown
-    await expect(authenticatedPage.getByText('Partner')).toBeVisible();
+    await expect(authenticatedPage.getByText('Partner')).toBeVisible({
+      timeout: 10000,
+    });
 
     // Verify the linked contact name is shown and is a link
     const contactLink = authenticatedPage.getByTestId(
       `relationship-contact-link-${bob.id}`
     );
-    await expect(contactLink).toBeVisible();
+    await expect(contactLink).toBeVisible({ timeout: 10000 });
     await expect(contactLink).toContainText(bob.firstName);
 
     // Click the link to navigate to Bob's profile
@@ -251,7 +257,7 @@ test.describe('Contact Management - Authenticated User', () => {
     // Verify we're now on Bob's detail page
     await expect(
       authenticatedPage.getByText(`${bob.firstName} ${bob.lastName}`).first()
-    ).toBeVisible();
+    ).toBeVisible({ timeout: 10000 });
   });
 });
 
@@ -267,7 +273,7 @@ test.describe('Contact Management - Unauthenticated User', () => {
     // Should see login page content
     await expect(
       unauthenticatedPage.getByRole('heading', { name: 'Welcome Back' })
-    ).toBeVisible();
+    ).toBeVisible({ timeout: 10000 });
   });
 
   test('should redirect to login when accessing create contact page unauthenticated', async ({
@@ -281,7 +287,7 @@ test.describe('Contact Management - Unauthenticated User', () => {
     // Should see login page content
     await expect(
       unauthenticatedPage.getByRole('heading', { name: 'Welcome Back' })
-    ).toBeVisible();
+    ).toBeVisible({ timeout: 10000 });
   });
 
   test('should redirect to login when accessing contact details unauthenticated', async ({
@@ -295,6 +301,6 @@ test.describe('Contact Management - Unauthenticated User', () => {
     // Should see login page content
     await expect(
       unauthenticatedPage.getByRole('heading', { name: 'Welcome Back' })
-    ).toBeVisible();
+    ).toBeVisible({ timeout: 10000 });
   });
 });

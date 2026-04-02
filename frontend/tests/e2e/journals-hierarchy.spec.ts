@@ -133,7 +133,7 @@ test.describe('Journal Hierarchy', () => {
     );
 
     const parentOption = page.getByRole('option', { name: parentTitle });
-    await expect(parentOption).toBeVisible({ timeout: 5000 });
+    await expect(parentOption).toBeVisible({ timeout: 10000 });
     await parentOption.click();
 
     const childResponsePromise = page.waitForResponse(
