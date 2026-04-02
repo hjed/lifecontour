@@ -3371,6 +3371,7 @@ def register_journal_tools(mcp: FastMCP[None]) -> None:
             int,
             Field(
                 default=2,
+                ge=0,
                 description="Number of days before the anchor date to include (default: 2)",
             ),
         ] = 2,
@@ -3378,6 +3379,7 @@ def register_journal_tools(mcp: FastMCP[None]) -> None:
             int,
             Field(
                 default=4,
+                ge=0,
                 description="Number of days after the anchor date to include (default: 4)",
             ),
         ] = 4,
@@ -3399,6 +3401,7 @@ def register_journal_tools(mcp: FastMCP[None]) -> None:
             int,
             Field(
                 default=50,
+                ge=1,
                 description="Maximum results to return per page (default: 50)",
             ),
         ] = 50,
@@ -3406,6 +3409,7 @@ def register_journal_tools(mcp: FastMCP[None]) -> None:
             int,
             Field(
                 default=0,
+                ge=0,
                 description="Number of results to skip for pagination (default: 0)",
             ),
         ] = 0,
@@ -3445,7 +3449,7 @@ def register_journal_tools(mcp: FastMCP[None]) -> None:
                     f"Invalid anchor_date '{anchor_date}'. Must be ISO format (YYYY-MM-DD)."
                 ) from exc
         else:
-            resolved_anchor = date.today()
+            resolved_anchor = datetime.now(UTC).date()
 
         window_start, window_end = compute_date_window(
             resolved_anchor, days_back, days_forward

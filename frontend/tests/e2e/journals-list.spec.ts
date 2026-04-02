@@ -1201,6 +1201,17 @@ test.describe('Journal List Page', () => {
   });
 
   test.describe('Date Window API', () => {
+    /**
+     * Format a Date as YYYY-MM-DD in the user's local timezone.
+     * Using local timezone avoids ±1 day drift when running near midnight UTC.
+     */
+    const toLocalDateString = (d: Date): string => {
+      const year = d.getFullYear();
+      const month = String(d.getMonth() + 1).padStart(2, '0');
+      const day = String(d.getDate()).padStart(2, '0');
+      return `${year}-${month}-${day}`;
+    };
+
     test('should return journals anchored to the current day within the default window', async ({
       authenticatedPage,
       testCleanup,
@@ -1247,13 +1258,14 @@ test.describe('Journal List Page', () => {
       });
 
       // Query the REST API with a date window anchored to today (default 2 days back, 4 days forward)
+      // Use local timezone dates to match the backend's date interpretation
       const windowStart = new Date(today);
       windowStart.setDate(windowStart.getDate() - 2);
       const windowEnd = new Date(today);
       windowEnd.setDate(windowEnd.getDate() + 4);
 
-      const startDate = windowStart.toISOString().split('T')[0];
-      const endDate = windowEnd.toISOString().split('T')[0];
+      const startDate = toLocalDateString(windowStart);
+      const endDate = toLocalDateString(windowEnd);
 
       const response = await page.request.get(
         `/api/journals?start_date=${startDate}&end_date=${endDate}&limit=20`
@@ -1297,13 +1309,14 @@ test.describe('Journal List Page', () => {
         await dataManager.cleanup();
       });
 
+      // Use local timezone dates to match the backend's date interpretation
       const windowStart = new Date();
       windowStart.setDate(windowStart.getDate() - 2);
       const windowEnd = new Date();
       windowEnd.setDate(windowEnd.getDate() + 4);
 
-      const startDate = windowStart.toISOString().split('T')[0];
-      const endDate = windowEnd.toISOString().split('T')[0];
+      const startDate = toLocalDateString(windowStart);
+      const endDate = toLocalDateString(windowEnd);
 
       // Request with limit=2 to force pagination
       const response = await page.request.get(
