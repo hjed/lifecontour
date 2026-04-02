@@ -93,7 +93,7 @@ test.describe('Tag Filtering via Main Contacts List', () => {
     }
   });
 
-  test('should display not found message for non-existent tag', async ({
+  test('should handle non-existent tag gracefully', async ({
     authenticatedPage,
   }) => {
     // Navigate to a non-existent tag

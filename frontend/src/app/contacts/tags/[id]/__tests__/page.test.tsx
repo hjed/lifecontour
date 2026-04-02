@@ -6,8 +6,9 @@
  * Tests for the legacy /contacts/tags/[id] route redirect.
  *
  * This page now redirects to /contacts?tag=<id> for the unified contacts
- * list experience. The redirect is a server component that calls next/navigation
- * redirect(), so we test it by verifying the function throws NEXT_REDIRECT.
+ * list experience. The redirect is implemented as a server component that
+ * calls next/navigation redirect(), and we test it by mocking redirect()
+ * and asserting it is called with the expected destination URL.
  */
 
 import { redirect } from 'next/navigation';

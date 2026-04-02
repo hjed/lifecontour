@@ -94,7 +94,9 @@ function ContactsPageContent() {
     fetchNextPage: fetchNextSearchPage,
   } = useInfiniteSearchContacts(
     debouncedSearchQuery,
-    {},
+    // Thread the active tag into the search path so search + tag filtering
+    // work together (the search API accepts tag names, not IDs).
+    activeTagName ? { tags: [activeTagName] } : {},
     { enabled: shouldUseSearch }
   );
 
@@ -296,7 +298,7 @@ function ContactsPageContent() {
       </Card>
 
       {/* Active Tag Filter Badge */}
-      {activeTagId && activeTagName && (
+      {activeTagId && (
         <div
           className='mb-4 flex items-center gap-2'
           data-testid='active-tag-filter'
@@ -306,11 +308,11 @@ function ContactsPageContent() {
             className='flex items-center gap-1 px-3 py-1'
           >
             <Tag className='h-3 w-3' aria-hidden='true' />
-            {activeTagName}
+            {activeTagName ?? `Tag ${activeTagId}`}
             <button
               onClick={clearTag}
               className='hover:bg-muted ml-1 rounded-full p-0.5'
-              aria-label={`Remove ${activeTagName} filter`}
+              aria-label={`Remove ${activeTagName ?? 'tag'} filter`}
               data-testid='clear-tag-filter'
             >
               <X className='h-3 w-3' />

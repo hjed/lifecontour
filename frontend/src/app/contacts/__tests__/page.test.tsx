@@ -506,6 +506,33 @@ describe('ContactsPage', () => {
       await screen.findByText('Contacts');
       expect(screen.queryByTestId('active-tag-filter')).not.toBeInTheDocument();
     });
+
+    it('shows tag badge with ID fallback when tag name is not resolved', async () => {
+      mockUseTagFilter.mockReturnValue({
+        tagId: '999',
+        setTag: mockSetTag,
+        clearTag: mockClearTag,
+      });
+
+      // Tags API returns data that does NOT include tag 999
+      mockUseTags.mockReturnValue({
+        data: { data: [] },
+        isLoading: false,
+        error: null,
+      } as any);
+
+      setupContactMocks({ data: mockContactsData });
+      renderContactsPage();
+
+      // Badge should still be visible with ID fallback
+      const tagBadge = await screen.findByTestId('active-tag-filter');
+      expect(tagBadge).toBeInTheDocument();
+      expect(tagBadge).toHaveTextContent('Tag 999');
+
+      // Clear button should still work
+      const clearButton = screen.getByTestId('clear-tag-filter');
+      expect(clearButton).toBeInTheDocument();
+    });
   });
 
   it('shows clear button when search is active', async () => {
