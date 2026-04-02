@@ -1,5 +1,6 @@
 """SQL implementation of CalendarInfoRepository."""
 
+from datetime import date
 from typing import Any
 from uuid import UUID
 
@@ -49,8 +50,8 @@ class SqlCalendarInfoRepository(CalendarInfoRepository):
     def _row_to_calendar_info(
         self,
         row: Any,
-        event_start_date: Any = None,
-        event_end_date: Any = None,
+        event_start_date: date | None = None,
+        event_end_date: date | None = None,
     ) -> CalendarInfo:
         """Convert a database row to a CalendarInfo entity."""
         start_date = event_start_date

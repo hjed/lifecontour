@@ -1,6 +1,6 @@
 """Integration tests for SqlCalendarInfoRepository."""
 
-from datetime import UTC, datetime, time, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 
 import pytest
 import pytest_asyncio
@@ -78,8 +78,8 @@ def create_test_calendar_info(
     is_all_day: bool = False,
     location: str | None = None,
     sync_invitees: bool = False,
-    event_start_date=None,
-    event_end_date=None,
+    event_start_date: date | None = None,
+    event_end_date: date | None = None,
 ) -> CalendarInfo:
     """Helper function to create a test calendar info."""
     return CalendarInfo(
