@@ -94,15 +94,12 @@ describe('JournalList', () => {
     expect(container.firstChild).toBeEmptyDOMElement();
   });
 
-  it('applies default grid className', () => {
+  it('applies default tree layout className', () => {
     const displayJournals = mockJournals.map(j => toDisplayJournal(j));
     const { container } = render(<JournalList journals={displayJournals} />);
 
-    const gridElement = container.firstChild as HTMLElement;
-    expect(gridElement).toHaveClass('grid');
-    expect(gridElement).toHaveClass('gap-4');
-    expect(gridElement).toHaveClass('md:grid-cols-2');
-    expect(gridElement).toHaveClass('lg:grid-cols-3');
+    const listElement = container.firstChild as HTMLElement;
+    expect(listElement).toHaveClass('space-y-3');
   });
 
   it('applies custom className', () => {

@@ -20,7 +20,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { useContactJournals } from '@/lib/api/journals';
-import { JournalListItem } from '@/components/journals/JournalListItem';
+import { JournalList } from '@/components/journals/JournalList';
 import { useDisplayJournals } from '@/hooks/useDisplayJournals';
 
 interface ContactJournalsProps {
@@ -52,24 +52,6 @@ function compareByEventDateMostRecentFirst(
   return dateB - dateA;
 }
 
-function compareChildJournals(
-  a: RelationshipSectionProps['journals'][number],
-  b: RelationshipSectionProps['journals'][number]
-): number {
-  const dateA = new Date(a.event_date_range.start).getTime();
-  const dateB = new Date(b.event_date_range.start).getTime();
-
-  // Children ordered by event_date_range.start, then order field (spec)
-  if (dateA !== dateB) return dateA - dateB;
-
-  const orderA = a.order ?? Number.POSITIVE_INFINITY;
-  const orderB = b.order ?? Number.POSITIVE_INFINITY;
-  if (orderA !== orderB) return orderA - orderB;
-
-  // Stable fallback
-  return String(a.id).localeCompare(String(b.id));
-}
-
 /**
  * Collapsible section for a specific relationship type
  */
@@ -80,100 +62,7 @@ function RelationshipSection({
 }: RelationshipSectionProps) {
   const [isOpen, setIsOpen] = useState(defaultOpen);
 
-  // Per-parent expand/collapse state. Undefined => expanded by default.
-  const [childrenExpandedById, setChildrenExpandedById] = useState<
-    Record<string, boolean>
-  >({});
-
-  const { rootJournals, childrenByParentId } = useMemo(() => {
-    const journalById = new Map(journals.map(j => [String(j.id), j]));
-
-    const childrenMap = new Map<string, typeof journals>();
-    const roots: typeof journals = [];
-
-    for (const journal of journals) {
-      const parentId = journal.parent_id;
-      const parentKey =
-        parentId !== null && parentId !== undefined ? String(parentId) : null;
-
-      // Only nest if the parent is present in this relationship-type group
-      if (parentKey && journalById.has(parentKey)) {
-        const existing = childrenMap.get(parentKey) ?? [];
-        existing.push(journal);
-        childrenMap.set(parentKey, existing);
-      } else {
-        roots.push(journal);
-      }
-    }
-
-    roots.sort(compareByEventDateMostRecentFirst);
-    childrenMap.forEach(children => {
-      children.sort(compareChildJournals);
-    });
-
-    return { rootJournals: roots, childrenByParentId: childrenMap };
-  }, [journals]);
-
   if (journals.length === 0) return null;
-
-  const toggleChildren = (journalId: string) => {
-    setChildrenExpandedById(prev => {
-      const current = prev[journalId] ?? true;
-      return { ...prev, [journalId]: !current };
-    });
-  };
-
-  const renderJournalNode = (journal: (typeof journals)[number]) => {
-    const children = childrenByParentId.get(String(journal.id)) ?? [];
-    const hasChildren = children.length > 0;
-    const isExpanded = childrenExpandedById[String(journal.id)] ?? true;
-
-    return (
-      <div key={journal.id} className='space-y-3'>
-        <div className='flex items-start gap-2'>
-          {hasChildren ? (
-            <Button
-              type='button'
-              variant='ghost'
-              size='icon'
-              className='h-8 w-8 shrink-0'
-              aria-label={`${isExpanded ? 'Collapse' : 'Expand'} child journals`}
-              aria-expanded={isExpanded}
-              aria-controls={`journal-children-${journal.id}`}
-              data-testid={`journalChildrenToggle-${journal.id}`}
-              onClick={e => {
-                e.preventDefault();
-                e.stopPropagation();
-                toggleChildren(String(journal.id));
-              }}
-            >
-              {isExpanded ? (
-                <ChevronDown className='h-4 w-4' aria-hidden='true' />
-              ) : (
-                <ChevronRight className='h-4 w-4' aria-hidden='true' />
-              )}
-            </Button>
-          ) : (
-            <div className='h-8 w-8 shrink-0' aria-hidden='true' />
-          )}
-
-          <div className='min-w-0 flex-1'>
-            <JournalListItem journal={journal} className='w-full' />
-          </div>
-        </div>
-
-        {hasChildren && isExpanded ? (
-          <div
-            id={`journal-children-${journal.id}`}
-            data-testid={`journalChildrenContainer-${journal.id}`}
-            className='ml-6 space-y-3 border-l pl-4'
-          >
-            {children.map(child => renderJournalNode(child))}
-          </div>
-        ) : null}
-      </div>
-    );
-  };
 
   return (
     <Card className='overflow-hidden'>
@@ -198,8 +87,8 @@ function RelationshipSection({
           </CollapsibleTrigger>
         </CardHeader>
         <CollapsibleContent>
-          <CardContent className='space-y-3 p-4 pt-0'>
-            {rootJournals.map(journal => renderJournalNode(journal))}
+          <CardContent className='p-4 pt-0'>
+            <JournalList journals={journals} />
           </CardContent>
         </CollapsibleContent>
       </Collapsible>

@@ -75,6 +75,7 @@ from app.core.journal.models.repositories import (
     RouteRepository,
     TravelDataRepository,
 )
+from app.core.journal.services.hierarchy_service import HierarchyService
 from app.core.journal.services.journal_merge_service import JournalMergeService
 from app.core.journal.services.journal_service import JournalService
 from app.core.search.exceptions import SearchServiceUnavailableError
@@ -887,6 +888,11 @@ async def _build_journal_list_resources(
         user_id=user_id, parent_ids=returned_ids_list
     )
 
+    # Compute depth for each journal via DB queries
+    depth_map = await HierarchyService.compute_depth_map(
+        returned_ids_list, journal_service.journal_repo
+    )
+
     # Enrich journals
     journal_resources = []
     for journal in all_journals:
@@ -916,6 +922,7 @@ async def _build_journal_list_resources(
         children_count = (
             children_count_by_parent_id.get(journal.id, 0) if journal.id else 0
         )
+        depth = depth_map.get(journal.id, 1) if journal.id else None
         resource = JournalConverter.to_resource(
             journal,
             base_url,
@@ -927,6 +934,7 @@ async def _build_journal_list_resources(
             routes=routes,
             parent=parent,
             children_count=children_count,
+            depth=depth,
         )
         journal_resources.append(resource)
 
@@ -1264,6 +1272,12 @@ async def get_journal(
         skiing_data_repo,
     )
 
+    # Compute depth for the journal
+    depth_map = await HierarchyService.compute_depth_map(
+        [journal.id] if journal.id else [], journal_service.journal_repo
+    )
+    depth = depth_map.get(journal.id, 1) if journal.id else None
+
     journal_resource = JournalConverter.to_resource(
         journal,
         base_url,
@@ -1275,6 +1289,7 @@ async def get_journal(
         parent=parent,
         children=children,
         children_count=children_count,
+        depth=depth,
         children_types=children_types,
     )
 
@@ -1878,6 +1893,11 @@ async def create_journal(
         else None
     )
 
+    depth_map = await HierarchyService.compute_depth_map(
+        [created_journal.id], journal_service.journal_repo
+    )
+    depth = depth_map.get(created_journal.id, 1)
+
     journal_resource = JournalConverter.to_resource(
         journal=created_journal,
         base_url=base_url,
@@ -1887,6 +1907,7 @@ async def create_journal(
         tags=tags,
         calendar=calendar,
         parent=parent,
+        depth=depth,
     )
 
     return await _build_journal_response(journal_resource, contact_repo)
@@ -2003,6 +2024,13 @@ async def update_journal(
         skiing_data_repo,
     )
 
+    # Compute depth for the journal
+    depth_map = await HierarchyService.compute_depth_map(
+        [saved_journal.id] if saved_journal.id else [],
+        journal_service.journal_repo,
+    )
+    depth = depth_map.get(saved_journal.id, 1) if saved_journal.id else None
+
     journal_resource = JournalConverter.to_resource(
         journal=saved_journal,
         base_url=base_url,
@@ -2014,6 +2042,7 @@ async def update_journal(
         parent=parent,
         children=children,
         children_count=children_count,
+        depth=depth,
         children_types=children_types,
     )
 
@@ -2177,6 +2206,13 @@ async def partial_update_journal(
         skiing_data_repo,
     )
 
+    # Compute depth for the journal
+    depth_map = await HierarchyService.compute_depth_map(
+        [saved_journal.id] if saved_journal.id else [],
+        journal_service.journal_repo,
+    )
+    depth = depth_map.get(saved_journal.id, 1) if saved_journal.id else None
+
     journal_resource = JournalConverter.to_resource(
         journal=saved_journal,
         base_url=base_url,
@@ -2188,6 +2224,7 @@ async def partial_update_journal(
         parent=parent,
         children=children,
         children_count=children_count,
+        depth=depth,
         children_types=children_types,
     )
 

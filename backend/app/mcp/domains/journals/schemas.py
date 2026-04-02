@@ -115,7 +115,28 @@ class JournalSearchResult(BaseModel):
     highlighted: dict[str, str] = Field(
         default_factory=dict, description="Search highlighting information"
     )
-    summary: str = Field(description="AI-friendly summary with search context")
+    summary: str | None = Field(
+        default=None, description="AI-friendly summary with search context"
+    )
+
+
+class JournalHierarchyNode(JournalSearchResult):
+    """AI-friendly journal hierarchy node format."""
+
+    depth: int = Field(description="Nesting level in the hierarchy")
+    children_count: int = Field(description="Number of direct children")
+    children: list["JournalHierarchyNode"] = Field(
+        default_factory=list, description="Child journals"
+    )
+
+
+class JournalHierarchyResponse(BaseModel):
+    """AI-friendly journal hierarchy response format."""
+
+    nodes: list[JournalHierarchyNode] = Field(description="Root hierarchy nodes")
+    total_nodes: int = Field(description="Total number of journals returned")
+    processing_time_ms: int = Field(description="Processing time in ms")
+    summary: str = Field(description="AI-friendly summary of hierarchy")
 
 
 class JournalSearchResponse(BaseModel):

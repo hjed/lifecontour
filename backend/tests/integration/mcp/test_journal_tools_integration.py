@@ -1428,6 +1428,66 @@ class TestActivityMcpToolsMountedIntegration:
         assert payload["personal_records"]["longest_distance"]["value"] == 18000
 
     @pytest.mark.asyncio
+    async def test_get_journal_hierarchy_returns_tree(
+        self,
+        authenticated_lifespan_client,
+        clean_database: AsyncConnection,
+    ) -> None:
+        """Verify the get_journal_hierarchy MCP tool returns a nested tree."""
+        # Create root journal
+        root_id = await self._insert_journal(
+            clean_database,
+            title="Root Trip",
+            content="Main trip journal",
+            start=datetime(2024, 6, 1, tzinfo=UTC),
+        )
+        assert root_id > 0
+
+        # Create child journal
+        child_id = await self._insert_journal(
+            clean_database,
+            title="Day 1",
+            content="First day of trip",
+            start=datetime(2024, 6, 1, tzinfo=UTC),
+        )
+        # Update parent_id of child
+        from sqlalchemy import text
+
+        await clean_database.execute(
+            text("UPDATE journals SET parent_id = :parent_id WHERE id = :id"),
+            {"parent_id": root_id, "id": child_id},
+        )
+
+        async with authenticated_lifespan_client() as authenticated_client:
+            session_id = await initialize_mcp_session(authenticated_client)
+            payload = await self._call_tool(
+                authenticated_client,
+                session_id,
+                "get_journal_hierarchy",
+                {"start_date": "2024-06-01"},
+            )
+
+        print("DEBUG PAYLOAD:", payload)
+        assert "error" not in payload, (
+            f"MCP tool returned error: {payload.get('message')}"
+        )
+        assert payload["total_nodes"] >= 2
+
+        # Find the root node in the payload
+        root_node = next(n for n in payload["nodes"] if n["id"] == root_id)
+        assert root_node["title"] == "Root Trip"
+        assert root_node["depth"] == 1
+        assert root_node["children_count"] == 1
+        assert len(root_node["children"]) == 1
+
+        child_node = root_node["children"][0]
+        assert child_node["id"] == child_id
+        assert child_node["title"] == "Day 1"
+        assert child_node["depth"] == 2
+        assert child_node["children_count"] == 0
+        assert len(child_node["children"]) == 0
+
+    @pytest.mark.asyncio
     async def test_analyze_activity_trends_returns_monthly_frequency_buckets(
         self,
         authenticated_lifespan_client,

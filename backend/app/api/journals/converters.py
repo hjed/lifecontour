@@ -226,6 +226,7 @@ class JournalConverter:
         parent: Journal | None = None,
         children: list[Journal] | None = None,
         children_count: int | None = None,
+        depth: int | None = None,
         routes: list[Route] | None = None,
         children_types: dict[int, list[str]] | None = None,
     ) -> JournalResource:
@@ -243,6 +244,7 @@ class JournalConverter:
             parent: Parent journal
             children: Child journals
             children_count: Number of child journals
+            depth: Depth in hierarchy (1=root, 2=first-level child)
             children_types: Mapping of child journal ID to type lists
 
         Returns:
@@ -276,6 +278,7 @@ class JournalConverter:
             parent=parent_summary,
             children=children_summaries,
             children_count=children_count,
+            depth=depth,
         )
 
         # Create relationships

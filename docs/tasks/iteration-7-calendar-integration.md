@@ -405,10 +405,10 @@ Phase 1 and Phase 2 were implemented as a combined delivery. The merge domain se
 **PR Size:** ~4-6 files
 
 **Acceptance Criteria:**
-- [ ] Provide a centralized hierarchy read model that supports nested display without duplicating tree logic in multiple UI surfaces.
-- [ ] Depth and collapse metadata required by the future day-grouped list are shaped centrally.
-- [ ] Contact-linked journal surfaces and existing detail surfaces keep working with the shared hierarchy model.
-- [ ] The hierarchy read model is suitable for both UI and MCP retrieval contexts.
+- [x] Provide a centralized hierarchy read model that supports nested display without duplicating tree logic in multiple UI surfaces.
+- [x] Depth and collapse metadata required by the future day-grouped list are shaped centrally.
+- [x] Contact-linked journal surfaces and existing detail surfaces keep working with the shared hierarchy model.
+- [x] The hierarchy read model is suitable for both UI and MCP retrieval contexts.
 
 **Required Test Coverage:**
 - **Unit:** tree-shaping and depth/collapse helpers.

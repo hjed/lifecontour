@@ -28,6 +28,9 @@ export interface DisplayJournal {
   isSearchResult?: boolean;
   highlightedTitle?: string | null;
   highlightedContent?: string | null;
+  // Hierarchy metadata
+  children_count?: number | null;
+  depth?: number | null;
 }
 
 /**
@@ -72,5 +75,7 @@ export function transformJournalForDisplay(
     isSearchResult,
     highlightedTitle,
     highlightedContent,
+    children_count: journal.attributes.children_count ?? null,
+    depth: journal.attributes.depth ?? null,
   };
 }
