@@ -316,3 +316,244 @@ async def test_merge_journal_with_route(
     # Verify source doesn't have it anymore (although source is deleted)
     routes_source = await route_repo.find_by_journal_id(source_id)
     assert len(routes_source) == 0
+
+
+@pytest.mark.integration
+async def test_merge_journals_with_external_links_to_same_calendar(
+    authenticated_client: AsyncClient,
+    async_connection: AsyncConnection,
+) -> None:
+    """Test merging journals when both have external event links to the same calendar.
+
+    Reproduces the production IntegrityError on journal_external_event_links_pkey
+    when source and target both link to the same calendar_id with different
+    external_event_id values.
+    """
+    from uuid import uuid4
+
+    from sqlalchemy import text
+
+    # 1. Create a calendar
+    calendar_id = uuid4()
+    await async_connection.execute(
+        text("""
+            INSERT INTO calendars (id, user_id, name, color)
+            VALUES (:id, :user_id, :name, :color)
+        """),
+        {
+            "id": calendar_id,
+            "user_id": "test-user-123",
+            "name": "Shared Calendar",
+            "color": "#3B82F6",
+        },
+    )
+
+    # 2. Create target and source journals via API
+    target_res = await authenticated_client.post(
+        "/api/journals",
+        json={
+            "data": {
+                "type": "journals",
+                "attributes": {
+                    "title": "Target with Link",
+                    "content": "Target content",
+                    "event_date_range": {
+                        "start": "2024-06-01T10:00:00Z",
+                        "end": "2024-06-01T11:00:00Z",
+                    },
+                },
+            }
+        },
+    )
+    assert target_res.status_code == 201
+    target_id = int(target_res.json()["data"]["id"])
+
+    source_res = await authenticated_client.post(
+        "/api/journals",
+        json={
+            "data": {
+                "type": "journals",
+                "attributes": {
+                    "title": "Source with Link",
+                    "content": "Source content",
+                    "event_date_range": {
+                        "start": "2024-06-01T10:00:00Z",
+                        "end": "2024-06-01T11:00:00Z",
+                    },
+                },
+            }
+        },
+    )
+    assert source_res.status_code == 201
+    source_id = int(source_res.json()["data"]["id"])
+
+    # 3. Insert external event links for both journals pointing to the same calendar
+    await async_connection.execute(
+        text("""
+            INSERT INTO journal_external_event_links
+                (journal_id, calendar_id, external_event_id, sync_capability, sync_status)
+            VALUES (:jid, :cid, :eid, 'bidirectional', 'synced')
+        """),
+        {
+            "jid": target_id,
+            "cid": calendar_id,
+            "eid": "target-google-event-abc",
+        },
+    )
+    await async_connection.execute(
+        text("""
+            INSERT INTO journal_external_event_links
+                (journal_id, calendar_id, external_event_id, sync_capability, sync_status)
+            VALUES (:jid, :cid, :eid, 'bidirectional', 'synced')
+        """),
+        {
+            "jid": source_id,
+            "cid": calendar_id,
+            "eid": "source-google-event-xyz",
+        },
+    )
+
+    # 4. Merge — this must not raise an IntegrityError
+    merge_res = await authenticated_client.post(
+        f"/api/journals/{target_id}/merge",
+        json={
+            "data": {
+                "type": "journal-merge",
+                "attributes": {"source_journal_id": source_id},
+            }
+        },
+    )
+    assert merge_res.status_code == 200
+
+    # 5. Verify target's original link was kept (target wins)
+    result = await async_connection.execute(
+        text("""
+            SELECT external_event_id
+            FROM journal_external_event_links
+            WHERE journal_id = :jid AND calendar_id = :cid
+        """),
+        {"jid": target_id, "cid": calendar_id},
+    )
+    row = result.fetchone()
+    assert row is not None
+    assert row[0] == "target-google-event-abc"
+
+    # 6. Verify source link was not duplicated
+    all_links = await async_connection.execute(
+        text("""
+            SELECT COUNT(*) FROM journal_external_event_links
+            WHERE journal_id = :jid
+        """),
+        {"jid": target_id},
+    )
+    count_row = all_links.fetchone()
+    assert count_row is not None
+    assert count_row[0] == 1
+
+
+@pytest.mark.integration
+async def test_merge_journals_moves_source_only_external_link(
+    authenticated_client: AsyncClient,
+    async_connection: AsyncConnection,
+) -> None:
+    """Test merging when only the source has an external event link.
+
+    Verifies the link is moved to the target without violating the unique
+    partial index on (calendar_id, external_event_id).
+    """
+    from uuid import uuid4
+
+    from sqlalchemy import text
+
+    # 1. Create a calendar
+    calendar_id = uuid4()
+    await async_connection.execute(
+        text("""
+            INSERT INTO calendars (id, user_id, name, color)
+            VALUES (:id, :user_id, :name, :color)
+        """),
+        {
+            "id": calendar_id,
+            "user_id": "test-user-123",
+            "name": "Source-Only Calendar",
+            "color": "#3B82F6",
+        },
+    )
+
+    # 2. Create target and source journals
+    target_res = await authenticated_client.post(
+        "/api/journals",
+        json={
+            "data": {
+                "type": "journals",
+                "attributes": {
+                    "title": "Target No Link",
+                    "content": "Target content",
+                    "event_date_range": {
+                        "start": "2024-07-01T10:00:00Z",
+                        "end": "2024-07-01T11:00:00Z",
+                    },
+                },
+            }
+        },
+    )
+    assert target_res.status_code == 201
+    target_id = int(target_res.json()["data"]["id"])
+
+    source_res = await authenticated_client.post(
+        "/api/journals",
+        json={
+            "data": {
+                "type": "journals",
+                "attributes": {
+                    "title": "Source With Link",
+                    "content": "Source content",
+                    "event_date_range": {
+                        "start": "2024-07-01T10:00:00Z",
+                        "end": "2024-07-01T11:00:00Z",
+                    },
+                },
+            }
+        },
+    )
+    assert source_res.status_code == 201
+    source_id = int(source_res.json()["data"]["id"])
+
+    # 3. Only the source has an external event link
+    await async_connection.execute(
+        text("""
+            INSERT INTO journal_external_event_links
+                (journal_id, calendar_id, external_event_id, sync_capability, sync_status)
+            VALUES (:jid, :cid, :eid, 'bidirectional', 'synced')
+        """),
+        {
+            "jid": source_id,
+            "cid": calendar_id,
+            "eid": "source-only-event-999",
+        },
+    )
+
+    # 4. Merge — must not violate unique index on (calendar_id, external_event_id)
+    merge_res = await authenticated_client.post(
+        f"/api/journals/{target_id}/merge",
+        json={
+            "data": {
+                "type": "journal-merge",
+                "attributes": {"source_journal_id": source_id},
+            }
+        },
+    )
+    assert merge_res.status_code == 200
+
+    # 5. Verify link was moved to target
+    result = await async_connection.execute(
+        text("""
+            SELECT external_event_id
+            FROM journal_external_event_links
+            WHERE journal_id = :jid AND calendar_id = :cid
+        """),
+        {"jid": target_id, "cid": calendar_id},
+    )
+    row = result.fetchone()
+    assert row is not None
+    assert row[0] == "source-only-event-999"
