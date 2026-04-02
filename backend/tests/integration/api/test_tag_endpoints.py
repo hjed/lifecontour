@@ -334,3 +334,98 @@ class TestTagEndpointsHierarchy:
         data = response.json()
         returned_ids = [int(c["id"]) for c in data["data"]]
         assert contact_id in returned_ids
+
+    # ---- Test 10: PATCH /api/tags/{tag_id} ----
+
+    async def test_update_tag_success(self, tag_api_client):
+        """Test updating a tag's name and color."""
+        tag = await self._create_tag(tag_api_client, "old-name")
+        tag_id = int(tag["id"])
+
+        request_data = {
+            "data": {
+                "type": "tags",
+                "id": str(tag_id),
+                "attributes": {
+                    "name": "new-name",
+                    "color": "#FF0000",
+                },
+            }
+        }
+        response = await tag_api_client.patch(f"/api/tags/{tag_id}", json=request_data)
+        assert response.status_code == 200
+
+        updated = response.json()["data"]
+        assert updated["attributes"]["name"] == "new-name"
+        assert updated["attributes"]["color"] == "#FF0000"
+
+    async def test_update_tag_clear_parent(self, tag_api_client):
+        """Test clearing a tag's parent_id by passing null."""
+        parent = await self._create_tag(tag_api_client, "parent")
+        parent_id = int(parent["id"])
+
+        child = await self._create_tag(tag_api_client, "child", parent_id=parent_id)
+        child_id = int(child["id"])
+
+        # Update and pass explicit None for parent_id
+        request_data = {
+            "data": {
+                "type": "tags",
+                "id": str(child_id),
+                "attributes": {
+                    "parent_id": None,
+                },
+            }
+        }
+        response = await tag_api_client.patch(
+            f"/api/tags/{child_id}", json=request_data
+        )
+        assert response.status_code == 200
+
+        updated = response.json()["data"]
+        assert updated["attributes"]["parent_id"] is None
+
+    async def test_update_tag_cycle(self, tag_api_client):
+        """Test updating a tag to create a cycle returns validation error."""
+        parent = await self._create_tag(tag_api_client, "cycle-a")
+        parent_id = int(parent["id"])
+
+        child = await self._create_tag(tag_api_client, "cycle-b", parent_id=parent_id)
+        child_id = int(child["id"])
+
+        # Try to make child the parent of its parent
+        request_data = {
+            "data": {
+                "type": "tags",
+                "id": str(parent_id),
+                "attributes": {
+                    "parent_id": child_id,
+                },
+            }
+        }
+        response = await tag_api_client.patch(
+            f"/api/tags/{parent_id}", json=request_data
+        )
+        assert response.status_code == 422
+
+        # Verify unprocessable entity / validation error for cycle
+        errors = response.json()["errors"]
+        assert len(errors) > 0
+        assert (
+            "cycle" in errors[0]["detail"].lower()
+            or "circular reference" in errors[0]["detail"].lower()
+        )
+
+    # ---- Test 11: DELETE /api/tags/{tag_id} ----
+
+    async def test_delete_tag(self, tag_api_client):
+        """Test safely deleting a tag."""
+        tag = await self._create_tag(tag_api_client, "to-delete")
+        tag_id = int(tag["id"])
+
+        response = await tag_api_client.delete(f"/api/tags/{tag_id}")
+        assert response.status_code == 204
+
+        # Verify not found
+        get_response = await tag_api_client.get(f"/api/tags/{tag_id}")
+        assert get_response.status_code == 404

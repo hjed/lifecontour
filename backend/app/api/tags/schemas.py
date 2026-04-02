@@ -35,6 +35,35 @@ class TagCreateRequest(BaseModel):
     data: TagCreateData = Field(..., description="Tag creation data")
 
 
+# Tag Update Schemas
+class TagUpdateAttributes(BaseModel):
+    """Attributes for updating a tag."""
+
+    name: str | None = Field(
+        default=None, description="Tag name", min_length=1, max_length=100
+    )
+    color: str | None = Field(default=None, description="Tag color (hex code)")
+    description: str | None = Field(default=None, description="Tag description")
+    parent_id: int | None = Field(
+        default=None,
+        description="Parent tag ID for hierarchical tags. Provide explicit None to clear parent.",
+    )
+
+
+class TagUpdateData(BaseModel):
+    """Data for updating a tag."""
+
+    type: str = Field(default="tags", description="Resource type")
+    id: str = Field(..., description="Tag ID")
+    attributes: TagUpdateAttributes = Field(..., description="Tag update attributes")
+
+
+class TagUpdateRequest(BaseModel):
+    """Request model for updating a tag."""
+
+    data: TagUpdateData = Field(..., description="Tag update data")
+
+
 class TagResponse(JsonApiResponse[TagResource]):
     """Response model for a single tag."""
 

@@ -28,6 +28,7 @@ from app.core.contacts.services import (
     ContactService,
     ContactValidationService,
     TagHierarchyService,
+    TagService,
 )
 from app.infrastructure.events.outbox_event_publisher import OutboxEventPublisher
 from app.infrastructure.search.search_service import SearchService
@@ -95,6 +96,21 @@ class ContactProvider(Provider):
     @provide
     def get_tag_hierarchy_service(self, tag_repo: TagRepository) -> TagHierarchyService:
         return TagHierarchyService(tag_repo)
+
+    @provide
+    def get_tag_service(
+        self,
+        tag_repo: TagRepository,
+        tag_hierarchy_service: TagHierarchyService,
+        event_publisher: ContactEventPublisher,
+    ) -> TagService:
+        from app.core.contacts.services.tag_service import TagService
+
+        return TagService(
+            tag_repo=tag_repo,
+            tag_hierarchy_service=tag_hierarchy_service,
+            event_publisher=event_publisher,
+        )
 
     @provide
     def get_contact_relationship_service(

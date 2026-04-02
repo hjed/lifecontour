@@ -130,6 +130,54 @@ class TagRemoved(DomainEvent):
 
 
 @dataclass(frozen=True)
+class TagUpdated(DomainEvent):
+    """Event raised when a tag is updated."""
+
+    def __init__(
+        self,
+        tag_id: int,
+        tag_name: str,
+        changed_fields: dict[str, Any],
+        transaction: AsyncConnection | None = None,
+    ):
+        super().__init__(
+            event_id=f"tag_updated_{tag_id}_{datetime.now().isoformat()}",
+            occurred_at=datetime.now(),
+            aggregate_id=tag_id,  # Use tag_id as aggregate_id since Tag is the root here
+            event_type="TagUpdated",
+            event_data={
+                "tag_id": tag_id,
+                "tag_name": tag_name,
+                "changed_fields": changed_fields,
+            },
+            transaction=transaction,
+        )
+
+
+@dataclass(frozen=True)
+class TagDeleted(DomainEvent):
+    """Event raised when a tag is deleted."""
+
+    def __init__(
+        self,
+        tag_id: int,
+        tag_name: str,
+        transaction: AsyncConnection | None = None,
+    ):
+        super().__init__(
+            event_id=f"tag_deleted_{tag_id}_{datetime.now().isoformat()}",
+            occurred_at=datetime.now(),
+            aggregate_id=tag_id,
+            event_type="TagDeleted",
+            event_data={
+                "tag_id": tag_id,
+                "tag_name": tag_name,
+            },
+            transaction=transaction,
+        )
+
+
+@dataclass(frozen=True)
 class ContactMethodAdded(DomainEvent):
     """Event raised when a contact method is added."""
 

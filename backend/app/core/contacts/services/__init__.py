@@ -7,6 +7,7 @@ from .contact_relationship_service import ContactRelationshipService
 from .contact_service import ContactService
 from .contact_validation_service import ContactValidationService
 from .tag_hierarchy_service import TagHierarchyService
+from .tag_service import TagService
 
 __all__ = [
     "AddressValidationService",
@@ -16,4 +17,5 @@ __all__ = [
     "ContactService",
     "ContactValidationService",
     "TagHierarchyService",
+    "TagService",
 ]
