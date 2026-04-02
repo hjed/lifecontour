@@ -69,7 +69,7 @@ test.describe('Sidebar Navigation', () => {
       ).not.toBeVisible();
 
       // Should have dynamic tag links (wait for React Query to load tags)
-      const tagLinks = page.locator('a[href*="/contacts/tags/"]');
+      const tagLinks = page.locator('a[href*="/contacts?tag="]');
       await expect(tagLinks.first()).toBeVisible();
       expect(await tagLinks.count()).toBeGreaterThan(0);
     });
@@ -176,7 +176,7 @@ test.describe('Sidebar Navigation', () => {
       ]);
 
       // Test dynamic tag navigation (if any tags exist)
-      const tagLinks = page.locator('a[href*="/contacts/tags/"]');
+      const tagLinks = page.locator('a[href*="/contacts?tag="]');
       const tagCount = await tagLinks.count();
 
       if (tagCount > 0) {
@@ -466,7 +466,7 @@ test.describe('Sidebar Navigation', () => {
         const childLink = page.getByTestId(`nav-link-tag-${childId}`);
         await expect(childLink).toBeVisible();
         await Promise.all([
-          page.waitForURL(`/contacts/tags/${childId}`),
+          page.waitForURL(`**/contacts?tag=${childId}`),
           childLink.click(),
         ]);
       } finally {
@@ -490,7 +490,7 @@ test.describe('Sidebar Navigation', () => {
       await expect(tagTreeArea).toBeVisible({ timeout: 10000 });
 
       // Tag links should be present as regular links
-      const tagLinks = page.locator('a[href*="/contacts/tags/"]');
+      const tagLinks = page.locator('a[href*="/contacts?tag="]');
       await expect(tagLinks.first()).toBeVisible();
 
       const tagCount = await tagLinks.count();
