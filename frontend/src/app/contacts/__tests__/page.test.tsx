@@ -357,9 +357,10 @@ describe('ContactsPage', () => {
   });
 
   describe('tag filtering', () => {
-    it('passes tag filter to useInfiniteContacts when tag is active', async () => {
+    /** Set up mocks for an active tag filter with a known tag. */
+    const setupActiveTagMocks = (tagId = '42', tagName = 'Work') => {
       mockUseTagFilter.mockReturnValue({
-        tagId: '42',
+        tagId,
         setTag: mockSetTag,
         clearTag: mockClearTag,
       });
@@ -369,9 +370,9 @@ describe('ContactsPage', () => {
           data: [
             {
               type: 'tags' as const,
-              id: '42',
+              id: tagId,
               attributes: {
-                name: 'Work',
+                name: tagName,
                 created_at: '2024-01-01T00:00:00Z',
                 updated_at: '2024-01-01T00:00:00Z',
               },
@@ -381,7 +382,10 @@ describe('ContactsPage', () => {
         isLoading: false,
         error: null,
       } as any);
+    };
 
+    it('passes tag filter to useInfiniteContacts when tag is active', async () => {
+      setupActiveTagMocks();
       setupContactMocks({ data: mockContactsData });
       renderContactsPage();
 
@@ -394,30 +398,7 @@ describe('ContactsPage', () => {
     });
 
     it('shows tag name in header when tag is active', async () => {
-      mockUseTagFilter.mockReturnValue({
-        tagId: '42',
-        setTag: mockSetTag,
-        clearTag: mockClearTag,
-      });
-
-      mockUseTags.mockReturnValue({
-        data: {
-          data: [
-            {
-              type: 'tags' as const,
-              id: '42',
-              attributes: {
-                name: 'Work',
-                created_at: '2024-01-01T00:00:00Z',
-                updated_at: '2024-01-01T00:00:00Z',
-              },
-            },
-          ],
-        },
-        isLoading: false,
-        error: null,
-      } as any);
-
+      setupActiveTagMocks();
       setupContactMocks({ data: mockContactsData });
       renderContactsPage();
 
@@ -428,30 +409,7 @@ describe('ContactsPage', () => {
     });
 
     it('shows active tag badge with clear button', async () => {
-      mockUseTagFilter.mockReturnValue({
-        tagId: '42',
-        setTag: mockSetTag,
-        clearTag: mockClearTag,
-      });
-
-      mockUseTags.mockReturnValue({
-        data: {
-          data: [
-            {
-              type: 'tags' as const,
-              id: '42',
-              attributes: {
-                name: 'Work',
-                created_at: '2024-01-01T00:00:00Z',
-                updated_at: '2024-01-01T00:00:00Z',
-              },
-            },
-          ],
-        },
-        isLoading: false,
-        error: null,
-      } as any);
-
+      setupActiveTagMocks();
       setupContactMocks({ data: mockContactsData });
       renderContactsPage();
 
@@ -466,30 +424,7 @@ describe('ContactsPage', () => {
 
     it('calls clearTag when tag badge clear button is clicked', async () => {
       const user = userEvent.setup();
-      mockUseTagFilter.mockReturnValue({
-        tagId: '42',
-        setTag: mockSetTag,
-        clearTag: mockClearTag,
-      });
-
-      mockUseTags.mockReturnValue({
-        data: {
-          data: [
-            {
-              type: 'tags' as const,
-              id: '42',
-              attributes: {
-                name: 'Work',
-                created_at: '2024-01-01T00:00:00Z',
-                updated_at: '2024-01-01T00:00:00Z',
-              },
-            },
-          ],
-        },
-        isLoading: false,
-        error: null,
-      } as any);
-
+      setupActiveTagMocks();
       setupContactMocks({ data: mockContactsData });
       renderContactsPage();
 

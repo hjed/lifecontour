@@ -126,12 +126,12 @@ function ContactsPageContent() {
       : undefined;
 
   const totalContacts =
-    totalCount !== undefined
-      ? Math.max(totalCount, loadedContacts.length)
-      : loadedContacts.length;
+    totalCount === undefined
+      ? loadedContacts.length
+      : Math.max(totalCount, loadedContacts.length);
   const contactLabel = totalContacts === 1 ? 'contact' : 'contacts';
   const processingTimeSuffix =
-    processingTimeMs !== undefined ? ` (${processingTimeMs}ms)` : '';
+    processingTimeMs === undefined ? '' : ` (${processingTimeMs}ms)`;
   let resultsSummary = `${totalContacts} ${contactLabel} found`;
 
   if (isLoading) {
