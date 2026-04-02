@@ -12,6 +12,7 @@ import {
   useQueryClient,
 } from '@tanstack/react-query';
 import { toast } from 'sonner';
+import { addDays, subDays, format, parseISO } from 'date-fns';
 import {
   JournalListResponse,
   JournalResponse,
@@ -726,21 +727,75 @@ export function useJournals(
   });
 }
 
+export interface DateChunkPageParam {
+  date_from: string;
+  date_to: string;
+}
+
 export function useInfiniteJournals(
   filters: JournalFilters = {},
-  options: { enabled?: boolean } = {}
+  options: { enabled?: boolean; chunkDays?: number; anchorDate?: string } = {}
 ) {
-  const initialPage = filters.page ?? 1;
+  const { chunkDays = 7 } = options;
+  const anchor = options.anchorDate ? parseISO(options.anchorDate) : new Date();
+
+  // Calculate initial boundary around anchor date
+  // (e.g. for chunkDays=7, it fetches anchor - 3 days to anchor + 3 days)
+  const halfChunk = Math.floor(chunkDays / 2);
+  const initialStartDate = format(subDays(anchor, halfChunk), 'yyyy-MM-dd');
+  const initialEndDate = format(
+    addDays(anchor, chunkDays - 1 - halfChunk),
+    'yyyy-MM-dd'
+  );
+
+  const initialPageParam: DateChunkPageParam = {
+    date_from: initialStartDate,
+    date_to: initialEndDate,
+  };
 
   return useInfiniteQuery({
     queryKey: journalKeys.infiniteList(getListQueryFilters(filters)),
     queryFn: ({ pageParam }) =>
       fetchJournals({
         ...filters,
-        page: pageParam,
+        date_from: pageParam.date_from,
+        date_to: pageParam.date_to,
+        limit: 500, // Safely assuming chunkDays won't exceed 500 journals
+        page: undefined, // Skip internal REST offset pagination
       }),
-    initialPageParam: initialPage,
-    getNextPageParam: getNextJournalPageParam,
+    initialPageParam,
+    getNextPageParam: (lastPage, allPages, lastPageParam) => {
+      console.log('lastPageParam:', lastPageParam);
+      try {
+        // Progressing into the PAST (Scrolling DOWN)
+        const prevEnd = parseISO(lastPageParam.date_from);
+        const newEnd = subDays(prevEnd, 1);
+        const newStart = subDays(newEnd, chunkDays - 1);
+        return {
+          date_from: format(newStart, 'yyyy-MM-dd'),
+          date_to: format(newEnd, 'yyyy-MM-dd'),
+        };
+      } catch (e) {
+        console.error('Error in getNextPageParam:', e);
+        return undefined;
+      }
+    },
+    getPreviousPageParam: (firstPage, allPages, firstPageParam) => {
+      console.log('firstPageParam:', firstPageParam);
+      try {
+        // Progressing into the FUTURE (Scrolling UP)
+        const prevStart = parseISO(firstPageParam.date_to);
+        const newStart = addDays(prevStart, 1);
+        const newEnd = addDays(newStart, chunkDays - 1);
+        return {
+          date_from: format(newStart, 'yyyy-MM-dd'),
+          date_to: format(newEnd, 'yyyy-MM-dd'),
+        };
+      } catch (e) {
+        console.error('Error in getPreviousPageParam:', e);
+        return undefined;
+      }
+    },
     staleTime: 5 * 60 * 1000, // 5 minutes
     enabled: options.enabled,
   });

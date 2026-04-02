@@ -11,12 +11,12 @@ import { useState } from 'react';
 import Link from 'next/link';
 import type { Route } from 'next';
 import { AuthGuard } from '@/components/auth/AuthGuard';
-import { JournalList } from '@/components/journals/JournalList';
+import { DayGroupedJournalList } from '@/components/journals/DayGroupedJournalList';
 import { JournalFilters } from '@/components/journals/JournalFilters';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
-import { useJournals, useSearchJournals } from '@/lib/api/journals';
+import { useInfiniteJournals, useSearchJournals } from '@/lib/api/journals';
 import { useDebounce } from '@/hooks/useDebounce';
 import { useDisplayJournals } from '@/hooks/useDisplayJournals';
 import { JournalFilters as JournalFiltersType } from '@/types/journals';
@@ -39,10 +39,16 @@ export default function JournalsPage() {
   const shouldUseSearch = debouncedSearchQuery.length > 0;
 
   const {
-    data: journalsData,
-    isLoading: isLoadingJournals,
-    error: journalsError,
-  } = useJournals(filters, { enabled: !shouldUseSearch });
+    data: infiniteData,
+    isLoading: isInfiniteLoading,
+    error: infiniteError,
+    fetchNextPage,
+    fetchPreviousPage,
+    hasNextPage,
+    hasPreviousPage,
+    isFetchingNextPage,
+    isFetchingPreviousPage,
+  } = useInfiniteJournals(filters, { enabled: !shouldUseSearch });
 
   const {
     data: searchData,
@@ -54,14 +60,41 @@ export default function JournalsPage() {
     { enabled: shouldUseSearch }
   );
 
-  const data = shouldUseSearch ? searchData : journalsData;
-  const isLoading = shouldUseSearch ? isLoadingSearch : isLoadingJournals;
-  const error = shouldUseSearch ? searchError : journalsError;
+  const isLoading = shouldUseSearch ? isLoadingSearch : isInfiniteLoading;
+  const error = shouldUseSearch ? searchError : infiniteError;
 
-  const totalJournals = data?.meta?.total_count || 0;
+  let journalsToDisplay = [];
+  if (shouldUseSearch) {
+    journalsToDisplay = searchData?.data || [];
+  } else {
+    journalsToDisplay = infiniteData?.pages?.flatMap(page => page.data) || [];
+  }
+
+  const totalJournals = shouldUseSearch
+    ? searchData?.meta?.total_count || 0
+    : journalsToDisplay.length;
 
   // Use the centralized display journals hook with search highlighting support
-  const displayJournals = useDisplayJournals(data?.data, shouldUseSearch);
+  const displayJournals = useDisplayJournals(
+    journalsToDisplay,
+    shouldUseSearch
+  );
+
+  let dateBounds = undefined;
+  if (!shouldUseSearch && infiniteData?.pageParams?.length) {
+    const validParams = infiniteData.pageParams.filter(Boolean) as {
+      date_from: string;
+      date_to: string;
+    }[];
+    if (validParams.length > 0) {
+      const minDate = validParams.map(p => p.date_from).sort()[0];
+      const maxDate = validParams
+        .map(p => p.date_to)
+        .sort()
+        .reverse()[0];
+      dateBounds = { start: minDate, end: maxDate };
+    }
+  }
 
   const handleSearchChange = (value: string) => {
     setSearchQuery(value);
@@ -80,9 +113,9 @@ export default function JournalsPage() {
 
     const journalCount = `${totalJournals} journal${totalJournals === 1 ? '' : 's'}`;
 
-    if (shouldUseSearch) {
-      const processingTime = data?.meta?.processing_time_ms
-        ? ` (${data.meta.processing_time_ms}ms)`
+    if (shouldUseSearch && searchData?.meta) {
+      const processingTime = searchData.meta.processing_time_ms
+        ? ` (${searchData.meta.processing_time_ms}ms)`
         : '';
       return `${journalCount} found for "${debouncedSearchQuery}"${processingTime}`;
     }
@@ -185,8 +218,22 @@ export default function JournalsPage() {
             </Card>
           )}
           {!isLoading && !error && (
-            <JournalList
+            <DayGroupedJournalList
               journals={displayJournals}
+              isLoadingNext={shouldUseSearch ? false : isFetchingNextPage}
+              isLoadingPrevious={
+                shouldUseSearch ? false : isFetchingPreviousPage
+              }
+              hasNextPage={shouldUseSearch ? false : hasNextPage}
+              hasPreviousPage={shouldUseSearch ? false : hasPreviousPage}
+              fetchNextPage={shouldUseSearch ? undefined : fetchNextPage}
+              fetchPreviousPage={
+                shouldUseSearch ? undefined : fetchPreviousPage
+              }
+              dateBounds={dateBounds}
+              collapseEmptyDays={
+                shouldUseSearch || Object.keys(filters).length > 0
+              }
               emptyState={
                 <Card>
                   <CardContent className='py-12 text-center'>

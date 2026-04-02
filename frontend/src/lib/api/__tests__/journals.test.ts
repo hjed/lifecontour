@@ -20,7 +20,6 @@ import {
   useDeleteCalendar,
   useInfiniteJournals,
   journalKeys,
-  getNextJournalPageParam,
 } from '../journals';
 import { JournalType } from '@/types/journals';
 
@@ -700,72 +699,104 @@ describe('Journals API', () => {
       expect(standardKey).not.toEqual(infiniteKey);
     });
 
-    it('should fetch the next page when available', async () => {
+    it('should fetch the next chunk when scrolling down (PAST)', async () => {
       const firstPage = createMockJournalListResponse(
         [createMockJournal('1')],
-        { total: 2, page: 1, total_pages: 2, per_page: 1 }
+        { total: 1, page: 1, total_pages: 1, per_page: 500 }
       );
       const secondPage = createMockJournalListResponse(
         [createMockJournal('2')],
-        { total: 2, page: 2, total_pages: 2, per_page: 1 }
+        { total: 1, page: 1, total_pages: 1, per_page: 500 }
       );
 
-      mockFetch
-        .mockResolvedValueOnce({
+      mockFetch.mockImplementation(async (...args) => {
+        const urlObj = String(args[0]);
+        if (urlObj.includes('start_date=2026-04-07'))
+          return { ok: true, json: async () => firstPage } as Response;
+        if (urlObj.includes('start_date=2026-03-31'))
+          return { ok: true, json: async () => secondPage } as Response;
+        return {
           ok: true,
-          json: async () => firstPage,
-        } as Response)
-        .mockResolvedValueOnce({
-          ok: true,
-          json: async () => secondPage,
-        } as Response);
-
-      const { result } = renderHook(() => useInfiniteJournals(), {
-        wrapper: createWrapper,
+          json: async () => createMockJournalListResponse([]),
+        } as Response;
       });
+
+      const { result } = renderHook(
+        () =>
+          useInfiniteJournals({}, { anchorDate: '2026-04-10', chunkDays: 7 }),
+        {
+          wrapper: createWrapper,
+        }
+      );
 
       await waitFor(() => {
         expect(result.current.isSuccess).toBe(true);
       });
 
-      await waitFor(() => {
-        expect(result.current.hasNextPage).toBe(true);
-      });
+      // Initial fetch should be: April 7 to April 13
+      expect(mockFetch).toHaveBeenCalledWith(
+        '/api/journals?start_date=2026-04-07&end_date=2026-04-13&limit=500',
+        expect.any(Object)
+      );
 
       await act(async () => {
         await result.current.fetchNextPage();
       });
 
+      // Next fetch (PAST) should be: March 31 to April 06
       await waitFor(() => {
-        expect(result.current.data?.pages).toHaveLength(2);
-      });
-
-      expect(mockFetch).toHaveBeenNthCalledWith(2, '/api/journals?page=2', {
-        credentials: 'include',
+        expect(mockFetch).toHaveBeenCalledWith(
+          '/api/journals?start_date=2026-03-31&end_date=2026-04-06&limit=500',
+          expect.any(Object)
+        );
       });
     });
-  });
 
-  describe('getNextJournalPageParam', () => {
-    it('should return next page when more pages available', () => {
-      const response = createMockJournalListResponse([createMockJournal('1')], {
-        page: 1,
-        total_pages: 3,
+    it('should fetch the previous chunk when scrolling up (FUTURE)', async () => {
+      const firstPage = createMockJournalListResponse(
+        [createMockJournal('1')],
+        { total: 1, page: 1, total_pages: 1, per_page: 500 }
+      );
+      const previousPage = createMockJournalListResponse(
+        [createMockJournal('2')],
+        { total: 1, page: 1, total_pages: 1, per_page: 500 }
+      );
+
+      mockFetch.mockImplementation(async (...args) => {
+        const urlObj = String(args[0]);
+        if (urlObj.includes('start_date=2026-04-07'))
+          return { ok: true, json: async () => firstPage } as Response;
+        if (urlObj.includes('start_date=2026-04-14'))
+          return { ok: true, json: async () => previousPage } as Response;
+        return {
+          ok: true,
+          json: async () => createMockJournalListResponse([]),
+        } as Response;
       });
-      expect(getNextJournalPageParam(response)).toBe(2);
-    });
 
-    it('should return undefined on last page', () => {
-      const response = createMockJournalListResponse([createMockJournal('1')], {
-        page: 3,
-        total_pages: 3,
+      const { result } = renderHook(
+        () =>
+          useInfiniteJournals({}, { anchorDate: '2026-04-10', chunkDays: 7 }),
+        {
+          wrapper: createWrapper,
+        }
+      );
+
+      await waitFor(() => {
+        expect(result.current.isSuccess).toBe(true);
       });
-      expect(getNextJournalPageParam(response)).toBeUndefined();
-    });
 
-    it('should return undefined with no meta', () => {
-      const response = { data: [] };
-      expect(getNextJournalPageParam(response)).toBeUndefined();
+      await act(async () => {
+        await result.current.fetchPreviousPage();
+      });
+
+      // Previous fetch (FUTURE) should be: April 14 to April 20
+      await waitFor(() => {
+        expect(mockFetch).toHaveBeenCalledWith(
+          '/api/journals?start_date=2026-04-14&end_date=2026-04-20&limit=500',
+          expect.any(Object)
+        );
+      });
     });
   });
 });

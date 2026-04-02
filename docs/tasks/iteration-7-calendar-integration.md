@@ -445,10 +445,10 @@ Phase 1 and Phase 2 were implemented as a combined delivery. The merge domain se
 **PR Size:** ~5-8 files
 
 **Acceptance Criteria:**
-- [ ] The main journals page is centred on today rather than a generic card grid.
-- [ ] Journals are grouped by day and can load further backward and forward as the user navigates.
-- [ ] Empty days render in a lightweight way rather than disappearing entirely.
-- [ ] The old grid-specific assumptions are removed rather than kept as a second primary mode.
+- [x] The main journals page is centred on today rather than a generic card grid.
+- [x] Journals are grouped by day and can load further backward and forward as the user navigates.
+- [x] Empty days render in a lightweight way rather than disappearing entirely.
+- [x] The old grid-specific assumptions are removed rather than kept as a second primary mode.
 
 **Required Test Coverage:**
 - **Unit:** day-group shaping and list-state helpers.

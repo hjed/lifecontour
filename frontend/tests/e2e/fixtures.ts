@@ -764,14 +764,19 @@ export const test = base.extend<TestFixtures, WorkerFixtures>({
     );
     await dataManager.clearAllJournals();
 
+    // Calculate relative dates to ensure they appear in the default date chunk (today)
+    const today = new Date();
+    const yesterday = new Date(today);
+    yesterday.setDate(today.getDate() - 1);
+
     // Create test journals via API
     const journals = await dataManager.createJournals([
       {
         title: 'Weekend Hike',
         content: 'Had a great hike in the mountains today.',
         event_date_range: {
-          start: '2026-01-15T09:00:00Z',
-          end: '2026-01-16T15:00:00Z',
+          start: yesterday.toISOString(),
+          end: yesterday.toISOString(),
         },
         types: ['note'],
       },
@@ -779,8 +784,8 @@ export const test = base.extend<TestFixtures, WorkerFixtures>({
         title: 'Team Meeting',
         content: 'Discussed Q1 goals and project timelines.',
         event_date_range: {
-          start: '2026-01-16T14:00:00Z',
-          end: '2026-01-16T15:00:00Z',
+          start: today.toISOString(),
+          end: today.toISOString(),
         },
         types: ['event'],
       },

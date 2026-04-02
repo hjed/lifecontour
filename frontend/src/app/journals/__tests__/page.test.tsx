@@ -15,55 +15,103 @@ jest.mock('next/navigation', () => ({
   }),
 }));
 
-// Mock the API hooks
-const mockJournalsData = {
-  data: [
-    {
-      type: 'journals' as const,
-      id: '1',
-      attributes: {
-        title: 'Test Journal 1',
-        content: 'Test content 1',
-        event_date_range: { start: '2024-01-01', end: '2024-01-01' },
-        types: [],
-        type_data: {},
-        contacts: [],
-        tags: [],
-        calendar: null,
-        parent: null,
-        children_count: 0,
-        created_at: '2024-01-01T00:00:00Z',
-        updated_at: '2024-01-01T00:00:00Z',
-      },
-    },
-  ],
-};
+// mock removed
 
-jest.mock('@/lib/api/journals', () => ({
-  useJournals: jest.fn(() => ({
-    data: mockJournalsData,
-    isLoading: false,
-    error: null,
-  })),
-  useSearchJournals: jest.fn(() => ({
-    data: null,
-    isLoading: false,
-    error: null,
-  })),
-  useJournalTags: jest.fn(() => ({
-    data: { data: [] },
-    isLoading: false,
-  })),
-  useCalendars: jest.fn(() => ({
-    data: { data: [] },
-    isLoading: false,
-  })),
-}));
+jest.mock('@/lib/api/journals', () => {
+  const originalModule = jest.requireActual('@/lib/api/journals');
+  return {
+    __esModule: true,
+    ...originalModule,
+    useInfiniteJournals: jest.fn(() => ({
+      data: {
+        pages: [
+          {
+            data: [
+              {
+                type: 'journals',
+                id: '1',
+                attributes: {
+                  title: 'Test Journal 1',
+                  content: 'Test content 1',
+                  event_date_range: { start: '2024-01-01', end: '2024-01-01' },
+                  types: [],
+                  type_data: {},
+                  contacts: [],
+                  tags: [],
+                  calendar: null,
+                  parent: null,
+                  children_count: 0,
+                  created_at: '2024-01-01T00:00:00Z',
+                  updated_at: '2024-01-01T00:00:00Z',
+                },
+              },
+            ],
+          },
+        ],
+        pageParams: [{ date_from: '2024-01-01', date_to: '2024-01-01' }],
+      },
+      isLoading: false,
+      error: null,
+      hasNextPage: false,
+      hasPreviousPage: false,
+      isFetchingNextPage: false,
+      isFetchingPreviousPage: false,
+    })),
+    useJournals: jest.fn(() => ({
+      data: {
+        data: [
+          {
+            type: 'journals',
+            id: '1',
+            attributes: {
+              title: 'Test Journal 1',
+              content: 'Test content 1',
+              event_date_range: { start: '2024-01-01', end: '2024-01-01' },
+              types: [],
+              type_data: {},
+              contacts: [],
+              tags: [],
+              calendar: null,
+              parent: null,
+              children_count: 0,
+              created_at: '2024-01-01T00:00:00Z',
+              updated_at: '2024-01-01T00:00:00Z',
+            },
+          },
+        ],
+      },
+      isLoading: false,
+      error: null,
+    })),
+    useSearchJournals: jest.fn(() => ({
+      data: null,
+      isLoading: false,
+      error: null,
+    })),
+    useJournalTags: jest.fn(() => ({
+      data: { data: [] },
+      isLoading: false,
+    })),
+    useCalendars: jest.fn(() => ({
+      data: { data: [] },
+      isLoading: false,
+    })),
+  };
+});
 
 // Mock AuthGuard
 jest.mock('@/components/auth/AuthGuard', () => ({
   AuthGuard: ({ children }: { children: React.ReactNode }) => <>{children}</>,
 }));
+
+// Mock IntersectionObserver
+const mockIntersectionObserver = jest.fn();
+mockIntersectionObserver.mockReturnValue({
+  observe: () => null,
+  unobserve: () => null,
+  disconnect: () => null,
+});
+global.IntersectionObserver = mockIntersectionObserver;
 
 describe('JournalsPage', () => {
   beforeEach(() => {

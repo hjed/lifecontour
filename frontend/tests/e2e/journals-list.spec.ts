@@ -44,8 +44,8 @@ test.describe('Journal List Page', () => {
       // Wait for page to load
       await expect(page.locator('main, [role="main"]').first()).toBeVisible();
 
-      // Verify empty state is displayed
-      await expect(page.getByText(/no journals found/i)).toBeVisible();
+      // Verify timeline shows empty days instead of a global empty state
+      await expect(page.getByText('No entries').first()).toBeVisible();
     });
   });
 
