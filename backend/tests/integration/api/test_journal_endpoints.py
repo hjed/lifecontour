@@ -2805,7 +2805,7 @@ class TestJournalHierarchyReparenting:
             f"/api/journals/{a_id}", json=patch_body
         )
 
-        assert response.status_code in [400, 422]
+        assert response.status_code == 400
 
     async def test_patch_parent_id_max_depth_exceeded(self, integration_api_client):
         """Test that PATCH parent_id fails when it would exceed max depth."""
@@ -2838,7 +2838,7 @@ class TestJournalHierarchyReparenting:
             f"/api/journals/{orphan_id}", json=patch_body
         )
 
-        assert response.status_code in [400, 422]
+        assert response.status_code == 400
 
     async def test_patch_parent_id_nonexistent_parent(self, integration_api_client):
         """Test that setting parent_id to a non-existent journal fails."""
@@ -2853,7 +2853,7 @@ class TestJournalHierarchyReparenting:
             f"/api/journals/{child_id}", json=patch_body
         )
 
-        assert response.status_code in [400, 404, 422]
+        assert response.status_code == 404
 
     async def test_patch_parent_id_change_parent(self, integration_api_client):
         """Test changing a journal's parent from one journal to another."""

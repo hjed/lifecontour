@@ -1,9 +1,10 @@
 import { test, expect } from './fixtures';
+import { Page, APIRequestContext, Response } from '@playwright/test';
 import { FRONTEND_TEST_URL } from './utils/frontend-test-config';
 
 // Helper to create a parent journal via the UI
 async function createParentJournal(
-  page: any,
+  page: Page,
   titlePrefix: string,
   content: string
 ) {
@@ -15,7 +16,7 @@ async function createParentJournal(
   await page.getByLabel(/content/i).fill(content);
 
   const parentResponsePromise = page.waitForResponse(
-    (response: any) =>
+    (response: Response) =>
       response.url().includes('/api/journals') &&
       response.request().method() === 'POST' &&
       response.status() === 201
@@ -38,7 +39,7 @@ async function createParentJournal(
 
 // Helper to verify the breadcrumb and children list rendering
 async function verifyHierarchyLinks(
-  page: any,
+  page: Page,
   childTitle: string,
   parentTitle: string,
   parentId: string
@@ -68,7 +69,7 @@ async function verifyHierarchyLinks(
 
 // Helper to create a journal via API to avoid code duplication
 async function createJournalViaApi(
-  request: any,
+  request: APIRequestContext,
   title: string,
   content: string
 ) {
@@ -163,7 +164,7 @@ test.describe('Journal Hierarchy', () => {
     await parentOption.click();
 
     const childResponsePromise = page.waitForResponse(
-      response =>
+      (response: Response) =>
         response.url().includes('/api/journals') &&
         response.request().method() === 'POST' &&
         response.status() === 201
@@ -215,7 +216,7 @@ test.describe('Journal Hierarchy', () => {
       .fill('Child created from parent detail page.');
 
     const childResponsePromise = page.waitForResponse(
-      response =>
+      (response: Response) =>
         response.url().includes('/api/journals') &&
         response.request().method() === 'POST' &&
         response.status() === 201
@@ -278,7 +279,7 @@ test.describe('Journal Hierarchy', () => {
 
     // 6. Wait for the PATCH request to complete
     await page.waitForResponse(
-      response =>
+      (response: Response) =>
         response.url().includes('/api/journals/') &&
         response.request().method() === 'PATCH' &&
         response.status() === 200
@@ -344,7 +345,7 @@ test.describe('Journal Hierarchy', () => {
 
     // 6. Wait for PATCH to complete
     await page.waitForResponse(
-      response =>
+      (response: Response) =>
         response.url().includes('/api/journals/') &&
         response.request().method() === 'PATCH' &&
         response.status() === 200
