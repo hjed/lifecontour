@@ -430,6 +430,9 @@ class JournalAttributes(BaseModel):
     children_count: int | None = Field(
         default=None, description="Number of child journals"
     )
+    depth: int | None = Field(
+        default=None, description="Depth in hierarchy (1=root, 2=first-level child)"
+    )
 
 
 class JournalRelationships(BaseModel):

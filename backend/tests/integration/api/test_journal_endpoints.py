@@ -126,6 +126,8 @@ class TestJournalCRUDEndpoints:
         assert data["data"]["attributes"]["title"] == "Test Journal"
         assert data["data"]["attributes"]["content"] == "Test content"
         assert "id" in data["data"]
+        assert "depth" in data["data"]["attributes"]
+        assert data["data"]["attributes"]["depth"] == 1
 
     async def test_get_journal(self, integration_api_client):
         """Test retrieving a journal by ID."""
@@ -147,6 +149,8 @@ class TestJournalCRUDEndpoints:
         data = response.json()
         assert data["data"]["id"] == journal_id
         assert data["data"]["attributes"]["title"] == "Get Test Journal"
+        assert "depth" in data["data"]["attributes"]
+        assert data["data"]["attributes"]["depth"] == 1
 
     async def test_list_journals(self, integration_api_client):
         """Test listing journals with pagination."""
@@ -166,6 +170,34 @@ class TestJournalCRUDEndpoints:
         assert len(data["data"]) >= 3
         assert "meta" in data
         assert "links" in data
+        for item in data["data"]:
+            assert "depth" in item["attributes"]
+            assert item["attributes"]["depth"] == 1
+
+    async def test_create_journal_with_parent(self, integration_api_client):
+        """Test creating a journal with a parent to verify depth fields."""
+        # Create parent
+        parent_data = create_journal_request_data(title="Parent")
+        parent_res = await integration_api_client.post(
+            "/api/journals", json=parent_data
+        )
+        parent_id = parent_res.json()["data"]["id"]
+
+        # Create child (parent_id is in attributes in JSON API)
+        child_data = create_journal_request_data(title="Child")
+        child_data["data"]["attributes"]["parent_id"] = int(parent_id)
+        child_res = await integration_api_client.post("/api/journals", json=child_data)
+
+        assert child_res.status_code == 201
+        child_id = child_res.json()["data"]["id"]
+        assert child_res.json()["data"]["attributes"]["depth"] == 2
+
+        # Retrieve list
+        list_res = await integration_api_client.get("/api/journals")
+        items = {item["id"]: item for item in list_res.json()["data"]}
+
+        assert items[parent_id]["attributes"]["depth"] == 1
+        assert items[child_id]["attributes"]["depth"] == 2
 
     async def test_get_journal_with_contact(self, integration_api_client):
         """Test retrieving a journal with a related contact to ensure name is populated."""

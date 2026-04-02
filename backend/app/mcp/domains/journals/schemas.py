@@ -15,6 +15,10 @@ JOURNAL_TITLE_DESC = "Journal title"
 JOURNAL_ID_DESC = "Journal ID"
 EVENT_DATE_RANGE_DESC = "Event date range"
 
+TOTAL_DISTANCE_DESC = "Total distance in metres"
+TOTAL_DURATION_DESC = "Total duration in seconds"
+TOTAL_ELEVATION_GAIN_DESC = "Total elevation gain in metres"
+
 
 class EventDateRangeSchema(BaseModel):
     """AI-friendly event date range format."""
@@ -115,7 +119,28 @@ class JournalSearchResult(BaseModel):
     highlighted: dict[str, str] = Field(
         default_factory=dict, description="Search highlighting information"
     )
-    summary: str = Field(description="AI-friendly summary with search context")
+    summary: str | None = Field(
+        default=None, description="AI-friendly summary with search context"
+    )
+
+
+class JournalHierarchyNode(JournalSearchResult):
+    """AI-friendly journal hierarchy node format."""
+
+    depth: int = Field(description="Nesting level in the hierarchy")
+    children_count: int = Field(description="Number of direct children")
+    children: list["JournalHierarchyNode"] = Field(
+        default_factory=list, description="Child journals"
+    )
+
+
+class JournalHierarchyResponse(BaseModel):
+    """AI-friendly journal hierarchy response format."""
+
+    nodes: list[JournalHierarchyNode] = Field(description="Root hierarchy nodes")
+    total_nodes: int = Field(description="Total number of journals returned")
+    processing_time_ms: int = Field(description="Processing time in ms")
+    summary: str = Field(description="AI-friendly summary of hierarchy")
 
 
 class JournalSearchResponse(BaseModel):
@@ -137,9 +162,9 @@ class JournalSearchResponse(BaseModel):
 class ActivityTotals(BaseModel):
     """Aggregate activity metrics."""
 
-    distance: int = Field(default=0, description="Total distance in metres")
-    duration: int = Field(default=0, description="Total duration in seconds")
-    elevation_gain: int = Field(default=0, description="Total elevation gain in metres")
+    distance: int = Field(default=0, description=TOTAL_DISTANCE_DESC)
+    duration: int = Field(default=0, description=TOTAL_DURATION_DESC)
+    elevation_gain: int = Field(default=0, description=TOTAL_ELEVATION_GAIN_DESC)
     calories: int = Field(default=0, description="Total calories burned")
 
 
@@ -148,11 +173,9 @@ class ActivityTypeStats(BaseModel):
 
     activity_type: str = Field(description="Activity type name")
     count: int = Field(description="Number of activities of this type")
-    total_distance: int = Field(default=0, description="Total distance in metres")
-    total_duration: int = Field(default=0, description="Total duration in seconds")
-    total_elevation_gain: int = Field(
-        default=0, description="Total elevation gain in metres"
-    )
+    total_distance: int = Field(default=0, description=TOTAL_DISTANCE_DESC)
+    total_duration: int = Field(default=0, description=TOTAL_DURATION_DESC)
+    total_elevation_gain: int = Field(default=0, description=TOTAL_ELEVATION_GAIN_DESC)
     total_calories: int = Field(default=0, description="Total calories burned")
 
 
@@ -187,11 +210,9 @@ class ActivityTrendPeriod(BaseModel):
 
     period_start: str = Field(description="Bucket start date in ISO format")
     activity_count: int = Field(description="Number of activities in the bucket")
-    total_distance: int = Field(default=0, description="Total distance in metres")
-    total_duration: int = Field(default=0, description="Total duration in seconds")
-    total_elevation_gain: int = Field(
-        default=0, description="Total elevation gain in metres"
-    )
+    total_distance: int = Field(default=0, description=TOTAL_DISTANCE_DESC)
+    total_duration: int = Field(default=0, description=TOTAL_DURATION_DESC)
+    total_elevation_gain: int = Field(default=0, description=TOTAL_ELEVATION_GAIN_DESC)
 
 
 class ActivityTrendsResponse(BaseModel):

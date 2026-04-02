@@ -586,6 +586,35 @@ class SqlJournalRepository(JournalRepository):
         row = result.fetchone()
         return row.max_depth if row and row.max_depth else 0
 
+    async def get_depth_bulk(self, journal_ids: list[int]) -> dict[int, int]:
+        """Get the depth of multiple journals in the hierarchy (1 for root)."""
+        if not journal_ids:
+            return {}
+
+        query = text(
+            """
+            WITH RECURSIVE ancestors AS (
+                -- Base case: start with the journals
+                SELECT id as origin_id, id, parent_id, 1 as depth
+                FROM journals
+                WHERE id = ANY(:journal_ids)
+
+                UNION ALL
+
+                -- Recursive case: go up to parent
+                SELECT a.origin_id, j.id, j.parent_id, a.depth + 1
+                FROM journals j
+                INNER JOIN ancestors a ON j.id = a.parent_id
+            )
+            SELECT origin_id, MAX(depth) as max_depth
+            FROM ancestors
+            GROUP BY origin_id
+            """
+        )
+        result = await self.conn.execute(query, {"journal_ids": journal_ids})
+        rows = result.fetchall()
+        return {row.origin_id: row.max_depth for row in rows}
+
     async def get_all(
         self,
         user_id: str,

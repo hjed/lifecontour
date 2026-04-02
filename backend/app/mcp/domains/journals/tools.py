@@ -87,6 +87,7 @@ from app.core.journal.adapters.sql.plan_data_repository import SqlPlanDataReposi
 from app.core.journal.adapters.sql.route_repository import SqlRouteRepository
 from app.core.journal.adapters.sql.travel_data_repository import SqlTravelDataRepository
 from app.core.journal.models.journal_tag import JournalTag
+from app.core.journal.services.hierarchy_service import HierarchyNode, HierarchyService
 from app.core.journal.services.journal_merge_service import JournalMergeService
 from app.core.journal.services.journal_service import JournalService
 from app.infrastructure.events.outbox_event_publisher import OutboxEventPublisher
@@ -100,6 +101,8 @@ from app.mcp.domains.journals.schemas import (
     ActivityTypeStats,
     EventDateRangeSchema,
     JournalCreateRequest,
+    JournalHierarchyNode,
+    JournalHierarchyResponse,
     JournalSearchResponse,
     JournalSearchResult,
     JournalUpdateRequest,
@@ -382,6 +385,36 @@ async def _build_search_results(
             )
         results.append(_journal_to_search_result(journal, types=types, summary=summary))
     return results
+
+
+async def _build_hierarchy_node(
+    node: HierarchyNode, repos: _JournalToolRepositories
+) -> JournalHierarchyNode:
+    """Build an AI-friendly hierarchy node from a HierarchyNode."""
+    assert node.journal.id is not None, "Hierarchy node journal must have an ID"
+    types, _ = await _fetch_types_for_journal(node.journal.id, repos)
+    children = []
+    for child_node in node.children:
+        children.append(await _build_hierarchy_node(child_node, repos))
+
+    return JournalHierarchyNode(
+        id=node.journal.id or 0,
+        title=node.journal.title,
+        content_excerpt=node.journal.content[:200] + "..."
+        if len(node.journal.content) > 200
+        else node.journal.content,
+        event_date_range=EventDateRangeSchema(
+            start=node.journal.event_date_range.start,
+            end=node.journal.event_date_range.end,
+        ),
+        types=types,
+        tags=[],
+        highlighted={},
+        summary=f"Hierarchical Journal: {node.journal.title}",
+        depth=node.depth,
+        children_count=node.children_count,
+        children=children,
+    )
 
 
 def _build_activity_query_filters(
@@ -2168,6 +2201,122 @@ def register_journal_tools(mcp: FastMCP[None]) -> None:
             contacts=contacts,
             tags=journal_tags,
             children=children,
+        )
+
+        return MCPResponseBuilder.success_response(response)
+
+    @mcp.tool
+    @mcp_unified_error_handler("get_journal_hierarchy", "journal")
+    async def get_journal_hierarchy(
+        start_date: Annotated[
+            str | None,
+            Field(
+                default=None,
+                description="Optional: Start date (ISO format) to filter journals",
+            ),
+        ] = None,
+        end_date: Annotated[
+            str | None,
+            Field(
+                default=None,
+                description="Optional: End date (ISO format) to filter journals",
+            ),
+        ] = None,
+        types: Annotated[
+            str | None,
+            Field(
+                default=None,
+                description="Optional: Comma-separated list of journal types to filter by",
+            ),
+        ] = None,
+        limit: Annotated[
+            int,
+            Field(
+                default=100,
+                description="Maximum number of journals to retrieve before building hierarchy (default: 100)",
+            ),
+        ] = 100,
+        db_connection: AsyncConnection = mcp_depends(get_async_connection),
+    ) -> str:
+        """
+        Get a hierarchical view of journals.
+
+        Retrieves journals and their descendants matching the given filters,
+        returning them in a nested tree structure. Useful for exploring
+        trips, projects, or multi-day events.
+
+        Args:
+            start_date: Optional start date
+            end_date: Optional end date
+            types: Optional comma-separated list of journal types
+            limit: Maximum number of journals to retrieve
+
+        Returns:
+            JSON string containing the journal hierarchy tree and summary.
+        """
+        import time
+
+        start_time = time.time()
+        user_id = await get_current_user_id()
+        repos = _create_journal_tool_repositories(db_connection)
+
+        type_filters = _parse_type_filters(types)
+        journal_type = type_filters[0] if len(type_filters) == 1 else None
+
+        start = _parse_optional_datetime_filter(start_date, "start_date")
+        end = _parse_optional_datetime_filter(end_date, "end_date", is_end=True)
+
+        start_str = start.isoformat() if start else None
+        end_str = end.isoformat() if end else None
+
+        journals = await repos.journal_repo.get_all(
+            user_id=user_id,
+            limit=limit,
+            offset=0,
+            journal_type=journal_type,
+            start_date=start_str,
+            end_date=end_str,
+        )
+
+        filtered_journals = []
+        if len(type_filters) > 1:
+            for j in journals:
+                if j.id is not None:
+                    j_types, _ = await _fetch_types_for_journal(j.id, repos)
+                    if any(t in type_filters for t in j_types):
+                        filtered_journals.append(j)
+            journals = filtered_journals
+
+        returned_ids_list = [j.id for j in journals if j.id is not None]
+        children_count_by_parent_id = (
+            await repos.journal_repo.count_children_for_parents(
+                user_id=user_id, parent_ids=returned_ids_list
+            )
+        )
+
+        depth_map = await HierarchyService.compute_depth_map(
+            returned_ids_list, repos.journal_repo
+        )
+
+        hierarchy_nodes = HierarchyService.build_tree_nodes(
+            journals, children_count_by_parent_id, depth_map
+        )
+
+        root_nodes = []
+        for h_node in hierarchy_nodes:
+            root_nodes.append(await _build_hierarchy_node(h_node, repos))
+
+        processing_time_ms = int((time.time() - start_time) * 1000)
+        summary = (
+            f"Found {len(journals)} journal(s), representing {len(root_nodes)} "
+            f"root-level item(s) in the hierarchy. (Processing time: {processing_time_ms}ms)"
+        )
+
+        response = JournalHierarchyResponse(
+            nodes=root_nodes,
+            total_nodes=len(journals),
+            processing_time_ms=processing_time_ms,
+            summary=summary,
         )
 
         return MCPResponseBuilder.success_response(response)

@@ -265,6 +265,7 @@ export interface JournalAttributes {
   parent?: ParentJournalSummary | null;
   children?: ChildJournalSummary[];
   children_count?: number | null;
+  depth?: number | null;
 }
 
 // Journal Relationships
