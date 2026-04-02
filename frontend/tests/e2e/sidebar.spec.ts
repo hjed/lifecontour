@@ -407,21 +407,15 @@ test.describe('Sidebar Navigation', () => {
         await expect(tagTreeArea).toBeVisible({ timeout: 10000 });
 
         // 4. Parent should be visible with an expand toggle
-        const parentLink = page.getByTestId(
-          `nav-link-${parentName.toLowerCase()}`
-        );
+        const parentLink = page.getByTestId(`nav-link-tag-${parentId}`);
         await expect(parentLink).toBeVisible();
 
-        const expandToggle = page.getByTestId(
-          `tag-toggle-${parentName.toLowerCase()}`
-        );
+        const expandToggle = page.getByTestId(`tag-toggle-${parentId}`);
         await expect(expandToggle).toBeVisible();
         await expect(expandToggle).toHaveAttribute('aria-expanded', 'false');
 
         // 5. Child should NOT be visible initially
-        const childLink = page.getByTestId(
-          `nav-link-${childName.toLowerCase()}`
-        );
+        const childLink = page.getByTestId(`nav-link-tag-${childId}`);
         await expect(childLink).not.toBeVisible();
 
         // 6. Click expand → child becomes visible
@@ -465,15 +459,11 @@ test.describe('Sidebar Navigation', () => {
         const tagTreeArea = page.getByTestId('tag-tree-scroll-area');
         await expect(tagTreeArea).toBeVisible({ timeout: 10000 });
 
-        const expandToggle = page.getByTestId(
-          `tag-toggle-${parentName.toLowerCase()}`
-        );
+        const expandToggle = page.getByTestId(`tag-toggle-${parentId}`);
         await expandToggle.click();
 
         // Click child tag link → navigate to tag page
-        const childLink = page.getByTestId(
-          `nav-link-${childName.toLowerCase()}`
-        );
+        const childLink = page.getByTestId(`nav-link-tag-${childId}`);
         await expect(childLink).toBeVisible();
         await Promise.all([
           page.waitForURL(`/contacts/tags/${childId}`),

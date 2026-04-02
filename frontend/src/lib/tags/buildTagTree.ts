@@ -49,14 +49,15 @@ export function buildTagTree(tags: TagResource[]): TagTreeNode[] {
     }
   }
 
-  // Sort siblings alphabetically at each level
-  const sortNodes = (nodes: TagTreeNode[]) => {
+  // Sort siblings alphabetically at each level, with cycle detection
+  const sortNodes = (nodes: TagTreeNode[], visited = new Set<string>()) => {
     nodes.sort((a, b) =>
       a.tag.attributes.name.localeCompare(b.tag.attributes.name)
     );
     for (const node of nodes) {
-      if (node.children.length > 0) {
-        sortNodes(node.children);
+      if (node.children.length > 0 && !visited.has(node.tag.id)) {
+        visited.add(node.tag.id);
+        sortNodes(node.children, visited);
       }
     }
   };

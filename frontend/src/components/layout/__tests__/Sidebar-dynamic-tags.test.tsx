@@ -117,7 +117,7 @@ describe('Sidebar - Dynamic Tags', () => {
     expect(screen.getByText('Work')).toBeInTheDocument();
 
     // Parent tag should have expand toggle
-    const expandButton = screen.getByTestId('tag-toggle-work');
+    const expandButton = screen.getByTestId('tag-toggle-1');
     expect(expandButton).toBeInTheDocument();
     expect(expandButton).toHaveAttribute('aria-expanded', 'false');
 
@@ -162,7 +162,7 @@ describe('Sidebar - Dynamic Tags', () => {
     renderWithProviders(<Sidebar />);
 
     // Click expand toggle
-    const expandButton = screen.getByTestId('tag-toggle-work');
+    const expandButton = screen.getByTestId('tag-toggle-1');
     await user.click(expandButton);
 
     // Child should now be visible

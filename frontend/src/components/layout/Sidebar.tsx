@@ -155,7 +155,7 @@ function TagTreeItem({
     <li
       className='list-none'
       style={{ marginLeft: `${depth * indentSizeRem}rem` }}
-      data-testid={`tag-tree-item-${node.tag.attributes.name.toLowerCase().replace(/\s+/g, '-')}`}
+      data-testid={`tag-tree-item-${node.tag.id}`}
     >
       <div className='flex items-center'>
         {/* Expand/collapse toggle for branches */}
@@ -170,7 +170,7 @@ function TagTreeItem({
             }}
             aria-expanded={isExpanded}
             aria-label={`${isExpanded ? 'Collapse' : 'Expand'} ${node.tag.attributes.name}`}
-            data-testid={`tag-toggle-${node.tag.attributes.name.toLowerCase().replace(/\s+/g, '-')}`}
+            data-testid={`tag-toggle-${node.tag.id}`}
           >
             {isExpanded ? (
               <ChevronDown className='h-3 w-3' aria-hidden='true' />
@@ -198,7 +198,7 @@ function TagTreeItem({
             href={href}
             onClick={onNavigate}
             aria-current={isActive ? 'page' : undefined}
-            data-testid={`nav-link-${node.tag.attributes.name.toLowerCase().replace(/\s+/g, '-')}`}
+            data-testid={`nav-link-tag-${node.tag.id}`}
           >
             <Tag className='mr-1.5 h-3 w-3 shrink-0' aria-hidden='true' />
             <span className='truncate'>{node.tag.attributes.name}</span>
