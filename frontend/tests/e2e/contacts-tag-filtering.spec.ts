@@ -1,17 +1,20 @@
 import { test, expect } from './fixtures';
 
 /**
- * Tag Filtering Pages Tests
+ * Tag Filtering Tests — Unified Contacts List
+ *
+ * These tests verify that tag filtering works through the main contacts
+ * list page at `/contacts?tag=<id>`. The old standalone `/contacts/tags/<id>`
+ * page now redirects here.
  *
  * Converted to use the advanced fixture-based testing system.
- * Each test uses deterministic fixtures that provide guaranteed data state.
  */
-test.describe('Tag Filtering Pages', () => {
+test.describe('Tag Filtering via Main Contacts List', () => {
   test('should redirect to login when not authenticated', async ({
     unauthenticatedPage,
   }) => {
-    // Navigate to tag page
-    await unauthenticatedPage.goto('/contacts/tags/work');
+    // Navigate to tag-filtered contacts page
+    await unauthenticatedPage.goto('/contacts?tag=1');
     await expect(unauthenticatedPage).toHaveTitle(/Personal Management System/);
 
     // Should redirect to login first
@@ -28,13 +31,42 @@ test.describe('Tag Filtering Pages', () => {
     ).toBeVisible();
   });
 
+  test('legacy /contacts/tags/[id] redirects to /contacts?tag=<id>', async ({
+    authenticatedPage,
+  }) => {
+    // Create a tag to test with
+    const tagName = 'Redirect-Test-' + Date.now();
+    const tagResp = await authenticatedPage.request.post('/api/tags', {
+      data: {
+        data: {
+          type: 'tags',
+          attributes: { name: tagName },
+        },
+      },
+      headers: { 'Content-Type': 'application/json' },
+    });
+    expect(tagResp.ok()).toBe(true);
+    const tagData = await tagResp.json();
+    const tagId = tagData.data.id;
+
+    // Navigate to the old URL
+    await authenticatedPage.goto(`/contacts/tags/${tagId}`);
+
+    // Should redirect to the main contacts page with tag param
+    await authenticatedPage.waitForURL(`**/contacts?tag=${tagId}`);
+    expect(authenticatedPage.url()).toContain(`/contacts?tag=${tagId}`);
+
+    // Cleanup
+    await authenticatedPage.request.delete(`/api/tags/${tagId}`);
+  });
+
   test('should display contacts filtered by tag when tag exists', async ({
     taggedContactsData,
   }) => {
     const { page, contacts, tags } = taggedContactsData;
-    // Navigate to first tag page (guaranteed by fixture)
+    // Navigate to contacts with tag filter (new unified URL)
     const firstTag = tags[0];
-    await page.goto(`/contacts/tags/${firstTag.id}`);
+    await page.goto(`/contacts?tag=${firstTag.id}`);
     await expect(page).toHaveTitle(/Personal Management System/);
 
     // Should show contacts with this tag (guaranteed by fixture)
@@ -64,32 +96,17 @@ test.describe('Tag Filtering Pages', () => {
   test('should display not found message for non-existent tag', async ({
     authenticatedPage,
   }) => {
-    // Navigate to non-existent tag page
-    await authenticatedPage.goto('/contacts/tags/non-existent-tag-999');
+    // Navigate to a non-existent tag
+    await authenticatedPage.goto('/contacts?tag=non-existent-tag-999');
     await expect(authenticatedPage).toHaveTitle(/Personal Management System/);
 
-    // Should show tag not found message - use the h1 specifically to avoid strict mode violation
-    const errorHeading = authenticatedPage.locator(
-      'h1:has-text("Tag Not Found")'
-    );
-    await expect(errorHeading).toBeVisible();
-
-    // Also check for the descriptive text
-    await expect(
-      authenticatedPage.locator('text=/the requested tag could not be found/i')
-    ).toBeVisible();
-
-    // Should have helpful navigation back to contacts
-    const backLink = authenticatedPage.locator(
-      'a[href="/contacts"], a:has-text("Browse"), a:has-text("All Contacts")'
-    );
-    const linkCount = await backLink.count();
-    if (linkCount > 0) {
-      await expect(backLink.first()).toBeVisible();
-    }
+    // The page should load without errors — contacts list shows
+    // with no results since the tag ID does not match any real tag
+    const heading = authenticatedPage.locator('h1');
+    await expect(heading).toBeVisible();
   });
 
-  test('parent tag page should show contacts tagged with child tags', async ({
+  test('parent tag filter should show contacts tagged with child tags', async ({
     authenticatedPage,
   }) => {
     // 1. Create parent tag
@@ -149,8 +166,8 @@ test.describe('Tag Filtering Pages', () => {
     );
     expect(assignResp.ok() || assignResp.status() === 204).toBe(true);
 
-    // 5. Navigate to parent tag page — descendant filtering should show the contact
-    await authenticatedPage.goto(`/contacts/tags/${parentId}`);
+    // 5. Navigate to unified contacts page with parent tag filter
+    await authenticatedPage.goto(`/contacts?tag=${parentId}`);
     await expect(authenticatedPage).toHaveTitle(/Personal Management System/);
 
     // The contact should appear because filtering by parent includes descendants
@@ -209,8 +226,8 @@ test.describe('Tag Filtering Pages', () => {
     );
     expect(assignResp.ok() || assignResp.status() === 204).toBe(true);
 
-    // 3. Navigate to the tag page
-    await authenticatedPage.goto(`/contacts/tags/${tagId}`);
+    // 3. Navigate to the unified contacts page with tag filter
+    await authenticatedPage.goto(`/contacts?tag=${tagId}`);
     await expect(authenticatedPage).toHaveTitle(/Personal Management System/);
 
     // The contact should be visible
@@ -247,97 +264,73 @@ test.describe('Tag Filtering Pages', () => {
     const responseData = await response.json();
     const tagId = responseData.data.id;
 
-    await authenticatedPage.goto(`/contacts/tags/${tagId}`);
+    await authenticatedPage.goto(`/contacts?tag=${tagId}`);
     await expect(authenticatedPage).toHaveTitle(/Personal Management System/);
 
     // Wait for content to load by checking for the heading
     const heading = authenticatedPage.locator('h1');
     await expect(heading).toBeVisible();
 
-    // Should contain the tag name or tag-related text
+    // Should contain the tag name in the heading
     const headingText = await heading.textContent();
-    expect(headingText?.toLowerCase()).toMatch(/(tag|contact)/);
+    expect(headingText?.toLowerCase()).toContain(tagName.toLowerCase());
 
     // Cleanup test data
     await authenticatedPage.request.delete(`/api/tags/${tagId}`);
   });
 
-  test('should handle empty tag state with helpful message', async ({
+  test('should show active tag badge with clear functionality', async ({
     authenticatedPage,
   }) => {
-    // Create an empty tag (no contacts assigned)
+    // Create a test tag
+    const tagName = 'Badge-Test-' + Date.now();
     const response = await authenticatedPage.request.post('/api/tags', {
       data: {
         data: {
           type: 'tags',
-          attributes: {
-            name: 'Empty-Tag-' + Date.now(),
-          },
+          attributes: { name: tagName },
         },
       },
-      headers: {
-        'Content-Type': 'application/json',
-      },
+      headers: { 'Content-Type': 'application/json' },
     });
-
     expect(response.ok()).toBe(true);
     const responseData = await response.json();
     const tagId = responseData.data.id;
 
-    await authenticatedPage.goto(`/contacts/tags/${tagId}`);
+    await authenticatedPage.goto(`/contacts?tag=${tagId}`);
     await expect(authenticatedPage).toHaveTitle(/Personal Management System/);
 
-    // Wait for content to load by waiting for empty state, contact cards, or error message
-    try {
-      await authenticatedPage.waitForSelector(
-        '[data-testid="contact-card"], .contact-card, [class*="card"]'
-      );
-    } catch {
-      // If no contact cards, wait for empty state or error message
-      await authenticatedPage.waitForSelector(
-        'text=/no contacts.*tag/i, text=/no contacts found/i, text=/add.*contacts.*tag/i, text=/tag.*not.*found/i'
-      );
-    }
-
-    // Look for empty state message
-    const emptyStateMessages = [
-      'text=/no contacts.*tag/i',
-      'text=/no contacts found/i',
-      'text=/add.*contacts.*tag/i',
-    ];
-
-    let hasEmptyStateMessage = false;
-    for (const selector of emptyStateMessages) {
-      if ((await authenticatedPage.locator(selector).count()) > 0) {
-        hasEmptyStateMessage = true;
-        break;
-      }
-    }
-
-    // Look for contact cards
-    const contactCards = authenticatedPage.locator(
-      '[data-testid="contact-card"], .contact-card, [class*="card"]'
+    // Active tag badge should be visible
+    const tagBadge = authenticatedPage.locator(
+      '[data-testid="active-tag-filter"]'
     );
-    const hasContacts = (await contactCards.count()) > 0;
+    await expect(tagBadge).toBeVisible({ timeout: 10000 });
 
-    // Look for tag not found
-    const hasTagNotFound =
-      (await authenticatedPage.locator('text=/tag.*not.*found/i').count()) > 0;
+    // Click clear to remove tag filter
+    const clearButton = authenticatedPage.locator(
+      '[data-testid="clear-tag-filter"]'
+    );
+    await expect(clearButton).toBeVisible();
+    await clearButton.click();
 
-    // Should have one of these states
-    expect(hasEmptyStateMessage || hasContacts || hasTagNotFound).toBe(true);
+    // Should return to unfiltered contacts list
+    await authenticatedPage.waitForURL('**/contacts');
+    expect(authenticatedPage.url()).not.toContain('tag=');
 
-    // Cleanup test data
+    // Tag badge should no longer be visible
+    await expect(tagBadge).not.toBeVisible();
+
+    // Cleanup
     await authenticatedPage.request.delete(`/api/tags/${tagId}`);
   });
 
   test('should maintain consistent navigation with other contact pages', async ({
     authenticatedPage,
   }) => {
-    await authenticatedPage.goto('/contacts/tags/1');
+    await authenticatedPage.goto('/contacts?tag=1');
     await expect(authenticatedPage).toHaveTitle(/Personal Management System/);
 
-    // Should have consistent navigation elements
+    // Should have consistent navigation elements (sidebar)
     const sidebar = authenticatedPage
       .locator('nav, aside, [role="navigation"]')
       .first();

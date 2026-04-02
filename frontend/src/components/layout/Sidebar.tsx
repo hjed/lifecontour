@@ -13,7 +13,7 @@
 import { useState, useCallback } from 'react';
 import Link from 'next/link';
 import type { Route } from 'next';
-import { usePathname } from 'next/navigation';
+import { usePathname, useSearchParams } from 'next/navigation';
 import {
   Users,
   BookOpen,
@@ -66,10 +66,18 @@ interface SidebarContentProps {
  * Determines if a given href matches the current pathname for active link highlighting.
  *
  * Special handling for the contacts root path to ensure exact matching.
+ * When the contacts page has a `?tag=` param, we do NOT mark the plain
+ * "All" link as active — the tag-specific item will be active instead.
  */
-function isActiveLink(href: Route, pathname: string): boolean {
+function isActiveLink(
+  href: Route,
+  pathname: string,
+  searchParams: URLSearchParams
+): boolean {
   if (href === '/contacts') {
-    return pathname === '/contacts' || pathname === '/contacts/';
+    const isOnContacts = pathname === '/contacts' || pathname === '/contacts/';
+    // If a tag filter is active, "All" should not be highlighted
+    return isOnContacts && !searchParams.has('tag');
   }
   if (href === '/integrations') {
     return pathname === '/integrations' || pathname === '/integrations/';
@@ -147,7 +155,7 @@ function TagTreeItem({
   const hasChildren = node.children.length > 0;
   const tagId = node.tag.id;
   const isExpanded = expandedTags[tagId] ?? false;
-  const href = `/contacts/tags/${tagId}` as Route;
+  const href = `/contacts?tag=${tagId}` as Route;
   const isActive = checkActiveLink(href);
   const indentSizeRem = 0.75; // matches Tailwind ml-3 visually for nesting
 
@@ -275,10 +283,25 @@ function TagTreeNavigation({
  */
 function SidebarContentWithContext({ onNavigate }: SidebarContentProps) {
   const pathname = usePathname();
+  const searchParams = useSearchParams();
   const { state, toggleSection } = useSidebar();
   const navigationSections = useNavigationSections();
 
-  const checkActiveLink = (href: Route) => isActiveLink(href, pathname);
+  const checkActiveLink = useCallback(
+    (href: Route) => {
+      // For tag links (/contacts?tag=X), compare the tag param
+      if (typeof href === 'string' && href.startsWith('/contacts?tag=')) {
+        const hrefParams = new URLSearchParams(href.split('?')[1]);
+        const isOnContacts =
+          pathname === '/contacts' || pathname === '/contacts/';
+        return (
+          isOnContacts && searchParams.get('tag') === hrefParams.get('tag')
+        );
+      }
+      return isActiveLink(href, pathname, searchParams);
+    },
+    [pathname, searchParams]
+  );
 
   return (
     <SidebarContentInner
@@ -296,6 +319,7 @@ function SidebarContentWithContext({ onNavigate }: SidebarContentProps) {
  */
 function SidebarContentWithLocalState({ onNavigate }: SidebarContentProps) {
   const pathname = usePathname();
+  const searchParams = useSearchParams();
   const navigationSections = useNavigationSections();
   const [expandedSections, setExpandedSections] = useState<
     Record<string, boolean>
@@ -316,7 +340,20 @@ function SidebarContentWithLocalState({ onNavigate }: SidebarContentProps) {
     }));
   };
 
-  const checkActiveLink = (href: Route) => isActiveLink(href, pathname);
+  const checkActiveLink = useCallback(
+    (href: Route) => {
+      if (typeof href === 'string' && href.startsWith('/contacts?tag=')) {
+        const hrefParams = new URLSearchParams(href.split('?')[1]);
+        const isOnContacts =
+          pathname === '/contacts' || pathname === '/contacts/';
+        return (
+          isOnContacts && searchParams.get('tag') === hrefParams.get('tag')
+        );
+      }
+      return isActiveLink(href, pathname, searchParams);
+    },
+    [pathname, searchParams]
+  );
 
   return (
     <SidebarContentInner

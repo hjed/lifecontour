@@ -26,6 +26,7 @@ jest.mock('next/navigation', () => ({
     replace: jest.fn(),
   })),
   usePathname: jest.fn(() => '/contacts'),
+  useSearchParams: jest.fn(() => new URLSearchParams()),
 }));
 
 // Mock constants
@@ -61,9 +62,23 @@ jest.mock('@/lib/api/contacts', () => {
     useInfiniteContacts: jest.fn(),
     useInfiniteSearchContacts: jest.fn(),
     useToggleContactFavourite: jest.fn(),
+    useTags: jest.fn(() => ({
+      data: undefined,
+      isLoading: false,
+      error: null,
+    })),
     getContactPaginationMeta: jest.fn(createMockGetContactPaginationMeta),
   };
 });
+
+// Mock useTagFilter hook
+jest.mock('@/hooks/useTagFilter', () => ({
+  useTagFilter: jest.fn(() => ({
+    tagId: null,
+    setTag: jest.fn(),
+    clearTag: jest.fn(),
+  })),
+}));
 
 // Mock the FavouriteToggle component
 jest.mock('@/components/contacts/FavouriteToggle', () => ({
