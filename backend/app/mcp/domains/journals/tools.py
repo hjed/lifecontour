@@ -7,7 +7,7 @@ Each tool is designed to return AI-friendly, contextual information.
 
 import dataclasses
 import json
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from datetime import time as dt_time
 from typing import Annotated, Any
 from uuid import UUID
@@ -101,6 +101,7 @@ from app.mcp.domains.journals.schemas import (
     ActivityTypeStats,
     EventDateRangeSchema,
     JournalCreateRequest,
+    JournalDateWindowResponse,
     JournalHierarchyNode,
     JournalHierarchyResponse,
     JournalSearchResponse,
@@ -1658,6 +1659,25 @@ async def _fetch_enrichment_data(
     tags = await tag_repo.get_tags_for_journal(journal_id)
 
     return types, type_data, contacts, tags
+
+
+def compute_date_window(
+    anchor: date, days_back: int, days_forward: int
+) -> tuple[date, date]:
+    """Compute a date window around an anchor date.
+
+    Args:
+        anchor: The centre date for the window.
+        days_back: How many days before the anchor to include.
+        days_forward: How many days after the anchor to include.
+
+    Returns:
+        Tuple of (window_start, window_end) as date objects.
+    """
+    return (
+        anchor - timedelta(days=days_back),
+        anchor + timedelta(days=days_forward),
+    )
 
 
 def register_journal_tools(mcp: FastMCP[None]) -> None:
@@ -3330,6 +3350,147 @@ def register_journal_tools(mcp: FastMCP[None]) -> None:
             target_title=target.title,
             candidates=candidates,
             summary=summary_text,
+        )
+
+        return MCPResponseBuilder.success_response(response)
+
+    @mcp.tool
+    @mcp_unified_error_handler("browse_journals_by_date_window", "journal")
+    async def browse_journals_by_date_window(
+        anchor_date: Annotated[
+            str | None,
+            Field(
+                default=None,
+                description=(
+                    "Optional ISO date to anchor the window on (defaults to today). "
+                    "Example: '2026-04-02'"
+                ),
+            ),
+        ] = None,
+        days_back: Annotated[
+            int,
+            Field(
+                default=2,
+                description="Number of days before the anchor date to include (default: 2)",
+            ),
+        ] = 2,
+        days_forward: Annotated[
+            int,
+            Field(
+                default=4,
+                description="Number of days after the anchor date to include (default: 4)",
+            ),
+        ] = 4,
+        types: Annotated[
+            str | None,
+            Field(
+                default=None,
+                description="Optional comma-separated journal types to filter by",
+            ),
+        ] = None,
+        search: Annotated[
+            str | None,
+            Field(
+                default=None,
+                description="Optional text search query within the window",
+            ),
+        ] = None,
+        limit: Annotated[
+            int,
+            Field(
+                default=50,
+                description="Maximum results to return per page (default: 50)",
+            ),
+        ] = 50,
+        offset: Annotated[
+            int,
+            Field(
+                default=0,
+                description="Number of results to skip for pagination (default: 0)",
+            ),
+        ] = 0,
+        db_connection: AsyncConnection = mcp_depends(get_async_connection),
+    ) -> str:
+        """
+        Browse journals within a date window anchored on a given date.
+
+        Returns journals falling within [anchor - days_back, anchor + days_forward].
+        Defaults to a 7-day window (2 days back, 4 days forward from today).
+        Supports pagination via offset/limit and optional type/search filters.
+
+        Use this tool for time-oriented journal browsing, such as seeing
+        what happened recently or what is coming up.
+
+        Args:
+            anchor_date: ISO date string to centre the window on (defaults to today)
+            days_back: Days before the anchor to include
+            days_forward: Days after the anchor to include
+            types: Comma-separated journal types to filter by
+            search: Text search query
+            limit: Page size
+            offset: Pagination offset
+
+        Returns:
+            JSON with journals in the window, window boundaries, and pagination info
+        """
+        user_id = await get_current_user_id()
+        repos = _create_journal_tool_repositories(db_connection)
+
+        # Resolve anchor date
+        if anchor_date is not None:
+            try:
+                resolved_anchor = date.fromisoformat(anchor_date.strip())
+            except ValueError as exc:
+                raise ValueError(
+                    f"Invalid anchor_date '{anchor_date}'. Must be ISO format (YYYY-MM-DD)."
+                ) from exc
+        else:
+            resolved_anchor = date.today()
+
+        window_start, window_end = compute_date_window(
+            resolved_anchor, days_back, days_forward
+        )
+
+        start_iso = window_start.isoformat()
+        end_iso = window_end.isoformat()
+
+        type_filters = _parse_type_filters(types)
+        journal_type = type_filters[0] if len(type_filters) == 1 else None
+
+        total_count = await repos.journal_repo.count_all(
+            user_id=user_id,
+            journal_type=journal_type,
+            start_date=start_iso,
+            end_date=end_iso,
+            search=search,
+        )
+
+        journals = await repos.journal_repo.get_all(
+            user_id=user_id,
+            limit=limit,
+            offset=offset,
+            journal_type=journal_type,
+            start_date=start_iso,
+            end_date=end_iso,
+            search=search,
+        )
+
+        results = await _build_search_results(journals, repos)
+
+        has_more = (offset + limit) < total_count
+
+        response = JournalDateWindowResponse(
+            results=results,
+            window_start=start_iso,
+            window_end=end_iso,
+            anchor_date=resolved_anchor.isoformat(),
+            total_count=total_count,
+            has_more=has_more,
+            summary=(
+                f"Found {total_count} journal(s) between "
+                f"{start_iso} and {end_iso} "
+                f"(anchored on {resolved_anchor.isoformat()})"
+            ),
         )
 
         return MCPResponseBuilder.success_response(response)

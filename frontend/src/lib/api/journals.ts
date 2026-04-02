@@ -5,7 +5,12 @@
  * with proper error handling and caching.
  */
 
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import {
+  useInfiniteQuery,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from '@tanstack/react-query';
 import { toast } from 'sonner';
 import {
   JournalListResponse,
@@ -18,7 +23,7 @@ import {
   JournalCalendar,
   MergeOverrides,
 } from '@/types/journals';
-import { JsonApiErrorResponse } from '@/types/api';
+import { JsonApiErrorResponse, JsonApiMeta } from '@/types/api';
 import {
   API_ENDPOINTS,
   ERROR_MESSAGES,
@@ -30,6 +35,9 @@ export const journalKeys = {
   all: ['journals'] as const,
   lists: () => [...journalKeys.all, 'list'] as const,
   list: (filters: JournalFilters) => [...journalKeys.lists(), filters] as const,
+  infiniteLists: () => [...journalKeys.lists(), 'infinite'] as const,
+  infiniteList: (filters: JournalFilters) =>
+    [...journalKeys.infiniteLists(), filters] as const,
   details: () => [...journalKeys.all, 'detail'] as const,
   detail: (id: string) => [...journalKeys.details(), id] as const,
   search: (query: string) => [...journalKeys.all, 'search', query] as const,
@@ -649,6 +657,62 @@ async function deleteCalendar(id: string): Promise<void> {
   }
 }
 
+interface JournalPaginationMeta {
+  totalCount?: number;
+  currentPage?: number;
+  pageCount?: number;
+  perPage?: number;
+}
+
+function getMetaNumber(
+  meta: JsonApiMeta | undefined,
+  ...keys: string[]
+): number | undefined {
+  if (!meta) return undefined;
+  for (const key of keys) {
+    const value = meta[key];
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      return value;
+    }
+  }
+  return undefined;
+}
+
+export function getJournalPaginationMeta(
+  meta?: JsonApiMeta
+): JournalPaginationMeta {
+  return {
+    totalCount: getMetaNumber(meta, 'total_count', 'total'),
+    currentPage: getMetaNumber(meta, 'current_page', 'page'),
+    pageCount: getMetaNumber(meta, 'page_count', 'total_pages', 'totalPages'),
+    perPage: getMetaNumber(meta, 'per_page', 'limit'),
+  };
+}
+
+export function getNextJournalPageParam(
+  lastPage: JournalListResponse
+): number | undefined {
+  const { currentPage, pageCount } = getJournalPaginationMeta(lastPage.meta);
+  if (
+    currentPage === undefined ||
+    pageCount === undefined ||
+    currentPage >= pageCount
+  ) {
+    return undefined;
+  }
+  return currentPage + 1;
+}
+
+function omitPage<T extends { page?: number }>(value: T): Omit<T, 'page'> {
+  const nextValue = { ...value };
+  delete nextValue.page;
+  return nextValue as Omit<T, 'page'>;
+}
+
+function getListQueryFilters(filters: JournalFilters): JournalFilters {
+  return omitPage(filters);
+}
+
 // React Query Hooks
 export function useJournals(
   filters: JournalFilters = {},
@@ -657,6 +721,26 @@ export function useJournals(
   return useQuery({
     queryKey: journalKeys.list(filters),
     queryFn: () => fetchJournals(filters),
+    staleTime: 5 * 60 * 1000, // 5 minutes
+    enabled: options.enabled,
+  });
+}
+
+export function useInfiniteJournals(
+  filters: JournalFilters = {},
+  options: { enabled?: boolean } = {}
+) {
+  const initialPage = filters.page ?? 1;
+
+  return useInfiniteQuery({
+    queryKey: journalKeys.infiniteList(getListQueryFilters(filters)),
+    queryFn: ({ pageParam }) =>
+      fetchJournals({
+        ...filters,
+        page: pageParam,
+      }),
+    initialPageParam: initialPage,
+    getNextPageParam: getNextJournalPageParam,
     staleTime: 5 * 60 * 1000, // 5 minutes
     enabled: options.enabled,
   });
