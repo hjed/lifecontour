@@ -32,6 +32,8 @@ def project_calendar_info_to_linked_calendar(
         location=calendar_info.location,
         sync_invitees=calendar_info.sync_invitees,
         event_state=calendar_info.event_state,
+        event_start_date=calendar_info.event_start_date,
+        event_end_date=calendar_info.event_end_date,
         created_at=calendar_info.created_at,
         updated_at=calendar_info.updated_at,
     )
@@ -44,8 +46,29 @@ class SqlCalendarInfoRepository(CalendarInfoRepository):
         """Initialize repository with database connection."""
         self.conn = connection
 
-    def _row_to_calendar_info(self, row: Any) -> CalendarInfo:
+    def _row_to_calendar_info(
+        self,
+        row: Any,
+        event_start_date: Any = None,
+        event_end_date: Any = None,
+    ) -> CalendarInfo:
         """Convert a database row to a CalendarInfo entity."""
+        start_date = event_start_date
+        end_date = event_end_date
+
+        if (
+            start_date is None
+            and hasattr(row, "event_date_range_start")
+            and row.event_date_range_start
+        ):
+            start_date = row.event_date_range_start.date()
+        if (
+            end_date is None
+            and hasattr(row, "event_date_range_end")
+            and row.event_date_range_end
+        ):
+            end_date = row.event_date_range_end.date()
+
         return CalendarInfo(
             journal_id=row.journal_id,
             calendar_id=row.calendar_id,
@@ -55,6 +78,8 @@ class SqlCalendarInfoRepository(CalendarInfoRepository):
             location=row.location,
             sync_invitees=row.sync_invitees,
             event_state=EventState(row.event_state),
+            event_start_date=start_date,
+            event_end_date=end_date,
             created_at=row.created_at,
             updated_at=row.updated_at,
         )
@@ -63,11 +88,13 @@ class SqlCalendarInfoRepository(CalendarInfoRepository):
         """Find calendar info by journal ID."""
         query = text(
             """
-            SELECT journal_id, calendar_id, start_time, end_time,
-                   is_all_day, location, sync_invitees, event_state,
-                   created_at, updated_at
-            FROM journal_calendar_info
-            WHERE journal_id = :journal_id
+            SELECT jci.journal_id, jci.calendar_id, jci.start_time, jci.end_time,
+                   jci.is_all_day, jci.location, jci.sync_invitees, jci.event_state,
+                   jci.created_at, jci.updated_at,
+                   j.event_date_range_start, j.event_date_range_end
+            FROM journal_calendar_info jci
+            INNER JOIN journals j ON j.id = jci.journal_id
+            WHERE jci.journal_id = :journal_id
             """
         )
         result = await self.conn.execute(query, {"journal_id": journal_id})
@@ -131,7 +158,11 @@ class SqlCalendarInfoRepository(CalendarInfoRepository):
             },
         )
         row = result.fetchone()
-        return self._row_to_calendar_info(row)
+        return self._row_to_calendar_info(
+            row,
+            event_start_date=calendar_info.event_start_date,
+            event_end_date=calendar_info.event_end_date,
+        )
 
     async def _update(self, calendar_info: CalendarInfo) -> CalendarInfo:
         """Update existing calendar info."""
@@ -166,7 +197,11 @@ class SqlCalendarInfoRepository(CalendarInfoRepository):
             },
         )
         row = result.fetchone()
-        return self._row_to_calendar_info(row)
+        return self._row_to_calendar_info(
+            row,
+            event_start_date=calendar_info.event_start_date,
+            event_end_date=calendar_info.event_end_date,
+        )
 
     async def delete(self, journal_id: int) -> None:
         """Delete calendar info by journal ID."""
@@ -183,12 +218,14 @@ class SqlCalendarInfoRepository(CalendarInfoRepository):
         """Get all calendar info entries for a calendar."""
         primary_query = text(
             """
-            SELECT journal_id, calendar_id, start_time, end_time,
-                   is_all_day, location, sync_invitees, event_state,
-                   created_at, updated_at
-            FROM journal_calendar_info
-            WHERE calendar_id = :calendar_id
-            ORDER BY journal_id ASC
+            SELECT jci.journal_id, jci.calendar_id, jci.start_time, jci.end_time,
+                   jci.is_all_day, jci.location, jci.sync_invitees, jci.event_state,
+                   jci.created_at, jci.updated_at,
+                   j.event_date_range_start, j.event_date_range_end
+            FROM journal_calendar_info jci
+            INNER JOIN journals j ON j.id = jci.journal_id
+            WHERE jci.calendar_id = :calendar_id
+            ORDER BY jci.journal_id ASC
             """
         )
         primary_result = await self.conn.execute(
@@ -203,9 +240,11 @@ class SqlCalendarInfoRepository(CalendarInfoRepository):
             SELECT jci.journal_id, jci.calendar_id, jci.start_time, jci.end_time,
                    jci.is_all_day, jci.location, jci.sync_invitees, jci.event_state,
                    jci.created_at, jci.updated_at,
+                   j.event_date_range_start, j.event_date_range_end,
                    jeel.calendar_id AS linked_calendar_id
             FROM journal_external_event_links jeel
             INNER JOIN journal_calendar_info jci ON jci.journal_id = jeel.journal_id
+            INNER JOIN journals j ON j.id = jci.journal_id
             WHERE jeel.calendar_id = :calendar_id
               AND jci.calendar_id <> jeel.calendar_id
             ORDER BY jci.journal_id ASC

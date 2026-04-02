@@ -78,6 +78,8 @@ def create_test_calendar_info(
     is_all_day: bool = False,
     location: str | None = None,
     sync_invitees: bool = False,
+    event_start_date=None,
+    event_end_date=None,
 ) -> CalendarInfo:
     """Helper function to create a test calendar info."""
     return CalendarInfo(
@@ -88,6 +90,8 @@ def create_test_calendar_info(
         is_all_day=is_all_day,
         location=location,
         sync_invitees=sync_invitees,
+        event_start_date=event_start_date,
+        event_end_date=event_end_date,
     )
 
 
@@ -224,6 +228,49 @@ class TestCalendarInfoRepositoryFindByJournalId:
         found = await calendar_info_repository.find_by_journal_id(99999)
 
         assert found is None
+
+    async def test_find_by_journal_id_supports_midnight_crossing_events(
+        self,
+        calendar_info_repository: SqlCalendarInfoRepository,
+        journal_repository: SqlJournalRepository,
+        test_calendar: Calendar,
+    ):
+        """Test finding calendar info where end_time < start_time crosses midnight."""
+        now = datetime.now(UTC)
+        # Create a journal that starts at 11 PM and ends at 1 AM the next day
+        start_dt = now.replace(hour=23, minute=0, second=0, microsecond=0)
+        end_dt = start_dt + timedelta(hours=2)
+
+        journal = await journal_repository.save(
+            Journal(
+                user_id="test-user-123",
+                title="Late Event",
+                content="Event content",
+                event_date_range=EventDateRange(
+                    start=start_dt,
+                    end=end_dt,
+                ),
+            )
+        )
+
+        calendar_info = create_test_calendar_info(
+            journal_id=journal.id,  # type: ignore[arg-type]
+            calendar_id=test_calendar.id,
+            start_time=time(23, 0),
+            end_time=time(1, 0),
+            event_start_date=start_dt.date(),
+            event_end_date=end_dt.date(),
+        )
+
+        await calendar_info_repository.save(calendar_info)
+
+        # This should successfully map to CalendarInfo since `event_start_date` and `event_end_date` are correctly joined
+        found = await calendar_info_repository.find_by_journal_id(journal.id)  # type: ignore[arg-type]
+
+        assert found is not None
+        assert found.journal_id == journal.id
+        assert found.start_time == time(23, 0)
+        assert found.end_time == time(1, 0)
 
 
 @pytest.mark.integration
