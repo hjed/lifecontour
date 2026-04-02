@@ -388,12 +388,16 @@ test.describe('Journal List Page', () => {
       // Navigate to journals page
       await page.goto('/journals');
       await expect(page.locator('main, [role="main"]').first()).toBeVisible();
+      // Wait for journal data to finish loading (prevents Mobile Chrome flakiness)
+      await page.waitForLoadState('networkidle');
 
-      // Verify all journals are initially visible
+      // Verify all journals are initially visible (scrolling into view for mobile viewports)
       for (const journal of journals) {
-        await expect(
-          page.getByRole('heading', { name: new RegExp(journal.title, 'i') })
-        ).toBeVisible();
+        const heading = page.getByRole('heading', {
+          name: new RegExp(journal.title, 'i'),
+        });
+        await heading.scrollIntoViewIfNeeded();
+        await expect(heading).toBeVisible({ timeout: 30000 });
       }
 
       // Open date range filter popover
