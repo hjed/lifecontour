@@ -203,4 +203,199 @@ test.describe('Journal Hierarchy', () => {
     // 6. Verify links
     await verifyHierarchyLinks(page, childTitle, parentTitle, parentId);
   });
+
+  test('should add an existing journal as a child from parent detail page', async ({
+    authenticatedPage,
+    request,
+  }) => {
+    const page = authenticatedPage;
+    const timestamp = Date.now();
+
+    // 1. Create two independent journals via API
+    const parentTitle = `E2E Hierarchy AddExisting Parent - ${timestamp}`;
+    const childTitle = `E2E Hierarchy AddExisting Child - ${timestamp}`;
+
+    const parentResponse = await request.post(
+      `${FRONTEND_TEST_URL}/api/journals`,
+      {
+        data: {
+          data: {
+            type: 'journals',
+            attributes: {
+              title: parentTitle,
+              content: 'Parent journal for add-existing test.',
+              event_date_range: {
+                start: new Date().toISOString(),
+                end: new Date().toISOString(),
+              },
+            },
+          },
+        },
+      }
+    );
+    expect(parentResponse.ok()).toBeTruthy();
+    const parentData = await parentResponse.json();
+    const parentId = parentData.data.id;
+
+    const childResponse = await request.post(
+      `${FRONTEND_TEST_URL}/api/journals`,
+      {
+        data: {
+          data: {
+            type: 'journals',
+            attributes: {
+              title: childTitle,
+              content: 'Child journal for add-existing test.',
+              event_date_range: {
+                start: new Date().toISOString(),
+                end: new Date().toISOString(),
+              },
+            },
+          },
+        },
+      }
+    );
+    expect(childResponse.ok()).toBeTruthy();
+
+    // 2. Navigate to the parent journal detail page
+    await page.goto(`/journals/${parentId}`);
+    await expect(
+      page.getByRole('heading', { name: parentTitle, exact: true }).first()
+    ).toBeVisible();
+
+    // 3. Click "Add Existing" button
+    const addExistingButton = page.getByRole('button', {
+      name: /add existing/i,
+    });
+    await expect(addExistingButton).toBeVisible();
+    await addExistingButton.click();
+
+    // 4. Search for the child journal
+    const searchInput = page.locator('#add-existing-child-search');
+    await expect(searchInput).toBeVisible();
+    await searchInput.fill(childTitle);
+
+    // 5. Wait for and select the journal from results
+    const childOption = page
+      .getByRole('option', { name: new RegExp(childTitle.slice(0, 30)) })
+      .first();
+    await expect(childOption).toBeVisible({ timeout: 10000 });
+    await childOption.click();
+
+    // 6. Wait for the PATCH request to complete
+    await page.waitForResponse(
+      response =>
+        response.url().includes('/api/journals/') &&
+        response.request().method() === 'PATCH' &&
+        response.status() === 200
+    );
+
+    // 7. Verify the child now appears in the children list
+    await page.reload();
+    await expect(
+      page.getByRole('heading', { name: parentTitle, exact: true }).first()
+    ).toBeVisible();
+
+    const childLink = page
+      .getByTestId('children-list')
+      .getByRole('link', { name: new RegExp(childTitle.slice(0, 30)) });
+    await expect(childLink).toBeVisible({ timeout: 10000 });
+  });
+
+  test('should set parent from child detail page using parent selector', async ({
+    authenticatedPage,
+    request,
+  }) => {
+    const page = authenticatedPage;
+    const timestamp = Date.now();
+
+    // 1. Create two independent journals via API
+    const parentTitle = `E2E Hierarchy SetParent Parent - ${timestamp}`;
+    const childTitle = `E2E Hierarchy SetParent Child - ${timestamp}`;
+
+    const parentResponse = await request.post(
+      `${FRONTEND_TEST_URL}/api/journals`,
+      {
+        data: {
+          data: {
+            type: 'journals',
+            attributes: {
+              title: parentTitle,
+              content: 'Parent for set-parent test.',
+              event_date_range: {
+                start: new Date().toISOString(),
+                end: new Date().toISOString(),
+              },
+            },
+          },
+        },
+      }
+    );
+    expect(parentResponse.ok()).toBeTruthy();
+
+    const childResponse = await request.post(
+      `${FRONTEND_TEST_URL}/api/journals`,
+      {
+        data: {
+          data: {
+            type: 'journals',
+            attributes: {
+              title: childTitle,
+              content: 'Child for set-parent test.',
+              event_date_range: {
+                start: new Date().toISOString(),
+                end: new Date().toISOString(),
+              },
+            },
+          },
+        },
+      }
+    );
+    expect(childResponse.ok()).toBeTruthy();
+    const childData = await childResponse.json();
+    const childId = childData.data.id;
+
+    // 2. Navigate to the child journal detail page
+    await page.goto(`/journals/${childId}`);
+    await expect(
+      page.getByRole('heading', { name: childTitle, exact: true }).first()
+    ).toBeVisible();
+
+    // 3. Click "Set Parent" button
+    const setParentButton = page.getByRole('button', {
+      name: /set parent/i,
+    });
+    await expect(setParentButton).toBeVisible();
+    await setParentButton.click();
+
+    // 4. Search for the parent journal
+    const parentSearchInput = page.locator('#parent-journal-search');
+    await expect(parentSearchInput).toBeVisible();
+    await parentSearchInput.fill(parentTitle);
+
+    // 5. Select the parent from search results
+    const parentOption = page
+      .getByRole('option', { name: new RegExp(parentTitle.slice(0, 30)) })
+      .first();
+    await expect(parentOption).toBeVisible({ timeout: 10000 });
+    await parentOption.click();
+
+    // 6. Wait for PATCH to complete
+    await page.waitForResponse(
+      response =>
+        response.url().includes('/api/journals/') &&
+        response.request().method() === 'PATCH' &&
+        response.status() === 200
+    );
+
+    // 7. Verify breadcrumb shows the parent link
+    await page.reload();
+    await expect(
+      page.getByRole('heading', { name: childTitle, exact: true }).first()
+    ).toBeVisible();
+
+    const parentLink = page.getByTestId('parent-link');
+    await expect(parentLink).toBeVisible({ timeout: 10000 });
+    await expect(parentLink).toHaveText(parentTitle);
+  });
 });
