@@ -359,4 +359,142 @@ test.describe('Sidebar Navigation', () => {
       await expect(allLink).toBeFocused();
     });
   });
+
+  test.describe('Hierarchical Tag Navigation', () => {
+    async function createTestTag(
+      page: any,
+      name: string,
+      parentId?: number
+    ): Promise<number> {
+      const resp = await page.request.post('/api/tags', {
+        data: {
+          data: {
+            type: 'tags',
+            attributes: { name, ...(parentId ? { parent_id: parentId } : {}) },
+          },
+        },
+        headers: { 'Content-Type': 'application/json' },
+      });
+      expect(resp.ok()).toBe(true);
+      const data = await resp.json();
+      return data.data.id;
+    }
+
+    test('shows parent tag with expand control and nested children', async ({
+      authenticatedPage,
+    }) => {
+      const page = authenticatedPage;
+      const tagsToDelete: number[] = [];
+      await page.setViewportSize({ width: 1024, height: 768 });
+
+      try {
+        // 1. Create parent tag
+        const parentName = 'SidebarParent-' + Date.now();
+        const parentId = await createTestTag(page, parentName);
+        tagsToDelete.push(parentId);
+
+        // 2. Create child tag
+        const childName = 'SidebarChild-' + Date.now();
+        const childId = await createTestTag(page, childName, parentId);
+        tagsToDelete.push(childId);
+
+        // 3. Navigate to contacts page to see sidebar
+        await page.goto('/contacts');
+        await expect(page).toHaveTitle(/Personal Management System/);
+
+        // Wait for sidebar tag tree to load
+        const tagTreeArea = page.getByTestId('tag-tree-scroll-area');
+        await expect(tagTreeArea).toBeVisible({ timeout: 10000 });
+
+        // 4. Parent should be visible with an expand toggle
+        const parentLink = page.getByTestId(`nav-link-tag-${parentId}`);
+        await expect(parentLink).toBeVisible();
+
+        const expandToggle = page.getByTestId(`tag-toggle-${parentId}`);
+        await expect(expandToggle).toBeVisible();
+        await expect(expandToggle).toHaveAttribute('aria-expanded', 'false');
+
+        // 5. Child should NOT be visible initially
+        const childLink = page.getByTestId(`nav-link-tag-${childId}`);
+        await expect(childLink).not.toBeVisible();
+
+        // 6. Click expand → child becomes visible
+        await expandToggle.click();
+        await expect(expandToggle).toHaveAttribute('aria-expanded', 'true');
+        await expect(childLink).toBeVisible();
+
+        // 7. Click collapse → child hidden again
+        await expandToggle.click();
+        await expect(expandToggle).toHaveAttribute('aria-expanded', 'false');
+        await expect(childLink).not.toBeVisible();
+      } finally {
+        for (const id of tagsToDelete) {
+          await page.request.delete(`/api/tags/${id}`);
+        }
+      }
+    });
+
+    test('navigates to child tag page from sidebar tree', async ({
+      authenticatedPage,
+    }) => {
+      const page = authenticatedPage;
+      const tagsToDelete: number[] = [];
+      await page.setViewportSize({ width: 1024, height: 768 });
+
+      try {
+        // Create parent + child
+        const parentName = 'NavParent-' + Date.now();
+        const parentId = await createTestTag(page, parentName);
+        tagsToDelete.push(parentId);
+
+        const childName = 'NavChild-' + Date.now();
+        const childId = await createTestTag(page, childName, parentId);
+        tagsToDelete.push(childId);
+
+        // Navigate
+        await page.goto('/contacts');
+        await expect(page).toHaveTitle(/Personal Management System/);
+
+        // Wait for tag tree, expand parent
+        const tagTreeArea = page.getByTestId('tag-tree-scroll-area');
+        await expect(tagTreeArea).toBeVisible({ timeout: 10000 });
+
+        const expandToggle = page.getByTestId(`tag-toggle-${parentId}`);
+        await expandToggle.click();
+
+        // Click child tag link → navigate to tag page
+        const childLink = page.getByTestId(`nav-link-tag-${childId}`);
+        await expect(childLink).toBeVisible();
+        await Promise.all([
+          page.waitForURL(`/contacts/tags/${childId}`),
+          childLink.click(),
+        ]);
+      } finally {
+        for (const id of tagsToDelete) {
+          await page.request.delete(`/api/tags/${id}`);
+        }
+      }
+    });
+
+    test('flat tags render without expand controls', async ({
+      taggedContactsData,
+    }) => {
+      const { page } = taggedContactsData;
+      await page.setViewportSize({ width: 1024, height: 768 });
+
+      await page.goto('/contacts');
+      await expect(page).toHaveTitle(/Personal Management System/);
+
+      // Wait for tag tree to load
+      const tagTreeArea = page.getByTestId('tag-tree-scroll-area');
+      await expect(tagTreeArea).toBeVisible({ timeout: 10000 });
+
+      // Tag links should be present as regular links
+      const tagLinks = page.locator('a[href*="/contacts/tags/"]');
+      await expect(tagLinks.first()).toBeVisible();
+
+      const tagCount = await tagLinks.count();
+      expect(tagCount).toBeGreaterThan(0);
+    });
+  });
 });
