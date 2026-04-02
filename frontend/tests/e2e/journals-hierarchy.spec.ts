@@ -232,7 +232,6 @@ test.describe('Journal Hierarchy', () => {
 
   test('should add an existing journal as a child from parent detail page', async ({
     authenticatedPage,
-    request,
   }) => {
     const page = authenticatedPage;
     const timestamp = Date.now();
@@ -242,12 +241,12 @@ test.describe('Journal Hierarchy', () => {
     const childTitle = `E2E Hierarchy AddExisting Child - ${timestamp}`;
 
     const parentId = await createJournalViaApi(
-      request,
+      authenticatedPage.request,
       parentTitle,
       'Parent journal for add-existing test.'
     );
     await createJournalViaApi(
-      request,
+      authenticatedPage.request,
       childTitle,
       'Child journal for add-existing test.'
     );
@@ -299,7 +298,6 @@ test.describe('Journal Hierarchy', () => {
 
   test('should set parent from child detail page using parent selector', async ({
     authenticatedPage,
-    request,
   }) => {
     const page = authenticatedPage;
     const timestamp = Date.now();
@@ -309,12 +307,12 @@ test.describe('Journal Hierarchy', () => {
     const childTitle = `E2E Hierarchy SetParent Child - ${timestamp}`;
 
     await createJournalViaApi(
-      request,
+      authenticatedPage.request,
       parentTitle,
       'Parent for set-parent test.'
     );
     const childId = await createJournalViaApi(
-      request,
+      authenticatedPage.request,
       childTitle,
       'Child for set-parent test.'
     );
