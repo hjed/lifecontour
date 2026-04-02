@@ -254,9 +254,10 @@ export function JournalDetailView({
           parent_id: Number(journal.id),
         },
       });
-      // Also invalidate the current (parent) journal's cache so children list refreshes
+      // Re-parenting can affect both the new parent's and the previous parent's
+      // children lists, so invalidate all journal detail queries.
       queryClient.invalidateQueries({
-        queryKey: journalKeys.detail(journal.id),
+        queryKey: journalKeys.details(),
       });
     },
     [journal.id, updateJournal, queryClient]
@@ -271,9 +272,10 @@ export function JournalDetailView({
           parent_id: Number(parentId),
         },
       });
-      // Invalidate this journal's detail cache so breadcrumb/parent info updates
+      // Re-parenting can affect both the new parent's and the previous parent's
+      // children lists, so invalidate all journal detail queries.
       queryClient.invalidateQueries({
-        queryKey: journalKeys.detail(journal.id),
+        queryKey: journalKeys.details(),
       });
     },
     [journal.id, updateJournal, queryClient]
@@ -281,17 +283,12 @@ export function JournalDetailView({
 
   // Handle removing the parent of this journal
   const handleParentRemove = useCallback(async () => {
-    // Note: setting parent_id to null requires backend support for
-    // distinguishing "field absent" vs "field set to null".
-    // For now, we set parent_id to 0 which the backend treats as removing the parent,
-    // or we rely on a future backend fix to handle null properly.
-    await updateJournal.mutateAsync({
-      id: journal.id,
-      data: {
-        parent_id: null,
-      },
-    });
-  }, [journal.id, updateJournal]);
+    // Parent removal is intentionally disabled until the backend can
+    // distinguish between an omitted `parent_id` field and an explicit
+    // `parent_id: null` update. Sending `null` is currently treated as
+    // "field not provided", and sending `0` would be validated as a real ID.
+    return;
+  }, []);
 
   return (
     <div

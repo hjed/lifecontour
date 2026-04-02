@@ -122,10 +122,11 @@ export function JournalParentSelector({
 
           {/* Remove parent button */}
           <Button
+            title='Removing a parent is temporarily disabled until backend explicitly supports null updates'
             variant='ghost'
             size='sm'
             onClick={handleRemove}
-            disabled={disabled || isLoading}
+            disabled={true}
             className='h-6 w-6 p-0'
             aria-label='Remove parent journal'
           >

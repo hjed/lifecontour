@@ -2684,7 +2684,7 @@ class TestJournalHierarchyReparenting:
 
     Validates that we can add an existing journal as a child of another journal
     by updating its parent_id through the PATCH endpoint. Tests cover multiple
-    journal subtypes, cycle detection, max-depth enforcement, and parent removal.
+    journal subtypes, cycle detection, and max-depth enforcement.
     """
 
     @pytest_asyncio.fixture(autouse=True)
