@@ -214,7 +214,22 @@ class JournalRepository(ABC):
             journal_id: The journal ID
 
         Returns:
-            The depth of the journal (1 for root, 2 for first-level child, etc.)
+            The depth (1-based)
+        """
+        pass
+
+    @abstractmethod
+    async def get_depth_bulk(self, journal_ids: list[int]) -> dict[int, int]:
+        """
+        Get the depth of multiple journals in the hierarchy.
+
+        Root journals have depth 1.
+
+        Args:
+            journal_ids: List of journal IDs
+
+        Returns:
+            Dictionary mapping journal_id to its depth (1-based)
         """
         pass
 
