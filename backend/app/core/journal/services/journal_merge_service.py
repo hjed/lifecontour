@@ -350,10 +350,14 @@ class JournalMergeService:
     ) -> None:
         await transaction.execute(
             text("""
+                WITH removed AS (
+                    DELETE FROM journal_external_event_links
+                    WHERE journal_id = :source_id
+                    RETURNING calendar_id, external_event_id, updated_at, sync_capability, sync_status
+                )
                 INSERT INTO journal_external_event_links (journal_id, calendar_id, external_event_id, updated_at, sync_capability, sync_status)
                 SELECT :target_id, calendar_id, external_event_id, updated_at, sync_capability, sync_status
-                FROM journal_external_event_links source_links
-                WHERE journal_id = :source_id
+                FROM removed
                 ON CONFLICT (journal_id, calendar_id) DO NOTHING
             """),
             {"target_id": target_id, "source_id": source_id},
