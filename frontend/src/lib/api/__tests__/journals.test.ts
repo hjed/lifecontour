@@ -2,7 +2,7 @@
  * @jest-environment jsdom
  */
 
-import { renderHook, waitFor } from '@testing-library/react';
+import { act, renderHook, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import React, { ReactNode } from 'react';
 import {
@@ -18,6 +18,9 @@ import {
   useCreateCalendar,
   useUpdateCalendar,
   useDeleteCalendar,
+  useInfiniteJournals,
+  journalKeys,
+  getNextJournalPageParam,
 } from '../journals';
 import { JournalType } from '@/types/journals';
 
@@ -75,15 +78,27 @@ const createMockJournalAttributes = (overrides = {}) => ({
 
 const createMockJournal = (id: string, attributeOverrides = {}) => ({
   id,
-  type: 'journals',
+  type: 'journals' as const,
   attributes: createMockJournalAttributes(attributeOverrides),
 });
 
 const createMockJournalListResponse = (
-  journals: ReturnType<typeof createMockJournal>[]
+  journals: ReturnType<typeof createMockJournal>[],
+  meta: {
+    total?: number;
+    page?: number;
+    per_page?: number;
+    total_pages?: number;
+  } = {}
 ) => ({
   data: journals,
-  meta: { total: journals.length, page: 1, per_page: 20, total_pages: 1 },
+  meta: {
+    total: journals.length,
+    page: 1,
+    per_page: 20,
+    total_pages: 1,
+    ...meta,
+  },
 });
 
 const createMockJournalResponse = (
@@ -654,6 +669,103 @@ describe('Journals API', () => {
           expect.objectContaining({ method: 'DELETE' })
         );
       });
+    });
+  });
+
+  describe('useInfiniteJournals', () => {
+    it('should use a distinct query key from useJournals for the same filters', async () => {
+      const filters = {};
+
+      mockFetch.mockResolvedValue({
+        ok: true,
+        json: async () => createMockJournalListResponse([]),
+      } as Response);
+
+      const { result: standardResult } = renderHook(
+        () => useJournals(filters),
+        { wrapper: createWrapper }
+      );
+      const { result: infiniteResult } = renderHook(
+        () => useInfiniteJournals(filters),
+        { wrapper: createWrapper }
+      );
+
+      await waitFor(() => {
+        expect(standardResult.current.isSuccess).toBe(true);
+        expect(infiniteResult.current.isSuccess).toBe(true);
+      });
+
+      const standardKey = journalKeys.list(filters);
+      const infiniteKey = journalKeys.infiniteList(filters);
+      expect(standardKey).not.toEqual(infiniteKey);
+    });
+
+    it('should fetch the next page when available', async () => {
+      const firstPage = createMockJournalListResponse(
+        [createMockJournal('1')],
+        { total: 2, page: 1, total_pages: 2, per_page: 1 }
+      );
+      const secondPage = createMockJournalListResponse(
+        [createMockJournal('2')],
+        { total: 2, page: 2, total_pages: 2, per_page: 1 }
+      );
+
+      mockFetch
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => firstPage,
+        } as Response)
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => secondPage,
+        } as Response);
+
+      const { result } = renderHook(() => useInfiniteJournals(), {
+        wrapper: createWrapper,
+      });
+
+      await waitFor(() => {
+        expect(result.current.isSuccess).toBe(true);
+      });
+
+      await waitFor(() => {
+        expect(result.current.hasNextPage).toBe(true);
+      });
+
+      await act(async () => {
+        await result.current.fetchNextPage();
+      });
+
+      await waitFor(() => {
+        expect(result.current.data?.pages).toHaveLength(2);
+      });
+
+      expect(mockFetch).toHaveBeenNthCalledWith(2, '/api/journals?page=2', {
+        credentials: 'include',
+      });
+    });
+  });
+
+  describe('getNextJournalPageParam', () => {
+    it('should return next page when more pages available', () => {
+      const response = createMockJournalListResponse([createMockJournal('1')], {
+        page: 1,
+        total_pages: 3,
+      });
+      expect(getNextJournalPageParam(response)).toBe(2);
+    });
+
+    it('should return undefined on last page', () => {
+      const response = createMockJournalListResponse([createMockJournal('1')], {
+        page: 3,
+        total_pages: 3,
+      });
+      expect(getNextJournalPageParam(response)).toBeUndefined();
+    });
+
+    it('should return undefined with no meta', () => {
+      const response = { data: [] };
+      expect(getNextJournalPageParam(response)).toBeUndefined();
     });
   });
 });

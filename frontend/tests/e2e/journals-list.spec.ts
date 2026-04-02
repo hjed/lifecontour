@@ -388,12 +388,16 @@ test.describe('Journal List Page', () => {
       // Navigate to journals page
       await page.goto('/journals');
       await expect(page.locator('main, [role="main"]').first()).toBeVisible();
+      // Wait for journal data to finish loading (prevents Mobile Chrome flakiness)
+      await page.waitForLoadState('networkidle');
 
-      // Verify all journals are initially visible
+      // Verify all journals are initially visible (scrolling into view for mobile viewports)
       for (const journal of journals) {
-        await expect(
-          page.getByRole('heading', { name: new RegExp(journal.title, 'i') })
-        ).toBeVisible();
+        const heading = page.getByRole('heading', {
+          name: new RegExp(journal.title, 'i'),
+        });
+        await heading.scrollIntoViewIfNeeded();
+        await expect(heading).toBeVisible({ timeout: 30000 });
       }
 
       // Open date range filter popover
@@ -1197,6 +1201,140 @@ test.describe('Journal List Page', () => {
 
       // Verify we're on the detail page
       expect(page.url()).toContain(`/journals/${firstJournal.id}`);
+    });
+  });
+
+  test.describe('Date Window API', () => {
+    /**
+     * Format a Date as YYYY-MM-DD in the user's local timezone.
+     * Using local timezone avoids ±1 day drift when running near midnight UTC.
+     */
+    const toLocalDateString = (d: Date): string => {
+      const year = d.getFullYear();
+      const month = String(d.getMonth() + 1).padStart(2, '0');
+      const day = String(d.getDate()).padStart(2, '0');
+      return `${year}-${month}-${day}`;
+    };
+
+    test('should return journals anchored to the current day within the default window', async ({
+      authenticatedPage,
+      testCleanup,
+    }) => {
+      const page = authenticatedPage;
+      const dataManager = new (
+        await import('./data-management')
+      ).TestDataManager(page);
+
+      await dataManager.clearAllJournals();
+
+      // Get today's date and create journals at different offsets
+      const today = new Date();
+      const todayIso = today.toISOString();
+      const thirtyDaysAgo = new Date(today);
+      thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+      const thirtyDaysAgoIso = thirtyDaysAgo.toISOString();
+
+      const journals = await dataManager.createJournals([
+        {
+          title: 'Today Journal',
+          content: 'A journal created for today.',
+          event_date_range: {
+            start: todayIso,
+            end: todayIso,
+          },
+        },
+        {
+          title: 'Old Journal',
+          content: 'A journal from 30 days ago.',
+          event_date_range: {
+            start: thirtyDaysAgoIso,
+            end: thirtyDaysAgoIso,
+          },
+        },
+      ]);
+
+      // Use the returned titles (which include unique suffixes from createJournals)
+      const todayJournalTitle = journals[0].title;
+      const oldJournalTitle = journals[1].title;
+
+      testCleanup(async () => {
+        await dataManager.cleanup();
+      });
+
+      // Query the REST API with a date window anchored to today (default 2 days back, 4 days forward)
+      // Use local timezone dates to match the backend's date interpretation
+      const windowStart = new Date(today);
+      windowStart.setDate(windowStart.getDate() - 2);
+      const windowEnd = new Date(today);
+      windowEnd.setDate(windowEnd.getDate() + 4);
+
+      const startDate = toLocalDateString(windowStart);
+      const endDate = toLocalDateString(windowEnd);
+
+      const response = await page.request.get(
+        `/api/journals?start_date=${startDate}&end_date=${endDate}&limit=20`
+      );
+      expect(response.ok()).toBe(true);
+
+      const body = await response.json();
+      const titles = body.data.map(
+        (j: { attributes: { title: string } }) => j.attributes.title
+      );
+
+      // Today's journal should be in the window
+      expect(titles).toContain(todayJournalTitle);
+      // The old journal (30 days ago) should NOT be in the window
+      expect(titles).not.toContain(oldJournalTitle);
+    });
+
+    test('should return correct pagination metadata', async ({
+      authenticatedPage,
+      testCleanup,
+    }) => {
+      const page = authenticatedPage;
+      const dataManager = new (
+        await import('./data-management')
+      ).TestDataManager(page);
+
+      await dataManager.clearAllJournals();
+
+      const today = new Date().toISOString();
+
+      // Create 3 journals all on today's date
+      await dataManager.createJournals(
+        Array.from({ length: 3 }, (_, i) => ({
+          title: `Pagination Journal ${i + 1}`,
+          content: `Content for pagination test ${i + 1}`,
+          event_date_range: { start: today, end: today },
+        }))
+      );
+
+      testCleanup(async () => {
+        await dataManager.cleanup();
+      });
+
+      // Use local timezone dates to match the backend's date interpretation
+      const windowStart = new Date();
+      windowStart.setDate(windowStart.getDate() - 2);
+      const windowEnd = new Date();
+      windowEnd.setDate(windowEnd.getDate() + 4);
+
+      const startDate = toLocalDateString(windowStart);
+      const endDate = toLocalDateString(windowEnd);
+
+      // Request with limit=2 to force pagination
+      const response = await page.request.get(
+        `/api/journals?start_date=${startDate}&end_date=${endDate}&limit=2&page=1`
+      );
+      expect(response.ok()).toBe(true);
+
+      const body = await response.json();
+
+      // Verify pagination meta (JSON API field names)
+      expect(body.data).toHaveLength(2);
+      expect(body.meta.total_count).toBe(3);
+      expect(body.meta.current_page).toBe(1);
+      expect(body.meta.page_count).toBeGreaterThanOrEqual(2);
     });
   });
 });

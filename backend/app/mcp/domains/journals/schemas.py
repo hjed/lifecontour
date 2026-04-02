@@ -159,6 +159,26 @@ class JournalSearchResponse(BaseModel):
     )
 
 
+class JournalDateWindowResponse(BaseModel):
+    """AI-friendly date-window journal browsing response.
+
+    Returns journals within a computed date window anchored on a given date.
+    Designed for time-oriented journal browsing (e.g. infinite scroll).
+    """
+
+    results: list[JournalSearchResult] = Field(
+        description="Journals within the date window"
+    )
+    window_start: str = Field(description="Window start date (ISO format)")
+    window_end: str = Field(description="Window end date (ISO format)")
+    anchor_date: str = Field(description="The anchor date used for the window")
+    total_count: int = Field(description="Total journals in the window")
+    has_more: bool = Field(
+        description="Whether there are more journals beyond the current offset+limit"
+    )
+    summary: str = Field(description="AI-friendly summary of the date window results")
+
+
 class ActivityTotals(BaseModel):
     """Aggregate activity metrics."""
 

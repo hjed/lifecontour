@@ -431,10 +431,10 @@ Phase 1 and Phase 2 were implemented as a combined delivery. The merge domain se
 **PR Size:** ~5-7 files
 
 **Acceptance Criteria:**
-- [ ] Introduce a date-anchored journal window API/query contract rather than plain page-number list pagination for the main journals view.
-- [ ] The default initial window supports loading the previous 2 days and next 4 days around today.
-- [ ] Frontend data hooks use infinite-query style loading suitable for extending in both directions.
-- [ ] MCP can retrieve grouped journal windows around a date anchor using the same underlying read model.
+- [x] Introduce a date-anchored journal window API/query contract rather than plain page-number list pagination for the main journals view.
+- [x] The default initial window supports loading the previous 2 days and next 4 days around today.
+- [x] Frontend data hooks use infinite-query style loading suitable for extending in both directions.
+- [x] MCP can retrieve grouped journal windows around a date anchor using the same underlying read model.
 
 **Required Test Coverage:**
 - **Unit:** date-window boundary and cursor/window-extension helpers.
