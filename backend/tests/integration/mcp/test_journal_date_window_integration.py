@@ -303,3 +303,56 @@ class TestBrowseJournalsByDateWindowIntegration:
             assert payload["anchor_date"] == "2026-04-02"
             assert payload["window_start"] == "2026-03-31"
             assert payload["window_end"] == "2026-04-06"
+
+    @pytest.mark.asyncio
+    async def test_journals_on_window_end_day_are_included(
+        self, authenticated_lifespan_client, clean_database: AsyncConnection
+    ) -> None:
+        """Journals occurring later on window_end day must not be excluded.
+
+        Regression test: date-only end boundaries previously parsed as midnight
+        (T00:00:00), which excluded journals with start times after midnight on
+        the window_end date.
+        """
+        anchor = datetime(2026, 6, 15, tzinfo=UTC).date()
+
+        # Journal at 18:00 on the window_end day (anchor + 4 = 2026-06-19)
+        window_end_date = anchor + timedelta(days=4)
+        await _insert_journal(
+            clean_database,
+            user_id="test-user-123",
+            title="Evening Journal on End Day",
+            start=datetime.combine(window_end_date, datetime.min.time()).replace(
+                tzinfo=UTC
+            )
+            + timedelta(hours=18),
+        )
+
+        async with authenticated_lifespan_client() as client:
+            session_id = await initialize_mcp_session(client)
+
+            response = await client.post(
+                "/mcp-server/mcp",
+                json={
+                    "jsonrpc": "2.0",
+                    "id": 2,
+                    "method": "tools/call",
+                    "params": {
+                        "name": "browse_journals_by_date_window",
+                        "arguments": {
+                            "anchor_date": anchor.isoformat(),
+                            "days_back": 2,
+                            "days_forward": 4,
+                        },
+                    },
+                },
+                headers=mcp_headers(session_id),
+            )
+
+            assert response.status_code == 200
+            payload = extract_mcp_json_payload(response.text)
+
+            assert "error" not in payload
+            assert payload["total_count"] == 1
+            titles = [r["title"] for r in payload["results"]]
+            assert "Evening Journal on End Day" in titles

@@ -3456,7 +3456,12 @@ def register_journal_tools(mcp: FastMCP[None]) -> None:
         )
 
         start_iso = window_start.isoformat()
-        end_iso = window_end.isoformat()
+        # Use end-of-day for window_end so journals occurring later on that
+        # day are included (the repo compares event_date_range_start <= end_date,
+        # and date.isoformat() alone yields midnight which would exclude them).
+        end_iso = datetime.combine(
+            window_end, dt_time(23, 59, 59), tzinfo=UTC
+        ).isoformat()
 
         type_filters = _parse_type_filters(types)
         journal_type = type_filters[0] if len(type_filters) == 1 else None
@@ -3486,13 +3491,13 @@ def register_journal_tools(mcp: FastMCP[None]) -> None:
         response = JournalDateWindowResponse(
             results=results,
             window_start=start_iso,
-            window_end=end_iso,
+            window_end=window_end.isoformat(),
             anchor_date=resolved_anchor.isoformat(),
             total_count=total_count,
             has_more=has_more,
             summary=(
                 f"Found {total_count} journal(s) between "
-                f"{start_iso} and {end_iso} "
+                f"{start_iso} and {window_end.isoformat()} "
                 f"(anchored on {resolved_anchor.isoformat()})"
             ),
         )
