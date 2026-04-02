@@ -32,6 +32,17 @@ function compareChildNodes(a: JournalTreeNode, b: JournalTreeNode): number {
   return String(a.journal.id).localeCompare(String(b.journal.id));
 }
 
+function getValidParentId(
+  journal: DisplayJournal,
+  validIds: Set<string>
+): string | null {
+  if (journal.parent_id === null || journal.parent_id === undefined) {
+    return null;
+  }
+  const parentIdStr = String(journal.parent_id);
+  return validIds.has(parentIdStr) ? parentIdStr : null;
+}
+
 /**
  * Build a tree of JournalTreeNodes from a flat list of DisplayJournals.
  *
@@ -62,16 +73,10 @@ export function buildJournalTree(
   // Link children to parents
   const roots: JournalTreeNode[] = [];
   for (const node of Array.from(nodesById.values())) {
-    const parentId =
-      node.journal.parent_id !== null && node.journal.parent_id !== undefined
-        ? String(node.journal.parent_id)
-        : null;
+    const parentId = getValidParentId(node.journal, journalIds);
 
-    if (parentId && journalIds.has(parentId)) {
-      const parentNode = nodesById.get(parentId);
-      if (parentNode) {
-        parentNode.children.push(node);
-      }
+    if (parentId) {
+      nodesById.get(parentId)?.children.push(node);
     } else {
       roots.push(node);
     }
