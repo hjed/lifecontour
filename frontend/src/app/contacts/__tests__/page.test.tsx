@@ -20,6 +20,7 @@ jest.mock('@/lib/api/contacts', () => {
     useInfiniteContacts: jest.fn(),
     useInfiniteSearchContacts: jest.fn(),
     useToggleContactFavourite: jest.fn(),
+    useTags: jest.fn(),
     getContactPaginationMeta: jest.fn(createMockGetContactPaginationMeta),
   };
 });
@@ -28,7 +29,22 @@ jest.mock('@/hooks/useDebounce', () => ({
   useDebounce: jest.fn(value => value),
 }));
 
+// Mock useTagFilter hook — defaults to no active tag
+const mockClearTag = jest.fn();
+const mockSetTag = jest.fn();
+jest.mock('@/hooks/useTagFilter', () => ({
+  useTagFilter: jest.fn(() => ({
+    tagId: null,
+    setTag: mockSetTag,
+    clearTag: mockClearTag,
+  })),
+}));
+
 // Note: Next.js navigation is mocked globally in jest.setup.ts
+
+const mockUseTagFilter = jest.mocked(
+  jest.requireMock('@/hooks/useTagFilter').useTagFilter
+);
 
 const mockUseInfiniteContacts = jest.mocked(
   jest.requireMock('@/lib/api/contacts').useInfiniteContacts
@@ -41,6 +57,7 @@ const mockUseInfiniteSearchContacts = jest.mocked(
 const mockUseToggleContactFavourite = jest.mocked(
   jest.requireMock('@/lib/api/contacts').useToggleContactFavourite
 );
+const mockUseTags = jest.mocked(jest.requireMock('@/lib/api/contacts').useTags);
 
 type ContactsQueryState = {
   data?: ContactListResponse;
@@ -198,6 +215,20 @@ describe('ContactsPage', () => {
       isError: false,
       error: null,
     });
+
+    // Default: no tags API data
+    mockUseTags.mockReturnValue({
+      data: undefined,
+      isLoading: false,
+      error: null,
+    } as any);
+
+    // Default: no active tag filter
+    mockUseTagFilter.mockReturnValue({
+      tagId: null,
+      setTag: mockSetTag,
+      clearTag: mockClearTag,
+    });
   });
 
   // Test helpers
@@ -323,6 +354,120 @@ describe('ContactsPage', () => {
     expect(
       screen.queryByText('Filter by tags (coming soon)')
     ).not.toBeInTheDocument();
+  });
+
+  describe('tag filtering', () => {
+    /** Set up mocks for an active tag filter with a known tag. */
+    const setupActiveTagMocks = (tagId = '42', tagName = 'Work') => {
+      mockUseTagFilter.mockReturnValue({
+        tagId,
+        setTag: mockSetTag,
+        clearTag: mockClearTag,
+      });
+
+      mockUseTags.mockReturnValue({
+        data: {
+          data: [
+            {
+              type: 'tags' as const,
+              id: tagId,
+              attributes: {
+                name: tagName,
+                created_at: '2024-01-01T00:00:00Z',
+                updated_at: '2024-01-01T00:00:00Z',
+              },
+            },
+          ],
+        },
+        isLoading: false,
+        error: null,
+      } as any);
+    };
+
+    it('passes tag filter to useInfiniteContacts when tag is active', async () => {
+      setupActiveTagMocks();
+      setupContactMocks({ data: mockContactsData });
+      renderContactsPage();
+
+      await screen.findByText('Work Contacts');
+
+      expect(mockUseInfiniteContacts).toHaveBeenCalledWith(
+        expect.objectContaining({ tags: ['42'] }),
+        expect.anything()
+      );
+    });
+
+    it('shows tag name in header when tag is active', async () => {
+      setupActiveTagMocks();
+      setupContactMocks({ data: mockContactsData });
+      renderContactsPage();
+
+      expect(await screen.findByText('Work Contacts')).toBeInTheDocument();
+      expect(
+        screen.getByText('Contacts tagged with "Work"')
+      ).toBeInTheDocument();
+    });
+
+    it('shows active tag badge with clear button', async () => {
+      setupActiveTagMocks();
+      setupContactMocks({ data: mockContactsData });
+      renderContactsPage();
+
+      // Tag badge should be visible
+      const tagBadge = await screen.findByTestId('active-tag-filter');
+      expect(tagBadge).toBeInTheDocument();
+
+      // Clear button
+      const clearButton = screen.getByTestId('clear-tag-filter');
+      expect(clearButton).toBeInTheDocument();
+    });
+
+    it('calls clearTag when tag badge clear button is clicked', async () => {
+      const user = userEvent.setup();
+      setupActiveTagMocks();
+      setupContactMocks({ data: mockContactsData });
+      renderContactsPage();
+
+      const clearButton = await screen.findByTestId('clear-tag-filter');
+      await user.click(clearButton);
+
+      expect(mockClearTag).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not show tag badge when no tag is active', async () => {
+      setupContactMocks({ data: mockContactsData });
+      renderContactsPage();
+
+      await screen.findByText('Contacts');
+      expect(screen.queryByTestId('active-tag-filter')).not.toBeInTheDocument();
+    });
+
+    it('shows tag badge with ID fallback when tag name is not resolved', async () => {
+      mockUseTagFilter.mockReturnValue({
+        tagId: '999',
+        setTag: mockSetTag,
+        clearTag: mockClearTag,
+      });
+
+      // Tags API returns data that does NOT include tag 999
+      mockUseTags.mockReturnValue({
+        data: { data: [] },
+        isLoading: false,
+        error: null,
+      } as any);
+
+      setupContactMocks({ data: mockContactsData });
+      renderContactsPage();
+
+      // Badge should still be visible with ID fallback
+      const tagBadge = await screen.findByTestId('active-tag-filter');
+      expect(tagBadge).toBeInTheDocument();
+      expect(tagBadge).toHaveTextContent('Tag 999');
+
+      // Clear button should still work
+      const clearButton = screen.getByTestId('clear-tag-filter');
+      expect(clearButton).toBeInTheDocument();
+    });
   });
 
   it('shows clear button when search is active', async () => {

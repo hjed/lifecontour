@@ -139,9 +139,9 @@ test.describe('Contact Favourites and Filtering', () => {
     }) => {
       const { page, contacts, tags } = taggedContactsData;
 
-      // Navigate to first tag page (guaranteed by fixture)
+      // Navigate to contacts with tag filter (unified URL)
       const firstTag = tags[0];
-      await page.goto(`/contacts/tags/${firstTag.id}`);
+      await page.goto(`/contacts?tag=${firstTag.id}`);
       await expect(page).toHaveTitle(/Personal Management System/);
 
       // Should show contacts with this tag (guaranteed by fixture)
@@ -159,8 +159,8 @@ test.describe('Contact Favourites and Filtering', () => {
       }
 
       // Page should indicate it's showing the tag
-      const pageContent = page.locator('body');
-      await expect(pageContent).toContainText(new RegExp(firstTag.name, 'i'));
+      const heading = page.locator('h1');
+      await expect(heading).toContainText(new RegExp(firstTag.name, 'i'));
     });
 
     test('should display empty state when tag has no contacts', async ({
@@ -185,17 +185,15 @@ test.describe('Contact Favourites and Filtering', () => {
       const responseData = await response.json();
       const tagId = responseData.data.id;
 
-      // Navigate to the empty tag
-      await authenticatedPage.goto(`/contacts/tags/${tagId}`);
+      // Navigate to the empty tag via unified contacts URL
+      await authenticatedPage.goto(`/contacts?tag=${tagId}`);
       await expect(authenticatedPage).toHaveTitle(/Personal Management System/);
 
-      // Should show empty state for this tag
-      const emptyState = authenticatedPage.locator(
-        'text=/no contacts found in this tag/i'
-      );
+      // Should show the standard empty state on the unified contacts page
+      const emptyState = authenticatedPage.getByText(/no contacts found/i);
       await expect(emptyState).toBeVisible();
 
-      // Should not show any contact cards (exclude empty state card)
+      // Should not show any contact cards
       const contactCards = authenticatedPage.locator(
         '[data-testid^="contact-"]'
       );
@@ -205,25 +203,17 @@ test.describe('Contact Favourites and Filtering', () => {
       await authenticatedPage.request.delete(`/api/tags/${tagId}`);
     });
 
-    test('should display not found message for non-existent tag', async ({
+    test('should handle non-existent tag gracefully', async ({
       authenticatedPage,
     }) => {
-      // Navigate to non-existent tag page
-      await authenticatedPage.goto('/contacts/tags/non-existent-tag-999');
+      // Navigate to a non-existent tag via unified contacts URL
+      await authenticatedPage.goto('/contacts?tag=non-existent-tag-999');
       await expect(authenticatedPage).toHaveTitle(/Personal Management System/);
 
-      // Should show tag not found message - use the h1 specifically to avoid strict mode violation
-      const errorHeading = authenticatedPage.locator(
-        'h1:has-text("Tag Not Found")'
-      );
-      await expect(errorHeading).toBeVisible();
-
-      // Also check for the descriptive text
-      await expect(
-        authenticatedPage.locator(
-          'text=/the requested tag could not be found/i'
-        )
-      ).toBeVisible();
+      // The page should load without errors — contacts list shows
+      // with no results since the tag ID does not match any real tag
+      const heading = authenticatedPage.locator('h1');
+      await expect(heading).toBeVisible();
     });
   });
 

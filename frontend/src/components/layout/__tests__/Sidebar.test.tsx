@@ -10,6 +10,7 @@ import { useTags } from '@/lib/api/contacts';
 // Mock Next.js navigation
 jest.mock('next/navigation', () => ({
   usePathname: jest.fn(),
+  useSearchParams: jest.fn(() => new URLSearchParams()),
 }));
 
 // Mock the API hooks
@@ -284,17 +285,46 @@ describe('Sidebar Components', () => {
 
   describe('Navigation Logic', () => {
     it('correctly identifies active links for different paths', () => {
+      const { useSearchParams: mockUseSearchParamsFn } =
+        jest.requireMock('next/navigation');
+      const mockSearchParams = mockUseSearchParamsFn as jest.Mock;
+
       const testCases = [
-        { pathname: '/contacts', expectedActive: 'All' },
-        { pathname: '/contacts/', expectedActive: 'All' },
-        { pathname: '/contacts/favourites', expectedActive: 'Favourites' },
-        { pathname: '/contacts/tags/1', expectedActive: 'Group 1' },
-        { pathname: '/contacts/tags/2', expectedActive: 'Group 2' },
-        { pathname: '/journals', expectedActive: null }, // Journals section collapsed by default
+        {
+          pathname: '/contacts',
+          searchParams: '',
+          expectedActive: 'All',
+        },
+        {
+          pathname: '/contacts/',
+          searchParams: '',
+          expectedActive: 'All',
+        },
+        {
+          pathname: '/contacts/favourites',
+          searchParams: '',
+          expectedActive: 'Favourites',
+        },
+        {
+          pathname: '/contacts',
+          searchParams: 'tag=1',
+          expectedActive: 'Group 1',
+        },
+        {
+          pathname: '/contacts',
+          searchParams: 'tag=2',
+          expectedActive: 'Group 2',
+        },
+        {
+          pathname: '/journals',
+          searchParams: '',
+          expectedActive: null, // Journals section collapsed by default
+        },
       ];
 
-      testCases.forEach(({ pathname, expectedActive }) => {
+      testCases.forEach(({ pathname, searchParams, expectedActive }) => {
         mockUsePathname.mockReturnValue(pathname);
+        mockSearchParams.mockReturnValue(new URLSearchParams(searchParams));
         const { unmount } = render(<DesktopSidebar />);
 
         if (expectedActive) {

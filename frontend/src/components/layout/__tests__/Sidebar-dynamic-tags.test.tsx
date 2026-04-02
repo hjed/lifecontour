@@ -17,6 +17,7 @@ jest.mock('@/lib/api/contacts', () => ({
 // Mock Next.js router
 jest.mock('next/navigation', () => ({
   usePathname: jest.fn(() => '/contacts'),
+  useSearchParams: jest.fn(() => new URLSearchParams()),
 }));
 
 const mockUseTags = useTags as jest.MockedFunction<typeof useTags>;
@@ -66,8 +67,8 @@ describe('Sidebar - Dynamic Tags', () => {
     const familyLink = screen.getByText('Family').closest('a');
     const workLink = screen.getByText('Work').closest('a');
 
-    expect(familyLink).toHaveAttribute('href', '/contacts/tags/2');
-    expect(workLink).toHaveAttribute('href', '/contacts/tags/1');
+    expect(familyLink).toHaveAttribute('href', '/contacts?tag=2');
+    expect(workLink).toHaveAttribute('href', '/contacts?tag=1');
   });
 
   it('should render hierarchical tags nested under parent', () => {

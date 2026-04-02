@@ -176,15 +176,15 @@ The sequence reflects both user priority and technical dependency:
 **PR Size:** ~5-7 files
 
 **Acceptance Criteria:**
-- [ ] Clicking a tag opens the normal contacts list experience filtered to that tag tree.
-- [ ] Favourites and search-within-list continue to work in filtered views.
-- [ ] The existing `/contacts/tags/[id]` behaviour is either aligned with the main list flow or safely retired without broken links.
-- [ ] Parent-tag filtering remains stable under pagination.
+- [x] Clicking a tag opens the normal contacts list experience filtered to that tag tree.
+- [x] Favourites and search-within-list continue to work in filtered views.
+- [x] The existing `/contacts/tags/[id]` behaviour is either aligned with the main list flow or safely retired without broken links.
+- [x] Parent-tag filtering remains stable under pagination.
 
 **Required Test Coverage:**
-- **Unit:** query-param/state helpers for tag-filtered list state.
-- **Integration:** contacts API pagination/filter combinations with tag-tree filtering.
-- **E2E:** navigate from sidebar tag → filtered contacts list → pagination/search/favourite regression checks.
+- **Unit:** query-param/state helpers for tag-filtered list state. ✅
+- **Integration:** contacts API pagination/filter combinations with tag-tree filtering. ✅ (existing backend tests)
+- **E2E:** navigate from sidebar tag → filtered contacts list → pagination/search/favourite regression checks. ✅
 
 ### ITER2.6-003: Tag Management UX and MCP Parity
 **Objective:** Complete editable tag management across contact surfaces, sidebar management, and MCP.

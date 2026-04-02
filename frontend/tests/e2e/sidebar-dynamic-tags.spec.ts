@@ -56,8 +56,8 @@ test.describe('Sidebar Dynamic Tags Navigation', () => {
     await sidebar.waitForSidebar();
 
     // Wait for tags to be loaded by checking if tag links are present
-    // This ensures React Query has finished loading the tags
-    const tagLinks = page.locator('a[href*="/contacts/tags/"]');
+    // Tags now link to /contacts?tag=<id> instead of /contacts/tags/<id>
+    const tagLinks = page.locator('a[href*="/contacts?tag="]');
     await expect(tagLinks.first()).toBeVisible();
 
     const tagCount = await tagLinks.count();
@@ -69,7 +69,7 @@ test.describe('Sidebar Dynamic Tags Navigation', () => {
     await expect(firstTag).toHaveAttribute('href');
 
     const href = await firstTag.getAttribute('href');
-    expect(href).toMatch(/\/contacts\/tags\/\w+/);
+    expect(href).toMatch(/\/contacts\?tag=\w+/);
   });
 
   test('should display favourites link in sidebar', async ({
@@ -122,20 +122,20 @@ test.describe('Sidebar Dynamic Tags Navigation', () => {
 
     await sidebar.waitForSidebar();
 
-    // Click on work tag link
+    // Click on work tag link (now links to /contacts?tag=<id>)
     const workTagLink = page.locator(
-      'a[href*="/contacts/tags/"]:has-text("work")'
+      'a[href*="/contacts?tag="]:has-text("work")'
     );
     await expect(workTagLink).toBeVisible();
 
     // Wait for navigation to complete
     await Promise.all([
-      page.waitForURL('**/contacts/tags/**'),
+      page.waitForURL('**/contacts?tag=**'),
       workTagLink.click(),
     ]);
 
-    // Should navigate to work tag page
-    expect(page.url()).toContain('/contacts/tags/');
+    // Should navigate to contacts page with tag filter
+    expect(page.url()).toContain('/contacts?tag=');
 
     // Should show work tag content
     const pageContent = page.locator('body');

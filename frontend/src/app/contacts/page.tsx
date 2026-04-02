@@ -2,18 +2,20 @@
  * Contact list page with search and filtering capabilities.
  *
  * Displays a paginated list of contacts with search functionality,
- * tag filtering, and responsive design.
+ * tag filtering, and responsive design. Supports URL-based tag filtering
+ * via `?tag=<id>` so that sidebar tag clicks open the same list experience.
  */
 
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { Plus, Search, Filter, Users } from 'lucide-react';
+import { Suspense, useEffect, useMemo, useRef, useState } from 'react';
+import { Plus, Search, Filter, Users, Tag, X } from 'lucide-react';
 import Link from 'next/link';
 import {
   getContactPaginationMeta,
   useInfiniteContacts,
   useInfiniteSearchContacts,
+  useTags,
 } from '@/lib/api/contacts';
 import { ContactFilters } from '@/types/contacts';
 import { Button } from '@/components/ui/button';
@@ -21,17 +23,21 @@ import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Badge } from '@/components/ui/badge';
 import { AuthGuard } from '@/components/auth/AuthGuard';
 
 import { ContactList } from '@/components/contacts/ContactList';
 import { useDebounce } from '@/hooks/useDebounce';
 import { useDisplayContacts } from '@/hooks/useDisplayContacts';
+import { useTagFilter } from '@/hooks/useTagFilter';
 import { TIMEOUTS } from '@/lib/constants';
 
 export default function ContactsPage() {
   return (
     <AuthGuard>
-      <ContactsPageContent />
+      <Suspense>
+        <ContactsPageContent />
+      </Suspense>
     </AuthGuard>
   );
 }
@@ -42,11 +48,30 @@ function ContactsPageContent() {
   const [showFilters, setShowFilters] = useState(false);
   const infiniteScrollTriggerRef = useRef<HTMLDivElement | null>(null);
 
+  // Tag filter from URL search params (?tag=<id>)
+  const { tagId: activeTagId, clearTag } = useTagFilter();
+
+  // Fetch tags for name resolution when a tag filter is active
+  const { data: tagsData } = useTags();
+  const activeTagName = useMemo(() => {
+    if (!activeTagId || !tagsData?.data) return null;
+    const tag = tagsData.data.find(t => t.id === activeTagId);
+    return tag?.attributes.name ?? null;
+  }, [activeTagId, tagsData]);
+
   // Debounce search query to avoid excessive API calls
   const debouncedSearchQuery = useDebounce(
     searchQuery,
     TIMEOUTS.DEBOUNCE_SEARCH
   );
+
+  // Merge tag filter from URL into the active filters
+  const effectiveFilters = useMemo<ContactFilters>(() => {
+    if (activeTagId) {
+      return { ...filters, tags: [activeTagId] };
+    }
+    return filters;
+  }, [filters, activeTagId]);
 
   // Use search query if present, otherwise use regular contact list
   const shouldUseSearch = debouncedSearchQuery.length > 0;
@@ -58,7 +83,7 @@ function ContactsPageContent() {
     hasNextPage: hasNextContactsPage,
     isFetchingNextPage: isFetchingNextContactsPage,
     fetchNextPage: fetchNextContactsPage,
-  } = useInfiniteContacts(filters, { enabled: !shouldUseSearch });
+  } = useInfiniteContacts(effectiveFilters, { enabled: !shouldUseSearch });
 
   const {
     data: searchData,
@@ -69,7 +94,9 @@ function ContactsPageContent() {
     fetchNextPage: fetchNextSearchPage,
   } = useInfiniteSearchContacts(
     debouncedSearchQuery,
-    {},
+    // Thread the active tag into the search path so search + tag filtering
+    // work together (the search API accepts tag names, not IDs).
+    activeTagName ? { tags: [activeTagName] } : {},
     { enabled: shouldUseSearch }
   );
 
@@ -99,12 +126,12 @@ function ContactsPageContent() {
       : undefined;
 
   const totalContacts =
-    totalCount !== undefined
-      ? Math.max(totalCount, loadedContacts.length)
-      : loadedContacts.length;
+    totalCount === undefined
+      ? loadedContacts.length
+      : Math.max(totalCount, loadedContacts.length);
   const contactLabel = totalContacts === 1 ? 'contact' : 'contacts';
   const processingTimeSuffix =
-    processingTimeMs !== undefined ? ` (${processingTimeMs}ms)` : '';
+    processingTimeMs === undefined ? '' : ` (${processingTimeMs}ms)`;
   let resultsSummary = `${totalContacts} ${contactLabel} found`;
 
   if (isLoading) {
@@ -151,11 +178,19 @@ function ContactsPageContent() {
   const clearSearch = () => {
     setSearchQuery('');
     setFilters({});
+    if (activeTagId) {
+      clearTag();
+    }
   };
 
   const toggleFavouritesFilter = () => {
     setFilters(prev => ({ ...prev, favourite: !(prev.favourite === true) }));
   };
+
+  const hasActiveFilters =
+    searchQuery.length > 0 ||
+    Object.keys(filters).length > 0 ||
+    activeTagId !== null;
 
   if (error) {
     return (
@@ -172,9 +207,20 @@ function ContactsPageContent() {
       {/* Header */}
       <div className='mb-8 flex flex-col gap-4 md:flex-row md:items-center md:justify-between'>
         <div>
-          <h1 className='text-3xl font-bold tracking-tight'>Contacts</h1>
+          <h1 className='flex items-center gap-2 text-3xl font-bold tracking-tight'>
+            {activeTagName ? (
+              <>
+                <Tag className='h-7 w-7' aria-hidden='true' />
+                {activeTagName} Contacts
+              </>
+            ) : (
+              'Contacts'
+            )}
+          </h1>
           <p className='text-muted-foreground'>
-            Manage your personal and professional contacts
+            {activeTagName
+              ? `Contacts tagged with "${activeTagName}"`
+              : 'Manage your personal and professional contacts'}
           </p>
         </div>
         <Button asChild>
@@ -216,7 +262,7 @@ function ContactsPageContent() {
               >
                 Favourites
               </Button>
-              {(searchQuery || Object.keys(filters).length > 0) && (
+              {hasActiveFilters && (
                 <Button
                   variant='outline'
                   onClick={clearSearch}
@@ -250,6 +296,30 @@ function ContactsPageContent() {
           )}
         </CardContent>
       </Card>
+
+      {/* Active Tag Filter Badge */}
+      {activeTagId && (
+        <div
+          className='mb-4 flex items-center gap-2'
+          data-testid='active-tag-filter'
+        >
+          <Badge
+            variant='secondary'
+            className='flex items-center gap-1 px-3 py-1'
+          >
+            <Tag className='h-3 w-3' aria-hidden='true' />
+            {activeTagName ?? `Tag ${activeTagId}`}
+            <button
+              onClick={clearTag}
+              className='hover:bg-muted ml-1 rounded-full p-0.5'
+              aria-label={`Remove ${activeTagName ?? 'tag'} filter`}
+              data-testid='clear-tag-filter'
+            >
+              <X className='h-3 w-3' />
+            </button>
+          </Badge>
+        </div>
+      )}
 
       {/* Results Summary */}
       <div className='mb-4 flex items-center gap-2'>
