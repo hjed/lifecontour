@@ -28,7 +28,7 @@ export function useTagFilter(): TagFilter {
   const router = useRouter();
   const pathname = usePathname();
 
-  const tagId = searchParams.get(TAG_PARAM);
+  const tagId = searchParams.get(TAG_PARAM) || null;
 
   const setTag = useCallback(
     (id: string) => {

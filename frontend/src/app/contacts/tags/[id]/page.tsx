@@ -14,5 +14,5 @@ interface TagPageProps {
 
 export default async function TagPageRedirect({ params }: TagPageProps) {
   const { id } = await params;
-  redirect(`/contacts?tag=${id}`);
+  redirect(`/contacts?tag=${encodeURIComponent(id)}`);
 }

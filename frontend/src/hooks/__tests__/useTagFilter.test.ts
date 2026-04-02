@@ -40,6 +40,15 @@ describe('useTagFilter', () => {
     expect(result.current.tagId).toBeNull();
   });
 
+  it('normalizes empty tag param to null', () => {
+    mockUseSearchParams.mockReturnValue(
+      new URLSearchParams('tag=') as ReturnType<typeof useSearchParams>
+    );
+
+    const { result } = renderHook(() => useTagFilter());
+    expect(result.current.tagId).toBeNull();
+  });
+
   it('returns tagId from URL search params', () => {
     mockUseSearchParams.mockReturnValue(
       new URLSearchParams('tag=42') as ReturnType<typeof useSearchParams>
