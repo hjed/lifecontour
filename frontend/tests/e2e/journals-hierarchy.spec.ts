@@ -1,6 +1,97 @@
 import { test, expect } from './fixtures';
 import { FRONTEND_TEST_URL } from './utils/frontend-test-config';
 
+// Helper to create a parent journal via the UI
+async function createParentJournal(
+  page: any,
+  titlePrefix: string,
+  content: string
+) {
+  const parentTitle = `${titlePrefix} - ${Date.now()}`;
+  await page.goto('/journals/new');
+  await expect(page.locator('main, [role="main"]').first()).toBeVisible();
+
+  await page.getByLabel(/title/i).fill(parentTitle);
+  await page.getByLabel(/content/i).fill(content);
+
+  const parentResponsePromise = page.waitForResponse(
+    (response: any) =>
+      response.url().includes('/api/journals') &&
+      response.request().method() === 'POST' &&
+      response.status() === 201
+  );
+
+  const createButton = page.getByRole('button', { name: /create journal/i });
+  await expect(createButton).toBeEnabled();
+  await createButton.click();
+  await parentResponsePromise;
+
+  // Wait for redirect to detail page
+  await page.waitForURL(/\/journals\/\d+/);
+  const parentUrl = page.url();
+  const match = parentUrl.match(/\/journals\/(\d+)/);
+  expect(match).not.toBeNull();
+  const parentId = match![1];
+
+  return { parentTitle, parentId };
+}
+
+// Helper to verify the breadcrumb and children list rendering
+async function verifyHierarchyLinks(
+  page: any,
+  childTitle: string,
+  parentTitle: string,
+  parentId: string
+) {
+  // Verify child detail page shows breadcrumb to parent
+  await page.waitForURL(/\/journals\/\d+/);
+  await expect(
+    page.getByRole('heading', { name: childTitle, exact: true }).first()
+  ).toBeVisible();
+
+  const parentLink = page.getByTestId('parent-link');
+  await expect(parentLink).toBeVisible();
+  await expect(parentLink).toHaveText(parentTitle);
+  await expect(parentLink).toHaveAttribute('href', `/journals/${parentId}`);
+
+  // Click parent breadcrumb to verify navigation back to parent
+  await parentLink.click();
+  await page.waitForURL(/\/journals\/\d+/);
+  await expect(
+    page.getByRole('heading', { name: parentTitle, exact: true }).first()
+  ).toBeVisible();
+
+  // Verify child journal appears in parent's children list
+  const childLink = page.getByRole('link', { name: childTitle });
+  await expect(childLink).toBeVisible();
+}
+
+// Helper to create a journal via API to avoid code duplication
+async function createJournalViaApi(
+  request: any,
+  title: string,
+  content: string
+) {
+  const response = await request.post(`${FRONTEND_TEST_URL}/api/journals`, {
+    data: {
+      data: {
+        type: 'journals',
+        attributes: {
+          title,
+          content,
+          event_date_range: {
+            start: new Date().toISOString(),
+            end: new Date().toISOString(),
+          },
+        },
+      },
+    },
+  });
+  expect(response.ok()).toBeTruthy();
+  const data = await response.json();
+  return data.data.id;
+}
+
 test.describe('Journal Hierarchy', () => {
   // Helper to ensure clean slate
   test.afterEach(async ({ request }) => {
@@ -21,71 +112,6 @@ test.describe('Journal Hierarchy', () => {
       console.debug('Cleanup failed:', e);
     }
   });
-
-  // Helper to create a parent journal via the UI
-  async function createParentJournal(
-    page: any,
-    titlePrefix: string,
-    content: string
-  ) {
-    const parentTitle = `${titlePrefix} - ${Date.now()}`;
-    await page.goto('/journals/new');
-    await expect(page.locator('main, [role="main"]').first()).toBeVisible();
-
-    await page.getByLabel(/title/i).fill(parentTitle);
-    await page.getByLabel(/content/i).fill(content);
-
-    const parentResponsePromise = page.waitForResponse(
-      (response: any) =>
-        response.url().includes('/api/journals') &&
-        response.request().method() === 'POST' &&
-        response.status() === 201
-    );
-
-    const createButton = page.getByRole('button', { name: /create journal/i });
-    await expect(createButton).toBeEnabled();
-    await createButton.click();
-    await parentResponsePromise;
-
-    // Wait for redirect to detail page
-    await page.waitForURL(/\/journals\/\d+/);
-    const parentUrl = page.url();
-    const match = parentUrl.match(/\/journals\/(\d+)/);
-    expect(match).not.toBeNull();
-    const parentId = match![1];
-
-    return { parentTitle, parentId };
-  }
-
-  // Helper to verify the breadcrumb and children list rendering
-  async function verifyHierarchyLinks(
-    page: any,
-    childTitle: string,
-    parentTitle: string,
-    parentId: string
-  ) {
-    // Verify child detail page shows breadcrumb to parent
-    await page.waitForURL(/\/journals\/\d+/);
-    await expect(
-      page.getByRole('heading', { name: childTitle, exact: true }).first()
-    ).toBeVisible();
-
-    const parentLink = page.getByTestId('parent-link');
-    await expect(parentLink).toBeVisible();
-    await expect(parentLink).toHaveText(parentTitle);
-    await expect(parentLink).toHaveAttribute('href', `/journals/${parentId}`);
-
-    // Click parent breadcrumb to verify navigation back to parent
-    await parentLink.click();
-    await page.waitForURL(/\/journals\/\d+/);
-    await expect(
-      page.getByRole('heading', { name: parentTitle, exact: true }).first()
-    ).toBeVisible();
-
-    // Verify child journal appears in parent's children list
-    const childLink = page.getByRole('link', { name: childTitle });
-    await expect(childLink).toBeVisible();
-  }
 
   test('should create a child journal and display the parent reference', async ({
     authenticatedPage,
@@ -215,47 +241,16 @@ test.describe('Journal Hierarchy', () => {
     const parentTitle = `E2E Hierarchy AddExisting Parent - ${timestamp}`;
     const childTitle = `E2E Hierarchy AddExisting Child - ${timestamp}`;
 
-    const parentResponse = await request.post(
-      `${FRONTEND_TEST_URL}/api/journals`,
-      {
-        data: {
-          data: {
-            type: 'journals',
-            attributes: {
-              title: parentTitle,
-              content: 'Parent journal for add-existing test.',
-              event_date_range: {
-                start: new Date().toISOString(),
-                end: new Date().toISOString(),
-              },
-            },
-          },
-        },
-      }
+    const parentId = await createJournalViaApi(
+      request,
+      parentTitle,
+      'Parent journal for add-existing test.'
     );
-    expect(parentResponse.ok()).toBeTruthy();
-    const parentData = await parentResponse.json();
-    const parentId = parentData.data.id;
-
-    const childResponse = await request.post(
-      `${FRONTEND_TEST_URL}/api/journals`,
-      {
-        data: {
-          data: {
-            type: 'journals',
-            attributes: {
-              title: childTitle,
-              content: 'Child journal for add-existing test.',
-              event_date_range: {
-                start: new Date().toISOString(),
-                end: new Date().toISOString(),
-              },
-            },
-          },
-        },
-      }
+    await createJournalViaApi(
+      request,
+      childTitle,
+      'Child journal for add-existing test.'
     );
-    expect(childResponse.ok()).toBeTruthy();
 
     // 2. Navigate to the parent journal detail page
     await page.goto(`/journals/${parentId}`);
@@ -313,47 +308,16 @@ test.describe('Journal Hierarchy', () => {
     const parentTitle = `E2E Hierarchy SetParent Parent - ${timestamp}`;
     const childTitle = `E2E Hierarchy SetParent Child - ${timestamp}`;
 
-    const parentResponse = await request.post(
-      `${FRONTEND_TEST_URL}/api/journals`,
-      {
-        data: {
-          data: {
-            type: 'journals',
-            attributes: {
-              title: parentTitle,
-              content: 'Parent for set-parent test.',
-              event_date_range: {
-                start: new Date().toISOString(),
-                end: new Date().toISOString(),
-              },
-            },
-          },
-        },
-      }
+    await createJournalViaApi(
+      request,
+      parentTitle,
+      'Parent for set-parent test.'
     );
-    expect(parentResponse.ok()).toBeTruthy();
-
-    const childResponse = await request.post(
-      `${FRONTEND_TEST_URL}/api/journals`,
-      {
-        data: {
-          data: {
-            type: 'journals',
-            attributes: {
-              title: childTitle,
-              content: 'Child for set-parent test.',
-              event_date_range: {
-                start: new Date().toISOString(),
-                end: new Date().toISOString(),
-              },
-            },
-          },
-        },
-      }
+    const childId = await createJournalViaApi(
+      request,
+      childTitle,
+      'Child for set-parent test.'
     );
-    expect(childResponse.ok()).toBeTruthy();
-    const childData = await childResponse.json();
-    const childId = childData.data.id;
 
     // 2. Navigate to the child journal detail page
     await page.goto(`/journals/${childId}`);
