@@ -149,11 +149,12 @@ function TagTreeItem({
   const isExpanded = expandedTags[tagId] ?? false;
   const href = `/contacts/tags/${tagId}` as Route;
   const isActive = checkActiveLink(href);
-  const indentClass = depth === 0 ? 'ml-0' : `ml-4`;
+  const indentSizeRem = 0.75; // matches Tailwind ml-3 visually for nesting
 
   return (
-    <div
-      className={cn(indentClass)}
+    <li
+      className='list-none'
+      style={{ marginLeft: `${depth * indentSizeRem}rem` }}
       data-testid={`tag-tree-item-${node.tag.attributes.name.toLowerCase().replace(/\s+/g, '-')}`}
     >
       <div className='flex items-center'>
@@ -207,7 +208,7 @@ function TagTreeItem({
 
       {/* Children (recursive) */}
       {hasChildren && isExpanded && (
-        <div role='group' aria-label={`${node.tag.attributes.name} child tags`}>
+        <ul aria-label={`${node.tag.attributes.name} child tags`}>
           {node.children.map(child => (
             <TagTreeItem
               key={child.tag.id}
@@ -219,9 +220,9 @@ function TagTreeItem({
               onNavigate={onNavigate}
             />
           ))}
-        </div>
+        </ul>
       )}
-    </div>
+    </li>
   );
 }
 
@@ -252,7 +253,7 @@ function TagTreeNavigation({
 
   return (
     <ScrollArea className='max-h-[50vh]' data-testid='tag-tree-scroll-area'>
-      <div className='space-y-0.5' role='group' aria-label='Tags'>
+      <ul className='m-0 space-y-0.5 p-0' aria-label='Tags'>
         {tree.map(node => (
           <TagTreeItem
             key={node.tag.id}
@@ -264,7 +265,7 @@ function TagTreeNavigation({
             onNavigate={onNavigate}
           />
         ))}
-      </div>
+      </ul>
     </ScrollArea>
   );
 }

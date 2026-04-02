@@ -36,7 +36,9 @@ export function buildTagTree(tags: TagResource[]): TagTreeNode[] {
     const node = byId.get(tag.id)!;
     const parentId = tag.attributes.parent_id;
 
-    if (parentId != null) {
+    if (parentId == null) {
+      roots.push(node);
+    } else {
       const parentNode = byId.get(String(parentId));
       if (parentNode) {
         parentNode.children.push(node);
@@ -44,8 +46,6 @@ export function buildTagTree(tags: TagResource[]): TagTreeNode[] {
         // Orphaned child: parent not in list, treat as root
         roots.push(node);
       }
-    } else {
-      roots.push(node);
     }
   }
 
