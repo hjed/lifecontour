@@ -4,7 +4,9 @@ Tag API schemas.
 Defines request/response models for tag endpoints following JSON API specification.
 """
 
-from pydantic import BaseModel, Field
+from typing import Any
+
+from pydantic import BaseModel, Field, model_validator
 
 from app.api.common.schemas import JsonApiResponse
 from app.api.contacts.schemas import TagResource
@@ -48,6 +50,16 @@ class TagUpdateAttributes(BaseModel):
         default=None,
         description="Parent tag ID for hierarchical tags. Provide explicit None to clear parent.",
     )
+
+    @model_validator(mode="before")
+    @classmethod
+    def validate_non_nulls(cls, data: Any) -> Any:
+        """Reject explicit nulls for required string fields."""
+        if isinstance(data, dict):
+            for field in ["name", "color", "description"]:
+                if field in data and data[field] is None:
+                    raise ValueError(f"Explicit null is not allowed for '{field}'")
+        return data
 
 
 class TagUpdateData(BaseModel):

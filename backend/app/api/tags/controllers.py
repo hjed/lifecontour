@@ -9,7 +9,7 @@ import structlog
 from core_shared.models.contacts.entities import Tag
 from core_shared.models.contacts.value_objects import TagName
 from dishka.integrations.fastapi import FromDishka, inject
-from fastapi import APIRouter, Query, Request, status
+from fastapi import APIRouter, HTTPException, Query, Request, status
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.api.common.schemas import get_request_base_url
@@ -138,6 +138,23 @@ async def update_tag(
     Supports clearing parent_id by providing explicit None.
     """
     base_url = get_request_base_url(request)
+
+    # Validate that path ID matches body ID if body ID is provided
+    body_id = tag_request.data.id
+    if body_id is not None:
+        try:
+            body_id_int = int(str(body_id))
+        except ValueError as e:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid tag ID format in request body",
+            ) from e
+        if body_id_int != tag_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Path ID does not match body ID",
+            )
+
     attrs = tag_request.data.attributes
 
     # Check if parent_id is explicitly set to None

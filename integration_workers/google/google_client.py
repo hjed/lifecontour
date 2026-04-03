@@ -498,7 +498,11 @@ class GoogleAPIClient:
 
             result = (
                 service.contactGroups()
-                .update(resourceName=resource_name, body=update_body)
+                .update(
+                    resourceName=resource_name,
+                    updateContactGroupFields="name",
+                    body=update_body,
+                )
                 .execute()
             )
 
@@ -512,7 +516,7 @@ class GoogleAPIClient:
 
         except HttpError as e:
             if e.resp.status == 404:
-                # Missing group, let's just log and recreate if it happens during push
+                # Missing group; logging warning before re-raising. Callers or higher levels should recreate or handle.
                 logger.warning(
                     "Contact group not found for update",
                     google_account_email=self.google_account_email,
