@@ -246,7 +246,7 @@ export function CalendarSettingsDialog({
                   <FormControl>
                     <Switch
                       checked={field.value}
-                      onCheckedChange={checked => {
+                      onCheckedChange={(checked: boolean) => {
                         field.onChange(checked);
                         if (!checked) {
                           form.setValue('google_calendar_id', null);
