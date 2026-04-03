@@ -172,4 +172,44 @@ describe('JournalChildrenList', () => {
       expect(screen.getByText('Plan')).toBeInTheDocument();
     });
   });
+
+  describe('Add Existing Button', () => {
+    it('renders "Add Existing" button when parentId and onAddExisting are provided', () => {
+      render(
+        <JournalChildrenList
+          childJournals={mockChildren}
+          parentId='42'
+          onAddExisting={jest.fn()}
+        />
+      );
+
+      expect(
+        screen.getByRole('button', { name: /add existing/i })
+      ).toBeInTheDocument();
+    });
+
+    it('does not render "Add Existing" button when onAddExisting is not provided', () => {
+      render(
+        <JournalChildrenList childJournals={mockChildren} parentId='42' />
+      );
+
+      expect(
+        screen.queryByRole('button', { name: /add existing/i })
+      ).not.toBeInTheDocument();
+    });
+
+    it('does not render "Add Existing" button when parentId is not provided', () => {
+      render(
+        <JournalChildrenList
+          childJournals={mockChildren}
+          onAddExisting={jest.fn()}
+        />
+      );
+
+      // Without parentId, neither Add Child nor Add Existing should appear
+      expect(
+        screen.queryByRole('button', { name: /add existing/i })
+      ).not.toBeInTheDocument();
+    });
+  });
 });

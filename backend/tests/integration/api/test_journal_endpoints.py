@@ -2676,3 +2676,221 @@ class TestJournalTypeCreationWithDependencies:
 
         assert "cross_country_skiing" in type_data
         assert type_data["cross_country_skiing"]["snow_conditions"] == "packed powder"
+
+
+@pytest.mark.integration
+class TestJournalHierarchyReparenting:
+    """Integration tests for re-parenting existing journals via PATCH.
+
+    Validates that we can add an existing journal as a child of another journal
+    by updating its parent_id through the PATCH endpoint. Tests cover multiple
+    journal subtypes, cycle detection, and max-depth enforcement.
+    """
+
+    @pytest_asyncio.fixture(autouse=True)
+    async def setup_method(self, clean_database):  # noqa: ARG002
+        """Setup method to ensure clean database for each test."""
+        pass
+
+    @staticmethod
+    def _patch_parent_data(journal_id: str, parent_id: int | None) -> dict[str, Any]:
+        """Build a PATCH request body that sets parent_id."""
+        return {
+            "data": {
+                "type": "journals",
+                "id": journal_id,
+                "attributes": {
+                    "parent_id": parent_id,
+                },
+            }
+        }
+
+    @staticmethod
+    async def _create_journal(
+        client,
+        title: str,
+        content: str,
+        types: list[str] | None = None,
+        parent_id: str | int | None = None,
+    ) -> str:
+        kwargs: dict[str, Any] = {"title": title, "content": content}
+        if types is not None:
+            kwargs["types"] = types
+        if parent_id is not None:
+            kwargs["parent_id"] = parent_id
+        data = create_journal_request_data(**kwargs)
+        resp = await client.post("/api/journals", json=data)
+        assert resp.status_code == 201
+        return str(resp.json()["data"]["id"])
+
+    # --- Subtype tests: verify PATCH parent_id works for various journal types ---
+
+    @pytest.mark.parametrize(
+        "journal_type,parent_title,child_title",
+        [
+            (None, "Parent Note", "Orphan Note"),
+            (["FITNESS"], "Parent Fitness", "Orphan Fitness"),
+            (["EVENT"], "Parent Event", "Orphan Event"),
+        ],
+    )
+    async def test_patch_parent_id_on_journal_subtypes(
+        self, integration_api_client, journal_type, parent_title, child_title
+    ):
+        """Test setting parent_id on various journal subtypes via PATCH."""
+        parent_id = await self._create_journal(
+            integration_api_client,
+            title=parent_title,
+            content="Parent content",
+            types=journal_type,
+        )
+        child_id = await self._create_journal(
+            integration_api_client,
+            title=child_title,
+            content="Child content",
+            types=journal_type,
+        )
+
+        patch_body = self._patch_parent_data(child_id, int(parent_id))
+        response = await integration_api_client.patch(
+            f"/api/journals/{child_id}", json=patch_body
+        )
+
+        assert response.status_code == 200
+        attrs = response.json()["data"]["attributes"]
+        assert int(attrs["parent_id"]) == int(parent_id)
+        assert attrs["parent"] is not None
+        assert attrs["depth"] == 2
+
+    # --- Parent appears in children list ---
+
+    async def test_parent_shows_reparented_child_in_children_list(
+        self, integration_api_client
+    ):
+        """After PATCH parent_id, the parent's GET should list the child."""
+        parent_id = await self._create_journal(
+            integration_api_client, title="Parent List", content="Parent content"
+        )
+        child_id = await self._create_journal(
+            integration_api_client, title="Orphan List", content="Child content"
+        )
+
+        # Re-parent
+        patch_body = self._patch_parent_data(child_id, int(parent_id))
+        await integration_api_client.patch(f"/api/journals/{child_id}", json=patch_body)
+
+        # Fetch parent and check children list
+        parent_get = await integration_api_client.get(f"/api/journals/{parent_id}")
+        assert parent_get.status_code == 200
+        children = parent_get.json()["data"]["attributes"]["children"]
+        child_ids = [str(c["id"]) for c in children]
+        assert str(child_id) in child_ids
+
+    # --- Validation tests ---
+
+    async def test_patch_parent_id_cycle_detection(self, integration_api_client):
+        """Test that setting parent_id to a descendant fails with a cycle error."""
+        a_id = await self._create_journal(
+            integration_api_client, title="Journal A", content="A content"
+        )
+        b_id = await self._create_journal(
+            integration_api_client,
+            title="Journal B",
+            content="B content",
+            parent_id=int(a_id),
+        )
+
+        # Try to make A a child of B (would create cycle A -> B -> A)
+        patch_body = self._patch_parent_data(a_id, int(b_id))
+        response = await integration_api_client.patch(
+            f"/api/journals/{a_id}", json=patch_body
+        )
+
+        assert response.status_code == 400
+
+    async def test_patch_parent_id_max_depth_exceeded(self, integration_api_client):
+        """Test that PATCH parent_id fails when it would exceed max depth."""
+        # Build a chain of 5 levels (max depth)
+        current_parent_id: int | None = None
+        for level in range(5):
+            data = create_journal_request_data(
+                title=f"Level {level}",
+                content=f"Level {level} content",
+                parent_id=current_parent_id,
+            )
+            resp = await integration_api_client.post("/api/journals", json=data)
+            assert resp.status_code == 201
+            current_parent_id = resp.json()["data"]["id"]
+
+        # Create a journal with its own child (depth 2)
+        orphan_data = create_journal_request_data(
+            title="Orphan Root", content="Orphan content"
+        )
+        orphan_resp = await integration_api_client.post(
+            "/api/journals", json=orphan_data
+        )
+        orphan_id = orphan_resp.json()["data"]["id"]
+
+        # Try to attach the orphan under the deepest journal (level 4, depth 5)
+        # This would make the orphan depth 6 — exceeding max depth
+        assert current_parent_id is not None
+        patch_body = self._patch_parent_data(orphan_id, int(current_parent_id))
+        response = await integration_api_client.patch(
+            f"/api/journals/{orphan_id}", json=patch_body
+        )
+
+        assert response.status_code == 400
+
+    async def test_patch_parent_id_nonexistent_parent(self, integration_api_client):
+        """Test that setting parent_id to a non-existent journal fails."""
+        child_data = create_journal_request_data(
+            title="Orphan", content="Orphan content"
+        )
+        child_resp = await integration_api_client.post("/api/journals", json=child_data)
+        child_id = child_resp.json()["data"]["id"]
+
+        patch_body = self._patch_parent_data(child_id, 99999)
+        response = await integration_api_client.patch(
+            f"/api/journals/{child_id}", json=patch_body
+        )
+
+        assert response.status_code == 404
+
+    async def test_patch_parent_id_change_parent(self, integration_api_client):
+        """Test changing a journal's parent from one journal to another."""
+        # Create parent A, parent B, and child under A
+        a_data = create_journal_request_data(title="Parent A", content="A content")
+        a_resp = await integration_api_client.post("/api/journals", json=a_data)
+        a_id = a_resp.json()["data"]["id"]
+
+        b_data = create_journal_request_data(title="Parent B", content="B content")
+        b_resp = await integration_api_client.post("/api/journals", json=b_data)
+        b_id = b_resp.json()["data"]["id"]
+
+        child_data = create_journal_request_data(
+            title="Child", content="Child content", parent_id=a_id
+        )
+        child_resp = await integration_api_client.post("/api/journals", json=child_data)
+        child_id = child_resp.json()["data"]["id"]
+
+        # Move child from A to B
+        patch_body = self._patch_parent_data(child_id, int(b_id))
+        response = await integration_api_client.patch(
+            f"/api/journals/{child_id}", json=patch_body
+        )
+
+        assert response.status_code == 200
+        attrs = response.json()["data"]["attributes"]
+        assert int(attrs["parent_id"]) == int(b_id)
+        assert attrs["parent"]["title"] == "Parent B"
+
+        # Verify A no longer has the child
+        a_get = await integration_api_client.get(f"/api/journals/{a_id}")
+        a_children = a_get.json()["data"]["attributes"]["children"]
+        a_child_ids = [str(c["id"]) for c in a_children]
+        assert str(child_id) not in a_child_ids
+
+        # Verify B now has the child
+        b_get = await integration_api_client.get(f"/api/journals/{b_id}")
+        b_children = b_get.json()["data"]["attributes"]["children"]
+        b_child_ids = [str(c["id"]) for c in b_children]
+        assert str(child_id) in b_child_ids

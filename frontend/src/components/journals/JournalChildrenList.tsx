@@ -3,23 +3,37 @@
  *
  * Shows a list of child journals with links to navigate to them.
  * Displays title, date, and type information.
- * Optionally provides an "Add Child Journal" action when parentId is given.
+ * Optionally provides "Add Child Journal" and "Add Existing" actions.
  */
 
 'use client';
 
+import { useState } from 'react';
 import Link from 'next/link';
 import type { Route } from 'next';
-import { ChevronRight, Calendar, FileText, Plus } from 'lucide-react';
+import { ChevronRight, Calendar, FileText, Plus, Link2 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from '@/components/ui/popover';
+import { Label } from '@/components/ui/label';
 import { cn } from '@/lib/utils';
-import { JournalType, type ChildJournalSummary } from '@/types/journals';
+import {
+  JournalType,
+  type ChildJournalSummary,
+  type JournalResource,
+} from '@/types/journals';
 import { JournalTypeBadges } from './JournalTypeBadges';
+import { JournalSearchCombobox } from './JournalSearchCombobox';
 
 interface JournalChildrenListProps {
   readonly childJournals: ChildJournalSummary[];
   readonly parentId?: string;
+  /** Callback to add an existing journal as a child. Receives the selected journal's ID. */
+  readonly onAddExisting?: (journalId: string) => Promise<void>;
   readonly className?: string;
 }
 
@@ -30,26 +44,80 @@ interface JournalChildrenListProps {
 export function JournalChildrenList({
   childJournals,
   parentId,
+  onAddExisting,
   className,
 }: JournalChildrenListProps) {
+  const [isAddExistingOpen, setIsAddExistingOpen] = useState(false);
+  const [isAddingExisting, setIsAddingExisting] = useState(false);
+
   if (childJournals.length === 0 && !parentId) {
     return null;
   }
+
+  const handleAddExisting = async (journal: JournalResource) => {
+    if (!onAddExisting) return;
+    setIsAddingExisting(true);
+    try {
+      await onAddExisting(journal.id);
+      setIsAddExistingOpen(false);
+    } catch (error) {
+      console.error('Failed to add existing journal as child:', error);
+    } finally {
+      setIsAddingExisting(false);
+    }
+  };
 
   return (
     <Card className={className} data-testid='children-list'>
       <CardHeader className='flex flex-row items-center justify-between space-y-0'>
         <CardTitle className='text-lg'>Child Journals</CardTitle>
         {parentId && (
-          <Button variant='outline' size='sm' asChild>
-            <Link
-              href={`/journals/new?parentId=${parentId}` as Route}
-              aria-label='Add child journal'
-            >
-              <Plus className='mr-1 h-4 w-4' />
-              Add Child
-            </Link>
-          </Button>
+          <div className='flex items-center gap-2'>
+            {/* Add Existing Button */}
+            {onAddExisting && (
+              <Popover
+                open={isAddExistingOpen}
+                onOpenChange={setIsAddExistingOpen}
+              >
+                <PopoverTrigger asChild>
+                  <Button
+                    variant='outline'
+                    size='sm'
+                    disabled={isAddingExisting}
+                    aria-label='Add existing journal as child'
+                  >
+                    <Link2 className='mr-1 h-4 w-4' />
+                    Add Existing
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className='w-80 p-3' align='end'>
+                  <div className='space-y-2'>
+                    <Label htmlFor='add-existing-child-search'>
+                      Search for a journal to add as child
+                    </Label>
+                    <JournalSearchCombobox
+                      onSelect={handleAddExisting}
+                      placeholder='Search journals...'
+                      inputId='add-existing-child-search'
+                      excludeJournalId={parentId}
+                      disabled={isAddingExisting}
+                    />
+                  </div>
+                </PopoverContent>
+              </Popover>
+            )}
+
+            {/* Create New Child Button */}
+            <Button variant='outline' size='sm' asChild>
+              <Link
+                href={`/journals/new?parentId=${parentId}` as Route}
+                aria-label='Add child journal'
+              >
+                <Plus className='mr-1 h-4 w-4' />
+                Add Child
+              </Link>
+            </Button>
+          </div>
         )}
       </CardHeader>
       <CardContent>

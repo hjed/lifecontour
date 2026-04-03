@@ -41,6 +41,7 @@ import { JournalCalendarBadge } from './JournalCalendarBadge';
 import { JournalContactBadge } from './JournalContactBadge';
 import { JournalTagBadge } from './JournalTagBadge';
 import { JournalChildrenList } from './JournalChildrenList';
+import { JournalParentSelector } from './JournalParentSelector';
 import { JournalTypeSection } from './JournalTypeSection';
 import { JournalTypeManager } from './JournalTypeManager';
 import { InlineEditHeading } from './InlineEditHeading';
@@ -60,8 +61,10 @@ import {
   useUpdateTypeData,
   useAddJournalType,
   useRemoveJournalType,
+  journalKeys,
 } from '@/lib/api/journals';
 import { useRouter } from 'next/navigation';
+import { useQueryClient } from '@tanstack/react-query';
 
 interface JournalDetailViewProps {
   readonly journal: Journal;
@@ -77,6 +80,7 @@ export function JournalDetailView({
   className,
 }: JournalDetailViewProps) {
   const router = useRouter();
+  const queryClient = useQueryClient();
 
   // Mutations
   const updateJournal = useUpdateJournal();
@@ -241,6 +245,51 @@ export function JournalDetailView({
     [journal.id, updateJournal]
   );
 
+  // Handle adding an existing journal as a child of this journal
+  const handleAddExistingChild = useCallback(
+    async (childJournalId: string) => {
+      await updateJournal.mutateAsync({
+        id: childJournalId,
+        data: {
+          parent_id: Number(journal.id),
+        },
+      });
+      // Re-parenting can affect both the new parent's and the previous parent's
+      // children lists, so invalidate all journal detail queries.
+      queryClient.invalidateQueries({
+        queryKey: journalKeys.details(),
+      });
+    },
+    [journal.id, updateJournal, queryClient]
+  );
+
+  // Handle changing the parent of this journal
+  const handleParentChange = useCallback(
+    async (parentId: string) => {
+      await updateJournal.mutateAsync({
+        id: journal.id,
+        data: {
+          parent_id: Number(parentId),
+        },
+      });
+      // Re-parenting can affect both the new parent's and the previous parent's
+      // children lists, so invalidate all journal detail queries.
+      queryClient.invalidateQueries({
+        queryKey: journalKeys.details(),
+      });
+    },
+    [journal.id, updateJournal, queryClient]
+  );
+
+  // Handle removing the parent of this journal
+  const handleParentRemove = useCallback(async () => {
+    // Parent removal is intentionally disabled until the backend can
+    // distinguish between an omitted `parent_id` field and an explicit
+    // `parent_id: null` update. Sending `null` is currently treated as
+    // "field not provided", and sending `0` would be validated as a real ID.
+    return;
+  }, []);
+
   return (
     <div
       className={cn('space-y-6', className)}
@@ -339,6 +388,17 @@ export function JournalDetailView({
                 availableTags={availableTags}
               />
             </div>
+
+            {/* Parent Journal */}
+            <div className='space-y-2'>
+              <div className='text-sm font-medium'>Parent Journal</div>
+              <JournalParentSelector
+                currentJournalId={journal.id}
+                parent={journal.parent}
+                onParentChange={handleParentChange}
+                onParentRemove={handleParentRemove}
+              />
+            </div>
           </div>
 
           <Separator />
@@ -376,6 +436,7 @@ export function JournalDetailView({
       <JournalChildrenList
         childJournals={journal.children ?? []}
         parentId={journal.id}
+        onAddExisting={handleAddExistingChild}
       />
     </div>
   );
