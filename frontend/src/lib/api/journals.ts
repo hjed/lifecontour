@@ -760,12 +760,13 @@ export function useInfiniteJournals(
         ...filters,
         date_from: pageParam.date_from,
         date_to: pageParam.date_to,
-        limit: 500, // Safely assuming chunkDays won't exceed 500 journals
+        // The API safely supports up to limit=1000. 500 is chosen to cover 99.9% of dense 7-day chunks
+        // without risking dropped items or invoking REST offsets over chunk edges.
+        limit: 500,
         page: undefined, // Skip internal REST offset pagination
       }),
     initialPageParam,
     getNextPageParam: (lastPage, allPages, lastPageParam) => {
-      console.log('lastPageParam:', lastPageParam);
       try {
         // Progressing into the PAST (Scrolling DOWN)
         const prevEnd = parseISO(lastPageParam.date_from);
@@ -775,13 +776,11 @@ export function useInfiniteJournals(
           date_from: format(newStart, 'yyyy-MM-dd'),
           date_to: format(newEnd, 'yyyy-MM-dd'),
         };
-      } catch (e) {
-        console.error('Error in getNextPageParam:', e);
+      } catch {
         return undefined;
       }
     },
     getPreviousPageParam: (firstPage, allPages, firstPageParam) => {
-      console.log('firstPageParam:', firstPageParam);
       try {
         // Progressing into the FUTURE (Scrolling UP)
         const prevStart = parseISO(firstPageParam.date_to);
@@ -791,8 +790,7 @@ export function useInfiniteJournals(
           date_from: format(newStart, 'yyyy-MM-dd'),
           date_to: format(newEnd, 'yyyy-MM-dd'),
         };
-      } catch (e) {
-        console.error('Error in getPreviousPageParam:', e);
+      } catch {
         return undefined;
       }
     },

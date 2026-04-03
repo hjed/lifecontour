@@ -37,22 +37,58 @@ export function DayGroupedJournalList({
   const topSentinelRef = useRef<HTMLDivElement>(null);
   const bottomSentinelRef = useRef<HTMLDivElement>(null);
 
+  const fetchStateRef = useRef({
+    hasNextPage,
+    hasPreviousPage,
+    isLoadingNext,
+    isLoadingPrevious,
+    fetchNextPage,
+    fetchPreviousPage,
+  });
+
+  useEffect(() => {
+    fetchStateRef.current = {
+      hasNextPage,
+      hasPreviousPage,
+      isLoadingNext,
+      isLoadingPrevious,
+      fetchNextPage,
+      fetchPreviousPage,
+    };
+  }, [
+    hasNextPage,
+    hasPreviousPage,
+    isLoadingNext,
+    isLoadingPrevious,
+    fetchNextPage,
+    fetchPreviousPage,
+  ]);
+
   // Set up intersection observers for bi-directional scroll fetching
   useEffect(() => {
     const observer = new IntersectionObserver(
       entries => {
         entries.forEach(entry => {
           if (!entry.isIntersecting) return;
+          const state = fetchStateRef.current;
 
           if (entry.target === topSentinelRef.current) {
             // Scrolling up -> fetch previous (FUTURE items)
-            if (hasPreviousPage && !isLoadingPrevious && fetchPreviousPage) {
-              fetchPreviousPage();
+            if (
+              state.hasPreviousPage &&
+              !state.isLoadingPrevious &&
+              state.fetchPreviousPage
+            ) {
+              state.fetchPreviousPage();
             }
           } else if (entry.target === bottomSentinelRef.current) {
             // Scrolling down -> fetch next (PAST items)
-            if (hasNextPage && !isLoadingNext && fetchNextPage) {
-              fetchNextPage();
+            if (
+              state.hasNextPage &&
+              !state.isLoadingNext &&
+              state.fetchNextPage
+            ) {
+              state.fetchNextPage();
             }
           }
         });
@@ -66,18 +102,8 @@ export function DayGroupedJournalList({
     if (topTarget) observer.observe(topTarget);
     if (bottomTarget) observer.observe(bottomTarget);
 
-    return () => {
-      if (topTarget) observer.unobserve(topTarget);
-      if (bottomTarget) observer.unobserve(bottomTarget);
-    };
-  }, [
-    hasNextPage,
-    hasPreviousPage,
-    isLoadingNext,
-    isLoadingPrevious,
-    fetchNextPage,
-    fetchPreviousPage,
-  ]);
+    return () => observer.disconnect();
+  }, []);
 
   if (journals.length === 0 && !hasNextPage && !hasPreviousPage && emptyState) {
     return <>{emptyState}</>;

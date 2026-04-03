@@ -16,6 +16,7 @@ export interface GroupJournalsOptions {
 
 /**
  * Groups an array of journals into a contiguous array of days between startDate and endDate.
+ * Journals outside the specified start/end date will be placed into dynamically created ad-hoc buckets to prevent data loss.
  * Sorts days continuously descending (Newest at top, oldest at bottom).
  * Sorts journals within each day continuously ascending (Oldest journal first chronologically on that day).
  */
@@ -49,8 +50,8 @@ export function groupJournalsByDay({
 
   // Group journals
   journals.forEach(journal => {
-    // Determine the local date string from original timestamp
-    const dateValue = new Date(journal.event_date_range.start);
+    // Determine the local date string from original timestamp using parseISO to prevent unintended UTC shifting
+    const dateValue = parseISO(journal.event_date_range.start);
     const formattedDate = format(dateValue, 'yyyy-MM-dd');
 
     if (dayGroupsMap[formattedDate]) {
@@ -70,8 +71,8 @@ export function groupJournalsByDay({
   Object.values(dayGroupsMap).forEach(group => {
     group.journals.sort((a, b) => {
       return (
-        new Date(a.event_date_range.start).getTime() -
-        new Date(b.event_date_range.start).getTime()
+        parseISO(a.event_date_range.start).getTime() -
+        parseISO(b.event_date_range.start).getTime()
       );
     });
   });
