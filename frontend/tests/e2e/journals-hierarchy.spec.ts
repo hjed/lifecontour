@@ -275,15 +275,16 @@ test.describe('Journal Hierarchy', () => {
       .getByRole('option', { name: new RegExp(childTitle.slice(0, 30)) })
       .first();
     await expect(childOption).toBeVisible({ timeout: 10000 });
-    await childOption.click();
-
     // 6. Wait for the PATCH request to complete
-    await page.waitForResponse(
+    const patchResponsePromise = page.waitForResponse(
       (response: Response) =>
         response.url().includes('/api/journals/') &&
         response.request().method() === 'PATCH' &&
         response.status() === 200
     );
+
+    await childOption.click();
+    await patchResponsePromise;
 
     // 7. Verify the child now appears in the children list
     await page.reload();
@@ -341,15 +342,16 @@ test.describe('Journal Hierarchy', () => {
       .getByRole('option', { name: new RegExp(parentTitle.slice(0, 30)) })
       .first();
     await expect(parentOption).toBeVisible({ timeout: 10000 });
-    await parentOption.click();
-
     // 6. Wait for PATCH to complete
-    await page.waitForResponse(
+    const patchResponsePromise = page.waitForResponse(
       (response: Response) =>
         response.url().includes('/api/journals/') &&
         response.request().method() === 'PATCH' &&
         response.status() === 200
     );
+
+    await parentOption.click();
+    await patchResponsePromise;
 
     // 7. Verify breadcrumb shows the parent link
     await page.reload();
