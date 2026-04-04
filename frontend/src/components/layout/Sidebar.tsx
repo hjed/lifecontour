@@ -10,7 +10,7 @@
  * Contact tags render as a nested tree with expand/collapse controls.
  */
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, Suspense } from 'react';
 import Link from 'next/link';
 import type { Route } from 'next';
 import { usePathname, useSearchParams } from 'next/navigation';
@@ -553,7 +553,9 @@ export function DesktopSidebar({ className }: SidebarProps) {
       data-testid='sidebar'
     >
       <div className='flex h-full flex-col'>
-        <SidebarContent />
+        <Suspense fallback={null}>
+          <SidebarContent />
+        </Suspense>
       </div>
     </aside>
   );
@@ -582,7 +584,9 @@ export function MobileSidebar({ className }: SidebarProps) {
         <SheetHeader className='border-b px-4 py-2'>
           <SheetTitle>Navigation</SheetTitle>
         </SheetHeader>
-        <SidebarContent onNavigate={() => setOpen(false)} />
+        <Suspense fallback={null}>
+          <SidebarContent onNavigate={() => setOpen(false)} />
+        </Suspense>
       </SheetContent>
     </Sheet>
   );
