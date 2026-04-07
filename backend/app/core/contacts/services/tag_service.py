@@ -12,6 +12,13 @@ from app.core.contacts.models.repositories import ContactEventPublisher, TagRepo
 from app.core.contacts.services.tag_hierarchy_service import TagHierarchyService
 
 
+def _compute_path_string(path_tags: list[Tag], fallback_tag: Tag) -> str:
+    """Build a slash-delimited path string from a list of ancestor tags."""
+    if path_tags:
+        return "/".join(str(t.name) for t in path_tags)
+    return str(fallback_tag.name)
+
+
 class TagService:
     """
     Service for tag mutations and event publishing.
@@ -57,60 +64,31 @@ class TagService:
         if not tag:
             raise TagNotFoundError(tag_id)
 
-        # Calculate old path for sync events
         old_path_tags = await self.tag_hierarchy_service.get_tag_path(tag_id)
-        old_path_str = (
-            "/".join([str(t.name) for t in old_path_tags])
-            if old_path_tags
-            else str(tag.name)
-        )
+        old_path_str = _compute_path_string(old_path_tags, tag)
 
         changed_fields: dict[str, Any] = {}
 
-        if name is not None and str(tag.name) != name:
-            await self.tag_hierarchy_service.validate_tag_name_uniqueness(
-                name, transaction, exclude_tag_id=tag_id
+        if name is not None:
+            await self._apply_name_change(
+                tag, tag_id, name, transaction, changed_fields
             )
-            old_name = str(tag.name)
-            tag.name = TagName(name)
-            changed_fields["name"] = (old_name, name)
 
         if color is not None:
-            old_color = str(tag.color) if tag.color else None
-            if old_color != color:
-                tag.color = color
-                changed_fields["color"] = (old_color, color)
+            self._apply_color_change(tag, color, changed_fields)
 
         if description is not None and tag.description != description:
-            old_desc = tag.description
+            changed_fields["description"] = (tag.description, description)
             tag.description = description
-            changed_fields["description"] = (old_desc, description)
 
-        if parent_id is not None:
-            if tag.parent_id != parent_id:
-                await self.tag_hierarchy_service.validate_parent_child_relationship(
-                    parent_id=parent_id, child_id=tag_id, transaction=transaction
-                )
-                parent_tag = await self.tag_repo.find_by_id(parent_id)
-                if not parent_tag:
-                    raise TagNotFoundError(parent_id)
-                old_parent = tag.parent_id
-                tag.parent_id = parent_id
-                changed_fields["parent_id"] = (old_parent, parent_id)
-        elif set_parent_null and tag.parent_id is not None:
-            old_parent = tag.parent_id
-            tag.parent_id = None
-            changed_fields["parent_id"] = (old_parent, None)
+        await self._apply_parent_change(
+            tag, tag_id, parent_id, set_parent_null, transaction, changed_fields
+        )
 
         tag = await self.tag_repo.save(tag)
 
-        # Calculate new path for sync events
         new_path_tags = await self.tag_hierarchy_service.get_tag_path(tag_id)
-        new_path_str = (
-            "/".join([str(t.name) for t in new_path_tags])
-            if new_path_tags
-            else str(tag.name)
-        )
+        new_path_str = _compute_path_string(new_path_tags, tag)
 
         if old_path_str != new_path_str:
             changed_fields["full_path"] = (old_path_str, new_path_str)
@@ -126,6 +104,61 @@ class TagService:
 
         return tag
 
+    async def _apply_name_change(
+        self,
+        tag: Tag,
+        tag_id: int,
+        name: str,
+        transaction: AsyncConnection,
+        changed_fields: dict[str, Any],
+    ) -> None:
+        """Validate and apply a tag name change."""
+        if str(tag.name) == name:
+            return
+        await self.tag_hierarchy_service.validate_tag_name_uniqueness(
+            name, transaction, exclude_tag_id=tag_id
+        )
+        old_name = str(tag.name)
+        tag.name = TagName(name)
+        changed_fields["name"] = (old_name, name)
+
+    @staticmethod
+    def _apply_color_change(
+        tag: Tag,
+        color: str,
+        changed_fields: dict[str, Any],
+    ) -> None:
+        """Apply a tag color change if different."""
+        old_color = str(tag.color) if tag.color else None
+        if old_color != color:
+            tag.color = color
+            changed_fields["color"] = (old_color, color)
+
+    async def _apply_parent_change(
+        self,
+        tag: Tag,
+        tag_id: int,
+        parent_id: int | None,
+        set_parent_null: bool,
+        transaction: AsyncConnection,
+        changed_fields: dict[str, Any],
+    ) -> None:
+        """Validate and apply a parent_id change, or clear it if requested."""
+        if parent_id is not None and tag.parent_id != parent_id:
+            await self.tag_hierarchy_service.validate_parent_child_relationship(
+                parent_id=parent_id, child_id=tag_id, transaction=transaction
+            )
+            parent_tag = await self.tag_repo.find_by_id(parent_id)
+            if not parent_tag:
+                raise TagNotFoundError(parent_id)
+            old_parent = tag.parent_id
+            tag.parent_id = parent_id
+            changed_fields["parent_id"] = (old_parent, parent_id)
+        elif set_parent_null and tag.parent_id is not None:
+            old_parent = tag.parent_id
+            tag.parent_id = None
+            changed_fields["parent_id"] = (old_parent, None)
+
     async def delete_tag(self, tag_id: int, transaction: AsyncConnection) -> None:
         """
         Delete a tag cascade removing it from contacts, and publish TagDeleted event.
@@ -134,11 +167,8 @@ class TagService:
         if not tag:
             raise TagNotFoundError(tag_id)
 
-        # Calculate old path for sync events
         path_tags = await self.tag_hierarchy_service.get_tag_path(tag_id)
-        path_str = (
-            "/".join([str(t.name) for t in path_tags]) if path_tags else str(tag.name)
-        )
+        path_str = _compute_path_string(path_tags, tag)
 
         await self.tag_repo.delete(tag_id)
 

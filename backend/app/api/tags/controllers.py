@@ -28,7 +28,7 @@ router = APIRouter(
 )
 
 
-@router.get("", response_model=TagListResponse)
+@router.get("")
 @inject
 async def list_tags(
     request: Request,
@@ -53,7 +53,7 @@ async def list_tags(
     return TagListResponse(data=tag_resources)
 
 
-@router.post("", response_model=TagResponse, status_code=status.HTTP_201_CREATED)
+@router.post("", status_code=status.HTTP_201_CREATED)
 @inject
 async def create_tag(
     request: Request,
@@ -95,7 +95,7 @@ async def create_tag(
     return TagResponse(data=tag_resource)
 
 
-@router.get("/{tag_id}", response_model=TagResponse)
+@router.get("/{tag_id}")
 @inject
 async def get_tag(
     tag_id: int,
@@ -121,7 +121,7 @@ async def get_tag(
     return TagResponse(data=tag_resource)
 
 
-@router.patch("/{tag_id}", response_model=TagResponse)
+@router.patch("/{tag_id}")
 @inject
 async def update_tag(
     tag_id: int,
