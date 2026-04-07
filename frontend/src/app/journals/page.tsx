@@ -23,6 +23,35 @@ import { JournalFilters as JournalFiltersType } from '@/types/journals';
 import { BookOpen, Filter, Plus, Search } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { TIMEOUTS } from '@/lib/constants';
+function getDateBounds(infiniteData: any) {
+  if (!infiniteData?.pageParams?.length) return undefined;
+
+  const validParams = infiniteData.pageParams.filter(Boolean) as {
+    date_from: string;
+    date_to: string;
+  }[];
+
+  if (validParams.length === 0) return undefined;
+
+  const minDate = validParams
+    .map(p => p.date_from)
+    .sort((a, b) => a.localeCompare(b))[0];
+  const maxDate = validParams
+    .map(p => p.date_to)
+    .sort((a, b) => b.localeCompare(a))[0];
+
+  return { start: minDate, end: maxDate };
+}
+
+function getEmptyStateMessage(
+  searchQuery: string,
+  filters: JournalFiltersType
+) {
+  if (searchQuery) return `No journals match "${searchQuery}"`;
+  if (Object.keys(filters).length > 0)
+    return 'Try adjusting your filters or create a new journal.';
+  return 'Get started by creating your first journal entry.';
+}
 
 export default function JournalsPage() {
   const [searchQuery, setSearchQuery] = useState('');
@@ -80,21 +109,7 @@ export default function JournalsPage() {
     shouldUseSearch
   );
 
-  let dateBounds = undefined;
-  if (!shouldUseSearch && infiniteData?.pageParams?.length) {
-    const validParams = infiniteData.pageParams.filter(Boolean) as {
-      date_from: string;
-      date_to: string;
-    }[];
-    if (validParams.length > 0) {
-      const minDate = validParams.map(p => p.date_from).sort()[0];
-      const maxDate = validParams
-        .map(p => p.date_to)
-        .sort()
-        .reverse()[0];
-      dateBounds = { start: minDate, end: maxDate };
-    }
-  }
+  const dateBounds = shouldUseSearch ? undefined : getDateBounds(infiniteData);
 
   const handleSearchChange = (value: string) => {
     setSearchQuery(value);
@@ -242,13 +257,7 @@ export default function JournalsPage() {
                       No journals found
                     </h3>
                     <p className='text-muted-foreground mt-2 text-sm'>
-                      {(() => {
-                        if (searchQuery)
-                          return `No journals match "${searchQuery}"`;
-                        if (Object.keys(filters).length > 0)
-                          return 'Try adjusting your filters or create a new journal.';
-                        return 'Get started by creating your first journal entry.';
-                      })()}
+                      {getEmptyStateMessage(searchQuery, filters)}
                     </p>
                     <Button asChild className='mt-4 gap-2'>
                       <Link href={'/journals/new' as Route}>

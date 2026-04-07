@@ -123,7 +123,7 @@ export function DayGroupedJournalList({
             return 0;
           }
         })
-        .filter(n => !isNaN(n) && n > 0);
+        .filter(n => !Number.isNaN(n) && n > 0);
       if (dates.length > 0) {
         effectiveStartDate = format(new Date(Math.min(...dates)), 'yyyy-MM-dd');
         effectiveEndDate = format(new Date(Math.max(...dates)), 'yyyy-MM-dd');
