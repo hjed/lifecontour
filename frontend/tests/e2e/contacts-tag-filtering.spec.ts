@@ -267,13 +267,11 @@ test.describe('Tag Filtering via Main Contacts List', () => {
     await authenticatedPage.goto(`/contacts?tag=${tagId}`);
     await expect(authenticatedPage).toHaveTitle(/Personal Management System/);
 
-    // Wait for content to load by checking for the heading
+    // Wait for the heading to contain the tag name — this is loaded
+    // asynchronously via the useTags() query, so we use Playwright's
+    // web-first assertion which auto-retries until the text appears.
     const heading = authenticatedPage.locator('h1');
-    await expect(heading).toBeVisible();
-
-    // Should contain the tag name in the heading
-    const headingText = await heading.textContent();
-    expect(headingText?.toLowerCase()).toContain(tagName.toLowerCase());
+    await expect(heading).toContainText(tagName, { ignoreCase: true });
 
     // Cleanup test data
     await authenticatedPage.request.delete(`/api/tags/${tagId}`);

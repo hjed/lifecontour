@@ -548,7 +548,10 @@ export class TestDataManager {
   }
 
   /**
-   * Create a relationship between two contacts via API
+   * Create a relationship between two contacts via API.
+   *
+   * Retries on transient 404/5xx errors to handle database consistency delays
+   * in CI where recently-created contacts may be momentarily invisible.
    */
   async createRelationship(
     fromContactId: string,
@@ -559,36 +562,61 @@ export class TestDataManager {
       `🔗 [Data Manager] Creating relationship: ${fromContactId} -> ${toContactId} (${relationshipType})`
     );
 
-    const response = await this.page.request.post(
-      `/api/contacts/${fromContactId}/relationships`,
-      {
-        headers: {
-          'Content-Type': 'application/vnd.api+json',
-          Accept: 'application/vnd.api+json',
-        },
-        data: {
+    const maxRetries = 3;
+    let lastError: Error | undefined;
+
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      const response = await this.page.request.post(
+        `/api/contacts/${fromContactId}/relationships`,
+        {
+          headers: {
+            'Content-Type': 'application/vnd.api+json',
+            Accept: 'application/vnd.api+json',
+          },
           data: {
-            type: 'contact_relationships',
-            attributes: {
-              from_contact_id: Number(fromContactId),
-              to_contact_id: Number(toContactId),
-              relationship_type: relationshipType,
+            data: {
+              type: 'contact_relationships',
+              attributes: {
+                from_contact_id: Number(fromContactId),
+                to_contact_id: Number(toContactId),
+                relationship_type: relationshipType,
+              },
             },
           },
-        },
-      }
-    );
+        }
+      );
 
-    if (!response.ok()) {
+      if (response.ok()) {
+        console.log(
+          `✅ [Data Manager] Relationship created: ${fromContactId} -> ${toContactId}`
+        );
+        return;
+      }
+
+      const statusCode = response.status();
       const errorBody = await response.text();
+
+      // Retry on transient errors (404 = contact not yet visible, 5xx = server)
+      if ((statusCode === 404 || statusCode >= 500) && attempt < maxRetries) {
+        console.debug(
+          `⚠️ [Data Manager] Relationship creation attempt ${attempt}/${maxRetries} ` +
+            `got ${statusCode}, retrying after delay...`
+        );
+        await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
+        lastError = new Error(
+          `Failed to create relationship: ${statusCode} - ${errorBody}`
+        );
+        continue;
+      }
+
+      // Non-retryable error or final attempt — throw immediately
       throw new Error(
-        `Failed to create relationship: ${response.status()} - ${errorBody}`
+        `Failed to create relationship: ${statusCode} - ${errorBody}`
       );
     }
 
-    console.log(
-      `✅ [Data Manager] Relationship created: ${fromContactId} -> ${toContactId}`
-    );
+    // Should not reach here, but satisfy TypeScript
+    throw lastError ?? new Error('Failed to create relationship after retries');
   }
 
   /**
