@@ -23,6 +23,8 @@ import {
   ContactFormData,
   ContactFilters,
   TagListResponse,
+  TagCreateAttributes,
+  TagResponse,
 } from '@/types/contacts';
 import { JsonApiErrorResponse, JsonApiMeta } from '@/types/api';
 import {
@@ -901,6 +903,145 @@ export function useDeleteContactAddress() {
       });
       queryClient.invalidateQueries({ queryKey: contactKeys.lists() });
       toast.success('Contact address deleted successfully');
+    },
+    onError: (error: Error) => {
+      toast.error(error.message);
+    },
+  });
+}
+
+// Contact Tag Management API Functions
+
+async function assignTagToContact(
+  contactId: string,
+  tagId: string
+): Promise<void> {
+  const response = await fetch(
+    `${API_ENDPOINTS.CONTACTS.BASE}/${contactId}/tags`,
+    {
+      method: 'POST',
+      credentials: 'include',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        data: {
+          type: 'tags',
+          id: tagId,
+        },
+      }),
+    }
+  );
+
+  if (!response.ok) {
+    const errorData: JsonApiErrorResponse = await response.json();
+    throw new Error(
+      errorData.errors?.[0]?.detail || ERROR_MESSAGES.UPDATE_FAILED
+    );
+  }
+}
+
+async function removeTagFromContact(
+  contactId: string,
+  tagId: string
+): Promise<void> {
+  const response = await fetch(
+    `${API_ENDPOINTS.CONTACTS.BASE}/${contactId}/tags/${tagId}`,
+    {
+      method: 'DELETE',
+      credentials: 'include',
+    }
+  );
+
+  if (!response.ok) {
+    const errorData: JsonApiErrorResponse = await response.json();
+    throw new Error(
+      errorData.errors?.[0]?.detail || ERROR_MESSAGES.DELETE_FAILED
+    );
+  }
+}
+
+async function createTag(
+  attributes: TagCreateAttributes
+): Promise<TagResponse> {
+  const response = await fetch('/api/tags', {
+    method: 'POST',
+    credentials: 'include',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      data: {
+        type: 'tags',
+        attributes,
+      },
+    }),
+  });
+
+  if (!response.ok) {
+    const errorData: JsonApiErrorResponse = await response.json();
+    throw new Error(
+      errorData.errors?.[0]?.detail || ERROR_MESSAGES.CREATE_FAILED
+    );
+  }
+
+  return response.json();
+}
+
+// React Query Hooks for Contact Tag Management
+
+export function useAssignContactTag() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({ contactId, tagId }: { contactId: string; tagId: string }) =>
+      assignTagToContact(contactId, tagId),
+    onSuccess: (_, { contactId }) => {
+      queryClient.invalidateQueries({
+        queryKey: contactKeys.detail(contactId),
+      });
+      queryClient.invalidateQueries({
+        queryKey: contactKeys.tags(contactId),
+      });
+      queryClient.invalidateQueries({ queryKey: contactKeys.lists() });
+      toast.success(SUCCESS_MESSAGES.TAG_ASSIGNED);
+    },
+    onError: (error: Error) => {
+      toast.error(error.message);
+    },
+  });
+}
+
+export function useRemoveContactTag() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({ contactId, tagId }: { contactId: string; tagId: string }) =>
+      removeTagFromContact(contactId, tagId),
+    onSuccess: (_, { contactId }) => {
+      queryClient.invalidateQueries({
+        queryKey: contactKeys.detail(contactId),
+      });
+      queryClient.invalidateQueries({
+        queryKey: contactKeys.tags(contactId),
+      });
+      queryClient.invalidateQueries({ queryKey: contactKeys.lists() });
+      toast.success(SUCCESS_MESSAGES.TAG_REMOVED);
+    },
+    onError: (error: Error) => {
+      toast.error(error.message);
+    },
+  });
+}
+
+export function useCreateTag() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (attributes: TagCreateAttributes) => createTag(attributes),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: tagKeys.lists() });
+      toast.success(SUCCESS_MESSAGES.TAG_CREATED);
     },
     onError: (error: Error) => {
       toast.error(error.message);
