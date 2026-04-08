@@ -200,17 +200,19 @@ The sequence reflects both user priority and technical dependency:
 
 #### Phase 1: Tag CRUD, Re-parenting, and Safe Delete Rules
 **PR Size:** ~5-7 files
+**Status:** ✅ COMPLETE
 
 **Acceptance Criteria:**
-- [ ] Backend create/update/delete/re-parent behaviour is explicit and validated.
-- [ ] Minimum editable fields are `name` and `colour`, with parent selection support.
-- [ ] Deleting a tag removes it from all assigned contacts safely.
-- [ ] Re-parenting does not corrupt descendant filtering behaviour.
+- [x] Backend create/update/delete/re-parent behaviour is explicit and validated.
+- [x] Minimum editable fields are `name` and `colour`, with parent selection support.
+- [x] Deleting a tag removes it from all assigned contacts safely.
+- [x] Re-parenting does not corrupt descendant filtering behaviour.
+- [x] All changes are passed back to Google Contacts through the sync
 
 **Required Test Coverage:**
-- **Unit:** tag validation, re-parenting, cascade removal behaviour.
-- **Integration:** API CRUD tests with real database state changes across contact assignments.
-- **E2E:** admin-style tag CRUD flow proving create/edit/delete changes show up in the contacts UI.
+- **Unit:** tag validation, re-parenting, cascade removal behaviour. ✅
+- **Integration:** API CRUD tests with real database state changes across contact assignments. ✅
+- **E2E:** admin-style tag CRUD flow proving create/edit/delete changes show up in the contacts UI. ✅
 
 #### Phase 2: Contact Editing Tag Flows
 **PR Size:** ~5-8 files

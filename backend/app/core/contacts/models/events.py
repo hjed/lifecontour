@@ -115,13 +115,64 @@ class TagRemoved(DomainEvent):
         tag_name: str,
         transaction: AsyncConnection | None = None,
     ):
+        now = datetime.now()
         super().__init__(
-            event_id=f"tag_removed_{contact_id}_{tag_id}_{datetime.now().isoformat()}",
-            occurred_at=datetime.now(),
+            event_id=f"tag_removed_{contact_id}_{tag_id}_{now.isoformat()}",
+            occurred_at=now,
             aggregate_id=contact_id,
             event_type="TagRemoved",
             event_data={
                 "contact_id": contact_id,
+                "tag_id": tag_id,
+                "tag_name": tag_name,
+            },
+            transaction=transaction,
+        )
+
+
+@dataclass(frozen=True)
+class TagUpdated(DomainEvent):
+    """Event raised when a tag is updated."""
+
+    def __init__(
+        self,
+        tag_id: int,
+        tag_name: str,
+        changed_fields: dict[str, Any],
+        transaction: AsyncConnection | None = None,
+    ):
+        now = datetime.now()
+        super().__init__(
+            event_id=f"tag_updated_{tag_id}_{now.isoformat()}",
+            occurred_at=now,
+            aggregate_id=tag_id,  # Use tag_id as aggregate_id since Tag is the root here
+            event_type="TagUpdated",
+            event_data={
+                "tag_id": tag_id,
+                "tag_name": tag_name,
+                "changed_fields": changed_fields,
+            },
+            transaction=transaction,
+        )
+
+
+@dataclass(frozen=True)
+class TagDeleted(DomainEvent):
+    """Event raised when a tag is deleted."""
+
+    def __init__(
+        self,
+        tag_id: int,
+        tag_name: str,
+        transaction: AsyncConnection | None = None,
+    ):
+        now = datetime.now()
+        super().__init__(
+            event_id=f"tag_deleted_{tag_id}_{now.isoformat()}",
+            occurred_at=now,
+            aggregate_id=tag_id,
+            event_type="TagDeleted",
+            event_data={
                 "tag_id": tag_id,
                 "tag_name": tag_name,
             },

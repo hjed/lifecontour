@@ -138,6 +138,13 @@ class OutboxProcessor:
             ):
                 await self._process_journal_event(event)
 
+            # Route tag events to integration workers
+            if event.event_type in (
+                "TagUpdated",
+                "TagDeleted",
+            ):
+                await self._process_tag_event(event)
+
             # Mark as processed
             await repository.mark_as_processed(event.event_id)
 
@@ -317,6 +324,25 @@ class OutboxProcessor:
             event_id=event.event_id,
             event_type=event.event_type,
             result=result,
+        )
+
+    async def _process_tag_event(self, event: Any) -> None:
+        """
+        Broadcast tag events to all integrations.
+
+        Args:
+            event: Tag domain event (TagUpdated, TagDeleted)
+        """
+        from app.core.integrations.task_queue_service import TaskQueueService
+
+        async with self.container() as request_container:
+            task_queue = await request_container.get(TaskQueueService)
+            await task_queue.broadcast_tag_event(event.event_type, event.event_data)
+
+        logger.info(
+            "Broadcasted tag event to workers",
+            event_id=event.event_id,
+            event_type=event.event_type,
         )
 
     async def _process_journal_event(self, event: Any) -> None:

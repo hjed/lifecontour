@@ -9,14 +9,15 @@ import structlog
 from core_shared.models.contacts.entities import Tag
 from core_shared.models.contacts.value_objects import TagName
 from dishka.integrations.fastapi import FromDishka, inject
-from fastapi import APIRouter, Query, Request, status
+from fastapi import APIRouter, HTTPException, Query, Request, status
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.api.common.schemas import get_request_base_url
 from app.api.contacts.converters import TagConverter
 from app.api.contacts.schemas import TagListResponse
-from app.api.tags.schemas import TagCreateRequest, TagResponse
+from app.api.tags.schemas import TagCreateRequest, TagResponse, TagUpdateRequest
 from app.core.contacts.models.repositories import TagRepository
+from app.core.contacts.services.tag_service import TagService
 from app.infrastructure.auth.models import SessionUser
 
 logger = structlog.get_logger()
@@ -27,7 +28,7 @@ router = APIRouter(
 )
 
 
-@router.get("", response_model=TagListResponse)
+@router.get("")
 @inject
 async def list_tags(
     request: Request,
@@ -52,7 +53,7 @@ async def list_tags(
     return TagListResponse(data=tag_resources)
 
 
-@router.post("", response_model=TagResponse, status_code=status.HTTP_201_CREATED)
+@router.post("", status_code=status.HTTP_201_CREATED)
 @inject
 async def create_tag(
     request: Request,
@@ -94,7 +95,7 @@ async def create_tag(
     return TagResponse(data=tag_resource)
 
 
-@router.get("/{tag_id}", response_model=TagResponse)
+@router.get("/{tag_id}")
 @inject
 async def get_tag(
     tag_id: int,
@@ -120,11 +121,80 @@ async def get_tag(
     return TagResponse(data=tag_resource)
 
 
+@router.patch("/{tag_id}")
+@inject
+async def update_tag(
+    tag_id: int,
+    request: Request,
+    tag_request: TagUpdateRequest,
+    tag_service: FromDishka[TagService],
+    connection: FromDishka[AsyncConnection],
+    user: FromDishka[SessionUser],  # Require authentication
+) -> TagResponse:
+    """
+    Update a specific tag by ID.
+
+    Updates the tag with the provided attributes and returns the updated resource.
+    Supports clearing parent_id by providing explicit None.
+    """
+    base_url = get_request_base_url(request)
+    # Validate resource type
+    if tag_request.data.type and tag_request.data.type != "tags":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid resource type, expected 'tags'",
+        )
+
+    # Validate that path ID matches body ID if body ID is provided
+    body_id = tag_request.data.id
+    if body_id is not None:
+        try:
+            body_id_int = int(str(body_id))
+        except ValueError as e:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid tag ID format in request body",
+            ) from e
+        if body_id_int != tag_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Path ID does not match body ID",
+            )
+
+    attrs = tag_request.data.attributes
+
+    # Check if parent_id is explicitly set to None
+    set_parent_null = False
+    if "parent_id" in attrs.model_fields_set and attrs.parent_id is None:
+        set_parent_null = True
+
+    try:
+        updated_tag = await tag_service.update_tag(
+            tag_id=tag_id,
+            transaction=connection,
+            name=attrs.name,
+            color=attrs.color,
+            description=attrs.description,
+            parent_id=attrs.parent_id,
+            set_parent_null=set_parent_null,
+        )
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        ) from e
+
+    tag_resource = TagConverter.to_resource(updated_tag, base_url)
+
+    return TagResponse(data=tag_resource)
+
+
 @router.delete("/{tag_id}", status_code=status.HTTP_204_NO_CONTENT)
 @inject
 async def delete_tag(
     tag_id: int,
-    tag_repo: FromDishka[TagRepository],
+    tag_service: FromDishka[TagService],
+    connection: FromDishka[AsyncConnection],
     user: FromDishka[SessionUser],  # Require authentication
 ) -> None:
     """
@@ -133,10 +203,4 @@ async def delete_tag(
     Removes the tag from the system. This will also remove the tag from any contacts
     that were associated with it.
     """
-    tag = await tag_repo.find_by_id(tag_id)
-    if not tag:
-        from app.core.contacts.models.exceptions import ContactNotFoundError
-
-        raise ContactNotFoundError(tag_id)
-
-    await tag_repo.delete(tag_id)
+    await tag_service.delete_tag(tag_id=tag_id, transaction=connection)

@@ -2322,6 +2322,108 @@ async def process_journal_event(
         )
         raise
 
+async def process_tag_event(
+    ctx: dict[str, Any], event_type: str, event_data: dict[str, Any]
+) -> dict[str, Any]:
+    """
+    Process tag events like renamed or deleted for Google Contacts.
+
+    This ARQ task receives domain events (TagUpdated, TagDeleted)
+    and updates the corresponding Contact Groups across all synced Google Accounts.
+
+    Args:
+        ctx: ARQ context dictionary
+        event_type: The type of the event (TagUpdated, TagDeleted)
+        event_data: The event payload
+    """
+    job_id = ctx.get("job_id", "unknown")
+    set_job_id(job_id)
+    set_worker_id(settings.worker_id)
+    session_factory = ctx["session_factory"]
+
+    logger.info(
+        "Processing tag event",
+        job_id=job_id,
+        event_type=event_type,
+    )
+
+    processed_users = 0
+    errors = []
+
+    try:
+        async with session_factory() as session:
+            # Find all users with Google Integration
+            auth_stmt = text("""
+                SELECT user_id, google_account_email
+                FROM user_google_integration
+            """)
+            auth_result = await session.execute(auth_stmt)
+            users = auth_result.fetchall()
+
+            for row in users:
+                user_id = row.user_id
+                google_account_email = row.google_account_email
+
+                try:
+                    auth_service = GoogleAuthService(
+                        session=session,
+                        encryption_key=settings.encryption_key.get_secret_value(),
+                        google_client_id=settings.google_client_id,
+                        google_client_secret=settings.google_client_secret.get_secret_value(),
+                    )
+
+                    client = GoogleAPIClient(
+                        auth_service=auth_service,
+                        google_account_email=google_account_email,
+                        google_client_id=settings.google_client_id,
+                        google_client_secret=settings.google_client_secret.get_secret_value(),
+                        user_id=user_id,
+                    )
+
+                    # Fetch groups to map name dynamically to resourceName
+                    forward_group_mapping = await _build_contact_group_mapping(client)
+                    reverse_group_mapping = _build_reverse_group_mapping(forward_group_mapping)
+
+                    if event_type == "TagDeleted":
+                        path_str = event_data.get("tag_name")
+                        if not path_str:
+                            continue
+
+                        resource_name = reverse_group_mapping.get(path_str)
+                        if resource_name:
+                            await client.delete_contact_group(resource_name)
+                    elif event_type == "TagUpdated":
+                        changed_fields = event_data.get("changed_fields", {})
+                        if "full_path" in changed_fields:
+                            old_path, new_path = changed_fields["full_path"]
+                            resource_name = reverse_group_mapping.get(old_path)
+                            if resource_name:
+                                await client.update_contact_group(resource_name, new_path)
+
+                    processed_users += 1
+                except Exception as e:
+                    logger.error(
+                        "Error processing tag event for user",
+                        google_account_email=google_account_email,
+                        event_type=event_type,
+                        error=str(e)
+                    )
+                    errors.append(str(e))
+
+            if errors:
+                return {"status": "partial_success", "processed_users": processed_users, "errors": errors}
+
+            return {"status": "success", "processed_users": processed_users}
+
+    except Exception as e:
+        logger.error(
+            "Process tag event failed",
+            job_id=job_id,
+            error=str(e),
+            error_type=type(e).__name__,
+        )
+        raise
+
 
 async def push_local_contacts_to_google(
     ctx: dict[str, Any], google_account_email: str, user_id: str | int = 1
@@ -3183,6 +3285,7 @@ class GoogleWorkerSettings(WorkerSettingsBase):
         sync_google_contacts,
         push_local_contacts_to_google,
         process_journal_event,
+        process_tag_event,
         sync_calendar_events,
         setup_calendar_webhook,
         periodic_sync_all_accounts,  # Wrapper for periodic cron syncs

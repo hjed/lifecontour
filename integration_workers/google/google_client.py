@@ -462,6 +462,120 @@ class GoogleAPIClient:
             )
             raise e
 
+    async def update_contact_group(
+        self, resource_name: str, name: str
+    ) -> dict[str, Any]:
+        """
+        Update an existing contact group in Google People API.
+
+        Args:
+            resource_name: Resource name of the contact group
+            name: New display name for the contact group
+
+        Returns:
+            Updated contact group data
+        """
+        try:
+            service = await self._get_people_service()
+
+            logger.info(
+                "Updating Google contact group",
+                google_account_email=self.google_account_email,
+                resource_name=resource_name,
+                new_name=name,
+            )
+
+            # Need to fetch the group first to get the etag
+            group_data = service.contactGroups().get(resourceName=resource_name).execute()
+            etag = group_data.get("etag")
+
+            update_body = {
+                "contactGroup": {
+                    "name": name,
+                    "etag": etag
+                }
+            }
+
+            result = (
+                service.contactGroups()
+                .update(
+                    resourceName=resource_name,
+                    updateContactGroupFields="name",
+                    body=update_body,
+                )
+                .execute()
+            )
+
+            logger.info(
+                "Successfully updated Google contact group",
+                google_account_email=self.google_account_email,
+                resource_name=resource_name,
+            )
+
+            return cast(dict[str, Any], result)
+
+        except HttpError as e:
+            if e.resp.status == 404:
+                # Missing group; logging warning before re-raising. Callers or higher levels should recreate or handle.
+                logger.warning(
+                    "Contact group not found for update",
+                    google_account_email=self.google_account_email,
+                    resource_name=resource_name,
+                )
+            logger.error(
+                "Google API error while updating contact group",
+                google_account_email=self.google_account_email,
+                resource_name=resource_name,
+                error=str(e),
+                status_code=e.resp.status,
+            )
+            raise
+
+    async def delete_contact_group(self, resource_name: str) -> None:
+        """
+        Delete a contact group from Google People API.
+
+        Args:
+            resource_name: Resource name of the contact group to delete
+        """
+        try:
+            service = await self._get_people_service()
+
+            logger.info(
+                "Deleting Google contact group",
+                google_account_email=self.google_account_email,
+                resource_name=resource_name,
+            )
+
+            service.contactGroups().delete(
+                resourceName=resource_name, deleteContacts=False
+            ).execute()
+
+            logger.info(
+                "Successfully deleted Google contact group",
+                google_account_email=self.google_account_email,
+                resource_name=resource_name,
+            )
+
+        except HttpError as e:
+            if e.resp.status == 404:
+                # Group already deleted, consider it a success
+                logger.info(
+                    "Contact group already deleted or not found",
+                    google_account_email=self.google_account_email,
+                    resource_name=resource_name,
+                )
+                return
+
+            logger.error(
+                "Google API error while deleting contact group",
+                google_account_email=self.google_account_email,
+                resource_name=resource_name,
+                error=str(e),
+                status_code=e.resp.status,
+            )
+            raise
+
     # Calendar API Operations
 
     async def list_calendars(
