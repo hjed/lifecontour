@@ -1,4 +1,10 @@
-import { format, parseISO, eachDayOfInterval, isAfter } from 'date-fns';
+import {
+  format,
+  parseISO,
+  eachDayOfInterval,
+  isAfter,
+  isBefore,
+} from 'date-fns';
 import { DisplayJournal } from '@/utils/journalTransformers';
 
 export interface JournalDayGroup {
@@ -26,8 +32,15 @@ export function groupJournalsByDay({
   endDate,
   collapseEmpty,
 }: GroupJournalsOptions): JournalDayGroup[] {
-  const start = parseISO(startDate);
-  const end = parseISO(endDate);
+  let start = parseISO(startDate);
+  let end = parseISO(endDate);
+
+  // Dynamically expand interval to prevent non-contiguous out-of-bounds keys
+  journals.forEach(journal => {
+    const journalDate = parseISO(journal.event_date_range.start);
+    if (isBefore(journalDate, start)) start = journalDate;
+    if (isAfter(journalDate, end)) end = journalDate;
+  });
 
   if (isAfter(start, end)) {
     return [];

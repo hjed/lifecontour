@@ -37,8 +37,10 @@ export const journalKeys = {
   lists: () => [...journalKeys.all, 'list'] as const,
   list: (filters: JournalFilters) => [...journalKeys.lists(), filters] as const,
   infiniteLists: () => [...journalKeys.lists(), 'infinite'] as const,
-  infiniteList: (filters: JournalFilters) =>
-    [...journalKeys.infiniteLists(), filters] as const,
+  infiniteList: (
+    filters: JournalFilters,
+    options?: { chunkDays?: number; anchorDate?: string }
+  ) => [...journalKeys.infiniteLists(), filters, options] as const,
   details: () => [...journalKeys.all, 'detail'] as const,
   detail: (id: string) => [...journalKeys.details(), id] as const,
   search: (query: string) => [...journalKeys.all, 'search', query] as const,
@@ -754,7 +756,10 @@ export function useInfiniteJournals(
   };
 
   return useInfiniteQuery({
-    queryKey: journalKeys.infiniteList(getListQueryFilters(filters)),
+    queryKey: journalKeys.infiniteList(getListQueryFilters(filters), {
+      chunkDays: options.chunkDays,
+      anchorDate: options.anchorDate,
+    }),
     queryFn: ({ pageParam }) =>
       fetchJournals({
         ...filters,

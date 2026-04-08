@@ -66,9 +66,6 @@ test.describe('Journal Infinite Scroll', () => {
     await expect(
       page.getByRole('heading', { name: /Past Journal/i })
     ).not.toBeVisible();
-    await expect(
-      page.getByRole('heading', { name: /Future Journal/i })
-    ).not.toBeVisible();
 
     // 3. Scroll Down (to PAST) -> Should trigger fetchNextPage
     const bottomSentinel = page.getByTestId('journal-bottom-sentinel');

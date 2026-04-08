@@ -124,6 +124,7 @@ describe('Journals API', () => {
       },
     });
     jest.clearAllMocks();
+    mockFetch.mockReset();
   });
 
   describe('useJournals', () => {
@@ -695,7 +696,10 @@ describe('Journals API', () => {
       });
 
       const standardKey = journalKeys.list(filters);
-      const infiniteKey = journalKeys.infiniteList(filters);
+      const infiniteKey = journalKeys.infiniteList(filters, {
+        chunkDays: undefined,
+        anchorDate: undefined,
+      });
       expect(standardKey).not.toEqual(infiniteKey);
     });
 

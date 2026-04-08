@@ -23,13 +23,17 @@ import { JournalFilters as JournalFiltersType } from '@/types/journals';
 import { BookOpen, Filter, Plus, Search } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { TIMEOUTS } from '@/lib/constants';
-function getDateBounds(infiniteData: any) {
+import { InfiniteData } from '@tanstack/react-query';
+
+function getDateBounds(
+  infiniteData: InfiniteData<unknown, unknown> | undefined
+) {
   if (!infiniteData?.pageParams?.length) return undefined;
 
-  const validParams = infiniteData.pageParams.filter(Boolean) as {
-    date_from: string;
-    date_to: string;
-  }[];
+  const validParams = infiniteData.pageParams.filter(
+    (p): p is { date_from: string; date_to: string } =>
+      Boolean(p && typeof p === 'object' && 'date_from' in p && 'date_to' in p)
+  );
 
   if (validParams.length === 0) return undefined;
 
