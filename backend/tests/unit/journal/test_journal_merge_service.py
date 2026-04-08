@@ -221,3 +221,142 @@ class TestJournalMergeService:
         )  # only overridden fields are updated
         assert params["mood_value"] == 8
         assert params["target_id"] == 1
+
+    @pytest.mark.asyncio
+    async def test_merge_allday_target_with_timed_source_clears_times(
+        self, merge_service, mock_journal_repo, mock_transaction
+    ):
+        """When target is all-day and source has times, merged result stays all-day with null times."""
+        target = create_test_journal(id=1, title="All Day Event")
+        source = create_test_journal(id=2, title="Timed Event")
+
+        mock_journal_repo.find_by_id.side_effect = lambda j_id: (
+            target if j_id == 1 else source
+        )
+        mock_journal_repo.save.return_value = target
+
+        from datetime import time
+
+        def mock_calendar_execute(query, params=None):
+            q_str = str(query)
+            mock_res = MagicMock()
+            if "journal_calendar_info" in q_str and "SELECT" in q_str:
+                if params and (params.get("target_id") == 1 or params.get("id") == 1):
+                    row = MagicMock()
+                    row._mapping = {
+                        "journal_id": 1,
+                        "calendar_id": "cal-1",
+                        "start_time": None,
+                        "end_time": None,
+                        "is_all_day": True,
+                        "location": None,
+                        "sync_invitees": False,
+                        "timezone": None,
+                    }
+                    mock_res.fetchone.return_value = row
+                elif params and (params.get("source_id") == 2 or params.get("id") == 2):
+                    row = MagicMock()
+                    row._mapping = {
+                        "journal_id": 2,
+                        "calendar_id": "cal-1",
+                        "start_time": time(10, 0),
+                        "end_time": time(11, 0),
+                        "is_all_day": False,
+                        "location": "Office",
+                        "sync_invitees": False,
+                        "timezone": None,
+                    }
+                    mock_res.fetchone.return_value = row
+                else:
+                    mock_res.fetchone.return_value = None
+            else:
+                mock_res.fetchone.return_value = None
+            mock_res.fetchall.return_value = []
+            return mock_res
+
+        mock_transaction.execute.side_effect = mock_calendar_execute
+
+        await merge_service.merge_journals(1, 2, mock_transaction)
+
+        execute_calls = mock_transaction.execute.call_args_list
+        update_calls = [
+            call
+            for call in execute_calls
+            if "UPDATE journal_calendar_info" in str(call[0][0])
+        ]
+
+        assert len(update_calls) == 1
+        params = update_calls[0][0][1]
+        # All-day events should have times forced to None
+        assert params.get("start_time") is None
+        assert params.get("end_time") is None
+
+    @pytest.mark.asyncio
+    async def test_merge_timed_target_with_allday_source_stays_valid(
+        self, merge_service, mock_journal_repo, mock_transaction
+    ):
+        """When target has times and source is all-day, merged result keeps times and stays timed."""
+        target = create_test_journal(id=1, title="Timed Event")
+        source = create_test_journal(id=2, title="All Day Event")
+
+        mock_journal_repo.find_by_id.side_effect = lambda j_id: (
+            target if j_id == 1 else source
+        )
+        mock_journal_repo.save.return_value = target
+
+        from datetime import time
+
+        def mock_calendar_execute(query, params=None):
+            q_str = str(query)
+            mock_res = MagicMock()
+            if "journal_calendar_info" in q_str and "SELECT" in q_str:
+                if params and (params.get("target_id") == 1 or params.get("id") == 1):
+                    row = MagicMock()
+                    row._mapping = {
+                        "journal_id": 1,
+                        "calendar_id": "cal-1",
+                        "start_time": time(14, 0),
+                        "end_time": time(15, 0),
+                        "is_all_day": False,
+                        "location": None,
+                        "sync_invitees": False,
+                        "timezone": None,
+                    }
+                    mock_res.fetchone.return_value = row
+                elif params and (params.get("source_id") == 2 or params.get("id") == 2):
+                    row = MagicMock()
+                    row._mapping = {
+                        "journal_id": 2,
+                        "calendar_id": "cal-1",
+                        "start_time": None,
+                        "end_time": None,
+                        "is_all_day": True,
+                        "location": "Park",
+                        "sync_invitees": True,
+                        "timezone": None,
+                    }
+                    mock_res.fetchone.return_value = row
+                else:
+                    mock_res.fetchone.return_value = None
+            else:
+                mock_res.fetchone.return_value = None
+            mock_res.fetchall.return_value = []
+            return mock_res
+
+        mock_transaction.execute.side_effect = mock_calendar_execute
+
+        await merge_service.merge_journals(1, 2, mock_transaction)
+
+        execute_calls = mock_transaction.execute.call_args_list
+        update_calls = [
+            call
+            for call in execute_calls
+            if "UPDATE journal_calendar_info" in str(call[0][0])
+        ]
+
+        # Should have an update (at minimum for location from source)
+        assert len(update_calls) == 1
+        params = update_calls[0][0][1]
+        # Target keeps its times, so is_all_day should NOT be set to True
+        # The merged state should remain is_all_day=False with existing times
+        assert "is_all_day" not in params or params.get("is_all_day") is not True

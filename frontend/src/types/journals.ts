@@ -58,6 +58,7 @@ export interface CalendarInfoData {
   end_time?: string | null; // time string (HH:MM:SS)
   is_all_day: boolean;
   location?: string | null;
+  timezone?: string | null; // IANA timezone (e.g. 'Australia/Sydney')
   sync_invitees: boolean;
   event_state?: EventState;
 }

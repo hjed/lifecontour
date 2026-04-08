@@ -215,3 +215,71 @@ class TestCalendarInfoTimeValidation:
                 start_time=time(17, 0),
                 end_time=time(9, 0),
             )
+
+
+@pytest.mark.unit
+class TestCalendarInfoTimezoneValidation:
+    """Test CalendarInfo timezone validation."""
+
+    def test_valid_timezone(self):
+        """Test that a valid IANA timezone is accepted."""
+        calendar_id = uuid4()
+        info = CalendarInfo(
+            journal_id=1,
+            calendar_id=calendar_id,
+            is_all_day=True,
+            timezone="Australia/Sydney",
+        )
+        assert info.timezone == "Australia/Sydney"
+
+    def test_utc_timezone(self):
+        """Test that UTC timezone is accepted."""
+        calendar_id = uuid4()
+        info = CalendarInfo(
+            journal_id=1,
+            calendar_id=calendar_id,
+            is_all_day=True,
+            timezone="UTC",
+        )
+        assert info.timezone == "UTC"
+
+    def test_null_timezone_is_valid(self):
+        """Test that null timezone is accepted (default)."""
+        calendar_id = uuid4()
+        info = CalendarInfo(
+            journal_id=1,
+            calendar_id=calendar_id,
+            is_all_day=True,
+        )
+        assert info.timezone is None
+
+    def test_invalid_timezone_raises_error(self):
+        """Test that an invalid timezone string raises error."""
+        calendar_id = uuid4()
+        with pytest.raises(
+            CalendarInfoValidationError,
+            match="Invalid IANA timezone",
+        ):
+            CalendarInfo(
+                journal_id=1,
+                calendar_id=calendar_id,
+                is_all_day=True,
+                timezone="Not/A/Real/Timezone",
+            )
+
+    def test_timezone_too_long_raises_error(self):
+        """Test that timezone exceeding max length raises error."""
+        from core_shared.models.journals import MAX_TIMEZONE_LENGTH
+
+        calendar_id = uuid4()
+        long_tz = "A" * (MAX_TIMEZONE_LENGTH + 1)
+        with pytest.raises(
+            CalendarInfoValidationError,
+            match=f"Timezone cannot exceed {MAX_TIMEZONE_LENGTH}",
+        ):
+            CalendarInfo(
+                journal_id=1,
+                calendar_id=calendar_id,
+                is_all_day=True,
+                timezone=long_tz,
+            )

@@ -443,7 +443,7 @@ class JournalMergeService:
         source_dict = source_row._mapping
         target_dict = target_row._mapping
         updates = []
-        update_params = {"target_id": target_id}
+        update_params: dict[str, Any] = {"target_id": target_id}
 
         type_enum_names = [
             k
@@ -474,8 +474,40 @@ class JournalMergeService:
                 updates.append(f"{col} = :{col}")
                 update_params[col] = s_val
 
+        if table_name == "journal_calendar_info":
+            # Compute full merged state for validation
+            merged_state = {
+                **target_dict,
+                **{k: v for k, v in update_params.items() if k != "target_id"},
+            }
+
+            if merged_state.get("is_all_day"):
+                if merged_state.get("start_time") is not None:
+                    if "start_time" not in update_params:
+                        updates.append("start_time = :start_time")
+                    update_params["start_time"] = None
+                if merged_state.get("end_time") is not None:
+                    if "end_time" not in update_params:
+                        updates.append("end_time = :end_time")
+                    update_params["end_time"] = None
+            else:
+                # If it's timed but times are missing, force to all_day
+                if (
+                    merged_state.get("start_time") is None
+                    and merged_state.get("end_time") is None
+                ):
+                    if "is_all_day" not in update_params:
+                        updates.append("is_all_day = :is_all_day")
+                    update_params["is_all_day"] = True
+
         if updates:
-            set_clause = ", ".join(updates)
+            # Deduplicate just in case
+            unique_updates = []
+            for u in updates:
+                if u not in unique_updates:
+                    unique_updates.append(u)
+
+            set_clause = ", ".join(unique_updates)
             await transaction.execute(
                 text(
                     f"UPDATE {table_name} SET {set_clause} WHERE journal_id = :target_id"

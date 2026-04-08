@@ -82,10 +82,15 @@ import { JournalSearchCombobox } from './JournalSearchCombobox';
 // Form validation schema
 const formSchema = z.object({
   title: z.string().min(1, 'Title is required'),
-  dateRange: z.object({
-    from: z.date(),
-    to: z.date().optional(),
-  }),
+  dateRange: z
+    .object({
+      from: z.date(),
+      to: z.date().optional(),
+    })
+    .refine(data => !data.to || data.to >= data.from, {
+      message: 'End date cannot be before start date',
+      path: ['to'],
+    }),
   content: z.string(),
   types: z.array(z.nativeEnum(JournalType)),
   parentId: z.number().nullable().optional(),
@@ -626,18 +631,53 @@ export function JournalCreateForm({
             <FormItem>
               <FormLabel>Date Range</FormLabel>
               <FormControl>
-                {/* Placeholder for date range picker - will be implemented in future iteration */}
-                <Input
-                  type='date'
-                  value={field.value.from.toISOString().split('T')[0]}
-                  onChange={e => {
-                    const newDate = new Date(e.target.value);
-                    field.onChange({ ...field.value, from: newDate });
-                  }}
-                />
+                <div className='flex items-center gap-4'>
+                  <div className='flex w-full flex-col gap-2'>
+                    <span className='text-muted-foreground text-xs'>
+                      Start Date
+                    </span>
+                    <Input
+                      type='date'
+                      value={field.value.from.toISOString().split('T')[0]}
+                      onChange={e => {
+                        const newDate = new Date(e.target.value);
+                        // If 'to' is not set, or is the same as the old 'from', auto-advance 'to' to match the new 'from'
+                        const autoUpdateTo =
+                          !field.value.to ||
+                          field.value.to.getTime() ===
+                            field.value.from.getTime();
+                        field.onChange({
+                          ...field.value,
+                          from: newDate,
+                          ...(autoUpdateTo ? { to: newDate } : {}),
+                        });
+                      }}
+                      className='w-full'
+                    />
+                  </div>
+                  <div className='flex w-full flex-col gap-2'>
+                    <span className='text-muted-foreground text-xs'>
+                      End Date
+                    </span>
+                    <Input
+                      type='date'
+                      value={
+                        (field.value.to || field.value.from)
+                          .toISOString()
+                          .split('T')[0]
+                      }
+                      onChange={e => {
+                        const newDate = new Date(e.target.value);
+                        field.onChange({ ...field.value, to: newDate });
+                      }}
+                      className='w-full'
+                      min={field.value.from.toISOString().split('T')[0]} // Native validation fallback
+                    />
+                  </div>
+                </div>
               </FormControl>
               <FormDescription>
-                Select the date or date range for this journal entry
+                Select the start and end date for this journal entry
               </FormDescription>
               <FormMessage />
             </FormItem>

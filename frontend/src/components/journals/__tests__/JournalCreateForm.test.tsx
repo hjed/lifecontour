@@ -69,7 +69,8 @@ describe('JournalCreateForm', () => {
       renderWithClient(<JournalCreateForm />);
 
       expect(screen.getByLabelText(/title/i)).toBeInTheDocument();
-      expect(screen.getByLabelText(/date range/i)).toBeInTheDocument();
+      expect(screen.getAllByText(/start date/i)[0]).toBeInTheDocument();
+      expect(screen.getAllByText(/end date/i)[0]).toBeInTheDocument();
       expect(screen.getByLabelText(/content/i)).toBeInTheDocument();
       expect(
         screen.getByRole('button', { name: /create journal/i })
@@ -113,11 +114,15 @@ describe('JournalCreateForm', () => {
 
     it('allows submission with valid title and date range', async () => {
       const user = userEvent.setup();
+
       mockMutateAsync.mockResolvedValueOnce({
         data: { id: '1', type: 'journals', attributes: {} },
       });
 
       renderWithClient(<JournalCreateForm />);
+
+      expect(screen.getAllByText(/start date/i)[0]).toBeInTheDocument();
+      expect(screen.getAllByText(/end date/i)[0]).toBeInTheDocument();
 
       const titleInput = screen.getByLabelText(/title/i);
       await user.type(titleInput, 'Test Journal');

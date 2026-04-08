@@ -31,6 +31,7 @@ def project_calendar_info_to_linked_calendar(
         end_time=calendar_info.end_time,
         is_all_day=calendar_info.is_all_day,
         location=calendar_info.location,
+        timezone=calendar_info.timezone,
         sync_invitees=calendar_info.sync_invitees,
         event_state=calendar_info.event_state,
         event_start_date=calendar_info.event_start_date,
@@ -77,6 +78,7 @@ class SqlCalendarInfoRepository(CalendarInfoRepository):
             end_time=row.end_time,
             is_all_day=row.is_all_day,
             location=row.location,
+            timezone=getattr(row, "timezone", None),
             sync_invitees=row.sync_invitees,
             event_state=EventState(row.event_state),
             event_start_date=start_date,
@@ -90,8 +92,8 @@ class SqlCalendarInfoRepository(CalendarInfoRepository):
         query = text(
             """
             SELECT jci.journal_id, jci.calendar_id, jci.start_time, jci.end_time,
-                   jci.is_all_day, jci.location, jci.sync_invitees, jci.event_state,
-                   jci.created_at, jci.updated_at,
+                   jci.is_all_day, jci.location, jci.timezone, jci.sync_invitees,
+                   jci.event_state, jci.created_at, jci.updated_at,
                    j.event_date_range_start, j.event_date_range_end
             FROM journal_calendar_info jci
             INNER JOIN journals j ON j.id = jci.journal_id
@@ -134,14 +136,14 @@ class SqlCalendarInfoRepository(CalendarInfoRepository):
             """
             INSERT INTO journal_calendar_info (
                 journal_id, calendar_id, start_time, end_time,
-                is_all_day, location, sync_invitees, event_state
+                is_all_day, location, timezone, sync_invitees, event_state
             )
             VALUES (
                 :journal_id, :calendar_id, :start_time, :end_time,
-                :is_all_day, :location, :sync_invitees, :event_state
+                :is_all_day, :location, :timezone, :sync_invitees, :event_state
             )
             RETURNING journal_id, calendar_id, start_time, end_time,
-                      is_all_day, location, sync_invitees, event_state,
+                      is_all_day, location, timezone, sync_invitees, event_state,
                       created_at, updated_at
             """
         )
@@ -154,6 +156,7 @@ class SqlCalendarInfoRepository(CalendarInfoRepository):
                 "end_time": calendar_info.end_time,
                 "is_all_day": calendar_info.is_all_day,
                 "location": calendar_info.location,
+                "timezone": calendar_info.timezone,
                 "sync_invitees": calendar_info.sync_invitees,
                 "event_state": calendar_info.event_state.value,
             },
@@ -175,12 +178,13 @@ class SqlCalendarInfoRepository(CalendarInfoRepository):
                 end_time = :end_time,
                 is_all_day = :is_all_day,
                 location = :location,
+                timezone = :timezone,
                 sync_invitees = :sync_invitees,
                 event_state = :event_state,
                 updated_at = now()
             WHERE journal_id = :journal_id
             RETURNING journal_id, calendar_id, start_time, end_time,
-                      is_all_day, location, sync_invitees, event_state,
+                      is_all_day, location, timezone, sync_invitees, event_state,
                       created_at, updated_at
             """
         )
@@ -193,6 +197,7 @@ class SqlCalendarInfoRepository(CalendarInfoRepository):
                 "end_time": calendar_info.end_time,
                 "is_all_day": calendar_info.is_all_day,
                 "location": calendar_info.location,
+                "timezone": calendar_info.timezone,
                 "sync_invitees": calendar_info.sync_invitees,
                 "event_state": calendar_info.event_state.value,
             },
@@ -220,8 +225,8 @@ class SqlCalendarInfoRepository(CalendarInfoRepository):
         primary_query = text(
             """
             SELECT jci.journal_id, jci.calendar_id, jci.start_time, jci.end_time,
-                   jci.is_all_day, jci.location, jci.sync_invitees, jci.event_state,
-                   jci.created_at, jci.updated_at,
+                   jci.is_all_day, jci.location, jci.timezone, jci.sync_invitees,
+                   jci.event_state, jci.created_at, jci.updated_at,
                    j.event_date_range_start, j.event_date_range_end
             FROM journal_calendar_info jci
             INNER JOIN journals j ON j.id = jci.journal_id
@@ -239,8 +244,8 @@ class SqlCalendarInfoRepository(CalendarInfoRepository):
         linked_query = text(
             """
             SELECT jci.journal_id, jci.calendar_id, jci.start_time, jci.end_time,
-                   jci.is_all_day, jci.location, jci.sync_invitees, jci.event_state,
-                   jci.created_at, jci.updated_at,
+                   jci.is_all_day, jci.location, jci.timezone, jci.sync_invitees,
+                   jci.event_state, jci.created_at, jci.updated_at,
                    j.event_date_range_start, j.event_date_range_end,
                    jeel.calendar_id AS linked_calendar_id
             FROM journal_external_event_links jeel

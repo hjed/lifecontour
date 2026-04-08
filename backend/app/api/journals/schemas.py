@@ -50,6 +50,10 @@ class CalendarInfoDataSchema(BaseModel):
     )
     is_all_day: bool = Field(default=False, description="Whether event is all-day")
     location: str | None = Field(default=None, description="Event location")
+    timezone: str | None = Field(
+        default=None,
+        description="IANA timezone string (e.g. 'Australia/Sydney')",
+    )
     sync_invitees: bool = Field(
         default=False, description="Whether to sync invitees with calendar"
     )

@@ -90,6 +90,9 @@ class GoogleEventTransformer:
 
         event_state = self._resolve_event_state(google_event, self_email)
 
+        # Extract timezone from Google event (prefer start timezone)
+        event_timezone = self._extract_timezone(google_event)
+
         calendar_info = CalendarInfo(
             journal_id=None,
             calendar_id=calendar_id,
@@ -97,12 +100,25 @@ class GoogleEventTransformer:
             end_time=end_time,
             is_all_day=is_all_day,
             location=google_event.location,
+            timezone=event_timezone,
             event_state=event_state,
             event_start_date=start_dt.date(),
             event_end_date=end_dt.date(),
         )
 
         return journal, calendar_info
+
+    def _extract_timezone(self, google_event: GoogleEvent) -> str | None:
+        """Extract IANA timezone from Google event start/end.
+
+        Returns the timezone string from start.timeZone (preferred) or end.timeZone.
+        Returns None for all-day events or when no timezone is specified.
+        """
+        if google_event.start and google_event.start.time_zone:
+            return google_event.start.time_zone
+        if google_event.end and google_event.end.time_zone:
+            return google_event.end.time_zone
+        return None
 
     def _resolve_event_state(
         self,
@@ -222,12 +238,20 @@ class GoogleEventTransformer:
 
             # Format datetime as ISO 8601. Add 'Z' manually if UTC, else Google handles offsets.
             # Our backend expects UTC.
-            payload["start"] = {
+            start_payload: dict[str, str] = {
                 "dateTime": start_dt.isoformat().replace(UTC_OFFSET_SUFFIX, "Z")
             }
-            payload["end"] = {
+            end_payload: dict[str, str] = {
                 "dateTime": end_dt.isoformat().replace(UTC_OFFSET_SUFFIX, "Z")
             }
+
+            # Include timezone if set on the calendar info
+            if calendar_info.timezone:
+                start_payload["timeZone"] = calendar_info.timezone
+                end_payload["timeZone"] = calendar_info.timezone
+
+            payload["start"] = start_payload
+            payload["end"] = end_payload
 
         if calendar_info.sync_invitees and invitee_emails:
             payload["attendees"] = [{"email": email} for email in invitee_emails]

@@ -19,6 +19,7 @@ MAX_GOOGLE_CALENDAR_ID_LENGTH: int = 255
 
 # CalendarInfo constants (EVENT type)
 MAX_LOCATION_LENGTH: int = 500
+MAX_TIMEZONE_LENGTH: int = 50
 
 # MoodData constants (MOOD_RATING type)
 MIN_MOOD_VALUE: int = 1

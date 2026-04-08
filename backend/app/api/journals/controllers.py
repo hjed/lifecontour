@@ -1449,6 +1449,7 @@ async def _process_journal_type_data(
                 end_time=end_time,
                 is_all_day=event_data.get("is_all_day", False),
                 location=event_data.get("location"),
+                timezone=event_data.get("timezone"),
                 sync_invitees=event_data.get("sync_invitees", False),
             )
             await calendar_info_repo.save(calendar_info)

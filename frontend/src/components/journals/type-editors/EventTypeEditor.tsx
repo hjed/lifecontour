@@ -8,7 +8,7 @@
 'use client';
 
 import { useMemo } from 'react';
-import { Calendar as CalendarIcon, MapPin, Clock } from 'lucide-react';
+import { Calendar as CalendarIcon, MapPin, Clock, Globe } from 'lucide-react';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -16,6 +16,7 @@ import { cn } from '@/lib/utils';
 import type { CalendarInfoData } from '@/types/journals';
 import { useTypeEditorState } from './useTypeEditorState';
 import { TypeEditorActions } from './TypeEditorActions';
+import { getDefaultTimezone } from '@/components/settings/TimezoneSettings';
 
 interface EventTypeEditorProps {
   readonly journalId?: string;
@@ -62,7 +63,13 @@ export function EventTypeEditor({
   createMode = false,
   onChange,
 }: EventTypeEditorProps) {
-  const initialData = useMemo(() => data ?? DEFAULT_DATA, [data]);
+  const initialData = useMemo(() => {
+    if (data) return data;
+    // In create mode, default timezone to user preference
+    return createMode
+      ? { ...DEFAULT_DATA, timezone: getDefaultTimezone() }
+      : DEFAULT_DATA;
+  }, [data, createMode]);
 
   const {
     isEditing,
@@ -188,6 +195,37 @@ export function EventTypeEditor({
           data-testid='location-input'
         />
       </div>
+
+      {/* Timezone */}
+      {!editData.is_all_day && (
+        <div className='space-y-2'>
+          <Label htmlFor='timezone' className='flex items-center gap-2'>
+            <Globe className='h-4 w-4' aria-hidden='true' />
+            Timezone
+          </Label>
+          <Input
+            id='timezone'
+            value={editData.timezone || ''}
+            onChange={e =>
+              setEditData(previous => ({
+                ...previous,
+                timezone: e.target.value || null,
+              }))
+            }
+            placeholder={Intl.DateTimeFormat().resolvedOptions().timeZone}
+            disabled={!isEditing}
+            data-testid='timezone-input'
+          />
+          {editData.timezone &&
+            editData.timezone !==
+              Intl.DateTimeFormat().resolvedOptions().timeZone && (
+              <p className='text-muted-foreground text-xs'>
+                Your local timezone:{' '}
+                {Intl.DateTimeFormat().resolvedOptions().timeZone}
+              </p>
+            )}
+        </div>
+      )}
 
       {/* Sync invitees */}
       <div className='flex items-center space-x-2'>

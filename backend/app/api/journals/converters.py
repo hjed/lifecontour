@@ -313,6 +313,7 @@ class TypeDataConverter:
             end_time=calendar_info.end_time,
             is_all_day=calendar_info.is_all_day,
             location=calendar_info.location,
+            timezone=calendar_info.timezone,
             sync_invitees=calendar_info.sync_invitees,
             event_state=calendar_info.event_state.value,
         ).model_dump(exclude_none=True)

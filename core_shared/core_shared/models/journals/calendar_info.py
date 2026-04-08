@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 from datetime import date, datetime, time
 from uuid import UUID
 
-from .constants import MAX_LOCATION_LENGTH
+from .constants import MAX_LOCATION_LENGTH, MAX_TIMEZONE_LENGTH
 from .event_state import EventState
 from .exceptions import CalendarInfoValidationError
 
@@ -32,6 +32,7 @@ class CalendarInfo:
         end_time: Optional end time (null for all-day events)
         is_all_day: Whether this is an all-day event
         location: Optional location string
+        timezone: Optional IANA timezone string (e.g. 'Australia/Sydney')
         sync_invitees: Whether to sync invitees to Google Calendar
         event_state: Event participation state (invited/tentative/confirmed/cancelled)
         event_start_date: Optional event start date for date-aware time validation
@@ -48,6 +49,7 @@ class CalendarInfo:
     end_time: time | None = None
     is_all_day: bool = False
     location: str | None = None
+    timezone: str | None = None
     sync_invitees: bool = False
     event_state: EventState = EventState.CONFIRMED
     event_start_date: date | None = field(default=None, repr=False)
@@ -61,6 +63,7 @@ class CalendarInfo:
         self._validate_calendar_id()
         self._validate_times()
         self._validate_location()
+        self._validate_timezone()
         self._validate_event_state()
 
     def _validate_journal_id(self) -> None:
@@ -140,4 +143,22 @@ class CalendarInfo:
                     "event_state",
                     f"Invalid event state: {self.event_state}. "
                     f"Must be one of: {', '.join(e.value for e in EventState)}",
+                ) from None
+
+    def _validate_timezone(self) -> None:
+        """Validate timezone is a valid IANA timezone string."""
+        if self.timezone is not None:
+            if len(self.timezone) > MAX_TIMEZONE_LENGTH:
+                raise CalendarInfoValidationError(
+                    "timezone",
+                    f"Timezone cannot exceed {MAX_TIMEZONE_LENGTH} characters",
+                )
+            from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+            try:
+                ZoneInfo(self.timezone)
+            except (ZoneInfoNotFoundError, KeyError):
+                raise CalendarInfoValidationError(
+                    "timezone",
+                    f"Invalid IANA timezone: {self.timezone}",
                 ) from None
