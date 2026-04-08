@@ -702,11 +702,11 @@ describe('Journals API', () => {
     it('should fetch the next chunk when scrolling down (PAST)', async () => {
       const firstPage = createMockJournalListResponse(
         [createMockJournal('1')],
-        { total: 1, page: 1, total_pages: 1, per_page: 500 }
+        { total: 1, page: 1, total_pages: 1, per_page: 100 }
       );
       const secondPage = createMockJournalListResponse(
         [createMockJournal('2')],
-        { total: 1, page: 1, total_pages: 1, per_page: 500 }
+        { total: 1, page: 1, total_pages: 1, per_page: 100 }
       );
 
       mockFetch.mockImplementation(async (...args) => {
@@ -735,7 +735,7 @@ describe('Journals API', () => {
 
       // Initial fetch should be: April 7 to April 13
       expect(mockFetch).toHaveBeenCalledWith(
-        '/api/journals?start_date=2026-04-07&end_date=2026-04-13&limit=500',
+        '/api/journals?start_date=2026-04-07&end_date=2026-04-13&limit=100',
         expect.any(Object)
       );
 
@@ -746,7 +746,7 @@ describe('Journals API', () => {
       // Next fetch (PAST) should be: March 31 to April 06
       await waitFor(() => {
         expect(mockFetch).toHaveBeenCalledWith(
-          '/api/journals?start_date=2026-03-31&end_date=2026-04-06&limit=500',
+          '/api/journals?start_date=2026-03-31&end_date=2026-04-06&limit=100',
           expect.any(Object)
         );
       });
@@ -755,11 +755,11 @@ describe('Journals API', () => {
     it('should fetch the previous chunk when scrolling up (FUTURE)', async () => {
       const firstPage = createMockJournalListResponse(
         [createMockJournal('1')],
-        { total: 1, page: 1, total_pages: 1, per_page: 500 }
+        { total: 1, page: 1, total_pages: 1, per_page: 100 }
       );
       const previousPage = createMockJournalListResponse(
         [createMockJournal('2')],
-        { total: 1, page: 1, total_pages: 1, per_page: 500 }
+        { total: 1, page: 1, total_pages: 1, per_page: 100 }
       );
 
       mockFetch.mockImplementation(async (...args) => {
@@ -793,7 +793,7 @@ describe('Journals API', () => {
       // Previous fetch (FUTURE) should be: April 14 to April 20
       await waitFor(() => {
         expect(mockFetch).toHaveBeenCalledWith(
-          '/api/journals?start_date=2026-04-14&end_date=2026-04-20&limit=500',
+          '/api/journals?start_date=2026-04-14&end_date=2026-04-20&limit=100',
           expect.any(Object)
         );
       });

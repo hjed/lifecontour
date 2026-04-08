@@ -760,9 +760,9 @@ export function useInfiniteJournals(
         ...filters,
         date_from: pageParam.date_from,
         date_to: pageParam.date_to,
-        // The API safely supports up to limit=1000. 500 is chosen to cover 99.9% of dense 7-day chunks
+        // The API safely supports up to limit=100. 100 is chosen as the max permissible value to cover dense 7-day chunks
         // without risking dropped items or invoking REST offsets over chunk edges.
-        limit: 500,
+        limit: 100,
         page: undefined, // Skip internal REST offset pagination
       }),
     initialPageParam,
