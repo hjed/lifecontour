@@ -9,6 +9,27 @@
 'use client';
 
 import { useCallback, useRef, useState } from 'react';
+
+/**
+ * Format a Date as a local YYYY-MM-DD string for HTML date inputs.
+ * Unlike toISOString().split('T')[0], this avoids UTC conversion
+ * which can shift the date across timezone boundaries.
+ */
+function formatLocalDate(date: Date): string {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
+/**
+ * Parse a YYYY-MM-DD string into a local Date at midnight.
+ * Using `new Date('YYYY-MM-DD')` parses as UTC; this parses as local time.
+ */
+function parseLocalDate(dateStr: string): Date {
+  const [y, m, d] = dateStr.split('-').map(Number);
+  return new Date(y, m - 1, d);
+}
 import { useRouter } from 'next/navigation';
 import type { Route } from 'next';
 import {
@@ -38,6 +59,7 @@ import {
   FormMessage,
 } from '@/components/ui/form';
 import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Checkbox } from '@/components/ui/checkbox';
 import { useCreateJournal, useJournal } from '@/lib/api/journals';
@@ -633,14 +655,18 @@ export function JournalCreateForm({
               <FormControl>
                 <div className='flex items-center gap-4'>
                   <div className='flex w-full flex-col gap-2'>
-                    <span className='text-muted-foreground text-xs'>
+                    <Label
+                      htmlFor='date-range-start'
+                      className='text-muted-foreground text-xs'
+                    >
                       Start Date
-                    </span>
+                    </Label>
                     <Input
+                      id='date-range-start'
                       type='date'
-                      value={field.value.from.toISOString().split('T')[0]}
+                      value={formatLocalDate(field.value.from)}
                       onChange={e => {
-                        const newDate = new Date(e.target.value);
+                        const newDate = parseLocalDate(e.target.value);
                         // If 'to' is not set, or is the same as the old 'from', auto-advance 'to' to match the new 'from'
                         const autoUpdateTo =
                           !field.value.to ||
@@ -656,22 +682,24 @@ export function JournalCreateForm({
                     />
                   </div>
                   <div className='flex w-full flex-col gap-2'>
-                    <span className='text-muted-foreground text-xs'>
+                    <Label
+                      htmlFor='date-range-end'
+                      className='text-muted-foreground text-xs'
+                    >
                       End Date
-                    </span>
+                    </Label>
                     <Input
+                      id='date-range-end'
                       type='date'
-                      value={
-                        (field.value.to || field.value.from)
-                          .toISOString()
-                          .split('T')[0]
-                      }
+                      value={formatLocalDate(
+                        field.value.to || field.value.from
+                      )}
                       onChange={e => {
-                        const newDate = new Date(e.target.value);
+                        const newDate = parseLocalDate(e.target.value);
                         field.onChange({ ...field.value, to: newDate });
                       }}
                       className='w-full'
-                      min={field.value.from.toISOString().split('T')[0]} // Native validation fallback
+                      min={formatLocalDate(field.value.from)}
                     />
                   </div>
                 </div>

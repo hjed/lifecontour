@@ -608,6 +608,29 @@ class TestGoogleEventTransformerTimezone:
         _, calendar_info = result
         assert calendar_info.timezone is None
 
+    def test_inbound_all_day_event_ignores_timezone_when_present(self) -> None:
+        """All-day events ignore start/end timeZone values when date is used."""
+        google_event = GoogleEvent.model_validate(
+            {
+                "id": "tz_event_allday_with_timezone",
+                "summary": "Holiday",
+                "start": {
+                    "date": "2023-12-25",
+                    "timeZone": "America/New_York",
+                },
+                "end": {
+                    "date": "2023-12-26",
+                    "timeZone": "America/New_York",
+                },
+                "status": "confirmed",
+            }
+        )
+        transformer = GoogleEventTransformer()
+        result = transformer.transform_event(google_event, "user1", uuid.uuid4())
+        assert result is not None
+        _, calendar_info = result
+        assert calendar_info.timezone is None
+
     def test_outbound_payload_includes_timezone_when_set(self) -> None:
         """Outbound Google payload includes timeZone on start/end when set."""
         transformer = GoogleEventTransformer()

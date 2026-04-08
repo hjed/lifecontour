@@ -490,15 +490,6 @@ class JournalMergeService:
                     if "end_time" not in update_params:
                         updates.append("end_time = :end_time")
                     update_params["end_time"] = None
-            else:
-                # If it's timed but times are missing, force to all_day
-                if (
-                    merged_state.get("start_time") is None
-                    and merged_state.get("end_time") is None
-                ):
-                    if "is_all_day" not in update_params:
-                        updates.append("is_all_day = :is_all_day")
-                    update_params["is_all_day"] = True
 
         if updates:
             # Deduplicate just in case

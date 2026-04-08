@@ -7,7 +7,7 @@
 
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { Globe } from 'lucide-react';
 import {
   Card,
@@ -38,26 +38,34 @@ export function TimezoneSettings() {
   const browserTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
   const [timezone, setTimezone] = useState(browserTimezone);
   const [saved, setSaved] = useState(false);
+  const savedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     const stored = localStorage.getItem(TIMEZONE_STORAGE_KEY);
     if (stored) {
       setTimezone(stored);
     }
+    return () => {
+      if (savedTimerRef.current) clearTimeout(savedTimerRef.current);
+    };
   }, []);
 
-  const handleSave = () => {
-    localStorage.setItem(TIMEZONE_STORAGE_KEY, timezone);
+  const flashSaved = useCallback(() => {
     setSaved(true);
-    setTimeout(() => setSaved(false), 2000);
-  };
+    if (savedTimerRef.current) clearTimeout(savedTimerRef.current);
+    savedTimerRef.current = setTimeout(() => setSaved(false), 2000);
+  }, []);
 
-  const handleReset = () => {
+  const handleSave = useCallback(() => {
+    localStorage.setItem(TIMEZONE_STORAGE_KEY, timezone);
+    flashSaved();
+  }, [timezone, flashSaved]);
+
+  const handleReset = useCallback(() => {
     localStorage.removeItem(TIMEZONE_STORAGE_KEY);
     setTimezone(browserTimezone);
-    setSaved(true);
-    setTimeout(() => setSaved(false), 2000);
-  };
+    flashSaved();
+  }, [browserTimezone, flashSaved]);
 
   return (
     <Card data-testid='timezone-settings'>

@@ -112,8 +112,11 @@ class GoogleEventTransformer:
         """Extract IANA timezone from Google event start/end.
 
         Returns the timezone string from start.timeZone (preferred) or end.timeZone.
-        Returns None for all-day events or when no timezone is specified.
+        Returns None for all-day events (date-only) or when no timezone is specified.
         """
+        # All-day events use date fields, not dateTime — timezone is not meaningful
+        if google_event.start and google_event.start.date:
+            return None
         if google_event.start and google_event.start.time_zone:
             return google_event.start.time_zone
         if google_event.end and google_event.end.time_zone:
