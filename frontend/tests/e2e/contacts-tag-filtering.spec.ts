@@ -135,7 +135,7 @@ test.describe('Tag Filtering via Main Contacts List', () => {
       },
       headers: { 'Content-Type': 'application/json' },
     });
-    expect(childResp.ok()).toBe(true);
+    expect(childResp.ok(), await childResp.text()).toBe(true);
     const childData = await childResp.json();
     const childId = childData.data.id;
 
