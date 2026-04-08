@@ -115,9 +115,10 @@ class TagRemoved(DomainEvent):
         tag_name: str,
         transaction: AsyncConnection | None = None,
     ):
+        now = datetime.now()
         super().__init__(
-            event_id=f"tag_removed_{contact_id}_{tag_id}_{datetime.now().isoformat()}",
-            occurred_at=datetime.now(),
+            event_id=f"tag_removed_{contact_id}_{tag_id}_{now.isoformat()}",
+            occurred_at=now,
             aggregate_id=contact_id,
             event_type="TagRemoved",
             event_data={
@@ -140,9 +141,10 @@ class TagUpdated(DomainEvent):
         changed_fields: dict[str, Any],
         transaction: AsyncConnection | None = None,
     ):
+        now = datetime.now()
         super().__init__(
-            event_id=f"tag_updated_{tag_id}_{datetime.now().isoformat()}",
-            occurred_at=datetime.now(),
+            event_id=f"tag_updated_{tag_id}_{now.isoformat()}",
+            occurred_at=now,
             aggregate_id=tag_id,  # Use tag_id as aggregate_id since Tag is the root here
             event_type="TagUpdated",
             event_data={
@@ -164,9 +166,10 @@ class TagDeleted(DomainEvent):
         tag_name: str,
         transaction: AsyncConnection | None = None,
     ):
+        now = datetime.now()
         super().__init__(
-            event_id=f"tag_deleted_{tag_id}_{datetime.now().isoformat()}",
-            occurred_at=datetime.now(),
+            event_id=f"tag_deleted_{tag_id}_{now.isoformat()}",
+            occurred_at=now,
             aggregate_id=tag_id,
             event_type="TagDeleted",
             event_data={

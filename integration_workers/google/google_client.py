@@ -529,7 +529,7 @@ class GoogleAPIClient:
                 error=str(e),
                 status_code=e.resp.status,
             )
-            raise e
+            raise
 
     async def delete_contact_group(self, resource_name: str) -> None:
         """
@@ -574,7 +574,7 @@ class GoogleAPIClient:
                 error=str(e),
                 status_code=e.resp.status,
             )
-            raise e
+            raise
 
     # Calendar API Operations
 

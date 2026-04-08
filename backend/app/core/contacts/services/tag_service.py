@@ -85,7 +85,10 @@ class TagService:
             tag, tag_id, parent_id, set_parent_null, transaction, changed_fields
         )
 
-        tag = await self.tag_repo.save(tag)
+        if changed_fields:
+            # Re-trigger domain validation
+            tag.__post_init__()
+            tag = await self.tag_repo.save(tag)
 
         new_path_tags = await self.tag_hierarchy_service.get_tag_path(tag_id)
         new_path_str = _compute_path_string(new_path_tags, tag)

@@ -138,6 +138,12 @@ async def update_tag(
     Supports clearing parent_id by providing explicit None.
     """
     base_url = get_request_base_url(request)
+    # Validate resource type
+    if tag_request.data.type and tag_request.data.type != "tags":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid resource type, expected 'tags'",
+        )
 
     # Validate that path ID matches body ID if body ID is provided
     body_id = tag_request.data.id
@@ -162,15 +168,21 @@ async def update_tag(
     if "parent_id" in attrs.model_fields_set and attrs.parent_id is None:
         set_parent_null = True
 
-    updated_tag = await tag_service.update_tag(
-        tag_id=tag_id,
-        transaction=connection,
-        name=attrs.name,
-        color=attrs.color,
-        description=attrs.description,
-        parent_id=attrs.parent_id,
-        set_parent_null=set_parent_null,
-    )
+    try:
+        updated_tag = await tag_service.update_tag(
+            tag_id=tag_id,
+            transaction=connection,
+            name=attrs.name,
+            color=attrs.color,
+            description=attrs.description,
+            parent_id=attrs.parent_id,
+            set_parent_null=set_parent_null,
+        )
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        ) from e
 
     tag_resource = TagConverter.to_resource(updated_tag, base_url)
 
