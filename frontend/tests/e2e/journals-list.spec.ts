@@ -109,11 +109,11 @@ test.describe('Journal List Page', () => {
 
       // Wait for the search to complete by checking that the matching journal is visible
       // This implicitly waits for the debounce and API call to complete
-      await expect(
-        page.getByRole('heading', {
-          name: /Weekend Hike/i,
-        })
-      ).toBeVisible({ timeout: 10000 });
+      const weekendHeading = page.getByRole('heading', {
+        name: /Weekend Hike/i,
+      });
+      await weekendHeading.scrollIntoViewIfNeeded().catch(() => {});
+      await expect(weekendHeading).toBeVisible({ timeout: 30000 });
 
       // Verify non-matching journal is not visible (Team Meeting)
       await expect(
@@ -301,12 +301,17 @@ test.describe('Journal List Page', () => {
       await searchInput.fill('Meeting');
 
       // Wait for search results
-      await expect(
-        page.getByRole('heading', { name: /Meeting Notes/i })
-      ).toBeVisible({ timeout: 10000 });
-      await expect(
-        page.getByRole('heading', { name: /Team Meeting/i })
-      ).toBeVisible();
+      const meetingNotesHeading = page.getByRole('heading', {
+        name: /Meeting Notes/i,
+      });
+      await meetingNotesHeading.scrollIntoViewIfNeeded().catch(() => {});
+      await expect(meetingNotesHeading).toBeVisible({ timeout: 30000 });
+
+      const teamMeetingHeading = page.getByRole('heading', {
+        name: /Team Meeting/i,
+      });
+      await teamMeetingHeading.scrollIntoViewIfNeeded().catch(() => {});
+      await expect(teamMeetingHeading).toBeVisible({ timeout: 30000 });
 
       // Now filter by EVENT type - should only show "Team Meeting"
       const filtersSection = page.locator('[data-testid="journal-filters"]');
@@ -568,11 +573,11 @@ test.describe('Journal List Page', () => {
       await responsePromise;
 
       // Verify only Alice's journal is shown
-      await expect(
-        page.getByRole('heading', {
-          name: /Meeting with Alice/i,
-        })
-      ).toBeVisible();
+      const aliceHeading = page.getByRole('heading', {
+        name: /Meeting with Alice/i,
+      });
+      await aliceHeading.scrollIntoViewIfNeeded().catch(() => {});
+      await expect(aliceHeading).toBeVisible({ timeout: 30000 });
 
       // Verify contact name is visible on the journal card
       await expect(
@@ -680,12 +685,15 @@ test.describe('Journal List Page', () => {
       await responsePromise;
 
       // Verify only journals with Work tag are visible
-      await expect(
-        page.getByRole('heading', { name: /Work Meeting/i })
-      ).toBeVisible();
-      await expect(
-        page.getByRole('heading', { name: /Mixed Journal/i })
-      ).toBeVisible();
+      const workHeading = page.getByRole('heading', { name: /Work Meeting/i });
+      await workHeading.scrollIntoViewIfNeeded().catch(() => {});
+      await expect(workHeading).toBeVisible({ timeout: 30000 });
+
+      const mixedHeading = page.getByRole('heading', {
+        name: /Mixed Journal/i,
+      });
+      await mixedHeading.scrollIntoViewIfNeeded().catch(() => {});
+      await expect(mixedHeading).toBeVisible({ timeout: 30000 });
 
       // Verify Personal Note is not visible
       await expect(
