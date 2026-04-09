@@ -140,6 +140,9 @@ export function DayGroupedJournalList({
     collapseEmpty: collapseEmptyDays,
   });
 
+  const isTotallyEmpty =
+    journals.length === 0 && !isLoadingNext && !isLoadingPrevious;
+
   return (
     <div className={`space-y-6 ${className}`}>
       {/* Top Sentinel (Future) */}
@@ -153,7 +156,7 @@ export function DayGroupedJournalList({
         )}
       </div>
 
-      {dayGroups.length === 0 && !isLoadingNext && !isLoadingPrevious && (
+      {isTotallyEmpty && (
         <div className='py-8'>
           {emptyState || (
             <div className='text-muted-foreground text-center'>
