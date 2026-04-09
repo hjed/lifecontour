@@ -105,10 +105,6 @@ export function DayGroupedJournalList({
     return () => observer.disconnect();
   }, []);
 
-  if (journals.length === 0 && emptyState) {
-    return <>{emptyState}</>;
-  }
-
   // Derive date bounds
   let effectiveStartDate = dateBounds?.start;
   let effectiveEndDate = dateBounds?.end;

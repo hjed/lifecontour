@@ -458,10 +458,15 @@ test.describe('Journal List Page', () => {
       const startGrid = page.getByRole('grid', { name: startMonthName });
       // Navigate to the correct month if needed
       while (!(await startGrid.isVisible())) {
+        const currentGrids = await page.getByRole('grid').allInnerTexts();
         await page
           .getByRole('button', { name: 'Go to the Previous Month' })
           .click();
-        await page.waitForTimeout(200);
+
+        await expect(async () => {
+          const newGrids = await page.getByRole('grid').allInnerTexts();
+          expect(newGrids).not.toEqual(currentGrids);
+        }).toPass({ timeout: 5000 });
       }
 
       const startLabel = `${rangeStart.getDate()} ${monthNames[rangeStart.getMonth()]} ${rangeStart.getFullYear()}`;
@@ -481,10 +486,15 @@ test.describe('Journal List Page', () => {
       const endMonthName = `${monthNames[rangeEnd.getMonth()]} ${rangeEnd.getFullYear()}`;
       const endGrid = page.getByRole('grid', { name: endMonthName });
       while (!(await endGrid.isVisible())) {
+        const currentGrids = await page.getByRole('grid').allInnerTexts();
         await page
           .getByRole('button', { name: 'Go to the Next Month' })
           .click();
-        await page.waitForTimeout(200);
+
+        await expect(async () => {
+          const newGrids = await page.getByRole('grid').allInnerTexts();
+          expect(newGrids).not.toEqual(currentGrids);
+        }).toPass({ timeout: 5000 });
       }
 
       const endLabel = `${rangeEnd.getDate()} ${monthNames[rangeEnd.getMonth()]} ${rangeEnd.getFullYear()}`;
@@ -918,10 +928,15 @@ test.describe('Journal List Page', () => {
         name: rangeStartMonthName,
       });
       while (!(await rangeStartGrid.isVisible())) {
+        const currentGrids = await page.getByRole('grid').allInnerTexts();
         await page
           .getByRole('button', { name: 'Go to the Previous Month' })
           .click();
-        await page.waitForTimeout(200);
+
+        await expect(async () => {
+          const newGrids = await page.getByRole('grid').allInnerTexts();
+          expect(newGrids).not.toEqual(currentGrids);
+        }).toPass({ timeout: 5000 });
       }
 
       const startLabel = `${day4.getDate()} ${monthNames[day4.getMonth()]} ${day4.getFullYear()}`;
@@ -940,10 +955,15 @@ test.describe('Journal List Page', () => {
         name: rangeEndMonthName,
       });
       while (!(await rangeEndGrid.isVisible())) {
+        const currentGrids = await page.getByRole('grid').allInnerTexts();
         await page
           .getByRole('button', { name: 'Go to the Next Month' })
           .click();
-        await page.waitForTimeout(200);
+
+        await expect(async () => {
+          const newGrids = await page.getByRole('grid').allInnerTexts();
+          expect(newGrids).not.toEqual(currentGrids);
+        }).toPass({ timeout: 5000 });
       }
 
       const endLabel = `${today.getDate()} ${monthNames[today.getMonth()]} ${today.getFullYear()}`;

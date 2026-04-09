@@ -767,8 +767,8 @@ export function useInfiniteJournals(
     queryFn: ({ pageParam }) =>
       fetchJournals({
         ...filters,
-        date_from: hasUserDateFilter ? filters.date_from : pageParam.date_from,
-        date_to: hasUserDateFilter ? filters.date_to : pageParam.date_to,
+        date_from: filters.date_from ?? pageParam.date_from,
+        date_to: filters.date_to ?? pageParam.date_to,
         // The API safely supports up to limit=100. 100 is chosen as the max permissible value to cover dense 7-day chunks
         // without risking dropped items or invoking REST offsets over chunk edges.
         limit: 100,
