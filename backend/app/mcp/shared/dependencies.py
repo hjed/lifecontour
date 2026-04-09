@@ -10,7 +10,7 @@ from fastmcp.server.dependencies import get_http_request
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core.contacts.models.repositories import TagRepository
-from app.core.contacts.services import ContactService
+from app.core.contacts.services import ContactRelationshipService, ContactService
 from app.infrastructure.auth.models import SessionUser
 from app.infrastructure.events.outbox_event_publisher import OutboxEventPublisher
 from app.infrastructure.search.search_service import SearchService
@@ -120,3 +120,11 @@ async def get_tag_repository() -> TagRepository:
 async def get_outbox_event_publisher() -> OutboxEventPublisher:
     """Resolve the outbox event publisher for the current MCP request."""
     return cast(OutboxEventPublisher, await _resolve_dependency(OutboxEventPublisher))
+
+
+async def get_contact_relationship_service() -> ContactRelationshipService:
+    """Resolve the contact relationship service for the current MCP request."""
+    return cast(
+        ContactRelationshipService,
+        await _resolve_dependency(ContactRelationshipService),
+    )

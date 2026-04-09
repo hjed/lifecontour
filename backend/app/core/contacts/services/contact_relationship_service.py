@@ -292,11 +292,16 @@ class ContactRelationshipService:
 
         # Set to_contact_name on each relationship
         for rel in relationships:
-            other_id = (
-                rel.to_contact_id
-                if rel.from_contact_id == viewing_contact_id
-                else rel.from_contact_id
-            )
+            if rel.to_contact_id == viewing_contact_id:
+                # The viewing contact is the target of the relationship.
+                # Invert the relationship so the viewer sees it from their perspective
+                other_id = rel.from_contact_id
+                rel.relationship_type = rel.relationship_type.get_inverse_type()
+                # Swap the IDs so it is clearly directional from the viewing contact
+                rel.to_contact_id = other_id
+                rel.from_contact_id = viewing_contact_id
+            else:
+                other_id = rel.to_contact_id
             rel.to_contact_name = contact_names.get(other_id)
 
         return relationships
