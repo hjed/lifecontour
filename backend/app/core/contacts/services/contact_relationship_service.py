@@ -290,18 +290,25 @@ class ContactRelationshipService:
             if contact:
                 contact_names[cid] = contact.get_display_name()
 
+        import copy
+
+        resolved_relationships = []
         # Set to_contact_name on each relationship
         for rel in relationships:
-            if rel.to_contact_id == viewing_contact_id:
+            resolved_rel = copy.copy(rel)
+            if resolved_rel.to_contact_id == viewing_contact_id:
                 # The viewing contact is the target of the relationship.
                 # Invert the relationship so the viewer sees it from their perspective
-                other_id = rel.from_contact_id
-                rel.relationship_type = rel.relationship_type.get_inverse_type()
+                other_id = resolved_rel.from_contact_id
+                resolved_rel.relationship_type = (
+                    resolved_rel.relationship_type.get_inverse_type()
+                )
                 # Swap the IDs so it is clearly directional from the viewing contact
-                rel.to_contact_id = other_id
-                rel.from_contact_id = viewing_contact_id
+                resolved_rel.to_contact_id = other_id
+                resolved_rel.from_contact_id = viewing_contact_id
             else:
-                other_id = rel.to_contact_id
-            rel.to_contact_name = contact_names.get(other_id)
+                other_id = resolved_rel.to_contact_id
+            resolved_rel.to_contact_name = contact_names.get(other_id)
+            resolved_relationships.append(resolved_rel)
 
-        return relationships
+        return resolved_relationships

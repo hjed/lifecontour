@@ -267,7 +267,7 @@ class ContactRelationshipSchema(BaseModel):
     other_contact_id: int = Field(description="ID of the other contact")
     other_contact_name: str = Field(description="Full name of the other contact")
     relationship_type: str = Field(
-        description="Type of relationship (e.g., PARENT, CHILD, FRIEND, COLLEAGUE)"
+        description="Type of relationship (e.g., parent, child, friend, colleague)"
     )
     summary: str = Field(description="AI-friendly summary of this relationship")
 
@@ -292,7 +292,7 @@ class AddContactRelationshipRequest(BaseModel):
     contact_id: int = Field(description="ID of the main contact")
     target_contact_id: int = Field(description="ID of the other contact")
     relationship_type: str = Field(
-        description="Type of relationship (e.g., PARENT, FRIEND)"
+        description="Type of relationship (e.g., parent, friend)"
     )
 
 
@@ -302,3 +302,10 @@ class UpdateContactRelationshipRequest(BaseModel):
     contact_id: int = Field(description="ID of the main contact")
     relationship_id: int = Field(description="ID of the relationship to update")
     relationship_type: str = Field(description="New type of relationship")
+
+
+class ContactActionResponse(BaseModel):
+    """Generic response format for successful non-query actions."""
+
+    status: str = Field(description="Action resolution status (e.g., 'success').")
+    message: str = Field(description="Description of the completed action.")

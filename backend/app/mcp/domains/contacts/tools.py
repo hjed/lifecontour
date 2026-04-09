@@ -32,6 +32,7 @@ from app.core.contacts.services import ContactRelationshipService, ContactServic
 from app.infrastructure.search.search_service import SearchService
 from app.mcp.domains.contacts.schemas import (
     AddContactRelationshipRequest,
+    ContactActionResponse,
     ContactCreateRequest,
     ContactListResponse,
     ContactRelationshipListResponse,
@@ -926,6 +927,15 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
                     f"Relationship with ID {request.relationship_id} not found",
                 )
 
+            # Check that the request.contact_id is a participant in the relationship
+            if (
+                existing_relationship.from_contact_id != request.contact_id
+                and existing_relationship.to_contact_id != request.contact_id
+            ):
+                raise ContactValidationError(
+                    "relationship", "Relationship does not belong to the active contact"
+                )
+
             # If we are updating from the perspective of the 'to_contact' (target),
             # the requested type is from target -> source, so we invert it for canonical storage (source -> target)
             if existing_relationship.to_contact_id == request.contact_id:
@@ -1012,13 +1022,11 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
                 relationship_id=relationship_id,
             )
 
-            return json.dumps(
-                {
-                    "status": "success",
-                    "message": f"Relationship {relationship_id} successfully removed",
-                },
-                indent=2,
+            response = ContactActionResponse(
+                status="success",
+                message=f"Relationship {relationship_id} successfully removed",
             )
+            return MCPResponseBuilder.success_response(response)
 
         except Exception as e:
             logger.error(
