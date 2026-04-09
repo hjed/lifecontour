@@ -12,6 +12,7 @@ import {
   useQueryClient,
 } from '@tanstack/react-query';
 import { toast } from 'sonner';
+import { addDays, subDays, format, parseISO } from 'date-fns';
 import {
   JournalListResponse,
   JournalResponse,
@@ -36,8 +37,10 @@ export const journalKeys = {
   lists: () => [...journalKeys.all, 'list'] as const,
   list: (filters: JournalFilters) => [...journalKeys.lists(), filters] as const,
   infiniteLists: () => [...journalKeys.lists(), 'infinite'] as const,
-  infiniteList: (filters: JournalFilters) =>
-    [...journalKeys.infiniteLists(), filters] as const,
+  infiniteList: (
+    filters: JournalFilters,
+    options?: { chunkDays?: number; anchorDate?: string }
+  ) => [...journalKeys.infiniteLists(), filters, options] as const,
   details: () => [...journalKeys.all, 'detail'] as const,
   detail: (id: string) => [...journalKeys.details(), id] as const,
   search: (query: string) => [...journalKeys.all, 'search', query] as const,
@@ -726,21 +729,84 @@ export function useJournals(
   });
 }
 
+export interface DateChunkPageParam {
+  date_from: string;
+  date_to: string;
+}
+
 export function useInfiniteJournals(
   filters: JournalFilters = {},
-  options: { enabled?: boolean } = {}
+  options: { enabled?: boolean; chunkDays?: number; anchorDate?: string } = {}
 ) {
-  const initialPage = filters.page ?? 1;
+  const { chunkDays = 7 } = options;
+  const anchor = options.anchorDate ? parseISO(options.anchorDate) : new Date();
+
+  // When the user has applied an explicit date-range filter, honour it instead
+  // of the chunk-based window so that the filter actually works.
+  const hasUserDateFilter = Boolean(filters.date_from || filters.date_to);
+
+  // Calculate initial boundary around anchor date
+  // (e.g. for chunkDays=7, it fetches anchor - 3 days to anchor + 3 days)
+  const halfChunk = Math.floor(chunkDays / 2);
+  const initialStartDate = format(subDays(anchor, halfChunk), 'yyyy-MM-dd');
+  const initialEndDate = format(
+    addDays(anchor, chunkDays - 1 - halfChunk),
+    'yyyy-MM-dd'
+  );
+
+  const initialPageParam: DateChunkPageParam = {
+    date_from: filters.date_from ?? initialStartDate,
+    date_to: filters.date_to ?? initialEndDate,
+  };
 
   return useInfiniteQuery({
-    queryKey: journalKeys.infiniteList(getListQueryFilters(filters)),
+    queryKey: journalKeys.infiniteList(getListQueryFilters(filters), {
+      chunkDays: options.chunkDays,
+      anchorDate: options.anchorDate,
+    }),
     queryFn: ({ pageParam }) =>
       fetchJournals({
         ...filters,
-        page: pageParam,
+        date_from: filters.date_from ?? pageParam.date_from,
+        date_to: filters.date_to ?? pageParam.date_to,
+        // The API safely supports up to limit=100. 100 is chosen as the max permissible value to cover dense 7-day chunks
+        // without risking dropped items or invoking REST offsets over chunk edges.
+        limit: 100,
+        page: undefined, // Skip internal REST offset pagination
       }),
-    initialPageParam: initialPage,
-    getNextPageParam: getNextJournalPageParam,
+    initialPageParam,
+    getNextPageParam: (lastPage, allPages, lastPageParam) => {
+      // When the user has an explicit date filter, don't paginate further
+      if (hasUserDateFilter) return undefined;
+      try {
+        // Progressing into the PAST (Scrolling DOWN)
+        const prevEnd = parseISO(lastPageParam.date_from);
+        const newEnd = subDays(prevEnd, 1);
+        const newStart = subDays(newEnd, chunkDays - 1);
+        return {
+          date_from: format(newStart, 'yyyy-MM-dd'),
+          date_to: format(newEnd, 'yyyy-MM-dd'),
+        };
+      } catch {
+        return undefined;
+      }
+    },
+    getPreviousPageParam: (firstPage, allPages, firstPageParam) => {
+      // When the user has an explicit date filter, don't paginate further
+      if (hasUserDateFilter) return undefined;
+      try {
+        // Progressing into the FUTURE (Scrolling UP)
+        const prevStart = parseISO(firstPageParam.date_to);
+        const newStart = addDays(prevStart, 1);
+        const newEnd = addDays(newStart, chunkDays - 1);
+        return {
+          date_from: format(newStart, 'yyyy-MM-dd'),
+          date_to: format(newEnd, 'yyyy-MM-dd'),
+        };
+      } catch {
+        return undefined;
+      }
+    },
     staleTime: 5 * 60 * 1000, // 5 minutes
     enabled: options.enabled,
   });

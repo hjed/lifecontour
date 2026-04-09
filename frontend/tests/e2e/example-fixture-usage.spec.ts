@@ -183,6 +183,36 @@ test.describe('Example: Fixture-Based Testing', () => {
       // Wait for contacts to load
       await expect(page.locator('main, [role="main"]').first()).toBeVisible();
 
+      // Wait for contacts to be indexed in MeiliSearch
+      // The outbox processor runs every 10 seconds, so we poll until contacts are indexed
+      let indexed = false;
+      for (let attempt = 0; attempt < 15 && !indexed; attempt++) {
+        await page.waitForTimeout(1000); // Wait 1 second between attempts
+
+        const response = await page.evaluate(async query => {
+          try {
+            const res = await fetch(
+              `/api/search/contacts?q=${encodeURIComponent(query)}&limit=20&page=1`
+            );
+            if (!res.ok) return { ok: false, count: 0 };
+            const data = await res.json();
+            return { ok: true, count: data.data?.length || 0 };
+          } catch {
+            return { ok: false, count: 0 };
+          }
+        }, contacts[0].firstName);
+
+        if (response.ok && response.count > 0) {
+          indexed = true;
+        }
+      }
+
+      if (!indexed) {
+        throw new Error(
+          'Contacts were not indexed in MeiliSearch within 15 seconds'
+        );
+      }
+
       // Use search functionality
       const searchInput = page.locator('[data-testid="search-input"]');
       await searchInput.fill(contacts[0].firstName);

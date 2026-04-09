@@ -307,6 +307,16 @@ test.describe('Login Page - Unauthenticated Users', () => {
       await expect(firstButton).toBeVisible({ timeout: 10000 });
       await expect(firstButton).toBeEnabled();
 
+      // Prevent the actual navigation to avoid 'Target page, context or browser has been closed'
+      // errors when Playwright tears down the context while it's navigating
+      await unauthenticatedPage.route('**/api/auth/login*', route => {
+        route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ url: '/mock-redirect' }),
+        });
+      });
+
       // Set up request tracking BEFORE triggering the action
       const requestPromise = unauthenticatedPage.waitForRequest(
         request => request.url().includes('/api/auth/login'),
