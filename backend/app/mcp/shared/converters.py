@@ -7,9 +7,10 @@ reducing duplication and ensuring consistent response structures.
 
 from typing import Any
 
-from core_shared.models.contacts.entities import Contact
+from core_shared.models.contacts.entities import Contact, ContactRelationship
 
 from app.mcp.domains.contacts.schemas import (
+    ContactRelationshipSchema,
     ContactResponse,
     ContactSearchResult,
     GlobalSearchResponse,
@@ -201,6 +202,40 @@ class ContactConverter:
             summary_parts.append(additional_context)
 
         return ". ".join(summary_parts) + "."
+
+
+class ContactRelationshipConverter:
+    """Converter for ContactRelationship entities to MCP response formats."""
+
+    @staticmethod
+    def to_relationship_response(
+        relationship: ContactRelationship,
+        main_contact_id: int,
+    ) -> ContactRelationshipSchema:
+        """
+        Convert a ContactRelationship entity to an AI-friendly ContactRelationshipSchema.
+        """
+        # Determine the other contact based on perspective
+        if relationship.from_contact_id == main_contact_id:
+            other_id = relationship.to_contact_id
+            other_name_str = relationship.to_contact_name or str(other_id)
+            rel_type = relationship.relationship_type.value
+        else:
+            other_id = relationship.from_contact_id
+            # In inverse perspective, we might not have from_contact_name cached.
+            other_name_str = str(other_id)
+            rel_type = relationship.relationship_type.get_inverse_type().value
+
+        # Build summary
+        summary = f"This contact is a {rel_type} of {other_name_str}."
+
+        return ContactRelationshipSchema(
+            id=relationship.id,  # type: ignore[arg-type]
+            other_contact_id=other_id,
+            other_contact_name=other_name_str,
+            relationship_type=rel_type,
+            summary=summary,
+        )
 
 
 class SearchResponseConverter:

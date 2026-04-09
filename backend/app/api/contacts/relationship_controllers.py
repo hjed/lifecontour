@@ -210,11 +210,17 @@ async def update_contact_relationship(
 
     from core_shared.models.contacts.entities import RelationshipType
 
+    rel_type = RelationshipType(relationship_request.data.attributes.relationship_type)
+
+    # If the editing contact is the 'to_contact', the relationship type sent
+    # by the UI is from the 'to_contact's perspective. We must invert it
+    # back so it is stored correctly from the original 'from_contact's perspective.
+    if existing_relationship.to_contact_id == contact_id:
+        rel_type = rel_type.get_inverse_type()
+
     updated_relationship = await relationship_service.update_relationship(
         relationship_id=relationship_id,
-        relationship_type=RelationshipType(
-            relationship_request.data.attributes.relationship_type
-        ),
+        relationship_type=rel_type,
     )
 
     # Resolve contact name for display consistency

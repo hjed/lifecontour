@@ -22,7 +22,7 @@ from fastmcp import FastMCP
 from fastmcp.client import Client
 from sqlalchemy.ext.asyncio import AsyncConnection
 
-from app.core.contacts.services import ContactService
+from app.core.contacts.services import ContactRelationshipService, ContactService
 from app.infrastructure.search.search_service import SearchService
 from app.mcp.domains.contacts.tools import register_contact_tools
 from tests.fixtures.contact_fixtures import create_basic_contact, create_full_contact
@@ -87,6 +87,21 @@ class ContactTestProvider(Provider):
             address_validation_service=address_validation_service,
             history_service=history_service,
             tag_hierarchy_service=tag_hierarchy_service,
+        )
+
+    @provide(scope=Scope.REQUEST)
+    def get_contact_relationship_service(
+        self, connection: AsyncConnection
+    ) -> "ContactRelationshipService":
+        from app.core.contacts.adapters.sql import (
+            SqlContactRelationshipRepository,
+            SqlContactRepository,
+        )
+        from app.core.contacts.services import ContactRelationshipService
+
+        return ContactRelationshipService(
+            contact_repo=SqlContactRepository(connection),
+            relationship_repo=SqlContactRelationshipRepository(connection),
         )
 
     @provide(scope=Scope.APP)
@@ -698,3 +713,105 @@ class TestContactToolsIntegration:
         payload = extract_mcp_json_payload(response.text)
         assert payload["total_count"] == 2
         assert [tag["name"] for tag in payload["tags"]] == ["colleague", "friend"]
+
+    @pytest.mark.asyncio
+    async def test_contact_relationships_via_mounted_http_session(
+        self,
+        authenticated_lifespan_client,
+        contact_service: ContactService,
+        clean_database,
+    ):
+        """Mounted MCP HTTP calls should resolve and execute relationship tools correctly."""
+        # Create two contacts first using the service
+        from core_shared.models.contacts.entities import Contact
+
+        c1 = await contact_service.create_contact(
+            Contact(first_name="Jane", last_name="Doe"), clean_database
+        )
+        c2 = await contact_service.create_contact(
+            Contact(first_name="John", last_name="Smith"), clean_database
+        )
+
+        async with authenticated_lifespan_client() as authenticated_client:
+            session_id = await initialize_mcp_session(authenticated_client)
+
+            import typing
+
+            async def call_mcp(name: str, args: dict[str, typing.Any]):
+                resp = await authenticated_client.post(
+                    "/mcp-server/mcp",
+                    json={
+                        "jsonrpc": "2.0",
+                        "id": 1,
+                        "method": "tools/call",
+                        "params": {
+                            "name": name,
+                            "arguments": args,
+                        },
+                    },
+                    headers=mcp_headers(session_id),
+                )
+                assert resp.status_code == 200
+                return extract_mcp_json_payload(resp.text)
+
+            # 1. Add relationship
+            add_payload = await call_mcp(
+                "add_contact_relationship",
+                {
+                    "request": {
+                        "contact_id": c1.id,
+                        "target_contact_id": c2.id,
+                        "relationship_type": "parent",
+                    }
+                },
+            )
+            assert add_payload["relationship_type"] == "parent"
+            assert add_payload["other_contact_id"] == c2.id
+
+            # 2. Get relationships for c1
+            get1_payload = await call_mcp(
+                "get_contact_relationships", {"contact_id": c1.id}
+            )
+            assert get1_payload["total_count"] == 1
+            assert get1_payload["relationships"][0]["relationship_type"] == "parent"
+
+            # 3. Get relationships for c2 (should be inverted)
+            get2_payload = await call_mcp(
+                "get_contact_relationships", {"contact_id": c2.id}
+            )
+            assert get2_payload["total_count"] == 1
+            assert get2_payload["relationships"][0]["relationship_type"] == "child"
+
+            rel_id = get2_payload["relationships"][0]["id"]
+
+            # 4. Update relationship
+            update_payload = await call_mcp(
+                "update_contact_relationship",
+                {
+                    "request": {
+                        "contact_id": c2.id,
+                        "relationship_id": rel_id,
+                        "relationship_type": "friend",
+                    }
+                },
+            )
+            assert update_payload["relationship_type"] == "friend"
+
+            # Verify update reflected in c1
+            get1_after_update = await call_mcp(
+                "get_contact_relationships", {"contact_id": c1.id}
+            )
+            assert (
+                get1_after_update["relationships"][0]["relationship_type"] == "friend"
+            )
+
+            # 5. Remove relationship
+            await call_mcp(
+                "remove_contact_relationship",
+                {"contact_id": c1.id, "relationship_id": rel_id},
+            )
+
+            get1_after_remove = await call_mcp(
+                "get_contact_relationships", {"contact_id": c1.id}
+            )
+            assert get1_after_remove["total_count"] == 0

@@ -13,7 +13,9 @@ from core_shared.models.contacts.entities import (
     Contact,
     ContactMethod,
     ContactNote,
+    ContactRelationship,
     MethodType,
+    RelationshipType,
     Tag,
 )
 from core_shared.models.contacts.exceptions import ContactValidationError
@@ -26,22 +28,28 @@ from app.core.contacts.models.exceptions import (
     ContactNotFoundError,
 )
 from app.core.contacts.models.repositories import TagRepository
-from app.core.contacts.services import ContactService
+from app.core.contacts.services import ContactRelationshipService, ContactService
 from app.infrastructure.search.search_service import SearchService
 from app.mcp.domains.contacts.schemas import (
+    AddContactRelationshipRequest,
+    ContactActionResponse,
     ContactCreateRequest,
     ContactListResponse,
+    ContactRelationshipListResponse,
     ContactSearchResponse,
     ContactUpdateRequest,
+    UpdateContactRelationshipRequest,
 )
 from app.mcp.shared.converters import (
     ContactConverter,
+    ContactRelationshipConverter,
     SearchResponseConverter,
     SearchResultProcessor,
 )
 from app.mcp.shared.decorators import mcp_unified_error_handler
 from app.mcp.shared.dependencies import (
     get_async_connection,
+    get_contact_relationship_service,
     get_contact_service,
     get_search_service,
     get_tag_repository,
@@ -751,6 +759,282 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
             raise ContactValidationError(
                 "contact_id", f"Contact with ID {contact_id} not found"
             ) from e
+
+    @mcp.tool
+    @mcp_unified_error_handler("get_contact_relationships", "relationship")
+    async def get_contact_relationships(
+        contact_id: Annotated[
+            int, Field(description="ID of the contact to list relationships for")
+        ],
+        relationship_service: ContactRelationshipService = mcp_depends(
+            get_contact_relationship_service
+        ),
+    ) -> str:
+        """
+        List all relationships for a specific contact.
+
+        Returns a list of all relationships associated with the contact, appropriately mapping the relationship type to match the perspective of the contact being checked.
+
+        Args:
+            contact_id: The ID of the contact to get relationships for
+
+        Returns:
+            JSON string containing the contact's relationships
+        """
+        logger.info("MCP: Getting contact relationships", contact_id=contact_id)
+
+        try:
+            relationships = await relationship_service.get_relationships_for_contact(
+                contact_id
+            )
+
+            # Resolve the names of the "other" contact
+            resolved_relationships = (
+                await relationship_service.resolve_relationship_contact_names(
+                    relationships, contact_id
+                )
+            )
+
+            relationship_schemas = []
+            for rel in resolved_relationships:
+                relationship_schemas.append(
+                    ContactRelationshipConverter.to_relationship_response(
+                        rel, contact_id
+                    )
+                )
+
+            response_data = ContactRelationshipListResponse(
+                relationships=relationship_schemas,
+                total_count=len(relationship_schemas),
+                summary=f"Found {len(relationship_schemas)} relationships for this contact.",
+            )
+
+            logger.info(
+                "MCP: Contact relationships retrieved successfully",
+                contact_id=contact_id,
+                count=len(relationship_schemas),
+            )
+            return MCPResponseBuilder.success_response(response_data)
+
+        except ContactNotFoundError:
+            raise
+        except Exception as e:
+            logger.error(
+                "MCP: Failed to get contact relationships",
+                error=str(e),
+                contact_id=contact_id,
+            )
+            raise
+
+    @mcp.tool
+    @mcp_unified_error_handler("add_contact_relationship", "relationship")
+    async def add_contact_relationship(
+        request: AddContactRelationshipRequest,
+        relationship_service: ContactRelationshipService = mcp_depends(
+            get_contact_relationship_service
+        ),
+    ) -> str:
+        """
+        Add a new relationship between two contacts.
+
+        Creates an association between two contacts.
+
+        Args:
+            request: Contact relationship creation details
+
+        Returns:
+            JSON string containing the newly created relationship
+        """
+        logger.info(
+            "MCP: Adding contact relationship",
+            contact_id=request.contact_id,
+            target_contact_id=request.target_contact_id,
+        )
+
+        try:
+            relationship_type = RelationshipType(request.relationship_type.lower())
+
+            from typing import cast
+
+            created_relationship = cast(
+                ContactRelationship,
+                await relationship_service.create_relationship(
+                    from_contact_id=request.contact_id,
+                    to_contact_id=request.target_contact_id,
+                    relationship_type=relationship_type,
+                ),
+            )
+
+            # Resolve names
+            [
+                resolved_rel
+            ] = await relationship_service.resolve_relationship_contact_names(
+                [created_relationship], request.contact_id
+            )
+
+            schema = ContactRelationshipConverter.to_relationship_response(
+                resolved_rel, request.contact_id
+            )
+
+            logger.info(
+                "MCP: Contact relationship added successfully",
+                relationship_id=created_relationship.id,
+            )
+            return MCPResponseBuilder.success_response(schema)
+
+        except Exception as e:
+            logger.error(
+                "MCP: Failed to add contact relationship",
+                error=str(e),
+                contact_id=request.contact_id,
+            )
+            raise
+
+    @mcp.tool
+    @mcp_unified_error_handler("update_contact_relationship", "relationship")
+    async def update_contact_relationship(
+        request: UpdateContactRelationshipRequest,
+        relationship_service: ContactRelationshipService = mcp_depends(
+            get_contact_relationship_service
+        ),
+    ) -> str:
+        """
+        Update an existing contact relationship.
+
+        Changes the relationship type of an existing association. Resolves the correct relationship perspective automatically.
+
+        Args:
+            request: Contact relationship update details
+
+        Returns:
+            JSON string containing the updated relationship
+        """
+        logger.info(
+            "MCP: Updating contact relationship",
+            relationship_id=request.relationship_id,
+        )
+
+        try:
+            rel_type = RelationshipType(request.relationship_type.lower())
+
+            # Fetch the existing relationship to determine direction
+            existing_relationship = await relationship_service.get_relationship_by_id(
+                request.relationship_id
+            )
+            if not existing_relationship:
+                raise ContactValidationError(
+                    "relationship",
+                    f"Relationship with ID {request.relationship_id} not found",
+                )
+
+            # Check that the request.contact_id is a participant in the relationship
+            if (
+                existing_relationship.from_contact_id != request.contact_id
+                and existing_relationship.to_contact_id != request.contact_id
+            ):
+                raise ContactValidationError(
+                    "relationship", "Relationship does not belong to the active contact"
+                )
+
+            # If we are updating from the perspective of the 'to_contact' (target),
+            # the requested type is from target -> source, so we invert it for canonical storage (source -> target)
+            if existing_relationship.to_contact_id == request.contact_id:
+                rel_type = rel_type.get_inverse_type()
+
+            updated_relationship = await relationship_service.update_relationship(
+                relationship_id=request.relationship_id,
+                relationship_type=rel_type,
+            )
+
+            [
+                resolved_rel
+            ] = await relationship_service.resolve_relationship_contact_names(
+                [updated_relationship], request.contact_id
+            )
+
+            schema = ContactRelationshipConverter.to_relationship_response(
+                resolved_rel, request.contact_id
+            )
+
+            logger.info(
+                "MCP: Contact relationship updated successfully",
+                relationship_id=updated_relationship.id,
+            )
+            return MCPResponseBuilder.success_response(schema)
+
+        except Exception as e:
+            logger.error(
+                "MCP: Failed to update contact relationship",
+                error=str(e),
+                relationship_id=request.relationship_id,
+            )
+            raise
+
+    @mcp.tool
+    @mcp_unified_error_handler("remove_contact_relationship", "relationship")
+    async def remove_contact_relationship(
+        contact_id: Annotated[int, Field(description="ID of the current contact")],
+        relationship_id: Annotated[
+            int, Field(description="ID of the relationship to remove")
+        ],
+        relationship_service: ContactRelationshipService = mcp_depends(
+            get_contact_relationship_service
+        ),
+    ) -> str:
+        """
+        Remove a relationship between two contacts.
+
+        Deletes the specified relationship.
+
+        Args:
+            contact_id: The ID of the contact
+            relationship_id: The ID of the relationship to remove
+
+        Returns:
+            Success message matching MCP conventions
+        """
+        logger.info(
+            "MCP: Removing contact relationship", relationship_id=relationship_id
+        )
+
+        try:
+            existing_relationship = await relationship_service.get_relationship_by_id(
+                relationship_id
+            )
+            if not existing_relationship:
+                raise ContactValidationError(
+                    "relationship", f"Relationship with ID {relationship_id} not found"
+                )
+
+            # Verify it belongs to the contact
+            if (
+                existing_relationship.from_contact_id != contact_id
+                and existing_relationship.to_contact_id != contact_id
+            ):
+                raise ContactValidationError(
+                    "relationship", "Relationship does not belong to the active contact"
+                )
+
+            await relationship_service.delete_relationship(relationship_id)
+
+            logger.info(
+                "MCP: Contact relationship removed successfully",
+                relationship_id=relationship_id,
+            )
+
+            response = ContactActionResponse(
+                status="success",
+                message=f"Relationship {relationship_id} successfully removed",
+            )
+            return MCPResponseBuilder.success_response(response)
+
+        except Exception as e:
+            logger.error(
+                "MCP: Failed to remove contact relationship",
+                error=str(e),
+                relationship_id=relationship_id,
+            )
+            raise
 
     @mcp.tool
     @mcp_unified_error_handler("list_tags", "tag")

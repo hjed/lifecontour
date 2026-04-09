@@ -143,6 +143,51 @@ class TestContactRelationshipEndpoints:
         assert data["data"][0]["attributes"]["relationship_type"] == "friend"
 
     @pytest.mark.asyncio
+    async def test_get_inverse_relationship_perspective(
+        self,
+        authenticated_client,
+        contact_factory: ContactFactory,
+    ):
+        """Test getting a relationship from the perspective of the target contact (inverse type)."""
+        # Create contacts
+        contact1 = await contact_factory.create_contact(
+            first_name="Parent", last_name="Contact"
+        )
+        contact2 = await contact_factory.create_contact(
+            first_name="Child", last_name="Contact"
+        )
+
+        # Create relationship: Parent -> Child (type=PARENT)
+        await contact_factory.create_relationship(
+            from_contact_id=int(contact1["id"]),
+            to_contact_id=int(contact2["id"]),
+            relationship_type=RelationshipType.PARENT,
+        )
+
+        # Get relationships from the 'from' contact (Parent)
+        response1 = await authenticated_client.get(
+            f"/api/contacts/{contact1['id']}/relationships"
+        )
+        assert response1.status_code == 200
+        data1 = response1.json()
+        assert len(data1["data"]) == 1
+        assert data1["data"][0]["attributes"]["relationship_type"] == "parent"
+        assert data1["data"][0]["attributes"]["from_contact_id"] == int(contact1["id"])
+        assert data1["data"][0]["attributes"]["to_contact_id"] == int(contact2["id"])
+
+        # Get relationships from the 'to' contact (Child)
+        response2 = await authenticated_client.get(
+            f"/api/contacts/{contact2['id']}/relationships"
+        )
+        assert response2.status_code == 200
+        data2 = response2.json()
+        assert len(data2["data"]) == 1
+        # The relationship should be inverted from the child's perspective
+        assert data2["data"][0]["attributes"]["relationship_type"] == "child"
+        assert data2["data"][0]["attributes"]["from_contact_id"] == int(contact2["id"])
+        assert data2["data"][0]["attributes"]["to_contact_id"] == int(contact1["id"])
+
+    @pytest.mark.asyncio
     async def test_get_specific_relationship(
         self,
         authenticated_client,
@@ -243,6 +288,58 @@ class TestContactRelationshipEndpoints:
         assert response.status_code == 200
         data = response.json()
         assert data["data"]["attributes"]["relationship_type"] == "colleague"
+
+    @pytest.mark.asyncio
+    async def test_update_relationship_inverse_perspective(
+        self,
+        authenticated_client,
+        contact_factory: ContactFactory,
+    ):
+        """Test updating a relationship from the perspective of the target contact."""
+        contact1 = await contact_factory.create_contact(
+            first_name="Parent", last_name="Contact"
+        )
+        contact2 = await contact_factory.create_contact(
+            first_name="Child", last_name="Contact"
+        )
+
+        relationship = await contact_factory.create_relationship(
+            from_contact_id=int(contact1["id"]),
+            to_contact_id=int(contact2["id"]),
+            relationship_type=RelationshipType.PARENT,
+        )
+
+        # Child updates the relationship. They see "child", but change it back to "parent"
+        # (meaning Child is now PARENT of Parent)
+        update_data = {
+            "data": {
+                "type": "contact_relationships",
+                "id": str(relationship["id"]),
+                "attributes": {
+                    "relationship_type": "parent",
+                    "from_contact_id": int(contact2["id"]),
+                    "to_contact_id": int(contact1["id"]),
+                },
+            }
+        }
+
+        response = await authenticated_client.put(
+            f"/api/contacts/{contact2['id']}/relationships/{relationship['id']}",
+            json=update_data,
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["data"]["attributes"]["relationship_type"] == "parent"
+
+        # Verify the underlying original relationship was correctly inverted
+        get_response = await authenticated_client.get(
+            f"/api/contacts/{contact1['id']}/relationships/{relationship['id']}"
+        )
+        assert get_response.status_code == 200
+        # If Child is PARENT of Parent, then Parent is CHILD of Child.
+        # So from Parent's perspective, they should see "child"
+        assert get_response.json()["data"]["attributes"]["relationship_type"] == "child"
 
     @pytest.mark.asyncio
     async def test_delete_relationship(
