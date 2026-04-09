@@ -61,7 +61,9 @@ test.describe('Contact Management - Authenticated User', () => {
     // Verify tag is displayed using the specific text (since we don't know the exact new tag ID)
     await expect(
       authenticatedPage
-        .locator('[data-testid^="tag-badge-"]', { hasText: 'TestDetailTag' })
+        .locator('[data-testid^="tag-badge-"]:visible', {
+          hasText: 'TestDetailTag',
+        })
         .first()
     ).toBeVisible({ timeout: 10000 });
   });

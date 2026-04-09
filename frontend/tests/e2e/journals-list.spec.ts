@@ -112,7 +112,7 @@ test.describe('Journal List Page', () => {
       const weekendHeading = page.getByRole('heading', {
         name: /Weekend Hike/i,
       });
-      await weekendHeading.scrollIntoViewIfNeeded().catch(() => {});
+      await weekendHeading.scrollIntoViewIfNeeded();
       await expect(weekendHeading).toBeVisible({ timeout: 30000 });
 
       // Verify non-matching journal is not visible (Team Meeting)
@@ -304,13 +304,13 @@ test.describe('Journal List Page', () => {
       const meetingNotesHeading = page.getByRole('heading', {
         name: /Meeting Notes/i,
       });
-      await meetingNotesHeading.scrollIntoViewIfNeeded().catch(() => {});
+      await meetingNotesHeading.scrollIntoViewIfNeeded();
       await expect(meetingNotesHeading).toBeVisible({ timeout: 30000 });
 
       const teamMeetingHeading = page.getByRole('heading', {
         name: /Team Meeting/i,
       });
-      await teamMeetingHeading.scrollIntoViewIfNeeded().catch(() => {});
+      await teamMeetingHeading.scrollIntoViewIfNeeded();
       await expect(teamMeetingHeading).toBeVisible({ timeout: 30000 });
 
       // Now filter by EVENT type - should only show "Team Meeting"
@@ -576,7 +576,7 @@ test.describe('Journal List Page', () => {
       const aliceHeading = page.getByRole('heading', {
         name: /Meeting with Alice/i,
       });
-      await aliceHeading.scrollIntoViewIfNeeded().catch(() => {});
+      await aliceHeading.scrollIntoViewIfNeeded();
       await expect(aliceHeading).toBeVisible({ timeout: 30000 });
 
       // Verify contact name is visible on the journal card
@@ -686,13 +686,13 @@ test.describe('Journal List Page', () => {
 
       // Verify only journals with Work tag are visible
       const workHeading = page.getByRole('heading', { name: /Work Meeting/i });
-      await workHeading.scrollIntoViewIfNeeded().catch(() => {});
+      await workHeading.scrollIntoViewIfNeeded();
       await expect(workHeading).toBeVisible({ timeout: 30000 });
 
       const mixedHeading = page.getByRole('heading', {
         name: /Mixed Journal/i,
       });
-      await mixedHeading.scrollIntoViewIfNeeded().catch(() => {});
+      await mixedHeading.scrollIntoViewIfNeeded();
       await expect(mixedHeading).toBeVisible({ timeout: 30000 });
 
       // Verify Personal Note is not visible

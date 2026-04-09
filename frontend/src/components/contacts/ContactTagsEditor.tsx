@@ -53,7 +53,11 @@ export function ContactTagsEditor({
 
   const { data: contactTagsData, isLoading: isLoadingContactTags } =
     useContactTags(contactId);
-  const { data: allTagsData } = useTags();
+  const {
+    data: allTagsData,
+    isLoading: isLoadingAllTags,
+    isError: isAllTagsError,
+  } = useTags();
 
   // Mutations
   const assignTag = useAssignContactTag();
@@ -135,17 +139,34 @@ export function ContactTagsEditor({
     return tag.attributes.name;
   };
 
-  if (isLoadingContactTags) {
+  if (isLoadingContactTags || isLoadingAllTags) {
     return (
       <Card className={className} data-testid='tags-loading'>
         <CardHeader>
           <CardTitle className='text-lg'>Tags</CardTitle>
         </CardHeader>
-        <CardContent>
+        <CardContent className='space-y-3'>
           <div className='flex flex-wrap gap-2'>
-            <Skeleton className='h-6 w-16' />
-            <Skeleton className='h-6 w-20' />
+            <Skeleton className='h-6 w-16 rounded-full' />
+            <Skeleton className='h-6 w-20 rounded-full' />
+            <Skeleton className='h-6 w-24 rounded-full' />
           </div>
+          <Skeleton className='h-9 w-32' />
+        </CardContent>
+      </Card>
+    );
+  }
+
+  if (isAllTagsError) {
+    return (
+      <Card className={className} data-testid='tags-error'>
+        <CardHeader>
+          <CardTitle className='text-lg'>Tags</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <p className='text-destructive text-sm'>
+            Failed to load tag definitions.
+          </p>
         </CardContent>
       </Card>
     );
