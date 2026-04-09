@@ -741,6 +741,10 @@ export function useInfiniteJournals(
   const { chunkDays = 7 } = options;
   const anchor = options.anchorDate ? parseISO(options.anchorDate) : new Date();
 
+  // When the user has applied an explicit date-range filter, honour it instead
+  // of the chunk-based window so that the filter actually works.
+  const hasUserDateFilter = Boolean(filters.date_from || filters.date_to);
+
   // Calculate initial boundary around anchor date
   // (e.g. for chunkDays=7, it fetches anchor - 3 days to anchor + 3 days)
   const halfChunk = Math.floor(chunkDays / 2);
@@ -751,8 +755,8 @@ export function useInfiniteJournals(
   );
 
   const initialPageParam: DateChunkPageParam = {
-    date_from: initialStartDate,
-    date_to: initialEndDate,
+    date_from: filters.date_from ?? initialStartDate,
+    date_to: filters.date_to ?? initialEndDate,
   };
 
   return useInfiniteQuery({
@@ -763,8 +767,8 @@ export function useInfiniteJournals(
     queryFn: ({ pageParam }) =>
       fetchJournals({
         ...filters,
-        date_from: pageParam.date_from,
-        date_to: pageParam.date_to,
+        date_from: hasUserDateFilter ? filters.date_from : pageParam.date_from,
+        date_to: hasUserDateFilter ? filters.date_to : pageParam.date_to,
         // The API safely supports up to limit=100. 100 is chosen as the max permissible value to cover dense 7-day chunks
         // without risking dropped items or invoking REST offsets over chunk edges.
         limit: 100,
@@ -772,6 +776,8 @@ export function useInfiniteJournals(
       }),
     initialPageParam,
     getNextPageParam: (lastPage, allPages, lastPageParam) => {
+      // When the user has an explicit date filter, don't paginate further
+      if (hasUserDateFilter) return undefined;
       try {
         // Progressing into the PAST (Scrolling DOWN)
         const prevEnd = parseISO(lastPageParam.date_from);
@@ -786,6 +792,8 @@ export function useInfiniteJournals(
       }
     },
     getPreviousPageParam: (firstPage, allPages, firstPageParam) => {
+      // When the user has an explicit date filter, don't paginate further
+      if (hasUserDateFilter) return undefined;
       try {
         // Progressing into the FUTURE (Scrolling UP)
         const prevStart = parseISO(firstPageParam.date_to);

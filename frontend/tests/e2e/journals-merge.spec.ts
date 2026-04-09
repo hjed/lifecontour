@@ -1,6 +1,8 @@
 import { test, expect } from './fixtures';
 import { TestDataManager } from './data-management';
 
+const todayISO = new Date().toISOString();
+
 test.describe('Journal Merge Workflow', () => {
   test('should merge a source journal into a target journal and delete the source', async ({
     authenticatedPage,
@@ -20,8 +22,8 @@ test.describe('Journal Merge Workflow', () => {
         exactTitle: true,
         content: 'Source interesting content',
         event_date_range: {
-          start: '2026-02-11T14:00:00Z',
-          end: '2026-02-11T15:00:00Z',
+          start: todayISO,
+          end: todayISO,
         },
         types: ['note'],
       },
@@ -30,8 +32,8 @@ test.describe('Journal Merge Workflow', () => {
         exactTitle: true,
         content: 'Target beginning content',
         event_date_range: {
-          start: '2026-02-11T14:00:00Z',
-          end: '2026-02-11T15:00:00Z',
+          start: todayISO,
+          end: todayISO,
         },
         types: ['plan'],
         type_data: { plan: { documents: [] } },
@@ -182,8 +184,8 @@ test.describe('Journal Merge Workflow', () => {
         exactTitle: true,
         content: 'Source mood content',
         event_date_range: {
-          start: '2026-02-11T14:00:00Z',
-          end: '2026-02-11T15:00:00Z',
+          start: todayISO,
+          end: todayISO,
         },
         types: ['mood_rating'],
         type_data: {
@@ -198,8 +200,8 @@ test.describe('Journal Merge Workflow', () => {
         exactTitle: true,
         content: 'Target mood content',
         event_date_range: {
-          start: '2026-02-11T14:00:00Z',
-          end: '2026-02-11T15:00:00Z',
+          start: todayISO,
+          end: todayISO,
         },
         types: ['mood_rating'],
         type_data: {

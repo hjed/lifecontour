@@ -105,7 +105,7 @@ export function DayGroupedJournalList({
     return () => observer.disconnect();
   }, []);
 
-  if (journals.length === 0 && !hasNextPage && !hasPreviousPage && emptyState) {
+  if (journals.length === 0 && emptyState) {
     return <>{emptyState}</>;
   }
 

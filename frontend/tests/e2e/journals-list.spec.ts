@@ -8,6 +8,16 @@
 import { test, expect } from './fixtures';
 import { waitForContactSearchIndexing } from './utils/test-helpers';
 
+/**
+ * Generate an ISO datetime string offset from today by the given number of days.
+ * Journals must use dates near "today" so they appear in the initial
+ * date-window chunk loaded by the infinite scroll hook (~7 days around today).
+ */
+function relativeDate(dayOffset: number): string {
+  const d = new Date();
+  d.setDate(d.getDate() + dayOffset);
+  return d.toISOString();
+}
 test.describe('Journal List Page', () => {
   test.describe('Basic Display', () => {
     test('should display journals when data exists', async ({
@@ -44,8 +54,8 @@ test.describe('Journal List Page', () => {
       // Wait for page to load
       await expect(page.locator('main, [role="main"]').first()).toBeVisible();
 
-      // Verify timeline shows empty days instead of a global empty state
-      await expect(page.getByText('No entries').first()).toBeVisible();
+      // Verify the empty state card is displayed
+      await expect(page.getByText('No journals found')).toBeVisible();
     });
   });
 
@@ -211,8 +221,8 @@ test.describe('Journal List Page', () => {
           title: 'Meeting Notes',
           content: 'Discussion about project timeline',
           event_date_range: {
-            start: '2026-02-10T09:00:00Z',
-            end: '2026-02-10T17:00:00Z',
+            start: relativeDate(-2),
+            end: relativeDate(-2),
           },
           // NOTE type (default)
         },
@@ -220,8 +230,8 @@ test.describe('Journal List Page', () => {
           title: 'Team Meeting',
           content: 'Weekly sync with the team',
           event_date_range: {
-            start: '2026-02-11T09:00:00Z',
-            end: '2026-02-11T17:00:00Z',
+            start: relativeDate(-1),
+            end: relativeDate(-1),
           },
           types: ['event'],
           type_data: {
@@ -236,8 +246,8 @@ test.describe('Journal List Page', () => {
           title: 'Random Note',
           content: 'Some random thoughts',
           event_date_range: {
-            start: '2026-02-12T09:00:00Z',
-            end: '2026-02-12T17:00:00Z',
+            start: relativeDate(0),
+            end: relativeDate(0),
           },
           // NOTE type (default)
         },
@@ -350,32 +360,42 @@ test.describe('Journal List Page', () => {
       // Clear existing journals
       await dataManager.clearAllJournals();
 
-      // Create journals with different date ranges
+      // Use dates relative to today so they appear in the initial chunk window.
+      // We place all three journals within a few days of today so the infinite
+      // scroll loads them, then apply a date range that includes only one.
+      const today = new Date();
+      const day1 = new Date(today);
+      day1.setDate(today.getDate() - 2);
+      const day2 = new Date(today);
+      // day2 = today (no offset needed)
+      const day3 = new Date(today);
+      day3.setDate(today.getDate() + 2);
+
       const journals = await dataManager.createJournals([
         {
-          title: 'January Journal',
-          content: 'This happened in January',
+          title: 'Earlier Journal',
+          content: 'This happened 2 days ago',
           event_date_range: {
-            start: '2026-01-10T09:00:00Z',
-            end: '2026-01-10T17:00:00Z',
+            start: day1.toISOString(),
+            end: day1.toISOString(),
           },
           types: ['note'],
         },
         {
-          title: 'February Journal',
-          content: 'This happened in February',
+          title: 'Middle Journal',
+          content: 'This happened today',
           event_date_range: {
-            start: '2026-02-15T09:00:00Z',
-            end: '2026-02-15T17:00:00Z',
+            start: day2.toISOString(),
+            end: day2.toISOString(),
           },
           types: ['note'],
         },
         {
-          title: 'March Journal',
-          content: 'This happened in March',
+          title: 'Later Journal',
+          content: 'This will happen in 2 days',
           event_date_range: {
-            start: '2026-03-20T09:00:00Z',
-            end: '2026-03-20T17:00:00Z',
+            start: day3.toISOString(),
+            end: day3.toISOString(),
           },
           types: ['note'],
         },
@@ -409,21 +429,44 @@ test.describe('Journal List Page', () => {
       // Wait for calendar to be visible
       await page.waitForSelector('[role="grid"]', { state: 'visible' });
 
-      // Navigate to February 2026 grid if not currently visible
-      const februaryGrid = page.getByRole('grid', { name: 'February 2026' });
-      while (!(await februaryGrid.isVisible())) {
+      // Format the target dates for the calendar picker accessibility labels
+      // The calendar buttons use labels like "9 April 2026"
+      const monthNames = [
+        'January',
+        'February',
+        'March',
+        'April',
+        'May',
+        'June',
+        'July',
+        'August',
+        'September',
+        'October',
+        'November',
+        'December',
+      ];
+
+      // Build the accessible name for the start/end date buttons
+      // We want a range that only includes day2 (yesterday) but not day1 or day3
+      const rangeStart = new Date(day2);
+      rangeStart.setDate(rangeStart.getDate() - 1);
+      const rangeEnd = new Date(day2);
+      rangeEnd.setDate(rangeEnd.getDate() + 1);
+
+      // Ensure the grid for the range start month is visible
+      const startMonthName = `${monthNames[rangeStart.getMonth()]} ${rangeStart.getFullYear()}`;
+      const startGrid = page.getByRole('grid', { name: startMonthName });
+      // Navigate to the correct month if needed
+      while (!(await startGrid.isVisible())) {
         await page
           .getByRole('button', { name: 'Go to the Previous Month' })
           .click();
-        // Wait for the calendar to update before checking visibility again
-        await expect(page.getByRole('status').first()).toBeVisible();
+        await page.waitForTimeout(200);
       }
 
-      // Select dates within the February grid to avoid ambiguity with overflow dates
-
-      // Select start date (February 1, 2026)
-      await februaryGrid
-        .getByRole('button', { name: /\b1 February 2026\b/ })
+      const startLabel = `${rangeStart.getDate()} ${monthNames[rangeStart.getMonth()]} ${rangeStart.getFullYear()}`;
+      await startGrid
+        .getByRole('button', { name: new RegExp(`\\b${startLabel}\\b`) })
         .click();
 
       // Start waiting for API response before clicking the second date
@@ -434,25 +477,35 @@ test.describe('Journal List Page', () => {
           response.status() === 200
       );
 
-      // Select end date (February 28, 2026) - this triggers the API call
-      await februaryGrid
-        .getByRole('button', { name: /\b28 February 2026\b/ })
+      // Ensure the grid for the range end month is visible
+      const endMonthName = `${monthNames[rangeEnd.getMonth()]} ${rangeEnd.getFullYear()}`;
+      const endGrid = page.getByRole('grid', { name: endMonthName });
+      while (!(await endGrid.isVisible())) {
+        await page
+          .getByRole('button', { name: 'Go to the Next Month' })
+          .click();
+        await page.waitForTimeout(200);
+      }
+
+      const endLabel = `${rangeEnd.getDate()} ${monthNames[rangeEnd.getMonth()]} ${rangeEnd.getFullYear()}`;
+      await endGrid
+        .getByRole('button', { name: new RegExp(`\\b${endLabel}\\b`) })
         .click();
 
       // Wait for the API response to complete
       await responsePromise;
 
-      // Verify only February journal is visible
+      // Verify only the Middle journal is visible (day2 is within the range)
       await expect(
-        page.getByRole('heading', { name: /February Journal/i })
+        page.getByRole('heading', { name: /Middle Journal/i })
       ).toBeVisible();
 
-      // Verify January and March journals are not visible
+      // Verify the other journals are not visible (outside the selected range)
       await expect(
-        page.getByRole('heading', { name: /January Journal/i })
+        page.getByRole('heading', { name: /Earlier Journal/i })
       ).not.toBeVisible();
       await expect(
-        page.getByRole('heading', { name: /March Journal/i })
+        page.getByRole('heading', { name: /Later Journal/i })
       ).not.toBeVisible();
     });
 
@@ -481,8 +534,8 @@ test.describe('Journal List Page', () => {
           title: 'Meeting with Alice',
           content: 'Discussed project plans',
           event_date_range: {
-            start: '2026-02-01T09:00:00Z',
-            end: '2026-02-01T10:00:00Z',
+            start: relativeDate(-2),
+            end: relativeDate(-2),
           },
           types: ['note'],
           contacts: [
@@ -493,8 +546,8 @@ test.describe('Journal List Page', () => {
           title: 'Meeting with Bob',
           content: 'Reviewed quarterly goals',
           event_date_range: {
-            start: '2026-02-02T09:00:00Z',
-            end: '2026-02-02T10:00:00Z',
+            start: relativeDate(-1),
+            end: relativeDate(-1),
           },
           types: ['note'],
           contacts: [
@@ -505,8 +558,8 @@ test.describe('Journal List Page', () => {
           title: 'Solo Work',
           content: 'Working alone',
           event_date_range: {
-            start: '2026-02-03T09:00:00Z',
-            end: '2026-02-03T10:00:00Z',
+            start: relativeDate(0),
+            end: relativeDate(0),
           },
           types: ['note'],
         },
@@ -612,24 +665,24 @@ test.describe('Journal List Page', () => {
           title: 'Work Meeting',
           content: 'Quarterly review',
           event_date_range: {
-            start: '2026-02-10T09:00:00Z',
-            end: '2026-02-10T17:00:00Z',
+            start: relativeDate(-2),
+            end: relativeDate(-2),
           },
         },
         {
           title: 'Personal Note',
           content: 'Weekend plans',
           event_date_range: {
-            start: '2026-02-11T09:00:00Z',
-            end: '2026-02-11T17:00:00Z',
+            start: relativeDate(-1),
+            end: relativeDate(-1),
           },
         },
         {
           title: 'Mixed Journal',
           content: 'Both work and personal',
           event_date_range: {
-            start: '2026-02-12T09:00:00Z',
-            end: '2026-02-12T17:00:00Z',
+            start: relativeDate(0),
+            end: relativeDate(0),
           },
         },
       ]);
@@ -750,14 +803,27 @@ test.describe('Journal List Page', () => {
         { name: 'Test Calendar', color: '#FF0000' },
       ]);
 
-      // Create journals with various combinations
+      // Use dates near today so journals appear in the initial chunk window.
+      // today-1: Note with Charlie (matches all filters)
+      // today:   Event with Charlie (wrong type)
+      // today-3: Note with Charlie (wrong date — outside date-range filter)
+      // today-2: Note without contact (wrong contact)
+      const today = new Date();
+      const day1 = new Date(today);
+      day1.setDate(today.getDate() - 1);
+      const day2 = new Date(today);
+      const day3 = new Date(today);
+      day3.setDate(today.getDate() - 3);
+      const day4 = new Date(today);
+      day4.setDate(today.getDate() - 2);
+
       await dataManager.createJournals([
         {
-          title: 'February Note with Charlie',
+          title: 'Recent Note with Charlie',
           content: 'This matches all filters',
           event_date_range: {
-            start: '2026-02-10T09:00:00Z',
-            end: '2026-02-10T17:00:00Z',
+            start: day1.toISOString(),
+            end: day1.toISOString(),
           },
           // Don't specify types for NOTE - it's the default (no type-specific data)
           contacts: [
@@ -765,11 +831,11 @@ test.describe('Journal List Page', () => {
           ],
         },
         {
-          title: 'February Event with Charlie',
+          title: 'Recent Event with Charlie',
           content: 'Wrong type',
           event_date_range: {
-            start: '2026-02-11T09:00:00Z',
-            end: '2026-02-11T17:00:00Z',
+            start: day2.toISOString(),
+            end: day2.toISOString(),
           },
           types: ['event'],
           type_data: {
@@ -784,11 +850,11 @@ test.describe('Journal List Page', () => {
           ],
         },
         {
-          title: 'January Note with Charlie',
+          title: 'Old Note with Charlie',
           content: 'Wrong date',
           event_date_range: {
-            start: '2026-01-10T09:00:00Z',
-            end: '2026-01-10T17:00:00Z',
+            start: day3.toISOString(),
+            end: day3.toISOString(),
           },
           // Don't specify types for NOTE - it's the default (no type-specific data)
           contacts: [
@@ -796,11 +862,11 @@ test.describe('Journal List Page', () => {
           ],
         },
         {
-          title: 'February Note Solo',
+          title: 'Recent Note Solo',
           content: 'Wrong contact',
           event_date_range: {
-            start: '2026-02-12T09:00:00Z',
-            end: '2026-02-12T17:00:00Z',
+            start: day4.toISOString(),
+            end: day4.toISOString(),
           },
           // Don't specify types for NOTE - it's the default (no type-specific data)
         },
@@ -821,7 +887,7 @@ test.describe('Journal List Page', () => {
       await page.goto('/journals');
       await expect(page.locator('main, [role="main"]').first()).toBeVisible();
 
-      // Apply date filter (February 2026)
+      // Apply date filter — select a range that includes day1 and day2 but excludes day3
       const dateRangeButton = page.getByRole('button', {
         name: /pick a date range/i,
       });
@@ -830,19 +896,37 @@ test.describe('Journal List Page', () => {
       // Wait for calendar to be visible
       await page.waitForSelector('[role="grid"]', { state: 'visible' });
 
-      // Navigate to February 2026 grid if not currently visible
-      const februaryGrid = page.getByRole('grid', { name: 'February 2026' });
-      while (!(await februaryGrid.isVisible())) {
+      const monthNames = [
+        'January',
+        'February',
+        'March',
+        'April',
+        'May',
+        'June',
+        'July',
+        'August',
+        'September',
+        'October',
+        'November',
+        'December',
+      ];
+
+      // Build the date range: from day4 (today-2) to today
+      // This excludes day3 (today-3) but includes day1 (today-1), day2 (today), day4 (today-2)
+      const rangeStartMonthName = `${monthNames[day4.getMonth()]} ${day4.getFullYear()}`;
+      const rangeStartGrid = page.getByRole('grid', {
+        name: rangeStartMonthName,
+      });
+      while (!(await rangeStartGrid.isVisible())) {
         await page
           .getByRole('button', { name: 'Go to the Previous Month' })
           .click();
-        // Wait for the calendar to update before checking visibility again
-        await expect(page.getByRole('status').first()).toBeVisible();
+        await page.waitForTimeout(200);
       }
 
-      // Select dates within the February grid to avoid ambiguity
-      await februaryGrid
-        .getByRole('button', { name: /\b1 February 2026\b/ })
+      const startLabel = `${day4.getDate()} ${monthNames[day4.getMonth()]} ${day4.getFullYear()}`;
+      await rangeStartGrid
+        .getByRole('button', { name: new RegExp(`\\b${startLabel}\\b`) })
         .click();
 
       // Start waiting for API response before clicking the second date
@@ -851,8 +935,20 @@ test.describe('Journal List Page', () => {
           response.url().includes('/api/journals') && response.status() === 200
       );
 
-      await februaryGrid
-        .getByRole('button', { name: /\b28 February 2026\b/ })
+      const rangeEndMonthName = `${monthNames[today.getMonth()]} ${today.getFullYear()}`;
+      const rangeEndGrid = page.getByRole('grid', {
+        name: rangeEndMonthName,
+      });
+      while (!(await rangeEndGrid.isVisible())) {
+        await page
+          .getByRole('button', { name: 'Go to the Next Month' })
+          .click();
+        await page.waitForTimeout(200);
+      }
+
+      const endLabel = `${today.getDate()} ${monthNames[today.getMonth()]} ${today.getFullYear()}`;
+      await rangeEndGrid
+        .getByRole('button', { name: new RegExp(`\\b${endLabel}\\b`) })
         .click();
       await dateResponsePromise;
 
@@ -895,18 +991,18 @@ test.describe('Journal List Page', () => {
 
       // Verify only the matching journal is visible
       await expect(
-        page.getByRole('heading', { name: /February Note with Charlie/i })
+        page.getByRole('heading', { name: /Recent Note with Charlie/i })
       ).toBeVisible();
 
       // Verify non-matching journals are not visible
       await expect(
-        page.getByRole('heading', { name: /February Event with Charlie/i })
+        page.getByRole('heading', { name: /Recent Event with Charlie/i })
       ).not.toBeVisible();
       await expect(
-        page.getByRole('heading', { name: /January Note with Charlie/i })
+        page.getByRole('heading', { name: /Old Note with Charlie/i })
       ).not.toBeVisible();
       await expect(
-        page.getByRole('heading', { name: /February Note Solo/i })
+        page.getByRole('heading', { name: /Recent Note Solo/i })
       ).not.toBeVisible();
     });
 
@@ -934,8 +1030,8 @@ test.describe('Journal List Page', () => {
           title: 'Work Event',
           content: 'Team meeting',
           event_date_range: {
-            start: '2026-02-10T09:00:00Z',
-            end: '2026-02-10T17:00:00Z',
+            start: relativeDate(-2),
+            end: relativeDate(-2),
           },
           types: ['event'],
           type_data: {
@@ -950,8 +1046,8 @@ test.describe('Journal List Page', () => {
           title: 'Personal Event',
           content: 'Dentist appointment',
           event_date_range: {
-            start: '2026-02-11T09:00:00Z',
-            end: '2026-02-11T17:00:00Z',
+            start: relativeDate(-1),
+            end: relativeDate(-1),
           },
           types: ['event'],
           type_data: {
@@ -966,8 +1062,8 @@ test.describe('Journal List Page', () => {
           title: 'Note without Calendar',
           content: 'Random note',
           event_date_range: {
-            start: '2026-02-12T09:00:00Z',
-            end: '2026-02-12T17:00:00Z',
+            start: relativeDate(0),
+            end: relativeDate(0),
           },
         },
       ]);
@@ -1084,8 +1180,8 @@ test.describe('Journal List Page', () => {
           title: 'Parent Journal',
           content: 'This is a parent journal',
           event_date_range: {
-            start: '2026-02-10T09:00:00Z',
-            end: '2026-02-10T17:00:00Z',
+            start: relativeDate(-3),
+            end: relativeDate(-3),
           },
         },
       ]);
@@ -1098,8 +1194,8 @@ test.describe('Journal List Page', () => {
           title: 'Child Journal 1',
           content: 'First child',
           event_date_range: {
-            start: '2026-02-11T09:00:00Z',
-            end: '2026-02-11T17:00:00Z',
+            start: relativeDate(-2),
+            end: relativeDate(-2),
           },
           parent_id: parentId,
         },
@@ -1107,8 +1203,8 @@ test.describe('Journal List Page', () => {
           title: 'Child Journal 2',
           content: 'Second child',
           event_date_range: {
-            start: '2026-02-12T09:00:00Z',
-            end: '2026-02-12T17:00:00Z',
+            start: relativeDate(-1),
+            end: relativeDate(-1),
           },
           parent_id: parentId,
         },
@@ -1120,8 +1216,8 @@ test.describe('Journal List Page', () => {
           title: 'Another Root Journal',
           content: 'This is another root journal',
           event_date_range: {
-            start: '2026-02-13T09:00:00Z',
-            end: '2026-02-13T17:00:00Z',
+            start: relativeDate(0),
+            end: relativeDate(0),
           },
         },
       ]);
