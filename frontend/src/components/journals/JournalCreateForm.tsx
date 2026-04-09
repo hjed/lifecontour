@@ -9,6 +9,27 @@
 'use client';
 
 import { useCallback, useRef, useState } from 'react';
+
+/**
+ * Format a Date as a local YYYY-MM-DD string for HTML date inputs.
+ * Unlike toISOString().split('T')[0], this avoids UTC conversion
+ * which can shift the date across timezone boundaries.
+ */
+function formatLocalDate(date: Date): string {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
+/**
+ * Parse a YYYY-MM-DD string into a local Date at midnight.
+ * Using `new Date('YYYY-MM-DD')` parses as UTC; this parses as local time.
+ */
+function parseLocalDate(dateStr: string): Date {
+  const [y, m, d] = dateStr.split('-').map(Number);
+  return new Date(y, m - 1, d);
+}
 import { useRouter } from 'next/navigation';
 import type { Route } from 'next';
 import {
@@ -38,6 +59,7 @@ import {
   FormMessage,
 } from '@/components/ui/form';
 import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Checkbox } from '@/components/ui/checkbox';
 import { useCreateJournal, useJournal } from '@/lib/api/journals';
@@ -82,10 +104,15 @@ import { JournalSearchCombobox } from './JournalSearchCombobox';
 // Form validation schema
 const formSchema = z.object({
   title: z.string().min(1, 'Title is required'),
-  dateRange: z.object({
-    from: z.date(),
-    to: z.date().optional(),
-  }),
+  dateRange: z
+    .object({
+      from: z.date(),
+      to: z.date().optional(),
+    })
+    .refine(data => !data.to || data.to >= data.from, {
+      message: 'End date cannot be before start date',
+      path: ['to'],
+    }),
   content: z.string(),
   types: z.array(z.nativeEnum(JournalType)),
   parentId: z.number().nullable().optional(),
@@ -626,18 +653,59 @@ export function JournalCreateForm({
             <FormItem>
               <FormLabel>Date Range</FormLabel>
               <FormControl>
-                {/* Placeholder for date range picker - will be implemented in future iteration */}
-                <Input
-                  type='date'
-                  value={field.value.from.toISOString().split('T')[0]}
-                  onChange={e => {
-                    const newDate = new Date(e.target.value);
-                    field.onChange({ ...field.value, from: newDate });
-                  }}
-                />
+                <div className='flex items-center gap-4'>
+                  <div className='flex w-full flex-col gap-2'>
+                    <Label
+                      htmlFor='date-range-start'
+                      className='text-muted-foreground text-xs'
+                    >
+                      Start Date
+                    </Label>
+                    <Input
+                      id='date-range-start'
+                      type='date'
+                      value={formatLocalDate(field.value.from)}
+                      onChange={e => {
+                        const newDate = parseLocalDate(e.target.value);
+                        // If 'to' is not set, or is the same as the old 'from', auto-advance 'to' to match the new 'from'
+                        const autoUpdateTo =
+                          !field.value.to ||
+                          field.value.to.getTime() ===
+                            field.value.from.getTime();
+                        field.onChange({
+                          ...field.value,
+                          from: newDate,
+                          ...(autoUpdateTo ? { to: newDate } : {}),
+                        });
+                      }}
+                      className='w-full'
+                    />
+                  </div>
+                  <div className='flex w-full flex-col gap-2'>
+                    <Label
+                      htmlFor='date-range-end'
+                      className='text-muted-foreground text-xs'
+                    >
+                      End Date
+                    </Label>
+                    <Input
+                      id='date-range-end'
+                      type='date'
+                      value={formatLocalDate(
+                        field.value.to || field.value.from
+                      )}
+                      onChange={e => {
+                        const newDate = parseLocalDate(e.target.value);
+                        field.onChange({ ...field.value, to: newDate });
+                      }}
+                      className='w-full'
+                      min={formatLocalDate(field.value.from)}
+                    />
+                  </div>
+                </div>
               </FormControl>
               <FormDescription>
-                Select the date or date range for this journal entry
+                Select the start and end date for this journal entry
               </FormDescription>
               <FormMessage />
             </FormItem>

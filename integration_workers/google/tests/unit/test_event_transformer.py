@@ -546,3 +546,181 @@ class TestGoogleEventTransformerMultiDayEvents:
         assert calendar_info.start_time == time(10, 0)
         assert calendar_info.end_time == time(11, 0)
         assert calendar_info.is_all_day is False
+
+
+class TestGoogleEventTransformerTimezone:
+    """Tests for timezone extraction and preservation in Google event sync."""
+
+    def test_inbound_event_extracts_start_timezone(self) -> None:
+        """Timezone from start.timeZone is extracted into CalendarInfo."""
+        google_event = GoogleEvent.model_validate(
+            {
+                "id": "tz_event_1",
+                "summary": "Sydney Meeting",
+                "start": {
+                    "dateTime": "2023-10-27T10:00:00+11:00",
+                    "timeZone": "Australia/Sydney",
+                },
+                "end": {
+                    "dateTime": "2023-10-27T11:00:00+11:00",
+                    "timeZone": "Australia/Sydney",
+                },
+                "status": "confirmed",
+            }
+        )
+        transformer = GoogleEventTransformer()
+        result = transformer.transform_event(google_event, "user1", uuid.uuid4())
+        assert result is not None
+        _, calendar_info = result
+        assert calendar_info.timezone == "Australia/Sydney"
+
+    def test_inbound_event_no_timezone_returns_none(self) -> None:
+        """When no timeZone is set on start/end, CalendarInfo.timezone is None."""
+        google_event = GoogleEvent.model_validate(
+            {
+                "id": "tz_event_2",
+                "summary": "UTC Meeting",
+                "start": {"dateTime": "2023-10-27T10:00:00Z"},
+                "end": {"dateTime": "2023-10-27T11:00:00Z"},
+                "status": "confirmed",
+            }
+        )
+        transformer = GoogleEventTransformer()
+        result = transformer.transform_event(google_event, "user1", uuid.uuid4())
+        assert result is not None
+        _, calendar_info = result
+        assert calendar_info.timezone is None
+
+    def test_inbound_all_day_event_no_timezone(self) -> None:
+        """All-day events should not have a timezone even if set on the event."""
+        google_event = GoogleEvent.model_validate(
+            {
+                "id": "tz_event_allday",
+                "summary": "Holiday",
+                "start": {"date": "2023-12-25"},
+                "end": {"date": "2023-12-26"},
+                "status": "confirmed",
+            }
+        )
+        transformer = GoogleEventTransformer()
+        result = transformer.transform_event(google_event, "user1", uuid.uuid4())
+        assert result is not None
+        _, calendar_info = result
+        assert calendar_info.timezone is None
+
+    def test_inbound_all_day_event_ignores_timezone_when_present(self) -> None:
+        """All-day events ignore start/end timeZone values when date is used."""
+        google_event = GoogleEvent.model_validate(
+            {
+                "id": "tz_event_allday_with_timezone",
+                "summary": "Holiday",
+                "start": {
+                    "date": "2023-12-25",
+                    "timeZone": "America/New_York",
+                },
+                "end": {
+                    "date": "2023-12-26",
+                    "timeZone": "America/New_York",
+                },
+                "status": "confirmed",
+            }
+        )
+        transformer = GoogleEventTransformer()
+        result = transformer.transform_event(google_event, "user1", uuid.uuid4())
+        assert result is not None
+        _, calendar_info = result
+        assert calendar_info.timezone is None
+
+    def test_outbound_payload_includes_timezone_when_set(self) -> None:
+        """Outbound Google payload includes timeZone on start/end when set."""
+        transformer = GoogleEventTransformer()
+        start_dt = datetime(2023, 10, 27, 10, 0, tzinfo=UTC)
+        end_dt = datetime(2023, 10, 27, 11, 0, tzinfo=UTC)
+
+        journal = Journal(
+            user_id="user_123",
+            title="Sydney Meeting",
+            content="",
+            event_date_range=EventDateRange(start=start_dt, end=end_dt),
+        )
+
+        calendar_info = CalendarInfo(
+            calendar_id=uuid.uuid4(),
+            start_time=start_dt.time().replace(tzinfo=None),
+            end_time=end_dt.time().replace(tzinfo=None),
+            is_all_day=False,
+            timezone="Australia/Sydney",
+        )
+
+        payload = transformer.transform_to_google_event_payload(journal, calendar_info)
+        assert payload["start"]["timeZone"] == "Australia/Sydney"
+        assert payload["end"]["timeZone"] == "Australia/Sydney"
+
+    def test_outbound_payload_omits_timezone_when_none(self) -> None:
+        """Outbound Google payload omits timeZone when CalendarInfo.timezone is None."""
+        transformer = GoogleEventTransformer()
+        start_dt = datetime(2023, 10, 27, 10, 0, tzinfo=UTC)
+        end_dt = datetime(2023, 10, 27, 11, 0, tzinfo=UTC)
+
+        journal = Journal(
+            user_id="user_123",
+            title="UTC Meeting",
+            content="",
+            event_date_range=EventDateRange(start=start_dt, end=end_dt),
+        )
+
+        calendar_info = CalendarInfo(
+            calendar_id=uuid.uuid4(),
+            start_time=start_dt.time().replace(tzinfo=None),
+            end_time=end_dt.time().replace(tzinfo=None),
+            is_all_day=False,
+            timezone=None,
+        )
+
+        payload = transformer.transform_to_google_event_payload(journal, calendar_info)
+        assert "timeZone" not in payload["start"]
+        assert "timeZone" not in payload["end"]
+
+    def test_inbound_event_prefers_start_timezone(self) -> None:
+        """When start and end have different timezones, start is preferred."""
+        google_event = GoogleEvent.model_validate(
+            {
+                "id": "tz_event_diff",
+                "summary": "Cross TZ Meeting",
+                "start": {
+                    "dateTime": "2023-10-27T10:00:00+11:00",
+                    "timeZone": "Australia/Sydney",
+                },
+                "end": {
+                    "dateTime": "2023-10-27T11:00:00+05:30",
+                    "timeZone": "Asia/Kolkata",
+                },
+                "status": "confirmed",
+            }
+        )
+        transformer = GoogleEventTransformer()
+        result = transformer.transform_event(google_event, "user1", uuid.uuid4())
+        assert result is not None
+        _, calendar_info = result
+        assert calendar_info.timezone == "Australia/Sydney"
+
+    def test_inbound_event_falls_back_to_end_timezone(self) -> None:
+        """When only end has a timezone, it is used as fallback."""
+        google_event = GoogleEvent.model_validate(
+            {
+                "id": "tz_event_end_only",
+                "summary": "End TZ Only",
+                "start": {"dateTime": "2023-10-27T10:00:00Z"},
+                "end": {
+                    "dateTime": "2023-10-27T18:00:00+05:30",
+                    "timeZone": "Asia/Kolkata",
+                },
+                "status": "confirmed",
+            }
+        )
+        transformer = GoogleEventTransformer()
+        result = transformer.transform_event(google_event, "user1", uuid.uuid4())
+        assert result is not None
+        _, calendar_info = result
+        assert calendar_info.timezone == "Asia/Kolkata"
+

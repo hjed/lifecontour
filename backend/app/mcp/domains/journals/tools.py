@@ -815,6 +815,7 @@ def _build_calendar_data(calendar_info: Any) -> dict[str, Any]:
         else None,
         "is_all_day": calendar_info.is_all_day,
         "location": calendar_info.location,
+        "timezone": calendar_info.timezone,
         "sync_invitees": calendar_info.sync_invitees,
         "event_state": calendar_info.event_state.value
         if hasattr(calendar_info.event_state, "value")
@@ -1245,6 +1246,7 @@ async def _update_event_data(
         end_time=_parse_optional_time_field(type_data_dict, "end_time"),
         is_all_day=type_data_dict.get("is_all_day", False),
         location=type_data_dict.get("location"),
+        timezone=type_data_dict.get("timezone"),
         sync_invitees=type_data_dict.get("sync_invitees", False),
         event_state=type_data_dict.get("event_state", "confirmed"),
     )
