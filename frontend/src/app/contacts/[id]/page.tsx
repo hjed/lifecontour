@@ -13,15 +13,10 @@ import { ArrowLeft, Trash2, Calendar } from 'lucide-react';
 
 import { format } from 'date-fns';
 import { enAU } from 'date-fns/locale';
-import {
-  useContact,
-  useDeleteContact,
-  useContactTags,
-} from '@/lib/api/contacts';
+import { useContact, useDeleteContact } from '@/lib/api/contacts';
 import { generateDisplayName } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 
@@ -32,7 +27,7 @@ import { ContactAddressesList } from '@/components/contacts/ContactAddressesList
 import { RelationshipsList } from '@/components/contacts/RelationshipsList';
 import { ActivityFeed } from '@/components/contacts/ActivityFeed';
 import { ContactJournals } from '@/components/contacts/ContactJournals';
-import type { TagResource } from '@/types/contacts';
+import { ContactTagsEditor } from '@/components/contacts/ContactTagsEditor';
 import { AuthGuard } from '@/components/auth/AuthGuard';
 import { DATE_FORMATS } from '@/lib/constants';
 
@@ -45,34 +40,6 @@ const MetadataItem = ({ label, value }: { label: string; value: string }) => (
     </div>
   </div>
 );
-
-const TagsCard = ({
-  tags,
-  title = 'Tags',
-}: {
-  tags: TagResource[];
-  title?: string;
-}) =>
-  tags.length > 0 ? (
-    <Card>
-      <CardHeader>
-        <CardTitle className='text-lg'>{title}</CardTitle>
-      </CardHeader>
-      <CardContent>
-        <div className='flex flex-wrap gap-2'>
-          {tags.map(tag => (
-            <Badge
-              key={tag.id}
-              variant='secondary'
-              data-testid={`tag-${tag.attributes.name}`}
-            >
-              {tag.attributes.name}
-            </Badge>
-          ))}
-        </div>
-      </CardContent>
-    </Card>
-  ) : null;
 
 export default function ContactDetailPage() {
   return (
@@ -90,9 +57,6 @@ function ContactDetailPageContent() {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
   const { data: contactData, isLoading, error } = useContact(contactId);
-  const { data: tagsData } = useContactTags(contactId, {
-    enabled: !!contactData,
-  });
 
   const deleteContactMutation = useDeleteContact();
 
@@ -148,7 +112,6 @@ function ContactDetailPageContent() {
     contact.attributes.first_name,
     contact.attributes.last_name || ''
   );
-  const tags = tagsData?.data || [];
 
   return (
     <div className='container mx-auto px-4 py-8'>
@@ -200,7 +163,7 @@ function ContactDetailPageContent() {
           <RelationshipsList contactId={contact.id} />
 
           {/* Tags */}
-          <TagsCard tags={tags} />
+          <ContactTagsEditor contactId={contact.id} />
 
           {/* Metadata */}
           <Card>
@@ -290,7 +253,7 @@ function ContactDetailPageContent() {
         {/* Sidebar - Mobile fallback for tags and metadata */}
         <div className='space-y-6 lg:hidden'>
           {/* Tags - Mobile Only */}
-          <TagsCard tags={tags} />
+          <ContactTagsEditor contactId={contact.id} />
 
           {/* Metadata - Mobile Only */}
           <Card>

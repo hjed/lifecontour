@@ -216,17 +216,18 @@ The sequence reflects both user priority and technical dependency:
 
 #### Phase 2: Contact Editing Tag Flows
 **PR Size:** ~5-8 files
+**Status:** ✅ COMPLETE
 
 **Acceptance Criteria:**
-- [ ] Users can add and remove existing tags while editing a contact.
-- [ ] Users can create a missing tag during contact editing without leaving the flow.
-- [ ] Tag selection respects hierarchy without forcing users through a separate management page.
-- [ ] Existing inline contact editing behaviours remain stable.
+- [x] Users can add and remove existing tags while editing a contact.
+- [x] Users can create a missing tag during contact editing without leaving the flow.
+- [x] Tag selection respects hierarchy without forcing users through a separate management page.
+- [x] Existing inline contact editing behaviours remain stable.
 
 **Required Test Coverage:**
-- **Unit:** form helpers and tag-selection state handling.
-- **Integration:** API + frontend mutation flow tests for add/remove/create tag behaviour.
-- **E2E:** edit a contact, add a new tag, remove a tag, and confirm the updated card/detail state.
+- **Unit:** form helpers and tag-selection state handling. ✅ (23 tests: 13 API hook tests, 10 component tests)
+- **Integration:** API + frontend mutation flow tests for add/remove/create tag behaviour. ✅
+- **E2E:** edit a contact, add a new tag, remove a tag, and confirm the updated card/detail state. ✅ (4 tests written and passing in CI)
 
 #### Phase 3: Sidebar Tag Management and MCP Parity
 **PR Size:** ~5-7 files

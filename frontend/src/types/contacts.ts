@@ -203,6 +203,23 @@ export interface ContactUpdateData {
   attributes: ContactFormData;
 }
 
+// Tag Create Types
+export interface TagCreateAttributes {
+  name: string;
+  color?: string;
+  description?: string;
+  parent_id?: number | null;
+}
+
+export interface TagCreateData {
+  type: 'tags';
+  attributes: TagCreateAttributes;
+}
+
+export interface TagCreateRequest {
+  data: TagCreateData;
+}
+
 // Tag Assignment Types
 export interface TagAssignmentData {
   type: 'tags';

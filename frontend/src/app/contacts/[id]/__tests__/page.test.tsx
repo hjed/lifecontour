@@ -24,10 +24,26 @@ import {
 jest.mock('@/lib/api/contacts', () => ({
   useContact: jest.fn(),
   useContactTags: jest.fn(),
+  useTags: jest.fn(() => ({
+    data: { data: [] },
+    isLoading: false,
+  })),
   useUpdateContact: jest.fn(),
   useDeleteContact: jest.fn(),
   useToggleContactFavourite: jest.fn(),
   useUpdateContactField: jest.fn(),
+  useAssignContactTag: jest.fn(() => ({
+    mutate: jest.fn(),
+    isPending: false,
+  })),
+  useRemoveContactTag: jest.fn(() => ({
+    mutate: jest.fn(),
+    isPending: false,
+  })),
+  useCreateTag: jest.fn(() => ({
+    mutateAsync: jest.fn(),
+    isPending: false,
+  })),
   useAddContactMethod: jest.fn(() => ({
     mutateAsync: jest.fn(),
     isPending: false,
