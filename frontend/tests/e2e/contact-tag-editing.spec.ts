@@ -24,10 +24,10 @@ test.describe('Contact Tag Editing', () => {
     // Navigate to the contact detail page
     await authenticatedPage.goto(`/contacts/${contact.id}`);
 
-    // Wait for the tags editor to be visible (use first() for desktop/mobile duplicate)
-    const tagsEditor = authenticatedPage
-      .locator('[data-testid="contact-tags-editor"]')
-      .first();
+    // Wait for the tags editor to be visible
+    const tagsEditor = authenticatedPage.locator(
+      '[data-testid="contact-tags-editor"]:visible'
+    );
     await expect(tagsEditor).toBeVisible();
 
     // Click "Add Tag" button (scoped to the visible editor)
@@ -70,10 +70,10 @@ test.describe('Contact Tag Editing', () => {
     // Navigate to the contact detail page
     await authenticatedPage.goto(`/contacts/${contact.id}`);
 
-    // Scope to the first visible editor
-    const tagsEditor = authenticatedPage
-      .locator('[data-testid="contact-tags-editor"]')
-      .first();
+    // Scope to the visible editor
+    const tagsEditor = authenticatedPage.locator(
+      '[data-testid="contact-tags-editor"]:visible'
+    );
 
     // Verify the tag is displayed
     await expect(
@@ -107,10 +107,10 @@ test.describe('Contact Tag Editing', () => {
     // Navigate to the contact detail page
     await authenticatedPage.goto(`/contacts/${contact.id}`);
 
-    // Scope to the first visible editor
-    const tagsEditor = authenticatedPage
-      .locator('[data-testid="contact-tags-editor"]')
-      .first();
+    // Scope to the visible editor
+    const tagsEditor = authenticatedPage.locator(
+      '[data-testid="contact-tags-editor"]:visible'
+    );
     await expect(tagsEditor).toBeVisible();
 
     // Click "Add Tag" button
@@ -147,9 +147,9 @@ test.describe('Contact Tag Editing', () => {
     // Navigate to the contact detail page
     await page.goto(`/contacts/${contact.id}`);
 
-    // Verify tags editor is present (use first() for desktop/mobile duplicate)
+    // Verify tags editor is present
     await expect(
-      page.locator('[data-testid="contact-tags-editor"]').first()
+      page.locator('[data-testid="contact-tags-editor"]:visible')
     ).toBeVisible();
 
     // Verify inline editing still works
