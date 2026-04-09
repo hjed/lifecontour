@@ -221,7 +221,9 @@ test.describe('Sidebar Navigation', () => {
       await mobileTrigger.click();
 
       // Sheet should open with navigation
-      await expect(page.getByText('Navigation')).toBeVisible();
+      await expect(
+        page.getByRole('heading', { name: 'Navigation' })
+      ).toBeVisible();
       await expect(
         page.getByRole('button', { name: /contacts/i })
       ).toBeVisible();
@@ -238,7 +240,9 @@ test.describe('Sidebar Navigation', () => {
 
       // Open mobile sidebar
       await page.getByTestId('mobile-nav-trigger').click();
-      await expect(page.getByText('Navigation')).toBeVisible();
+      await expect(
+        page.getByRole('heading', { name: 'Navigation' })
+      ).toBeVisible();
 
       // Click on a navigation item in the mobile sidebar and wait for navigation
       await Promise.all([
@@ -250,7 +254,9 @@ test.describe('Sidebar Navigation', () => {
       ]);
 
       // Should navigate and close sidebar
-      await expect(page.getByText('Navigation')).not.toBeVisible();
+      await expect(
+        page.getByRole('heading', { name: 'Navigation' })
+      ).not.toBeVisible();
     });
 
     // TODO: Re-enable when mobile modal viewport issues are resolved
