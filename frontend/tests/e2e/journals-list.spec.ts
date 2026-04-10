@@ -70,13 +70,9 @@ test.describe('Journal List Page', () => {
       await expect(page.locator('main, [role="main"]').first()).toBeVisible();
 
       // Wait for journals to be indexed in MeiliSearch
-      // The outbox processor runs every 10 seconds, so we poll until journals are indexed
-      // We use a retry loop with exponential backoff
-      let indexed = false;
-      for (let attempt = 0; attempt < 15 && !indexed; attempt++) {
-        await page.waitForTimeout(1000); // Wait 1 second between attempts
-
-        // Check if journals are indexed by making a search request
+      // The outbox processor runs every 10 seconds, so we retry this check
+      // with Playwright's toPass polling until journals are indexed or timeout expires
+      await expect(async () => {
         const response = await page.evaluate(async () => {
           try {
             const res = await fetch(
@@ -89,17 +85,9 @@ test.describe('Journal List Page', () => {
             return { ok: false, count: 0 };
           }
         });
-
-        if (response.ok && response.count > 0) {
-          indexed = true;
-        }
-      }
-
-      if (!indexed) {
-        throw new Error(
-          'Journals were not indexed in MeiliSearch within 15 seconds'
-        );
-      }
+        expect(response.ok).toBe(true);
+        expect(response.count).toBeGreaterThan(0);
+      }).toPass({ timeout: 15000 });
 
       // Verify all journals are initially visible
       for (const journal of journals) {
@@ -122,7 +110,7 @@ test.describe('Journal List Page', () => {
       const weekendHeading = page.getByRole('heading', {
         name: /Weekend Hike/i,
       });
-      await weekendHeading.scrollIntoViewIfNeeded();
+
       await expect(weekendHeading).toBeVisible({ timeout: 30000 });
 
       // Verify non-matching journal is not visible (Team Meeting)
@@ -263,10 +251,7 @@ test.describe('Journal List Page', () => {
 
       // Wait for journals to be indexed in MeiliSearch
       // Increased timeout to 30 seconds to handle indexing delays when running as part of full test suite
-      let indexed = false;
-      for (let attempt = 0; attempt < 30 && !indexed; attempt++) {
-        await page.waitForTimeout(1000);
-
+      await expect(async () => {
         const response = await page.evaluate(async () => {
           try {
             const res = await fetch(
@@ -284,27 +269,20 @@ test.describe('Journal List Page', () => {
           }
         });
 
-        // Wait for BOTH journals with "Meeting" in the title to be indexed ("Meeting Notes" and "Team Meeting")
-        if (response.ok && response.count >= 2) {
-          const titles: string[] = response.titles ?? [];
-          const hasMeetingNotes = titles.some(t =>
-            t.toLowerCase().includes('meeting notes')
-          );
-          const hasTeamMeeting = titles.some(t =>
-            t.toLowerCase().includes('team meeting')
-          );
+        expect(response.ok).toBe(true);
+        expect(response.count).toBeGreaterThanOrEqual(2);
 
-          if (hasMeetingNotes && hasTeamMeeting) {
-            indexed = true;
-          }
-        }
-      }
-
-      if (!indexed) {
-        throw new Error(
-          'Journals were not indexed in MeiliSearch within 30 seconds'
+        const titles: string[] = response.titles ?? [];
+        const hasMeetingNotes = titles.some(t =>
+          t.toLowerCase().includes('meeting notes')
         );
-      }
+        const hasTeamMeeting = titles.some(t =>
+          t.toLowerCase().includes('team meeting')
+        );
+
+        expect(hasMeetingNotes).toBe(true);
+        expect(hasTeamMeeting).toBe(true);
+      }).toPass({ timeout: 30000 });
 
       // Search for "Meeting" - should match both "Meeting Notes" and "Team Meeting"
       const searchInput = page.getByTestId('search-input');
@@ -314,13 +292,11 @@ test.describe('Journal List Page', () => {
       const meetingNotesHeading = page.getByRole('heading', {
         name: /Meeting Notes/i,
       });
-      await meetingNotesHeading.scrollIntoViewIfNeeded();
       await expect(meetingNotesHeading).toBeVisible({ timeout: 30000 });
 
       const teamMeetingHeading = page.getByRole('heading', {
         name: /Team Meeting/i,
       });
-      await teamMeetingHeading.scrollIntoViewIfNeeded();
       await expect(teamMeetingHeading).toBeVisible({ timeout: 30000 });
 
       // Now filter by EVENT type - should only show "Team Meeting"
@@ -421,7 +397,7 @@ test.describe('Journal List Page', () => {
         const heading = page.getByRole('heading', {
           name: new RegExp(journal.title, 'i'),
         });
-        await heading.scrollIntoViewIfNeeded();
+
         await expect(heading).toBeVisible({ timeout: 30000 });
       }
 
@@ -639,7 +615,6 @@ test.describe('Journal List Page', () => {
       const aliceHeading = page.getByRole('heading', {
         name: /Meeting with Alice/i,
       });
-      await aliceHeading.scrollIntoViewIfNeeded();
       await expect(aliceHeading).toBeVisible({ timeout: 30000 });
 
       // Verify contact name is visible on the journal card
@@ -749,13 +724,13 @@ test.describe('Journal List Page', () => {
 
       // Verify only journals with Work tag are visible
       const workHeading = page.getByRole('heading', { name: /Work Meeting/i });
-      await workHeading.scrollIntoViewIfNeeded();
+
       await expect(workHeading).toBeVisible({ timeout: 30000 });
 
       const mixedHeading = page.getByRole('heading', {
         name: /Mixed Journal/i,
       });
-      await mixedHeading.scrollIntoViewIfNeeded();
+
       await expect(mixedHeading).toBeVisible({ timeout: 30000 });
 
       // Verify Personal Note is not visible

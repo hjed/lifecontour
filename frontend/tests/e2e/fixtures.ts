@@ -252,7 +252,19 @@ async function completeWorkerOAuthFlow(browser: any): Promise<AuthState> {
         const stillOnCallback = page.url().includes('/auth/callback');
         if (stillOnCallback) {
           // Wait a bit longer for the callback to complete
-          await page.waitForTimeout(2000);
+          try {
+            await page.waitForURL(
+              (url: URL) => !url.toString().includes('/auth/callback'),
+              { timeout: 15000 }
+            );
+          } catch (error) {
+            const callbackUrl = page.url();
+            console.error(
+              '🔐 [Worker Auth] Callback did not complete after additional wait. Current URL:',
+              callbackUrl
+            );
+            throw error;
+          }
           currentUrl = page.url();
           console.log(
             '🔐 [Worker Auth] After additional wait, URL is:',
@@ -279,9 +291,6 @@ async function completeWorkerOAuthFlow(browser: any): Promise<AuthState> {
     // Step 4: Verify authentication using web-first assertion pattern
     // Uses toPass for automatic retry instead of manual loops
     console.debug('🔐 [Worker Auth] Verifying authentication...');
-
-    // Wait a moment for session to be persisted
-    await page.waitForTimeout(500);
 
     let authUser: string | undefined;
     // NOTE: This uses a 10s timeout because the real OAuth flow involves an external

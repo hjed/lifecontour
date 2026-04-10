@@ -13,6 +13,7 @@ import {
   FRONTEND_TEST_CALLBACK_URL,
   FRONTEND_TEST_LOGIN_URL,
   FRONTEND_TEST_URL,
+  OAUTH_ADMIN_TEST_PORT,
   OAUTH_PUBLIC_TEST_PORT,
   OAUTH_UI_TEST_PORT,
 } from './utils/frontend-test-config';
@@ -59,17 +60,22 @@ test.describe('OAuth Docker Integration', () => {
   }) => {
     console.log('1. Testing OAuth client configuration...');
 
-    // Wait a bit for OAuth initialization to complete
+    // Wait for OAuth client initialization...
     console.log('2. Waiting for OAuth client initialization...');
-    await page.waitForTimeout(5000);
 
     try {
-      // Test if Hydra admin endpoint is accessible
-      const response = await page.request.get(
-        'http://localhost:4447/admin/clients/test-client-id'
-      );
+      // Test if Hydra admin endpoint is accessible, retry if it's not reachable
+      let response: import('@playwright/test').APIResponse | undefined;
+      await expect(async () => {
+        response = await page.request.get(
+          `http://localhost:${OAUTH_ADMIN_TEST_PORT}/admin/clients/test-client-id`
+        );
+        // We only want to retry on connection refused (which throws) or 502 Bad Gateway
+        // A 404 is a valid response meaning Hydra is up but client isn't there yet
+        expect(response.status()).not.toBe(502);
+      }).toPass({ timeout: 15000 });
 
-      if (response.ok()) {
+      if (response && response.ok()) {
         const client = await response.json();
         console.log('3. OAuth client configuration retrieved successfully');
         console.log('4. Client ID:', client.client_id);
@@ -168,7 +174,10 @@ test.describe('OAuth Docker Integration', () => {
       );
 
       await oauthButtons.first().click();
-      await page.waitForTimeout(3000);
+
+      await expect(async () => {
+        expect(oauthRequests.length).toBeGreaterThan(0);
+      }).toPass({ timeout: 10000 });
 
       // Check if OAuth request was made
       if (oauthRequests.length > 0) {
@@ -241,7 +250,9 @@ test.describe('OAuth Docker Integration', () => {
     // Test callback with mock parameters
     console.log('3. Testing callback with mock OAuth parameters...');
     await page.goto(`/auth/callback?code=test-code&state=${state}`);
-    await page.waitForTimeout(3000);
+    await expect(async () => {
+      expect(callbackRequests.length).toBeGreaterThan(0);
+    }).toPass({ timeout: 10000 });
 
     // Verify callback request was made
     expect(callbackRequests.length).toBeGreaterThan(0);
@@ -317,8 +328,11 @@ test.describe('OAuth Docker Integration', () => {
           console.log('4. Environment variables are properly set');
 
           // Test that clicking doesn't immediately fail
-          await oauthButtons.first().click();
-          await page.waitForTimeout(1000);
+          // Instead of silent catch delay, we ensure network is quiet or wait for navigation conditionally
+          await Promise.all([
+            page.waitForNavigation({ timeout: 5000 }).catch(() => null),
+            oauthButtons.first().click(),
+          ]);
 
           // Should either redirect or show some response
           const currentUrl = page.url();
