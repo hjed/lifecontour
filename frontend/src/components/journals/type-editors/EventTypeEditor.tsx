@@ -12,6 +12,14 @@ import { Calendar as CalendarIcon, MapPin, Clock, Globe } from 'lucide-react';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import { Checkbox } from '@/components/ui/checkbox';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import { useCalendars } from '@/lib/api/journals';
 import { cn } from '@/lib/utils';
 import type { CalendarInfoData } from '@/types/journals';
 import { useTypeEditorState } from './useTypeEditorState';
@@ -85,6 +93,10 @@ export function EventTypeEditor({
     onChange,
   });
 
+  const { data: calendarsResponse, isLoading: isLoadingCalendars } =
+    useCalendars();
+  const availableCalendars = calendarsResponse?.data || [];
+
   return (
     <div
       className={cn('space-y-4', className)}
@@ -96,19 +108,36 @@ export function EventTypeEditor({
           <CalendarIcon className='h-4 w-4' aria-hidden='true' />
           Calendar
         </Label>
-        <Input
-          id='calendar-id'
+        <Select
           value={editData.calendar_id || ''}
-          onChange={e =>
+          onValueChange={value =>
             setEditData(previous => ({
               ...previous,
-              calendar_id: e.target.value,
+              calendar_id: value,
             }))
           }
-          placeholder='Select calendar'
-          disabled={!isEditing}
-          data-testid='calendar-id-input'
-        />
+          disabled={!isEditing || isLoadingCalendars}
+        >
+          <SelectTrigger id='calendar-id' data-testid='calendar-id-input'>
+            <SelectValue placeholder='Select calendar' />
+          </SelectTrigger>
+          <SelectContent>
+            {availableCalendars.map(cal => (
+              <SelectItem key={cal.id} value={cal.id}>
+                <div className='flex items-center gap-2'>
+                  <div
+                    className='h-3 w-3 rounded-full'
+                    style={{
+                      backgroundColor: cal.attributes.color || '#6b7280',
+                    }}
+                    aria-hidden='true'
+                  />
+                  <span>{cal.attributes.name}</span>
+                </div>
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
       </div>
 
       {/* All-day toggle */}
