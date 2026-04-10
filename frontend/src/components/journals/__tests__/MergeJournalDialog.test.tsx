@@ -115,6 +115,8 @@ describe('MergeJournalDialog', () => {
     await user.click(nextBtn);
 
     // The resolution dialog should be opened (indicated by its title)
-    expect(screen.getByText(/Resolve Merge Conflicts/i)).toBeInTheDocument();
+    expect(
+      await screen.findByText(/Resolve Merge Conflicts/i)
+    ).toBeInTheDocument();
   });
 });

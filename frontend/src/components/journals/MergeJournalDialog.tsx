@@ -86,7 +86,11 @@ export function MergeJournalDialog({
 
   const handleNext = () => {
     if (!selectedJournal) return;
-    handleOpenChange(false);
+    if (externalOnOpenChange) {
+      externalOnOpenChange(false);
+    } else {
+      setInternalOpen(false);
+    }
     setResolutionOpen(true);
   };
 
