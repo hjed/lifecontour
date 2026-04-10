@@ -140,11 +140,9 @@ test.describe('Contact Inline Editing', () => {
     const nicknameField = page.locator('[data-testid="nickname-field"]');
 
     // Enter edit mode
-    // Playwright's click() auto-scrolls the element into view, so no manual
-    // scrollIntoView is needed. The previous manual scroll + click pattern
-    // caused a race condition in Firefox.
-    await nicknameField.scrollIntoViewIfNeeded();
-    await nicknameField.click({ force: true });
+    // Standard click ensures actionability checks (visibility, stable, receiving events)
+    await expect(nicknameField).toBeVisible();
+    await nicknameField.click();
 
     const input = page.locator('[data-testid="nickname-field"] input');
     await expect(input).toBeVisible();
