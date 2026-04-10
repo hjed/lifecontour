@@ -15,6 +15,16 @@ globalThis.ResizeObserver = jest.fn().mockImplementation(() => ({
   disconnect: jest.fn(),
 }));
 
+// Mock missing JSDOM functions required by Radix UI Select
+window.getSelection = jest.fn().mockReturnValue({
+  removeAllRanges: jest.fn(),
+});
+window.HTMLElement.prototype.scrollIntoView = jest.fn();
+window.HTMLElement.prototype.hasPointerCapture = jest.fn();
+window.HTMLElement.prototype.releasePointerCapture = jest.fn();
+
+// Empty replacing pointer event block
+
 // Create a mock router with proper typing
 const mockPush = jest.fn();
 const mockReplace = jest.fn();

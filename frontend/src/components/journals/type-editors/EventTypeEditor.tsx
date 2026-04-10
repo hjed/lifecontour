@@ -12,6 +12,14 @@ import { Calendar as CalendarIcon, MapPin, Clock, Globe } from 'lucide-react';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import { Checkbox } from '@/components/ui/checkbox';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import { useCalendars } from '@/lib/api/journals';
 import { cn } from '@/lib/utils';
 import type { CalendarInfoData } from '@/types/journals';
 import { useTypeEditorState } from './useTypeEditorState';
@@ -85,6 +93,14 @@ export function EventTypeEditor({
     onChange,
   });
 
+  const {
+    data: calendarsResponse,
+    isLoading: isLoadingCalendars,
+    error: calendarsError,
+  } = useCalendars();
+  const availableCalendars = calendarsResponse?.data || [];
+  const hasNoCalendars = availableCalendars.length === 0;
+
   return (
     <div
       className={cn('space-y-4', className)}
@@ -96,19 +112,62 @@ export function EventTypeEditor({
           <CalendarIcon className='h-4 w-4' aria-hidden='true' />
           Calendar
         </Label>
-        <Input
-          id='calendar-id'
+        <Select
           value={editData.calendar_id || ''}
-          onChange={e =>
+          onValueChange={value =>
             setEditData(previous => ({
               ...previous,
-              calendar_id: e.target.value,
+              calendar_id: value,
             }))
           }
-          placeholder='Select calendar'
-          disabled={!isEditing}
-          data-testid='calendar-id-input'
-        />
+          disabled={!isEditing || isLoadingCalendars || !!calendarsError}
+        >
+          <SelectTrigger id='calendar-id' data-testid='calendar-id-input'>
+            <SelectValue
+              placeholder={
+                calendarsError
+                  ? 'Failed to load calendars'
+                  : hasNoCalendars && !isLoadingCalendars
+                    ? 'No calendars available'
+                    : 'Select calendar'
+              }
+            />
+          </SelectTrigger>
+          <SelectContent>
+            {hasNoCalendars && !isLoadingCalendars && (
+              <SelectItem
+                value='none'
+                disabled
+                className='text-muted-foreground'
+              >
+                {calendarsError
+                  ? 'Failed to load calendars'
+                  : 'No calendars available'}
+              </SelectItem>
+            )}
+            {availableCalendars.map(cal => (
+              <SelectItem key={cal.id} value={cal.id}>
+                <div className='flex items-center gap-2'>
+                  <div
+                    className='h-3 w-3 rounded-full'
+                    style={{
+                      backgroundColor: cal.attributes.color || '#6b7280',
+                    }}
+                    aria-hidden='true'
+                  />
+                  <span>{cal.attributes.name}</span>
+                </div>
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        {isEditing && hasNoCalendars && !isLoadingCalendars && (
+          <p className='text-destructive mt-1 text-sm'>
+            {calendarsError
+              ? 'There was an error loading your calendars. Please try again later.'
+              : 'You must create a calendar first before you can associate an event with it.'}
+          </p>
+        )}
       </div>
 
       {/* All-day toggle */}
