@@ -779,10 +779,10 @@ export function useInfiniteJournals(
       // When the user has an explicit date filter, don't paginate further
       if (hasUserDateFilter) return undefined;
       try {
-        // Progressing into the PAST (Scrolling DOWN)
-        const prevEnd = parseISO(lastPageParam.date_from);
-        const newEnd = subDays(prevEnd, 1);
-        const newStart = subDays(newEnd, chunkDays - 1);
+        // Progressing into the FUTURE (Scrolling DOWN)
+        const prevStart = parseISO(lastPageParam.date_to);
+        const newStart = addDays(prevStart, 1);
+        const newEnd = addDays(newStart, chunkDays - 1);
         return {
           date_from: format(newStart, 'yyyy-MM-dd'),
           date_to: format(newEnd, 'yyyy-MM-dd'),
@@ -795,10 +795,10 @@ export function useInfiniteJournals(
       // When the user has an explicit date filter, don't paginate further
       if (hasUserDateFilter) return undefined;
       try {
-        // Progressing into the FUTURE (Scrolling UP)
-        const prevStart = parseISO(firstPageParam.date_to);
-        const newStart = addDays(prevStart, 1);
-        const newEnd = addDays(newStart, chunkDays - 1);
+        // Progressing into the PAST (Scrolling UP)
+        const prevEnd = parseISO(firstPageParam.date_from);
+        const newEnd = subDays(prevEnd, 1);
+        const newStart = subDays(newEnd, chunkDays - 1);
         return {
           date_from: format(newStart, 'yyyy-MM-dd'),
           date_to: format(newEnd, 'yyyy-MM-dd'),

@@ -703,22 +703,24 @@ describe('Journals API', () => {
       expect(standardKey).not.toEqual(infiniteKey);
     });
 
-    it('should fetch the next chunk when scrolling down (PAST)', async () => {
+    it('should fetch the next chunk when scrolling down (FUTURE)', async () => {
       const firstPage = createMockJournalListResponse(
         [createMockJournal('1')],
         { total: 1, page: 1, total_pages: 1, per_page: 100 }
       );
-      const secondPage = createMockJournalListResponse(
-        [createMockJournal('2')],
-        { total: 1, page: 1, total_pages: 1, per_page: 100 }
-      );
+      const nextPage = createMockJournalListResponse([createMockJournal('2')], {
+        total: 1,
+        page: 1,
+        total_pages: 1,
+        per_page: 100,
+      });
 
       mockFetch.mockImplementation(async (...args) => {
         const urlObj = String(args[0]);
         if (urlObj.includes('start_date=2026-04-07'))
           return { ok: true, json: async () => firstPage } as Response;
-        if (urlObj.includes('start_date=2026-03-31'))
-          return { ok: true, json: async () => secondPage } as Response;
+        if (urlObj.includes('start_date=2026-04-14'))
+          return { ok: true, json: async () => nextPage } as Response;
         return {
           ok: true,
           json: async () => createMockJournalListResponse([]),
@@ -747,16 +749,16 @@ describe('Journals API', () => {
         await result.current.fetchNextPage();
       });
 
-      // Next fetch (PAST) should be: March 31 to April 06
+      // Next fetch (FUTURE) should be: April 14 to April 20
       await waitFor(() => {
         expect(mockFetch).toHaveBeenCalledWith(
-          '/api/journals?start_date=2026-03-31&end_date=2026-04-06&limit=100',
+          '/api/journals?start_date=2026-04-14&end_date=2026-04-20&limit=100',
           expect.any(Object)
         );
       });
     });
 
-    it('should fetch the previous chunk when scrolling up (FUTURE)', async () => {
+    it('should fetch the previous chunk when scrolling up (PAST)', async () => {
       const firstPage = createMockJournalListResponse(
         [createMockJournal('1')],
         { total: 1, page: 1, total_pages: 1, per_page: 100 }
@@ -770,7 +772,7 @@ describe('Journals API', () => {
         const urlObj = String(args[0]);
         if (urlObj.includes('start_date=2026-04-07'))
           return { ok: true, json: async () => firstPage } as Response;
-        if (urlObj.includes('start_date=2026-04-14'))
+        if (urlObj.includes('start_date=2026-03-31'))
           return { ok: true, json: async () => previousPage } as Response;
         return {
           ok: true,
@@ -794,10 +796,10 @@ describe('Journals API', () => {
         await result.current.fetchPreviousPage();
       });
 
-      // Previous fetch (FUTURE) should be: April 14 to April 20
+      // Previous fetch (PAST) should be: March 31 to April 06
       await waitFor(() => {
         expect(mockFetch).toHaveBeenCalledWith(
-          '/api/journals?start_date=2026-04-14&end_date=2026-04-20&limit=100',
+          '/api/journals?start_date=2026-03-31&end_date=2026-04-06&limit=100',
           expect.any(Object)
         );
       });

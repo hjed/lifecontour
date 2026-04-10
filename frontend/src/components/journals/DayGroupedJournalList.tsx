@@ -1,6 +1,6 @@
 'use client';
 
-import { ReactNode, useEffect, useRef } from 'react';
+import { ReactNode, useEffect, useRef, useState } from 'react';
 import { format, parseISO } from 'date-fns';
 import { Loader2 } from 'lucide-react';
 import { JournalListItem } from '@/components/journals/JournalListItem';
@@ -46,6 +46,31 @@ export function DayGroupedJournalList({
     fetchPreviousPage,
   });
 
+  const [hasScrolled, setHasScrolled] = useState(false);
+
+  // Initial scroll to today before enabling observers
+  useEffect(() => {
+    if (hasScrolled) return;
+    if (isLoadingNext || isLoadingPrevious) return;
+
+    const todayStr = format(new Date(), 'yyyy-MM-dd');
+    const todayElement = document.querySelector(
+      `[data-testid="journal-day-group-${todayStr}"]`
+    );
+
+    if (todayElement) {
+      setTimeout(() => {
+        todayElement.scrollIntoView({ block: 'start' });
+        // Allow a brief moment for the scroll to settle before enabling observers
+
+        setTimeout(() => setHasScrolled(true), 100);
+      }, 50);
+    } else if (journals.length > 0 || (!isLoadingNext && !isLoadingPrevious)) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- Needed to gate intersection observers
+      setHasScrolled(true);
+    }
+  }, [journals, isLoadingNext, isLoadingPrevious, hasScrolled]);
+
   useEffect(() => {
     fetchStateRef.current = {
       hasNextPage,
@@ -66,6 +91,8 @@ export function DayGroupedJournalList({
 
   // Set up intersection observers for bi-directional scroll fetching
   useEffect(() => {
+    if (!hasScrolled) return;
+
     const observer = new IntersectionObserver(
       entries => {
         entries.forEach(entry => {
@@ -73,7 +100,7 @@ export function DayGroupedJournalList({
           const state = fetchStateRef.current;
 
           if (entry.target === topSentinelRef.current) {
-            // Scrolling up -> fetch previous (FUTURE items)
+            // Scrolling up -> fetch previous (PAST items)
             if (
               state.hasPreviousPage &&
               !state.isLoadingPrevious &&
@@ -82,7 +109,7 @@ export function DayGroupedJournalList({
               state.fetchPreviousPage();
             }
           } else if (entry.target === bottomSentinelRef.current) {
-            // Scrolling down -> fetch next (PAST items)
+            // Scrolling down -> fetch next (FUTURE items)
             if (
               state.hasNextPage &&
               !state.isLoadingNext &&
@@ -103,7 +130,7 @@ export function DayGroupedJournalList({
     if (bottomTarget) observer.observe(bottomTarget);
 
     return () => observer.disconnect();
-  }, []);
+  }, [hasScrolled]);
 
   // Derive date bounds
   let effectiveStartDate = dateBounds?.start;
@@ -145,7 +172,7 @@ export function DayGroupedJournalList({
 
   return (
     <div className={`space-y-6 ${className}`}>
-      {/* Top Sentinel (Future) */}
+      {/* Top Sentinel (Past) */}
       <div
         ref={topSentinelRef}
         className='flex h-4 w-full items-center justify-center'
@@ -198,7 +225,7 @@ export function DayGroupedJournalList({
         );
       })}
 
-      {/* Bottom Sentinel (Past) */}
+      {/* Bottom Sentinel (Future) */}
       <div
         ref={bottomSentinelRef}
         className='flex h-4 w-full items-center justify-center'

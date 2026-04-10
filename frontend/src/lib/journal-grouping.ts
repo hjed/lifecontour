@@ -90,9 +90,9 @@ export function groupJournalsByDay({
     });
   });
 
-  // Sort days DESCENDING (Newest day first)
+  // Sort days ASCENDING (Oldest day first)
   const resultKeys = Object.keys(dayGroupsMap).sort((a, b) =>
-    b.localeCompare(a)
+    a.localeCompare(b)
   );
 
   let result = resultKeys.map(k => dayGroupsMap[k]);

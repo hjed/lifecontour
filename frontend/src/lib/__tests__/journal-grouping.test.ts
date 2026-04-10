@@ -31,8 +31,8 @@ describe('journal-grouping', () => {
 
       expect(result).toHaveLength(3);
 
-      // Newest (04-03) should be first
-      expect(result[0].date).toBe('2026-04-03');
+      // Oldest (04-01) should be first
+      expect(result[0].date).toBe('2026-04-01');
       expect(result[0].isEmpty).toBe(false);
       expect(result[0].journals).toHaveLength(1);
 
@@ -40,7 +40,7 @@ describe('journal-grouping', () => {
       expect(result[1].isEmpty).toBe(true);
       expect(result[1].journals).toHaveLength(0);
 
-      expect(result[2].date).toBe('2026-04-01');
+      expect(result[2].date).toBe('2026-04-03');
       expect(result[2].isEmpty).toBe(false);
       expect(result[2].journals).toHaveLength(1);
     });
@@ -59,8 +59,8 @@ describe('journal-grouping', () => {
       });
 
       expect(result).toHaveLength(2);
-      expect(result[0].date).toBe('2026-04-03'); // Descending order
-      expect(result[1].date).toBe('2026-04-01');
+      expect(result[0].date).toBe('2026-04-01'); // Ascending order
+      expect(result[1].date).toBe('2026-04-03');
     });
 
     it('sorts journals within a day correctly by date ascending', () => {
@@ -128,11 +128,11 @@ describe('journal-grouping', () => {
         collapseEmpty: false,
       });
       expect(result).toHaveLength(3);
-      // Descending order: 04-03 is first
-      expect(result[0].journals).toHaveLength(1);
-      expect(result[0].journals[0].id).toBe('3');
+      // Ascending order: 04-01 is first
+      expect(result[0].journals).toHaveLength(2); // 04-01
       expect(result[1].journals).toHaveLength(0);
-      expect(result[2].journals).toHaveLength(2); // 04-01
+      expect(result[2].journals).toHaveLength(1);
+      expect(result[2].journals[0].id).toBe('3');
     });
   });
 });
