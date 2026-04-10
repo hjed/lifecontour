@@ -291,7 +291,8 @@ test.describe('Journal Creation UI Flow', () => {
     await page
       .getByRole('checkbox', { name: /all-day event/i })
       .waitFor({ state: 'visible' });
-    await page.getByTestId('calendar-id-input').fill(calendarId);
+    await page.getByTestId('calendar-id-input').click();
+    await page.locator(`[role="option"][data-value="${calendarId}"]`).click();
 
     // Check all-day to avoid Start/End time validation unless we want to fill them
     await page.getByRole('checkbox', { name: /all-day event/i }).check();
