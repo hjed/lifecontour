@@ -74,13 +74,6 @@ jest.setTimeout(15000);
 describe('JournalCreateForm', () => {
   beforeEach(() => {
     jest.clearAllMocks();
-    // JSDOM missing functions required by Radix UI Select
-    window.getSelection = jest.fn().mockReturnValue({
-      removeAllRanges: jest.fn(),
-    });
-    window.HTMLElement.prototype.scrollIntoView = jest.fn();
-    window.HTMLElement.prototype.hasPointerCapture = jest.fn();
-    window.HTMLElement.prototype.releasePointerCapture = jest.fn();
   });
 
   describe('Rendering', () => {
