@@ -234,6 +234,7 @@ services:
       WEBHOOK_BASE_URL: ${WEBHOOK_BASE_URL:-http://localhost:8000}
       DISABLE_AUTH: ${DISABLE_AUTH:-false}
       HOME: /app/.cache
+      ENABLE_TEST_REVIEW_ITEMS: ${ENABLE_TEST_REVIEW_ITEMS:-false}
     volumes:
       - ./backend:/app
       - ./core_shared:/core_shared

@@ -246,6 +246,43 @@ export interface ChildJournalSummary {
   types: JournalType[];
 }
 
+// Review Items and Suggestions
+export interface ReviewSuggestion {
+  id: number;
+  reason: string;
+  confidence_score: number;
+  candidate_journal_id: number;
+  candidate_journal_title: string;
+}
+
+export interface ReviewItemJournalSummary {
+  id: number;
+  title: string;
+}
+
+export interface ReviewItemAttributes {
+  status: string;
+  reason: string;
+  confidence_score: number;
+  details: Record<string, unknown>;
+  source_journal: ReviewItemJournalSummary;
+  candidate_journal: ReviewItemJournalSummary;
+}
+
+export interface ReviewItemResource {
+  type: 'review-items';
+  id: string;
+  attributes: ReviewItemAttributes;
+  links?: JsonApiLinks;
+  meta?: JsonApiMeta;
+}
+
+export interface ReviewItemsListResponse {
+  data: ReviewItemResource[];
+  links?: JsonApiLinks;
+  meta?: JsonApiMeta;
+}
+
 // Journal Attributes
 export interface JournalAttributes {
   title: string;
@@ -267,6 +304,9 @@ export interface JournalAttributes {
   children?: ChildJournalSummary[];
   children_count?: number | null;
   depth?: number | null;
+  // Review information
+  has_pending_reviews?: boolean;
+  review_items?: ReviewSuggestion[];
 }
 
 // Journal Relationships

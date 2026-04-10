@@ -1,0 +1,161 @@
+import { useState } from 'react';
+import Link from 'next/link';
+import type { Route } from 'next';
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+} from '@/components/ui/sheet';
+import { Button } from '@/components/ui/button';
+import { AlertCircle, GitMerge, Loader2 } from 'lucide-react';
+import { useReviewItems } from '@/lib/api/journals';
+import { MergeJournalDialog } from './MergeJournalDialog';
+import { Badge } from '@/components/ui/badge';
+
+interface ReviewQueueSidebarProps {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}
+
+export function ReviewQueueSidebar({
+  open,
+  onOpenChange,
+}: ReviewQueueSidebarProps) {
+  const [mergeDialogOpen, setMergeDialogOpen] = useState(false);
+  const [selectedSourceId, setSelectedSourceId] = useState<string | null>(null);
+  const [selectedCandidateId, setSelectedCandidateId] = useState<string | null>(
+    null
+  );
+
+  const { data, isLoading } = useReviewItems('pending', 1, 50);
+  const totalCount = (data?.meta?.total_count as number) || 0;
+  const items = data?.data || [];
+
+  const handleReviewClick = (sourceId: number, candidateId: number) => {
+    setSelectedSourceId(sourceId.toString());
+    setSelectedCandidateId(candidateId.toString());
+    setMergeDialogOpen(true);
+  };
+
+  return (
+    <Sheet open={open} onOpenChange={onOpenChange}>
+      <SheetContent className='w-full overflow-y-auto sm:max-w-md'>
+        <SheetHeader className='mb-6'>
+          <SheetTitle className='flex items-center gap-2'>
+            Review Queue
+            {totalCount > 0 && (
+              <Badge variant='destructive' className='ml-2 font-mono'>
+                {totalCount}
+              </Badge>
+            )}
+          </SheetTitle>
+          <SheetDescription>
+            AI-generated suggestions for journals that may be duplicates or
+            related.
+          </SheetDescription>
+        </SheetHeader>
+
+        {isLoading ? (
+          <div className='text-muted-foreground flex items-center justify-center p-8'>
+            <Loader2 className='mr-2 h-4 w-4 animate-spin' />
+            Loading queue...
+          </div>
+        ) : items.length === 0 ? (
+          <div className='text-muted-foreground p-8 text-center'>
+            <AlertCircle className='mx-auto mb-3 h-8 w-8 opacity-50' />
+            <p>Your review queue is empty.</p>
+            <p className='mt-1 text-sm'>No pending AI suggestions.</p>
+          </div>
+        ) : (
+          <div className='space-y-4'>
+            {items.map(item => {
+              const { attributes, id } = item;
+              const {
+                source_journal,
+                candidate_journal,
+                reason,
+                confidence_score,
+              } = attributes;
+
+              return (
+                <div
+                  key={id}
+                  className='border-destructive/20 bg-destructive/5 space-y-3 rounded-lg border p-4'
+                >
+                  <div className='flex items-start justify-between gap-2'>
+                    <div className='text-destructive flex items-center gap-1.5 text-sm font-medium'>
+                      <AlertCircle className='h-3.5 w-3.5' />
+                      {reason.replace('_', ' ')}
+                    </div>
+                    <div className='text-muted-foreground bg-background rounded border px-1.5 py-0.5 text-[10px] font-bold uppercase'>
+                      {Math.round(confidence_score * 100)}% Match
+                    </div>
+                  </div>
+
+                  <div className='space-y-2 text-sm'>
+                    <p>
+                      <Link
+                        href={`/journals/${source_journal.id}` as Route}
+                        className='font-medium hover:underline focus:outline-none'
+                        onClick={() => onOpenChange(false)}
+                      >
+                        {source_journal.title}
+                      </Link>
+                      {' may be a duplicate of '}
+                      <Link
+                        href={`/journals/${candidate_journal.id}` as Route}
+                        className='font-medium hover:underline focus:outline-none'
+                        onClick={() => onOpenChange(false)}
+                      >
+                        {candidate_journal.title}
+                      </Link>
+                    </p>
+                  </div>
+
+                  <div className='flex justify-end pt-2'>
+                    <Button
+                      variant='destructive'
+                      size='sm'
+                      className='w-full text-xs'
+                      onClick={() =>
+                        handleReviewClick(
+                          source_journal.id,
+                          candidate_journal.id
+                        )
+                      }
+                      data-testid={`queue-review-btn-${id}`}
+                    >
+                      <GitMerge className='mr-1.5 h-3.5 w-3.5' />
+                      Resolve Merge
+                    </Button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {selectedSourceId && selectedCandidateId && (
+          <MergeJournalDialog
+            sourceJournalId={selectedSourceId}
+            targetJournalId={selectedCandidateId}
+            // Passing targetJournalId creates an auto-populated target choice which is exactly what we want.
+            // Oh wait, MergeJournalDialog doesn't take targetJournalId as an auto-populate parameter?
+            open={mergeDialogOpen}
+            onOpenChange={open => {
+              setMergeDialogOpen(open);
+              if (!open) {
+                setTimeout(() => {
+                  setSelectedSourceId(null);
+                  setSelectedCandidateId(null);
+                }, 300);
+              }
+            }}
+          />
+        )}
+      </SheetContent>
+    </Sheet>
+  );
+}

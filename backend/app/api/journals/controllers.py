@@ -38,6 +38,7 @@ from app.api.journals.converters import (
     TypeDataConverter,
 )
 from app.api.journals.schemas import (
+    EventDateRangeSchema,
     JournalAttributes,
     JournalContactAddRequest,
     JournalCreateRequest,
@@ -53,6 +54,12 @@ from app.api.journals.schemas import (
     JournalTypeDataUpdateRequest,
     JournalUpdateRequest,
     MergeJournalRequest,
+    ReviewItemAttributes,
+    ReviewItemCreateRequest,
+    ReviewItemJournalSummary,
+    ReviewItemListResponse,
+    ReviewItemResource,
+    ReviewSuggestionSchema,
 )
 from app.core.contacts.models.repositories import ContactRepository
 from app.core.journal.models.repositories import (
@@ -72,6 +79,7 @@ from app.core.journal.models.repositories import (
     OutdoorActivityDataRepository,
     PhotoAlbumDataRepository,
     PlanDataRepository,
+    ReviewItemRepository,
     RouteRepository,
     TravelDataRepository,
 )
@@ -80,6 +88,7 @@ from app.core.journal.services.journal_merge_service import JournalMergeService
 from app.core.journal.services.journal_service import JournalService
 from app.core.search.exceptions import SearchServiceUnavailableError
 from app.infrastructure.auth.models import SessionUser
+from app.infrastructure.config import Settings
 from app.infrastructure.search.search_service import SearchService
 
 logger = structlog.get_logger()
@@ -854,6 +863,7 @@ async def _build_journal_list_resources(
     contact_relationship_repo: JournalContactRelationshipRepository,
     tag_repo: JournalTagRepository,
     route_repo: RouteRepository,
+    pending_review_journal_ids: set[int] | None = None,
 ) -> list[JournalResource]:
     """Helper to consistently build journal list responses with enriched data.
 
@@ -938,6 +948,12 @@ async def _build_journal_list_resources(
         )
         journal_resources.append(resource)
 
+    # Set has_pending_reviews indicator
+    review_ids = pending_review_journal_ids or set()
+    for resource in journal_resources:
+        journal_id_int = int(resource.id)
+        resource.attributes.has_pending_reviews = journal_id_int in review_ids
+
     # Populate contact names
     contact_cache: dict[int, str] = {}
     for resource in journal_resources:
@@ -970,6 +986,7 @@ async def list_journals(
     tag_repo: FromDishka[JournalTagRepository],
     route_repo: FromDishka[RouteRepository],
     contact_repo: FromDishka[ContactRepository],
+    review_item_repo: FromDishka[ReviewItemRepository],
     user: FromDishka[SessionUser],  # Require authentication
     page: Annotated[int, Query(description="Page number", ge=1)] = 1,
     limit: Annotated[int, Query(description="Items per page", ge=1, le=100)] = 20,
@@ -1025,6 +1042,11 @@ async def list_journals(
         search=search,
     )
 
+    # Fetch pending review journal IDs for the review indicator
+    pending_review_journal_ids = (
+        await review_item_repo.find_pending_journal_ids_by_user(user.id)
+    )
+
     # Convert to resources with enriched data
     journal_resources = await _build_journal_list_resources(
         journals=journals,
@@ -1050,6 +1072,7 @@ async def list_journals(
         contact_relationship_repo=contact_relationship_repo,
         tag_repo=tag_repo,
         route_repo=route_repo,
+        pending_review_journal_ids=pending_review_journal_ids,
     )
 
     meta = create_pagination_meta(total_count, page, limit)
@@ -1189,6 +1212,156 @@ async def search_journals(
     )
 
 
+@router.get("/review-items")
+@inject
+async def list_review_items(
+    request: Request,
+    review_item_repo: FromDishka[ReviewItemRepository],
+    journal_service: FromDishka[JournalService],
+    user: FromDishka[SessionUser],
+    limit: Annotated[int, Query(description="Items per page", ge=1, le=100)] = 20,
+    offset: Annotated[int, Query(description="Items to skip", ge=0)] = 0,
+    item_status: Annotated[
+        str, Query(description="Filter by status", alias="status")
+    ] = "pending",
+) -> ReviewItemListResponse:
+    """
+    List review items for the authenticated user.
+
+    Returns a paginated list of review items that need user attention.
+    Each item includes source and candidate journal summaries.
+    """
+    base_url = get_request_base_url(request)
+
+    if item_status != "pending":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Only 'pending' status is currently supported",
+        )
+
+    items = await review_item_repo.find_pending_by_user(
+        user.id, limit=limit, offset=offset
+    )
+    total_count = await review_item_repo.count_pending_by_user(user.id)
+
+    # Batch-fetch journal summaries for all source and candidate journals
+    journal_ids = set()
+    for item in items:
+        journal_ids.add(item.source_journal_id)
+        journal_ids.add(item.candidate_journal_id)
+
+    journals = await journal_service.find_journals_by_ids_for_user(
+        user_id=user.id, journal_ids=list(journal_ids)
+    )
+    journal_map = {j.id: j for j in journals if j.id is not None}
+
+    # Build review item resources
+    resources: list[ReviewItemResource] = []
+    for item in items:
+        source_journal = journal_map.get(item.source_journal_id)
+        candidate_journal = journal_map.get(item.candidate_journal_id)
+
+        source_summary = ReviewItemJournalSummary(
+            id=item.source_journal_id,
+            title=source_journal.title
+            if source_journal
+            else f"Journal {item.source_journal_id}",
+            event_date_range=EventDateRangeSchema(
+                start=source_journal.event_date_range.start,
+                end=source_journal.event_date_range.end,
+            )
+            if source_journal
+            else EventDateRangeSchema(start=datetime.now(UTC), end=datetime.now(UTC)),
+        )
+
+        candidate_summary = ReviewItemJournalSummary(
+            id=item.candidate_journal_id,
+            title=candidate_journal.title
+            if candidate_journal
+            else f"Journal {item.candidate_journal_id}",
+            event_date_range=EventDateRangeSchema(
+                start=candidate_journal.event_date_range.start,
+                end=candidate_journal.event_date_range.end,
+            )
+            if candidate_journal
+            else EventDateRangeSchema(start=datetime.now(UTC), end=datetime.now(UTC)),
+        )
+
+        resources.append(
+            ReviewItemResource(
+                id=str(item.id),
+                attributes=ReviewItemAttributes(
+                    reason=item.reason.value,
+                    confidence_score=item.confidence_score,
+                    status=item.status,
+                    details=item.details,
+                    source_journal=source_summary,
+                    candidate_journal=candidate_summary,
+                    created_at=item.created_at,
+                ),
+                links=JsonApiLinks(
+                    self=f"{base_url}/api/journals/review-items/{item.id}",
+                ),
+            )
+        )
+
+    meta = create_pagination_meta(
+        total_count, 1 + offset // limit if limit else 1, limit
+    )
+
+    return ReviewItemListResponse(data=resources, meta=meta)
+
+
+@router.post("/review-items", status_code=status.HTTP_201_CREATED)
+@inject
+async def create_review_item(
+    review_request: ReviewItemCreateRequest,
+    review_item_repo: FromDishka[ReviewItemRepository],
+    user: FromDishka[SessionUser],
+    settings: FromDishka[Settings],
+) -> dict[str, Any]:
+    """
+    Create a review item (test-only endpoint).
+
+    This endpoint is gated behind the ENABLE_TEST_REVIEW_ITEMS setting
+    and is only available in test/CI environments for E2E testing.
+    """
+    from core_shared.models.journals.review_item import ReviewItem, ReviewReason
+
+    if not settings.enable_test_review_items:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Not found",
+        )
+
+    attrs = review_request.data.attributes
+    review_item = ReviewItem(
+        user_id=user.id,
+        source_journal_id=attrs.source_journal_id,
+        candidate_journal_id=attrs.candidate_journal_id,
+        reason=ReviewReason(attrs.reason),
+        confidence_score=attrs.confidence_score,
+        details=attrs.details,
+    )
+
+    created, is_new = await review_item_repo.create(review_item)
+
+    return {
+        "data": {
+            "type": "review-items",
+            "id": str(created.id),
+            "attributes": {
+                "source_journal_id": created.source_journal_id,
+                "candidate_journal_id": created.candidate_journal_id,
+                "reason": created.reason.value,
+                "confidence_score": created.confidence_score,
+                "status": created.status,
+                "is_new": is_new,
+            },
+        }
+    }
+
+
 @router.get("/{journal_id}")
 @inject
 async def get_journal(
@@ -1214,6 +1387,7 @@ async def get_journal(
     tag_repo: FromDishka[JournalTagRepository],
     route_repo: FromDishka[RouteRepository],
     contact_repo: FromDishka[ContactRepository],
+    review_item_repo: FromDishka[ReviewItemRepository],
     user: FromDishka[SessionUser],  # Require authentication
 ) -> JournalResponse:
     """
@@ -1292,6 +1466,33 @@ async def get_journal(
         depth=depth,
         children_types=children_types,
     )
+
+    # Embed pending review items in the detail response
+    pending_review_items = await review_item_repo.find_pending_by_journal_id(journal_id)
+    if pending_review_items:
+        # Fetch candidate journal titles
+        candidate_ids = [ri.candidate_journal_id for ri in pending_review_items]
+        candidate_journals = await journal_service.find_journals_by_ids_for_user(
+            user_id=user.id, journal_ids=candidate_ids
+        )
+        candidate_title_map = {
+            j.id: j.title for j in candidate_journals if j.id is not None
+        }
+
+        journal_resource.attributes.review_items = [
+            ReviewSuggestionSchema(
+                id=ri.id,  # type: ignore[arg-type]
+                reason=ri.reason.value,
+                confidence_score=ri.confidence_score,
+                candidate_journal_id=ri.candidate_journal_id,
+                candidate_journal_title=candidate_title_map.get(
+                    ri.candidate_journal_id, f"Journal {ri.candidate_journal_id}"
+                ),
+                details=ri.details,
+            ).model_dump()
+            for ri in pending_review_items
+        ]
+        journal_resource.attributes.has_pending_reviews = True
 
     return await _build_journal_response(journal_resource, contact_repo)
 

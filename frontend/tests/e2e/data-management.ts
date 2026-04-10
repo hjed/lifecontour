@@ -55,6 +55,14 @@ export interface JournalCreateRequest {
   parent_id?: number;
 }
 
+export interface ReviewItemCreateRequest {
+  source_journal_id: number;
+  candidate_journal_id: number;
+  reason?: string;
+  confidence_score?: number;
+  details?: Record<string, unknown>;
+}
+
 /**
  * Manages test data creation and cleanup via API calls
  */
@@ -929,6 +937,50 @@ export class TestDataManager {
     }
 
     return journals;
+  }
+
+  /**
+   * Create a review item for testing
+   */
+  async createReviewItem(
+    request: ReviewItemCreateRequest
+  ): Promise<{ id: string }> {
+    console.log(
+      `📝 [Data Manager] Creating review item between journals ${request.source_journal_id} and ${request.candidate_journal_id}`
+    );
+
+    const payload = {
+      data: {
+        type: 'review-items',
+        attributes: {
+          source_journal_id: request.source_journal_id,
+          candidate_journal_id: request.candidate_journal_id,
+          reason: request.reason || 'potential_duplicate',
+          confidence_score: request.confidence_score || 0.85,
+          details: request.details || {},
+        },
+      },
+    };
+
+    const response = await this.page.request.post(
+      '/api/journals/review-items',
+      {
+        data: payload,
+      }
+    );
+
+    if (!response.ok()) {
+      const errorText = await response.text();
+      console.error(
+        `Failed to create review item: ${response.status()} ${errorText}`
+      );
+      throw new Error(
+        `Failed to create review item: ${response.status()} ${errorText}`
+      );
+    }
+
+    const responseData = await response.json();
+    return { id: responseData.data.id };
   }
 
   /**

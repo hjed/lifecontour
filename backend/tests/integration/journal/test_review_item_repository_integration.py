@@ -325,3 +325,292 @@ class TestReviewItemRepositoryFindPending:
         )
 
         assert pending == []
+
+
+OTHER_USER_ID = "other-user-456"
+
+
+@pytest.mark.integration
+class TestReviewItemRepositoryFindPendingByUser:
+    """Test find_pending_by_user operations."""
+
+    async def test_returns_all_pending_items_for_user(
+        self,
+        review_item_repository: SqlReviewItemRepository,
+        journal_repository: SqlJournalRepository,
+    ):
+        """Should return all pending review items for a user."""
+        source = await _create_journal(journal_repository, title="Source")
+        candidate1 = await _create_journal(
+            journal_repository, title="Candidate 1", hours_offset=1
+        )
+        candidate2 = await _create_journal(
+            journal_repository, title="Candidate 2", hours_offset=2
+        )
+
+        await review_item_repository.create(
+            _make_review_item(
+                source_journal_id=source.id,  # type: ignore[arg-type]
+                candidate_journal_id=candidate1.id,  # type: ignore[arg-type]
+            )
+        )
+        await review_item_repository.create(
+            _make_review_item(
+                source_journal_id=source.id,  # type: ignore[arg-type]
+                candidate_journal_id=candidate2.id,  # type: ignore[arg-type]
+            )
+        )
+
+        items = await review_item_repository.find_pending_by_user(USER_ID)
+
+        assert len(items) == 2
+
+    async def test_respects_limit_and_offset(
+        self,
+        review_item_repository: SqlReviewItemRepository,
+        journal_repository: SqlJournalRepository,
+    ):
+        """Should paginate results using limit and offset."""
+        source = await _create_journal(journal_repository, title="Source")
+        candidates = []
+        for i in range(3):
+            c = await _create_journal(
+                journal_repository, title=f"Candidate {i}", hours_offset=i + 1
+            )
+            candidates.append(c)
+            await review_item_repository.create(
+                _make_review_item(
+                    source_journal_id=source.id,  # type: ignore[arg-type]
+                    candidate_journal_id=c.id,  # type: ignore[arg-type]
+                    confidence_score=0.9 - i * 0.1,
+                )
+            )
+
+        page1 = await review_item_repository.find_pending_by_user(
+            USER_ID, limit=2, offset=0
+        )
+        page2 = await review_item_repository.find_pending_by_user(
+            USER_ID, limit=2, offset=2
+        )
+
+        assert len(page1) == 2
+        assert len(page2) == 1
+
+    async def test_returns_empty_for_no_pending(
+        self,
+        review_item_repository: SqlReviewItemRepository,
+    ):
+        """Should return empty list when no pending items exist."""
+        items = await review_item_repository.find_pending_by_user(USER_ID)
+        assert items == []
+
+    async def test_ordered_by_confidence_desc(
+        self,
+        review_item_repository: SqlReviewItemRepository,
+        journal_repository: SqlJournalRepository,
+    ):
+        """Results should be ordered by confidence_score descending."""
+        source = await _create_journal(journal_repository, title="Source")
+        low = await _create_journal(journal_repository, title="Low", hours_offset=1)
+        high = await _create_journal(journal_repository, title="High", hours_offset=2)
+
+        await review_item_repository.create(
+            _make_review_item(
+                source_journal_id=source.id,  # type: ignore[arg-type]
+                candidate_journal_id=low.id,  # type: ignore[arg-type]
+                confidence_score=0.3,
+            )
+        )
+        await review_item_repository.create(
+            _make_review_item(
+                source_journal_id=source.id,  # type: ignore[arg-type]
+                candidate_journal_id=high.id,  # type: ignore[arg-type]
+                confidence_score=0.95,
+            )
+        )
+
+        items = await review_item_repository.find_pending_by_user(USER_ID)
+
+        assert items[0].confidence_score == 0.95
+        assert items[1].confidence_score == 0.3
+
+
+@pytest.mark.integration
+class TestReviewItemRepositoryCountPendingByUser:
+    """Test count_pending_by_user operations."""
+
+    async def test_returns_correct_count(
+        self,
+        review_item_repository: SqlReviewItemRepository,
+        journal_repository: SqlJournalRepository,
+    ):
+        """Should return correct count of pending items for user."""
+        source = await _create_journal(journal_repository, title="Source")
+        c1 = await _create_journal(journal_repository, title="C1", hours_offset=1)
+        c2 = await _create_journal(journal_repository, title="C2", hours_offset=2)
+
+        await review_item_repository.create(
+            _make_review_item(
+                source_journal_id=source.id,  # type: ignore[arg-type]
+                candidate_journal_id=c1.id,  # type: ignore[arg-type]
+            )
+        )
+        await review_item_repository.create(
+            _make_review_item(
+                source_journal_id=source.id,  # type: ignore[arg-type]
+                candidate_journal_id=c2.id,  # type: ignore[arg-type]
+            )
+        )
+
+        count = await review_item_repository.count_pending_by_user(USER_ID)
+        assert count == 2
+
+    async def test_returns_zero_when_none(
+        self,
+        review_item_repository: SqlReviewItemRepository,
+    ):
+        """Should return zero when no pending items exist."""
+        count = await review_item_repository.count_pending_by_user(USER_ID)
+        assert count == 0
+
+
+@pytest.mark.integration
+class TestReviewItemRepositoryFindPendingJournalIds:
+    """Test find_pending_journal_ids_by_user operations."""
+
+    async def test_returns_journal_ids_with_pending_reviews(
+        self,
+        review_item_repository: SqlReviewItemRepository,
+        journal_repository: SqlJournalRepository,
+    ):
+        """Should return distinct journal IDs that have pending review items."""
+        source1 = await _create_journal(journal_repository, title="Source 1")
+        source2 = await _create_journal(
+            journal_repository, title="Source 2", hours_offset=1
+        )
+        candidate = await _create_journal(
+            journal_repository, title="Candidate", hours_offset=2
+        )
+        # Journal with no review items
+        await _create_journal(journal_repository, title="Clean Journal", hours_offset=3)
+
+        await review_item_repository.create(
+            _make_review_item(
+                source_journal_id=source1.id,  # type: ignore[arg-type]
+                candidate_journal_id=candidate.id,  # type: ignore[arg-type]
+            )
+        )
+        await review_item_repository.create(
+            _make_review_item(
+                source_journal_id=source2.id,  # type: ignore[arg-type]
+                candidate_journal_id=candidate.id,  # type: ignore[arg-type]
+            )
+        )
+
+        journal_ids = await review_item_repository.find_pending_journal_ids_by_user(
+            USER_ID
+        )
+
+        # Should include source journals and candidate journal
+        assert source1.id in journal_ids
+        assert source2.id in journal_ids
+        assert candidate.id in journal_ids
+
+    async def test_returns_empty_when_no_pending(
+        self,
+        review_item_repository: SqlReviewItemRepository,
+    ):
+        """Should return empty set when no pending review items exist."""
+        journal_ids = await review_item_repository.find_pending_journal_ids_by_user(
+            USER_ID
+        )
+        assert journal_ids == set()
+
+
+@pytest.mark.integration
+class TestReviewItemRepositoryUpdateStatus:
+    """Test update_status operations."""
+
+    async def test_updates_status_to_resolved(
+        self,
+        review_item_repository: SqlReviewItemRepository,
+        journal_repository: SqlJournalRepository,
+    ):
+        """Should update a pending review item to resolved."""
+        source = await _create_journal(journal_repository, title="Source")
+        candidate = await _create_journal(
+            journal_repository, title="Candidate", hours_offset=1
+        )
+
+        created, _ = await review_item_repository.create(
+            _make_review_item(
+                source_journal_id=source.id,  # type: ignore[arg-type]
+                candidate_journal_id=candidate.id,  # type: ignore[arg-type]
+            )
+        )
+
+        assert created.id is not None
+        updated = await review_item_repository.update_status(created.id, "resolved")
+
+        assert updated is not None
+        assert updated.status == "resolved"
+        assert updated.id == created.id
+
+    async def test_updates_status_to_dismissed(
+        self,
+        review_item_repository: SqlReviewItemRepository,
+        journal_repository: SqlJournalRepository,
+    ):
+        """Should update a pending review item to dismissed."""
+        source = await _create_journal(journal_repository, title="Source")
+        candidate = await _create_journal(
+            journal_repository, title="Candidate", hours_offset=1
+        )
+
+        created, _ = await review_item_repository.create(
+            _make_review_item(
+                source_journal_id=source.id,  # type: ignore[arg-type]
+                candidate_journal_id=candidate.id,  # type: ignore[arg-type]
+            )
+        )
+
+        assert created.id is not None
+        updated = await review_item_repository.update_status(created.id, "dismissed")
+
+        assert updated is not None
+        assert updated.status == "dismissed"
+
+    async def test_returns_none_for_nonexistent(
+        self,
+        review_item_repository: SqlReviewItemRepository,
+    ):
+        """Should return None when review item doesn't exist."""
+        result = await review_item_repository.update_status(99999, "resolved")
+        assert result is None
+
+    async def test_resolved_item_excluded_from_pending(
+        self,
+        review_item_repository: SqlReviewItemRepository,
+        journal_repository: SqlJournalRepository,
+    ):
+        """Resolved items should not appear in pending queries."""
+        source = await _create_journal(journal_repository, title="Source")
+        candidate = await _create_journal(
+            journal_repository, title="Candidate", hours_offset=1
+        )
+
+        created, _ = await review_item_repository.create(
+            _make_review_item(
+                source_journal_id=source.id,  # type: ignore[arg-type]
+                candidate_journal_id=candidate.id,  # type: ignore[arg-type]
+            )
+        )
+
+        assert created.id is not None
+        await review_item_repository.update_status(created.id, "resolved")
+
+        pending = await review_item_repository.find_pending_by_user(USER_ID)
+        assert len(pending) == 0
+
+        count = await review_item_repository.count_pending_by_user(USER_ID)
+        assert count == 0

@@ -48,6 +48,7 @@ import { InlineEditHeading } from './InlineEditHeading';
 import { JournalContentInline } from './JournalContentInline';
 import { InlineEditDateRange } from './InlineEditDateRange';
 import { MergeJournalDialog } from './MergeJournalDialog';
+import { ReviewSuggestions } from './ReviewSuggestions';
 import { validateRequired } from '@/lib/validation';
 import {
   useUpdateJournal,
@@ -297,6 +298,14 @@ export function JournalDetailView({
     >
       {/* Breadcrumb Navigation */}
       <JournalBreadcrumb parent={journal.parent} currentTitle={journal.title} />
+
+      {/* Review Suggestions */}
+      {journal.review_items && journal.review_items.length > 0 && (
+        <ReviewSuggestions
+          journalId={journal.id}
+          suggestions={journal.review_items}
+        />
+      )}
 
       {/* Main Content Card */}
       <Card>

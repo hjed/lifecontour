@@ -438,6 +438,15 @@ class JournalAttributes(BaseModel):
         default=None, description="Depth in hierarchy (1=root, 2=first-level child)"
     )
 
+    # Review indicators
+    has_pending_reviews: bool = Field(
+        default=False, description="Whether this journal has pending review items"
+    )
+    review_items: list[dict[str, Any]] | None = Field(
+        default=None,
+        description="Pending review suggestions (only populated on detail view)",
+    )
+
 
 class JournalRelationships(BaseModel):
     """Journal relationships to other resources."""
@@ -677,6 +686,97 @@ class MergeJournalData(BaseModel):
 
 class MergeJournalRequest(JsonApiCreateRequest[MergeJournalData]):
     """Request model for merging journals."""
+
+    pass
+
+
+# Review Item Schemas
+class ReviewSuggestionSchema(BaseModel):
+    """Lightweight review suggestion embedded in journal detail responses."""
+
+    id: int = Field(..., description="Review item ID")
+    reason: str = Field(
+        ...,
+        description="Review reason (external_link_match, duplicate_journal, needs_review)",
+    )
+    confidence_score: float = Field(..., description="Match confidence (0.0-1.0)")
+    candidate_journal_id: int = Field(..., description="Candidate journal ID")
+    candidate_journal_title: str = Field(..., description="Candidate journal title")
+    details: dict[str, Any] | None = Field(
+        default=None, description="Match details (matched fields, similarity scores)"
+    )
+
+
+class ReviewItemJournalSummary(BaseModel):
+    """Lightweight journal summary embedded in review item responses."""
+
+    id: int = Field(..., description="Journal ID")
+    title: str = Field(..., description="Journal title")
+    event_date_range: EventDateRangeSchema = Field(
+        ..., description="Journal event date range"
+    )
+
+
+class ReviewItemAttributes(BaseModel):
+    """Review item attributes for the review queue endpoint."""
+
+    reason: str = Field(
+        ...,
+        description="Review reason (external_link_match, duplicate_journal, needs_review)",
+    )
+    confidence_score: float = Field(..., description="Match confidence (0.0-1.0)")
+    status: str = Field(..., description="Review status (pending, resolved, dismissed)")
+    details: dict[str, Any] | None = Field(default=None, description="Match details")
+    source_journal: ReviewItemJournalSummary = Field(
+        ..., description="Source journal summary"
+    )
+    candidate_journal: ReviewItemJournalSummary = Field(
+        ..., description="Candidate journal summary"
+    )
+    created_at: datetime | None = Field(default=None, description="Creation timestamp")
+
+
+class ReviewItemResource(BaseModel):
+    """Review item resource following JSON API specification."""
+
+    type: str = Field(default="review-items", description=RESOURCE_TYPE_DESC)
+    id: str = Field(..., description="Resource identifier")
+    attributes: ReviewItemAttributes = Field(..., description="Review item attributes")
+    links: JsonApiLinks | None = Field(default=None, description=RESOURCE_LINKS_DESC)
+
+
+class ReviewItemListResponse(JsonApiCollectionResponse[ReviewItemResource]):
+    """Response model for a list of review items."""
+
+    pass
+
+
+class ReviewItemCreateAttributes(BaseModel):
+    """Attributes for creating a review item (test-only endpoint)."""
+
+    source_journal_id: int = Field(..., description="Source journal ID")
+    candidate_journal_id: int = Field(..., description="Candidate journal ID")
+    reason: str = Field(
+        default="duplicate_journal",
+        description="Review reason (external_link_match, duplicate_journal, needs_review)",
+    )
+    confidence_score: float = Field(
+        default=0.85, description="Match confidence (0.0-1.0)"
+    )
+    details: dict[str, Any] | None = Field(default=None, description="Match details")
+
+
+class ReviewItemCreateData(BaseModel):
+    """Data for creating a review item."""
+
+    type: str = Field(default="review-items", description=RESOURCE_TYPE_DESC)
+    attributes: ReviewItemCreateAttributes = Field(
+        ..., description="Review item attributes"
+    )
+
+
+class ReviewItemCreateRequest(JsonApiCreateRequest[ReviewItemCreateData]):
+    """Request model for creating a review item (test-only endpoint)."""
 
     pass
 

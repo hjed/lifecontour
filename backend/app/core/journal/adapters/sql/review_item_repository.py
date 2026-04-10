@@ -140,3 +140,76 @@ class SqlReviewItemRepository(ReviewItemRepository):
         if row is None:
             return None
         return self._row_to_review_item(row)
+
+    async def find_pending_by_user(
+        self, user_id: str, limit: int = 50, offset: int = 0
+    ) -> list[ReviewItem]:
+        """Find all pending review items for a user, paginated."""
+        query = text(
+            """
+            SELECT id, user_id, source_journal_id, candidate_journal_id,
+                   reason, confidence_score, details, status,
+                   created_at, updated_at
+            FROM journal_review_items
+            WHERE user_id = :user_id
+            AND status = 'pending'
+            ORDER BY confidence_score DESC, created_at DESC
+            LIMIT :limit OFFSET :offset
+            """
+        )
+        result = await self.conn.execute(
+            query, {"user_id": user_id, "limit": limit, "offset": offset}
+        )
+        return [self._row_to_review_item(row) for row in result.fetchall()]
+
+    async def count_pending_by_user(self, user_id: str) -> int:
+        """Count pending review items for a user."""
+        query = text(
+            """
+            SELECT COUNT(*)
+            FROM journal_review_items
+            WHERE user_id = :user_id
+            AND status = 'pending'
+            """
+        )
+        result = await self.conn.execute(query, {"user_id": user_id})
+        row = result.fetchone()
+        return int(row[0]) if row else 0
+
+    async def find_pending_journal_ids_by_user(self, user_id: str) -> set[int]:
+        """Find journal IDs involved in pending review items for a user."""
+        query = text(
+            """
+            SELECT DISTINCT source_journal_id AS journal_id
+            FROM journal_review_items
+            WHERE user_id = :user_id AND status = 'pending'
+            UNION
+            SELECT DISTINCT candidate_journal_id AS journal_id
+            FROM journal_review_items
+            WHERE user_id = :user_id AND status = 'pending'
+            """
+        )
+        result = await self.conn.execute(query, {"user_id": user_id})
+        return {row.journal_id for row in result.fetchall()}
+
+    async def update_status(
+        self, review_item_id: int, new_status: str
+    ) -> ReviewItem | None:
+        """Update the status of a review item."""
+        query = text(
+            """
+            UPDATE journal_review_items
+            SET status = :new_status, updated_at = NOW()
+            WHERE id = :review_item_id
+            RETURNING id, user_id, source_journal_id, candidate_journal_id,
+                      reason, confidence_score, details, status,
+                      created_at, updated_at
+            """
+        )
+        result = await self.conn.execute(
+            query, {"review_item_id": review_item_id, "new_status": new_status}
+        )
+        row = result.fetchone()
+        if row is None:
+            return None
+        return self._row_to_review_item(row)
