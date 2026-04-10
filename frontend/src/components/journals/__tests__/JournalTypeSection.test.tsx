@@ -14,6 +14,10 @@ jest.mock('@/lib/api/routes', () => ({
   useRoute: () => ({ data: undefined }),
 }));
 
+jest.mock('@/lib/api/journals', () => ({
+  useCalendars: () => ({ data: [], isLoading: false }),
+}));
+
 describe('JournalTypeSection', () => {
   const mockJournalId = '123';
 
