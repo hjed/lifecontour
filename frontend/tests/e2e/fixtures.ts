@@ -252,12 +252,19 @@ async function completeWorkerOAuthFlow(browser: any): Promise<AuthState> {
         const stillOnCallback = page.url().includes('/auth/callback');
         if (stillOnCallback) {
           // Wait a bit longer for the callback to complete
-          await page
-            .waitForURL(
+          try {
+            await page.waitForURL(
               (url: URL) => !url.toString().includes('/auth/callback'),
               { timeout: 15000 }
-            )
-            .catch(() => {});
+            );
+          } catch (error) {
+            const callbackUrl = page.url();
+            console.error(
+              '🔐 [Worker Auth] Callback did not complete after additional wait. Current URL:',
+              callbackUrl
+            );
+            throw error;
+          }
           currentUrl = page.url();
           console.log(
             '🔐 [Worker Auth] After additional wait, URL is:',

@@ -70,8 +70,8 @@ test.describe('Journal List Page', () => {
       await expect(page.locator('main, [role="main"]').first()).toBeVisible();
 
       // Wait for journals to be indexed in MeiliSearch
-      // The outbox processor runs every 10 seconds, so we poll until journals are indexed
-      // We use a retry loop with exponential backoff
+      // The outbox processor runs every 10 seconds, so we retry this check
+      // with Playwright's toPass polling until journals are indexed or timeout expires
       await expect(async () => {
         const response = await page.evaluate(async () => {
           try {
