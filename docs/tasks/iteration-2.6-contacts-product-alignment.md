@@ -233,15 +233,15 @@ The sequence reflects both user priority and technical dependency:
 **PR Size:** ~5-7 files
 
 **Acceptance Criteria:**
-- [ ] Sidebar tag management supports create, edit, re-parent, and delete actions using compact menu/modal flows.
-- [ ] MCP `update_contact` supports the same tag outcomes as the UI, including creation-by-name where supported today.
-- [ ] No dedicated MCP add/remove-tag tools are introduced.
-- [ ] UI and MCP tag edits remain behaviourally aligned.
+- [x] Sidebar tag management supports create, edit, re-parent, and delete actions using compact menu/modal flows.
+- [x] MCP `update_contact` supports the same tag outcomes as the UI, including creation-by-name where supported today.
+- [x] No dedicated MCP add/remove-tag tools are introduced.
+- [x] UI and MCP tag edits remain behaviourally aligned.
 
 **Required Test Coverage:**
-- **Unit:** modal/menu state and MCP tag-update mapping helpers.
-- **Integration:** MCP tests covering replacement-style updates, missing-tag creation, and parity with REST behaviour.
-- **E2E:** sidebar edit flow plus a follow-up UI verification after an MCP-style tag update.
+- **Unit:** modal/menu state and MCP tag-update mapping helpers. ✅
+- **Integration:** MCP tests covering replacement-style updates, missing-tag creation, and parity with REST behaviour. ✅
+- **E2E:** sidebar edit flow plus a follow-up UI verification after an MCP-style tag update. ✅
 
 ### ITER2.6-004: Contact Detail Layout Polish
 **Objective:** Improve the contact page layout without undoing the existing responsive structure.

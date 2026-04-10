@@ -1048,3 +1048,85 @@ export function useCreateTag() {
     },
   });
 }
+
+// Tag Update & Delete API Functions
+
+async function updateTag(
+  id: string,
+  attributes: Partial<TagCreateAttributes>
+): Promise<TagResponse> {
+  const response = await fetch(`/api/tags/${id}`, {
+    method: 'PATCH',
+    credentials: 'include',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      data: {
+        type: 'tags',
+        id,
+        attributes,
+      },
+    }),
+  });
+
+  if (!response.ok) {
+    const errorData: JsonApiErrorResponse = await response.json();
+    throw new Error(
+      errorData.errors?.[0]?.detail || ERROR_MESSAGES.UPDATE_FAILED
+    );
+  }
+
+  return response.json();
+}
+
+async function deleteTag(id: string): Promise<void> {
+  const response = await fetch(`/api/tags/${id}`, {
+    method: 'DELETE',
+    credentials: 'include',
+  });
+
+  if (!response.ok) {
+    const errorData: JsonApiErrorResponse = await response.json();
+    throw new Error(
+      errorData.errors?.[0]?.detail || ERROR_MESSAGES.DELETE_FAILED
+    );
+  }
+}
+
+export function useUpdateTag() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({
+      id,
+      attributes,
+    }: {
+      id: string;
+      attributes: Partial<TagCreateAttributes>;
+    }) => updateTag(id, attributes),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: tagKeys.lists() });
+      toast.success(SUCCESS_MESSAGES.TAG_UPDATED);
+    },
+    onError: (error: Error) => {
+      toast.error(error.message);
+    },
+  });
+}
+
+export function useDeleteTag() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (id: string) => deleteTag(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: tagKeys.lists() });
+      queryClient.invalidateQueries({ queryKey: contactKeys.all });
+      toast.success(SUCCESS_MESSAGES.TAG_DELETED);
+    },
+    onError: (error: Error) => {
+      toast.error(error.message);
+    },
+  });
+}

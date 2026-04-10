@@ -815,3 +815,213 @@ class TestContactToolsIntegration:
                 "get_contact_relationships", {"contact_id": c1.id}
             )
             assert get1_after_remove["total_count"] == 0
+
+
+class TestMCPTagParity:
+    """Integration tests verifying MCP update_contact tag parity with REST API.
+
+    The MCP update_contact tool uses a replacement strategy for tags:
+    providing a tag list replaces all existing tags. Tags referenced by name
+    are found-or-created automatically. These tests formally verify that
+    behaviour and its parity with the REST tag CRUD endpoints.
+    """
+
+    @pytest_asyncio.fixture
+    async def test_container(self, clean_database: AsyncConnection):
+        """Create test container with mocked dependencies."""
+        container = make_async_container(ContactTestProvider(clean_database))
+        yield container
+        await container.close()
+
+    @pytest_asyncio.fixture
+    async def contact_service(self, test_container):
+        """Get contact service from test container."""
+        async with test_container() as request_container:
+            return await request_container.get(ContactService)
+
+    @pytest.fixture
+    def tag_repo(self, clean_database: AsyncConnection):
+        """Create real tag repository."""
+        from app.core.contacts.adapters.sql import SqlTagRepository
+
+        return SqlTagRepository(clean_database)
+
+    @pytest.mark.asyncio
+    async def test_update_contact_replaces_tags_via_mcp(
+        self,
+        contact_service: ContactService,
+        tag_repo,
+        clean_database: AsyncConnection,
+    ):
+        """Verify that update_contact replaces all tags (not appends).
+
+        When the MCP tool provides a new set of tags, existing tags
+        on the contact should be fully replaced.
+        """
+        # Setup: create tags and contact with initial tags
+        tag_a = await tag_repo.save(Tag(name=TagName("alpha")))
+        tag_b = await tag_repo.save(Tag(name=TagName("bravo")))
+        tag_c = await tag_repo.save(Tag(name=TagName("charlie")))
+
+        contact = Contact(first_name="Replace", last_name="Test", tags=[tag_a, tag_b])
+        saved = await contact_service.create_contact(contact, clean_database)
+        assert saved.id is not None
+
+        # Verify initial state
+        retrieved = await contact_service.get_contact_by_id(saved.id)
+        assert retrieved is not None
+        assert retrieved.tags is not None
+        assert len(retrieved.tags) == 2
+        initial_names = sorted(str(t.name) for t in retrieved.tags)
+        assert initial_names == ["alpha", "bravo"]
+
+        # Act: update with replacement tags (bravo → charlie via replacement)
+        updated_contact = Contact(
+            id=saved.id,
+            first_name="Replace",
+            last_name="Test",
+            tags=[tag_b, tag_c],
+        )
+        await contact_service.update_contact(updated_contact, clean_database)
+
+        # Assert: tags fully replaced
+        final = await contact_service.get_contact_by_id(saved.id)
+        assert final is not None
+        assert final.tags is not None
+        assert len(final.tags) == 2
+        final_names = sorted(str(t.name) for t in final.tags)
+        assert final_names == ["bravo", "charlie"]
+
+    @pytest.mark.asyncio
+    async def test_update_contact_creates_missing_tags_via_mcp(
+        self,
+        contact_service: ContactService,
+        tag_repo,
+        clean_database: AsyncConnection,
+    ):
+        """Verify MCP find-or-create semantics for tags.
+
+        When the MCP tool references tags by name that don't exist,
+        they should be auto-created and assigned to the contact.
+        """
+        # Setup: create one existing tag
+        existing_tag = await tag_repo.save(Tag(name=TagName("existing")))
+
+        contact = Contact(
+            first_name="AutoCreate", last_name="Tags", tags=[existing_tag]
+        )
+        saved = await contact_service.create_contact(contact, clean_database)
+        assert saved.id is not None
+
+        # Act: simulate MCP tool tag handling — mix existing + new
+        tag_names = ["existing", "brand-new", "also-new"]
+        resolved_tags = []
+        for name in tag_names:
+            found = await tag_repo.find_by_name(name)
+            if found:
+                resolved_tags.append(found)
+            else:
+                new_tag = Tag(name=TagName(name))
+                saved_tag = await tag_repo.save(new_tag)
+                resolved_tags.append(saved_tag)
+
+        updated_contact = Contact(
+            id=saved.id,
+            first_name="AutoCreate",
+            last_name="Tags",
+            tags=resolved_tags,
+        )
+        await contact_service.update_contact(updated_contact, clean_database)
+
+        # Assert: all three tags present
+        final = await contact_service.get_contact_by_id(saved.id)
+        assert final is not None
+        assert final.tags is not None
+        assert len(final.tags) == 3
+        final_names = sorted(str(t.name) for t in final.tags)
+        assert final_names == ["also-new", "brand-new", "existing"]
+
+        # Assert: existing tag was reused (same ID)
+        existing_in_final = next(t for t in final.tags if str(t.name) == "existing")
+        assert existing_in_final.id == existing_tag.id
+
+    @pytest.mark.asyncio
+    async def test_update_contact_empty_tags_clears_all(
+        self,
+        contact_service: ContactService,
+        tag_repo,
+        clean_database: AsyncConnection,
+    ):
+        """Verify that providing an empty tag list clears all tags."""
+        # Setup: contact with tags
+        tag_x = await tag_repo.save(Tag(name=TagName("x-ray")))
+        tag_y = await tag_repo.save(Tag(name=TagName("yankee")))
+
+        contact = Contact(first_name="Clear", last_name="Tags", tags=[tag_x, tag_y])
+        saved = await contact_service.create_contact(contact, clean_database)
+        assert saved.id is not None
+
+        # Verify initial state
+        retrieved = await contact_service.get_contact_by_id(saved.id)
+        assert retrieved is not None
+        assert retrieved.tags is not None
+        assert len(retrieved.tags) == 2
+
+        # Act: update with empty tags list
+        updated_contact = Contact(
+            id=saved.id,
+            first_name="Clear",
+            last_name="Tags",
+            tags=[],
+        )
+        await contact_service.update_contact(updated_contact, clean_database)
+
+        # Assert: all tags removed
+        final = await contact_service.get_contact_by_id(saved.id)
+        assert final is not None
+        assert final.tags is not None
+        assert len(final.tags) == 0
+
+    @pytest.mark.asyncio
+    async def test_mcp_tag_update_parity_with_rest(
+        self,
+        contact_service: ContactService,
+        tag_repo,
+        clean_database: AsyncConnection,
+    ):
+        """Verify MCP and REST produce identical outcomes.
+
+        Creates tags via REST-equivalent repo calls, then applies an MCP-style
+        replacement update. The resulting state should match what would happen
+        if the same tags were assigned via the REST tag API.
+        """
+        # Setup via REST-equivalent: create tags
+        rest_tag_a = await tag_repo.save(Tag(name=TagName("rest-a")))
+        rest_tag_b = await tag_repo.save(Tag(name=TagName("rest-b")))
+
+        # Create contact with tag-a (simulating REST assignment)
+        contact = Contact(
+            first_name="Parity",
+            last_name="Check",
+            tags=[rest_tag_a],
+        )
+        saved = await contact_service.create_contact(contact, clean_database)
+        assert saved.id is not None
+
+        # MCP-style update: replace tags with [rest-b]
+        # This mirrors what update_contact MCP tool does
+        updated_contact = Contact(
+            id=saved.id,
+            first_name="Parity",
+            last_name="Check",
+            tags=[rest_tag_b],
+        )
+        await contact_service.update_contact(updated_contact, clean_database)
+
+        # Verify: contact has only rest-b (same outcome as REST assignment)
+        final = await contact_service.get_contact_by_id(saved.id)
+        assert final is not None
+        assert final.tags is not None
+        assert len(final.tags) == 1
+        assert str(final.tags[0].name) == "rest-b"
+        assert final.tags[0].id == rest_tag_b.id

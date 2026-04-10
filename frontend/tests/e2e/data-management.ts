@@ -28,6 +28,7 @@ export interface ContactCreateRequest {
 export interface TagCreateRequest {
   name: string;
   color?: string;
+  parent_id?: number | null;
 }
 
 export interface CalendarCreateRequest {
@@ -83,7 +84,7 @@ export class TestDataManager {
     const uniqueFirstName = `${contactData.firstName}_${uniqueId}`;
     const uniqueLastName = `${contactData.lastName}_${uniqueId}`;
 
-    console.log(
+    console.debug(
       `📝 [Data Manager] Creating contact: ${uniqueFirstName} ${uniqueLastName}`
     );
 
@@ -96,15 +97,15 @@ export class TestDataManager {
           await this.page.request.get('/api/auth/status');
         if (authTestResponse.ok()) {
           const authData = await authTestResponse.json();
-          console.log(`🔐 [Data Manager] Auth test successful:`, authData);
+          console.debug(`🔐 [Data Manager] Auth test successful:`, authData);
         } else {
-          console.log(
+          console.debug(
             `🔐 [Data Manager] Auth test failed: ${authTestResponse.status()}`
           );
           const errorText = await authTestResponse.text();
-          console.log(`🔐 [Data Manager] Auth error response:`, errorText);
+          console.debug(`🔐 [Data Manager] Auth error response:`, errorText);
           const contextCookies = await this.page.context().cookies();
-          console.log(
+          console.debug(
             `🔐 [Data Manager] Context has ${contextCookies.length} cookies:`,
             contextCookies.map(c => c.name).join(', ')
           );
@@ -145,7 +146,7 @@ export class TestDataManager {
       // Handle tags if provided
       let assignedTags: string[] = [];
       if (contactData.tags && contactData.tags.length > 0) {
-        console.log(
+        console.debug(
           `🏷️ [Data Manager] Creating and assigning ${contactData.tags.length} tags to contact ${contactId}`
         );
 
@@ -160,7 +161,7 @@ export class TestDataManager {
         assignedTags = contactData.tags;
       }
 
-      console.log(
+      console.debug(
         `✅ [Data Manager] Contact created with ID: ${contactId} (favourite: ${contactAttributes.is_favourite})`
       );
 
@@ -174,7 +175,7 @@ export class TestDataManager {
         isFavourite: contactAttributes.is_favourite || contactData.isFavourite,
       };
     } catch (error) {
-      console.error(`❌ [Data Manager] Failed to create contact:`, error);
+      console.debug(`❌ [Data Manager] Failed to create contact:`, error);
 
       // Return mock data as fallback for tests that don't require real API
       const mockId = `mock-${Date.now()}-${Math.random().toString(36).substring(2, 11)}`;
@@ -196,7 +197,7 @@ export class TestDataManager {
   async createContacts(
     contactsData: ContactCreateRequest[]
   ): Promise<TestContact[]> {
-    console.log(
+    console.debug(
       `📝 [Data Manager] Creating ${contactsData.length} contacts...`
     );
 
@@ -208,7 +209,7 @@ export class TestDataManager {
 
     for (const contactData of contactsData) {
       if (Date.now() - startTime > maxCreationTime) {
-        console.warn(
+        console.debug(
           `⚠️ [Data Manager] Contact creation timed out after ${maxCreationTime}ms`
         );
         break;
@@ -230,7 +231,7 @@ export class TestDataManager {
   async createCalendars(
     calendarsData: CalendarCreateRequest[]
   ): Promise<Array<{ id: string; name: string; color: string }>> {
-    console.log(
+    console.debug(
       `📅 [Data Manager] Creating ${calendarsData.length} calendars...`
     );
 
@@ -276,7 +277,7 @@ export class TestDataManager {
 
       calendars.push(calendar);
       this.createdCalendars.push(calendar.id);
-      console.log(`✅ [Data Manager] Created calendar: ${calendar.name}`);
+      console.debug(`✅ [Data Manager] Created calendar: ${calendar.name}`);
     }
 
     // Add a small delay to ensure database consistency
@@ -293,7 +294,9 @@ export class TestDataManager {
   async createTag(
     tagData: TagCreateRequest
   ): Promise<{ id: string; name: string }> {
-    console.log(`🏷️ [Data Manager] Creating tag via tags API: ${tagData.name}`);
+    console.debug(
+      `🏷️ [Data Manager] Creating tag via tags API: ${tagData.name}`
+    );
 
     try {
       // Use the new tags API endpoint to create the tag
@@ -302,6 +305,10 @@ export class TestDataManager {
           type: 'tags',
           attributes: {
             name: tagData.name,
+            ...(tagData.color ? { color: tagData.color } : {}),
+            ...(tagData.parent_id !== undefined
+              ? { parent_id: tagData.parent_id }
+              : {}),
           },
         },
       };
@@ -332,14 +339,14 @@ export class TestDataManager {
 
       this.createdTagIds.push(tagId);
 
-      console.log(`✅ [Data Manager] Tag created with ID: ${tagId}`);
+      console.debug(`✅ [Data Manager] Tag created with ID: ${tagId}`);
 
       return {
         id: tagId,
         name: tagData.name,
       };
     } catch (error) {
-      console.error(
+      console.debug(
         `❌ [Data Manager] Failed to create tag: ${tagData.name}`,
         error
       );
@@ -377,11 +384,33 @@ export class TestDataManager {
 
       return null;
     } catch (error) {
-      console.warn(
+      console.debug(
         `⚠️ [Data Manager] Failed to search for tag "${name}":`,
         error
       );
       return null;
+    }
+  }
+
+  /**
+   * Delete existing tag by name
+   */
+  async deleteTagByName(name: string): Promise<void> {
+    try {
+      const tag = await this.findTagByName(name);
+      if (tag) {
+        console.debug(
+          `🗑️ [Data Manager] Deleting tag "${name}" (ID: ${tag.id})`
+        );
+        const response = await this.page.request.delete(`/api/tags/${tag.id}`);
+        if (!response.ok()) {
+          console.debug(
+            `⚠️ [Data Manager] Failed to delete tag "${name}": ${response.status()}`
+          );
+        }
+      }
+    } catch (error) {
+      console.debug(`⚠️ [Data Manager] Error deleting tag "${name}":`, error);
     }
   }
 
@@ -391,7 +420,7 @@ export class TestDataManager {
   async createTags(
     tagsData: TagCreateRequest[]
   ): Promise<{ id: string; name: string }[]> {
-    console.log(`🏷️ [Data Manager] Creating ${tagsData.length} tags...`);
+    console.debug(`🏷️ [Data Manager] Creating ${tagsData.length} tags...`);
 
     const tags: { id: string; name: string }[] = [];
 
@@ -401,7 +430,7 @@ export class TestDataManager {
 
     for (const tagData of tagsData) {
       if (Date.now() - startTime > maxCreationTime) {
-        console.warn(
+        console.debug(
           `⚠️ [Data Manager] Tag creation timed out after ${maxCreationTime}ms`
         );
         break;
@@ -410,7 +439,7 @@ export class TestDataManager {
       // First, try to find existing tag
       const existingTag = await this.findTagByName(tagData.name);
       if (existingTag) {
-        console.log(
+        console.debug(
           `🔄 [Data Manager] Reusing existing tag: ${existingTag.name} (ID: ${existingTag.id})`
         );
         tags.push(existingTag);
@@ -422,7 +451,7 @@ export class TestDataManager {
         const tag = await this.createTag(tagData);
         tags.push(tag);
       } catch (error) {
-        console.error(
+        console.debug(
           `❌ [Data Manager] Failed to create tag: ${tagData.name}`,
           error
         );
@@ -440,7 +469,7 @@ export class TestDataManager {
     contactId: string,
     tagIds: string[]
   ): Promise<void> {
-    console.log(
+    console.debug(
       `🏷️ [Data Manager] Assigning ${tagIds.length} tags to contact ${contactId}`
     );
 
@@ -448,7 +477,7 @@ export class TestDataManager {
       for (const tagId of tagIds) {
         // Skip mock tag IDs (they don't exist in the database)
         if (tagId.startsWith('mock-tag-')) {
-          console.log(`🏷️ [Data Manager] Skipping mock tag ID: ${tagId}`);
+          console.debug(`🏷️ [Data Manager] Skipping mock tag ID: ${tagId}`);
           continue;
         }
 
@@ -467,23 +496,23 @@ export class TestDataManager {
         );
 
         if (response.ok()) {
-          console.log(
+          console.debug(
             `✅ [Data Manager] Tag ${tagId} assigned to contact ${contactId}`
           );
         } else {
           const errorText = await response.text();
-          console.warn(
+          console.debug(
             `⚠️ [Data Manager] Failed to assign tag ${tagId} to contact ${contactId}: ${response.status()}`
           );
-          console.warn(`⚠️ [Data Manager] Error response:`, errorText);
+          console.debug(`⚠️ [Data Manager] Error response:`, errorText);
         }
       }
 
-      console.log(
+      console.debug(
         `✅ [Data Manager] Tag assignment completed for contact ${contactId}`
       );
     } catch (error) {
-      console.error(`❌ [Data Manager] Failed to assign tags:`, error);
+      console.debug(`❌ [Data Manager] Failed to assign tags:`, error);
     }
   }
 
@@ -494,7 +523,7 @@ export class TestDataManager {
     contactId: string,
     isFavourite: boolean
   ): Promise<void> {
-    console.log(
+    console.debug(
       `⭐ [Data Manager] Setting contact ${contactId} favourite: ${isFavourite}`
     );
 
@@ -510,7 +539,7 @@ export class TestDataManager {
       );
 
       if (!getResponse.ok()) {
-        console.warn(
+        console.debug(
           `⚠️ [Data Manager] Failed to get contact status: ${getResponse.status()}`
         );
         return;
@@ -521,7 +550,7 @@ export class TestDataManager {
 
       // Only toggle if the current status is different from desired status
       if (currentFavourite === isFavourite) {
-        console.log(
+        console.debug(
           `✅ [Data Manager] Contact favourite status already correct`
         );
       } else {
@@ -535,15 +564,15 @@ export class TestDataManager {
         );
 
         if (response.ok()) {
-          console.log(`✅ [Data Manager] Contact favourite status updated`);
+          console.debug(`✅ [Data Manager] Contact favourite status updated`);
         } else {
-          console.warn(
+          console.debug(
             `⚠️ [Data Manager] Failed to set favourite status: ${response.status()}`
           );
         }
       }
     } catch (error) {
-      console.error(`❌ [Data Manager] Failed to set favourite status:`, error);
+      console.debug(`❌ [Data Manager] Failed to set favourite status:`, error);
     }
   }
 
@@ -558,7 +587,7 @@ export class TestDataManager {
     toContactId: string,
     relationshipType: string
   ): Promise<void> {
-    console.log(
+    console.debug(
       `🔗 [Data Manager] Creating relationship: ${fromContactId} -> ${toContactId} (${relationshipType})`
     );
 
@@ -587,7 +616,7 @@ export class TestDataManager {
       );
 
       if (response.ok()) {
-        console.log(
+        console.debug(
           `✅ [Data Manager] Relationship created: ${fromContactId} -> ${toContactId}`
         );
         return;
@@ -629,7 +658,7 @@ export class TestDataManager {
     const uniqueId = this.generateUniqueId();
     const uniqueName = `${tagData.name}_${uniqueId}`;
 
-    console.log(`🏷️ [Data Manager] Creating journal tag: ${uniqueName}`);
+    console.debug(`🏷️ [Data Manager] Creating journal tag: ${uniqueName}`);
 
     try {
       const response = await this.page.request.post('/api/journals/tags', {
@@ -657,7 +686,7 @@ export class TestDataManager {
       const createdTag = responseData.data;
       const tagId = createdTag.id;
 
-      console.log(`✅ [Data Manager] Journal tag created with ID: ${tagId}`);
+      console.debug(`✅ [Data Manager] Journal tag created with ID: ${tagId}`);
 
       // Track the created journal tag for cleanup
       this.createdJournalTagIds.push(tagId);
@@ -667,7 +696,7 @@ export class TestDataManager {
         name: uniqueName, // Return the unique name that was actually created
       };
     } catch (error) {
-      console.error(
+      console.debug(
         `❌ [Data Manager] Failed to create journal tag: ${tagData.name}`,
         error
       );
@@ -681,7 +710,7 @@ export class TestDataManager {
   async createJournalTags(
     tagsData: TagCreateRequest[]
   ): Promise<{ id: string; name: string }[]> {
-    console.log(
+    console.debug(
       `🏷️ [Data Manager] Creating ${tagsData.length} journal tags...`
     );
 
@@ -692,7 +721,7 @@ export class TestDataManager {
         const tag = await this.createJournalTag(tagData);
         tags.push(tag);
       } catch (error) {
-        console.error(
+        console.debug(
           `❌ [Data Manager] Failed to create journal tag: ${tagData.name}`,
           error
         );
@@ -718,7 +747,7 @@ export class TestDataManager {
     journalId: string,
     tagIds: string[]
   ): Promise<void> {
-    console.log(
+    console.debug(
       `🏷️ [Data Manager] Assigning ${tagIds.length} tags to journal ${journalId}`
     );
 
@@ -742,16 +771,16 @@ export class TestDataManager {
         }
       );
 
-      if (!response.ok()) {
+      if (response.ok()) {
+        console.debug(
+          `✅ [Data Manager] Assigned tag ${tagId} to journal ${journalId}`
+        );
+      } else {
         const status = response.status();
-        console.warn(
+        console.debug(
           `⚠️ [Data Manager] Failed to assign tag ${tagId} to journal ${journalId}: ${status}`
         );
         failedAssignments.push({ tagId, status });
-      } else {
-        console.log(
-          `✅ [Data Manager] Assigned tag ${tagId} to journal ${journalId}`
-        );
       }
     }
 
@@ -776,7 +805,7 @@ export class TestDataManager {
       ? journalData.title
       : `${journalData.title}_${uniqueId}`;
 
-    console.log(`📝 [Data Manager] Creating journal: ${uniqueTitle}`);
+    console.debug(`📝 [Data Manager] Creating journal: ${uniqueTitle}`);
 
     try {
       // Make API request to create journal (JSON API format)
@@ -881,7 +910,7 @@ export class TestDataManager {
       // Should not reach here, but satisfy TypeScript
       throw lastError ?? new Error('Failed to create journal after retries');
     } catch (error) {
-      console.error(`❌ [Data Manager] Failed to create journal:`, error);
+      console.debug(`❌ [Data Manager] Failed to create journal:`, error);
       throw error;
     }
   }
@@ -906,7 +935,7 @@ export class TestDataManager {
    * Clear all journals (for test setup)
    */
   async clearAllJournals(): Promise<void> {
-    console.log(`🧹 [Data Manager] Clearing all journals...`);
+    console.debug(`🧹 [Data Manager] Clearing all journals...`);
 
     try {
       // Get all journals
@@ -917,7 +946,7 @@ export class TestDataManager {
       });
 
       if (!response.ok()) {
-        console.warn(
+        console.debug(
           `⚠️ [Data Manager] Failed to fetch journals: ${response.status()}`
         );
         return;
@@ -926,7 +955,7 @@ export class TestDataManager {
       const data = await response.json();
       const journals = data.data || [];
 
-      console.log(
+      console.debug(
         `🧹 [Data Manager] Found ${journals.length} journals to delete`
       );
 
@@ -937,21 +966,21 @@ export class TestDataManager {
             `/api/journals/${journal.id}`
           );
           if (deleteResponse.ok()) {
-            console.log(
+            console.debug(
               `🗑️ [Data Manager] Deleted existing journal ${journal.id}`
             );
           }
         } catch (error) {
-          console.warn(
+          console.debug(
             `⚠️ [Data Manager] Error deleting journal ${journal.id}:`,
             error
           );
         }
       }
 
-      console.log(`✅ [Data Manager] All journals cleared`);
+      console.debug(`✅ [Data Manager] All journals cleared`);
     } catch (error) {
-      console.error(`❌ [Data Manager] Failed to clear journals:`, error);
+      console.debug(`❌ [Data Manager] Failed to clear journals:`, error);
     }
   }
 
@@ -959,7 +988,7 @@ export class TestDataManager {
    * Clean up all created test data
    */
   async cleanup(): Promise<void> {
-    console.log(
+    console.debug(
       `🧹 [Data Manager] Starting cleanup of ${this.createdContactIds.length} contacts, ${this.createdTagIds.length} contact tags, ${this.createdJournalTagIds.length} journal tags, ${this.createdJournalIds.length} journals, and ${this.createdCalendars.length} calendars...`
     );
 
@@ -978,8 +1007,34 @@ export class TestDataManager {
         ),
       ]);
     } catch (error) {
-      console.warn(`⚠️ [Data Manager] Cleanup failed or timed out:`, error);
+      console.debug(`⚠️ [Data Manager] Cleanup failed or timed out:`, error);
       // Continue anyway to not block test completion
+    }
+  }
+
+  private async cleanupSpecificItems(
+    items: readonly string[],
+    endpointPrefix: string,
+    itemName: string
+  ): Promise<void> {
+    for (const itemId of items) {
+      try {
+        const response = await this.page.request.delete(
+          `${endpointPrefix}/${itemId}`
+        );
+        if (response.ok()) {
+          console.debug(`🗑️ [Data Manager] Deleted ${itemName} ${itemId}`);
+        } else {
+          console.debug(
+            `⚠️ [Data Manager] Failed to delete ${itemName} ${itemId}: ${response.status()}`
+          );
+        }
+      } catch (error) {
+        console.debug(
+          `⚠️ [Data Manager] Error deleting ${itemName} ${itemId}:`,
+          error
+        );
+      }
     }
   }
 
@@ -993,101 +1048,42 @@ export class TestDataManager {
         '/api/contacts/test/cleanup'
       );
       if (response.ok()) {
-        console.log(`🗑️ [Data Manager] Bulk deleted all contacts successfully`);
+        console.debug(
+          `🗑️ [Data Manager] Bulk deleted all contacts successfully`
+        );
       } else {
-        console.warn(
+        console.debug(
           `⚠️ [Data Manager] Bulk cleanup failed: ${response.status()}`
         );
         // Fall back to individual deletion if bulk cleanup fails
         await this.fallbackIndividualCleanup();
       }
     } catch (error) {
-      console.warn(`⚠️ [Data Manager] Bulk cleanup error:`, error);
+      console.debug(`⚠️ [Data Manager] Bulk cleanup error:`, error);
       // Fall back to individual deletion if bulk cleanup fails
       await this.fallbackIndividualCleanup();
     }
 
-    // Clean up journals (if any were created)
-    for (const journalId of this.createdJournalIds) {
-      try {
-        const response = await this.page.request.delete(
-          `/api/journals/${journalId}`
-        );
-        if (response.ok()) {
-          console.log(`🗑️ [Data Manager] Deleted journal ${journalId}`);
-        } else {
-          console.warn(
-            `⚠️ [Data Manager] Failed to delete journal ${journalId}: ${response.status()}`
-          );
-        }
-      } catch (error) {
-        console.warn(
-          `⚠️ [Data Manager] Error deleting journal ${journalId}:`,
-          error
-        );
-      }
-    }
-
-    // Clean up contact tags (if any were created)
-    for (const tagId of this.createdTagIds) {
-      try {
-        const response = await this.page.request.delete(`/api/tags/${tagId}`);
-        if (response.ok()) {
-          console.log(`🗑️ [Data Manager] Deleted contact tag ${tagId}`);
-        } else {
-          console.warn(
-            `⚠️ [Data Manager] Failed to delete contact tag ${tagId}: ${response.status()}`
-          );
-        }
-      } catch (error) {
-        console.warn(
-          `⚠️ [Data Manager] Error deleting contact tag ${tagId}:`,
-          error
-        );
-      }
-    }
-
-    // Clean up journal tags (if any were created)
-    for (const tagId of this.createdJournalTagIds) {
-      try {
-        const response = await this.page.request.delete(
-          `/api/journals/tags/${tagId}`
-        );
-        if (response.ok()) {
-          console.log(`🗑️ [Data Manager] Deleted journal tag ${tagId}`);
-        } else {
-          console.warn(
-            `⚠️ [Data Manager] Failed to delete journal tag ${tagId}: ${response.status()}`
-          );
-        }
-      } catch (error) {
-        console.warn(
-          `⚠️ [Data Manager] Error deleting journal tag ${tagId}:`,
-          error
-        );
-      }
-    }
-
-    // Clean up calendars (if any were created)
-    for (const calendarId of this.createdCalendars) {
-      try {
-        const response = await this.page.request.delete(
-          `/api/calendars/${calendarId}`
-        );
-        if (response.ok()) {
-          console.log(`🗑️ [Data Manager] Deleted calendar ${calendarId}`);
-        } else {
-          console.warn(
-            `⚠️ [Data Manager] Failed to delete calendar ${calendarId}: ${response.status()}`
-          );
-        }
-      } catch (error) {
-        console.warn(
-          `⚠️ [Data Manager] Error deleting calendar ${calendarId}:`,
-          error
-        );
-      }
-    }
+    await this.cleanupSpecificItems(
+      this.createdJournalIds,
+      '/api/journals',
+      'journal'
+    );
+    await this.cleanupSpecificItems(
+      this.createdTagIds,
+      '/api/tags',
+      'contact tag'
+    );
+    await this.cleanupSpecificItems(
+      this.createdJournalTagIds,
+      '/api/journals/tags',
+      'journal tag'
+    );
+    await this.cleanupSpecificItems(
+      this.createdCalendars,
+      '/api/calendars',
+      'calendar'
+    );
 
     // Clear tracking arrays
     this.createdContactIds = [];
@@ -1097,14 +1093,14 @@ export class TestDataManager {
     // Note: createdCalendars is readonly, so we can't reassign it
     // The array will be cleared when the TestDataManager instance is destroyed
 
-    console.log(`✅ [Data Manager] Cleanup completed`);
+    console.debug(`✅ [Data Manager] Cleanup completed`);
   }
 
   /**
    * Fallback cleanup method using individual contact deletion
    */
   private async fallbackIndividualCleanup(): Promise<void> {
-    console.log(`🧹 [Data Manager] Using fallback individual cleanup...`);
+    console.debug(`🧹 [Data Manager] Using fallback individual cleanup...`);
 
     let successfulDeletes = 0;
     const startTime = Date.now();
@@ -1113,7 +1109,7 @@ export class TestDataManager {
     for (const contactId of this.createdContactIds) {
       // Check timeout
       if (Date.now() - startTime > maxCleanupTime) {
-        console.warn(
+        console.debug(
           `⚠️ [Data Manager] Individual cleanup timed out after ${maxCleanupTime}ms`
         );
         break;
@@ -1124,28 +1120,33 @@ export class TestDataManager {
           `/api/contacts/${contactId}`
         );
         if (response.ok()) {
-          console.log(`🗑️ [Data Manager] Deleted contact ${contactId}`);
+          console.debug(`🗑️ [Data Manager] Deleted contact ${contactId}`);
           successfulDeletes++;
         } else if (response.status() === 404) {
           // Contact already deleted - this is fine
-          console.log(`🗑️ [Data Manager] Contact ${contactId} already deleted`);
+          console.debug(
+            `🗑️ [Data Manager] Contact ${contactId} already deleted`
+          );
           successfulDeletes++;
         } else {
           // Don't log full error details for 500 errors (known backend transaction issue)
           if (response.status() === 500) {
-            console.warn(
+            console.debug(
               `⚠️ [Data Manager] Failed to delete contact ${contactId}: 500 (backend transaction issue)`
             );
           } else {
             const errorText = await response.text();
-            console.warn(
+            console.debug(
               `⚠️ [Data Manager] Failed to delete contact ${contactId}: ${response.status()}`
             );
-            console.warn(`⚠️ [Data Manager] Delete error response:`, errorText);
+            console.debug(
+              `⚠️ [Data Manager] Delete error response:`,
+              errorText
+            );
           }
         }
       } catch (error) {
-        console.warn(
+        console.debug(
           `⚠️ [Data Manager] Error deleting contact ${contactId}:`,
           error
         );
@@ -1156,7 +1157,7 @@ export class TestDataManager {
     }
 
     if (successfulDeletes > 0) {
-      console.log(
+      console.debug(
         `🗑️ [Data Manager] Successfully deleted ${successfulDeletes}/${this.createdContactIds.length} contacts`
       );
     }
@@ -1180,7 +1181,7 @@ export class TestDataManager {
    * Clear all existing contacts (for empty state tests)
    */
   async clearAllContacts(): Promise<void> {
-    console.log(`🧹 [Data Manager] Clearing all existing contacts...`);
+    console.debug(`🧹 [Data Manager] Clearing all existing contacts...`);
 
     try {
       // Use bulk cleanup endpoint for efficient clearing
@@ -1188,15 +1189,17 @@ export class TestDataManager {
         '/api/contacts/test/cleanup'
       );
       if (response.ok()) {
-        console.log(`🗑️ [Data Manager] Bulk cleared all contacts successfully`);
+        console.debug(
+          `🗑️ [Data Manager] Bulk cleared all contacts successfully`
+        );
       } else {
-        console.warn(
+        console.debug(
           `⚠️ [Data Manager] Bulk clear failed: ${response.status()}, falling back to individual deletion`
         );
         await this.fallbackClearAllContacts();
       }
     } catch (error) {
-      console.warn(`⚠️ [Data Manager] Bulk clear error:`, error);
+      console.debug(`⚠️ [Data Manager] Bulk clear error:`, error);
       await this.fallbackClearAllContacts();
     }
   }
@@ -1209,7 +1212,7 @@ export class TestDataManager {
       // Get all contacts
       const response = await this.page.request.get('/api/contacts');
       if (!response.ok()) {
-        console.warn(
+        console.debug(
           `⚠️ [Data Manager] Failed to fetch contacts for cleanup: ${response.status()}`
         );
         return;
@@ -1218,7 +1221,7 @@ export class TestDataManager {
       const data = await response.json();
       const contacts = data.data || [];
 
-      console.log(
+      console.debug(
         `🧹 [Data Manager] Found ${contacts.length} contacts to delete`
       );
 
@@ -1229,21 +1232,21 @@ export class TestDataManager {
             `/api/contacts/${contact.id}`
           );
           if (deleteResponse.ok()) {
-            console.log(
+            console.debug(
               `🗑️ [Data Manager] Deleted existing contact ${contact.id}`
             );
           }
         } catch (error) {
-          console.warn(
+          console.debug(
             `⚠️ [Data Manager] Error deleting contact ${contact.id}:`,
             error
           );
         }
       }
 
-      console.log(`✅ [Data Manager] All contacts cleared`);
+      console.debug(`✅ [Data Manager] All contacts cleared`);
     } catch (error) {
-      console.error(`❌ [Data Manager] Failed to clear contacts:`, error);
+      console.debug(`❌ [Data Manager] Failed to clear contacts:`, error);
     }
   }
 }

@@ -23,6 +23,7 @@ import {
   Menu,
   Settings,
   Tag,
+  Plus,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
@@ -38,6 +39,8 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { useSidebar, useSidebarAvailable } from '@/contexts/SidebarContext';
 import { useTags } from '@/lib/api/contacts';
 import { buildTagTree, TagTreeNode } from '@/lib/tags/buildTagTree';
+import { TagContextMenu } from '@/components/contacts/TagContextMenu';
+import { CreateTagDialog } from '@/components/contacts/CreateTagDialog';
 
 interface NavigationItem {
   readonly label: string;
@@ -165,54 +168,56 @@ function TagTreeItem({
       style={{ marginLeft: `${depth * indentSizeRem}rem` }}
       data-testid={`tag-tree-item-${node.tag.id}`}
     >
-      <div className='flex items-center'>
-        {/* Expand/collapse toggle for branches */}
-        {hasChildren ? (
+      <TagContextMenu tag={node.tag}>
+        <div className='flex items-center'>
+          {/* Expand/collapse toggle for branches */}
+          {hasChildren ? (
+            <Button
+              variant='ghost'
+              size='sm'
+              className='h-6 w-6 shrink-0 p-0'
+              onClick={e => {
+                e.stopPropagation();
+                toggleTag(tagId);
+              }}
+              aria-expanded={isExpanded}
+              aria-label={`${isExpanded ? 'Collapse' : 'Expand'} ${node.tag.attributes.name}`}
+              data-testid={`tag-toggle-${node.tag.id}`}
+            >
+              {isExpanded ? (
+                <ChevronDown className='h-3 w-3' aria-hidden='true' />
+              ) : (
+                <ChevronRight className='h-3 w-3' aria-hidden='true' />
+              )}
+            </Button>
+          ) : (
+            <span className='inline-block w-6 shrink-0' aria-hidden='true' />
+          )}
+
+          {/* Tag link */}
           <Button
             variant='ghost'
             size='sm'
-            className='h-6 w-6 shrink-0 p-0'
-            onClick={e => {
-              e.stopPropagation();
-              toggleTag(tagId);
-            }}
-            aria-expanded={isExpanded}
-            aria-label={`${isExpanded ? 'Collapse' : 'Expand'} ${node.tag.attributes.name}`}
-            data-testid={`tag-toggle-${node.tag.id}`}
-          >
-            {isExpanded ? (
-              <ChevronDown className='h-3 w-3' aria-hidden='true' />
-            ) : (
-              <ChevronRight className='h-3 w-3' aria-hidden='true' />
+            className={cn(
+              'h-auto min-w-0 flex-1 justify-start px-1 py-1.5 font-normal',
+              'hover:bg-accent hover:text-accent-foreground',
+              'focus-visible:ring-ring focus-visible:ring-2 focus-visible:ring-offset-2',
+              isActive && 'bg-accent text-accent-foreground font-medium'
             )}
-          </Button>
-        ) : (
-          <span className='inline-block w-6 shrink-0' aria-hidden='true' />
-        )}
-
-        {/* Tag link */}
-        <Button
-          variant='ghost'
-          size='sm'
-          className={cn(
-            'h-auto min-w-0 flex-1 justify-start px-1 py-1.5 font-normal',
-            'hover:bg-accent hover:text-accent-foreground',
-            'focus-visible:ring-ring focus-visible:ring-2 focus-visible:ring-offset-2',
-            isActive && 'bg-accent text-accent-foreground font-medium'
-          )}
-          asChild
-        >
-          <Link
-            href={href}
-            onClick={onNavigate}
-            aria-current={isActive ? 'page' : undefined}
-            data-testid={`nav-link-tag-${node.tag.id}`}
+            asChild
           >
-            <Tag className='mr-1.5 h-3 w-3 shrink-0' aria-hidden='true' />
-            <span className='truncate'>{node.tag.attributes.name}</span>
-          </Link>
-        </Button>
-      </div>
+            <Link
+              href={href}
+              onClick={onNavigate}
+              aria-current={isActive ? 'page' : undefined}
+              data-testid={`nav-link-tag-${node.tag.id}`}
+            >
+              <Tag className='mr-1.5 h-3 w-3 shrink-0' aria-hidden='true' />
+              <span className='truncate'>{node.tag.attributes.name}</span>
+            </Link>
+          </Button>
+        </div>
+      </TagContextMenu>
 
       {/* Children (recursive) */}
       {hasChildren && isExpanded && (
@@ -395,145 +400,169 @@ function SidebarContentInner({
   readonly onNavigate?: () => void;
   readonly navigationSections: NavigationSection[];
 }) {
+  const [showCreateTagDialog, setShowCreateTagDialog] = useState(false);
+
   return (
-    <nav
-      className='flex h-full flex-col space-y-2 p-4'
-      role='navigation'
-      aria-label='Main navigation'
-    >
-      {navigationSections.map((section, sectionIndex) => {
-        const isExpanded = expandedSections[section.label];
-        const SectionIcon = section.icon;
+    <>
+      <nav
+        className='flex h-full flex-col space-y-2 p-4'
+        role='navigation'
+        aria-label='Main navigation'
+      >
+        {navigationSections.map((section, sectionIndex) => {
+          const isExpanded = expandedSections[section.label];
+          const SectionIcon = section.icon;
 
-        return (
-          <div key={section.label} className='space-y-1'>
-            {sectionIndex > 0 && <Separator className='my-2' />}
+          return (
+            <div key={section.label} className='space-y-1'>
+              {sectionIndex > 0 && <Separator className='my-2' />}
 
-            {/* Section Header */}
-            <Button
-              variant='ghost'
-              className={cn(
-                'h-auto w-full justify-start px-2 py-1.5 font-medium',
-                'hover:bg-accent hover:text-accent-foreground',
-                'focus-visible:ring-ring focus-visible:ring-2 focus-visible:ring-offset-2'
-              )}
-              onClick={() => toggleSection(section.label)}
-              aria-expanded={isExpanded}
-              aria-controls={`section-${section.label.toLowerCase()}`}
-              id={`section-${section.label.toLowerCase()}-header`}
-            >
-              <SectionIcon className='mr-2 h-4 w-4' aria-hidden='true' />
-              <span className='flex-1 text-left'>{section.label}</span>
-              {isExpanded ? (
-                <ChevronDown className='h-4 w-4' aria-hidden='true' />
-              ) : (
-                <ChevronRight className='h-4 w-4' aria-hidden='true' />
-              )}
-            </Button>
-
-            {/* Section Items */}
-            {isExpanded && (
-              <div
-                id={`section-${section.label.toLowerCase()}`}
-                className='ml-6 space-y-1'
-                role='group'
-                aria-labelledby={`section-${section.label.toLowerCase()}-header`}
+              {/* Section Header */}
+              <Button
+                variant='ghost'
+                className={cn(
+                  'h-auto w-full justify-start px-2 py-1.5 font-medium',
+                  'hover:bg-accent hover:text-accent-foreground',
+                  'focus-visible:ring-ring focus-visible:ring-2 focus-visible:ring-offset-2'
+                )}
+                onClick={() => toggleSection(section.label)}
+                aria-expanded={isExpanded}
+                aria-controls={`section-${section.label.toLowerCase()}`}
+                id={`section-${section.label.toLowerCase()}-header`}
               >
-                {section.items.map((item, index) => {
-                  const isActive =
-                    !item.disabled && item.href && isActiveLink(item.href);
-                  const ItemIcon = item.icon;
-                  const itemKey = item.href || `${section.label}-${index}`;
+                <SectionIcon className='mr-2 h-4 w-4' aria-hidden='true' />
+                <span className='flex-1 text-left'>{section.label}</span>
+                {isExpanded ? (
+                  <ChevronDown className='h-4 w-4' aria-hidden='true' />
+                ) : (
+                  <ChevronRight className='h-4 w-4' aria-hidden='true' />
+                )}
+              </Button>
 
-                  if (item.disabled) {
+              {/* Section Items */}
+              {isExpanded && (
+                <div
+                  id={`section-${section.label.toLowerCase()}`}
+                  className='ml-6 space-y-1'
+                  role='group'
+                  aria-labelledby={`section-${section.label.toLowerCase()}-header`}
+                >
+                  {section.items.map((item, index) => {
+                    const isActive =
+                      !item.disabled && item.href && isActiveLink(item.href);
+                    const ItemIcon = item.icon;
+                    const itemKey = item.href || `${section.label}-${index}`;
+
+                    if (item.disabled) {
+                      return (
+                        <div
+                          key={itemKey}
+                          className={cn(
+                            'h-auto w-full justify-start px-2 py-1.5 font-normal',
+                            'text-muted-foreground cursor-not-allowed opacity-50',
+                            'flex items-center'
+                          )}
+                        >
+                          {ItemIcon && (
+                            <ItemIcon
+                              className='mr-2 h-3 w-3'
+                              aria-hidden='true'
+                            />
+                          )}
+                          {item.label}
+                        </div>
+                      );
+                    }
+
+                    // Only render as link if href exists
+                    if (!item.href) {
+                      return (
+                        <div
+                          key={itemKey}
+                          className={cn(
+                            'h-auto w-full justify-start px-2 py-1.5 font-normal',
+                            'text-muted-foreground',
+                            'flex items-center'
+                          )}
+                        >
+                          {ItemIcon && (
+                            <ItemIcon
+                              className='mr-2 h-3 w-3'
+                              aria-hidden='true'
+                            />
+                          )}
+                          {item.label}
+                        </div>
+                      );
+                    }
+
                     return (
-                      <div
+                      <Button
                         key={itemKey}
+                        variant='ghost'
+                        size='sm'
                         className={cn(
                           'h-auto w-full justify-start px-2 py-1.5 font-normal',
-                          'text-muted-foreground cursor-not-allowed opacity-50',
-                          'flex items-center'
+                          'hover:bg-accent hover:text-accent-foreground',
+                          'focus-visible:ring-ring focus-visible:ring-2 focus-visible:ring-offset-2',
+                          isActive &&
+                            'bg-accent text-accent-foreground font-medium'
                         )}
+                        asChild
                       >
-                        {ItemIcon && (
-                          <ItemIcon
-                            className='mr-2 h-3 w-3'
-                            aria-hidden='true'
-                          />
-                        )}
-                        {item.label}
-                      </div>
+                        <Link
+                          href={item.href}
+                          onClick={onNavigate}
+                          aria-current={isActive ? 'page' : undefined}
+                          data-testid={`nav-link-${item.label.toLowerCase()}`}
+                        >
+                          {ItemIcon && (
+                            <ItemIcon
+                              className='mr-2 h-3 w-3'
+                              aria-hidden='true'
+                            />
+                          )}
+                          {item.label}
+                        </Link>
+                      </Button>
                     );
-                  }
+                  })}
 
-                  // Only render as link if href exists
-                  if (!item.href) {
-                    return (
-                      <div
-                        key={itemKey}
-                        className={cn(
-                          'h-auto w-full justify-start px-2 py-1.5 font-normal',
-                          'text-muted-foreground',
-                          'flex items-center'
-                        )}
-                      >
-                        {ItemIcon && (
-                          <ItemIcon
-                            className='mr-2 h-3 w-3'
-                            aria-hidden='true'
-                          />
-                        )}
-                        {item.label}
-                      </div>
-                    );
-                  }
+                  {/* Nested tag tree */}
+                  {section.tagTree && section.tagTree.length > 0 && (
+                    <TagTreeNavigation
+                      tree={section.tagTree}
+                      isActiveLink={isActiveLink}
+                      onNavigate={onNavigate}
+                    />
+                  )}
 
-                  return (
+                  {/* Create Tag Button */}
+                  {section.label === 'Contacts' && (
                     <Button
-                      key={itemKey}
                       variant='ghost'
                       size='sm'
                       className={cn(
-                        'h-auto w-full justify-start px-2 py-1.5 font-normal',
-                        'hover:bg-accent hover:text-accent-foreground',
-                        'focus-visible:ring-ring focus-visible:ring-2 focus-visible:ring-offset-2',
-                        isActive &&
-                          'bg-accent text-accent-foreground font-medium'
+                        'text-muted-foreground h-auto w-full justify-start px-2 py-1.5 font-normal',
+                        'hover:bg-accent hover:text-accent-foreground'
                       )}
-                      asChild
+                      onClick={() => setShowCreateTagDialog(true)}
                     >
-                      <Link
-                        href={item.href}
-                        onClick={onNavigate}
-                        aria-current={isActive ? 'page' : undefined}
-                        data-testid={`nav-link-${item.label.toLowerCase()}`}
-                      >
-                        {ItemIcon && (
-                          <ItemIcon
-                            className='mr-2 h-3 w-3'
-                            aria-hidden='true'
-                          />
-                        )}
-                        {item.label}
-                      </Link>
+                      <Plus className='mr-2 h-3 w-3' aria-hidden='true' />
+                      Create Tag
                     </Button>
-                  );
-                })}
-
-                {/* Nested tag tree */}
-                {section.tagTree && section.tagTree.length > 0 && (
-                  <TagTreeNavigation
-                    tree={section.tagTree}
-                    isActiveLink={isActiveLink}
-                    onNavigate={onNavigate}
-                  />
-                )}
-              </div>
-            )}
-          </div>
-        );
-      })}
-    </nav>
+                  )}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </nav>
+      <CreateTagDialog
+        open={showCreateTagDialog}
+        onOpenChange={setShowCreateTagDialog}
+      />
+    </>
   );
 }
 
