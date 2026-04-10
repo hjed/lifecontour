@@ -12,6 +12,9 @@ import { renderWithProviders } from '@/test-utils';
 // Mock the API hooks
 jest.mock('@/lib/api/contacts', () => ({
   useTags: jest.fn(),
+  useUpdateTag: jest.fn(() => ({ mutateAsync: jest.fn(), isPending: false })),
+  useDeleteTag: jest.fn(() => ({ mutateAsync: jest.fn(), isPending: false })),
+  useCreateTag: jest.fn(() => ({ mutateAsync: jest.fn(), isPending: false })),
 }));
 
 // Mock Next.js router

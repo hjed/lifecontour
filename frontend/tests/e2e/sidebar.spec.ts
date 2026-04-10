@@ -1,4 +1,5 @@
 import { test, expect } from './fixtures';
+import { TestDataManager } from './data-management';
 
 /**
  * Sidebar Navigation Tests
@@ -367,119 +368,118 @@ test.describe('Sidebar Navigation', () => {
   });
 
   test.describe('Hierarchical Tag Navigation', () => {
-    async function createTestTag(
-      page: any,
-      name: string,
-      parentId?: number
-    ): Promise<number> {
-      const resp = await page.request.post('/api/tags', {
-        data: {
-          data: {
-            type: 'tags',
-            attributes: { name, ...(parentId ? { parent_id: parentId } : {}) },
-          },
-        },
-        headers: { 'Content-Type': 'application/json' },
-      });
-      expect(resp.ok()).toBe(true);
-      const data = await resp.json();
-      return data.data.id;
-    }
-
     test('shows parent tag with expand control and nested children', async ({
       authenticatedPage,
+      testCleanup,
     }) => {
       const page = authenticatedPage;
-      const tagsToDelete: number[] = [];
+      const testDataManager = new TestDataManager(page);
+
       await page.setViewportSize({ width: 1024, height: 768 });
 
-      try {
-        // 1. Create parent tag
-        const parentName = 'SidebarParent-' + Date.now();
-        const parentId = await createTestTag(page, parentName);
-        tagsToDelete.push(parentId);
+      // 1. Create parent tag
+      const parentName = `SidebarParent-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+      const parentResult = await testDataManager.createTag({
+        name: parentName,
+      });
+      const parentId = parentResult.id;
 
-        // 2. Create child tag
-        const childName = 'SidebarChild-' + Date.now();
-        const childId = await createTestTag(page, childName, parentId);
-        tagsToDelete.push(childId);
+      testCleanup(async () => {
+        await testDataManager.deleteTagByName(parentName).catch(() => {});
+      });
 
-        // 3. Navigate to contacts page to see sidebar
-        await page.goto('/contacts');
-        await expect(page).toHaveTitle(/Personal Management System/);
+      // 2. Create child tag
+      const childName = `SidebarChild-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+      const childResult = await testDataManager.createTag({
+        name: childName,
+        parent_id: parseInt(parentId),
+      });
+      const childId = childResult.id;
 
-        // Wait for sidebar tag tree to load
-        const tagTreeArea = page.getByTestId('tag-tree-scroll-area');
-        await expect(tagTreeArea).toBeVisible({ timeout: 10000 });
+      testCleanup(async () => {
+        await testDataManager.deleteTagByName(childName).catch(() => {});
+      });
 
-        // 4. Parent should be visible with an expand toggle
-        const parentLink = page.getByTestId(`nav-link-tag-${parentId}`);
-        await expect(parentLink).toBeVisible();
+      // 3. Navigate to contacts page to see sidebar
+      await page.goto('/contacts');
+      await expect(page).toHaveTitle(/Personal Management System/);
 
-        const expandToggle = page.getByTestId(`tag-toggle-${parentId}`);
-        await expect(expandToggle).toBeVisible();
-        await expect(expandToggle).toHaveAttribute('aria-expanded', 'false');
+      // Wait for sidebar tag tree to load
+      const tagTreeArea = page.getByTestId('tag-tree-scroll-area');
+      await expect(tagTreeArea).toBeVisible({ timeout: 10000 });
 
-        // 5. Child should NOT be visible initially
-        const childLink = page.getByTestId(`nav-link-tag-${childId}`);
-        await expect(childLink).not.toBeVisible();
+      // 4. Parent should be visible with an expand toggle
+      const parentLink = page.getByTestId(`nav-link-tag-${parentId}`);
+      await expect(parentLink).toBeVisible();
 
-        // 6. Click expand → child becomes visible
-        await expandToggle.click();
-        await expect(expandToggle).toHaveAttribute('aria-expanded', 'true');
-        await expect(childLink).toBeVisible();
+      const expandToggle = page.getByTestId(`tag-toggle-${parentId}`);
+      await expect(expandToggle).toBeVisible();
+      await expect(expandToggle).toHaveAttribute('aria-expanded', 'false');
 
-        // 7. Click collapse → child hidden again
-        await expandToggle.click();
-        await expect(expandToggle).toHaveAttribute('aria-expanded', 'false');
-        await expect(childLink).not.toBeVisible();
-      } finally {
-        for (const id of tagsToDelete) {
-          await page.request.delete(`/api/tags/${id}`);
-        }
-      }
+      // 5. Child should NOT be visible initially
+      const childLink = page.getByTestId(`nav-link-tag-${childId}`);
+      await expect(childLink).not.toBeVisible();
+
+      // 6. Click expand → child becomes visible
+      await expandToggle.click();
+      await expect(expandToggle).toHaveAttribute('aria-expanded', 'true');
+      await expect(childLink).toBeVisible();
+
+      // 7. Click collapse → child hidden again
+      await expandToggle.click();
+      await expect(expandToggle).toHaveAttribute('aria-expanded', 'false');
+      await expect(childLink).not.toBeVisible();
     });
 
     test('navigates to child tag page from sidebar tree', async ({
       authenticatedPage,
+      testCleanup,
     }) => {
       const page = authenticatedPage;
-      const tagsToDelete: number[] = [];
+      const testDataManager = new TestDataManager(page);
+
       await page.setViewportSize({ width: 1024, height: 768 });
 
-      try {
-        // Create parent + child
-        const parentName = 'NavParent-' + Date.now();
-        const parentId = await createTestTag(page, parentName);
-        tagsToDelete.push(parentId);
+      // Create parent + child
+      const parentName = `NavParent-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+      const parentResult = await testDataManager.createTag({
+        name: parentName,
+      });
+      const parentId = parentResult.id;
 
-        const childName = 'NavChild-' + Date.now();
-        const childId = await createTestTag(page, childName, parentId);
-        tagsToDelete.push(childId);
+      testCleanup(async () => {
+        await testDataManager.deleteTagByName(parentName).catch(() => {});
+      });
 
-        // Navigate
-        await page.goto('/contacts');
-        await expect(page).toHaveTitle(/Personal Management System/);
+      const childName = `NavChild-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+      const childResult = await testDataManager.createTag({
+        name: childName,
+        parent_id: parseInt(parentId),
+      });
+      const childId = childResult.id;
 
-        // Wait for tag tree, expand parent
-        const tagTreeArea = page.getByTestId('tag-tree-scroll-area');
-        await expect(tagTreeArea).toBeVisible({ timeout: 10000 });
+      testCleanup(async () => {
+        await testDataManager.deleteTagByName(childName).catch(() => {});
+      });
 
-        const expandToggle = page.getByTestId(`tag-toggle-${parentId}`);
-        await expandToggle.click();
+      // Navigate
+      await page.goto('/contacts');
+      await expect(page).toHaveTitle(/Personal Management System/);
 
-        // Click child tag link → navigate to tag page
-        const childLink = page.getByTestId(`nav-link-tag-${childId}`);
-        await expect(childLink).toBeVisible();
-        await Promise.all([
-          page.waitForURL(`**/contacts?tag=${childId}`),
-          childLink.click(),
-        ]);
-      } finally {
-        for (const id of tagsToDelete) {
-          await page.request.delete(`/api/tags/${id}`);
-        }
-      }
+      // Wait for tag tree, expand parent
+      const tagTreeArea = page.getByTestId('tag-tree-scroll-area');
+      await expect(tagTreeArea).toBeVisible({ timeout: 10000 });
+
+      const expandToggle = page.getByTestId(`tag-toggle-${parentId}`);
+      await expandToggle.click();
+
+      // Click child tag link → navigate to tag page
+      const childLink = page.getByTestId(`nav-link-tag-${childId}`);
+      await expect(childLink).toBeVisible();
+      await Promise.all([
+        page.waitForURL(`**/contacts?tag=${childId}`),
+        childLink.click(),
+      ]);
     });
 
     test('flat tags render without expand controls', async ({

@@ -167,6 +167,8 @@ export const SUCCESS_MESSAGES = {
   TAG_ASSIGNED: 'Tag assigned successfully',
   TAG_REMOVED: 'Tag removed successfully',
   TAG_CREATED: 'Tag created successfully',
+  TAG_UPDATED: 'Tag updated successfully',
+  TAG_DELETED: 'Tag deleted successfully',
   CREATE_SUCCESS: 'Created successfully',
   UPDATE_SUCCESS: 'Updated successfully',
   DELETE_SUCCESS: 'Deleted successfully',
