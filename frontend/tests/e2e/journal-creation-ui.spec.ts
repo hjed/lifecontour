@@ -292,7 +292,9 @@ test.describe('Journal Creation UI Flow', () => {
       .getByRole('checkbox', { name: /all-day event/i })
       .waitFor({ state: 'visible' });
     await page.getByTestId('calendar-id-input').click();
-    await page.getByRole('option', { name: calendarName }).click();
+    const calendarOption = page.getByRole('option', { name: calendarName });
+    await expect(calendarOption).toBeVisible({ timeout: 10000 });
+    await calendarOption.click();
 
     // Check all-day to avoid Start/End time validation unless we want to fill them
     await page.getByRole('checkbox', { name: /all-day event/i }).check();

@@ -93,9 +93,13 @@ export function EventTypeEditor({
     onChange,
   });
 
-  const { data: calendarsResponse, isLoading: isLoadingCalendars } =
-    useCalendars();
+  const {
+    data: calendarsResponse,
+    isLoading: isLoadingCalendars,
+    error: calendarsError,
+  } = useCalendars();
   const availableCalendars = calendarsResponse?.data || [];
+  const hasNoCalendars = availableCalendars.length === 0;
 
   return (
     <div
@@ -116,12 +120,31 @@ export function EventTypeEditor({
               calendar_id: value,
             }))
           }
-          disabled={!isEditing || isLoadingCalendars}
+          disabled={!isEditing || isLoadingCalendars || !!calendarsError}
         >
           <SelectTrigger id='calendar-id' data-testid='calendar-id-input'>
-            <SelectValue placeholder='Select calendar' />
+            <SelectValue
+              placeholder={
+                calendarsError
+                  ? 'Failed to load calendars'
+                  : hasNoCalendars && !isLoadingCalendars
+                    ? 'No calendars available'
+                    : 'Select calendar'
+              }
+            />
           </SelectTrigger>
           <SelectContent>
+            {hasNoCalendars && !isLoadingCalendars && (
+              <SelectItem
+                value='none'
+                disabled
+                className='text-muted-foreground'
+              >
+                {calendarsError
+                  ? 'Failed to load calendars'
+                  : 'No calendars available'}
+              </SelectItem>
+            )}
             {availableCalendars.map(cal => (
               <SelectItem key={cal.id} value={cal.id}>
                 <div className='flex items-center gap-2'>
@@ -138,6 +161,13 @@ export function EventTypeEditor({
             ))}
           </SelectContent>
         </Select>
+        {isEditing && hasNoCalendars && !isLoadingCalendars && (
+          <p className='text-destructive mt-1 text-sm'>
+            {calendarsError
+              ? 'There was an error loading your calendars. Please try again later.'
+              : 'You must create a calendar first before you can associate an event with it.'}
+          </p>
+        )}
       </div>
 
       {/* All-day toggle */}
