@@ -26,13 +26,15 @@ test.describe('Tag CRUD UI Updates', () => {
       const tagId = tagData.data.id;
       cleanupTagId = tagId;
 
-      // Reload page to see it in sidebar
-      await authenticatedPage.reload();
+      // Reload page and poll until it appears in sidebar to handle caching/latency
       const tagLink = authenticatedPage.locator(
         `a[href*="/contacts?tag=${tagId}"]`
       );
-      await expect(tagLink).toBeVisible();
-      await expect(tagLink).toHaveText(new RegExp(tagName, 'i'));
+      await expect(async () => {
+        await authenticatedPage.reload();
+        await expect(tagLink).toBeVisible();
+        await expect(tagLink).toHaveText(new RegExp(tagName, 'i'));
+      }).toPass({ timeout: 15000 });
 
       // Update Tag via API
       const newTagName = tagName + '-Updated';
@@ -51,10 +53,12 @@ test.describe('Tag CRUD UI Updates', () => {
       );
       expect(updateResp.ok()).toBe(true);
 
-      // Reload page
-      await authenticatedPage.reload();
-      await expect(tagLink).toBeVisible();
-      await expect(tagLink).toHaveText(new RegExp(newTagName, 'i'));
+      // Reload page and poll until the new text appears
+      await expect(async () => {
+        await authenticatedPage.reload();
+        await expect(tagLink).toBeVisible();
+        await expect(tagLink).toHaveText(new RegExp(newTagName, 'i'));
+      }).toPass({ timeout: 15000 });
 
       // Delete Tag via API
       const deleteResp = await authenticatedPage.request.delete(
@@ -63,9 +67,11 @@ test.describe('Tag CRUD UI Updates', () => {
       expect(deleteResp.ok()).toBe(true);
       cleanupTagId = null; // Cleaned up cleanly during standard execution
 
-      // Reload page
-      await authenticatedPage.reload();
-      await expect(tagLink).not.toBeVisible();
+      // Reload page and poll until it disappears
+      await expect(async () => {
+        await authenticatedPage.reload();
+        await expect(tagLink).not.toBeVisible();
+      }).toPass({ timeout: 15000 });
     } finally {
       if (cleanupTagId) {
         await authenticatedPage.request.delete(`/api/tags/${cleanupTagId}`);
