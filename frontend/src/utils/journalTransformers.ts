@@ -31,6 +31,8 @@ export interface DisplayJournal {
   // Hierarchy metadata
   children_count?: number | null;
   depth?: number | null;
+  // Review indicators
+  has_pending_reviews?: boolean;
 }
 
 /**
@@ -77,5 +79,6 @@ export function transformJournalForDisplay(
     highlightedContent,
     children_count: journal.attributes.children_count ?? null,
     depth: journal.attributes.depth ?? null,
+    has_pending_reviews: journal.attributes.has_pending_reviews,
   };
 }

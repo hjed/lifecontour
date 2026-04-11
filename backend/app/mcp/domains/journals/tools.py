@@ -84,6 +84,7 @@ from app.core.journal.adapters.sql.photo_album_data_repository import (
     SqlPhotoAlbumDataRepository,
 )
 from app.core.journal.adapters.sql.plan_data_repository import SqlPlanDataRepository
+from app.core.journal.adapters.sql.review_item_repository import SqlReviewItemRepository
 from app.core.journal.adapters.sql.route_repository import SqlRouteRepository
 from app.core.journal.adapters.sql.travel_data_repository import SqlTravelDataRepository
 from app.core.journal.models.journal_tag import JournalTag
@@ -3505,3 +3506,109 @@ def register_journal_tools(mcp: FastMCP[None]) -> None:
         )
 
         return MCPResponseBuilder.success_response(response)
+
+    @mcp.tool
+    @mcp_unified_error_handler("list_review_items", "journal")
+    async def list_review_items(
+        limit: Annotated[
+            int,
+            Field(
+                default=20,
+                description="Maximum number of results to return (default: 20)",
+            ),
+        ] = 20,
+        offset: Annotated[
+            int,
+            Field(
+                default=0,
+                description="Number of results to skip (default: 0)",
+            ),
+        ] = 0,
+        status: Annotated[
+            str,
+            Field(
+                default="pending",
+                description="Filter by items status, must be 'pending' for now",
+            ),
+        ] = "pending",
+        user_id_override: Annotated[
+            str | None,
+            Field(
+                default=None,
+                description="Optional: Only for use in tests. Override the user_id.",
+            ),
+        ] = None,
+        db_connection: AsyncConnection = mcp_depends(get_async_connection),
+    ) -> str:
+        """
+        List pending journal review items for the user.
+
+        Retrieves a list of journals that might need merging, deduplication,
+        or review. Used typically to show pending tasks in a queue/sidebar.
+
+        Returns AI-friendly response containing reason, confidence score, and
+        candidate journal ids for review.
+        """
+        # Determine the user ID using similar logic to other tools
+        # The user ID is usually extracted from the context, or we can use a helper if we have it
+        # Actually tools usually take the test_user_id from context if provided.
+        user_id = user_id_override or "dev-system-user"
+
+        if status != "pending":
+            return json.dumps({"error": "Only 'pending' status is currently supported"})
+
+        review_item_repo = SqlReviewItemRepository(db_connection)
+
+        items = await review_item_repo.find_pending_by_user(
+            user_id, limit=limit, offset=offset
+        )
+        total_count = await review_item_repo.count_pending_by_user(user_id)
+
+        # Batch-fetch journal summaries for context
+        journal_ids = set()
+        for item in items:
+            journal_ids.add(item.source_journal_id)
+            journal_ids.add(item.candidate_journal_id)
+
+        journal_repo = SqlJournalRepository(db_connection)
+
+        journals = await journal_repo.find_by_ids_for_user(user_id, list(journal_ids))
+        journal_map = {j.id: j for j in journals if j.id is not None}
+
+        # Build response payload
+        results = []
+        for item in items:
+            source_journal = journal_map.get(item.source_journal_id)
+            candidate_journal = journal_map.get(item.candidate_journal_id)
+
+            results.append(
+                {
+                    "id": item.id,
+                    "status": item.status,
+                    "reason": item.reason.value
+                    if hasattr(item.reason, "value")
+                    else item.reason,
+                    "confidence_score": item.confidence_score,
+                    "details": item.details,
+                    "source_journal": {
+                        "id": item.source_journal_id,
+                        "title": source_journal.title
+                        if source_journal
+                        else f"Journal {item.source_journal_id}",
+                    },
+                    "candidate_journal": {
+                        "id": item.candidate_journal_id,
+                        "title": candidate_journal.title
+                        if candidate_journal
+                        else f"Journal {item.candidate_journal_id}",
+                    },
+                }
+            )
+
+        response_data = {
+            "meta": {"total_count": total_count, "offset": offset, "limit": limit},
+            "data": results,
+            "summary": f"Found {total_count} pending review item(s).",
+        }
+
+        return json.dumps(response_data, indent=2)

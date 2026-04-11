@@ -44,6 +44,9 @@ from app.core.journal.adapters.sql.photo_album_data_repository import (
     SqlPhotoAlbumDataRepository,
 )
 from app.core.journal.adapters.sql.plan_data_repository import SqlPlanDataRepository
+from app.core.journal.adapters.sql.review_item_repository import (
+    SqlReviewItemRepository,
+)
 from app.core.journal.adapters.sql.route_repository import SqlRouteRepository
 from app.core.journal.adapters.sql.travel_data_repository import SqlTravelDataRepository
 from app.core.journal.models.repositories import (
@@ -64,6 +67,7 @@ from app.core.journal.models.repositories import (
     OutdoorActivityDataRepository,
     PhotoAlbumDataRepository,
     PlanDataRepository,
+    ReviewItemRepository,
     RouteRepository,
     TravelDataRepository,
 )
@@ -198,6 +202,13 @@ class JournalProvider(Provider):
     def route_repository(self, connection: AsyncConnection) -> RouteRepository:
         """Provide a RouteRepository instance."""
         return SqlRouteRepository(connection)
+
+    @provide(scope=Scope.REQUEST)
+    def review_item_repository(
+        self, connection: AsyncConnection
+    ) -> ReviewItemRepository:
+        """Provide a ReviewItemRepository instance."""
+        return SqlReviewItemRepository(connection)
 
     @provide(scope=Scope.REQUEST)
     def journal_service(
