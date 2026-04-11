@@ -276,3 +276,95 @@ contact_relationships_table = Table(
         name="uq_contact_relationships_unique_relationship",
     ),
 )
+
+# Custom date types table
+custom_date_types_table = Table(
+    "custom_date_types",
+    metadata,
+    Column("id", Integer, primary_key=True),
+    Column("name", String(100), nullable=False, unique=True),
+    Column(
+        "created_at",
+        DateTime(timezone=True),
+        server_default=text("now()"),
+        nullable=False,
+    ),
+    Column(
+        "updated_at",
+        DateTime(timezone=True),
+        server_default=text("now()"),
+        nullable=False,
+    ),
+)
+
+# Contact important dates table
+contact_important_dates_table = Table(
+    "contact_important_dates",
+    metadata,
+    Column("id", Integer, primary_key=True),
+    Column(
+        "contact_id",
+        Integer,
+        ForeignKey("contacts.id", ondelete="CASCADE"),
+        nullable=False,
+    ),
+    Column("date_type", String(30), nullable=False),
+    Column("precision", String(10), nullable=False),
+    Column("year", Integer, nullable=True),
+    Column("month", Integer, nullable=True),
+    Column("day", Integer, nullable=True),
+    Column(
+        "custom_date_type_id",
+        Integer,
+        ForeignKey("custom_date_types.id"),
+        nullable=True,
+    ),
+    Column(
+        "created_at",
+        DateTime(timezone=True),
+        server_default=text("now()"),
+        nullable=False,
+    ),
+    Column(
+        "updated_at",
+        DateTime(timezone=True),
+        server_default=text("now()"),
+        nullable=False,
+    ),
+    CheckConstraint(
+        "date_type IN ('birthday', 'marriage_anniversary', 'work_anniversary', 'first_met', 'custom')",
+        name="ck_important_dates_date_type",
+    ),
+    CheckConstraint(
+        "precision IN ('full', 'day_month', 'year')",
+        name="ck_important_dates_precision",
+    ),
+    CheckConstraint(
+        "month IS NULL OR (month >= 1 AND month <= 12)",
+        name="ck_important_dates_month",
+    ),
+    CheckConstraint(
+        "day IS NULL OR (day >= 1 AND day <= 31)",
+        name="ck_important_dates_day",
+    ),
+    CheckConstraint(
+        "precision != 'full' OR (year IS NOT NULL AND month IS NOT NULL AND day IS NOT NULL)",
+        name="ck_important_dates_full_precision",
+    ),
+    CheckConstraint(
+        "precision != 'day_month' OR (month IS NOT NULL AND day IS NOT NULL)",
+        name="ck_important_dates_day_month_precision",
+    ),
+    CheckConstraint(
+        "precision != 'year' OR year IS NOT NULL",
+        name="ck_important_dates_year_precision",
+    ),
+    CheckConstraint(
+        "date_type != 'custom' OR custom_date_type_id IS NOT NULL",
+        name="ck_important_dates_custom_type_id",
+    ),
+    CheckConstraint(
+        "date_type = 'custom' OR custom_date_type_id IS NULL",
+        name="ck_important_dates_non_custom_type_id",
+    ),
+)

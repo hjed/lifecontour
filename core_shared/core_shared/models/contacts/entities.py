@@ -4,6 +4,10 @@ from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
 
+from core_shared.models.contacts.important_date_types import (
+    DatePrecision,
+    ImportantDateType,
+)
 from core_shared.models.contacts.value_objects import (
     Address,
     Email,
@@ -139,6 +143,67 @@ class ContactNote:
 
 
 @dataclass
+class ImportantDate:
+    """Important date entity associated with a contact."""
+
+    contact_id: int
+    date_type: ImportantDateType
+    precision: DatePrecision
+
+    # Nullable date components based on precision
+    year: int | None = None
+    month: int | None = None
+    day: int | None = None
+
+    # Foreign key and relationship to custom date type
+    custom_date_type_id: int | None = None
+    custom_date_type_name: str | None = None
+
+    id: int | None = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+    def __post_init__(self) -> None:
+        """Validate important date precision and constraints."""
+        # 1. Component range validation
+        if self.month is not None and not (1 <= self.month <= 12):
+            raise ValueError("Month must be between 1 and 12")
+
+        if self.day is not None and not (1 <= self.day <= 31):
+            raise ValueError("Day must be between 1 and 31")
+
+        # 2. Precision consistency validation
+        if self.precision == DatePrecision.FULL:
+            if self.year is None or self.month is None or self.day is None:
+                raise ValueError("Full precision requires year, month, and day")
+
+        elif self.precision == DatePrecision.DAY_MONTH:
+            if self.month is None or self.day is None:
+                raise ValueError("Day/Month precision requires month and day")
+            if self.year is not None:
+                self.year = None  # Ensure year is null for this precision
+
+        elif self.precision == DatePrecision.YEAR:
+            if self.year is None:
+                raise ValueError("Year precision requires year")
+            if self.month is not None or self.day is not None:
+                self.month = None
+                self.day = None  # Ensure month/day are null for this precision
+
+        # 3. Custom type validation
+        if self.date_type == ImportantDateType.CUSTOM:
+            if self.custom_date_type_id is None:
+                raise ValueError(
+                    "custom_date_type_id is required for custom date types"
+                )
+        else:
+            if self.custom_date_type_id is not None:
+                raise ValueError(
+                    "custom_date_type_id should only be set for custom date types"
+                )
+
+
+@dataclass
 class Contact:
     """Contact aggregate root entity."""
 
@@ -159,6 +224,7 @@ class Contact:
     notes: list[ContactNote] | None = None
     tags: list[Tag] | None = None
     relationships: list["ContactRelationship"] | None = None
+    important_dates: list[ImportantDate] | None = None
 
     def __post_init__(self) -> None:
         """Validate contact."""
@@ -224,6 +290,14 @@ class Contact:
             for address in self.addresses:
                 if address.is_primary:
                     return address
+        return None
+
+    def get_birthday(self) -> ImportantDate | None:
+        """Get birthday if available."""
+        if self.important_dates:
+            for date in self.important_dates:
+                if date.date_type == ImportantDateType.BIRTHDAY:
+                    return date
         return None
 
     def add_tag(self, tag: Tag) -> None:

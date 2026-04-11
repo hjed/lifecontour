@@ -87,6 +87,36 @@ class ContactNoteResource(BaseModel):
     attributes: ContactNoteAttributes = Field(..., description="Note attributes")
 
 
+# Contact Important Date Schemas (embedded in contact)
+class ImportantDateAttributes(BaseModel):
+    """Important date attributes for embedding in contact resource."""
+
+    date_type: str = Field(..., description="Type of important date")
+    precision: str = Field(
+        ..., description="Precision of the date (year, day_month, full)"
+    )
+    year: int | None = Field(default=None, description="Year component")
+    month: int | None = Field(default=None, description="Month component")
+    day: int | None = Field(default=None, description="Day component")
+    custom_date_type_id: int | None = Field(
+        default=None, description="ID of global custom date type"
+    )
+    custom_date_type_name: str | None = Field(
+        default=None, description="Read-only name of custom date type"
+    )
+    created_at: datetime | None = Field(default=None, description="Creation timestamp")
+    updated_at: datetime | None = Field(
+        default=None, description="Last update timestamp"
+    )
+
+
+class ImportantDateResource(BaseModel):
+    """Important date resource for embedding in contact."""
+
+    id: int | None = Field(default=None, description="Date ID (null for new dates)")
+    attributes: ImportantDateAttributes = Field(..., description="Date attributes")
+
+
 # Tag Schemas (for relationships)
 class TagAttributes(BaseModel):
     """Tag attributes."""
@@ -189,6 +219,9 @@ class ContactAttributes(BaseModel):
     )
     relationships: list[ContactRelationshipResource] = Field(
         default_factory=list, description="Contact relationships"
+    )
+    important_dates: list[ImportantDateResource] = Field(
+        default_factory=list, description="Contact important dates"
     )
 
 
@@ -486,3 +519,65 @@ class ContactAddressCreateRequest(BaseModel):
     """Request model for creating a contact address."""
 
     data: ContactAddressCreateData = Field(..., description="Address creation data")
+
+
+# Contact Important Date Add/Delete Schemas
+class ImportantDateCreateData(BaseModel):
+    """Data for creating a new important date."""
+
+    type: str = Field(default="contact_important_dates", description="Resource type")
+    attributes: ImportantDateAttributes = Field(
+        ..., description="Date attributes to create"
+    )
+
+
+class ImportantDateCreateRequest(BaseModel):
+    """Request model for creating an important date."""
+
+    data: ImportantDateCreateData = Field(..., description="Date creation data")
+
+
+# Custom Date Type Schemas
+class CustomDateTypeAttributes(BaseModel):
+    """Attributes for custom date type."""
+
+    name: str = Field(..., description="Name of custom date type")
+    created_at: datetime | None = Field(default=None, description="Creation timestamp")
+    updated_at: datetime | None = Field(
+        default=None, description="Last update timestamp"
+    )
+
+
+class CustomDateTypeResource(BaseModel):
+    """Resource model for custom date type."""
+
+    type: str = Field(default="custom_date_types", description="Resource type")
+    id: str = Field(..., description="Resource ID")
+    attributes: CustomDateTypeAttributes = Field(..., description="Attributes")
+    links: JsonApiLinks | None = Field(default=None, description="Resource links")
+    meta: dict[str, Any] | None = Field(default=None, description="Metadata")
+
+
+class CustomDateTypeListResponse(JsonApiCollectionResponse[CustomDateTypeResource]):
+    """Response model for a list of custom date types."""
+
+    pass
+
+
+class CustomDateTypeResponse(JsonApiResponse[CustomDateTypeResource]):
+    """Response model for a custom date type."""
+
+    pass
+
+
+class CustomDateTypeCreateData(BaseModel):
+    """Data for creating custom date type."""
+
+    type: str = Field(default="custom_date_types", description="Resource type")
+    attributes: CustomDateTypeAttributes = Field(..., description="Attributes")
+
+
+class CustomDateTypeCreateRequest(JsonApiCreateRequest[CustomDateTypeCreateData]):
+    """Request model for creating a custom date type."""
+
+    pass

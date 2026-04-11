@@ -18,6 +18,8 @@ if TYPE_CHECKING:
         ContactRelationshipCreateData,
         ContactRelationshipUpdateData,
         ContactUpdateData,
+        CustomDateTypeCreateData,
+        ImportantDateCreateData,
     )
 
 from core_shared.models.contacts.entities import (
@@ -26,8 +28,14 @@ from core_shared.models.contacts.entities import (
     ContactMethod,
     ContactNote,
     ContactRelationship,
+    ImportantDate,
     RelationshipType,
     Tag,
+)
+from core_shared.models.contacts.important_date_types import (
+    CustomDateType,
+    DatePrecision,
+    ImportantDateType,
 )
 
 from app.api.contacts.schemas import (
@@ -44,6 +52,10 @@ from app.api.contacts.schemas import (
     ContactRelationshipResponseAttributes,
     ContactRelationships,
     ContactResource,
+    CustomDateTypeAttributes,
+    CustomDateTypeResource,
+    ImportantDateAttributes,
+    ImportantDateResource,
     TagAttributes,
     TagResource,
 )
@@ -104,6 +116,24 @@ class ContactConverter:
         )
 
     @staticmethod
+    def to_important_date_resource(date: ImportantDate) -> ImportantDateResource:
+        """Convert ImportantDate domain entity to API resource."""
+        return ImportantDateResource(
+            id=date.id,
+            attributes=ImportantDateAttributes(
+                date_type=date.date_type.value,
+                precision=date.precision.value,
+                year=date.year,
+                month=date.month,
+                day=date.day,
+                custom_date_type_id=date.custom_date_type_id,
+                custom_date_type_name=date.custom_date_type_name,
+                created_at=date.created_at,
+                updated_at=date.updated_at,
+            ),
+        )
+
+    @staticmethod
     def to_resource(contact: Contact, base_url: str = "") -> ContactResource:
         """Convert Contact domain entity to API resource."""
         # Convert embedded entities
@@ -122,6 +152,10 @@ class ContactConverter:
             ContactRelationshipConverter.to_resource(relationship, base_url)
             for relationship in (contact.relationships or [])
         ]
+        important_date_resources = [
+            ContactConverter.to_important_date_resource(date)
+            for date in (contact.important_dates or [])
+        ]
 
         # Create attributes
         attributes = ContactAttributes(
@@ -136,6 +170,7 @@ class ContactConverter:
             addresses=addresses,
             notes=notes,
             relationships=relationship_resources,
+            important_dates=important_date_resources,
         )
 
         # Create relationships (tags included with full attributes)
@@ -250,6 +285,42 @@ class ContactRequestConverter:
         )
 
     @staticmethod
+    def from_important_date_resource(
+        date_resource: ImportantDateResource, contact_id: int
+    ) -> ImportantDate:
+        """Convert API important date resource to domain entity."""
+        return ImportantDate(
+            id=date_resource.id,
+            contact_id=contact_id,
+            date_type=ImportantDateType(date_resource.attributes.date_type),
+            precision=DatePrecision(date_resource.attributes.precision),
+            year=date_resource.attributes.year,
+            month=date_resource.attributes.month,
+            day=date_resource.attributes.day,
+            custom_date_type_id=date_resource.attributes.custom_date_type_id,
+            custom_date_type_name=date_resource.attributes.custom_date_type_name,
+            created_at=date_resource.attributes.created_at,
+            updated_at=date_resource.attributes.updated_at,
+        )
+
+    @staticmethod
+    def from_important_date_create_request(
+        request_data: ImportantDateCreateData,
+        contact_id: int,
+    ) -> ImportantDate:
+        """Convert API create request for important date to domain entity."""
+        attrs = request_data.attributes
+        return ImportantDate(
+            contact_id=contact_id,
+            date_type=ImportantDateType(attrs.date_type),
+            precision=DatePrecision(attrs.precision),
+            year=attrs.year,
+            month=attrs.month,
+            day=attrs.day,
+            custom_date_type_id=attrs.custom_date_type_id,
+        )
+
+    @staticmethod
     def from_create_request(
         request_data: ContactCreateData,
     ) -> Contact:
@@ -275,6 +346,12 @@ class ContactRequestConverter:
             )  # contact_id will be set later
             for note in attrs.notes
         ]
+        important_dates = [
+            ContactRequestConverter.from_important_date_resource(
+                date, 0
+            )  # contact_id will be set later
+            for date in attrs.important_dates
+        ]
 
         return Contact(
             first_name=attrs.first_name,
@@ -285,6 +362,7 @@ class ContactRequestConverter:
             methods=methods,
             addresses=addresses,
             notes=notes,
+            important_dates=important_dates,
         )
 
     @staticmethod
@@ -312,6 +390,12 @@ class ContactRequestConverter:
             ContactRequestConverter.from_note_resource(note, existing_contact.id or 0)
             for note in attrs.notes
         ]
+        important_dates = [
+            ContactRequestConverter.from_important_date_resource(
+                date, existing_contact.id or 0
+            )
+            for date in attrs.important_dates
+        ]
 
         # Update the existing contact with new data
         updated_contact = Contact(
@@ -325,6 +409,7 @@ class ContactRequestConverter:
             addresses=addresses,
             notes=notes,
             tags=existing_contact.tags,  # Preserve existing tags
+            important_dates=important_dates,
             created_at=existing_contact.created_at,
             updated_at=existing_contact.updated_at,
         )
@@ -440,3 +525,42 @@ class ContactHistoryConverter:
             id=str(entry.id),
             attributes=attributes,
         )
+
+
+class CustomDateTypeConverter:
+    """Converter for CustomDateType domain entities to API resources."""
+
+    @staticmethod
+    def to_resource(
+        ctype: CustomDateType, base_url: str = ""
+    ) -> CustomDateTypeResource:
+        """Convert CustomDateType domain entity to API resource."""
+        attributes = CustomDateTypeAttributes(
+            name=ctype.name,
+            created_at=ctype.created_at,
+            updated_at=ctype.updated_at,
+        )
+
+        links = None
+        if base_url and ctype.id:
+            links = JsonApiLinks(
+                self=f"{base_url}/api/custom-date-types/{ctype.id}",
+            )
+
+        _validate_entity_id(ctype.id, "custom date type")
+
+        return CustomDateTypeResource(
+            id=str(ctype.id),
+            attributes=attributes,
+            links=links,
+        )
+
+
+class CustomDateTypeRequestConverter:
+    """Converter for CustomDateType API requests to domain entities."""
+
+    @staticmethod
+    def from_create_request(request_data: CustomDateTypeCreateData) -> CustomDateType:
+        """Convert API create request logic."""
+        # Using domain directly since CustomDateType is just an entity kwargs model right now
+        return CustomDateType(name=request_data.attributes.name)
