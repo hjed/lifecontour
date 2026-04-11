@@ -1269,6 +1269,7 @@ export function useDismissReviewItem() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: reviewItemKeys.all });
       queryClient.invalidateQueries({ queryKey: journalKeys.lists() });
+      queryClient.invalidateQueries({ queryKey: journalKeys.details() });
       toast.success('Review item dismissed');
     },
     onError: (error: Error) => {

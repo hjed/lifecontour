@@ -1316,7 +1316,7 @@ async def list_review_items(
 @router.post("/review-items/{item_id}/dismiss", status_code=status.HTTP_200_OK)
 @inject
 async def dismiss_review_item(
-    item_id: str,
+    item_id: int,
     request: Request,
     review_item_repo: FromDishka[ReviewItemRepository],
     journal_service: FromDishka[JournalService],
@@ -1328,7 +1328,7 @@ async def dismiss_review_item(
     base_url = get_request_base_url(request)
 
     item = await review_item_repo.update_status(
-        int(item_id),
+        item_id,
         new_status="dismissed",
         user_id=user.id,
     )

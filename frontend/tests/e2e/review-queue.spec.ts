@@ -228,7 +228,9 @@ test.describe('Journal Review Queue', () => {
     );
     await expect(dismissBtn).toBeVisible();
     await dismissBtn.scrollIntoViewIfNeeded();
-    await page.waitForTimeout(500); // Wait for sidebar animation
+    await expect(dismissBtn).toBeEnabled();
+    // Use dispatchEvent instead of .click() as the Radix Sheet overlay and Mobile viewport
+    // constraints prevent reliable bounding-box clicks even with force: true
     await dismissBtn.dispatchEvent('click');
 
     await expect(page.getByText('Review item dismissed')).toBeVisible();
