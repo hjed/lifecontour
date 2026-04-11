@@ -11,6 +11,7 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import type { Route } from 'next';
+import { format, parseISO } from 'date-fns';
 import { ChevronRight, Calendar, FileText, Plus, Link2 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -169,11 +170,7 @@ function ChildJournalItem({ child }: ChildJournalItemProps) {
           </div>
           {child.date && (
             <div className='text-muted-foreground text-xs'>
-              {new Date(child.date).toLocaleDateString('en-US', {
-                year: 'numeric',
-                month: 'short',
-                day: 'numeric',
-              })}
+              {format(parseISO(child.date), 'MMM d, yyyy')}
             </div>
           )}
         </div>

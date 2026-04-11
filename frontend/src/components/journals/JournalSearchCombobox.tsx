@@ -11,6 +11,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Search, Book } from 'lucide-react';
+import { format, parseISO } from 'date-fns';
 import { cn } from '@/lib/utils';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent } from '@/components/ui/card';
@@ -258,9 +259,12 @@ export function JournalSearchCombobox({
                               {journal.attributes.title}
                             </span>
                             <span className='text-muted-foreground shrink-0 text-xs'>
-                              {new Date(
-                                journal.attributes.event_date_range.start
-                              ).toLocaleDateString()}
+                              {format(
+                                parseISO(
+                                  journal.attributes.event_date_range.start
+                                ),
+                                'MMM d, yyyy'
+                              )}
                             </span>
                           </div>
                         </button>

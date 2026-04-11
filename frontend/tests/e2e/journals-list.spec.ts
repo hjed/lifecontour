@@ -29,7 +29,7 @@ test.describe('Journal List Page', () => {
       await page.goto('/journals');
 
       // Wait for page to load
-      await expect(page.locator('main, [role="main"]').first()).toBeVisible();
+      await expect(page.getByTestId('journals-list-ready')).toBeVisible();
 
       // Verify page title
       await expect(page.locator('h1')).toContainText('Journals');
@@ -52,7 +52,7 @@ test.describe('Journal List Page', () => {
       await page.goto('/journals');
 
       // Wait for page to load
-      await expect(page.locator('main, [role="main"]').first()).toBeVisible();
+      await expect(page.getByTestId('journals-list-ready')).toBeVisible();
 
       // Verify the empty state card is displayed
       await expect(page.getByText('No journals found')).toBeVisible();
@@ -67,7 +67,7 @@ test.describe('Journal List Page', () => {
 
       // Navigate to journals page
       await page.goto('/journals');
-      await expect(page.locator('main, [role="main"]').first()).toBeVisible();
+      await expect(page.getByTestId('journals-list-ready')).toBeVisible();
 
       // Wait for journals to be indexed in MeiliSearch
       // The outbox processor runs every 10 seconds, so we retry this check
@@ -142,7 +142,7 @@ test.describe('Journal List Page', () => {
 
       // Navigate to journals page
       await page.goto('/journals');
-      await expect(page.locator('main, [role="main"]').first()).toBeVisible();
+      await expect(page.getByTestId('journals-list-ready')).toBeVisible();
 
       // Verify all journals are initially visible
       for (const journal of journals) {
@@ -247,7 +247,7 @@ test.describe('Journal List Page', () => {
 
       // Navigate to journals page
       await page.goto('/journals');
-      await expect(page.locator('main, [role="main"]').first()).toBeVisible();
+      await expect(page.getByTestId('journals-list-ready')).toBeVisible();
 
       // Wait for journals to be indexed in MeiliSearch
       // Increased timeout to 30 seconds to handle indexing delays when running as part of full test suite
@@ -388,7 +388,7 @@ test.describe('Journal List Page', () => {
 
       // Navigate to journals page
       await page.goto('/journals');
-      await expect(page.locator('main, [role="main"]').first()).toBeVisible();
+      await expect(page.getByTestId('journals-list-ready')).toBeVisible();
       // Wait for journal data to finish loading (prevents Mobile Chrome flakiness)
       await page.waitForLoadState('networkidle');
 
@@ -569,7 +569,7 @@ test.describe('Journal List Page', () => {
 
       // Navigate to journals page
       await page.goto('/journals');
-      await expect(page.locator('main, [role="main"]').first()).toBeVisible();
+      await expect(page.getByTestId('journals-list-ready')).toBeVisible();
 
       // Verify all journals are initially visible
       for (const journal of journals) {
@@ -691,7 +691,7 @@ test.describe('Journal List Page', () => {
 
       // Navigate to journals page
       await page.goto('/journals');
-      await expect(page.locator('main, [role="main"]').first()).toBeVisible();
+      await expect(page.getByTestId('journals-list-ready')).toBeVisible();
 
       // Verify all journals are initially visible
       await expect(
@@ -878,7 +878,7 @@ test.describe('Journal List Page', () => {
 
       // Navigate to journals page
       await page.goto('/journals');
-      await expect(page.locator('main, [role="main"]').first()).toBeVisible();
+      await expect(page.getByTestId('journals-list-ready')).toBeVisible();
 
       // Apply date filter — select a range that includes day1 and day2 but excludes day3
       const dateRangeButton = page.getByRole('button', {
@@ -1077,7 +1077,7 @@ test.describe('Journal List Page', () => {
 
       // Navigate to journals page
       await page.goto('/journals');
-      await expect(page.locator('main, [role="main"]').first()).toBeVisible();
+      await expect(page.getByTestId('journals-list-ready')).toBeVisible();
 
       // Verify all journals are initially visible
       await expect(
@@ -1289,7 +1289,7 @@ test.describe('Journal List Page', () => {
 
       // Navigate to journals page
       await page.goto('/journals');
-      await expect(page.locator('main, [role="main"]').first()).toBeVisible();
+      await expect(page.getByTestId('journals-list-ready')).toBeVisible();
 
       // Click on the first journal link
       const firstJournal = journals[0];

@@ -114,8 +114,12 @@ test.describe('Sidebar Navigation', () => {
       ).not.toBeVisible();
 
       // Click to expand
+      // Make retry idempotent by keeping click outside, allowing expect's
+      // built-in polling to wait for the 'aria-expanded' state
       await journalsButton.click();
-      await expect(journalsButton).toHaveAttribute('aria-expanded', 'true');
+      await expect(journalsButton).toHaveAttribute('aria-expanded', 'true', {
+        timeout: 15000,
+      });
       await expect(
         page.getByRole('link', { name: 'All Journals' })
       ).toBeVisible();

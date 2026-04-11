@@ -5,6 +5,7 @@ import {
   JournalContactRelationship,
   JournalCalendar,
   EventDateRange,
+  ChildJournalSummary,
 } from '@/types/journals';
 
 /**
@@ -29,6 +30,7 @@ export interface DisplayJournal {
   highlightedTitle?: string | null;
   highlightedContent?: string | null;
   // Hierarchy metadata
+  children?: ChildJournalSummary[];
   children_count?: number | null;
   depth?: number | null;
   // Review indicators
@@ -77,6 +79,7 @@ export function transformJournalForDisplay(
     isSearchResult,
     highlightedTitle,
     highlightedContent,
+    children: journal.attributes.children,
     children_count: journal.attributes.children_count ?? null,
     depth: journal.attributes.depth ?? null,
     has_pending_reviews: journal.attributes.has_pending_reviews,

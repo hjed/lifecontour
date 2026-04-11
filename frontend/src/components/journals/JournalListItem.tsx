@@ -33,6 +33,7 @@ import { DisplayJournal } from '@/hooks/useDisplayJournals';
 import { SearchHighlight } from '@/components/search/SearchHighlight';
 import { cn } from '@/lib/utils';
 import { formatDateRange } from '@/lib/date-utils';
+import { JournalChildrenList } from './JournalChildrenList';
 
 interface JournalListItemProps {
   readonly journal: DisplayJournal;
@@ -189,6 +190,13 @@ export function JournalListItem({ journal, className }: JournalListItemProps) {
               truncateContent(journal.content)
             )}
           </p>
+        )}
+
+        {/* Children List */}
+        {journal.children && journal.children.length > 0 && (
+          <div className='pt-2'>
+            <JournalChildrenList childJournals={journal.children} />
+          </div>
         )}
       </CardContent>
     </Card>
