@@ -1,0 +1,248 @@
+import {
+  toCalendarEvent,
+  toCalendarEvents,
+  groupEventsByDate,
+  getMonthDateRange,
+  getAgendaDateRange,
+  CalendarEvent,
+} from '../calendarEventHelpers';
+import { DisplayJournal } from '@/utils/journalTransformers';
+import { JournalType, EventState } from '@/types/journals';
+
+const createMockDisplayJournal = (
+  overrides: Partial<DisplayJournal> = {}
+): DisplayJournal => ({
+  id: '1',
+  title: 'Test Journal',
+  content: 'Some content',
+  event_date_range: {
+    start: '2026-04-15T10:00:00',
+    end: '2026-04-15T11:00:00',
+  },
+  types: [JournalType.EVENT],
+  tags: [],
+  contacts: [],
+  calendar: {
+    id: 'cal-1',
+    name: 'Personal',
+    color: '#3b82f6',
+  },
+  type_data: {
+    event: {
+      calendar_id: 'cal-1',
+      start_time: '10:00:00',
+      end_time: '11:00:00',
+      is_all_day: false,
+      sync_invitees: false,
+    },
+  },
+  ...overrides,
+});
+
+describe('calendarEventHelpers', () => {
+  describe('toCalendarEvent', () => {
+    it('extracts correct fields from a DisplayJournal', () => {
+      const journal = createMockDisplayJournal();
+      const event = toCalendarEvent(journal);
+
+      expect(event.id).toBe('1');
+      expect(event.title).toBe('Test Journal');
+      expect(event.date).toBe('2026-04-15');
+      expect(event.startTime).toBe('10:00');
+      expect(event.endTime).toBe('11:00');
+      expect(event.isAllDay).toBe(false);
+      expect(event.calendarColor).toBe('#3b82f6');
+      expect(event.calendarName).toBe('Personal');
+      expect(event.isCancelled).toBe(false);
+      expect(event.journalTypes).toEqual([JournalType.EVENT]);
+      expect(event.hasPendingReviews).toBe(false);
+    });
+
+    it('handles journal without calendar (default colour)', () => {
+      const journal = createMockDisplayJournal({
+        calendar: null,
+      });
+      const event = toCalendarEvent(journal);
+
+      expect(event.calendarColor).toBe('#6b7280');
+      expect(event.calendarName).toBeUndefined();
+    });
+
+    it('handles all-day events (no start/end time)', () => {
+      const journal = createMockDisplayJournal({
+        type_data: {
+          event: {
+            calendar_id: 'cal-1',
+            start_time: null,
+            end_time: null,
+            is_all_day: true,
+            sync_invitees: false,
+          },
+        },
+      });
+      const event = toCalendarEvent(journal);
+
+      expect(event.isAllDay).toBe(true);
+      expect(event.startTime).toBeNull();
+      expect(event.endTime).toBeNull();
+    });
+
+    it('handles cancelled event state', () => {
+      const journal = createMockDisplayJournal({
+        type_data: {
+          event: {
+            calendar_id: 'cal-1',
+            start_time: '10:00:00',
+            end_time: '11:00:00',
+            is_all_day: false,
+            sync_invitees: false,
+            event_state: EventState.CANCELLED,
+          },
+        },
+      });
+      const event = toCalendarEvent(journal);
+
+      expect(event.isCancelled).toBe(true);
+      expect(event.eventState).toBe(EventState.CANCELLED);
+    });
+
+    it('handles journal without event type data', () => {
+      const journal = createMockDisplayJournal({
+        types: [JournalType.NOTE],
+        type_data: {},
+      });
+      const event = toCalendarEvent(journal);
+
+      expect(event.isAllDay).toBe(true);
+      expect(event.startTime).toBeNull();
+      expect(event.endTime).toBeNull();
+    });
+
+    it('propagates has_pending_reviews flag', () => {
+      const journal = createMockDisplayJournal({
+        has_pending_reviews: true,
+      });
+      const event = toCalendarEvent(journal);
+
+      expect(event.hasPendingReviews).toBe(true);
+    });
+  });
+
+  describe('toCalendarEvents', () => {
+    it('converts an array of DisplayJournals to CalendarEvents', () => {
+      const journals = [
+        createMockDisplayJournal({ id: '1', title: 'First' }),
+        createMockDisplayJournal({ id: '2', title: 'Second' }),
+      ];
+
+      const events = toCalendarEvents(journals);
+      expect(events).toHaveLength(2);
+      expect(events[0].id).toBe('1');
+      expect(events[1].id).toBe('2');
+    });
+
+    it('returns empty array for empty input', () => {
+      expect(toCalendarEvents([])).toEqual([]);
+    });
+  });
+
+  describe('groupEventsByDate', () => {
+    it('groups events into correct date buckets', () => {
+      const events: CalendarEvent[] = [
+        {
+          id: '1',
+          title: 'Event A',
+          date: '2026-04-15',
+          startTime: '10:00',
+          endTime: '11:00',
+          isAllDay: false,
+          calendarColor: '#3b82f6',
+          isCancelled: false,
+          journalTypes: [JournalType.EVENT],
+          hasPendingReviews: false,
+        },
+        {
+          id: '2',
+          title: 'Event B',
+          date: '2026-04-15',
+          startTime: '14:00',
+          endTime: '15:00',
+          isAllDay: false,
+          calendarColor: '#ef4444',
+          isCancelled: false,
+          journalTypes: [JournalType.EVENT],
+          hasPendingReviews: false,
+        },
+        {
+          id: '3',
+          title: 'Event C',
+          date: '2026-04-16',
+          startTime: null,
+          endTime: null,
+          isAllDay: true,
+          calendarColor: '#3b82f6',
+          isCancelled: false,
+          journalTypes: [JournalType.EVENT],
+          hasPendingReviews: false,
+        },
+      ];
+
+      const grouped = groupEventsByDate(events);
+      expect(Object.keys(grouped)).toHaveLength(2);
+      expect(grouped['2026-04-15']).toHaveLength(2);
+      expect(grouped['2026-04-16']).toHaveLength(1);
+    });
+
+    it('returns empty object for empty input', () => {
+      expect(groupEventsByDate([])).toEqual({});
+    });
+  });
+
+  describe('getMonthDateRange', () => {
+    it('returns correct first/last day for April 2026', () => {
+      const range = getMonthDateRange(2026, 3); // 0-indexed month
+      expect(range.start).toBe('2026-04-01');
+      expect(range.end).toBe('2026-04-30');
+    });
+
+    it('returns correct range for January', () => {
+      const range = getMonthDateRange(2026, 0);
+      expect(range.start).toBe('2026-01-01');
+      expect(range.end).toBe('2026-01-31');
+    });
+
+    it('handles February in a leap year', () => {
+      const range = getMonthDateRange(2028, 1); // 2028 is a leap year
+      expect(range.start).toBe('2028-02-01');
+      expect(range.end).toBe('2028-02-29');
+    });
+
+    it('handles February in a non-leap year', () => {
+      const range = getMonthDateRange(2026, 1);
+      expect(range.start).toBe('2026-02-01');
+      expect(range.end).toBe('2026-02-28');
+    });
+
+    it('handles December', () => {
+      const range = getMonthDateRange(2026, 11);
+      expect(range.start).toBe('2026-12-01');
+      expect(range.end).toBe('2026-12-31');
+    });
+  });
+
+  describe('getAgendaDateRange', () => {
+    it('returns correct range from anchor with defaults', () => {
+      const anchor = new Date(2026, 3, 15); // April 15, 2026
+      const range = getAgendaDateRange(anchor, 30, 14);
+      expect(range.start).toBe('2026-04-01');
+      expect(range.end).toBe('2026-05-15');
+    });
+
+    it('handles start of year', () => {
+      const anchor = new Date(2026, 0, 5); // January 5, 2026
+      const range = getAgendaDateRange(anchor, 30, 14);
+      expect(range.start).toBe('2025-12-22');
+      expect(range.end).toBe('2026-02-04');
+    });
+  });
+});
