@@ -1946,24 +1946,26 @@ async def _process_journal_contact_relationships(
                 )
 
                 status, role = None, None
-                if attrs.get("status"):
+                status_raw = attrs.get("status")
+                if isinstance(status_raw, str):
                     try:
-                        status = AttendeeStatus[attrs["status"]]
+                        status = AttendeeStatus[status_raw.upper()]
                     except KeyError:
                         logger.warning(
                             "Invalid AttendeeStatus",
-                            status=attrs["status"],
+                            status=status_raw,
                             journal_id=journal_id,
                             contact_id=contact_id,
                         )
 
-                if attrs.get("role"):
+                role_raw = attrs.get("role")
+                if isinstance(role_raw, str):
                     try:
-                        role = ContactEventRole[attrs["role"]]
+                        role = ContactEventRole[role_raw.upper()]
                     except KeyError:
                         logger.warning(
                             "Invalid ContactEventRole",
-                            role=attrs["role"],
+                            role=role_raw,
                             journal_id=journal_id,
                             contact_id=contact_id,
                         )
@@ -1989,7 +1991,7 @@ async def _process_journal_contact_relationships(
                         contact_id=contact_id,
                     )
 
-        except (ValueError, KeyError, AttributeError):
+        except (ValueError, KeyError, AttributeError, TypeError):
             # Invalid contact relationship payload, skip
             pass
 
@@ -3387,21 +3389,21 @@ async def add_contact_to_journal(
     from core_shared.models.journals.contact_event_role import ContactEventRole
 
     status, role = None, None
-    if contact_request.data.attributes.status:
+    status_raw = contact_request.data.attributes.status
+    if isinstance(status_raw, str):
         try:
-            status = AttendeeStatus[contact_request.data.attributes.status]
+            status = AttendeeStatus[status_raw.upper()]
         except KeyError as e:
             raise JournalValidationError(
-                "status", f"Invalid status: {contact_request.data.attributes.status}"
+                "status", f"Invalid status: {status_raw}"
             ) from e
 
-    if contact_request.data.attributes.role:
+    role_raw = contact_request.data.attributes.role
+    if isinstance(role_raw, str):
         try:
-            role = ContactEventRole[contact_request.data.attributes.role]
+            role = ContactEventRole[role_raw.upper()]
         except KeyError as e:
-            raise JournalValidationError(
-                "role", f"Invalid role: {contact_request.data.attributes.role}"
-            ) from e
+            raise JournalValidationError("role", f"Invalid role: {role_raw}") from e
 
     # Create the relationship
     relationship = JournalContactRelationship(
