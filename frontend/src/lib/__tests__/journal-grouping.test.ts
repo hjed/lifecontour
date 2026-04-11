@@ -1,5 +1,6 @@
 import { groupJournalsByDay } from '../journal-grouping';
 import { DisplayJournal } from '@/utils/journalTransformers';
+import { format, addDays } from 'date-fns';
 
 const createMockJournal = (id: string, startDate: string): DisplayJournal => ({
   id,
@@ -15,65 +16,86 @@ const createMockJournal = (id: string, startDate: string): DisplayJournal => ({
 });
 
 describe('journal-grouping', () => {
+  const today = new Date();
+
+  // Helper to get formatted date relative to today
+  const getRelativeDateStr = (daysOffset: number = 0) =>
+    format(addDays(today, daysOffset), 'yyyy-MM-dd');
+
+  // Helper to get ISO time relative to today
+  const getRelativeTimeStr = (
+    daysOffset: number = 0,
+    timeStr: string = '10:00:00'
+  ) => `${getRelativeDateStr(daysOffset)}T${timeStr}`;
+
   describe('groupJournalsByDay', () => {
     it('creates contiguous day groups including empty days, ordered ascending', () => {
+      const todayStr = getRelativeDateStr(0);
+      const day2Str = getRelativeDateStr(1);
+      const day3Str = getRelativeDateStr(2);
+
       const journals = [
-        createMockJournal('1', '2026-04-01T10:00:00'),
-        createMockJournal('2', '2026-04-03T15:00:00'),
+        createMockJournal('1', getRelativeTimeStr(0, '10:00:00')),
+        createMockJournal('2', getRelativeTimeStr(2, '15:00:00')),
       ];
 
       const result = groupJournalsByDay({
         journals,
-        startDate: '2026-04-01',
-        endDate: '2026-04-03',
+        startDate: todayStr,
+        endDate: day3Str,
         collapseEmpty: false,
       });
 
       expect(result).toHaveLength(3);
 
-      // Oldest (04-01) should be first
-      expect(result[0].date).toBe('2026-04-01');
+      // Oldest (today) should be first
+      expect(result[0].date).toBe(todayStr);
       expect(result[0].isEmpty).toBe(false);
       expect(result[0].journals).toHaveLength(1);
 
-      expect(result[1].date).toBe('2026-04-02');
+      expect(result[1].date).toBe(day2Str);
       expect(result[1].isEmpty).toBe(true);
       expect(result[1].journals).toHaveLength(0);
 
-      expect(result[2].date).toBe('2026-04-03');
+      expect(result[2].date).toBe(day3Str);
       expect(result[2].isEmpty).toBe(false);
       expect(result[2].journals).toHaveLength(1);
     });
 
     it('collapses empty days when filter is applied', () => {
+      const todayStr = getRelativeDateStr(0);
+      const day3Str = getRelativeDateStr(2);
+
       const journals = [
-        createMockJournal('1', '2026-04-01T10:00:00'),
-        createMockJournal('2', '2026-04-03T15:00:00'),
+        createMockJournal('1', getRelativeTimeStr(0, '10:00:00')),
+        createMockJournal('2', getRelativeTimeStr(2, '15:00:00')),
       ];
 
       const result = groupJournalsByDay({
         journals,
-        startDate: '2026-04-01',
-        endDate: '2026-04-03',
+        startDate: todayStr,
+        endDate: day3Str,
         collapseEmpty: true,
       });
 
       expect(result).toHaveLength(2);
-      expect(result[0].date).toBe('2026-04-01'); // Ascending order
-      expect(result[1].date).toBe('2026-04-03');
+      expect(result[0].date).toBe(todayStr); // Ascending order
+      expect(result[1].date).toBe(day3Str);
     });
 
     it('sorts journals within a day correctly by date ascending', () => {
+      const todayStr = getRelativeDateStr(0);
+
       const journals = [
-        createMockJournal('2', '2026-04-01T15:00:00'),
-        createMockJournal('1', '2026-04-01T10:00:00'),
-        createMockJournal('3', '2026-04-01T18:00:00'),
+        createMockJournal('2', getRelativeTimeStr(0, '15:00:00')),
+        createMockJournal('1', getRelativeTimeStr(0, '10:00:00')),
+        createMockJournal('3', getRelativeTimeStr(0, '18:00:00')),
       ];
 
       const result = groupJournalsByDay({
         journals,
-        startDate: '2026-04-01',
-        endDate: '2026-04-01',
+        startDate: todayStr,
+        endDate: todayStr,
         collapseEmpty: false,
       });
 
@@ -107,30 +129,40 @@ describe('journal-grouping', () => {
     it('returns empty array when bounds are inverted', () => {
       const result = groupJournalsByDay({
         journals: [],
-        startDate: '2026-04-03',
-        endDate: '2026-04-01',
+        startDate: getRelativeDateStr(2),
+        endDate: getRelativeDateStr(0),
         collapseEmpty: false,
       });
       expect(result).toHaveLength(0);
     });
 
     it('handles multiple journals in multiple days', () => {
+      const todayStr = getRelativeDateStr(0);
+      const day3Str = getRelativeDateStr(2);
+
       const journals = [
-        createMockJournal('1', '2026-04-01T09:00:00'),
-        createMockJournal('2', '2026-04-01T15:00:00'),
-        createMockJournal('3', '2026-04-03T10:00:00'),
+        createMockJournal('1', getRelativeTimeStr(0, '09:00:00')),
+        createMockJournal('2', getRelativeTimeStr(0, '15:00:00')),
+        createMockJournal('3', getRelativeTimeStr(2, '10:00:00')),
       ];
 
       const result = groupJournalsByDay({
         journals,
-        startDate: '2026-04-01',
-        endDate: '2026-04-03',
+        startDate: todayStr,
+        endDate: day3Str,
         collapseEmpty: false,
       });
+
       expect(result).toHaveLength(3);
-      // Ascending order: 04-01 is first
-      expect(result[0].journals).toHaveLength(2); // 04-01
+      // Ascending order: today is first
+      expect(result[0].date).toBe(todayStr);
+      expect(result[0].journals).toHaveLength(2);
+      expect(result[0].journals[0].id).toBe('1');
+      expect(result[0].journals[1].id).toBe('2');
+
       expect(result[1].journals).toHaveLength(0);
+
+      expect(result[2].date).toBe(day3Str);
       expect(result[2].journals).toHaveLength(1);
       expect(result[2].journals[0].id).toBe('3');
     });
