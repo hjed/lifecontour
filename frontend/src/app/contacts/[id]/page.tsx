@@ -127,80 +127,40 @@ function ContactDetailPageContent() {
         </Button>
       </div>
 
-      {/* Contact Header - Three Column Grid Layout */}
-      <header className='mb-6 grid grid-cols-1 items-start gap-x-8 gap-y-4 md:grid-cols-[128px,1fr] lg:grid-cols-[128px,1fr,280px]'>
-        {/* Column 1: Avatar */}
-        <div className='col-start-1'>
-          <ContactAvatar
-            firstName={contact.attributes.first_name}
-            lastName={contact.attributes.last_name}
-            size='lg'
-            className='h-32 w-32'
-          />
-        </div>
+      <div className='grid grid-cols-1 items-start gap-8 lg:grid-cols-12'>
+        {/* Main Content */}
+        <div className='space-y-6 lg:col-span-8'>
+          {/* Identity Header */}
+          <div className='flex flex-col gap-6 sm:flex-row sm:items-start'>
+            <ContactAvatar
+              firstName={contact.attributes.first_name}
+              lastName={contact.attributes.last_name}
+              size='lg'
+              className='h-32 w-32 shrink-0'
+            />
+            <div className='flex min-w-0 flex-1 flex-col gap-4'>
+              <div className='flex items-start justify-between gap-4'>
+                <ContactIdentityInline contact={contact} />
 
-        {/* Column 2: Identity and Actions */}
-        <div className='col-start-1 space-y-4 md:col-start-2'>
-          <ContactIdentityInline contact={contact} />
+                {/* Action Buttons */}
+                <div className='flex shrink-0 gap-2'>
+                  <Button
+                    variant='outline'
+                    size='sm'
+                    onClick={() => setShowDeleteConfirm(true)}
+                    className='text-destructive hover:text-destructive'
+                    aria-label='Delete contact'
+                  >
+                    <Trash2 className='h-4 w-4' />
+                  </Button>
+                </div>
+              </div>
 
-          {/* Action Buttons */}
-          <div className='flex gap-2'>
-            <Button
-              variant='outline'
-              size='sm'
-              onClick={() => setShowDeleteConfirm(true)}
-              className='text-destructive hover:text-destructive'
-              aria-label='Delete contact'
-            >
-              <Trash2 className='h-4 w-4' />
-            </Button>
+              {/* Tags Editor */}
+              <ContactTagsEditor contactId={contact.id} />
+            </div>
           </div>
-        </div>
 
-        {/* Column 3: Sidebar (hidden on smaller screens) */}
-        <aside className='hidden space-y-4 lg:col-start-3 lg:block'>
-          {/* Relationships */}
-          <RelationshipsList contactId={contact.id} />
-
-          {/* Tags */}
-          <ContactTagsEditor contactId={contact.id} />
-
-          {/* Metadata */}
-          <Card>
-            <CardHeader>
-              <CardTitle className='text-lg'>Information</CardTitle>
-            </CardHeader>
-            <CardContent className='space-y-3'>
-              <MetadataItem
-                label='Created'
-                value={format(
-                  new Date(contact.attributes.created_at),
-                  DATE_FORMATS.LONG,
-                  { locale: enAU }
-                )}
-              />
-              {contact.attributes.updated_at !==
-                contact.attributes.created_at && (
-                <MetadataItem
-                  label='Last Updated'
-                  value={format(
-                    new Date(contact.attributes.updated_at),
-                    DATE_FORMATS.LONG,
-                    { locale: enAU }
-                  )}
-                />
-              )}
-            </CardContent>
-          </Card>
-
-          {/* Activity Feed */}
-          <ActivityFeed contactId={contact.id} pageSize={5} />
-        </aside>
-      </header>
-
-      {/* Contact Details */}
-      <div className='grid gap-6 lg:grid-cols-3'>
-        <div className='space-y-6 lg:col-span-2'>
           {/* Contact Methods */}
           <ContactMethodsList
             contactId={contact.id}
@@ -250,12 +210,12 @@ function ContactDetailPageContent() {
           )}
         </div>
 
-        {/* Sidebar - Mobile fallback for tags and metadata */}
-        <div className='space-y-6 lg:hidden'>
-          {/* Tags - Mobile Only */}
-          <ContactTagsEditor contactId={contact.id} />
+        {/* Sidebar */}
+        <aside className='space-y-6 lg:col-span-4'>
+          {/* Relationships */}
+          <RelationshipsList contactId={contact.id} />
 
-          {/* Metadata - Mobile Only */}
+          {/* Metadata */}
           <Card>
             <CardHeader>
               <CardTitle className='text-lg'>Information</CardTitle>
@@ -283,9 +243,9 @@ function ContactDetailPageContent() {
             </CardContent>
           </Card>
 
-          {/* Activity Feed - Mobile Only */}
+          {/* Activity Feed */}
           <ActivityFeed contactId={contact.id} pageSize={5} />
-        </div>
+        </aside>
       </div>
 
       {/* Delete Confirmation Dialog */}
