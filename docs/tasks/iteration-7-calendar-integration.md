@@ -457,18 +457,19 @@ Phase 1 and Phase 2 were implemented as a combined delivery. The merge domain se
 
 #### Phase 3: Collapsed Empty Future Weeks, Date Jump, Hierarchy Depth Rules, and List Indicators
 **PR Size:** ~6-8 files
+**Status:** ✅ COMPLETE
 
 **Acceptance Criteria:**
-- [ ] Empty future weeks collapse cleanly instead of dominating the view.
-- [ ] A date-jump interaction lets the user navigate directly to a chosen date.
-- [ ] Hierarchy expands to depth 3 around the current focus and collapses further away using the shared hierarchy read model.
-- [ ] List rows/groups surface lightweight sync, review, cancellation, and hierarchy indicators.
-- [ ] Filter options should be sticky when scrolling.
+- [x] Empty future weeks collapse cleanly instead of dominating the view.
+- [x] A date-jump interaction lets the user navigate directly to a chosen date.
+- [x] Hierarchy expands to depth 3 around the current focus and collapses further away using the shared hierarchy read model.
+- [x] List rows/groups surface lightweight sync, review, cancellation, and hierarchy indicators.
+- [x] Filter options should be sticky when scrolling.
 
 **Required Test Coverage:**
-- **Unit:** collapse-state, date-jump, and hierarchy-depth helpers.
-- **Integration:** component/data tests for collapsed future weeks, jump-to-date behaviour, and indicator rendering.
-- **E2E:** jump to a date, inspect collapsed empty periods, and confirm nested hierarchy plus status indicators render correctly.
+- **Unit:** collapse-state, date-jump, and hierarchy-depth helpers. ✅ Covered
+- **Integration:** component/data tests for collapsed future weeks, jump-to-date behaviour, and indicator rendering. ✅ Covered
+- **E2E:** jump to a date, inspect collapsed empty periods, and confirm nested hierarchy plus status indicators render correctly. ✅ Covered
 
 ### ITER7-007: Calendar Views and Sync-Facing Event Management
 **Objective:** Add alternate calendar views that reuse the same journal/event contracts rather than inventing a parallel calendar product.
