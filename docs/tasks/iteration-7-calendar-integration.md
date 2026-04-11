@@ -276,10 +276,10 @@ This phase fills two product-specification gaps discovered during Phase 3 comple
 **PR Size:** ~5-7 files
 
 **Acceptance Criteria:**
-- [ ] Provide a dedicated review queue in the journaling experience.
-- [ ] Show lightweight review indicators in the journal list.
-- [ ] Show inline review suggestions on the journal detail page.
-- [ ] Expose review items and their reasons through MCP in a way that matches the same underlying workflow.
+- [x] Provide a dedicated review queue in the journaling experience.
+- [x] Show lightweight review indicators in the journal list.
+- [x] Show inline review suggestions on the journal detail page.
+- [x] Expose review items and their reasons through MCP in a way that matches the same underlying workflow.
 
 **Required Test Coverage:**
 - **Unit:** review badge/state formatting and queue grouping helpers.

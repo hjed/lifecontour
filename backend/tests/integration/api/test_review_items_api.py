@@ -149,3 +149,59 @@ async def test_create_and_list_review_items(
     assert review_suggestion["reason"] == "duplicate_journal"
     assert review_suggestion["candidate_journal_id"] == candidate_id
     assert review_suggestion["candidate_journal_title"] == "Candidate Journal"
+
+
+async def test_dismiss_review_item(
+    authenticated_client,
+    test_settings: Settings,
+    async_connection: AsyncConnection,
+):
+    """Test dismissing a review item via API."""
+    test_settings.enable_test_review_items = True
+
+    from datetime import UTC, datetime
+
+    now = datetime.now(UTC)
+
+    result = await async_connection.execute(
+        text("""
+        INSERT INTO journals (user_id, title, content, event_date_range_start, event_date_range_end)
+        VALUES ('test-user-123', 'Source', '', :now, :now),
+               ('test-user-123', 'Candidate', '', :now, :now)
+        RETURNING id
+        """),
+        {"now": now},
+    )
+    rows = result.fetchall()
+    source_id = rows[0][0]
+    candidate_id = rows[1][0]
+
+    response = await authenticated_client.post(
+        "/api/journals/review-items",
+        json={
+            "data": {
+                "type": "review-items",
+                "attributes": {
+                    "source_journal_id": source_id,
+                    "candidate_journal_id": candidate_id,
+                    "reason": "duplicate_journal",
+                    "confidence_score": 0.85,
+                },
+            }
+        },
+    )
+    assert response.status_code == 201
+    created_id = response.json()["data"]["id"]
+
+    dismiss_resp = await authenticated_client.post(
+        f"/api/journals/review-items/{created_id}/dismiss"
+    )
+    assert dismiss_resp.status_code == 200
+
+    dismissed_data = dismiss_resp.json()["data"]["attributes"]
+    assert dismissed_data["status"] == "dismissed"
+
+    # Should no longer appear in the pending list
+    list_resp = await authenticated_client.get("/api/journals/review-items")
+    assert list_resp.status_code == 200
+    assert list_resp.json()["meta"]["total_count"] == 0

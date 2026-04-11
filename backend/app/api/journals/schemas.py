@@ -759,6 +759,12 @@ class ReviewItemListResponse(JsonApiCollectionResponse[ReviewItemResource]):
     pass
 
 
+class ReviewItemResponse(JsonApiResponse[ReviewItemResource]):
+    """Response model for a single review item."""
+
+    pass
+
+
 class ReviewItemCreateAttributes(BaseModel):
     """Attributes for creating a review item (test-only endpoint)."""
 

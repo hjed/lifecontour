@@ -127,3 +127,57 @@ class TestReviewItemsToolsIntegration:
             # verify title enrichment
             assert items[0]["source_journal"]["title"] == "Source Journal"
             assert items[0]["candidate_journal"]["title"] == "Candidate Journal"
+
+    @pytest.mark.asyncio
+    async def test_dismiss_review_item_mcp_tool(
+        self,
+        authenticated_lifespan_client,
+        sample_test_journals: tuple[int, int],
+        clean_database: AsyncConnection,
+    ) -> None:
+        """Test dismissing a review item via the MCP tool."""
+        source_id, candidate_id = sample_test_journals
+
+        repo = SqlReviewItemRepository(clean_database)
+        item = ReviewItem(
+            user_id="current_user",
+            source_journal_id=source_id,
+            candidate_journal_id=candidate_id,
+            reason=ReviewReason("duplicate_journal"),
+            confidence_score=0.9,
+            details={},
+        )
+        created_item, _ = await repo.create(item)
+        item_id = created_item.id
+
+        async with authenticated_lifespan_client() as authenticated_client:
+            session_id = await initialize_mcp_session(authenticated_client)
+
+            response = await authenticated_client.post(
+                "/mcp-server/mcp",
+                json={
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": "tools/call",
+                    "params": {
+                        "name": "dismiss_review_item",
+                        "arguments": {
+                            "item_id": item_id,
+                            "user_id_override": "current_user",
+                        },
+                    },
+                },
+                headers=mcp_headers(session_id),
+            )
+
+            assert response.status_code == 200
+
+            payload = extract_mcp_json_payload(response.text)
+
+            assert "error" not in payload
+            assert payload["success"] is True
+            assert payload["status"] == "dismissed"
+
+            # verify in database
+            pending_items = await repo.find_pending_by_user("current_user")
+            assert len(pending_items) == 0

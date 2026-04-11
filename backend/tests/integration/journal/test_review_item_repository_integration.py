@@ -567,7 +567,9 @@ class TestReviewItemRepositoryUpdateStatus:
         """Should update a pending review item to resolved."""
         created = await _setup_review_item(journal_repository, review_item_repository)
         assert created.id is not None
-        updated = await review_item_repository.update_status(created.id, "resolved")
+        updated = await review_item_repository.update_status(
+            created.id, "resolved", USER_ID
+        )
 
         assert updated is not None
         assert updated.status == "resolved"
@@ -581,7 +583,9 @@ class TestReviewItemRepositoryUpdateStatus:
         """Should update a pending review item to dismissed."""
         created = await _setup_review_item(journal_repository, review_item_repository)
         assert created.id is not None
-        updated = await review_item_repository.update_status(created.id, "dismissed")
+        updated = await review_item_repository.update_status(
+            created.id, "dismissed", USER_ID
+        )
 
         assert updated is not None
         assert updated.status == "dismissed"
@@ -591,7 +595,7 @@ class TestReviewItemRepositoryUpdateStatus:
         review_item_repository: SqlReviewItemRepository,
     ):
         """Should return None when review item doesn't exist."""
-        result = await review_item_repository.update_status(99999, "resolved")
+        result = await review_item_repository.update_status(99999, "resolved", USER_ID)
         assert result is None
 
     async def test_resolved_item_excluded_from_pending(
@@ -602,7 +606,7 @@ class TestReviewItemRepositoryUpdateStatus:
         """Resolved items should not appear in pending queries."""
         created = await _setup_review_item(journal_repository, review_item_repository)
         assert created.id is not None
-        await review_item_repository.update_status(created.id, "resolved")
+        await review_item_repository.update_status(created.id, "resolved", USER_ID)
 
         pending = await review_item_repository.find_pending_by_user(USER_ID)
         assert len(pending) == 0

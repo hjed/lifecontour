@@ -1236,3 +1236,44 @@ export function useReviewItems(status = 'pending', page = 1, limit = 20) {
     queryFn: () => getReviewItems(status, page, limit),
   });
 }
+
+/**
+ * Dismiss a pending review item
+ */
+export async function dismissReviewItem(id: string): Promise<unknown> {
+  const response = await fetch(`/api/journals/review-items/${id}/dismiss`, {
+    method: 'POST',
+    credentials: 'include',
+  });
+
+  if (!response.ok) {
+    const errorData: JsonApiErrorResponse = await response
+      .json()
+      .catch(() => ({}));
+    throw new Error(
+      errorData.errors?.[0]?.detail || 'Failed to dismiss review item'
+    );
+  }
+
+  return response.json();
+}
+
+/**
+ * Hook to dismiss a review item
+ */
+export function useDismissReviewItem() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: dismissReviewItem,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: reviewItemKeys.all });
+      queryClient.invalidateQueries({ queryKey: journalKeys.lists() });
+      queryClient.invalidateQueries({ queryKey: journalKeys.details() });
+      toast.success('Review item dismissed');
+    },
+    onError: (error: Error) => {
+      toast.error(error.message);
+    },
+  });
+}

@@ -7,6 +7,8 @@ import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { MergeJournalDialog } from './MergeJournalDialog';
 import { ReviewSuggestion } from '@/types/journals';
 
+import { useDismissReviewItem } from '@/lib/api/journals';
+
 interface ReviewSuggestionsProps {
   readonly journalId: string;
   readonly suggestions: ReviewSuggestion[];
@@ -21,6 +23,8 @@ export function ReviewSuggestions({
     null
   );
 
+  const dismissMutation = useDismissReviewItem();
+
   if (!suggestions || suggestions.length === 0) {
     return null;
   }
@@ -28,6 +32,10 @@ export function ReviewSuggestions({
   const handleReviewClick = (candidateId: number) => {
     setSelectedCandidateId(candidateId.toString());
     setMergeDialogOpen(true);
+  };
+
+  const handleDismiss = (id: number) => {
+    dismissMutation.mutate(id.toString());
   };
 
   return (
@@ -58,16 +66,26 @@ export function ReviewSuggestions({
             </div>
             <div className='flex shrink-0 gap-2'>
               <Button
+                variant='outline'
+                size='sm'
+                onClick={() => handleDismiss(suggestion.id)}
+                disabled={dismissMutation.isPending}
+                data-testid={`dismiss-btn-${suggestion.id}`}
+                className='border-destructive text-destructive hover:bg-destructive hover:text-destructive-foreground'
+              >
+                Dismiss
+              </Button>
+              <Button
                 variant='destructive'
                 size='sm'
                 className='whitespace-nowrap'
                 onClick={() =>
                   handleReviewClick(suggestion.candidate_journal_id)
                 }
-                data-testid={`review-btn-${suggestion.id}`}
+                data-testid={`confirm-match-btn-${suggestion.id}`}
               >
                 <GitMerge className='mr-2 h-4 w-4' />
-                Resolve Merge
+                Confirm Match
               </Button>
             </div>
           </AlertDescription>

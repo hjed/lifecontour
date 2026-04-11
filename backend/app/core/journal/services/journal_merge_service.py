@@ -109,7 +109,12 @@ class JournalMergeService:
             transaction,
         )
 
-        # 8. Publish Events & Cleanup Source
+        # 8. Resolve related Review Items
+        await self._resolve_review_items(
+            target_id, source_id, target.user_id, transaction
+        )
+
+        # 9. Publish Events & Cleanup Source
         await self._publish_events_and_cleanup(
             target_id, source_id, source, changed_fields, transaction
         )
@@ -540,4 +545,23 @@ class JournalMergeService:
                 external_identifiers={},
                 transaction=transaction,
             )
+        )
+
+    async def _resolve_review_items(
+        self,
+        target_id: int,
+        source_id: int,
+        user_id: str,
+        transaction: AsyncConnection,
+    ) -> None:
+        await transaction.execute(
+            text("""
+                UPDATE journal_review_items
+                SET status = 'resolved', updated_at = NOW()
+                WHERE status = 'pending'
+                  AND user_id = :user_id
+                  AND ((source_journal_id = :target_id AND candidate_journal_id = :source_id)
+                    OR (source_journal_id = :source_id AND candidate_journal_id = :target_id))
+            """),
+            {"target_id": target_id, "source_id": source_id, "user_id": user_id},
         )

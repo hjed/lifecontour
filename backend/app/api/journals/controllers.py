@@ -59,6 +59,7 @@ from app.api.journals.schemas import (
     ReviewItemJournalSummary,
     ReviewItemListResponse,
     ReviewItemResource,
+    ReviewItemResponse,
     ReviewSuggestionSchema,
 )
 from app.core.contacts.models.repositories import ContactRepository
@@ -1258,58 +1259,103 @@ async def list_review_items(
     # Build review item resources
     resources: list[ReviewItemResource] = []
     for item in items:
-        source_journal = journal_map.get(item.source_journal_id)
-        candidate_journal = journal_map.get(item.candidate_journal_id)
-
-        source_summary = ReviewItemJournalSummary(
-            id=item.source_journal_id,
-            title=source_journal.title
-            if source_journal
-            else f"Journal {item.source_journal_id}",
-            event_date_range=EventDateRangeSchema(
-                start=source_journal.event_date_range.start,
-                end=source_journal.event_date_range.end,
-            )
-            if source_journal
-            else EventDateRangeSchema(start=datetime.now(UTC), end=datetime.now(UTC)),
-        )
-
-        candidate_summary = ReviewItemJournalSummary(
-            id=item.candidate_journal_id,
-            title=candidate_journal.title
-            if candidate_journal
-            else f"Journal {item.candidate_journal_id}",
-            event_date_range=EventDateRangeSchema(
-                start=candidate_journal.event_date_range.start,
-                end=candidate_journal.event_date_range.end,
-            )
-            if candidate_journal
-            else EventDateRangeSchema(start=datetime.now(UTC), end=datetime.now(UTC)),
-        )
-
-        resources.append(
-            ReviewItemResource(
-                id=str(item.id),
-                attributes=ReviewItemAttributes(
-                    reason=item.reason.value,
-                    confidence_score=item.confidence_score,
-                    status=item.status,
-                    details=item.details,
-                    source_journal=source_summary,
-                    candidate_journal=candidate_summary,
-                    created_at=item.created_at,
-                ),
-                links=JsonApiLinks(
-                    self=f"{base_url}/api/journals/review-items/{item.id}",
-                ),
-            )
-        )
+        resources.append(_build_review_item_resource(item, journal_map, base_url))
 
     meta = create_pagination_meta(
         total_count, 1 + offset // limit if limit else 1, limit
     )
 
     return ReviewItemListResponse(data=resources, meta=meta)
+
+
+@router.post("/review-items/{item_id}/dismiss", status_code=status.HTTP_200_OK)
+@inject
+async def dismiss_review_item(
+    item_id: int,
+    request: Request,
+    review_item_repo: FromDishka[ReviewItemRepository],
+    journal_service: FromDishka[JournalService],
+    user: FromDishka[SessionUser],
+) -> ReviewItemResponse:
+    """
+    Dismiss a review item.
+    """
+    base_url = get_request_base_url(request)
+
+    item = await review_item_repo.update_status(
+        item_id,
+        new_status="dismissed",
+        user_id=user.id,
+    )
+
+    if not item:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Review item not found",
+        )
+
+    journals = await journal_service.find_journals_by_ids_for_user(
+        user_id=user.id, journal_ids=[item.source_journal_id, item.candidate_journal_id]
+    )
+    journal_map = {j.id: j for j in journals if j.id is not None}
+
+    # Convert to Resource
+    resource = _build_review_item_resource(item, journal_map, base_url)
+
+    return ReviewItemResponse(data=resource)
+
+
+def _build_review_item_resource(
+    item: Any,
+    journal_map: dict[int, Any],
+    base_url: str,
+) -> ReviewItemResource:
+    source_journal = journal_map.get(item.source_journal_id)
+    candidate_journal = journal_map.get(item.candidate_journal_id)
+
+    source_summary = ReviewItemJournalSummary(
+        id=item.source_journal_id,
+        title=source_journal.title
+        if source_journal
+        else f"Journal {item.source_journal_id}",
+        event_date_range=EventDateRangeSchema(
+            start=source_journal.event_date_range.start,
+            end=source_journal.event_date_range.end,
+        )
+        if source_journal
+        else EventDateRangeSchema(start=datetime.now(UTC), end=datetime.now(UTC)),
+    )
+
+    candidate_summary = ReviewItemJournalSummary(
+        id=item.candidate_journal_id,
+        title=candidate_journal.title
+        if candidate_journal
+        else f"Journal {item.candidate_journal_id}",
+        event_date_range=EventDateRangeSchema(
+            start=candidate_journal.event_date_range.start,
+            end=candidate_journal.event_date_range.end,
+        )
+        if candidate_journal
+        else EventDateRangeSchema(start=datetime.now(UTC), end=datetime.now(UTC)),
+    )
+
+    return ReviewItemResource(
+        id=str(item.id),
+        attributes=ReviewItemAttributes(
+            reason=item.reason.value
+            if hasattr(item.reason, "value")
+            else str(item.reason),
+            confidence_score=item.confidence_score,
+            status=item.status,
+            details=item.details,
+            source_journal=source_summary,
+            candidate_journal=candidate_summary,
+            created_at=item.created_at,
+        ),
+        links=JsonApiLinks(
+            self=f"{base_url}/api/journals/review-items/{item.id}",
+        ),
+    )
 
 
 @router.post("/review-items", status_code=status.HTTP_201_CREATED)
