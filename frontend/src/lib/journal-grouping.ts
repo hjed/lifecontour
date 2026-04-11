@@ -8,10 +8,20 @@ import {
 import { DisplayJournal } from '@/utils/journalTransformers';
 
 export interface JournalDayGroup {
+  type: 'day';
   date: string; // ISO date format YYYY-MM-DD
   journals: DisplayJournal[];
   isEmpty: boolean;
 }
+
+export interface CollapsedEmptyGroup {
+  type: 'collapsed-empty';
+  startDate: string; // ISO date format YYYY-MM-DD
+  endDate: string; // ISO date format YYYY-MM-DD
+  daysCount: number;
+}
+
+export type JournalListRenderItem = JournalDayGroup | CollapsedEmptyGroup;
 
 export interface GroupJournalsOptions {
   journals: DisplayJournal[];
@@ -31,7 +41,7 @@ export function groupJournalsByDay({
   startDate,
   endDate,
   collapseEmpty,
-}: GroupJournalsOptions): JournalDayGroup[] {
+}: GroupJournalsOptions): JournalListRenderItem[] {
   let start = parseISO(startDate);
   let end = parseISO(endDate);
 
@@ -55,6 +65,7 @@ export function groupJournalsByDay({
   days.forEach(day => {
     const formattedDate = format(day, 'yyyy-MM-dd');
     dayGroupsMap[formattedDate] = {
+      type: 'day',
       date: formattedDate,
       journals: [],
       isEmpty: true,
@@ -73,6 +84,7 @@ export function groupJournalsByDay({
     } else {
       // Out of bounds bucket creation
       dayGroupsMap[formattedDate] = {
+        type: 'day',
         date: formattedDate,
         journals: [journal],
         isEmpty: false,
@@ -95,10 +107,40 @@ export function groupJournalsByDay({
     a.localeCompare(b)
   );
 
-  let result = resultKeys.map(k => dayGroupsMap[k]);
+  let result: JournalListRenderItem[] = resultKeys.map(k => dayGroupsMap[k]);
 
   if (collapseEmpty) {
-    result = result.filter(group => !group.isEmpty);
+    result = result.filter(group => group.type === 'day' && !group.isEmpty);
+  } else {
+    // Collapse contiguous empty days if the sequence is >= 7 days long
+    const finalResult: JournalListRenderItem[] = [];
+    let emptySequence: JournalDayGroup[] = [];
+
+    const flushEmptySequence = () => {
+      if (emptySequence.length >= 7) {
+        finalResult.push({
+          type: 'collapsed-empty',
+          startDate: emptySequence[0].date,
+          endDate: emptySequence[emptySequence.length - 1].date,
+          daysCount: emptySequence.length,
+        });
+      } else {
+        finalResult.push(...emptySequence);
+      }
+      emptySequence = [];
+    };
+
+    for (const item of result) {
+      if (item.type === 'day' && item.isEmpty) {
+        emptySequence.push(item);
+      } else {
+        flushEmptySequence();
+        finalResult.push(item);
+      }
+    }
+    flushEmptySequence();
+
+    return finalResult;
   }
 
   return result;

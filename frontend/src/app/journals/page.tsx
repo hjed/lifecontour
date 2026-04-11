@@ -24,7 +24,21 @@ import {
 import { useDebounce } from '@/hooks/useDebounce';
 import { useDisplayJournals } from '@/hooks/useDisplayJournals';
 import { JournalFilters as JournalFiltersType } from '@/types/journals';
-import { BookOpen, Filter, Plus, Search, FileText } from 'lucide-react';
+import {
+  BookOpen,
+  Filter,
+  Plus,
+  Search,
+  FileText,
+  CalendarIcon,
+} from 'lucide-react';
+import { format, parseISO } from 'date-fns';
+import { Calendar } from '@/components/ui/calendar';
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from '@/components/ui/popover';
 import { cn } from '@/lib/utils';
 import { TIMEOUTS } from '@/lib/constants';
 import { InfiniteData } from '@tanstack/react-query';
@@ -67,6 +81,7 @@ export default function JournalsPage() {
   const [filters, setFilters] = useState<JournalFiltersType>({});
   const [showFilters, setShowFilters] = useState(true);
   const [queueOpen, setQueueOpen] = useState(false);
+  const [anchorDate, setAnchorDate] = useState<string | undefined>();
 
   const { data: reviewItemsData } = useReviewItems('pending', 1, 1);
   const reviewQueueCount = (reviewItemsData?.meta?.total_count as number) || 0;
@@ -90,7 +105,7 @@ export default function JournalsPage() {
     hasPreviousPage,
     isFetchingNextPage,
     isFetchingPreviousPage,
-  } = useInfiniteJournals(filters, { enabled: !shouldUseSearch });
+  } = useInfiniteJournals(filters, { enabled: !shouldUseSearch, anchorDate });
 
   const {
     data: searchData,
@@ -195,32 +210,70 @@ export default function JournalsPage() {
         </div>
       </div>
 
-      {/* Search Bar */}
-      <Card className='mb-6'>
-        <CardContent className='pt-6'>
-          <div className='flex flex-col gap-4 md:flex-row'>
-            <div className='relative flex-1'>
-              <Search className='text-muted-foreground absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2' />
-              <Input
-                placeholder='Search journals...'
-                value={searchQuery}
-                onChange={e => handleSearchChange(e.target.value)}
-                className='pl-10'
-                data-testid='search-input'
-              />
+      {/* Action / Search Bar */}
+      <div className='bg-background/95 supports-[backdrop-filter]:bg-background/60 sticky top-0 z-20 mb-6 py-2 backdrop-blur'>
+        <Card>
+          <CardContent className='pt-6'>
+            <div className='flex flex-col gap-4 md:flex-row'>
+              <div className='relative flex-1'>
+                <Search className='text-muted-foreground absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2' />
+                <Input
+                  placeholder='Search journals...'
+                  value={searchQuery}
+                  onChange={e => handleSearchChange(e.target.value)}
+                  className='pl-10'
+                  data-testid='search-input'
+                />
+              </div>
+              <div className='flex items-center gap-2'>
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <Button
+                      variant='outline'
+                      className={cn(
+                        'justify-start text-left font-normal',
+                        !anchorDate && 'text-muted-foreground'
+                      )}
+                      data-testid='jump-date-button'
+                    >
+                      <CalendarIcon className='mr-2 h-4 w-4' />
+                      {anchorDate ? (
+                        format(parseISO(anchorDate), 'PPP')
+                      ) : (
+                        <span>Jump to date...</span>
+                      )}
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className='w-auto p-0' align='end'>
+                    <Calendar
+                      mode='single'
+                      selected={anchorDate ? parseISO(anchorDate) : undefined}
+                      onSelect={d => {
+                        if (d) setAnchorDate(format(d, 'yyyy-MM-dd'));
+                      }}
+                      initialFocus
+                    />
+                  </PopoverContent>
+                </Popover>
+                {(searchQuery ||
+                  Object.keys(filters).length > 0 ||
+                  anchorDate) && (
+                  <Button
+                    variant='outline'
+                    onClick={() => {
+                      clearSearch();
+                      setAnchorDate(undefined);
+                    }}
+                    data-testid='clear-filters'
+                  >
+                    Clear
+                  </Button>
+                )}
+              </div>
             </div>
-            {(searchQuery || Object.keys(filters).length > 0) && (
-              <Button
-                variant='outline'
-                onClick={clearSearch}
-                data-testid='clear-filters'
-              >
-                Clear
-              </Button>
-            )}
-          </div>
-        </CardContent>
-      </Card>
+          </CardContent>
+        </Card>
+      </div>
 
       {/* Results Summary */}
       <div className='mb-4 flex items-center gap-2'>
@@ -278,6 +331,8 @@ export default function JournalsPage() {
               collapseEmptyDays={
                 shouldUseSearch || Object.keys(filters).length > 0
               }
+              onJumpToDate={date => setAnchorDate(date)}
+              focusDate={anchorDate || format(new Date(), 'yyyy-MM-dd')}
               emptyState={
                 <Card>
                   <CardContent className='py-12 text-center'>

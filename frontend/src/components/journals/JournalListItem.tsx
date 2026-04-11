@@ -25,10 +25,14 @@ import {
   TrendingUp,
   Waves,
   Snowflake,
+  Cloud,
+  Ban,
+  GitBranch,
 } from 'lucide-react';
+import { differenceInCalendarDays, parseISO } from 'date-fns';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { JournalType } from '@/types/journals';
+import { JournalType, EventState, CalendarInfoData } from '@/types/journals';
 import { DisplayJournal } from '@/hooks/useDisplayJournals';
 import { SearchHighlight } from '@/components/search/SearchHighlight';
 import { cn } from '@/lib/utils';
@@ -37,6 +41,7 @@ import { JournalChildrenList } from './JournalChildrenList';
 
 interface JournalListItemProps {
   readonly journal: DisplayJournal;
+  readonly focusDate?: string; // YYYY-MM-DD
   readonly className?: string;
 }
 
@@ -73,13 +78,39 @@ function truncateContent(content: string, maxLength: number = 200): string {
 /**
  * JournalListItem component displays a journal card with all relevant information
  */
-export function JournalListItem({ journal, className }: JournalListItemProps) {
+export function JournalListItem({
+  journal,
+  focusDate,
+  className,
+}: JournalListItemProps) {
   const calendarColor = journal.calendar?.color || '#6b7280'; // Default gray
 
-  // Use highlighted text if available, otherwise use regular text
   const displayTitle = journal.highlightedTitle || journal.title;
   const displayContent =
     journal.highlightedContent || truncateContent(journal.content);
+
+  const isCancelled =
+    (journal.type_data?.event as CalendarInfoData | undefined)?.event_state ===
+    EventState.CANCELLED;
+  const isHierarchyNode =
+    Boolean(journal.parent_id) || (journal.children_count ?? 0) > 0;
+
+  // Calculate depth limit based on date proximity
+  let shouldExpandChildren = true;
+  if (journal.depth !== undefined && journal.depth !== null) {
+    if (focusDate) {
+      const distance = Math.abs(
+        differenceInCalendarDays(
+          parseISO(journal.event_date_range.start),
+          parseISO(focusDate)
+        )
+      );
+      const maxDepth = distance <= 7 ? 3 : 1;
+      shouldExpandChildren = journal.depth < maxDepth;
+    } else {
+      shouldExpandChildren = journal.depth < 3; // Default 3 if no focus
+    }
+  }
 
   return (
     <Card
@@ -113,9 +144,26 @@ export function JournalListItem({ journal, className }: JournalListItemProps) {
                 ) : null;
               })}
             </div>
+            {isHierarchyNode && (
+              <GitBranch
+                className='text-muted-foreground h-4 w-4'
+                aria-label='Part of a hierarchy'
+                data-testid='hierarchy-indicator'
+              />
+            )}
+            {journal.calendar?.is_synced_to_google && (
+              <Cloud
+                className='text-muted-foreground h-4 w-4'
+                aria-label='Synced to Google Calendar'
+                data-testid='sync-indicator'
+              />
+            )}
             <Link
               href={`/journals/${journal.id}` as Route}
-              className='hover:underline'
+              className={cn(
+                'hover:underline',
+                isCancelled && 'text-muted-foreground line-through'
+              )}
             >
               {journal.isSearchResult ? (
                 <SearchHighlight text={displayTitle} fallback={journal.title} />
@@ -123,6 +171,16 @@ export function JournalListItem({ journal, className }: JournalListItemProps) {
                 journal.title
               )}
             </Link>
+            {isCancelled && (
+              <Badge
+                variant='outline'
+                className='text-muted-foreground border-muted-foreground ml-2 px-1 py-0 text-[10px] leading-none font-bold uppercase'
+                data-testid='cancelled-badge'
+              >
+                <Ban className='mr-1 inline h-3 w-3' />
+                Cancelled
+              </Badge>
+            )}
             {journal.has_pending_reviews && (
               <Badge
                 variant='destructive'
@@ -193,11 +251,13 @@ export function JournalListItem({ journal, className }: JournalListItemProps) {
         )}
 
         {/* Children List */}
-        {journal.children && journal.children.length > 0 && (
-          <div className='pt-2'>
-            <JournalChildrenList childJournals={journal.children} />
-          </div>
-        )}
+        {shouldExpandChildren &&
+          journal.children &&
+          journal.children.length > 0 && (
+            <div className='pt-2'>
+              <JournalChildrenList childJournals={journal.children} />
+            </div>
+          )}
       </CardContent>
     </Card>
   );

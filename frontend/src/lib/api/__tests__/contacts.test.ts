@@ -618,7 +618,7 @@ describe('Contacts API', () => {
       });
 
       expect(result.current.data).toEqual(mockResponse);
-      expect(mockFetch).toHaveBeenCalledWith('/api/tags', {
+      expect(mockFetch).toHaveBeenCalledWith('/api/tags?limit=1000', {
         credentials: 'include',
         headers: {
           'Content-Type': 'application/json',

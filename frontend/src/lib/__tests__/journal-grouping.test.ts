@@ -1,4 +1,8 @@
-import { groupJournalsByDay } from '../journal-grouping';
+import {
+  groupJournalsByDay,
+  JournalDayGroup,
+  CollapsedEmptyGroup,
+} from '../journal-grouping';
 import { DisplayJournal } from '@/utils/journalTransformers';
 import { format, addDays } from 'date-fns';
 
@@ -15,14 +19,22 @@ const createMockJournal = (id: string, startDate: string): DisplayJournal => ({
   contacts: [],
 });
 
+function assertIsDayGroup(group: any): asserts group is JournalDayGroup {
+  expect(group.type).toBe('day');
+}
+
+function assertIsCollapsedGroup(
+  group: any
+): asserts group is CollapsedEmptyGroup {
+  expect(group.type).toBe('collapsed-empty');
+}
+
 describe('journal-grouping', () => {
   const today = new Date();
 
-  // Helper to get formatted date relative to today
   const getRelativeDateStr = (daysOffset: number = 0) =>
     format(addDays(today, daysOffset), 'yyyy-MM-dd');
 
-  // Helper to get ISO time relative to today
   const getRelativeTimeStr = (
     daysOffset: number = 0,
     timeStr: string = '10:00:00'
@@ -48,15 +60,17 @@ describe('journal-grouping', () => {
 
       expect(result).toHaveLength(3);
 
-      // Oldest (today) should be first
+      assertIsDayGroup(result[0]);
       expect(result[0].date).toBe(todayStr);
       expect(result[0].isEmpty).toBe(false);
       expect(result[0].journals).toHaveLength(1);
 
+      assertIsDayGroup(result[1]);
       expect(result[1].date).toBe(day2Str);
       expect(result[1].isEmpty).toBe(true);
       expect(result[1].journals).toHaveLength(0);
 
+      assertIsDayGroup(result[2]);
       expect(result[2].date).toBe(day3Str);
       expect(result[2].isEmpty).toBe(false);
       expect(result[2].journals).toHaveLength(1);
@@ -79,7 +93,11 @@ describe('journal-grouping', () => {
       });
 
       expect(result).toHaveLength(2);
-      expect(result[0].date).toBe(todayStr); // Ascending order
+
+      assertIsDayGroup(result[0]);
+      expect(result[0].date).toBe(todayStr);
+
+      assertIsDayGroup(result[1]);
       expect(result[1].date).toBe(day3Str);
     });
 
@@ -100,7 +118,7 @@ describe('journal-grouping', () => {
       });
 
       expect(result).toHaveLength(1);
-      // Within the day, chronological (ascending) order
+      assertIsDayGroup(result[0]);
       expect(result[0].journals[0].id).toBe('1');
       expect(result[0].journals[1].id).toBe('2');
       expect(result[0].journals[2].id).toBe('3');
@@ -123,6 +141,7 @@ describe('journal-grouping', () => {
       });
 
       expect(result).toHaveLength(1);
+      assertIsDayGroup(result[0]);
       expect(result[0].date).toBe(dateStr);
     });
 
@@ -154,17 +173,69 @@ describe('journal-grouping', () => {
       });
 
       expect(result).toHaveLength(3);
-      // Ascending order: today is first
+
+      assertIsDayGroup(result[0]);
       expect(result[0].date).toBe(todayStr);
       expect(result[0].journals).toHaveLength(2);
       expect(result[0].journals[0].id).toBe('1');
       expect(result[0].journals[1].id).toBe('2');
 
+      assertIsDayGroup(result[1]);
       expect(result[1].journals).toHaveLength(0);
 
+      assertIsDayGroup(result[2]);
       expect(result[2].date).toBe(day3Str);
       expect(result[2].journals).toHaveLength(1);
       expect(result[2].journals[0].id).toBe('3');
+    });
+
+    it('collapses 7 or more consecutive empty days into a CollapsedEmptyGroup', () => {
+      const todayStr = getRelativeDateStr(0);
+      const day8Str = getRelativeDateStr(8);
+
+      const journals = [
+        createMockJournal('1', getRelativeTimeStr(0, '10:00:00')),
+        createMockJournal('2', getRelativeTimeStr(8, '10:00:00')),
+      ];
+
+      const result = groupJournalsByDay({
+        journals,
+        startDate: todayStr,
+        endDate: day8Str,
+        collapseEmpty: false,
+      });
+
+      expect(result).toHaveLength(3);
+      expect(result[0].type).toBe('day');
+      expect(result[1].type).toBe('collapsed-empty');
+      expect(result[2].type).toBe('day');
+
+      assertIsCollapsedGroup(result[1]);
+      expect(result[1].daysCount).toBe(7);
+      expect(result[1].startDate).toBe(getRelativeDateStr(1));
+      expect(result[1].endDate).toBe(getRelativeDateStr(7));
+    });
+
+    it('does not collapse fewer than 7 consecutive empty days', () => {
+      const todayStr = getRelativeDateStr(0);
+      const day7Str = getRelativeDateStr(7);
+
+      const journals = [
+        createMockJournal('1', getRelativeTimeStr(0, '10:00:00')),
+        createMockJournal('2', getRelativeTimeStr(7, '10:00:00')),
+      ];
+
+      const result = groupJournalsByDay({
+        journals,
+        startDate: todayStr,
+        endDate: day7Str,
+        collapseEmpty: false,
+      });
+
+      expect(result).toHaveLength(8);
+      result.forEach(group => {
+        assertIsDayGroup(group);
+      });
     });
   });
 });

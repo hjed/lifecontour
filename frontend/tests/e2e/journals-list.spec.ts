@@ -1436,4 +1436,138 @@ test.describe('Journal List Page', () => {
       expect(body.meta.page_count).toBeGreaterThanOrEqual(2);
     });
   });
+
+  test.describe('List View Refinements', () => {
+    test('should jump to a specific date', async ({
+      authenticatedPage,
+      testCleanup,
+    }) => {
+      const page = authenticatedPage;
+      const dataManager = new (
+        await import('./data-management')
+      ).TestDataManager(page);
+
+      await dataManager.clearAllJournals();
+
+      const targetDate = new Date();
+      targetDate.setDate(targetDate.getDate() + 15);
+      const targetIso = targetDate.toISOString();
+
+      const journals = await dataManager.createJournals([
+        {
+          title: 'Future Journal',
+          content: 'A journal 15 days in the future',
+          event_date_range: { start: targetIso, end: targetIso },
+        },
+      ]);
+      const targetJournalTitle = journals[0].title;
+
+      testCleanup(async () => await dataManager.cleanup());
+
+      // Navigate to journals page
+      await page.goto('/journals');
+      await expect(page.getByTestId('journals-list-ready')).toBeVisible();
+
+      // The future journal shouldn't be visible initially
+      await expect(
+        page.getByRole('heading', { name: targetJournalTitle })
+      ).not.toBeVisible();
+
+      // Click Date Jump Calendar
+      const dateJumpBtn = page.getByTestId('jump-date-button');
+      await dateJumpBtn.click();
+
+      // Wait for calendar
+      const monthNames = [
+        'January',
+        'February',
+        'March',
+        'April',
+        'May',
+        'June',
+        'July',
+        'August',
+        'September',
+        'October',
+        'November',
+        'December',
+      ];
+      const targetMonthName = `${monthNames[targetDate.getMonth()]} ${targetDate.getFullYear()}`;
+      const targetGrid = page.getByRole('grid', { name: targetMonthName });
+
+      while (!(await targetGrid.isVisible())) {
+        const currentGrids = await page.getByRole('grid').allInnerTexts();
+        await page.getByRole('button', { name: /next month/i }).click();
+        await expect(async () => {
+          const newGrids = await page.getByRole('grid').allInnerTexts();
+          expect(newGrids).not.toEqual(currentGrids);
+        }).toPass({ timeout: 5000 });
+      }
+
+      await targetGrid
+        .getByText(String(targetDate.getDate()), { exact: true })
+        .first()
+        .click();
+
+      // Now the future journal should be in view!
+      await expect(
+        page.getByRole('heading', { name: targetJournalTitle })
+      ).toBeVisible({ timeout: 15000 });
+    });
+
+    test('should collapse and expand empty week groups', async ({
+      authenticatedPage,
+      testCleanup,
+    }) => {
+      const page = authenticatedPage;
+      const dataManager = new (
+        await import('./data-management')
+      ).TestDataManager(page);
+
+      await dataManager.clearAllJournals();
+
+      const today = new Date();
+      const past = new Date();
+      past.setDate(today.getDate() - 8);
+
+      await dataManager.createJournals([
+        {
+          title: 'Today Journal',
+          content: 'Journal for today',
+          event_date_range: {
+            start: today.toISOString(),
+            end: today.toISOString(),
+          },
+        },
+        {
+          title: 'Past Journal',
+          content: 'Journal from 8 days ago',
+          event_date_range: {
+            start: past.toISOString(),
+            end: past.toISOString(),
+          },
+        },
+      ]);
+
+      testCleanup(async () => await dataManager.cleanup());
+
+      // Date jump backwards slightly so both load
+      await page.goto('/journals');
+      await expect(page.getByTestId('journals-list-ready')).toBeVisible();
+
+      // Wait for rendering
+      // The empty days between (7 days empty) should be collapsed
+      const collapsedText = page.getByText(/empty days/i);
+      await expect(collapsedText).toBeVisible({ timeout: 15000 });
+
+      // Click to expand
+      const toggleBtn = page.getByRole('button', { name: /expand/i });
+      await expect(toggleBtn).toBeVisible();
+      await toggleBtn.click();
+
+      // Expect to see "No journals for..." (the daily empty states)
+      const emptyRow = page.getByText(/No journals for/i).first();
+      await expect(emptyRow).toBeVisible();
+    });
+  });
 });
