@@ -20,6 +20,7 @@ export interface DisplayJournal {
   tags: JournalTag[];
   contacts: JournalContactRelationship[];
   calendar?: JournalCalendar | null;
+  type_data?: Record<string, any>;
   parent_id?: number | null;
   order?: number | null;
   created_at?: string | null;
@@ -71,6 +72,7 @@ export function transformJournalForDisplay(
     tags: journal.attributes.tags,
     contacts: journal.attributes.contacts,
     calendar: journal.attributes.calendar,
+    type_data: journal.attributes.type_data,
     parent_id: journal.attributes.parent_id ?? null,
     order: journal.attributes.order ?? null,
     created_at: journal.attributes.created_at,

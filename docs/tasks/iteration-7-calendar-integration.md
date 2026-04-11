@@ -463,6 +463,7 @@ Phase 1 and Phase 2 were implemented as a combined delivery. The merge domain se
 - [ ] A date-jump interaction lets the user navigate directly to a chosen date.
 - [ ] Hierarchy expands to depth 3 around the current focus and collapses further away using the shared hierarchy read model.
 - [ ] List rows/groups surface lightweight sync, review, cancellation, and hierarchy indicators.
+- [ ] Filter options should be sticky when scrolling.
 
 **Required Test Coverage:**
 - **Unit:** collapse-state, date-jump, and hierarchy-depth helpers.

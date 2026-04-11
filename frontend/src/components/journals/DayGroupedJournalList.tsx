@@ -6,6 +6,8 @@ import { Loader2 } from 'lucide-react';
 import { JournalListItem } from '@/components/journals/JournalListItem';
 import { DisplayJournal } from '@/hooks/useDisplayJournals';
 import { groupJournalsByDay } from '@/lib/journal-grouping';
+import { Button } from '@/components/ui/button';
+import Link from 'next/link';
 
 export interface DayGroupedJournalListProps {
   readonly journals: DisplayJournal[];
@@ -18,6 +20,8 @@ export interface DayGroupedJournalListProps {
   readonly dateBounds?: { start: string; end: string };
   readonly collapseEmptyDays: boolean;
   readonly emptyState?: ReactNode;
+  readonly onJumpToDate?: (date: string) => void;
+  readonly focusDate?: string;
   readonly className?: string;
 }
 
@@ -32,6 +36,8 @@ export function DayGroupedJournalList({
   dateBounds,
   collapseEmptyDays,
   emptyState,
+  onJumpToDate,
+  focusDate,
   className = '',
 }: DayGroupedJournalListProps) {
   const topSentinelRef = useRef<HTMLDivElement>(null);
@@ -206,6 +212,46 @@ export function DayGroupedJournalList({
       )}
 
       {dayGroups.map(group => {
+        if (group.type === 'collapsed-empty') {
+          const displayStartDate = format(parseISO(group.startDate), 'MMM do');
+          const displayEndDate = format(
+            parseISO(group.endDate),
+            'MMM do, yyyy'
+          );
+          return (
+            <div
+              key={`collapsed-${group.startDate}`}
+              className='flex flex-col items-center justify-between gap-4 py-8 opacity-70 transition-opacity hover:opacity-100 sm:flex-row'
+              data-testid={`journal-collapsed-group-${group.startDate}`}
+            >
+              <div className='text-muted-foreground flex w-full items-center gap-4 text-sm italic sm:w-auto'>
+                <div className='bg-border h-px w-8 flex-grow sm:flex-grow-0' />
+                <span className='whitespace-nowrap'>
+                  {displayStartDate} - {displayEndDate} ({group.daysCount} days
+                  without entries)
+                </span>
+                <div className='bg-border h-px w-8 flex-grow sm:flex-grow-0' />
+              </div>
+              <div className='flex w-full justify-center gap-2 sm:w-auto'>
+                {onJumpToDate && (
+                  <Button
+                    variant='outline'
+                    size='sm'
+                    onClick={() => onJumpToDate(group.startDate)}
+                  >
+                    Jump to date
+                  </Button>
+                )}
+                <Button variant='outline' size='sm' asChild>
+                  <Link href={`/journals/new?date=${group.startDate}`}>
+                    Add Journal
+                  </Link>
+                </Button>
+              </div>
+            </div>
+          );
+        }
+
         const displayDate = format(parseISO(group.date), 'EEEE, MMMM do, yyyy');
 
         return (
@@ -228,6 +274,7 @@ export function DayGroupedJournalList({
                   <JournalListItem
                     key={journal.id}
                     journal={journal}
+                    focusDate={focusDate}
                     className='w-full'
                   />
                 ))}
