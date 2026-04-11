@@ -14,6 +14,7 @@ from app.core.journal.models.journal_tag import JournalTag
 from app.mcp.domains.journals.schemas import (
     CalendarSchema,
     ContactRelationshipSchema,
+    ContactRelationshipSummary,
     EventDateRangeSchema,
     JournalChildSummary,
     JournalResponse,
@@ -29,7 +30,7 @@ class JournalConverter:
         journal: Journal,
         types: list[str],
         type_data: dict[str, dict[str, Any]],
-        contacts: list[tuple[int, str, str]],  # (id, name, relationship_type)
+        contacts: list[ContactRelationshipSummary],
         tags: list[JournalTag],
         calendar: Calendar | None = None,
         parent: Journal | None = None,
@@ -43,7 +44,7 @@ class JournalConverter:
             journal: The journal entity
             types: List of journal type names
             type_data: Type-specific data organized by type
-            contacts: List of contact tuples (id, name, relationship_type)
+            contacts: List of ContactRelationshipSummary objects
             tags: List of JournalTag entities
             calendar: Calendar entity (if EVENT type)
             parent: Parent journal entity (if child)
@@ -56,9 +57,13 @@ class JournalConverter:
         # Build contact relationships
         contact_relationships = [
             ContactRelationshipSchema(
-                id=contact_id, name=name, relationship_type=rel_type
+                id=contact.id,
+                name=contact.name,
+                relationship_type=contact.relationship_type,
+                status=contact.status,
+                role=contact.role,
             )
-            for contact_id, name, rel_type in contacts
+            for contact in contacts
         ]
 
         # Build tag names

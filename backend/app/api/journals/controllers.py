@@ -1939,6 +1939,31 @@ async def _process_journal_contact_relationships(
                     attrs["relationship_type"]
                 ]
 
+                # Parse status and role if present
+                from core_shared.models.journals.attendee_status import AttendeeStatus
+                from core_shared.models.journals.contact_event_role import (
+                    ContactEventRole,
+                )
+
+                status, role = None, None
+                if attrs.get("status"):
+                    try:
+                        status = AttendeeStatus[attrs["status"]]
+                    except KeyError:
+                        import structlog
+
+                        logger = structlog.get_logger()
+                        logger.warning(f"Invalid AttendeeStatus: {attrs['status']}")
+
+                if attrs.get("role"):
+                    try:
+                        role = ContactEventRole[attrs["role"]]
+                    except KeyError:
+                        import structlog
+
+                        logger = structlog.get_logger()
+                        logger.warning(f"Invalid ContactEventRole: {attrs['role']}")
+
                 # Create the relationship using a nested transaction (savepoint)
                 # to prevent aborting the main transaction if
                 # a contact is missing or a unique constraint is violated.
@@ -1946,6 +1971,8 @@ async def _process_journal_contact_relationships(
                     journal_id=journal_id,
                     contact_id=contact_id,
                     relationship_type=relationship_type,
+                    status=status,
+                    role=role,
                 )
                 try:
                     async with connection.begin_nested():
@@ -3354,11 +3381,34 @@ async def add_contact_to_journal(
             f"Invalid relationship type: {rel_type}",
         ) from e
 
+    # Parse status and role if present
+    from core_shared.models.journals.attendee_status import AttendeeStatus
+    from core_shared.models.journals.contact_event_role import ContactEventRole
+
+    status, role = None, None
+    if contact_request.data.attributes.status:
+        try:
+            status = AttendeeStatus[contact_request.data.attributes.status]
+        except KeyError as e:
+            raise JournalValidationError(
+                "status", f"Invalid status: {contact_request.data.attributes.status}"
+            ) from e
+
+    if contact_request.data.attributes.role:
+        try:
+            role = ContactEventRole[contact_request.data.attributes.role]
+        except KeyError as e:
+            raise JournalValidationError(
+                "role", f"Invalid role: {contact_request.data.attributes.role}"
+            ) from e
+
     # Create the relationship
     relationship = JournalContactRelationship(
         journal_id=journal_id,
         contact_id=contact_id,
         relationship_type=relationship_type,
+        status=status,
+        role=role,
     )
     try:
         await contact_relationship_repo.create(relationship)
