@@ -2322,6 +2322,7 @@ async def process_journal_event(
         )
         raise
 
+
 async def process_tag_event(
     ctx: dict[str, Any], event_type: str, event_data: dict[str, Any]
 ) -> dict[str, Any]:
@@ -2382,7 +2383,9 @@ async def process_tag_event(
 
                     # Fetch groups to map name dynamically to resourceName
                     forward_group_mapping = await _build_contact_group_mapping(client)
-                    reverse_group_mapping = _build_reverse_group_mapping(forward_group_mapping)
+                    reverse_group_mapping = _build_reverse_group_mapping(
+                        forward_group_mapping
+                    )
 
                     if event_type == "TagDeleted":
                         path_str = event_data.get("tag_name")
@@ -2398,7 +2401,9 @@ async def process_tag_event(
                             old_path, new_path = changed_fields["full_path"]
                             resource_name = reverse_group_mapping.get(old_path)
                             if resource_name:
-                                await client.update_contact_group(resource_name, new_path)
+                                await client.update_contact_group(
+                                    resource_name, new_path
+                                )
 
                     processed_users += 1
                 except Exception as e:
@@ -2406,12 +2411,16 @@ async def process_tag_event(
                         "Error processing tag event for user",
                         google_account_email=google_account_email,
                         event_type=event_type,
-                        error=str(e)
+                        error=str(e),
                     )
                     errors.append(str(e))
 
             if errors:
-                return {"status": "partial_success", "processed_users": processed_users, "errors": errors}
+                return {
+                    "status": "partial_success",
+                    "processed_users": processed_users,
+                    "errors": errors,
+                }
 
             return {"status": "success", "processed_users": processed_users}
 

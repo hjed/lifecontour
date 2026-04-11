@@ -5,6 +5,7 @@ Migrated from backend/app/core/integrations/google/service.py
 and adapted for worker environment with simplified dependencies.
 """
 
+import json
 from datetime import UTC, datetime, timedelta
 
 import httpx
@@ -24,6 +25,17 @@ class GoogleAuthTokensNotFoundError(Exception):
 
 class TokenRefreshFailedError(Exception):
     """Raised when Google token refresh fails permanently."""
+
+    pass
+
+
+class TokenRevokedError(TokenRefreshFailedError):
+    """Raised when the refresh token has been revoked or expired (invalid_grant).
+
+    This is a subclass of TokenRefreshFailedError so existing callers that
+    catch the parent will still work, but callers that need to distinguish
+    revocation from transient failures can catch this specifically.
+    """
 
     pass
 
@@ -180,6 +192,13 @@ class GoogleAuthService:
                     status_code=response.status_code,
                     error=response.text,
                 )
+
+                # Detect permanent token revocation (invalid_grant)
+                if self._is_invalid_grant(response):
+                    await self._mark_needs_reauth(str(user_id), google_account_email)
+                    await self.session.commit()
+                    raise TokenRevokedError(error_msg)
+
                 raise TokenRefreshFailedError(error_msg)
 
             token_data = response.json()
@@ -217,3 +236,48 @@ class GoogleAuthService:
             )
 
             return new_access_token
+
+    @staticmethod
+    def _is_invalid_grant(response: httpx.Response) -> bool:
+        """Check if an HTTP response indicates an invalid_grant error.
+
+        Google returns HTTP 400 with {"error": "invalid_grant"} when the
+        refresh token has been revoked, expired, or is otherwise unusable.
+        """
+        if response.status_code != 400:
+            return False
+        try:
+            body = json.loads(response.text)
+            return bool(body.get("error") == "invalid_grant")
+        except (json.JSONDecodeError, AttributeError):
+            return False
+
+    async def _mark_needs_reauth(self, user_id: str, google_account_email: str) -> None:
+        """Set the needs_reauth flag on the user's Google auth record.
+
+        This flag is read by the status endpoint to inform the frontend
+        that the user needs to re-authenticate.
+        """
+        stmt = text("""
+            UPDATE user_google_auth
+            SET needs_reauth = :needs_reauth,
+                updated_at = :updated_at
+            WHERE user_id = :user_id
+            AND google_account_email = :email
+        """)
+
+        await self.session.execute(
+            stmt,
+            {
+                "needs_reauth": True,
+                "updated_at": datetime.now(UTC),
+                "user_id": user_id,
+                "email": google_account_email,
+            },
+        )
+
+        logger.warning(
+            "Marked Google account as needing re-authentication",
+            google_account_email=google_account_email,
+            user_id=user_id,
+        )

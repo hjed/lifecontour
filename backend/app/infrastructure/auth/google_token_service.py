@@ -91,12 +91,12 @@ class GoogleTokenService:
                 INSERT INTO user_google_auth (
                     user_id, google_account_email, encrypted_access_token,
                     encrypted_refresh_token, expires_at, created_at, updated_at,
-                    granted_scopes
+                    granted_scopes, needs_reauth
                 )
                 VALUES (
                     :user_id, :google_account_email, :encrypted_access_token,
                     :encrypted_refresh_token, :expires_at, :created_at, :updated_at,
-                    :granted_scopes
+                    :granted_scopes, FALSE
                 )
                 ON CONFLICT (user_id, google_account_email)
                 DO UPDATE SET
@@ -104,7 +104,8 @@ class GoogleTokenService:
                     encrypted_refresh_token = EXCLUDED.encrypted_refresh_token,
                     expires_at = EXCLUDED.expires_at,
                     updated_at = EXCLUDED.updated_at,
-                    granted_scopes = EXCLUDED.granted_scopes
+                    granted_scopes = EXCLUDED.granted_scopes,
+                    needs_reauth = FALSE
             """)
 
             now = datetime.now(UTC)

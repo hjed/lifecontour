@@ -18,7 +18,8 @@ export type IntegrationStatus =
   | 'active'
   | 'inactive'
   | 'error'
-  | 'disconnected';
+  | 'disconnected'
+  | 'token_expired';
 export type HealthStatus = 'healthy' | 'degraded' | 'unhealthy';
 
 // Google Contacts Integration Status
@@ -29,6 +30,7 @@ export interface GoogleStatusAttributes {
   status: IntegrationStatus;
   errorMessage?: string;
   needsReconsent?: boolean;
+  needsReauth?: boolean;
 }
 
 export interface GoogleStatusResponse {

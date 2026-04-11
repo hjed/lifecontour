@@ -416,6 +416,7 @@ async def get_google_status(
         sync_count = 0
         is_connected = False
         needs_reconsent = False
+        needs_reauth = False
 
         async with db_manager.get_session() as session:
             conn = await session.connection()
@@ -427,11 +428,11 @@ async def get_google_status(
             status = "active" if is_connected else "disconnected"
 
             if is_connected:
-                # Check for calendar scopes to determine if re-consent is needed
+                # Check for calendar scopes and reauth status
                 from sqlalchemy import text
 
                 stmt = text("""
-                    SELECT granted_scopes
+                    SELECT granted_scopes, needs_reauth
                     FROM user_google_auth
                     WHERE user_id = :user_id
                 """)
@@ -445,6 +446,10 @@ async def get_google_status(
                         or "calendar.readonly" not in scopes
                     ):
                         needs_reconsent = True
+                    # If any connected account has the needs_reauth flag
+                    if row.needs_reauth:
+                        needs_reauth = True
+                    if needs_reconsent and needs_reauth:
                         break
 
                 repo = SyncJobRepository(conn)
@@ -466,6 +471,10 @@ async def get_google_status(
                 # Get total count of completed syncs
                 sync_count = total_count
 
+        # Override status when token is expired/revoked
+        if needs_reauth:
+            status = "token_expired"
+
         return GoogleStatusJsonApiResponse(
             data=GoogleStatusData(
                 id="google",
@@ -476,6 +485,7 @@ async def get_google_status(
                     sync_count=sync_count,
                     status=status,
                     needs_reconsent=needs_reconsent,
+                    needs_reauth=needs_reauth,
                 ),
             )
         )
@@ -663,6 +673,7 @@ async def google_oauth_callback(
     user: FromDishka[SessionUser],
     oauth_service: FromDishka[OAuthService],
     google_token_service: FromDishka[GoogleTokenService],
+    task_queue_service: FromDishka[TaskQueueService],
 ) -> OAuthCallbackResponse:
     """
     Handle OAuth callback for Google Contacts integration.
@@ -718,6 +729,27 @@ async def google_oauth_callback(
             has_access_token=bool(access_token),
             has_refresh_token=bool(refresh_token),
         )
+
+        # Auto-trigger a full sync to catch up on any missed data
+        try:
+            await task_queue_service.enqueue_google_sync(
+                google_account_email=google_email,
+                user_id=user.id,
+                sync_type="full",
+            )
+            logger.info(
+                "Auto-triggered full sync after OAuth relink",
+                user_id=user.id,
+                google_email=google_email,
+            )
+        except Exception as sync_err:
+            # Don't fail the OAuth callback if sync enqueueing fails
+            logger.warning(
+                "Failed to auto-trigger sync after OAuth relink",
+                user_id=user.id,
+                google_email=google_email,
+                error=str(sync_err),
+            )
 
         return OAuthCallbackResponse(
             success=True,
