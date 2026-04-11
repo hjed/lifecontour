@@ -11,6 +11,7 @@ from core_shared.models.journals import (
 from core_shared.models.journals.attendee_status import AttendeeStatus
 from core_shared.models.journals.contact_event_role import ContactEventRole
 from sqlalchemy import text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core.journal.adapters.sql.journal_contact_relationship_repository import (
@@ -307,7 +308,7 @@ class TestJournalContactRelationshipStatusRole:
         """Test that the DB CHECK constraint rejects an invalid status value."""
         journal_id, contact_id = sample_journal_and_contact
 
-        with pytest.raises(Exception):  # noqa: B017 - DB constraint error
+        with pytest.raises(IntegrityError):
             await rel_repo.conn.execute(
                 text(
                     """
@@ -330,7 +331,7 @@ class TestJournalContactRelationshipStatusRole:
         """Test that the DB CHECK constraint rejects an invalid role value."""
         journal_id, contact_id = sample_journal_and_contact
 
-        with pytest.raises(Exception):  # noqa: B017 - DB constraint error
+        with pytest.raises(IntegrityError):
             await rel_repo.conn.execute(
                 text(
                     """
