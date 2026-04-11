@@ -307,4 +307,109 @@ describe('IntegrationsPage', () => {
 
     expect(screen.getByTestId('sync-progress')).toBeInTheDocument();
   });
+
+  it('should show token expired banner when needsReauth is true', () => {
+    mockUseGoogleStatus.mockReturnValue({
+      data: {
+        data: {
+          id: 'google',
+          type: 'integration-status',
+          attributes: {
+            connected: true,
+            lastSync: '2024-01-15T10:30:00Z',
+            syncCount: 150,
+            status: 'token_expired',
+            needsReauth: true,
+          },
+        },
+      },
+      isLoading: false,
+      error: null,
+    } as any);
+
+    const wrapper = createWrapper();
+    render(<IntegrationsPage />, { wrapper });
+
+    expect(screen.getByTestId('token-expired-banner')).toBeInTheDocument();
+    expect(screen.getByText('Google connection expired')).toBeInTheDocument();
+    expect(screen.getByTestId('relink-google-button')).toBeInTheDocument();
+  });
+
+  it('should disable sync buttons when needsReauth is true', () => {
+    mockUseGoogleStatus.mockReturnValue({
+      data: {
+        data: {
+          id: 'google',
+          type: 'integration-status',
+          attributes: {
+            connected: true,
+            lastSync: '2024-01-15T10:30:00Z',
+            syncCount: 150,
+            status: 'token_expired',
+            needsReauth: true,
+          },
+        },
+      },
+      isLoading: false,
+      error: null,
+    } as any);
+
+    const wrapper = createWrapper();
+    render(<IntegrationsPage />, { wrapper });
+
+    const smartSyncButton = screen.getByTestId('trigger-google-sync');
+    expect(smartSyncButton).toBeDisabled();
+
+    const fullSyncButton = screen.getByText('Full Sync');
+    expect(fullSyncButton).toBeDisabled();
+  });
+
+  it('should trigger OAuth flow when relink button is clicked', async () => {
+    const mockAuthorize = jest.fn();
+    mockUseGoogleOAuthAuthorize.mockReturnValue({
+      mutate: mockAuthorize,
+      isPending: false,
+      error: null,
+    } as any);
+
+    mockUseGoogleStatus.mockReturnValue({
+      data: {
+        data: {
+          id: 'google',
+          type: 'integration-status',
+          attributes: {
+            connected: true,
+            lastSync: '2024-01-15T10:30:00Z',
+            syncCount: 150,
+            status: 'token_expired',
+            needsReauth: true,
+          },
+        },
+      },
+      isLoading: false,
+      error: null,
+    } as any);
+
+    const wrapper = createWrapper();
+    render(<IntegrationsPage />, { wrapper });
+
+    const relinkButton = screen.getByTestId('relink-google-button');
+    fireEvent.click(relinkButton);
+
+    await waitFor(() => {
+      expect(mockAuthorize).toHaveBeenCalledWith({
+        redirect_url: '/integrations',
+      });
+    });
+  });
+
+  it('should not show token expired banner when needsReauth is false', () => {
+    // Default mock has needsReauth undefined (falsy)
+    const wrapper = createWrapper();
+    render(<IntegrationsPage />, { wrapper });
+
+    expect(
+      screen.queryByTestId('token-expired-banner')
+    ).not.toBeInTheDocument();
+  });
 });

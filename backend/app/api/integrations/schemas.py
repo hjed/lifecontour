@@ -105,6 +105,11 @@ class GoogleStatusAttributes(BaseModel):
         description="Whether the user needs to re-consent to grant required scopes",
         serialization_alias="needsReconsent",
     )
+    needs_reauth: bool = Field(
+        default=False,
+        description="Whether the refresh token has been revoked and the user needs to re-authenticate",
+        serialization_alias="needsReauth",
+    )
 
     model_config = {"populate_by_name": True}
 

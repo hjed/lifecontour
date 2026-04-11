@@ -29,6 +29,7 @@ export interface GoogleStatusAttributes {
   status: IntegrationStatus;
   errorMessage?: string;
   needsReconsent?: boolean;
+  needsReauth?: boolean;
 }
 
 export interface GoogleStatusResponse {
