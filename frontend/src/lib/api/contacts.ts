@@ -308,7 +308,7 @@ async function searchContacts(
 }
 
 async function fetchTags(): Promise<TagListResponse> {
-  const response = await fetch('/api/tags', {
+  const response = await fetch('/api/tags?limit=1000', {
     credentials: 'include',
     headers: {
       'Content-Type': 'application/json',

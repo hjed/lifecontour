@@ -34,7 +34,7 @@ async def list_tags(
     request: Request,
     tag_repo: FromDishka[TagRepository],
     user: FromDishka[SessionUser],  # Require authentication
-    limit: int = Query(default=50, description="Items per page", ge=1, le=100),
+    limit: int = Query(default=1000, description="Items per page", ge=1, le=1000),
 ) -> TagListResponse:
     """
     List all available tags.

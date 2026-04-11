@@ -1497,18 +1497,16 @@ test.describe('Journal List Page', () => {
 
       while (!(await targetGrid.isVisible())) {
         const currentGrids = await page.getByRole('grid').allInnerTexts();
-        await page
-          .getByRole('button', { name: 'Go to the Next Month' })
-          .click();
+        await page.getByRole('button', { name: /next month/i }).click();
         await expect(async () => {
           const newGrids = await page.getByRole('grid').allInnerTexts();
           expect(newGrids).not.toEqual(currentGrids);
         }).toPass({ timeout: 5000 });
       }
 
-      const targetLabel = `${targetDate.getDate()} ${monthNames[targetDate.getMonth()]} ${targetDate.getFullYear()}`;
       await targetGrid
-        .getByRole('button', { name: new RegExp(`\\b${targetLabel}\\b`) })
+        .getByText(String(targetDate.getDate()), { exact: true })
+        .first()
         .click();
 
       // Now the future journal should be in view!
