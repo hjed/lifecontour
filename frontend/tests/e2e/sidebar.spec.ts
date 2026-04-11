@@ -113,9 +113,12 @@ test.describe('Sidebar Navigation', () => {
         page.getByRole('link', { name: 'All Journals' })
       ).not.toBeVisible();
 
-      // Click to expand
-      await journalsButton.click();
-      await expect(journalsButton).toHaveAttribute('aria-expanded', 'true');
+      // Click to expand — use toPass to handle Firefox timing where a single
+      // click may not immediately toggle aria-expanded before assertion runs.
+      await expect(async () => {
+        await journalsButton.click();
+        await expect(journalsButton).toHaveAttribute('aria-expanded', 'true');
+      }).toPass({ timeout: 15000 });
       await expect(
         page.getByRole('link', { name: 'All Journals' })
       ).toBeVisible();

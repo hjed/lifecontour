@@ -69,27 +69,29 @@ test.describe('Journal Infinite Scroll', () => {
 
     // 3. Scroll Down (to FUTURE) -> Should trigger fetchNextPage
     const bottomSentinel = page.getByTestId('journal-bottom-sentinel');
-    await expect(bottomSentinel).toBeVisible();
 
-    // Smooth scroll into view might not always trigger intersection observer immediately in headless,
-    // force it by evaluating scroll
-    await bottomSentinel.scrollIntoViewIfNeeded();
-
-    // Wait for the future journal to appear
-    await expect(
-      page.getByRole('heading', { name: /Future Journal/i })
-    ).toBeVisible({ timeout: 15000 });
+    // Use toPass to retry scroll + assertion together, since a single
+    // scrollIntoViewIfNeeded may not reliably trigger the IntersectionObserver
+    // in CI headless environments.
+    await expect(async () => {
+      await bottomSentinel.scrollIntoViewIfNeeded();
+      await expect(
+        page.getByRole('heading', { name: /Future Journal/i })
+      ).toBeVisible({ timeout: 5000 });
+    }).toPass({ timeout: 30000 });
 
     // 4. Scroll Up (to PAST) -> Should trigger fetchPreviousPage
     const topSentinel = page.getByTestId('journal-top-sentinel');
-    await expect(topSentinel).toBeVisible();
 
-    // Use evaluate directly to scroll to the very top to hit the sentinel reliably
-    await page.evaluate(() => window.scrollTo(0, 0));
-
-    // Wait for the past journal to appear
-    await expect(
-      page.getByRole('heading', { name: /Past Journal/i })
-    ).toBeVisible({ timeout: 15000 });
+    // Use toPass to retry scroll + assertion together for reliability.
+    // scrollIntoViewIfNeeded on the top sentinel reliably brings it into the
+    // viewport and triggers the IntersectionObserver, unlike window.scrollTo(0,0)
+    // which may not fire the observer in headless CI.
+    await expect(async () => {
+      await topSentinel.scrollIntoViewIfNeeded();
+      await expect(
+        page.getByRole('heading', { name: /Past Journal/i })
+      ).toBeVisible({ timeout: 5000 });
+    }).toPass({ timeout: 30000 });
   });
 });
