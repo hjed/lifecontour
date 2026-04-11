@@ -945,7 +945,7 @@ export class TestDataManager {
   async createReviewItem(
     request: ReviewItemCreateRequest
   ): Promise<{ id: string }> {
-    console.log(
+    console.debug(
       `📝 [Data Manager] Creating review item between journals ${request.source_journal_id} and ${request.candidate_journal_id}`
     );
 

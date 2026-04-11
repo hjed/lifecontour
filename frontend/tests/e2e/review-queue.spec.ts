@@ -92,9 +92,7 @@ test.describe('Journal Review Queue', () => {
 
     // Click Next to reach the resolution screen
     const nextBtn = mergeDialog.getByRole('button', { name: 'Next' });
-    if ((await nextBtn.count()) > 0 && (await nextBtn.isVisible())) {
-      await nextBtn.click();
-    }
+    await nextBtn.click();
 
     // Check that we reached the conflict resolution step
     const resolutionDialog = page.locator('[role="dialog"]', {
@@ -196,9 +194,7 @@ test.describe('Journal Review Queue', () => {
 
     // 7. Click Next to reach the resolution screen
     const nextBtn = mergeDialog.getByRole('button', { name: 'Next' });
-    if ((await nextBtn.count()) > 0 && (await nextBtn.isVisible())) {
-      await nextBtn.click();
-    }
+    await nextBtn.click();
 
     // 8. Verify we reach the conflict resolution step
     const resolutionDialog = page.locator('[role="dialog"]', {

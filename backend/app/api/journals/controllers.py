@@ -1468,7 +1468,9 @@ async def get_journal(
     )
 
     # Embed pending review items in the detail response
-    pending_review_items = await review_item_repo.find_pending_by_journal_id(journal_id)
+    pending_review_items = await review_item_repo.find_pending_by_journal_id(
+        journal_id=journal_id, user_id=user.id
+    )
     if pending_review_items:
         # Fetch candidate journal titles
         candidate_ids = [ri.candidate_journal_id for ri in pending_review_items]

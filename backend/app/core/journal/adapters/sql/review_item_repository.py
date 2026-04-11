@@ -98,7 +98,9 @@ class SqlReviewItemRepository(ReviewItemRepository):
 
         return self._row_to_review_item(row), True
 
-    async def find_pending_by_journal_id(self, journal_id: int) -> list[ReviewItem]:
+    async def find_pending_by_journal_id(
+        self, journal_id: int, user_id: str
+    ) -> list[ReviewItem]:
         """Find all pending review items where a journal is the source."""
         query = text(
             """
@@ -107,11 +109,14 @@ class SqlReviewItemRepository(ReviewItemRepository):
                    created_at, updated_at
             FROM journal_review_items
             WHERE source_journal_id = :journal_id
+            AND user_id = :user_id
             AND status = 'pending'
             ORDER BY confidence_score DESC
             """
         )
-        result = await self.conn.execute(query, {"journal_id": journal_id})
+        result = await self.conn.execute(
+            query, {"journal_id": journal_id, "user_id": user_id}
+        )
         rows = result.fetchall()
         return [self._row_to_review_item(row) for row in rows]
 

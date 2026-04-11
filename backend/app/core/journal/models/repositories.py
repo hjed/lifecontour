@@ -1522,7 +1522,9 @@ class ReviewItemRepository(ABC):
         pass
 
     @abstractmethod
-    async def find_pending_by_journal_id(self, journal_id: int) -> list[ReviewItem]:
+    async def find_pending_by_journal_id(
+        self, journal_id: int, user_id: str
+    ) -> list[ReviewItem]:
         """
         Find all pending review items where a journal is the source.
 
