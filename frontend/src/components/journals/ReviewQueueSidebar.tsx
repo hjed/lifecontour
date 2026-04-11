@@ -10,7 +10,7 @@ import {
 } from '@/components/ui/sheet';
 import { Button } from '@/components/ui/button';
 import { AlertCircle, GitMerge, Loader2 } from 'lucide-react';
-import { useReviewItems } from '@/lib/api/journals';
+import { useReviewItems, useDismissReviewItem } from '@/lib/api/journals';
 import { MergeJournalDialog } from './MergeJournalDialog';
 import { Badge } from '@/components/ui/badge';
 
@@ -42,6 +42,8 @@ export function ReviewQueueSidebar({
   const { data, isLoading } = useReviewItems('pending', 1, 50);
   const totalCount = (data?.meta?.total_count as number) || 0;
   const items = data?.data || [];
+
+  const dismissMutation = useDismissReviewItem();
 
   const handleReviewClick = (sourceId: number, candidateId: number) => {
     setSelectedSourceId(sourceId.toString());
@@ -120,7 +122,17 @@ export function ReviewQueueSidebar({
                     </p>
                   </div>
 
-                  <div className='flex justify-end pt-2'>
+                  <div className='flex justify-end gap-2 pt-2'>
+                    <Button
+                      variant='outline'
+                      size='sm'
+                      className='border-destructive text-destructive hover:bg-destructive hover:text-destructive-foreground w-full text-xs'
+                      onClick={() => dismissMutation.mutate(id.toString())}
+                      disabled={dismissMutation.isPending}
+                      data-testid={`queue-dismiss-btn-${id}`}
+                    >
+                      Dismiss
+                    </Button>
                     <Button
                       variant='destructive'
                       size='sm'
@@ -131,10 +143,10 @@ export function ReviewQueueSidebar({
                           candidate_journal.id
                         )
                       }
-                      data-testid={`queue-review-btn-${id}`}
+                      data-testid={`queue-confirm-match-btn-${id}`}
                     >
                       <GitMerge className='mr-1.5 h-3.5 w-3.5' />
-                      Resolve Merge
+                      Confirm Match
                     </Button>
                   </div>
                 </div>

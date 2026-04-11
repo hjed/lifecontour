@@ -198,21 +198,26 @@ class SqlReviewItemRepository(ReviewItemRepository):
         return {row.journal_id for row in result.fetchall()}
 
     async def update_status(
-        self, review_item_id: int, new_status: str
+        self, review_item_id: int, new_status: str, user_id: str
     ) -> ReviewItem | None:
         """Update the status of a review item."""
         query = text(
             """
             UPDATE journal_review_items
             SET status = :new_status, updated_at = NOW()
-            WHERE id = :review_item_id
+            WHERE id = :review_item_id AND user_id = :user_id
             RETURNING id, user_id, source_journal_id, candidate_journal_id,
                       reason, confidence_score, details, status,
                       created_at, updated_at
             """
         )
         result = await self.conn.execute(
-            query, {"review_item_id": review_item_id, "new_status": new_status}
+            query,
+            {
+                "review_item_id": review_item_id,
+                "new_status": new_status,
+                "user_id": user_id,
+            },
         )
         row = result.fetchone()
         if row is None:

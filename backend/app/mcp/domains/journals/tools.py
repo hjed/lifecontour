@@ -3593,6 +3593,41 @@ async def list_review_items(
     return json.dumps(response_data, indent=2)
 
 
+@mcp_unified_error_handler("dismiss_review_item", "journal")
+async def dismiss_review_item(
+    item_id: int,
+    user_id_override: str | None = None,
+    db_connection: AsyncConnection = mcp_depends(get_async_connection),
+) -> str:
+    """
+    Dismiss a journal review item.
+
+    Use this tool to dismiss a pending merge candidate review item that the user
+    has determined is not a match or should not be merged.
+    """
+    user_id = user_id_override or "dev-system-user"
+
+    review_item_repo = SqlReviewItemRepository(db_connection)
+
+    item = await review_item_repo.update_status(
+        review_item_id=item_id,
+        new_status="dismissed",
+        user_id=user_id,
+    )
+
+    if not item:
+        return json.dumps({"error": f"Review item {item_id} not found."})
+
+    return json.dumps(
+        {
+            "success": True,
+            "message": f"Successfully dismissed review item {item_id}.",
+            "status": item.status,
+        },
+        indent=2,
+    )
+
+
 def register_journal_tools(mcp: FastMCP[None]) -> None:
     """
     Register journal-related MCP tools with the FastMCP server.
@@ -3617,3 +3652,4 @@ def register_journal_tools(mcp: FastMCP[None]) -> None:
     mcp.add_tool(get_merge_candidates)
     mcp.add_tool(browse_journals_by_date_window)
     mcp.add_tool(list_review_items)
+    mcp.add_tool(dismiss_review_item)

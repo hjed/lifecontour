@@ -360,3 +360,33 @@ class TestJournalMergeService:
         # Target keeps its times, so is_all_day should NOT be set to True
         # The merged state should remain is_all_day=False with existing times
         assert "is_all_day" not in params or params.get("is_all_day") is not True
+
+    @pytest.mark.asyncio
+    async def test_merge_resolves_related_review_items(
+        self, merge_service, mock_journal_repo, mock_transaction
+    ):
+        """Verifies that related review items are resolved during the merge."""
+        target = create_test_journal(id=1, title="Target")
+        source = create_test_journal(id=2, title="Source")
+
+        mock_journal_repo.find_by_id.side_effect = lambda j_id: (
+            target if j_id == 1 else source
+        )
+        mock_journal_repo.save.return_value = target
+
+        await merge_service.merge_journals(1, 2, mock_transaction)
+
+        execute_calls = mock_transaction.execute.call_args_list
+        update_calls = [
+            call
+            for call in execute_calls
+            if "UPDATE journal_review_items" in str(call[0][0])
+        ]
+
+        assert len(update_calls) == 1
+        query_text = str(update_calls[0][0][0])
+        params = update_calls[0][0][1]
+
+        assert "status = 'resolved'" in query_text
+        assert params["target_id"] == 1
+        assert params["source_id"] == 2

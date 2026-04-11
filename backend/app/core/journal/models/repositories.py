@@ -1584,7 +1584,7 @@ class ReviewItemRepository(ABC):
 
     @abstractmethod
     async def update_status(
-        self, review_item_id: int, new_status: str
+        self, review_item_id: int, new_status: str, user_id: str
     ) -> ReviewItem | None:
         """
         Update the status of a review item.
@@ -1592,6 +1592,7 @@ class ReviewItemRepository(ABC):
         Args:
             review_item_id: The review item ID to update
             new_status: The new status value (e.g. 'resolved', 'dismissed')
+            user_id: The user ID for ownership verification
 
         Returns:
             The updated ReviewItem, or None if not found

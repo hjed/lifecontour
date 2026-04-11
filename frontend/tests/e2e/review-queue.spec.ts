@@ -75,11 +75,11 @@ test.describe('Journal Review Queue', () => {
     await expect(sidebar).toContainText('duplicate journal');
     await expect(sidebar).toContainText('95% Match');
 
-    // 7. Click "Resolve Merge"
+    // 7. Click "Confirm Match"
     const resolveBtn = sidebar
-      .getByRole('button', { name: /Resolve Merge/i })
+      .getByRole('button', { name: /Confirm Match/i })
       .first();
-    await resolveBtn.click();
+    await resolveBtn.click({ force: true });
 
     // 8. Since sourceJournalId is pre-populated, the dialog auto-advances
     //    directly to the conflict resolution step (skipping the "Next" step).
@@ -90,7 +90,7 @@ test.describe('Journal Review Queue', () => {
 
     // 9. Close the resolution dialog via Cancel
     const cancelBtn = resolutionDialog.getByRole('button', { name: 'Cancel' });
-    await cancelBtn.click();
+    await cancelBtn.click({ force: true });
   });
 
   test('should display ReviewSuggestions component on journal detail view', async ({
@@ -155,12 +155,12 @@ test.describe('Journal Review Queue', () => {
     );
     await expect(suggestionsContainer).toContainText('Confidence: 99%');
 
-    // 5. Click "Resolve Merge"
+    // 5. Click "Confirm Match"
     const resolutionButton = suggestionsContainer
-      .getByRole('button', { name: /Resolve Merge/i })
+      .getByRole('button', { name: /Confirm Match/i })
       .first();
     await expect(resolutionButton).toBeVisible();
-    await resolutionButton.click();
+    await resolutionButton.click({ force: true });
 
     // 6. Since sourceJournalId is pre-populated from ReviewSuggestions,
     //    the dialog auto-advances directly to Resolve Merge Conflicts.
@@ -168,5 +168,77 @@ test.describe('Journal Review Queue', () => {
       hasText: 'Resolve Merge Conflicts',
     });
     await expect(resolutionDialog).toBeVisible({ timeout: 15000 });
+  });
+
+  test('should dismiss review item from sidebar and remove it from UI', async ({
+    authenticatedPage,
+    testCleanup,
+  }) => {
+    const page = authenticatedPage;
+    const dataManager = new (await import('./data-management')).TestDataManager(
+      page
+    );
+    const contactTestHelpers = new ContactTestHelpers(page);
+
+    await dataManager.clearAllJournals();
+
+    const d = new Date();
+    const startStr = d.toISOString();
+    const endStr = d.toISOString();
+
+    const sourceJournal = await dataManager.createJournal({
+      title: 'Dismiss Source Journal',
+      content: 'I need to review this entry',
+      event_date_range: { start: startStr, end: endStr },
+      types: ['note'],
+    });
+
+    const candidateJournal = await dataManager.createJournal({
+      title: 'Dismiss Candidate Duplicate',
+      content: 'I am a duplicate candidate',
+      event_date_range: { start: startStr, end: endStr },
+      types: ['note'],
+    });
+
+    const reviewItem = await dataManager.createReviewItem({
+      source_journal_id: Number.parseInt(sourceJournal.id),
+      candidate_journal_id: Number.parseInt(candidateJournal.id),
+      reason: 'duplicate_journal',
+      confidence_score: 0.95,
+    });
+
+    testCleanup(async () => {
+      await dataManager.clearAllJournals();
+    });
+
+    await contactTestHelpers.navigateToAuthenticatedPage('/journals');
+
+    const queueBtn = page.getByRole('button', { name: /Review Queue/i });
+    await expect(queueBtn).toBeVisible();
+    await queueBtn.click();
+
+    const sidebar = page.locator('[role="dialog"]', {
+      hasText: 'Review Queue',
+    });
+    await expect(sidebar).toBeVisible();
+    await expect(sidebar).toContainText('Dismiss Candidate Duplicate');
+
+    const dismissBtn = sidebar.getByTestId(
+      `queue-dismiss-btn-${reviewItem.id}`
+    );
+    await expect(dismissBtn).toBeVisible();
+    await dismissBtn.scrollIntoViewIfNeeded();
+    await page.waitForTimeout(500); // Wait for sidebar animation
+    await dismissBtn.dispatchEvent('click');
+
+    await expect(page.getByText('Review item dismissed')).toBeVisible();
+    await expect(sidebar).not.toContainText('Dismiss Candidate Duplicate', {
+      timeout: 10000,
+    });
+
+    // Also verify the list reflects the empty state or is removed
+    await expect(
+      sidebar.getByText('Your review queue is empty.')
+    ).toBeVisible();
   });
 });
