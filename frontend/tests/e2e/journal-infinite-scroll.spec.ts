@@ -56,7 +56,7 @@ test.describe('Journal Infinite Scroll', () => {
 
     // 1. Visit page
     await page.goto('/journals');
-    await expect(page.locator('main, [role="main"]').first()).toBeVisible();
+    await expect(page.getByTestId('journals-list-ready')).toBeVisible();
     await page.waitForLoadState('networkidle');
 
     // 2. Initial state: Present should be visible, others shouldn't
@@ -67,7 +67,7 @@ test.describe('Journal Infinite Scroll', () => {
       page.getByRole('heading', { name: /Past Journal/i })
     ).not.toBeVisible();
 
-    // 3. Scroll Down (to PAST) -> Should trigger fetchNextPage
+    // 3. Scroll Down (to FUTURE) -> Should trigger fetchNextPage
     const bottomSentinel = page.getByTestId('journal-bottom-sentinel');
     await expect(bottomSentinel).toBeVisible();
 
@@ -75,21 +75,21 @@ test.describe('Journal Infinite Scroll', () => {
     // force it by evaluating scroll
     await bottomSentinel.scrollIntoViewIfNeeded();
 
-    // Wait for the past journal to appear
+    // Wait for the future journal to appear
     await expect(
-      page.getByRole('heading', { name: /Past Journal/i })
+      page.getByRole('heading', { name: /Future Journal/i })
     ).toBeVisible({ timeout: 15000 });
 
-    // 4. Scroll Up (to FUTURE) -> Should trigger fetchPreviousPage
+    // 4. Scroll Up (to PAST) -> Should trigger fetchPreviousPage
     const topSentinel = page.getByTestId('journal-top-sentinel');
     await expect(topSentinel).toBeVisible();
 
     // Use evaluate directly to scroll to the very top to hit the sentinel reliably
     await page.evaluate(() => window.scrollTo(0, 0));
 
-    // Wait for the future journal to appear
+    // Wait for the past journal to appear
     await expect(
-      page.getByRole('heading', { name: /Future Journal/i })
+      page.getByRole('heading', { name: /Past Journal/i })
     ).toBeVisible({ timeout: 15000 });
   });
 });
