@@ -122,7 +122,7 @@ class TestReviewItemsToolsIntegration:
             items = payload["data"]
             assert len(items) == 1
             assert items[0]["reason"] == "duplicate_journal"
-            assert items[0]["confidence_score"] == 0.9
+            assert items[0]["confidence_score"] == pytest.approx(0.9)
 
             # verify title enrichment
             assert items[0]["source_journal"]["title"] == "Source Journal"

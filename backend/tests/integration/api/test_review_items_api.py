@@ -115,7 +115,7 @@ async def test_create_and_list_review_items(
     assert item["id"] == str(created_id)
     attrs = item["attributes"]
     assert attrs["reason"] == "duplicate_journal"
-    assert attrs["confidence_score"] == 0.85
+    assert attrs["confidence_score"] == pytest.approx(0.85)
     assert attrs["status"] == "pending"
     assert attrs["details"] == {"similarity": 0.85}
 

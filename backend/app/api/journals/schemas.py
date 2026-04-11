@@ -25,6 +25,12 @@ RESOURCE_TYPE_DESC = "Resource type"
 RESOURCE_LINKS_DESC = "Resource links"
 CALENDAR_NAME_DESC = "Calendar name"
 CALENDAR_COLOR_DESC = "Calendar color (hex code)"
+JOURNAL_TITLE_DESC = "Journal title"
+RESOURCE_ID_DESC = "Resource identifier"
+REVIEW_REASON_DESC = (
+    "Review reason (external_link_match, duplicate_journal, needs_review)"
+)
+MATCH_CONFIDENCE_DESC = "Match confidence (0.0-1.0)"
 
 
 # Event Date Range Schema
@@ -396,7 +402,7 @@ class CalendarSchema(BaseModel):
 class JournalAttributes(BaseModel):
     """Journal attributes."""
 
-    title: str = Field(..., description="Journal title", max_length=500)
+    title: str = Field(..., description=JOURNAL_TITLE_DESC, max_length=500)
     content: str = Field(..., description="Journal content (markdown)")
     event_date_range: EventDateRangeSchema = Field(..., description="Event date range")
     parent_id: int | None = Field(default=None, description="Parent journal ID")
@@ -465,7 +471,7 @@ class JournalResource(BaseModel):
     """Journal resource following JSON API specification."""
 
     type: str = Field(default="journals", description=RESOURCE_TYPE_DESC)
-    id: str = Field(..., description="Resource identifier")
+    id: str = Field(..., description=RESOURCE_ID_DESC)
     attributes: JournalAttributes = Field(..., description="Journal attributes")
     relationships: JournalRelationships | None = Field(
         default=None, description="Journal relationships"
@@ -490,7 +496,9 @@ class JournalCreateData(BaseModel):
 class JournalUpdateAttributes(BaseModel):
     """Journal attributes for partial updates (all fields optional)."""
 
-    title: str | None = Field(default=None, description="Journal title", max_length=500)
+    title: str | None = Field(
+        default=None, description=JOURNAL_TITLE_DESC, max_length=500
+    )
     content: str | None = Field(default=None, description="Journal content (markdown)")
     event_date_range: EventDateRangeSchema | None = Field(
         default=None, description="Event date range"
@@ -697,9 +705,9 @@ class ReviewSuggestionSchema(BaseModel):
     id: int = Field(..., description="Review item ID")
     reason: str = Field(
         ...,
-        description="Review reason (external_link_match, duplicate_journal, needs_review)",
+        description=REVIEW_REASON_DESC,
     )
-    confidence_score: float = Field(..., description="Match confidence (0.0-1.0)")
+    confidence_score: float = Field(..., description=MATCH_CONFIDENCE_DESC)
     candidate_journal_id: int = Field(..., description="Candidate journal ID")
     candidate_journal_title: str = Field(..., description="Candidate journal title")
     details: dict[str, Any] | None = Field(
@@ -711,7 +719,7 @@ class ReviewItemJournalSummary(BaseModel):
     """Lightweight journal summary embedded in review item responses."""
 
     id: int = Field(..., description="Journal ID")
-    title: str = Field(..., description="Journal title")
+    title: str = Field(..., description=JOURNAL_TITLE_DESC)
     event_date_range: EventDateRangeSchema = Field(
         ..., description="Journal event date range"
     )
@@ -722,9 +730,9 @@ class ReviewItemAttributes(BaseModel):
 
     reason: str = Field(
         ...,
-        description="Review reason (external_link_match, duplicate_journal, needs_review)",
+        description=REVIEW_REASON_DESC,
     )
-    confidence_score: float = Field(..., description="Match confidence (0.0-1.0)")
+    confidence_score: float = Field(..., description=MATCH_CONFIDENCE_DESC)
     status: str = Field(..., description="Review status (pending, resolved, dismissed)")
     details: dict[str, Any] | None = Field(default=None, description="Match details")
     source_journal: ReviewItemJournalSummary = Field(
@@ -740,7 +748,7 @@ class ReviewItemResource(BaseModel):
     """Review item resource following JSON API specification."""
 
     type: str = Field(default="review-items", description=RESOURCE_TYPE_DESC)
-    id: str = Field(..., description="Resource identifier")
+    id: str = Field(..., description=RESOURCE_ID_DESC)
     attributes: ReviewItemAttributes = Field(..., description="Review item attributes")
     links: JsonApiLinks | None = Field(default=None, description=RESOURCE_LINKS_DESC)
 
@@ -758,11 +766,9 @@ class ReviewItemCreateAttributes(BaseModel):
     candidate_journal_id: int = Field(..., description="Candidate journal ID")
     reason: str = Field(
         default="duplicate_journal",
-        description="Review reason (external_link_match, duplicate_journal, needs_review)",
+        description=REVIEW_REASON_DESC,
     )
-    confidence_score: float = Field(
-        default=0.85, description="Match confidence (0.0-1.0)"
-    )
+    confidence_score: float = Field(default=0.85, description=MATCH_CONFIDENCE_DESC)
     details: dict[str, Any] | None = Field(default=None, description="Match details")
 
 
@@ -800,7 +806,7 @@ class CalendarResource(BaseModel):
     """Calendar resource following JSON API specification."""
 
     type: str = Field(default="calendars", description=RESOURCE_TYPE_DESC)
-    id: str = Field(..., description="Resource identifier")
+    id: str = Field(..., description=RESOURCE_ID_DESC)
     attributes: CalendarAttributes = Field(..., description="Calendar attributes")
     links: JsonApiLinks | None = Field(default=None, description=RESOURCE_LINKS_DESC)
     meta: dict[str, Any] | None = Field(default=None, description="Resource metadata")

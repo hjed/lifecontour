@@ -8,8 +8,8 @@ import { MergeJournalDialog } from './MergeJournalDialog';
 import { ReviewSuggestion } from '@/types/journals';
 
 interface ReviewSuggestionsProps {
-  journalId: string;
-  suggestions: ReviewSuggestion[];
+  readonly journalId: string;
+  readonly suggestions: ReviewSuggestion[];
 }
 
 export function ReviewSuggestions({

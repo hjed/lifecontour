@@ -128,7 +128,7 @@ class TestReviewItemRepositoryCreate:
         assert created.source_journal_id == source.id
         assert created.candidate_journal_id == candidate.id
         assert created.reason == ReviewReason.DUPLICATE_JOURNAL
-        assert created.confidence_score == 0.85
+        assert created.confidence_score == pytest.approx(0.85)
         assert created.status == "pending"
 
     async def test_create_preserves_details_json(
@@ -185,7 +185,9 @@ class TestReviewItemRepositoryCreate:
         assert is_new_first is True
         assert is_new_second is False
         assert created_second.id == created_first.id
-        assert created_second.confidence_score == 0.8  # Original, not 0.95
+        assert created_second.confidence_score == pytest.approx(
+            0.8
+        )  # Original, not 0.95
 
     async def test_create_with_different_reasons(
         self,
@@ -308,8 +310,8 @@ class TestReviewItemRepositoryFindPending:
         )
 
         assert len(pending) == 2
-        assert pending[0].confidence_score == 0.95
-        assert pending[1].confidence_score == 0.5
+        assert pending[0].confidence_score == pytest.approx(0.95)
+        assert pending[1].confidence_score == pytest.approx(0.5)
 
     async def test_find_pending_returns_empty_for_no_matches(
         self,
@@ -457,8 +459,8 @@ class TestReviewItemRepositoryFindPendingByUser:
 
         items = await review_item_repository.find_pending_by_user(USER_ID)
 
-        assert items[0].confidence_score == 0.95
-        assert items[1].confidence_score == 0.3
+        assert items[0].confidence_score == pytest.approx(0.95)
+        assert items[1].confidence_score == pytest.approx(0.3)
 
 
 @pytest.mark.integration

@@ -16,7 +16,11 @@ import { JournalFilters } from '@/components/journals/JournalFilters';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
-import { useInfiniteJournals, useSearchJournals } from '@/lib/api/journals';
+import {
+  useInfiniteJournals,
+  useSearchJournals,
+  useReviewItems,
+} from '@/lib/api/journals';
 import { useDebounce } from '@/hooks/useDebounce';
 import { useDisplayJournals } from '@/hooks/useDisplayJournals';
 import { JournalFilters as JournalFiltersType } from '@/types/journals';
@@ -25,7 +29,6 @@ import { cn } from '@/lib/utils';
 import { TIMEOUTS } from '@/lib/constants';
 import { InfiniteData } from '@tanstack/react-query';
 import { ReviewQueueSidebar } from '@/components/journals/ReviewQueueSidebar';
-import { useReviewItems } from '@/lib/api/journals';
 
 function getDateBounds(
   infiniteData: InfiniteData<unknown, unknown> | undefined

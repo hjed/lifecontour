@@ -32,7 +32,7 @@ export function MergeJournalDialog({
   onOpenChange: externalOnOpenChange,
 }: MergeJournalDialogProps) {
   const [internalOpen, setInternalOpen] = useState(false);
-  const open = externalOpen !== undefined ? externalOpen : internalOpen;
+  const open = externalOpen === undefined ? internalOpen : externalOpen;
 
   const [resolutionOpen, setResolutionOpen] = useState(false);
   const [selectedJournal, setSelectedJournal] =

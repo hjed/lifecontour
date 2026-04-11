@@ -15,8 +15,18 @@ import { MergeJournalDialog } from './MergeJournalDialog';
 import { Badge } from '@/components/ui/badge';
 
 interface ReviewQueueSidebarProps {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
+  readonly open: boolean;
+  readonly onOpenChange: (open: boolean) => void;
+}
+
+function EmptyQueueState() {
+  return (
+    <div className='text-muted-foreground p-8 text-center'>
+      <AlertCircle className='mx-auto mb-3 h-8 w-8 opacity-50' />
+      <p>Your review queue is empty.</p>
+      <p className='mt-1 text-sm'>No pending AI suggestions.</p>
+    </div>
+  );
 }
 
 export function ReviewQueueSidebar({
@@ -63,11 +73,7 @@ export function ReviewQueueSidebar({
             Loading queue...
           </div>
         ) : items.length === 0 ? (
-          <div className='text-muted-foreground p-8 text-center'>
-            <AlertCircle className='mx-auto mb-3 h-8 w-8 opacity-50' />
-            <p>Your review queue is empty.</p>
-            <p className='mt-1 text-sm'>No pending AI suggestions.</p>
-          </div>
+          <EmptyQueueState />
         ) : (
           <div className='space-y-4'>
             {items.map(item => {
@@ -141,8 +147,6 @@ export function ReviewQueueSidebar({
           <MergeJournalDialog
             sourceJournalId={selectedSourceId}
             targetJournalId={selectedCandidateId}
-            // Passing targetJournalId creates an auto-populated target choice which is exactly what we want.
-            // Oh wait, MergeJournalDialog doesn't take targetJournalId as an auto-populate parameter?
             open={mergeDialogOpen}
             onOpenChange={open => {
               setMergeDialogOpen(open);

@@ -39,8 +39,8 @@ test.describe('Journal Review Queue', () => {
 
     // 2. Create a review item linking them
     await dataManager.createReviewItem({
-      source_journal_id: parseInt(sourceJournal.id),
-      candidate_journal_id: parseInt(candidateJournal.id),
+      source_journal_id: Number.parseInt(sourceJournal.id),
+      candidate_journal_id: Number.parseInt(candidateJournal.id),
       reason: 'duplicate_journal',
       confidence_score: 0.95,
     });
@@ -153,8 +153,8 @@ test.describe('Journal Review Queue', () => {
 
     // 2. Create review item
     await dataManager.createReviewItem({
-      source_journal_id: parseInt(sourceJournal.id),
-      candidate_journal_id: parseInt(candidateJournal.id),
+      source_journal_id: Number.parseInt(sourceJournal.id),
+      candidate_journal_id: Number.parseInt(candidateJournal.id),
       reason: 'duplicate_journal',
       confidence_score: 0.99,
     });

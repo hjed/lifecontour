@@ -314,9 +314,9 @@ export class TestDataManager {
           attributes: {
             name: tagData.name,
             ...(tagData.color ? { color: tagData.color } : {}),
-            ...(tagData.parent_id !== undefined
-              ? { parent_id: tagData.parent_id }
-              : {}),
+            ...(tagData.parent_id === undefined
+              ? {}
+              : { parent_id: tagData.parent_id }),
           },
         },
       };
