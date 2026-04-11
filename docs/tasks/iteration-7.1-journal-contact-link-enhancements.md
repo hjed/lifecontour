@@ -1,6 +1,6 @@
 # Iteration 7.1: Journal-Contact Link Enhancements
 
-**Status:** 🟡 PLANNED
+**Status:** 🟢 IN PROGRESS (ITER7.1-001 Phase 1 complete)
 **Dependencies:** Iteration 4 (journal-contact relationship model), Iteration 7 (calendar sync, attendee/invitee sync), Iteration 2.5 (ContactAvatar component)
 **Goal:** Enrich journal-contact links with per-attendee status and role, add contact avatar visibility, and enable click-through navigation from journals to contacts.
 
@@ -74,18 +74,18 @@ Every phase below must meet the same completion bar before merge:
 **PR Size:** ~5-7 files
 
 **Acceptance Criteria:**
-- [ ] Add `AttendeeStatus` enum with values: `ATTENDING`, `ATTENDED`, `MAYBE`, `NO_REPLY`, `DECLINED`.
-- [ ] Add `ContactEventRole` enum with values: `ORGANISER`, `FACILITATOR`, `HELPER`.
-- [ ] Add nullable `status` (`VARCHAR(20)`) and `role` (`VARCHAR(20)`) columns to `journal_contact_relationships` table via Alembic migration.
-- [ ] Add CHECK constraints limiting `status` and `role` to valid enum values.
-- [ ] Update `JournalContactRelationship` domain entity with optional `status: AttendeeStatus | None` and `role: ContactEventRole | None` fields.
-- [ ] Domain validation: `status` and `role` are only permitted when `relationship_type` is `PARTICIPANT` or `INVITEE`. Setting them on `MENTION` or `ABOUT` relationships raises a validation error.
-- [ ] Update `SqlJournalContactRelationshipRepository` to read/write the new columns.
-- [ ] Existing relationships without status/role continue to work (NULL values are valid).
+- [x] Add `AttendeeStatus` enum with values: `ATTENDING`, `ATTENDED`, `MAYBE`, `NO_REPLY`, `DECLINED`.
+- [x] Add `ContactEventRole` enum with values: `ORGANISER`, `FACILITATOR_HELPER`.
+- [x] Add nullable `status` (`VARCHAR(20)`) and `role` (`VARCHAR(20)`) columns to `journal_contact_relationships` table via Alembic migration.
+- [x] Add CHECK constraints limiting `status` and `role` to valid enum values.
+- [x] Update `JournalContactRelationship` domain entity with optional `status: AttendeeStatus | None` and `role: ContactEventRole | None` fields.
+- [x] Domain validation: `status` and `role` are only permitted when `relationship_type` is `PARTICIPANT` or `INVITEE`. Setting them on `MENTION` or `ABOUT` relationships raises a validation error.
+- [x] Update `SqlJournalContactRelationshipRepository` to read/write the new columns.
+- [x] Existing relationships without status/role continue to work (NULL values are valid).
 
 **Required Test Coverage:**
-- **Unit:** enum validation, domain entity validation (status/role only on PARTICIPANT/INVITEE), rejection on MENTION/ABOUT.
-- **Integration:** migration test, repository read/write tests with and without status/role values.
+- **Unit:** ✅ enum validation, domain entity validation (status/role only on PARTICIPANT/INVITEE), rejection on MENTION/ABOUT.
+- **Integration:** ✅ repository read/write tests with and without status/role values, CHECK constraint enforcement.
 - **E2E:** deferred to Phase 2 — no user-visible surface changes yet.
 
 #### Phase 2: API, MCP, and Frontend Type Contracts
@@ -238,7 +238,7 @@ ALTER TABLE journal_contact_relationships
   ADD CONSTRAINT ck_journal_contact_relationships_status
     CHECK (status IN ('ATTENDING', 'ATTENDED', 'MAYBE', 'NO_REPLY', 'DECLINED')),
   ADD CONSTRAINT ck_journal_contact_relationships_role
-    CHECK (role IN ('ORGANISER', 'FACILITATOR', 'HELPER'));
+    CHECK (role IN ('ORGANISER', 'FACILITATOR_HELPER'));
 ```
 
 ### Enum Definitions
@@ -253,8 +253,7 @@ class AttendeeStatus(StrEnum):
 
 class ContactEventRole(StrEnum):
     ORGANISER = "ORGANISER"
-    FACILITATOR = "FACILITATOR"
-    HELPER = "HELPER"
+    FACILITATOR_HELPER = "FACILITATOR_HELPER"
 ```
 
 ### Google Calendar Mapping
