@@ -8,7 +8,10 @@ from core_shared.models.journals import (
     JournalContactRelationship,
     JournalContactRelationshipType,
 )
+from core_shared.models.journals.attendee_status import AttendeeStatus
+from core_shared.models.journals.contact_event_role import ContactEventRole
 from sqlalchemy import text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core.journal.adapters.sql.journal_contact_relationship_repository import (
@@ -190,3 +193,157 @@ class TestJournalContactRelationshipRepositoryIntegration:
         types = [rel.relationship_type for rel in relationships]
         assert JournalContactRelationshipType.PARTICIPANT in types
         assert JournalContactRelationshipType.MENTION in types
+
+
+@pytest.mark.integration
+class TestJournalContactRelationshipStatusRole:
+    """Integration tests for status and role fields on journal-contact relationships."""
+
+    async def test_create_with_status(self, rel_repo, sample_journal_and_contact):
+        """Test creating a PARTICIPANT relationship with status=ATTENDING."""
+        journal_id, contact_id = sample_journal_and_contact
+
+        rel = JournalContactRelationship(
+            journal_id=journal_id,
+            contact_id=contact_id,
+            relationship_type=JournalContactRelationshipType.PARTICIPANT,
+            status=AttendeeStatus.ATTENDING,
+        )
+        created = await rel_repo.create(rel)
+
+        assert created.status == AttendeeStatus.ATTENDING
+        assert created.role is None
+
+    async def test_create_with_role(self, rel_repo, sample_journal_and_contact):
+        """Test creating a PARTICIPANT relationship with role=ORGANISER."""
+        journal_id, contact_id = sample_journal_and_contact
+
+        rel = JournalContactRelationship(
+            journal_id=journal_id,
+            contact_id=contact_id,
+            relationship_type=JournalContactRelationshipType.PARTICIPANT,
+            role=ContactEventRole.ORGANISER,
+        )
+        created = await rel_repo.create(rel)
+
+        assert created.role == ContactEventRole.ORGANISER
+        assert created.status is None
+
+    async def test_create_with_status_and_role(
+        self, rel_repo, sample_journal_and_contact
+    ):
+        """Test creating a relationship with both status and role."""
+        journal_id, contact_id = sample_journal_and_contact
+
+        rel = JournalContactRelationship(
+            journal_id=journal_id,
+            contact_id=contact_id,
+            relationship_type=JournalContactRelationshipType.PARTICIPANT,
+            status=AttendeeStatus.MAYBE,
+            role=ContactEventRole.FACILITATOR_HELPER,
+        )
+        created = await rel_repo.create(rel)
+
+        assert created.status == AttendeeStatus.MAYBE
+        assert created.role == ContactEventRole.FACILITATOR_HELPER
+
+    async def test_create_without_status_role(
+        self, rel_repo, sample_journal_and_contact
+    ):
+        """Test creating without status/role preserves backward compatibility."""
+        journal_id, contact_id = sample_journal_and_contact
+
+        rel = JournalContactRelationship(
+            journal_id=journal_id,
+            contact_id=contact_id,
+            relationship_type=JournalContactRelationshipType.PARTICIPANT,
+        )
+        created = await rel_repo.create(rel)
+
+        assert created.status is None
+        assert created.role is None
+
+    async def test_get_by_journal_returns_status_role(
+        self, rel_repo, sample_journal_and_contact
+    ):
+        """Test get_by_journal returns status and role from the database."""
+        journal_id, contact_id = sample_journal_and_contact
+
+        rel = JournalContactRelationship(
+            journal_id=journal_id,
+            contact_id=contact_id,
+            relationship_type=JournalContactRelationshipType.INVITEE,
+            status=AttendeeStatus.DECLINED,
+            role=ContactEventRole.ORGANISER,
+        )
+        await rel_repo.create(rel)
+
+        relationships = await rel_repo.get_by_journal(journal_id)
+        assert len(relationships) == 1
+        assert relationships[0].status == AttendeeStatus.DECLINED
+        assert relationships[0].role == ContactEventRole.ORGANISER
+
+    async def test_get_by_contact_returns_status_role(
+        self, rel_repo, sample_journal_and_contact
+    ):
+        """Test get_by_contact returns status and role from the database."""
+        journal_id, contact_id = sample_journal_and_contact
+
+        rel = JournalContactRelationship(
+            journal_id=journal_id,
+            contact_id=contact_id,
+            relationship_type=JournalContactRelationshipType.PARTICIPANT,
+            status=AttendeeStatus.NO_REPLY,
+        )
+        await rel_repo.create(rel)
+
+        relationships = await rel_repo.get_by_contact(contact_id)
+        assert len(relationships) == 1
+        assert relationships[0].status == AttendeeStatus.NO_REPLY
+        assert relationships[0].role is None
+
+    async def test_check_constraint_rejects_invalid_status(
+        self, rel_repo, sample_journal_and_contact
+    ):
+        """Test that the DB CHECK constraint rejects an invalid status value."""
+        journal_id, contact_id = sample_journal_and_contact
+
+        with pytest.raises(IntegrityError):
+            await rel_repo.conn.execute(
+                text(
+                    """
+                    INSERT INTO journal_contact_relationships
+                    (journal_id, contact_id, relationship_type, status)
+                    VALUES (:journal_id, :contact_id, :rel_type, :status)
+                """
+                ),
+                {
+                    "journal_id": journal_id,
+                    "contact_id": contact_id,
+                    "rel_type": "PARTICIPANT",
+                    "status": "INVALID_STATUS",
+                },
+            )
+
+    async def test_check_constraint_rejects_invalid_role(
+        self, rel_repo, sample_journal_and_contact
+    ):
+        """Test that the DB CHECK constraint rejects an invalid role value."""
+        journal_id, contact_id = sample_journal_and_contact
+
+        with pytest.raises(IntegrityError):
+            await rel_repo.conn.execute(
+                text(
+                    """
+                    INSERT INTO journal_contact_relationships
+                    (journal_id, contact_id, relationship_type, role)
+                    VALUES (:journal_id, :contact_id, :rel_type, :role)
+                """
+                ),
+                {
+                    "journal_id": journal_id,
+                    "contact_id": contact_id,
+                    "rel_type": "PARTICIPANT",
+                    "role": "INVALID_ROLE",
+                },
+            )

@@ -1,6 +1,7 @@
 """Journal domain models."""
 
 from .abseiling_data import AbseilingData
+from .attendee_status import AttendeeStatus
 from .bushwalking_data import BushwalkingData
 from .calendar import Calendar
 from .calendar_info import CalendarInfo
@@ -40,6 +41,7 @@ from .constants import (
     VALID_CLIMBING_TYPES,
     VALID_TRACK_GRADES,
 )
+from .contact_event_role import ContactEventRole
 from .cross_country_skiing_data import CrossCountrySkiingData
 from .entities import Journal
 from .event_state import EventState
@@ -154,6 +156,8 @@ __all__ = [
     "JoggingData",
     "ReviewItem",
     # Enums
+    "AttendeeStatus",
+    "ContactEventRole",
     "EventState",
     "JournalType",
     "JournalContactRelationshipType",

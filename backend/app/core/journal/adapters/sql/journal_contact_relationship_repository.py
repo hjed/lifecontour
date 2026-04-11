@@ -4,6 +4,8 @@ from core_shared.models.journals import (
     JournalContactRelationship,
     JournalContactRelationshipType,
 )
+from core_shared.models.journals.attendee_status import AttendeeStatus
+from core_shared.models.journals.contact_event_role import ContactEventRole
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
@@ -17,6 +19,28 @@ class SqlJournalContactRelationshipRepository(JournalContactRelationshipReposito
         """Initialize with database connection."""
         self.conn = conn
 
+    @staticmethod
+    def _row_to_entity(row: object) -> JournalContactRelationship:
+        """Convert a database row to a JournalContactRelationship entity."""
+        return JournalContactRelationship(
+            journal_id=row.journal_id,  # type: ignore[attr-defined]
+            contact_id=row.contact_id,  # type: ignore[attr-defined]
+            relationship_type=JournalContactRelationshipType(
+                row.relationship_type  # type: ignore[attr-defined]
+            ),
+            created_at=row.created_at,  # type: ignore[attr-defined]
+            status=(
+                AttendeeStatus(row.status)  # type: ignore[attr-defined]
+                if row.status is not None  # type: ignore[attr-defined]
+                else None
+            ),
+            role=(
+                ContactEventRole(row.role)  # type: ignore[attr-defined]
+                if row.role is not None  # type: ignore[attr-defined]
+                else None
+            ),
+        )
+
     async def create(
         self, relationship: JournalContactRelationship
     ) -> JournalContactRelationship:
@@ -24,8 +48,8 @@ class SqlJournalContactRelationshipRepository(JournalContactRelationshipReposito
         query = text(
             """
             INSERT INTO journal_contact_relationships
-            (journal_id, contact_id, relationship_type)
-            VALUES (:journal_id, :contact_id, :relationship_type)
+            (journal_id, contact_id, relationship_type, status, role)
+            VALUES (:journal_id, :contact_id, :relationship_type, :status, :role)
             RETURNING created_at
         """
         )
@@ -35,6 +59,8 @@ class SqlJournalContactRelationshipRepository(JournalContactRelationshipReposito
                 "journal_id": relationship.journal_id,
                 "contact_id": relationship.contact_id,
                 "relationship_type": relationship.relationship_type.value,
+                "status": (relationship.status.value if relationship.status else None),
+                "role": relationship.role.value if relationship.role else None,
             },
         )
         row = result.fetchone()
@@ -71,7 +97,8 @@ class SqlJournalContactRelationshipRepository(JournalContactRelationshipReposito
         """Get all relationships for a journal."""
         query = text(
             """
-            SELECT journal_id, contact_id, relationship_type, created_at
+            SELECT journal_id, contact_id, relationship_type, created_at,
+                   status, role
             FROM journal_contact_relationships
             WHERE journal_id = :journal_id
             ORDER BY created_at DESC
@@ -80,21 +107,14 @@ class SqlJournalContactRelationshipRepository(JournalContactRelationshipReposito
         result = await self.conn.execute(query, {"journal_id": journal_id})
         rows = result.fetchall()
 
-        return [
-            JournalContactRelationship(
-                journal_id=row.journal_id,
-                contact_id=row.contact_id,
-                relationship_type=JournalContactRelationshipType(row.relationship_type),
-                created_at=row.created_at,
-            )
-            for row in rows
-        ]
+        return [self._row_to_entity(row) for row in rows]
 
     async def get_by_contact(self, contact_id: int) -> list[JournalContactRelationship]:
         """Get all relationships for a contact."""
         query = text(
             """
-            SELECT journal_id, contact_id, relationship_type, created_at
+            SELECT journal_id, contact_id, relationship_type, created_at,
+                   status, role
             FROM journal_contact_relationships
             WHERE contact_id = :contact_id
             ORDER BY created_at DESC
@@ -103,15 +123,7 @@ class SqlJournalContactRelationshipRepository(JournalContactRelationshipReposito
         result = await self.conn.execute(query, {"contact_id": contact_id})
         rows = result.fetchall()
 
-        return [
-            JournalContactRelationship(
-                journal_id=row.journal_id,
-                contact_id=row.contact_id,
-                relationship_type=JournalContactRelationshipType(row.relationship_type),
-                created_at=row.created_at,
-            )
-            for row in rows
-        ]
+        return [self._row_to_entity(row) for row in rows]
 
     async def get_by_journal_and_type(
         self, journal_id: int, relationship_type: JournalContactRelationshipType
@@ -119,7 +131,8 @@ class SqlJournalContactRelationshipRepository(JournalContactRelationshipReposito
         """Get all relationships of a specific type for a journal."""
         query = text(
             """
-            SELECT journal_id, contact_id, relationship_type, created_at
+            SELECT journal_id, contact_id, relationship_type, created_at,
+                   status, role
             FROM journal_contact_relationships
             WHERE journal_id = :journal_id
             AND relationship_type = :relationship_type
@@ -135,12 +148,4 @@ class SqlJournalContactRelationshipRepository(JournalContactRelationshipReposito
         )
         rows = result.fetchall()
 
-        return [
-            JournalContactRelationship(
-                journal_id=row.journal_id,
-                contact_id=row.contact_id,
-                relationship_type=JournalContactRelationshipType(row.relationship_type),
-                created_at=row.created_at,
-            )
-            for row in rows
-        ]
+        return [self._row_to_entity(row) for row in rows]
