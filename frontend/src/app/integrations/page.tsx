@@ -15,6 +15,7 @@ import {
   Users,
   AlertCircle,
   ShieldAlert,
+  KeyRound,
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { enAU } from 'date-fns/locale';
@@ -115,12 +116,52 @@ function ScopeUpgradeBanner({
   );
 }
 
-// Sync Controls Component
+// Token Expired Banner Component
+interface TokenExpiredBannerProps {
+  readonly onRelink: () => void;
+  readonly oauthLoading: boolean;
+}
+
+function TokenExpiredBanner({
+  onRelink,
+  oauthLoading,
+}: TokenExpiredBannerProps) {
+  return (
+    <Alert variant='destructive' data-testid='token-expired-banner'>
+      <KeyRound className='h-4 w-4' />
+      <AlertTitle>Google connection expired</AlertTitle>
+      <AlertDescription className='flex flex-col gap-2'>
+        <p>
+          Your Google account connection has expired or been revoked. Please
+          relink your account to resume synchronisation. A full sync will run
+          automatically to catch up on any missed data.
+        </p>
+        <div>
+          <Button
+            size='sm'
+            onClick={onRelink}
+            disabled={oauthLoading}
+            data-testid='relink-google-button'
+          >
+            {oauthLoading ? (
+              <RefreshCw className='mr-2 h-4 w-4 animate-spin' />
+            ) : (
+              <KeyRound className='mr-2 h-4 w-4' />
+            )}
+            Relink Google Account
+          </Button>
+        </div>
+      </AlertDescription>
+    </Alert>
+  );
+}
+
 interface SyncControlsProps {
   readonly connected: boolean;
   readonly syncLoading: boolean;
   readonly oauthLoading: boolean;
   readonly disconnectLoading: boolean;
+  readonly needsReauth: boolean;
   readonly onSync: (syncType: SyncType) => void;
   readonly onConnect: () => void;
   readonly onDisconnect: () => void;
@@ -132,11 +173,13 @@ function SyncControls({
   syncLoading,
   oauthLoading,
   disconnectLoading,
+  needsReauth,
   onSync,
   onConnect,
   onDisconnect,
   syncError,
 }: SyncControlsProps) {
+  const syncDisabled = syncLoading || needsReauth;
   return (
     <>
       <div className='flex gap-2'>
@@ -144,7 +187,7 @@ function SyncControls({
           <>
             <Button
               onClick={() => onSync('smart')}
-              disabled={syncLoading}
+              disabled={syncDisabled}
               data-testid='trigger-google-sync'
             >
               {syncLoading ? (
@@ -157,7 +200,7 @@ function SyncControls({
             <Button
               variant='outline'
               onClick={() => onSync('full')}
-              disabled={syncLoading}
+              disabled={syncDisabled}
             >
               Full Sync
             </Button>
@@ -516,12 +559,21 @@ function IntegrationsPageContent() {
                     />
                   )}
 
+                  {/* Token Expired Banner */}
+                  {status.connected && status.needsReauth && (
+                    <TokenExpiredBanner
+                      onRelink={handleConnectGoogle}
+                      oauthLoading={oauthLoading}
+                    />
+                  )}
+
                   {/* Sync Controls */}
                   <SyncControls
                     connected={status.connected}
                     syncLoading={syncLoading}
                     oauthLoading={oauthLoading}
                     disconnectLoading={disconnectLoading}
+                    needsReauth={!!status.needsReauth}
                     onSync={handleSync}
                     onConnect={handleConnectGoogle}
                     onDisconnect={handleDisconnectGoogle}

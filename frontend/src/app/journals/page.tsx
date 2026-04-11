@@ -16,14 +16,19 @@ import { JournalFilters } from '@/components/journals/JournalFilters';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
-import { useInfiniteJournals, useSearchJournals } from '@/lib/api/journals';
+import {
+  useInfiniteJournals,
+  useSearchJournals,
+  useReviewItems,
+} from '@/lib/api/journals';
 import { useDebounce } from '@/hooks/useDebounce';
 import { useDisplayJournals } from '@/hooks/useDisplayJournals';
 import { JournalFilters as JournalFiltersType } from '@/types/journals';
-import { BookOpen, Filter, Plus, Search } from 'lucide-react';
+import { BookOpen, Filter, Plus, Search, FileText } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { TIMEOUTS } from '@/lib/constants';
 import { InfiniteData } from '@tanstack/react-query';
+import { ReviewQueueSidebar } from '@/components/journals/ReviewQueueSidebar';
 
 function getDateBounds(
   infiniteData: InfiniteData<unknown, unknown> | undefined
@@ -61,6 +66,10 @@ export default function JournalsPage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [filters, setFilters] = useState<JournalFiltersType>({});
   const [showFilters, setShowFilters] = useState(true);
+  const [queueOpen, setQueueOpen] = useState(false);
+
+  const { data: reviewItemsData } = useReviewItems('pending', 1, 1);
+  const reviewQueueCount = (reviewItemsData?.meta?.total_count as number) || 0;
 
   // Debounce search query to avoid excessive API calls
   const debouncedSearchQuery = useDebounce(
@@ -96,11 +105,16 @@ export default function JournalsPage() {
   const isLoading = shouldUseSearch ? isLoadingSearch : isInfiniteLoading;
   const error = shouldUseSearch ? searchError : infiniteError;
 
-  let journalsToDisplay = [];
+  let journalsToDisplay: import('@/types/journals').JournalResource[] = [];
   if (shouldUseSearch) {
     journalsToDisplay = searchData?.data || [];
   } else {
-    journalsToDisplay = infiniteData?.pages?.flatMap(page => page.data) || [];
+    journalsToDisplay =
+      (
+        infiniteData as InfiniteData<
+          import('@/types/journals').JournalListResponse
+        >
+      )?.pages?.flatMap(page => page.data) || [];
   }
 
   const totalJournals = shouldUseSearch
@@ -152,6 +166,17 @@ export default function JournalsPage() {
           </p>
         </div>
         <div className='flex gap-2'>
+          {reviewQueueCount > 0 && (
+            <Button
+              variant='outline'
+              size='sm'
+              onClick={() => setQueueOpen(true)}
+              className='text-destructive hover:text-destructive hover:bg-destructive/10 gap-2'
+            >
+              <FileText className='h-4 w-4' />
+              Review Queue ({reviewQueueCount})
+            </Button>
+          )}
           <Button
             variant='outline'
             size='sm'
@@ -276,6 +301,8 @@ export default function JournalsPage() {
           )}
         </main>
       </div>
+
+      <ReviewQueueSidebar open={queueOpen} onOpenChange={setQueueOpen} />
     </AuthGuard>
   );
 }

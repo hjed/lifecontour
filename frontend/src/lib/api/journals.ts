@@ -23,6 +23,7 @@ import {
   JournalTag,
   JournalCalendar,
   MergeOverrides,
+  ReviewItemsListResponse,
 } from '@/types/journals';
 import { JsonApiErrorResponse, JsonApiMeta } from '@/types/api';
 import {
@@ -1184,5 +1185,54 @@ export function useContactJournals(
     queryFn: () => fetchContactJournals(contactId, filters),
     enabled: !!contactId,
     staleTime: 5 * 60 * 1000, // 5 minutes
+  });
+}
+
+// Review Queue
+
+export const reviewItemKeys = {
+  all: ['review-items'] as const,
+  lists: () => [...reviewItemKeys.all, 'list'] as const,
+  list: (status: string, page: number, limit: number) =>
+    [...reviewItemKeys.lists(), { status, page, limit }] as const,
+};
+
+/**
+ * Get pending review items queue
+ */
+export async function getReviewItems(
+  status = 'pending',
+  page = 1,
+  limit = 20
+): Promise<ReviewItemsListResponse> {
+  const params = new URLSearchParams({
+    status,
+    page: page.toString(),
+    limit: limit.toString(),
+  });
+
+  const response = await fetch(
+    `/api/journals/review-items?${params.toString()}`,
+    {
+      credentials: 'include',
+    }
+  );
+
+  if (!response.ok) {
+    const errorData: JsonApiErrorResponse = await response
+      .json()
+      .catch(() => ({}));
+    throw new Error(
+      errorData.errors?.[0]?.detail || ERROR_MESSAGES.FETCH_FAILED
+    );
+  }
+
+  return response.json();
+}
+
+export function useReviewItems(status = 'pending', page = 1, limit = 20) {
+  return useQuery({
+    queryKey: reviewItemKeys.list(status, page, limit),
+    queryFn: () => getReviewItems(status, page, limit),
   });
 }

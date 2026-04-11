@@ -486,15 +486,12 @@ class GoogleAPIClient:
             )
 
             # Need to fetch the group first to get the etag
-            group_data = service.contactGroups().get(resourceName=resource_name).execute()
+            group_data = (
+                service.contactGroups().get(resourceName=resource_name).execute()
+            )
             etag = group_data.get("etag")
 
-            update_body = {
-                "contactGroup": {
-                    "name": name,
-                    "etag": etag
-                }
-            }
+            update_body = {"contactGroup": {"name": name, "etag": etag}}
 
             result = (
                 service.contactGroups()

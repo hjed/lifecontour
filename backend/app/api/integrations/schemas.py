@@ -93,7 +93,7 @@ class GoogleStatusAttributes(BaseModel):
     )
     status: str = Field(
         default="disconnected",
-        description="Current integration status (active, inactive, error, disconnected)",
+        description="Current integration status (active, inactive, error, disconnected, token_expired)",
     )
     error_message: str | None = Field(
         default=None,
@@ -104,6 +104,11 @@ class GoogleStatusAttributes(BaseModel):
         default=False,
         description="Whether the user needs to re-consent to grant required scopes",
         serialization_alias="needsReconsent",
+    )
+    needs_reauth: bool = Field(
+        default=False,
+        description="Whether the refresh token has been revoked and the user needs to re-authenticate",
+        serialization_alias="needsReauth",
     )
 
     model_config = {"populate_by_name": True}

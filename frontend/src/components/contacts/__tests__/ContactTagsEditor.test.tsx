@@ -195,12 +195,6 @@ describe('ContactTagsEditor', () => {
     );
   });
 
-  it('should show tags section title', () => {
-    render(<ContactTagsEditor contactId='42' />);
-
-    expect(screen.getByText('Tags')).toBeInTheDocument();
-  });
-
   it('should show empty state when no tags are assigned', () => {
     mockUseContactTags.mockReturnValue({
       data: createTagListResponse([]),

@@ -123,6 +123,15 @@ export function JournalListItem({ journal, className }: JournalListItemProps) {
                 journal.title
               )}
             </Link>
+            {journal.has_pending_reviews && (
+              <Badge
+                variant='destructive'
+                className='ml-2 px-1 py-0 text-[10px] leading-none font-bold uppercase'
+                data-testid='needs-review-badge'
+              >
+                Needs Review
+              </Badge>
+            )}
           </CardTitle>
         </div>
       </CardHeader>

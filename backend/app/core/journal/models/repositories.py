@@ -1522,7 +1522,9 @@ class ReviewItemRepository(ABC):
         pass
 
     @abstractmethod
-    async def find_pending_by_journal_id(self, journal_id: int) -> list[ReviewItem]:
+    async def find_pending_by_journal_id(
+        self, journal_id: int, user_id: str
+    ) -> list[ReviewItem]:
         """
         Find all pending review items where a journal is the source.
 
@@ -1531,5 +1533,67 @@ class ReviewItemRepository(ABC):
 
         Returns:
             List of pending review items for the journal
+        """
+        pass
+
+    @abstractmethod
+    async def find_pending_by_user(
+        self, user_id: str, limit: int = 50, offset: int = 0
+    ) -> list[ReviewItem]:
+        """
+        Find all pending review items for a user, paginated.
+
+        Args:
+            user_id: The user ID to look up
+            limit: Maximum number of items to return
+            offset: Number of items to skip
+
+        Returns:
+            List of pending review items ordered by confidence_score DESC
+        """
+        pass
+
+    @abstractmethod
+    async def count_pending_by_user(self, user_id: str) -> int:
+        """
+        Count pending review items for a user.
+
+        Args:
+            user_id: The user ID to count for
+
+        Returns:
+            Total number of pending review items
+        """
+        pass
+
+    @abstractmethod
+    async def find_pending_journal_ids_by_user(self, user_id: str) -> set[int]:
+        """
+        Find journal IDs that have pending review items for a user.
+
+        Returns both source and candidate journal IDs so that list indicators
+        can flag any journal involved in a pending review.
+
+        Args:
+            user_id: The user ID to look up
+
+        Returns:
+            Set of journal IDs with pending review items
+        """
+        pass
+
+    @abstractmethod
+    async def update_status(
+        self, review_item_id: int, new_status: str
+    ) -> ReviewItem | None:
+        """
+        Update the status of a review item.
+
+        Args:
+            review_item_id: The review item ID to update
+            new_status: The new status value (e.g. 'resolved', 'dismissed')
+
+        Returns:
+            The updated ReviewItem, or None if not found
         """
         pass

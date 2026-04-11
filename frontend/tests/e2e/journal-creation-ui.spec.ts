@@ -264,12 +264,13 @@ test.describe('Journal Creation UI Flow', () => {
     const page = authenticatedPage;
 
     // Create a physical calendar via API to satisfy the foreign key constraint
+    const calendarName = `E2E Cal ${Date.now()}`;
     const calendarRes = await page.request.post('/api/calendars', {
       data: {
         data: {
           type: 'calendars',
           attributes: {
-            name: `E2E Cal ${Date.now()}`,
+            name: calendarName,
             description: 'Created by e2e test',
           },
         },
@@ -279,7 +280,6 @@ test.describe('Journal Creation UI Flow', () => {
     const calendarJson = await calendarRes.json();
     expect(calendarJson.data).toBeDefined();
     expect(calendarJson.data.id).toBeDefined();
-    const calendarId = calendarJson.data.id;
 
     await navigateToNewJournal(page);
 
@@ -291,7 +291,10 @@ test.describe('Journal Creation UI Flow', () => {
     await page
       .getByRole('checkbox', { name: /all-day event/i })
       .waitFor({ state: 'visible' });
-    await page.getByTestId('calendar-id-input').fill(calendarId);
+    await page.getByTestId('calendar-id-input').click();
+    const calendarOption = page.getByRole('option', { name: calendarName });
+    await expect(calendarOption).toBeVisible({ timeout: 10000 });
+    await calendarOption.click();
 
     // Check all-day to avoid Start/End time validation unless we want to fill them
     await page.getByRole('checkbox', { name: /all-day event/i }).check();

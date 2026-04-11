@@ -80,7 +80,9 @@ export function CalendarSettingsDialog({
   const { data: statusData } = useGoogleStatus();
   const isGoogleConnected = statusData?.data?.attributes?.connected ?? false;
   const needsReconsent = statusData?.data?.attributes?.needsReconsent ?? false;
-  const googleSyncAvailable = isGoogleConnected && !needsReconsent;
+  const needsReauth = statusData?.data?.attributes?.needsReauth ?? false;
+  const googleSyncAvailable =
+    isGoogleConnected && !needsReconsent && !needsReauth;
 
   const { data: googleCalendars, isLoading: calendarsLoading } =
     useGoogleCalendars(googleSyncAvailable);

@@ -45,6 +45,18 @@ jest.mock('@/lib/api/journals', () => ({
     isLoading: false,
     error: null,
   }),
+  useCalendars: () => ({
+    data: {
+      data: [
+        {
+          id: 'calendar-uuid-123',
+          attributes: { name: 'Test Calendar', color: '#ff0000' },
+        },
+      ],
+    },
+    isLoading: false,
+    error: null,
+  }),
 }));
 
 // Mock next/navigation
@@ -353,9 +365,8 @@ describe('JournalCreateForm', () => {
 
       const editorContainer = screen.getByTestId('event-type-editor');
 
-      // In create mode, the calendar ID input should be enabled
-      const calendarIdInput =
-        within(editorContainer).getByTestId('calendar-id-input');
+      // In create mode, the calendar ID select trigger should be enabled
+      const calendarIdInput = within(editorContainer).getByRole('combobox');
       expect(calendarIdInput).not.toBeDisabled();
 
       // In create mode, the Edit button should NOT be present
@@ -563,8 +574,10 @@ describe('JournalCreateForm', () => {
       const eventCheckbox = screen.getByLabelText(/^event$/i);
       await user.click(eventCheckbox);
 
-      const calendarIdInput = screen.getByTestId('calendar-id-input');
-      await user.type(calendarIdInput, 'calendar-uuid-123');
+      const selectTrigger = screen.getByTestId('calendar-id-input');
+      await user.click(selectTrigger);
+      await user.keyboard('[ArrowDown]');
+      await user.keyboard('[Enter]');
 
       await user.click(screen.getByRole('button', { name: /create journal/i }));
 

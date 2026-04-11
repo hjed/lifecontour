@@ -33,6 +33,8 @@ export interface DisplayJournal {
   children?: ChildJournalSummary[];
   children_count?: number | null;
   depth?: number | null;
+  // Review indicators
+  has_pending_reviews?: boolean;
 }
 
 /**
@@ -80,5 +82,6 @@ export function transformJournalForDisplay(
     children: journal.attributes.children,
     children_count: journal.attributes.children_count ?? null,
     depth: journal.attributes.depth ?? null,
+    has_pending_reviews: journal.attributes.has_pending_reviews,
   };
 }

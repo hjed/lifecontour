@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { GitMerge } from 'lucide-react';
 import {
   Dialog,
@@ -20,15 +20,52 @@ import { MergeResolutionDialog } from './MergeResolutionDialog';
 
 interface MergeJournalDialogProps {
   readonly targetJournalId: string;
+  readonly sourceJournalId?: string;
+  readonly open?: boolean;
+  readonly onOpenChange?: (open: boolean) => void;
 }
 
 export function MergeJournalDialog({
   targetJournalId,
+  sourceJournalId,
+  open: externalOpen,
+  onOpenChange: externalOnOpenChange,
 }: MergeJournalDialogProps) {
-  const [open, setOpen] = useState(false);
+  const [internalOpen, setInternalOpen] = useState(false);
+  const open = externalOpen === undefined ? internalOpen : externalOpen;
+
   const [resolutionOpen, setResolutionOpen] = useState(false);
   const [selectedJournal, setSelectedJournal] =
     useState<JournalResource | null>(null);
+
+  // Auto-select source journal if provided via props
+  const { data: initialSourceJournal } = useJournal(
+    sourceJournalId && open && !resolutionOpen ? sourceJournalId : ''
+  );
+
+  // Use useEffect to apply the source journal when it loads
+  useEffect(() => {
+    if (
+      initialSourceJournal?.data &&
+      !selectedJournal &&
+      open &&
+      !resolutionOpen
+    ) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setSelectedJournal(initialSourceJournal.data);
+      // Auto-open resolution if the UI triggered this from a specific review action
+      if (sourceJournalId && externalOpen) {
+        setResolutionOpen(true);
+      }
+    }
+  }, [
+    initialSourceJournal,
+    selectedJournal,
+    open,
+    resolutionOpen,
+    sourceJournalId,
+    externalOpen,
+  ]);
 
   const { data: targetJournalRes } = useJournal(targetJournalId);
   // Only fetch source journal details if one is selected, to compare conflicts
@@ -36,9 +73,24 @@ export function MergeJournalDialog({
 
   const mergeJournalData = useMergeJournal();
 
+  const handleOpenChange = (newOpen: boolean) => {
+    if (externalOnOpenChange) {
+      externalOnOpenChange(newOpen);
+    } else {
+      setInternalOpen(newOpen);
+    }
+    if (!newOpen) {
+      setSelectedJournal(null);
+    }
+  };
+
   const handleNext = () => {
     if (!selectedJournal) return;
-    setOpen(false);
+    if (externalOnOpenChange) {
+      externalOnOpenChange(false);
+    } else {
+      setInternalOpen(false);
+    }
     setResolutionOpen(true);
   };
 
@@ -58,13 +110,6 @@ export function MergeJournalDialog({
     }
   };
 
-  const handleOpenChange = (newOpen: boolean) => {
-    setOpen(newOpen);
-    if (!newOpen) {
-      setSelectedJournal(null);
-    }
-  };
-
   const handleResolutionOpenChange = (newOpen: boolean) => {
     setResolutionOpen(newOpen);
     if (!newOpen && !mergeJournalData.isPending) {
@@ -77,16 +122,18 @@ export function MergeJournalDialog({
   return (
     <>
       <Dialog open={open} onOpenChange={handleOpenChange}>
-        <DialogTrigger asChild>
-          <Button
-            variant='outline'
-            size='sm'
-            className='gap-2'
-            aria-label='Merge journal'
-          >
-            <GitMerge className='h-4 w-4' />
-          </Button>
-        </DialogTrigger>
+        {externalOpen === undefined && (
+          <DialogTrigger asChild>
+            <Button
+              variant='outline'
+              size='sm'
+              className='gap-2'
+              aria-label='Merge journal'
+            >
+              <GitMerge className='h-4 w-4' />
+            </Button>
+          </DialogTrigger>
+        )}
         <DialogContent className='sm:max-w-md'>
           <DialogHeader>
             <DialogTitle>Merge Another Journal</DialogTitle>

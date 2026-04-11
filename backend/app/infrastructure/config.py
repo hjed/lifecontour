@@ -98,6 +98,12 @@ class Settings(BaseSettings):
         "Disabled by default for safety — set ENABLE_REINDEX_ENDPOINT=true "
         "when performing MeiliSearch upgrades or index rebuilds.",
     )
+    enable_test_review_items: bool = Field(
+        default=False,
+        description="Enable the POST /api/journals/review-items test endpoint. "
+        "Disabled by default — set ENABLE_TEST_REVIEW_ITEMS=true "
+        "only in test/CI environments for E2E review queue testing.",
+    )
 
     # Session settings
     session_secret_key: str = Field(

@@ -258,10 +258,10 @@ The sequence reflects both user priority and technical dependency:
 **PR Size:** ~4-6 files
 
 **Acceptance Criteria:**
-- [ ] Contact methods and tags move higher in the desktop information hierarchy.
-- [ ] Excessive blank space is reduced without making the page feel cramped.
-- [ ] The sidebar remains part of the layout.
-- [ ] Existing inline editing, relationships, and activity sections still render and function.
+- [x] Contact methods and tags move higher in the desktop information hierarchy.
+- [x] Excessive blank space is reduced without making the page feel cramped.
+- [x] The sidebar remains part of the layout.
+- [x] Existing inline editing, relationships, and activity sections still render and function.
 
 **Required Test Coverage:**
 - **Unit:** any layout helper/state logic introduced for section ordering.
@@ -272,10 +272,10 @@ The sequence reflects both user priority and technical dependency:
 **PR Size:** ~4-6 files
 
 **Acceptance Criteria:**
-- [ ] Desktop width is used more effectively while preserving readability.
-- [ ] Mobile and tablet breakpoints remain functional.
-- [ ] Accessibility landmarks, headings, and keyboard interaction remain sound.
-- [ ] The page requires less scrolling for common tasks.
+- [x] Desktop width is used more effectively while preserving readability.
+- [x] Mobile and tablet breakpoints remain functional.
+- [x] Accessibility landmarks, headings, and keyboard interaction remain sound.
+- [x] The page requires less scrolling for common tasks.
 
 **Required Test Coverage:**
 - **Unit:** visual-state helpers if added.
