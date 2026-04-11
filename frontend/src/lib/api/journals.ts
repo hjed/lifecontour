@@ -780,8 +780,8 @@ export function useInfiniteJournals(
       if (hasUserDateFilter) return undefined;
       try {
         // Progressing into the FUTURE (Scrolling DOWN)
-        const prevStart = parseISO(lastPageParam.date_to);
-        const newStart = addDays(prevStart, 1);
+        const prevEnd = parseISO(lastPageParam.date_to);
+        const newStart = addDays(prevEnd, 1);
         const newEnd = addDays(newStart, chunkDays - 1);
         return {
           date_from: format(newStart, 'yyyy-MM-dd'),

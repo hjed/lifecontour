@@ -16,7 +16,7 @@ const createMockJournal = (id: string, startDate: string): DisplayJournal => ({
 
 describe('journal-grouping', () => {
   describe('groupJournalsByDay', () => {
-    it('creates contiguous day groups including empty days, ordered descending', () => {
+    it('creates contiguous day groups including empty days, ordered ascending', () => {
       const journals = [
         createMockJournal('1', '2026-04-01T10:00:00'),
         createMockJournal('2', '2026-04-03T15:00:00'),

@@ -58,17 +58,24 @@ export function DayGroupedJournalList({
       `[data-testid="journal-day-group-${todayStr}"]`
     );
 
-    if (todayElement) {
-      setTimeout(() => {
-        todayElement.scrollIntoView({ block: 'start' });
-        // Allow a brief moment for the scroll to settle before enabling observers
+    let scrollTimer: NodeJS.Timeout;
+    let stateTimer: NodeJS.Timeout;
 
-        setTimeout(() => setHasScrolled(true), 100);
+    if (todayElement) {
+      scrollTimer = setTimeout(() => {
+        todayElement.scrollIntoView({ block: 'center' });
+        // Allow a brief moment for the scroll to settle before enabling observers
+        stateTimer = setTimeout(() => setHasScrolled(true), 100);
       }, 50);
     } else if (journals.length > 0 || (!isLoadingNext && !isLoadingPrevious)) {
       // eslint-disable-next-line react-hooks/set-state-in-effect -- Needed to gate intersection observers
       setHasScrolled(true);
     }
+
+    return () => {
+      clearTimeout(scrollTimer);
+      clearTimeout(stateTimer);
+    };
   }, [journals, isLoadingNext, isLoadingPrevious, hasScrolled]);
 
   useEffect(() => {
@@ -171,7 +178,12 @@ export function DayGroupedJournalList({
     journals.length === 0 && !isLoadingNext && !isLoadingPrevious;
 
   return (
-    <div className={`space-y-6 ${className}`}>
+    <div
+      className={`space-y-6 ${className}`}
+      data-testid={
+        hasScrolled ? 'journals-list-ready' : 'journals-list-loading'
+      }
+    >
       {/* Top Sentinel (Past) */}
       <div
         ref={topSentinelRef}

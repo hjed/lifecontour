@@ -23,7 +23,7 @@ export interface GroupJournalsOptions {
 /**
  * Groups an array of journals into a contiguous array of days between startDate and endDate.
  * Journals outside the specified start/end date will be placed into dynamically created ad-hoc buckets to prevent data loss.
- * Sorts days continuously descending (Newest at top, oldest at bottom).
+ * Sorts days continuously ascending (Oldest at top, newest at bottom).
  * Sorts journals within each day continuously ascending (Oldest journal first chronologically on that day).
  */
 export function groupJournalsByDay({
