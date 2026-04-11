@@ -81,39 +81,16 @@ test.describe('Journal Review Queue', () => {
       .first();
     await resolveBtn.click();
 
-    // 8. Wait for Merge Resolution Dialog to open
-    const mergeDialog = page.locator('[role="dialog"]', {
-      hasText: 'Merge Another Journal',
-    });
-    await expect(mergeDialog).toBeVisible({ timeout: 15000 });
-
-    // The target choice should be the candidate
-    await expect(mergeDialog).toContainText('Selected to merge:');
-
-    // Click Next to reach the resolution screen
-    const nextBtn = mergeDialog.getByRole('button', { name: 'Next' });
-    await nextBtn.click();
-
-    // Check that we reached the conflict resolution step
+    // 8. Since sourceJournalId is pre-populated, the dialog auto-advances
+    //    directly to the conflict resolution step (skipping the "Next" step).
     const resolutionDialog = page.locator('[role="dialog"]', {
       hasText: 'Resolve Merge Conflicts',
     });
     await expect(resolutionDialog).toBeVisible({ timeout: 15000 });
 
-    const closeBtn = resolutionDialog
-      .getByRole('button', { name: 'Close' })
-      .first();
-    if ((await closeBtn.count()) > 0) {
-      await closeBtn.click();
-    } else {
-      // Fallback to cancel
-      const cancelBtn = resolutionDialog
-        .getByRole('button', { name: 'Cancel' })
-        .first();
-      if ((await cancelBtn.count()) > 0) {
-        await cancelBtn.click();
-      }
-    }
+    // 9. Close the resolution dialog via Cancel
+    const cancelBtn = resolutionDialog.getByRole('button', { name: 'Cancel' });
+    await cancelBtn.click();
   });
 
   test('should display ReviewSuggestions component on journal detail view', async ({
@@ -179,24 +156,14 @@ test.describe('Journal Review Queue', () => {
     await expect(suggestionsContainer).toContainText('Confidence: 99%');
 
     // 5. Click "Resolve Merge"
-    // Fallback if specific test id is wrong, just get resolving button inside container
     const resolutionButton = suggestionsContainer
       .getByRole('button', { name: /Resolve Merge/i })
       .first();
     await expect(resolutionButton).toBeVisible();
     await resolutionButton.click();
 
-    // 6. Verify merge dialog opens automatically
-    const mergeDialog = page.locator('[role="dialog"]', {
-      hasText: 'Merge Another Journal',
-    });
-    await expect(mergeDialog).toBeVisible({ timeout: 15000 });
-
-    // 7. Click Next to reach the resolution screen
-    const nextBtn = mergeDialog.getByRole('button', { name: 'Next' });
-    await nextBtn.click();
-
-    // 8. Verify we reach the conflict resolution step
+    // 6. Since sourceJournalId is pre-populated from ReviewSuggestions,
+    //    the dialog auto-advances directly to Resolve Merge Conflicts.
     const resolutionDialog = page.locator('[role="dialog"]', {
       hasText: 'Resolve Merge Conflicts',
     });
