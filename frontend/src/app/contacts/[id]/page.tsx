@@ -114,7 +114,10 @@ function ContactDetailPageContent() {
   );
 
   return (
-    <main className='container mx-auto px-4 py-8' aria-label='Contact Detail'>
+    <section
+      className='container mx-auto px-4 py-8'
+      aria-label='Contact Detail'
+    >
       {/* Header */}
       <div className='mb-6 flex items-center gap-4'>
         <Button
@@ -282,6 +285,6 @@ function ContactDetailPageContent() {
           </Card>
         </div>
       )}
-    </main>
+    </section>
   );
 }
