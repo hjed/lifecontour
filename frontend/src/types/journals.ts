@@ -225,8 +225,8 @@ export interface JournalContactRelationship {
   id: string; // Contact ID is returned as string from API
   name?: string | null;
   relationship_type: JournalContactRelationshipType;
-  status?: string | null;
-  role?: string | null;
+  status?: AttendeeStatus | null;
+  role?: ContactEventRole | null;
 }
 
 // Alias for backward compatibility
@@ -450,8 +450,8 @@ export interface JournalContactRelationshipAddData {
   attributes: {
     contact_id: string;
     relationship_type: JournalContactRelationshipType;
-    status?: string | null;
-    role?: string | null;
+    status?: AttendeeStatus | null;
+    role?: ContactEventRole | null;
   };
 }
 

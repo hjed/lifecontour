@@ -1555,19 +1555,34 @@ async def _persist_contact_relationships(
 
                 # Parse status and role if present
                 status, role = None, None
+
+                import structlog
+
+                logger = structlog.get_logger(__name__)
+
                 status_raw = rel.get("status")
                 if isinstance(status_raw, str):
                     try:
                         status = AttendeeStatus[status_raw.upper()]
-                    except Exception:
-                        pass
+                    except KeyError:
+                        logger.warning(
+                            "Ignoring invalid contact relationship status",
+                            status=status_raw,
+                            journal_id=journal_id,
+                            contact_id=contact_id,
+                        )
 
                 role_raw = rel.get("role")
                 if isinstance(role_raw, str):
                     try:
                         role = ContactEventRole[role_raw.upper()]
-                    except Exception:
-                        pass
+                    except KeyError:
+                        logger.warning(
+                            "Ignoring invalid contact relationship role",
+                            role=role_raw,
+                            journal_id=journal_id,
+                            contact_id=contact_id,
+                        )
 
                 # Create relationship
                 relationship = JournalContactRelationship(
@@ -2929,9 +2944,7 @@ async def link_journal_to_contact(
         JSON string containing relationship creation confirmation
 
     Raises:
-        JournalNotFoundError: If the journal with the given ID does not exist
-        ContactNotFoundError: If the contact with the given ID does not exist
-        ValueError: If relationship_type is invalid
+        ValueError: If relationship is invalid, or if journal or contact do not exist.
     """
     # Validate relationship type
     try:
@@ -2976,12 +2989,12 @@ async def link_journal_to_contact(
         role=role_enum,
     )
 
+    import sqlalchemy.exc
+
     try:
         await repos.contact_relationship_repo.create(rel)
-    except Exception as e:
-        if type(e).__name__ == "IntegrityError":
-            raise ValueError(f"Relationship already exists: {e}") from e
-        raise ValueError(f"Relationship already exists: {e}") from e
+    except sqlalchemy.exc.IntegrityError as e:
+        raise ValueError("Relationship already exists") from e
 
     class LinkResponse(BaseModel):
         journal_id: int
@@ -2995,11 +3008,11 @@ async def link_journal_to_contact(
     response = LinkResponse(
         journal_id=journal_id,
         contact_id=contact_id,
-        relationship_type=relationship_type,
-        status=status,
-        role=role,
+        relationship_type=relationship_enum.value,
+        status=status_enum.value if status_enum is not None else None,
+        role=role_enum.value if role_enum is not None else None,
         linked=True,
-        summary=f"Successfully linked journal {journal_id} to contact {contact_id} as {relationship_type}",
+        summary=f"Successfully linked journal {journal_id} to contact {contact_id} as {relationship_enum.value}",
     )
 
     return MCPResponseBuilder.success_response(response)

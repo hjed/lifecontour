@@ -1950,19 +1950,23 @@ async def _process_journal_contact_relationships(
                     try:
                         status = AttendeeStatus[attrs["status"]]
                     except KeyError:
-                        import structlog
-
-                        logger = structlog.get_logger()
-                        logger.warning(f"Invalid AttendeeStatus: {attrs['status']}")
+                        logger.warning(
+                            "Invalid AttendeeStatus",
+                            status=attrs["status"],
+                            journal_id=journal_id,
+                            contact_id=contact_id,
+                        )
 
                 if attrs.get("role"):
                     try:
                         role = ContactEventRole[attrs["role"]]
                     except KeyError:
-                        import structlog
-
-                        logger = structlog.get_logger()
-                        logger.warning(f"Invalid ContactEventRole: {attrs['role']}")
+                        logger.warning(
+                            "Invalid ContactEventRole",
+                            role=attrs["role"],
+                            journal_id=journal_id,
+                            contact_id=contact_id,
+                        )
 
                 # Create the relationship using a nested transaction (savepoint)
                 # to prevent aborting the main transaction if
@@ -1979,9 +1983,6 @@ async def _process_journal_contact_relationships(
                         await contact_relationship_repo.create(relationship)
                 except IntegrityError:
                     # Log error and ignore, the context manager handles the rollback to the savepoint
-                    import structlog
-
-                    logger = structlog.get_logger()
                     logger.warning(
                         "Invalid journal contact relationship ignored",
                         journal_id=journal_id,
