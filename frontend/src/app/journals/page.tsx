@@ -265,7 +265,9 @@ export default function JournalsPage() {
                       setAnchorDate(undefined);
                     }}
                     data-testid='clear-filters'
-                  ></Button>
+                  >
+                    Clear
+                  </Button>
                 )}
               </div>
             </div>

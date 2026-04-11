@@ -1,7 +1,7 @@
 'use client';
 
 import { ReactNode, useEffect, useRef, useState } from 'react';
-import { format, parseISO } from 'date-fns';
+import { eachDayOfInterval, format, parseISO } from 'date-fns';
 import { Loader2 } from 'lucide-react';
 import { JournalListItem } from '@/components/journals/JournalListItem';
 import { DisplayJournal } from '@/hooks/useDisplayJournals';
@@ -53,6 +53,9 @@ export function DayGroupedJournalList({
   });
 
   const [hasScrolled, setHasScrolled] = useState(false);
+  const [expandedEmptyGroups, setExpandedEmptyGroups] = useState<Set<string>>(
+    new Set()
+  );
 
   // Initial scroll to today before enabling observers
   useEffect(() => {
@@ -213,6 +216,36 @@ export function DayGroupedJournalList({
 
       {dayGroups.map(group => {
         if (group.type === 'collapsed-empty') {
+          if (expandedEmptyGroups.has(group.startDate)) {
+            const emptyDays = eachDayOfInterval({
+              start: parseISO(group.startDate),
+              end: parseISO(group.endDate),
+            });
+
+            return (
+              <div key={`expanded-${group.startDate}`} className='space-y-6'>
+                {emptyDays.map(day => {
+                  const dStr = format(day, 'yyyy-MM-dd');
+                  const displayD = format(day, 'EEEE, MMMM do, yyyy');
+                  return (
+                    <div
+                      key={dStr}
+                      className='space-y-3'
+                      data-testid={`journal-day-group-${dStr}`}
+                    >
+                      <h3 className='bg-background/95 supports-[backdrop-filter]:bg-background/60 sticky top-0 z-10 border-b py-2 text-lg font-semibold backdrop-blur'>
+                        {displayD}
+                      </h3>
+                      <div className='text-muted-foreground border-l-2 border-transparent py-2 pl-4 text-sm italic'>
+                        No journals for {displayD}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          }
+
           const displayStartDate = format(parseISO(group.startDate), 'MMM do');
           const displayEndDate = format(
             parseISO(group.endDate),
@@ -227,12 +260,23 @@ export function DayGroupedJournalList({
               <div className='text-muted-foreground flex w-full items-center gap-4 text-sm italic sm:w-auto'>
                 <div className='bg-border h-px w-8 flex-grow sm:flex-grow-0' />
                 <span className='whitespace-nowrap'>
-                  {displayStartDate} - {displayEndDate} ({group.daysCount} days
-                  without entries)
+                  {displayStartDate} - {displayEndDate} ({group.daysCount} empty
+                  days)
                 </span>
                 <div className='bg-border h-px w-8 flex-grow sm:flex-grow-0' />
               </div>
               <div className='flex w-full justify-center gap-2 sm:w-auto'>
+                <Button
+                  variant='outline'
+                  size='sm'
+                  onClick={() => {
+                    const newSet = new Set(expandedEmptyGroups);
+                    newSet.add(group.startDate);
+                    setExpandedEmptyGroups(newSet);
+                  }}
+                >
+                  Expand
+                </Button>
                 {onJumpToDate && (
                   <Button
                     variant='outline'

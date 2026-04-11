@@ -6,6 +6,7 @@ import {
   JournalCalendar,
   EventDateRange,
   ChildJournalSummary,
+  JournalTypeData,
 } from '@/types/journals';
 
 /**
@@ -20,7 +21,7 @@ export interface DisplayJournal {
   tags: JournalTag[];
   contacts: JournalContactRelationship[];
   calendar?: JournalCalendar | null;
-  type_data?: Record<string, any>;
+  type_data?: Record<string, JournalTypeData>;
   parent_id?: number | null;
   order?: number | null;
   created_at?: string | null;

@@ -29,10 +29,10 @@ import {
   Ban,
   GitBranch,
 } from 'lucide-react';
-import { differenceInDays, parseISO } from 'date-fns';
+import { differenceInCalendarDays, parseISO } from 'date-fns';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { JournalType } from '@/types/journals';
+import { JournalType, EventState, CalendarInfoData } from '@/types/journals';
 import { DisplayJournal } from '@/hooks/useDisplayJournals';
 import { SearchHighlight } from '@/components/search/SearchHighlight';
 import { cn } from '@/lib/utils';
@@ -89,7 +89,9 @@ export function JournalListItem({
   const displayContent =
     journal.highlightedContent || truncateContent(journal.content);
 
-  const isCancelled = journal.type_data?.event?.event_state === 'cancelled';
+  const isCancelled =
+    (journal.type_data?.event as CalendarInfoData | undefined)?.event_state ===
+    EventState.CANCELLED;
   const isHierarchyNode =
     Boolean(journal.parent_id) || (journal.children_count ?? 0) > 0;
 
@@ -98,7 +100,7 @@ export function JournalListItem({
   if (journal.depth !== undefined && journal.depth !== null) {
     if (focusDate) {
       const distance = Math.abs(
-        differenceInDays(
+        differenceInCalendarDays(
           parseISO(journal.event_date_range.start),
           parseISO(focusDate)
         )
