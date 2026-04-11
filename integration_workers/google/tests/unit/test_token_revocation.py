@@ -8,9 +8,13 @@ sets the needs_reauth flag, and raises TokenRevokedError.
 import json
 import sys
 from datetime import UTC, datetime, timedelta
+from typing import TYPE_CHECKING, Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+
+if TYPE_CHECKING:
+    from google_auth_service import GoogleAuthService
 
 sys.path.insert(0, "/core_shared")
 
@@ -37,7 +41,7 @@ def _make_invalid_grant_response() -> MagicMock:
     return response
 
 
-def _patch_httpx(response: MagicMock):
+def _patch_httpx(response: MagicMock) -> Any:
     """Context manager to patch httpx.AsyncClient to return a given response."""
     mock_client = AsyncMock()
     mock_client.post = AsyncMock(return_value=response)
@@ -93,9 +97,7 @@ class TestTokenRevocationDetection:
         select_result.fetchone.return_value = record
         update_result = MagicMock()
 
-        mock_session.execute = AsyncMock(
-            side_effect=[select_result, update_result]
-        )
+        mock_session.execute = AsyncMock(side_effect=[select_result, update_result])
 
     @pytest.mark.asyncio
     async def test_refresh_detects_invalid_grant_and_raises_token_revoked_error(

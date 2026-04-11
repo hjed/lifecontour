@@ -723,4 +723,3 @@ class TestGoogleEventTransformerTimezone:
         assert result is not None
         _, calendar_info = result
         assert calendar_info.timezone == "Asia/Kolkata"
-

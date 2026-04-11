@@ -93,7 +93,7 @@ class GoogleStatusAttributes(BaseModel):
     )
     status: str = Field(
         default="disconnected",
-        description="Current integration status (active, inactive, error, disconnected)",
+        description="Current integration status (active, inactive, error, disconnected, token_expired)",
     )
     error_message: str | None = Field(
         default=None,

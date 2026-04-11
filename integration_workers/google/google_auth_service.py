@@ -195,9 +195,8 @@ class GoogleAuthService:
 
                 # Detect permanent token revocation (invalid_grant)
                 if self._is_invalid_grant(response):
-                    await self._mark_needs_reauth(
-                        str(user_id), google_account_email
-                    )
+                    await self._mark_needs_reauth(str(user_id), google_account_email)
+                    await self.session.commit()
                     raise TokenRevokedError(error_msg)
 
                 raise TokenRefreshFailedError(error_msg)
@@ -253,9 +252,7 @@ class GoogleAuthService:
         except (json.JSONDecodeError, AttributeError):
             return False
 
-    async def _mark_needs_reauth(
-        self, user_id: str, google_account_email: str
-    ) -> None:
+    async def _mark_needs_reauth(self, user_id: str, google_account_email: str) -> None:
         """Set the needs_reauth flag on the user's Google auth record.
 
         This flag is read by the status endpoint to inform the frontend
