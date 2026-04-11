@@ -1683,98 +1683,317 @@ def compute_date_window(
     )
 
 
-def register_journal_tools(mcp: FastMCP[None]) -> None:
+"""
+Register journal-related MCP tools with the FastMCP server.
+
+Args:
+    mcp: The FastMCP server instance to register tools with
+"""
+
+
+@mcp_unified_error_handler("create_journal_entry", "journal")
+async def create_journal_entry(
+    journal_data: Annotated[
+        str,
+        Field(
+            description="JSON string containing journal creation data with fields: "
+            "title (str), content (str), event_date_range (dict with start/end), "
+            "types (list[str]), type_data (dict), contact_relationships (list[dict]), "
+            "tags (list[str]), parent_id (int, optional)"
+        ),
+    ],
+    db_connection: AsyncConnection = mcp_depends(get_async_connection),
+    event_publisher: OutboxEventPublisher = mcp_depends(get_outbox_event_publisher),
+) -> str:
     """
-    Register journal-related MCP tools with the FastMCP server.
+    Create a new journal entry with types, type-specific data, relationships, and tags.
+
+    Creates a journal entry with support for multiple types (NOTE, EVENT, MOOD_RATING, etc.),
+    type-specific data (e.g., calendar_id for EVENT), contact relationships, and tags.
+    Returns AI-friendly response with contextual summary.
 
     Args:
-        mcp: The FastMCP server instance to register tools with
+        journal_data: JSON string with journal creation data
+
+    Returns:
+        JSON string containing AI-friendly journal information including:
+        - Journal details (title, content, date range)
+        - Types and type-specific data
+        - Contact relationships
+        - Tags
+        - Contextual summary for AI understanding
+
+    Raises:
+        JournalValidationError: If validation fails
+        ValueError: If JSON parsing fails or required fields are missing
     """
+    # Parse JSON input
+    try:
+        data_dict = json.loads(journal_data)
+        request = JournalCreateRequest(**data_dict)
+    except json.JSONDecodeError as e:
+        raise ValueError(f"Invalid JSON format: {e}") from e
+    except Exception as e:
+        raise ValueError(f"Invalid journal data: {e}") from e
 
-    @mcp.tool
-    @mcp_unified_error_handler("create_journal_entry", "journal")
-    async def create_journal_entry(
-        journal_data: Annotated[
-            str,
-            Field(
-                description="JSON string containing journal creation data with fields: "
-                "title (str), content (str), event_date_range (dict with start/end), "
-                "types (list[str]), type_data (dict), contact_relationships (list[dict]), "
-                "tags (list[str]), parent_id (int, optional)"
-            ),
-        ],
-        db_connection: AsyncConnection = mcp_depends(get_async_connection),
-        event_publisher: OutboxEventPublisher = mcp_depends(get_outbox_event_publisher),
-    ) -> str:
-        """
-        Create a new journal entry with types, type-specific data, relationships, and tags.
+    # Get current user ID from auth context
+    user_id = await get_current_user_id()
 
-        Creates a journal entry with support for multiple types (NOTE, EVENT, MOOD_RATING, etc.),
-        type-specific data (e.g., calendar_id for EVENT), contact relationships, and tags.
-        Returns AI-friendly response with contextual summary.
+    # Create repositories
+    repos = _create_journal_tool_repositories(db_connection)
+    journal_repo = repos.journal_repo
 
-        Args:
-            journal_data: JSON string with journal creation data
+    # Create journal service
+    journal_service = JournalService(journal_repo, event_publisher)
 
-        Returns:
-            JSON string containing AI-friendly journal information including:
-            - Journal details (title, content, date range)
-            - Types and type-specific data
-            - Contact relationships
-            - Tags
-            - Contextual summary for AI understanding
+    # Create journal entity
+    journal = Journal(
+        user_id=user_id,
+        title=request.title,
+        content=request.content,
+        event_date_range=EventDateRange(
+            start=request.event_date_range.start,
+            end=request.event_date_range.end,
+        ),
+        parent_id=request.parent_id,
+    )
 
-        Raises:
-            JournalValidationError: If validation fails
-            ValueError: If JSON parsing fails or required fields are missing
-        """
-        # Parse JSON input
-        try:
-            data_dict = json.loads(journal_data)
-            request = JournalCreateRequest(**data_dict)
-        except json.JSONDecodeError as e:
-            raise ValueError(f"Invalid JSON format: {e}") from e
-        except Exception as e:
-            raise ValueError(f"Invalid journal data: {e}") from e
+    # Create journal
+    created_journal = await journal_service.create_journal(journal, db_connection)
 
-        # Get current user ID from auth context
-        user_id = await get_current_user_id()
+    # Ensure journal_id is not None (it should always be set after creation)
+    if created_journal.id is None:
+        msg = "Journal ID should be set after creation"
+        raise ValueError(msg)
+    journal_id = created_journal.id
 
-        # Create repositories
-        repos = _create_journal_tool_repositories(db_connection)
-        journal_repo = repos.journal_repo
+    # Add types if provided in the request
+    if request.types:
+        for type_str in request.types:
+            try:
+                # Convert type string to enum
+                journal_type = JournalType[type_str.upper()]
 
-        # Create journal service
-        journal_service = JournalService(journal_repo, event_publisher)
+                # Capture the return value: includes all types added (requested +
+                # auto-resolved dependencies like FITNESS for OUTDOOR_ACTIVITY).
+                added_types = await journal_service.add_type_to_journal(
+                    journal_id, journal_type, db_connection
+                )
 
-        # Create journal entity
-        journal = Journal(
-            user_id=user_id,
-            title=request.title,
-            content=request.content,
-            event_date_range=EventDateRange(
-                start=request.event_date_range.start,
-                end=request.event_date_range.end,
-            ),
-            parent_id=request.parent_id,
+                # Create type-specific data rows for ALL added types (including
+                # dependency types like FITNESS). Mirrors REST controller behaviour.
+                for added_type in added_types:
+                    await _create_type_specific_data(
+                        added_type,
+                        journal_id,
+                        repos.mood_data_repo,
+                        repos.plan_data_repo,
+                        repos.travel_data_repo,
+                        repos.fitness_data_repo,
+                        repos.outdoor_activity_data_repo,
+                        repos.bushwalking_data_repo,
+                        repos.jogging_data_repo,
+                        repos.abseiling_data_repo,
+                        repos.canyoning_data_repo,
+                        repos.climbing_data_repo,
+                        repos.kayaking_data_repo,
+                        repos.cross_country_skiing_data_repo,
+                    )
+
+                # Update type-specific data if provided
+                if request.type_data and type_str.upper() in request.type_data:
+                    await _update_type_specific_data(
+                        journal_type,
+                        journal_id,
+                        request.type_data[type_str.upper()],
+                        repos.calendar_info_repo,
+                        repos.mood_data_repo,
+                        repos.photo_album_data_repo,
+                        repos.fitness_data_repo,
+                        repos.outdoor_activity_data_repo,
+                        repos.bushwalking_data_repo,
+                        repos.jogging_data_repo,
+                        repos.abseiling_data_repo,
+                        repos.canyoning_data_repo,
+                        repos.climbing_data_repo,
+                        repos.kayaking_data_repo,
+                        repos.cross_country_skiing_data_repo,
+                    )
+            except (ValueError, KeyError):
+                # Invalid type, skip
+                pass
+
+    # Add contact relationships if provided
+    if request.contact_relationships:
+        await _persist_contact_relationships(
+            journal_id,
+            request.contact_relationships,
+            repos.contact_relationship_repo,
         )
 
-        # Create journal
-        created_journal = await journal_service.create_journal(journal, db_connection)
+    # Add tags if provided
+    if request.tags:
+        await _persist_tags(journal_id, request.tags, repos.tag_repo)
 
-        # Ensure journal_id is not None (it should always be set after creation)
-        if created_journal.id is None:
-            msg = "Journal ID should be set after creation"
-            raise ValueError(msg)
-        journal_id = created_journal.id
+    # Fetch all enrichment data
+    types, type_data, contacts, tags = await _fetch_enrichment_data(
+        journal_id,
+        repos.calendar_info_repo,
+        repos.mood_data_repo,
+        repos.plan_data_repo,
+        repos.travel_data_repo,
+        repos.photo_album_data_repo,
+        repos.fitness_data_repo,
+        repos.outdoor_activity_data_repo,
+        repos.bushwalking_data_repo,
+        repos.jogging_data_repo,
+        repos.abseiling_data_repo,
+        repos.canyoning_data_repo,
+        repos.climbing_data_repo,
+        repos.kayaking_data_repo,
+        repos.cross_country_skiing_data_repo,
+        repos.contact_relationship_repo,
+        repos.contact_repo,
+        repos.tag_repo,
+    )
 
-        # Add types if provided in the request
-        if request.types:
-            for type_str in request.types:
+    parent = None
+    if created_journal.parent_id is not None:
+        parent = await repos.journal_repo.find_by_id(created_journal.parent_id)
+
+    # Convert to AI-friendly response
+    response = JournalConverter.to_response(
+        journal=created_journal,
+        types=types,
+        type_data=type_data,
+        contacts=contacts,
+        tags=tags,
+        parent=parent,
+    )
+
+    return MCPResponseBuilder.success_response(response)
+
+
+@mcp_unified_error_handler("update_journal_entry", "journal")
+async def update_journal_entry(
+    journal_id: Annotated[
+        int, Field(description="The unique identifier of the journal to update")
+    ],
+    journal_data: Annotated[
+        str,
+        Field(
+            description="JSON string containing journal update data with optional fields: "
+            "title (str), content (str), event_date_range (dict with start/end), "
+            "types (list[str]), type_data (dict), contact_relationships (list[dict]), "
+            "tags (list[str])"
+        ),
+    ],
+    db_connection: AsyncConnection = mcp_depends(get_async_connection),
+    event_publisher: OutboxEventPublisher = mcp_depends(get_outbox_event_publisher),
+) -> str:
+    """
+    Update an existing journal entry with partial data.
+
+    Updates journal fields, types, type-specific data, contact relationships, and tags.
+    Only provided fields are updated; omitted fields remain unchanged.
+    Returns AI-friendly response with contextual summary.
+
+    Args:
+        journal_id: The unique identifier of the journal to update
+        journal_data: JSON string with journal update data (partial)
+
+    Returns:
+        JSON string containing AI-friendly updated journal information
+
+    Raises:
+        JournalNotFoundError: If the journal with the given ID does not exist
+        JournalValidationError: If validation fails
+        ValueError: If JSON parsing fails
+    """
+    # Parse JSON input
+    try:
+        data_dict = json.loads(journal_data)
+        request = JournalUpdateRequest(**data_dict)
+    except json.JSONDecodeError as e:
+        raise ValueError(f"Invalid JSON format: {e}") from e
+    except Exception as e:
+        raise ValueError(f"Invalid journal data: {e}") from e
+
+    # Create repositories
+    repos = _create_journal_tool_repositories(db_connection)
+    journal_repo = repos.journal_repo
+    journal_service = JournalService(journal_repo, event_publisher)
+
+    # Get existing journal
+    existing_journal = await journal_repo.find_by_id(journal_id)
+    if not existing_journal:
+        raise JournalNotFoundError(journal_id)
+
+    # Track changed fields
+    changed_fields: dict[str, Any] = {}
+
+    # Update journal fields
+    if request.title is not None:
+        existing_journal.title = request.title
+        changed_fields["title"] = request.title
+    if request.content is not None:
+        existing_journal.content = request.content
+        changed_fields["content"] = request.content
+    if request.event_date_range is not None:
+        existing_journal.event_date_range = EventDateRange(
+            start=request.event_date_range.start,
+            end=request.event_date_range.end,
+        )
+        changed_fields["event_date_range"] = request.event_date_range
+
+    if "parent_id" in request.model_fields_set:
+        existing_journal.parent_id = request.parent_id
+        changed_fields["parent_id"] = request.parent_id
+
+    # Update journal
+    updated_journal = await journal_service.update_journal(
+        existing_journal, changed_fields, db_connection
+    )
+
+    # Update types if provided (replace all types)
+    if request.types is not None:
+        # Get current types
+        current_types, _ = await _fetch_journal_types_and_data(
+            journal_id,
+            repos.calendar_info_repo,
+            repos.mood_data_repo,
+            repos.plan_data_repo,
+            repos.travel_data_repo,
+            repos.photo_album_data_repo,
+            repos.fitness_data_repo,
+            repos.outdoor_activity_data_repo,
+            repos.bushwalking_data_repo,
+            repos.jogging_data_repo,
+            repos.abseiling_data_repo,
+            repos.canyoning_data_repo,
+            repos.climbing_data_repo,
+            repos.kayaking_data_repo,
+            repos.cross_country_skiing_data_repo,
+        )
+
+        # Remove types that are not in the new list
+        for current_type_str in current_types:
+            if current_type_str not in [t.upper() for t in request.types]:
                 try:
-                    # Convert type string to enum
-                    journal_type = JournalType[type_str.upper()]
+                    current_type = JournalType[current_type_str.upper()]
+                    await journal_service.remove_type_from_journal(
+                        journal_id, current_type, db_connection
+                    )
+                except (ValueError, KeyError):
+                    pass
 
+        # Add new types
+        for type_str in request.types:
+            try:
+                journal_type = JournalType[type_str.upper()]
+
+                # Only add if not already present
+                if type_str.upper() not in current_types:
                     # Capture the return value: includes all types added (requested +
                     # auto-resolved dependencies like FITNESS for OUTDOOR_ACTIVITY).
                     added_types = await journal_service.add_type_to_journal(
@@ -1801,258 +2020,12 @@ def register_journal_tools(mcp: FastMCP[None]) -> None:
                             repos.cross_country_skiing_data_repo,
                         )
 
-                    # Update type-specific data if provided
-                    if request.type_data and type_str.upper() in request.type_data:
-                        await _update_type_specific_data(
-                            journal_type,
-                            journal_id,
-                            request.type_data[type_str.upper()],
-                            repos.calendar_info_repo,
-                            repos.mood_data_repo,
-                            repos.photo_album_data_repo,
-                            repos.fitness_data_repo,
-                            repos.outdoor_activity_data_repo,
-                            repos.bushwalking_data_repo,
-                            repos.jogging_data_repo,
-                            repos.abseiling_data_repo,
-                            repos.canyoning_data_repo,
-                            repos.climbing_data_repo,
-                            repos.kayaking_data_repo,
-                            repos.cross_country_skiing_data_repo,
-                        )
-                except (ValueError, KeyError):
-                    # Invalid type, skip
-                    pass
-
-        # Add contact relationships if provided
-        if request.contact_relationships:
-            await _persist_contact_relationships(
-                journal_id,
-                request.contact_relationships,
-                repos.contact_relationship_repo,
-            )
-
-        # Add tags if provided
-        if request.tags:
-            await _persist_tags(journal_id, request.tags, repos.tag_repo)
-
-        # Fetch all enrichment data
-        types, type_data, contacts, tags = await _fetch_enrichment_data(
-            journal_id,
-            repos.calendar_info_repo,
-            repos.mood_data_repo,
-            repos.plan_data_repo,
-            repos.travel_data_repo,
-            repos.photo_album_data_repo,
-            repos.fitness_data_repo,
-            repos.outdoor_activity_data_repo,
-            repos.bushwalking_data_repo,
-            repos.jogging_data_repo,
-            repos.abseiling_data_repo,
-            repos.canyoning_data_repo,
-            repos.climbing_data_repo,
-            repos.kayaking_data_repo,
-            repos.cross_country_skiing_data_repo,
-            repos.contact_relationship_repo,
-            repos.contact_repo,
-            repos.tag_repo,
-        )
-
-        parent = None
-        if created_journal.parent_id is not None:
-            parent = await repos.journal_repo.find_by_id(created_journal.parent_id)
-
-        # Convert to AI-friendly response
-        response = JournalConverter.to_response(
-            journal=created_journal,
-            types=types,
-            type_data=type_data,
-            contacts=contacts,
-            tags=tags,
-            parent=parent,
-        )
-
-        return MCPResponseBuilder.success_response(response)
-
-    @mcp.tool
-    @mcp_unified_error_handler("update_journal_entry", "journal")
-    async def update_journal_entry(
-        journal_id: Annotated[
-            int, Field(description="The unique identifier of the journal to update")
-        ],
-        journal_data: Annotated[
-            str,
-            Field(
-                description="JSON string containing journal update data with optional fields: "
-                "title (str), content (str), event_date_range (dict with start/end), "
-                "types (list[str]), type_data (dict), contact_relationships (list[dict]), "
-                "tags (list[str])"
-            ),
-        ],
-        db_connection: AsyncConnection = mcp_depends(get_async_connection),
-        event_publisher: OutboxEventPublisher = mcp_depends(get_outbox_event_publisher),
-    ) -> str:
-        """
-        Update an existing journal entry with partial data.
-
-        Updates journal fields, types, type-specific data, contact relationships, and tags.
-        Only provided fields are updated; omitted fields remain unchanged.
-        Returns AI-friendly response with contextual summary.
-
-        Args:
-            journal_id: The unique identifier of the journal to update
-            journal_data: JSON string with journal update data (partial)
-
-        Returns:
-            JSON string containing AI-friendly updated journal information
-
-        Raises:
-            JournalNotFoundError: If the journal with the given ID does not exist
-            JournalValidationError: If validation fails
-            ValueError: If JSON parsing fails
-        """
-        # Parse JSON input
-        try:
-            data_dict = json.loads(journal_data)
-            request = JournalUpdateRequest(**data_dict)
-        except json.JSONDecodeError as e:
-            raise ValueError(f"Invalid JSON format: {e}") from e
-        except Exception as e:
-            raise ValueError(f"Invalid journal data: {e}") from e
-
-        # Create repositories
-        repos = _create_journal_tool_repositories(db_connection)
-        journal_repo = repos.journal_repo
-        journal_service = JournalService(journal_repo, event_publisher)
-
-        # Get existing journal
-        existing_journal = await journal_repo.find_by_id(journal_id)
-        if not existing_journal:
-            raise JournalNotFoundError(journal_id)
-
-        # Track changed fields
-        changed_fields: dict[str, Any] = {}
-
-        # Update journal fields
-        if request.title is not None:
-            existing_journal.title = request.title
-            changed_fields["title"] = request.title
-        if request.content is not None:
-            existing_journal.content = request.content
-            changed_fields["content"] = request.content
-        if request.event_date_range is not None:
-            existing_journal.event_date_range = EventDateRange(
-                start=request.event_date_range.start,
-                end=request.event_date_range.end,
-            )
-            changed_fields["event_date_range"] = request.event_date_range
-
-        if "parent_id" in request.model_fields_set:
-            existing_journal.parent_id = request.parent_id
-            changed_fields["parent_id"] = request.parent_id
-
-        # Update journal
-        updated_journal = await journal_service.update_journal(
-            existing_journal, changed_fields, db_connection
-        )
-
-        # Update types if provided (replace all types)
-        if request.types is not None:
-            # Get current types
-            current_types, _ = await _fetch_journal_types_and_data(
-                journal_id,
-                repos.calendar_info_repo,
-                repos.mood_data_repo,
-                repos.plan_data_repo,
-                repos.travel_data_repo,
-                repos.photo_album_data_repo,
-                repos.fitness_data_repo,
-                repos.outdoor_activity_data_repo,
-                repos.bushwalking_data_repo,
-                repos.jogging_data_repo,
-                repos.abseiling_data_repo,
-                repos.canyoning_data_repo,
-                repos.climbing_data_repo,
-                repos.kayaking_data_repo,
-                repos.cross_country_skiing_data_repo,
-            )
-
-            # Remove types that are not in the new list
-            for current_type_str in current_types:
-                if current_type_str not in [t.upper() for t in request.types]:
-                    try:
-                        current_type = JournalType[current_type_str.upper()]
-                        await journal_service.remove_type_from_journal(
-                            journal_id, current_type, db_connection
-                        )
-                    except (ValueError, KeyError):
-                        pass
-
-            # Add new types
-            for type_str in request.types:
-                try:
-                    journal_type = JournalType[type_str.upper()]
-
-                    # Only add if not already present
-                    if type_str.upper() not in current_types:
-                        # Capture the return value: includes all types added (requested +
-                        # auto-resolved dependencies like FITNESS for OUTDOOR_ACTIVITY).
-                        added_types = await journal_service.add_type_to_journal(
-                            journal_id, journal_type, db_connection
-                        )
-
-                        # Create type-specific data rows for ALL added types (including
-                        # dependency types like FITNESS). Mirrors REST controller behaviour.
-                        for added_type in added_types:
-                            await _create_type_specific_data(
-                                added_type,
-                                journal_id,
-                                repos.mood_data_repo,
-                                repos.plan_data_repo,
-                                repos.travel_data_repo,
-                                repos.fitness_data_repo,
-                                repos.outdoor_activity_data_repo,
-                                repos.bushwalking_data_repo,
-                                repos.jogging_data_repo,
-                                repos.abseiling_data_repo,
-                                repos.canyoning_data_repo,
-                                repos.climbing_data_repo,
-                                repos.kayaking_data_repo,
-                                repos.cross_country_skiing_data_repo,
-                            )
-
-                    # Update type-specific data if provided
-                    if request.type_data and type_str.upper() in request.type_data:
-                        await _update_type_specific_data(
-                            journal_type,
-                            journal_id,
-                            request.type_data[type_str.upper()],
-                            repos.calendar_info_repo,
-                            repos.mood_data_repo,
-                            repos.photo_album_data_repo,
-                            repos.fitness_data_repo,
-                            repos.outdoor_activity_data_repo,
-                            repos.bushwalking_data_repo,
-                            repos.jogging_data_repo,
-                            repos.abseiling_data_repo,
-                            repos.canyoning_data_repo,
-                            repos.climbing_data_repo,
-                            repos.kayaking_data_repo,
-                            repos.cross_country_skiing_data_repo,
-                        )
-                except (ValueError, KeyError):
-                    # Invalid type, skip
-                    pass
-
-        # Update type_data if provided (without changing types)
-        elif request.type_data is not None:
-            for type_str, type_data_dict in request.type_data.items():
-                try:
-                    journal_type = JournalType[type_str.upper()]
+                # Update type-specific data if provided
+                if request.type_data and type_str.upper() in request.type_data:
                     await _update_type_specific_data(
                         journal_type,
                         journal_id,
-                        type_data_dict,
+                        request.type_data[type_str.upper()],
                         repos.calendar_info_repo,
                         repos.mood_data_repo,
                         repos.photo_album_data_repo,
@@ -2066,1136 +2039,1250 @@ def register_journal_tools(mcp: FastMCP[None]) -> None:
                         repos.kayaking_data_repo,
                         repos.cross_country_skiing_data_repo,
                     )
-                except (ValueError, KeyError):
-                    # Invalid type, skip
-                    pass
+            except (ValueError, KeyError):
+                # Invalid type, skip
+                pass
 
-        # Update contact relationships if provided (replace all relationships)
-        if request.contact_relationships is not None:
-            # Remove all existing relationships
-            existing_relationships = (
-                await repos.contact_relationship_repo.get_by_journal(journal_id)
-            )
-            for rel in existing_relationships:
-                await repos.contact_relationship_repo.delete(
-                    journal_id, rel.contact_id, rel.relationship_type
+    # Update type_data if provided (without changing types)
+    elif request.type_data is not None:
+        for type_str, type_data_dict in request.type_data.items():
+            try:
+                journal_type = JournalType[type_str.upper()]
+                await _update_type_specific_data(
+                    journal_type,
+                    journal_id,
+                    type_data_dict,
+                    repos.calendar_info_repo,
+                    repos.mood_data_repo,
+                    repos.photo_album_data_repo,
+                    repos.fitness_data_repo,
+                    repos.outdoor_activity_data_repo,
+                    repos.bushwalking_data_repo,
+                    repos.jogging_data_repo,
+                    repos.abseiling_data_repo,
+                    repos.canyoning_data_repo,
+                    repos.climbing_data_repo,
+                    repos.kayaking_data_repo,
+                    repos.cross_country_skiing_data_repo,
                 )
+            except (ValueError, KeyError):
+                # Invalid type, skip
+                pass
 
-            # Add new relationships
-            await _persist_contact_relationships(
-                journal_id,
-                request.contact_relationships,
-                repos.contact_relationship_repo,
+    # Update contact relationships if provided (replace all relationships)
+    if request.contact_relationships is not None:
+        # Remove all existing relationships
+        existing_relationships = await repos.contact_relationship_repo.get_by_journal(
+            journal_id
+        )
+        for rel in existing_relationships:
+            await repos.contact_relationship_repo.delete(
+                journal_id, rel.contact_id, rel.relationship_type
             )
 
-        # Update tags if provided (replace all tags)
-        if request.tags is not None:
-            # Remove all existing tags
-            existing_tags = await repos.tag_repo.get_tags_for_journal(journal_id)
-            for existing_tag in existing_tags:
-                if existing_tag.id is not None:
-                    await repos.tag_repo.remove_tag(journal_id, existing_tag.id)
-
-            # Add new tags
-            await _persist_tags(journal_id, request.tags, repos.tag_repo)
-
-        # Fetch all enrichment data
-        types, type_data, contacts, tags = await _fetch_enrichment_data(
+        # Add new relationships
+        await _persist_contact_relationships(
             journal_id,
-            repos.calendar_info_repo,
-            repos.mood_data_repo,
-            repos.plan_data_repo,
-            repos.travel_data_repo,
-            repos.photo_album_data_repo,
-            repos.fitness_data_repo,
-            repos.outdoor_activity_data_repo,
-            repos.bushwalking_data_repo,
-            repos.jogging_data_repo,
-            repos.abseiling_data_repo,
-            repos.canyoning_data_repo,
-            repos.climbing_data_repo,
-            repos.kayaking_data_repo,
-            repos.cross_country_skiing_data_repo,
+            request.contact_relationships,
             repos.contact_relationship_repo,
-            repos.contact_repo,
-            repos.tag_repo,
         )
 
-        parent = None
-        if updated_journal.parent_id is not None:
-            parent = await repos.journal_repo.find_by_id(updated_journal.parent_id)
+    # Update tags if provided (replace all tags)
+    if request.tags is not None:
+        # Remove all existing tags
+        existing_tags = await repos.tag_repo.get_tags_for_journal(journal_id)
+        for existing_tag in existing_tags:
+            if existing_tag.id is not None:
+                await repos.tag_repo.remove_tag(journal_id, existing_tag.id)
 
-        # Convert to AI-friendly response
-        response = JournalConverter.to_response(
-            journal=updated_journal,
-            types=types,
-            type_data=type_data,
-            contacts=contacts,
-            tags=tags,
-            parent=parent,
+        # Add new tags
+        await _persist_tags(journal_id, request.tags, repos.tag_repo)
+
+    # Fetch all enrichment data
+    types, type_data, contacts, tags = await _fetch_enrichment_data(
+        journal_id,
+        repos.calendar_info_repo,
+        repos.mood_data_repo,
+        repos.plan_data_repo,
+        repos.travel_data_repo,
+        repos.photo_album_data_repo,
+        repos.fitness_data_repo,
+        repos.outdoor_activity_data_repo,
+        repos.bushwalking_data_repo,
+        repos.jogging_data_repo,
+        repos.abseiling_data_repo,
+        repos.canyoning_data_repo,
+        repos.climbing_data_repo,
+        repos.kayaking_data_repo,
+        repos.cross_country_skiing_data_repo,
+        repos.contact_relationship_repo,
+        repos.contact_repo,
+        repos.tag_repo,
+    )
+
+    parent = None
+    if updated_journal.parent_id is not None:
+        parent = await repos.journal_repo.find_by_id(updated_journal.parent_id)
+
+    # Convert to AI-friendly response
+    response = JournalConverter.to_response(
+        journal=updated_journal,
+        types=types,
+        type_data=type_data,
+        contacts=contacts,
+        tags=tags,
+        parent=parent,
+    )
+
+    return MCPResponseBuilder.success_response(response)
+
+
+@mcp_unified_error_handler("get_journal", "journal")
+async def get_journal(
+    journal_id: Annotated[
+        int, Field(description="The unique identifier of the journal")
+    ],
+    include_children: Annotated[
+        bool,
+        Field(
+            default=False,
+            description="Optional: Include child journals in the response",
+        ),
+    ] = False,
+    db_connection: AsyncConnection = mcp_depends(get_async_connection),
+) -> str:
+    """
+    Get journal details by ID for AI analysis.
+
+    Retrieves comprehensive journal information including title, content, types,
+    type-specific data, contact relationships, tags, and a contextual summary.
+    Optionally includes child journals.
+
+    Args:
+        journal_id: The unique identifier of the journal
+        include_children: Optional flag to include child journals
+
+    Returns:
+        JSON string containing AI-friendly journal information including:
+        - Journal details (title, content, date range)
+        - Types and type-specific data
+        - Contact relationships
+        - Tags
+        - Optional child journals
+        - Contextual summary for AI understanding
+
+    Raises:
+        JournalNotFoundError: If the journal with the given ID does not exist
+    """
+    # Create repositories
+    repos = _create_journal_tool_repositories(db_connection)
+    journal_repo = repos.journal_repo
+
+    # Get journal
+    journal = await journal_repo.find_by_id(journal_id)
+    if not journal:
+        raise JournalNotFoundError(journal_id)
+
+    # Get children if requested
+    children = None
+    if include_children:
+        children = await journal_repo.get_children(journal_id)
+
+    # Fetch types and type-specific data
+    types, type_data = await _fetch_journal_types_and_data(
+        journal_id,
+        repos.calendar_info_repo,
+        repos.mood_data_repo,
+        repos.plan_data_repo,
+        repos.travel_data_repo,
+        repos.photo_album_data_repo,
+        repos.fitness_data_repo,
+        repos.outdoor_activity_data_repo,
+        repos.bushwalking_data_repo,
+        repos.jogging_data_repo,
+        repos.abseiling_data_repo,
+        repos.canyoning_data_repo,
+        repos.climbing_data_repo,
+        repos.kayaking_data_repo,
+        repos.cross_country_skiing_data_repo,
+    )
+
+    # Fetch contact relationships and contact details
+    contacts = await _fetch_contact_relationships_with_names(
+        journal_id, repos.contact_relationship_repo, repos.contact_repo
+    )
+
+    # Fetch tags
+    journal_tags = await repos.tag_repo.get_tags_for_journal(journal_id)
+
+    # Convert to AI-friendly response
+    response = JournalConverter.to_response(
+        journal=journal,
+        types=types,
+        type_data=type_data,
+        contacts=contacts,
+        tags=journal_tags,
+        children=children,
+    )
+
+    return MCPResponseBuilder.success_response(response)
+
+
+@mcp_unified_error_handler("get_journal_hierarchy", "journal")
+async def get_journal_hierarchy(
+    start_date: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="Optional: Start date (ISO format) to filter journals",
+        ),
+    ] = None,
+    end_date: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="Optional: End date (ISO format) to filter journals",
+        ),
+    ] = None,
+    types: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="Optional: Comma-separated list of journal types to filter by",
+        ),
+    ] = None,
+    limit: Annotated[
+        int,
+        Field(
+            default=100,
+            description="Maximum number of journals to retrieve before building hierarchy (default: 100)",
+        ),
+    ] = 100,
+    db_connection: AsyncConnection = mcp_depends(get_async_connection),
+) -> str:
+    """
+    Get a hierarchical view of journals.
+
+    Retrieves journals and their descendants matching the given filters,
+    returning them in a nested tree structure. Useful for exploring
+    trips, projects, or multi-day events.
+
+    Args:
+        start_date: Optional start date
+        end_date: Optional end date
+        types: Optional comma-separated list of journal types
+        limit: Maximum number of journals to retrieve
+
+    Returns:
+        JSON string containing the journal hierarchy tree and summary.
+    """
+    import time
+
+    start_time = time.time()
+    user_id = await get_current_user_id()
+    repos = _create_journal_tool_repositories(db_connection)
+
+    type_filters = _parse_type_filters(types)
+    journal_type = type_filters[0] if len(type_filters) == 1 else None
+
+    start = _parse_optional_datetime_filter(start_date, "start_date")
+    end = _parse_optional_datetime_filter(end_date, "end_date", is_end=True)
+
+    start_str = start.isoformat() if start else None
+    end_str = end.isoformat() if end else None
+
+    journals = await repos.journal_repo.get_all(
+        user_id=user_id,
+        limit=limit,
+        offset=0,
+        journal_type=journal_type,
+        start_date=start_str,
+        end_date=end_str,
+    )
+
+    filtered_journals = []
+    if len(type_filters) > 1:
+        for j in journals:
+            if j.id is not None:
+                j_types, _ = await _fetch_types_for_journal(j.id, repos)
+                if any(t in type_filters for t in j_types):
+                    filtered_journals.append(j)
+        journals = filtered_journals
+
+    returned_ids_list = [j.id for j in journals if j.id is not None]
+    children_count_by_parent_id = await repos.journal_repo.count_children_for_parents(
+        user_id=user_id, parent_ids=returned_ids_list
+    )
+
+    depth_map = await HierarchyService.compute_depth_map(
+        returned_ids_list, repos.journal_repo
+    )
+
+    hierarchy_nodes = HierarchyService.build_tree_nodes(
+        journals, children_count_by_parent_id, depth_map
+    )
+
+    root_nodes = []
+    for h_node in hierarchy_nodes:
+        root_nodes.append(await _build_hierarchy_node(h_node, repos))
+
+    processing_time_ms = int((time.time() - start_time) * 1000)
+    summary = (
+        f"Found {len(journals)} journal(s), representing {len(root_nodes)} "
+        f"root-level item(s) in the hierarchy. (Processing time: {processing_time_ms}ms)"
+    )
+
+    response = JournalHierarchyResponse(
+        nodes=root_nodes,
+        total_nodes=len(journals),
+        processing_time_ms=processing_time_ms,
+        summary=summary,
+    )
+
+    return MCPResponseBuilder.success_response(response)
+
+
+@mcp_unified_error_handler("search_journals", "journal")
+async def search_journals(
+    query: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="Optional: Search query for full-text search",
+        ),
+    ] = None,
+    types: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="Optional: Comma-separated list of journal types to filter by",
+        ),
+    ] = None,
+    limit: Annotated[
+        int,
+        Field(
+            default=20,
+            description="Maximum number of results to return (default: 20)",
+        ),
+    ] = 20,
+    db_connection: AsyncConnection = mcp_depends(get_async_connection),
+) -> str:
+    """
+    Search journals with filtering options.
+
+    Searches journals by query, types, and other filters.
+    Returns AI-friendly summaries with relevance scores.
+
+    Args:
+        query: Optional search query for full-text search
+        types: Optional comma-separated list of journal types
+        limit: Maximum number of results to return
+
+    Returns:
+        JSON string containing AI-friendly search results with:
+        - List of matching journals with excerpts
+        - Search metadata (total hits, processing time)
+        - Contextual summary for AI understanding
+
+    Raises:
+        ValueError: If invalid filter values are provided
+    """
+    user_id = await get_current_user_id()
+    repos = _create_journal_tool_repositories(db_connection)
+    type_filters = _parse_type_filters(types)
+
+    if len(type_filters) <= 1:
+        journal_type = type_filters[0] if type_filters else None
+        total_hits = await repos.journal_repo.count_all(
+            user_id=user_id,
+            journal_type=journal_type,
+            search=query,
         )
-
-        return MCPResponseBuilder.success_response(response)
-
-    @mcp.tool
-    @mcp_unified_error_handler("get_journal", "journal")
-    async def get_journal(
-        journal_id: Annotated[
-            int, Field(description="The unique identifier of the journal")
-        ],
-        include_children: Annotated[
-            bool,
-            Field(
-                default=False,
-                description="Optional: Include child journals in the response",
-            ),
-        ] = False,
-        db_connection: AsyncConnection = mcp_depends(get_async_connection),
-    ) -> str:
-        """
-        Get journal details by ID for AI analysis.
-
-        Retrieves comprehensive journal information including title, content, types,
-        type-specific data, contact relationships, tags, and a contextual summary.
-        Optionally includes child journals.
-
-        Args:
-            journal_id: The unique identifier of the journal
-            include_children: Optional flag to include child journals
-
-        Returns:
-            JSON string containing AI-friendly journal information including:
-            - Journal details (title, content, date range)
-            - Types and type-specific data
-            - Contact relationships
-            - Tags
-            - Optional child journals
-            - Contextual summary for AI understanding
-
-        Raises:
-            JournalNotFoundError: If the journal with the given ID does not exist
-        """
-        # Create repositories
-        repos = _create_journal_tool_repositories(db_connection)
-        journal_repo = repos.journal_repo
-
-        # Get journal
-        journal = await journal_repo.find_by_id(journal_id)
-        if not journal:
-            raise JournalNotFoundError(journal_id)
-
-        # Get children if requested
-        children = None
-        if include_children:
-            children = await journal_repo.get_children(journal_id)
-
-        # Fetch types and type-specific data
-        types, type_data = await _fetch_journal_types_and_data(
-            journal_id,
-            repos.calendar_info_repo,
-            repos.mood_data_repo,
-            repos.plan_data_repo,
-            repos.travel_data_repo,
-            repos.photo_album_data_repo,
-            repos.fitness_data_repo,
-            repos.outdoor_activity_data_repo,
-            repos.bushwalking_data_repo,
-            repos.jogging_data_repo,
-            repos.abseiling_data_repo,
-            repos.canyoning_data_repo,
-            repos.climbing_data_repo,
-            repos.kayaking_data_repo,
-            repos.cross_country_skiing_data_repo,
-        )
-
-        # Fetch contact relationships and contact details
-        contacts = await _fetch_contact_relationships_with_names(
-            journal_id, repos.contact_relationship_repo, repos.contact_repo
-        )
-
-        # Fetch tags
-        journal_tags = await repos.tag_repo.get_tags_for_journal(journal_id)
-
-        # Convert to AI-friendly response
-        response = JournalConverter.to_response(
-            journal=journal,
-            types=types,
-            type_data=type_data,
-            contacts=contacts,
-            tags=journal_tags,
-            children=children,
-        )
-
-        return MCPResponseBuilder.success_response(response)
-
-    @mcp.tool
-    @mcp_unified_error_handler("get_journal_hierarchy", "journal")
-    async def get_journal_hierarchy(
-        start_date: Annotated[
-            str | None,
-            Field(
-                default=None,
-                description="Optional: Start date (ISO format) to filter journals",
-            ),
-        ] = None,
-        end_date: Annotated[
-            str | None,
-            Field(
-                default=None,
-                description="Optional: End date (ISO format) to filter journals",
-            ),
-        ] = None,
-        types: Annotated[
-            str | None,
-            Field(
-                default=None,
-                description="Optional: Comma-separated list of journal types to filter by",
-            ),
-        ] = None,
-        limit: Annotated[
-            int,
-            Field(
-                default=100,
-                description="Maximum number of journals to retrieve before building hierarchy (default: 100)",
-            ),
-        ] = 100,
-        db_connection: AsyncConnection = mcp_depends(get_async_connection),
-    ) -> str:
-        """
-        Get a hierarchical view of journals.
-
-        Retrieves journals and their descendants matching the given filters,
-        returning them in a nested tree structure. Useful for exploring
-        trips, projects, or multi-day events.
-
-        Args:
-            start_date: Optional start date
-            end_date: Optional end date
-            types: Optional comma-separated list of journal types
-            limit: Maximum number of journals to retrieve
-
-        Returns:
-            JSON string containing the journal hierarchy tree and summary.
-        """
-        import time
-
-        start_time = time.time()
-        user_id = await get_current_user_id()
-        repos = _create_journal_tool_repositories(db_connection)
-
-        type_filters = _parse_type_filters(types)
-        journal_type = type_filters[0] if len(type_filters) == 1 else None
-
-        start = _parse_optional_datetime_filter(start_date, "start_date")
-        end = _parse_optional_datetime_filter(end_date, "end_date", is_end=True)
-
-        start_str = start.isoformat() if start else None
-        end_str = end.isoformat() if end else None
-
         journals = await repos.journal_repo.get_all(
             user_id=user_id,
             limit=limit,
             offset=0,
             journal_type=journal_type,
-            start_date=start_str,
-            end_date=end_str,
+            search=query,
         )
-
-        filtered_journals = []
-        if len(type_filters) > 1:
-            for j in journals:
-                if j.id is not None:
-                    j_types, _ = await _fetch_types_for_journal(j.id, repos)
-                    if any(t in type_filters for t in j_types):
-                        filtered_journals.append(j)
-            journals = filtered_journals
-
-        returned_ids_list = [j.id for j in journals if j.id is not None]
-        children_count_by_parent_id = (
-            await repos.journal_repo.count_children_for_parents(
-                user_id=user_id, parent_ids=returned_ids_list
-            )
+        results = await _build_search_results(journals, repos)
+    else:
+        candidate_count = await repos.journal_repo.count_all(
+            user_id=user_id, search=query
         )
-
-        depth_map = await HierarchyService.compute_depth_map(
-            returned_ids_list, repos.journal_repo
-        )
-
-        hierarchy_nodes = HierarchyService.build_tree_nodes(
-            journals, children_count_by_parent_id, depth_map
-        )
-
-        root_nodes = []
-        for h_node in hierarchy_nodes:
-            root_nodes.append(await _build_hierarchy_node(h_node, repos))
-
-        processing_time_ms = int((time.time() - start_time) * 1000)
-        summary = (
-            f"Found {len(journals)} journal(s), representing {len(root_nodes)} "
-            f"root-level item(s) in the hierarchy. (Processing time: {processing_time_ms}ms)"
-        )
-
-        response = JournalHierarchyResponse(
-            nodes=root_nodes,
-            total_nodes=len(journals),
-            processing_time_ms=processing_time_ms,
-            summary=summary,
-        )
-
-        return MCPResponseBuilder.success_response(response)
-
-    @mcp.tool
-    @mcp_unified_error_handler("search_journals", "journal")
-    async def search_journals(
-        query: Annotated[
-            str | None,
-            Field(
-                default=None,
-                description="Optional: Search query for full-text search",
-            ),
-        ] = None,
-        types: Annotated[
-            str | None,
-            Field(
-                default=None,
-                description="Optional: Comma-separated list of journal types to filter by",
-            ),
-        ] = None,
-        limit: Annotated[
-            int,
-            Field(
-                default=20,
-                description="Maximum number of results to return (default: 20)",
-            ),
-        ] = 20,
-        db_connection: AsyncConnection = mcp_depends(get_async_connection),
-    ) -> str:
-        """
-        Search journals with filtering options.
-
-        Searches journals by query, types, and other filters.
-        Returns AI-friendly summaries with relevance scores.
-
-        Args:
-            query: Optional search query for full-text search
-            types: Optional comma-separated list of journal types
-            limit: Maximum number of results to return
-
-        Returns:
-            JSON string containing AI-friendly search results with:
-            - List of matching journals with excerpts
-            - Search metadata (total hits, processing time)
-            - Contextual summary for AI understanding
-
-        Raises:
-            ValueError: If invalid filter values are provided
-        """
-        user_id = await get_current_user_id()
-        repos = _create_journal_tool_repositories(db_connection)
-        type_filters = _parse_type_filters(types)
-
-        if len(type_filters) <= 1:
-            journal_type = type_filters[0] if type_filters else None
-            total_hits = await repos.journal_repo.count_all(
-                user_id=user_id,
-                journal_type=journal_type,
-                search=query,
-            )
+        if candidate_count == 0:
+            journals = []
+        else:
             journals = await repos.journal_repo.get_all(
                 user_id=user_id,
-                limit=limit,
+                limit=candidate_count,
                 offset=0,
-                journal_type=journal_type,
                 search=query,
             )
-            results = await _build_search_results(journals, repos)
-        else:
-            candidate_count = await repos.journal_repo.count_all(
-                user_id=user_id, search=query
+
+        filtered_journals: list[Journal] = []
+        results = []
+        requested_types = set(type_filters)
+        for journal in journals:
+            if journal.id is None:
+                continue
+            journal_types, _ = await _fetch_types_for_journal(journal.id, repos)
+            if requested_types.isdisjoint(journal_types):
+                continue
+            filtered_journals.append(journal)
+            results.append(
+                _journal_to_search_result(
+                    journal,
+                    types=journal_types,
+                )
             )
-            if candidate_count == 0:
-                journals = []
-            else:
-                journals = await repos.journal_repo.get_all(
-                    user_id=user_id,
-                    limit=candidate_count,
-                    offset=0,
-                    search=query,
-                )
 
-            filtered_journals: list[Journal] = []
-            results = []
-            requested_types = set(type_filters)
-            for journal in journals:
-                if journal.id is None:
-                    continue
-                journal_types, _ = await _fetch_types_for_journal(journal.id, repos)
-                if requested_types.isdisjoint(journal_types):
-                    continue
-                filtered_journals.append(journal)
-                results.append(
-                    _journal_to_search_result(
-                        journal,
-                        types=journal_types,
-                    )
-                )
+        total_hits = len(filtered_journals)
+        results = results[:limit]
 
-            total_hits = len(filtered_journals)
-            results = results[:limit]
+    response = JournalSearchResponse(
+        results=results,
+        query=query,
+        total_hits=total_hits,
+        processing_time_ms=0,
+        summary=f"Found {total_hits} journal(s)",
+    )
 
-        response = JournalSearchResponse(
-            results=results,
-            query=query,
-            total_hits=total_hits,
-            processing_time_ms=0,
-            summary=f"Found {total_hits} journal(s)",
-        )
+    return MCPResponseBuilder.success_response(response)
 
-        return MCPResponseBuilder.success_response(response)
 
-    @mcp.tool
-    @mcp_unified_error_handler("search_activities", "journal")
-    async def search_activities(
-        query: Annotated[
-            str | None,
-            Field(default=None, description="Optional search query for title/content"),
-        ] = None,
-        activity_type: Annotated[
-            str | None,
-            Field(
-                default=None,
-                description="Optional effective activity type filter",
-            ),
-        ] = None,
-        start_date: Annotated[
-            str | None,
-            Field(default=None, description="Optional ISO start date/datetime filter"),
-        ] = None,
-        end_date: Annotated[
-            str | None,
-            Field(default=None, description="Optional ISO end date/datetime filter"),
-        ] = None,
-        limit: Annotated[
-            int,
-            Field(default=20, description="Maximum number of results to return"),
-        ] = 20,
-        db_connection: AsyncConnection = mcp_depends(get_async_connection),
-    ) -> str:
-        """Search activity journals with effective activity-type filtering."""
-        user_id = await get_current_user_id()
-        repos = _create_journal_tool_repositories(db_connection)
-        total_hits = await _count_activity_rows(
+@mcp_unified_error_handler("search_activities", "journal")
+async def search_activities(
+    query: Annotated[
+        str | None,
+        Field(default=None, description="Optional search query for title/content"),
+    ] = None,
+    activity_type: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="Optional effective activity type filter",
+        ),
+    ] = None,
+    start_date: Annotated[
+        str | None,
+        Field(default=None, description="Optional ISO start date/datetime filter"),
+    ] = None,
+    end_date: Annotated[
+        str | None,
+        Field(default=None, description="Optional ISO end date/datetime filter"),
+    ] = None,
+    limit: Annotated[
+        int,
+        Field(default=20, description="Maximum number of results to return"),
+    ] = 20,
+    db_connection: AsyncConnection = mcp_depends(get_async_connection),
+) -> str:
+    """Search activity journals with effective activity-type filtering."""
+    user_id = await get_current_user_id()
+    repos = _create_journal_tool_repositories(db_connection)
+    total_hits = await _count_activity_rows(
+        db_connection,
+        user_id,
+        search_query=query,
+        activity_type=activity_type,
+        start_date=start_date,
+        end_date=end_date,
+    )
+
+    activity_rows: list[_ActivityJournalRow] = []
+    if total_hits > 0:
+        activity_rows = await _fetch_activity_rows(
             db_connection,
             user_id,
             search_query=query,
             activity_type=activity_type,
             start_date=start_date,
             end_date=end_date,
+            limit=limit,
+            offset=0,
         )
 
-        activity_rows: list[_ActivityJournalRow] = []
-        if total_hits > 0:
-            activity_rows = await _fetch_activity_rows(
-                db_connection,
-                user_id,
-                search_query=query,
-                activity_type=activity_type,
-                start_date=start_date,
-                end_date=end_date,
-                limit=limit,
-                offset=0,
-            )
+    results = await _build_search_results(
+        [activity_row.journal for activity_row in activity_rows],
+        repos,
+        activity_rows_by_id={
+            activity_row.journal.id: activity_row
+            for activity_row in activity_rows
+            if activity_row.journal.id is not None
+        },
+    )
+    response = JournalSearchResponse(
+        results=results,
+        query=query,
+        total_hits=total_hits,
+        processing_time_ms=0,
+        summary=f"Found {total_hits} activity journal(s)",
+    )
+    return MCPResponseBuilder.success_response(response)
 
-        results = await _build_search_results(
-            [activity_row.journal for activity_row in activity_rows],
-            repos,
-            activity_rows_by_id={
-                activity_row.journal.id: activity_row
-                for activity_row in activity_rows
-                if activity_row.journal.id is not None
-            },
-        )
-        response = JournalSearchResponse(
-            results=results,
-            query=query,
-            total_hits=total_hits,
-            processing_time_ms=0,
-            summary=f"Found {total_hits} activity journal(s)",
-        )
-        return MCPResponseBuilder.success_response(response)
 
-    @mcp.tool
-    @mcp_unified_error_handler("get_activity_stats", "journal")
-    async def get_activity_stats(
-        activity_type: Annotated[
-            str | None,
-            Field(default=None, description="Optional effective activity type filter"),
-        ] = None,
-        start_date: Annotated[
-            str | None,
-            Field(default=None, description="Optional ISO start date/datetime filter"),
-        ] = None,
-        end_date: Annotated[
-            str | None,
-            Field(default=None, description="Optional ISO end date/datetime filter"),
-        ] = None,
-        db_connection: AsyncConnection = mcp_depends(get_async_connection),
-    ) -> str:
-        """Aggregate activity totals, breakdowns, and personal records."""
-        user_id = await get_current_user_id()
-        overall_stats_row = await _fetch_activity_overall_stats_row(
+@mcp_unified_error_handler("get_activity_stats", "journal")
+async def get_activity_stats(
+    activity_type: Annotated[
+        str | None,
+        Field(default=None, description="Optional effective activity type filter"),
+    ] = None,
+    start_date: Annotated[
+        str | None,
+        Field(default=None, description="Optional ISO start date/datetime filter"),
+    ] = None,
+    end_date: Annotated[
+        str | None,
+        Field(default=None, description="Optional ISO end date/datetime filter"),
+    ] = None,
+    db_connection: AsyncConnection = mcp_depends(get_async_connection),
+) -> str:
+    """Aggregate activity totals, breakdowns, and personal records."""
+    user_id = await get_current_user_id()
+    overall_stats_row = await _fetch_activity_overall_stats_row(
+        db_connection,
+        user_id,
+        activity_type=activity_type,
+        start_date=start_date,
+        end_date=end_date,
+    )
+    activity_type_rows = await _fetch_activity_type_stats_rows(
+        db_connection,
+        user_id,
+        activity_type=activity_type,
+        start_date=start_date,
+        end_date=end_date,
+    )
+
+    overall_totals = ActivityTotals(
+        distance=int(getattr(overall_stats_row, "total_distance", 0) or 0),
+        duration=int(getattr(overall_stats_row, "total_duration", 0) or 0),
+        elevation_gain=int(getattr(overall_stats_row, "total_elevation_gain", 0) or 0),
+        calories=int(getattr(overall_stats_row, "total_calories", 0) or 0),
+    )
+
+    activity_type_stats = [
+        ActivityTypeStats(
+            activity_type=row.activity_type,
+            count=int(row.count or 0),
+            total_distance=int(row.total_distance or 0),
+            total_duration=int(row.total_duration or 0),
+            total_elevation_gain=int(row.total_elevation_gain or 0),
+            total_calories=int(row.total_calories or 0),
+        )
+        for row in activity_type_rows
+    ]
+
+    async def build_personal_record(
+        metric_name: str,
+    ) -> ActivityPersonalRecord | None:
+        record_row = await _fetch_activity_personal_record_row(
             db_connection,
             user_id,
+            metric_name=metric_name,
             activity_type=activity_type,
             start_date=start_date,
             end_date=end_date,
         )
-        activity_type_rows = await _fetch_activity_type_stats_rows(
-            db_connection,
-            user_id,
-            activity_type=activity_type,
-            start_date=start_date,
-            end_date=end_date,
+        if record_row is None:
+            return None
+
+        return ActivityPersonalRecord(
+            activity_type=record_row.activity_type,
+            journal_id=int(record_row.journal_id),
+            journal_title=record_row.journal_title,
+            value=int(record_row.metric_value or 0),
         )
 
-        overall_totals = ActivityTotals(
-            distance=int(getattr(overall_stats_row, "total_distance", 0) or 0),
-            duration=int(getattr(overall_stats_row, "total_duration", 0) or 0),
-            elevation_gain=int(
-                getattr(overall_stats_row, "total_elevation_gain", 0) or 0
+    personal_records = {
+        "longest_distance": await build_personal_record("distance"),
+        "longest_duration": await build_personal_record("duration"),
+        "highest_elevation_gain": await build_personal_record("elevation_gain"),
+        "most_calories": await build_personal_record("calories"),
+    }
+    total_activities = int(getattr(overall_stats_row, "total_activities", 0) or 0)
+
+    response = ActivityStatsResponse(
+        total_activities=total_activities,
+        overall_totals=overall_totals,
+        activity_types=activity_type_stats,
+        personal_records=personal_records,
+        summary=(
+            f"Analysed {total_activities} activity journal(s) across "
+            f"{len(activity_type_stats)} activity type(s)"
+        ),
+    )
+    return MCPResponseBuilder.success_response(response)
+
+
+@mcp_unified_error_handler("analyze_activity_trends", "journal")
+async def analyze_activity_trends(
+    interval: Annotated[
+        str,
+        Field(
+            default="month",
+            description="Trend interval: day, week, month, or year",
+        ),
+    ] = "month",
+    activity_type: Annotated[
+        str | None,
+        Field(default=None, description="Optional effective activity type filter"),
+    ] = None,
+    start_date: Annotated[
+        str | None,
+        Field(default=None, description="Optional ISO start date/datetime filter"),
+    ] = None,
+    end_date: Annotated[
+        str | None,
+        Field(default=None, description="Optional ISO end date/datetime filter"),
+    ] = None,
+    db_connection: AsyncConnection = mcp_depends(get_async_connection),
+) -> str:
+    """Analyse activity trends by day, week, month, or year buckets."""
+    normalized_interval = interval.strip().lower()
+    if normalized_interval not in {"day", "week", "month", "year"}:
+        raise ValueError("interval must be one of: day, week, month, year")
+
+    user_id = await get_current_user_id()
+    trend_rows = await _fetch_activity_trend_rows(
+        db_connection,
+        user_id,
+        interval=normalized_interval,
+        activity_type=activity_type,
+        start_date=start_date,
+        end_date=end_date,
+    )
+
+    periods = [
+        ActivityTrendPeriod(
+            period_start=row.period_start.isoformat(),
+            activity_count=int(row.activity_count or 0),
+            total_distance=int(row.total_distance or 0),
+            total_duration=int(row.total_duration or 0),
+            total_elevation_gain=int(row.total_elevation_gain or 0),
+        )
+        for row in trend_rows
+    ]
+    total_activities = sum(period.activity_count for period in periods)
+
+    response = ActivityTrendsResponse(
+        interval=normalized_interval,
+        total_activities=total_activities,
+        periods=periods,
+        summary=(
+            f"Analysed {total_activities} activity journal(s) across "
+            f"{len(periods)} {normalized_interval} bucket(s)"
+        ),
+    )
+    return MCPResponseBuilder.success_response(response)
+
+
+@mcp_unified_error_handler("get_route_history", "journal")
+async def get_route_history(
+    route_id: Annotated[str, Field(description="Route UUID")],
+    db_connection: AsyncConnection = mcp_depends(get_async_connection),
+) -> str:
+    """Return route usage history across route-aware activity journals."""
+    user_id = await get_current_user_id()
+    repos = _create_journal_tool_repositories(db_connection)
+
+    try:
+        route_uuid = UUID(route_id)
+    except ValueError as exc:
+        raise ValueError(
+            f"Invalid route_id '{route_id}'. Must be a valid UUID."
+        ) from exc
+
+    route = await repos.route_repo.find_by_id(route_uuid)
+    if route is None:
+        return MCPResponseBuilder.not_found_error_response("Route", route_id)
+
+    journal = await repos.journal_repo.find_by_id(route.journal_id)
+    if journal is None or journal.user_id != user_id:
+        return MCPResponseBuilder.not_found_error_response("Route", route_id)
+
+    history_rows = await _fetch_route_history_rows(db_connection, user_id, route_uuid)
+    entries = [
+        RouteHistoryEntry(
+            journal_id=row.id,
+            journal_title=row.title,
+            activity_type=row.activity_type,
+            event_date_range=EventDateRangeSchema(
+                start=row.event_date_range_start,
+                end=row.event_date_range_end,
             ),
-            calories=int(getattr(overall_stats_row, "total_calories", 0) or 0),
+            distance=int(row.distance) if row.distance is not None else None,
+            duration=int(row.duration) if row.duration is not None else None,
+        )
+        for row in history_rows
+    ]
+    activity_types = sorted(
+        {entry.activity_type for entry in entries if entry.activity_type is not None}
+    )
+
+    response = RouteHistoryResponse(
+        route=RouteSummary(
+            id=str(route.id or route_uuid),
+            name=route.name,
+            description=route.description,
+        ),
+        usage_count=len(entries),
+        activity_types=activity_types,
+        entries=entries,
+        summary=(
+            f"Route '{route.name}' has been used {len(entries)} time(s) across "
+            f"{len(activity_types)} activity type(s)"
+        ),
+    )
+    return MCPResponseBuilder.success_response(response)
+
+
+@mcp_unified_error_handler("delete_journal", "journal")
+async def delete_journal(
+    journal_id: Annotated[
+        int, Field(description="The unique identifier of the journal to delete")
+    ],
+    delete_children: Annotated[
+        bool,
+        Field(
+            default=False,
+            description="Optional: Delete child journals as well",
+        ),
+    ] = False,
+    db_connection: AsyncConnection = mcp_depends(get_async_connection),
+    event_publisher: OutboxEventPublisher = mcp_depends(get_outbox_event_publisher),
+) -> str:
+    """
+    Delete a journal entry.
+
+    Deletes a journal entry and optionally its children.
+    Returns confirmation response.
+
+    Args:
+        journal_id: The unique identifier of the journal to delete
+        delete_children: Optional flag to delete child journals
+
+    Returns:
+        JSON string containing deletion confirmation
+
+    Raises:
+        JournalNotFoundError: If the journal with the given ID does not exist
+    """
+    # Explicitly reject unsupported delete_children behavior to avoid silent misuse
+    if delete_children:
+        raise NotImplementedError(
+            "The 'delete_children' flag is not yet supported. "
+            "Child journals are not deleted automatically."
         )
 
-        activity_type_stats = [
-            ActivityTypeStats(
-                activity_type=row.activity_type,
-                count=int(row.count or 0),
-                total_distance=int(row.total_distance or 0),
-                total_duration=int(row.total_duration or 0),
-                total_elevation_gain=int(row.total_elevation_gain or 0),
-                total_calories=int(row.total_calories or 0),
+    # Create repositories
+    journal_repo = SqlJournalRepository(db_connection)
+    journal_service = JournalService(journal_repo, event_publisher)
+
+    # Delete journal
+    await journal_service.delete_journal(journal_id, db_connection)
+
+    class DeleteResponse(BaseModel):
+        journal_id: int
+        deleted: bool
+        summary: str
+
+    response = DeleteResponse(
+        journal_id=journal_id,
+        deleted=True,
+        summary=f"Successfully deleted journal {journal_id}",
+    )
+
+    return MCPResponseBuilder.success_response(response)
+
+
+@mcp_unified_error_handler("get_contact_journals", "journal")
+async def get_contact_journals(
+    contact_id: Annotated[
+        int, Field(description="The unique identifier of the contact")
+    ],
+    limit: Annotated[
+        int,
+        Field(
+            default=20,
+            description="Maximum number of results to return (default: 20)",
+        ),
+    ] = 20,
+    db_connection: AsyncConnection = mcp_depends(get_async_connection),
+) -> str:
+    """
+    Get journals associated with a contact.
+
+    Retrieves journals that have relationships with the specified contact.
+    Returns AI-friendly summaries.
+
+    Args:
+        contact_id: The unique identifier of the contact
+        limit: Maximum number of results to return
+
+    Returns:
+        JSON string containing AI-friendly journal summaries
+
+    Raises:
+        ContactNotFoundError: If the contact with the given ID does not exist
+    """
+    # Create repositories
+    contact_rel_repo = SqlJournalContactRelationshipRepository(db_connection)
+    journal_repo = SqlJournalRepository(db_connection)
+
+    # Get relationships
+    relationships = await contact_rel_repo.get_by_contact(contact_id)
+
+    # Get journals
+    journals = []
+    for rel in relationships[:limit]:
+        journal = await journal_repo.find_by_id(rel.journal_id)
+        if journal:
+            journals.append(journal)
+
+    # Convert to search results
+    results = [_journal_to_search_result(journal) for journal in journals]
+
+    response = JournalSearchResponse(
+        results=results,
+        query=None,
+        total_hits=len(results),
+        processing_time_ms=0,
+        summary=f"Found {len(results)} journal(s) for contact {contact_id}",
+    )
+
+    return MCPResponseBuilder.success_response(response)
+
+
+@mcp_unified_error_handler("link_journal_to_contact", "journal")
+async def link_journal_to_contact(
+    journal_id: Annotated[
+        int, Field(description="The unique identifier of the journal")
+    ],
+    contact_id: Annotated[
+        int, Field(description="The unique identifier of the contact")
+    ],
+    relationship_type: Annotated[
+        str,
+        Field(description="Relationship type (PARTICIPANT, INVITEE, MENTION, ABOUT)"),
+    ],
+    db_connection: AsyncConnection = mcp_depends(get_async_connection),
+) -> str:
+    """
+    Link a journal to a contact with a specific relationship type.
+
+    Creates a relationship between a journal and a contact.
+    Returns confirmation response.
+
+    Args:
+        journal_id: The unique identifier of the journal
+        contact_id: The unique identifier of the contact
+        relationship_type: Relationship type (PARTICIPANT, INVITEE, MENTION, ABOUT)
+
+    Returns:
+        JSON string containing relationship creation confirmation
+
+    Raises:
+        JournalNotFoundError: If the journal with the given ID does not exist
+        ContactNotFoundError: If the contact with the given ID does not exist
+        ValueError: If relationship_type is invalid
+    """
+    # Validate relationship type
+    try:
+        rel_type = JournalContactRelationshipType(relationship_type.upper())
+    except ValueError as e:
+        raise ValueError(
+            f"Invalid relationship type: {relationship_type}. "
+            f"Must be one of: PARTICIPANT, INVITEE, MENTION, ABOUT"
+        ) from e
+
+    # Create repositories
+    contact_rel_repo = SqlJournalContactRelationshipRepository(db_connection)
+    journal_repo = SqlJournalRepository(db_connection)
+    contact_repo = SqlContactRepository(db_connection)
+
+    # Verify journal exists
+    journal = await journal_repo.find_by_id(journal_id)
+    if not journal:
+        raise JournalNotFoundError(journal_id)
+
+    # Verify contact exists
+    contact = await contact_repo.find_by_id(contact_id)
+    if not contact:
+        raise ContactNotFoundError(contact_id)
+
+    # Create relationship
+    relationship = JournalContactRelationship(
+        journal_id=journal_id,
+        contact_id=contact_id,
+        relationship_type=rel_type,
+    )
+    await contact_rel_repo.create(relationship)
+
+    class LinkResponse(BaseModel):
+        journal_id: int
+        contact_id: int
+        relationship_type: str
+        linked: bool
+        summary: str
+
+    response = LinkResponse(
+        journal_id=journal_id,
+        contact_id=contact_id,
+        relationship_type=relationship_type,
+        linked=True,
+        summary=f"Successfully linked journal {journal_id} to contact {contact_id} as {relationship_type}",
+    )
+
+    return MCPResponseBuilder.success_response(response)
+
+
+@mcp_unified_error_handler("list_calendars", "journal")
+async def list_calendars(
+    db_connection: AsyncConnection = mcp_depends(get_async_connection),
+) -> str:
+    """
+    List all calendars available for EVENT journals.
+    """
+    user_id = await get_current_user_id()
+    calendar_repo = SqlCalendarRepository(db_connection)
+
+    calendars = await calendar_repo.get_all(user_id=user_id)
+
+    class CalendarListItem(BaseModel):
+        id: str
+        name: str
+        description: str | None = None
+        color: str | None = None
+
+    class CalendarListResponse(BaseModel):
+        calendars: list[CalendarListItem]
+
+    response = CalendarListResponse(
+        calendars=[
+            CalendarListItem(
+                id=str(c.id),
+                name=c.name,
+                description=c.description,
+                color=c.color,
             )
-            for row in activity_type_rows
+            for c in calendars
         ]
+    )
 
-        async def build_personal_record(
-            metric_name: str,
-        ) -> ActivityPersonalRecord | None:
-            record_row = await _fetch_activity_personal_record_row(
-                db_connection,
-                user_id,
-                metric_name=metric_name,
-                activity_type=activity_type,
-                start_date=start_date,
-                end_date=end_date,
+    return MCPResponseBuilder.success_response(response)
+
+
+@mcp_unified_error_handler("create_calendar", "journal")
+async def create_calendar(
+    name: Annotated[str, Field(description="Calendar name")],
+    description: Annotated[
+        str | None, Field(description="Calendar description", default=None)
+    ] = None,
+    color: Annotated[
+        str | None, Field(description="Calendar color hex code", default=None)
+    ] = None,
+    db_connection: AsyncConnection = mcp_depends(get_async_connection),
+) -> str:
+    """
+    Create a new calendar to be used with EVENT journals.
+    """
+    user_id = await get_current_user_id()
+    calendar_repo = SqlCalendarRepository(db_connection)
+
+    new_calendar = Calendar(
+        user_id=user_id,
+        name=name,
+        description=description,
+        color=color or "#3B82F6",
+        is_synced_to_google=False,
+        google_calendar_id=None,
+    )
+
+    saved_calendar = await calendar_repo.save(new_calendar)
+
+    class CalendarResponse(BaseModel):
+        id: str
+        name: str
+        summary: str
+
+    return MCPResponseBuilder.success_response(
+        CalendarResponse(
+            id=str(saved_calendar.id),
+            name=saved_calendar.name,
+            summary=f"Created calendar '{saved_calendar.name}'",
+        )
+    )
+
+
+@mcp_unified_error_handler("update_calendar", "journal")
+async def update_calendar(
+    calendar_id: Annotated[str, Field(description="Calendar UUID")],
+    name: Annotated[
+        str | None, Field(description="Calendar name", default=None)
+    ] = None,
+    description: Annotated[
+        str | None, Field(description="Calendar description", default=None)
+    ] = None,
+    color: Annotated[
+        str | None, Field(description="Calendar color hex code", default=None)
+    ] = None,
+    db_connection: AsyncConnection = mcp_depends(get_async_connection),
+) -> str:
+    """
+    Update an existing calendar.
+    """
+    user_id = await get_current_user_id()
+    calendar_repo = SqlCalendarRepository(db_connection)
+
+    calendar_uuid = _parse_calendar_id(calendar_id)
+    if calendar_uuid is None:
+        raise ValueError(f"Invalid calendar_id '{calendar_id}'. Must be a valid UUID.")
+
+    calendar = await calendar_repo.find_by_id(calendar_uuid)
+    if not calendar or calendar.user_id != user_id:
+        return MCPResponseBuilder.not_found_error_response("Calendar", calendar_id)
+
+    if name is not None:
+        calendar.name = name
+    if description is not None:
+        calendar.description = description
+    if color is not None:
+        calendar.color = color
+
+    saved_calendar = await calendar_repo.save(calendar)
+
+    class CalendarResponse(BaseModel):
+        id: str
+        name: str
+        summary: str
+
+    return MCPResponseBuilder.success_response(
+        CalendarResponse(
+            id=str(saved_calendar.id),
+            name=saved_calendar.name,
+            summary=f"Updated calendar '{saved_calendar.name}'",
+        )
+    )
+
+
+@mcp_unified_error_handler("delete_calendar", "journal")
+async def delete_calendar(
+    calendar_id: Annotated[str, Field(description="Calendar UUID")],
+    db_connection: AsyncConnection = mcp_depends(get_async_connection),
+) -> str:
+    """
+    Delete a calendar. Will fail if the calendar is in use.
+    """
+    user_id = await get_current_user_id()
+    calendar_repo = SqlCalendarRepository(db_connection)
+
+    calendar_uuid = _parse_calendar_id(calendar_id)
+    if calendar_uuid is None:
+        raise ValueError(f"Invalid calendar_id '{calendar_id}'. Must be a valid UUID.")
+
+    calendar = await calendar_repo.find_by_id(calendar_uuid)
+    if not calendar or calendar.user_id != user_id:
+        return MCPResponseBuilder.not_found_error_response("Calendar", calendar_id)
+
+    check_query = text(
+        """
+        SELECT COUNT(*) as count
+        FROM journal_calendar_info
+        WHERE calendar_id = :calendar_id
+        """
+    )
+    result = await db_connection.execute(check_query, {"calendar_id": str(calendar.id)})
+    usage_count = int(result.scalar_one())
+
+    if usage_count > 0:
+        return MCPResponseBuilder.error_response(
+            "CONFLICT",
+            f"Calendar is in use by {usage_count} journal(s)",
+        )
+
+    if calendar.id is not None:
+        await calendar_repo.delete(calendar.id)
+
+    class DeleteCalendarResponse(BaseModel):
+        summary: str
+
+    return MCPResponseBuilder.success_response(
+        DeleteCalendarResponse(summary=f"Deleted calendar '{calendar.name}'")
+    )
+
+
+@mcp_unified_error_handler("merge_journals", "journal")
+async def merge_journals(
+    target_journal_id: Annotated[
+        int,
+        Field(description="The ID of the journal to keep (the merge target)"),
+    ],
+    merge_data: Annotated[
+        str,
+        Field(
+            description=(
+                "JSON string with merge parameters. Required key: "
+                '"source_journal_id" (int) — the journal to absorb and delete. '
+                'Optional key: "overrides" (object) — explicit conflict resolution '
+                'with keys: "title" (str), "content" (str), '
+                '"event_date_range" ({start, end}), '
+                '"type_data" ({TYPE: {field: value}})'
             )
-            if record_row is None:
-                return None
-
-            return ActivityPersonalRecord(
-                activity_type=record_row.activity_type,
-                journal_id=int(record_row.journal_id),
-                journal_title=record_row.journal_title,
-                value=int(record_row.metric_value or 0),
-            )
-
-        personal_records = {
-            "longest_distance": await build_personal_record("distance"),
-            "longest_duration": await build_personal_record("duration"),
-            "highest_elevation_gain": await build_personal_record("elevation_gain"),
-            "most_calories": await build_personal_record("calories"),
-        }
-        total_activities = int(getattr(overall_stats_row, "total_activities", 0) or 0)
-
-        response = ActivityStatsResponse(
-            total_activities=total_activities,
-            overall_totals=overall_totals,
-            activity_types=activity_type_stats,
-            personal_records=personal_records,
-            summary=(
-                f"Analysed {total_activities} activity journal(s) across "
-                f"{len(activity_type_stats)} activity type(s)"
-            ),
-        )
-        return MCPResponseBuilder.success_response(response)
-
-    @mcp.tool
-    @mcp_unified_error_handler("analyze_activity_trends", "journal")
-    async def analyze_activity_trends(
-        interval: Annotated[
-            str,
-            Field(
-                default="month",
-                description="Trend interval: day, week, month, or year",
-            ),
-        ] = "month",
-        activity_type: Annotated[
-            str | None,
-            Field(default=None, description="Optional effective activity type filter"),
-        ] = None,
-        start_date: Annotated[
-            str | None,
-            Field(default=None, description="Optional ISO start date/datetime filter"),
-        ] = None,
-        end_date: Annotated[
-            str | None,
-            Field(default=None, description="Optional ISO end date/datetime filter"),
-        ] = None,
-        db_connection: AsyncConnection = mcp_depends(get_async_connection),
-    ) -> str:
-        """Analyse activity trends by day, week, month, or year buckets."""
-        normalized_interval = interval.strip().lower()
-        if normalized_interval not in {"day", "week", "month", "year"}:
-            raise ValueError("interval must be one of: day, week, month, year")
-
-        user_id = await get_current_user_id()
-        trend_rows = await _fetch_activity_trend_rows(
-            db_connection,
-            user_id,
-            interval=normalized_interval,
-            activity_type=activity_type,
-            start_date=start_date,
-            end_date=end_date,
-        )
-
-        periods = [
-            ActivityTrendPeriod(
-                period_start=row.period_start.isoformat(),
-                activity_count=int(row.activity_count or 0),
-                total_distance=int(row.total_distance or 0),
-                total_duration=int(row.total_duration or 0),
-                total_elevation_gain=int(row.total_elevation_gain or 0),
-            )
-            for row in trend_rows
-        ]
-        total_activities = sum(period.activity_count for period in periods)
-
-        response = ActivityTrendsResponse(
-            interval=normalized_interval,
-            total_activities=total_activities,
-            periods=periods,
-            summary=(
-                f"Analysed {total_activities} activity journal(s) across "
-                f"{len(periods)} {normalized_interval} bucket(s)"
-            ),
-        )
-        return MCPResponseBuilder.success_response(response)
-
-    @mcp.tool
-    @mcp_unified_error_handler("get_route_history", "journal")
-    async def get_route_history(
-        route_id: Annotated[str, Field(description="Route UUID")],
-        db_connection: AsyncConnection = mcp_depends(get_async_connection),
-    ) -> str:
-        """Return route usage history across route-aware activity journals."""
-        user_id = await get_current_user_id()
-        repos = _create_journal_tool_repositories(db_connection)
-
-        try:
-            route_uuid = UUID(route_id)
-        except ValueError as exc:
-            raise ValueError(
-                f"Invalid route_id '{route_id}'. Must be a valid UUID."
-            ) from exc
-
-        route = await repos.route_repo.find_by_id(route_uuid)
-        if route is None:
-            return MCPResponseBuilder.not_found_error_response("Route", route_id)
-
-        journal = await repos.journal_repo.find_by_id(route.journal_id)
-        if journal is None or journal.user_id != user_id:
-            return MCPResponseBuilder.not_found_error_response("Route", route_id)
-
-        history_rows = await _fetch_route_history_rows(
-            db_connection, user_id, route_uuid
-        )
-        entries = [
-            RouteHistoryEntry(
-                journal_id=row.id,
-                journal_title=row.title,
-                activity_type=row.activity_type,
-                event_date_range=EventDateRangeSchema(
-                    start=row.event_date_range_start,
-                    end=row.event_date_range_end,
-                ),
-                distance=int(row.distance) if row.distance is not None else None,
-                duration=int(row.duration) if row.duration is not None else None,
-            )
-            for row in history_rows
-        ]
-        activity_types = sorted(
-            {
-                entry.activity_type
-                for entry in entries
-                if entry.activity_type is not None
-            }
-        )
-
-        response = RouteHistoryResponse(
-            route=RouteSummary(
-                id=str(route.id or route_uuid),
-                name=route.name,
-                description=route.description,
-            ),
-            usage_count=len(entries),
-            activity_types=activity_types,
-            entries=entries,
-            summary=(
-                f"Route '{route.name}' has been used {len(entries)} time(s) across "
-                f"{len(activity_types)} activity type(s)"
-            ),
-        )
-        return MCPResponseBuilder.success_response(response)
-
-    @mcp.tool
-    @mcp_unified_error_handler("delete_journal", "journal")
-    async def delete_journal(
-        journal_id: Annotated[
-            int, Field(description="The unique identifier of the journal to delete")
-        ],
-        delete_children: Annotated[
-            bool,
-            Field(
-                default=False,
-                description="Optional: Delete child journals as well",
-            ),
-        ] = False,
-        db_connection: AsyncConnection = mcp_depends(get_async_connection),
-        event_publisher: OutboxEventPublisher = mcp_depends(get_outbox_event_publisher),
-    ) -> str:
-        """
-        Delete a journal entry.
-
-        Deletes a journal entry and optionally its children.
-        Returns confirmation response.
-
-        Args:
-            journal_id: The unique identifier of the journal to delete
-            delete_children: Optional flag to delete child journals
-
-        Returns:
-            JSON string containing deletion confirmation
-
-        Raises:
-            JournalNotFoundError: If the journal with the given ID does not exist
-        """
-        # Explicitly reject unsupported delete_children behavior to avoid silent misuse
-        if delete_children:
-            raise NotImplementedError(
-                "The 'delete_children' flag is not yet supported. "
-                "Child journals are not deleted automatically."
-            )
-
-        # Create repositories
-        journal_repo = SqlJournalRepository(db_connection)
-        journal_service = JournalService(journal_repo, event_publisher)
-
-        # Delete journal
-        await journal_service.delete_journal(journal_id, db_connection)
-
-        class DeleteResponse(BaseModel):
-            journal_id: int
-            deleted: bool
-            summary: str
-
-        response = DeleteResponse(
-            journal_id=journal_id,
-            deleted=True,
-            summary=f"Successfully deleted journal {journal_id}",
-        )
-
-        return MCPResponseBuilder.success_response(response)
-
-    @mcp.tool
-    @mcp_unified_error_handler("get_contact_journals", "journal")
-    async def get_contact_journals(
-        contact_id: Annotated[
-            int, Field(description="The unique identifier of the contact")
-        ],
-        limit: Annotated[
-            int,
-            Field(
-                default=20,
-                description="Maximum number of results to return (default: 20)",
-            ),
-        ] = 20,
-        db_connection: AsyncConnection = mcp_depends(get_async_connection),
-    ) -> str:
-        """
-        Get journals associated with a contact.
-
-        Retrieves journals that have relationships with the specified contact.
-        Returns AI-friendly summaries.
-
-        Args:
-            contact_id: The unique identifier of the contact
-            limit: Maximum number of results to return
-
-        Returns:
-            JSON string containing AI-friendly journal summaries
-
-        Raises:
-            ContactNotFoundError: If the contact with the given ID does not exist
-        """
-        # Create repositories
-        contact_rel_repo = SqlJournalContactRelationshipRepository(db_connection)
-        journal_repo = SqlJournalRepository(db_connection)
-
-        # Get relationships
-        relationships = await contact_rel_repo.get_by_contact(contact_id)
-
-        # Get journals
-        journals = []
-        for rel in relationships[:limit]:
-            journal = await journal_repo.find_by_id(rel.journal_id)
-            if journal:
-                journals.append(journal)
-
-        # Convert to search results
-        results = [_journal_to_search_result(journal) for journal in journals]
-
-        response = JournalSearchResponse(
-            results=results,
-            query=None,
-            total_hits=len(results),
-            processing_time_ms=0,
-            summary=f"Found {len(results)} journal(s) for contact {contact_id}",
-        )
-
-        return MCPResponseBuilder.success_response(response)
-
-    @mcp.tool
-    @mcp_unified_error_handler("link_journal_to_contact", "journal")
-    async def link_journal_to_contact(
-        journal_id: Annotated[
-            int, Field(description="The unique identifier of the journal")
-        ],
-        contact_id: Annotated[
-            int, Field(description="The unique identifier of the contact")
-        ],
-        relationship_type: Annotated[
-            str,
-            Field(
-                description="Relationship type (PARTICIPANT, INVITEE, MENTION, ABOUT)"
-            ),
-        ],
-        db_connection: AsyncConnection = mcp_depends(get_async_connection),
-    ) -> str:
-        """
-        Link a journal to a contact with a specific relationship type.
-
-        Creates a relationship between a journal and a contact.
-        Returns confirmation response.
-
-        Args:
-            journal_id: The unique identifier of the journal
-            contact_id: The unique identifier of the contact
-            relationship_type: Relationship type (PARTICIPANT, INVITEE, MENTION, ABOUT)
-
-        Returns:
-            JSON string containing relationship creation confirmation
-
-        Raises:
-            JournalNotFoundError: If the journal with the given ID does not exist
-            ContactNotFoundError: If the contact with the given ID does not exist
-            ValueError: If relationship_type is invalid
-        """
-        # Validate relationship type
-        try:
-            rel_type = JournalContactRelationshipType(relationship_type.upper())
-        except ValueError as e:
-            raise ValueError(
-                f"Invalid relationship type: {relationship_type}. "
-                f"Must be one of: PARTICIPANT, INVITEE, MENTION, ABOUT"
-            ) from e
-
-        # Create repositories
-        contact_rel_repo = SqlJournalContactRelationshipRepository(db_connection)
-        journal_repo = SqlJournalRepository(db_connection)
-        contact_repo = SqlContactRepository(db_connection)
-
-        # Verify journal exists
-        journal = await journal_repo.find_by_id(journal_id)
-        if not journal:
-            raise JournalNotFoundError(journal_id)
-
-        # Verify contact exists
-        contact = await contact_repo.find_by_id(contact_id)
-        if not contact:
-            raise ContactNotFoundError(contact_id)
-
-        # Create relationship
-        relationship = JournalContactRelationship(
-            journal_id=journal_id,
-            contact_id=contact_id,
-            relationship_type=rel_type,
-        )
-        await contact_rel_repo.create(relationship)
-
-        class LinkResponse(BaseModel):
-            journal_id: int
-            contact_id: int
-            relationship_type: str
-            linked: bool
-            summary: str
-
-        response = LinkResponse(
-            journal_id=journal_id,
-            contact_id=contact_id,
-            relationship_type=relationship_type,
-            linked=True,
-            summary=f"Successfully linked journal {journal_id} to contact {contact_id} as {relationship_type}",
-        )
-
-        return MCPResponseBuilder.success_response(response)
-
-    @mcp.tool
-    @mcp_unified_error_handler("list_calendars", "journal")
-    async def list_calendars(
-        db_connection: AsyncConnection = mcp_depends(get_async_connection),
-    ) -> str:
-        """
-        List all calendars available for EVENT journals.
-        """
-        user_id = await get_current_user_id()
-        calendar_repo = SqlCalendarRepository(db_connection)
-
-        calendars = await calendar_repo.get_all(user_id=user_id)
-
-        class CalendarListItem(BaseModel):
-            id: str
-            name: str
-            description: str | None = None
-            color: str | None = None
-
-        class CalendarListResponse(BaseModel):
-            calendars: list[CalendarListItem]
-
-        response = CalendarListResponse(
-            calendars=[
-                CalendarListItem(
-                    id=str(c.id),
-                    name=c.name,
-                    description=c.description,
-                    color=c.color,
-                )
-                for c in calendars
-            ]
-        )
-
-        return MCPResponseBuilder.success_response(response)
-
-    @mcp.tool
-    @mcp_unified_error_handler("create_calendar", "journal")
-    async def create_calendar(
-        name: Annotated[str, Field(description="Calendar name")],
-        description: Annotated[
-            str | None, Field(description="Calendar description", default=None)
-        ] = None,
-        color: Annotated[
-            str | None, Field(description="Calendar color hex code", default=None)
-        ] = None,
-        db_connection: AsyncConnection = mcp_depends(get_async_connection),
-    ) -> str:
-        """
-        Create a new calendar to be used with EVENT journals.
-        """
-        user_id = await get_current_user_id()
-        calendar_repo = SqlCalendarRepository(db_connection)
-
-        new_calendar = Calendar(
-            user_id=user_id,
-            name=name,
-            description=description,
-            color=color or "#3B82F6",
-            is_synced_to_google=False,
-            google_calendar_id=None,
-        )
-
-        saved_calendar = await calendar_repo.save(new_calendar)
-
-        class CalendarResponse(BaseModel):
-            id: str
-            name: str
-            summary: str
-
-        return MCPResponseBuilder.success_response(
-            CalendarResponse(
-                id=str(saved_calendar.id),
-                name=saved_calendar.name,
-                summary=f"Created calendar '{saved_calendar.name}'",
-            )
-        )
-
-    @mcp.tool
-    @mcp_unified_error_handler("update_calendar", "journal")
-    async def update_calendar(
-        calendar_id: Annotated[str, Field(description="Calendar UUID")],
-        name: Annotated[
-            str | None, Field(description="Calendar name", default=None)
-        ] = None,
-        description: Annotated[
-            str | None, Field(description="Calendar description", default=None)
-        ] = None,
-        color: Annotated[
-            str | None, Field(description="Calendar color hex code", default=None)
-        ] = None,
-        db_connection: AsyncConnection = mcp_depends(get_async_connection),
-    ) -> str:
-        """
-        Update an existing calendar.
-        """
-        user_id = await get_current_user_id()
-        calendar_repo = SqlCalendarRepository(db_connection)
-
-        calendar_uuid = _parse_calendar_id(calendar_id)
-        if calendar_uuid is None:
-            raise ValueError(
-                f"Invalid calendar_id '{calendar_id}'. Must be a valid UUID."
-            )
-
-        calendar = await calendar_repo.find_by_id(calendar_uuid)
-        if not calendar or calendar.user_id != user_id:
-            return MCPResponseBuilder.not_found_error_response("Calendar", calendar_id)
-
-        if name is not None:
-            calendar.name = name
-        if description is not None:
-            calendar.description = description
-        if color is not None:
-            calendar.color = color
-
-        saved_calendar = await calendar_repo.save(calendar)
-
-        class CalendarResponse(BaseModel):
-            id: str
-            name: str
-            summary: str
-
-        return MCPResponseBuilder.success_response(
-            CalendarResponse(
-                id=str(saved_calendar.id),
-                name=saved_calendar.name,
-                summary=f"Updated calendar '{saved_calendar.name}'",
-            )
-        )
-
-    @mcp.tool
-    @mcp_unified_error_handler("delete_calendar", "journal")
-    async def delete_calendar(
-        calendar_id: Annotated[str, Field(description="Calendar UUID")],
-        db_connection: AsyncConnection = mcp_depends(get_async_connection),
-    ) -> str:
-        """
-        Delete a calendar. Will fail if the calendar is in use.
-        """
-        user_id = await get_current_user_id()
-        calendar_repo = SqlCalendarRepository(db_connection)
-
-        calendar_uuid = _parse_calendar_id(calendar_id)
-        if calendar_uuid is None:
-            raise ValueError(
-                f"Invalid calendar_id '{calendar_id}'. Must be a valid UUID."
-            )
-
-        calendar = await calendar_repo.find_by_id(calendar_uuid)
-        if not calendar or calendar.user_id != user_id:
-            return MCPResponseBuilder.not_found_error_response("Calendar", calendar_id)
-
-        check_query = text(
-            """
-            SELECT COUNT(*) as count
-            FROM journal_calendar_info
-            WHERE calendar_id = :calendar_id
-            """
-        )
-        result = await db_connection.execute(
-            check_query, {"calendar_id": str(calendar.id)}
-        )
-        usage_count = int(result.scalar_one())
-
-        if usage_count > 0:
-            return MCPResponseBuilder.error_response(
-                "CONFLICT",
-                f"Calendar is in use by {usage_count} journal(s)",
-            )
-
-        if calendar.id is not None:
-            await calendar_repo.delete(calendar.id)
-
-        class DeleteCalendarResponse(BaseModel):
-            summary: str
-
-        return MCPResponseBuilder.success_response(
-            DeleteCalendarResponse(summary=f"Deleted calendar '{calendar.name}'")
-        )
-
-    @mcp.tool
-    @mcp_unified_error_handler("merge_journals", "journal")
-    async def merge_journals(
-        target_journal_id: Annotated[
-            int,
-            Field(description="The ID of the journal to keep (the merge target)"),
-        ],
-        merge_data: Annotated[
-            str,
-            Field(
-                description=(
-                    "JSON string with merge parameters. Required key: "
-                    '"source_journal_id" (int) — the journal to absorb and delete. '
-                    'Optional key: "overrides" (object) — explicit conflict resolution '
-                    'with keys: "title" (str), "content" (str), '
-                    '"event_date_range" ({start, end}), '
-                    '"type_data" ({TYPE: {field: value}})'
-                )
-            ),
-        ],
-        db_connection: AsyncConnection = mcp_depends(get_async_connection),
-        event_publisher: OutboxEventPublisher = mcp_depends(get_outbox_event_publisher),
-    ) -> str:
-        """
-        Merge a source journal into a target journal.
-
-        The source journal's content, tags, contacts, type data, routes,
-        and child journals are absorbed into the target. The source is then
-        deleted. Use 'overrides' to resolve conflicts explicitly (title,
-        content, date range, or type-specific data).
-
-        Call get_merge_candidates first to find suitable merge targets.
-
-        Args:
-            target_journal_id: ID of the journal to keep
-            merge_data: JSON string containing source_journal_id and optional overrides
-
-        Returns:
-            JSON string containing the merged target journal with all combined data
-        """
-        merge_request = MergeJournalMCPRequest.model_validate_json(merge_data)
-
-        repos = _create_journal_tool_repositories(db_connection)
-
-        # Verify ownership — both journals must belong to the current user
-        user_id = await get_current_user_id()
-        target = await repos.journal_repo.find_by_id(target_journal_id)
-        if not target or target.user_id != user_id:
-            raise JournalNotFoundError(target_journal_id)
-        source = await repos.journal_repo.find_by_id(merge_request.source_journal_id)
-        if not source or source.user_id != user_id:
-            raise JournalNotFoundError(merge_request.source_journal_id)
-
-        merge_service = JournalMergeService(repos.journal_repo, event_publisher)
-
-        merged_journal = await merge_service.merge_journals(
-            target_id=target_journal_id,
-            source_id=merge_request.source_journal_id,
-            transaction=db_connection,
-            overrides=merge_request.overrides,
-        )
-
-        # Fetch enriched target
-        types, type_data = await _fetch_journal_types_and_data(
-            target_journal_id,
+        ),
+    ],
+    db_connection: AsyncConnection = mcp_depends(get_async_connection),
+    event_publisher: OutboxEventPublisher = mcp_depends(get_outbox_event_publisher),
+) -> str:
+    """
+    Merge a source journal into a target journal.
+
+    The source journal's content, tags, contacts, type data, routes,
+    and child journals are absorbed into the target. The source is then
+    deleted. Use 'overrides' to resolve conflicts explicitly (title,
+    content, date range, or type-specific data).
+
+    Call get_merge_candidates first to find suitable merge targets.
+
+    Args:
+        target_journal_id: ID of the journal to keep
+        merge_data: JSON string containing source_journal_id and optional overrides
+
+    Returns:
+        JSON string containing the merged target journal with all combined data
+    """
+    merge_request = MergeJournalMCPRequest.model_validate_json(merge_data)
+
+    repos = _create_journal_tool_repositories(db_connection)
+
+    # Verify ownership — both journals must belong to the current user
+    user_id = await get_current_user_id()
+    target = await repos.journal_repo.find_by_id(target_journal_id)
+    if not target or target.user_id != user_id:
+        raise JournalNotFoundError(target_journal_id)
+    source = await repos.journal_repo.find_by_id(merge_request.source_journal_id)
+    if not source or source.user_id != user_id:
+        raise JournalNotFoundError(merge_request.source_journal_id)
+
+    merge_service = JournalMergeService(repos.journal_repo, event_publisher)
+
+    merged_journal = await merge_service.merge_journals(
+        target_id=target_journal_id,
+        source_id=merge_request.source_journal_id,
+        transaction=db_connection,
+        overrides=merge_request.overrides,
+    )
+
+    # Fetch enriched target
+    types, type_data = await _fetch_journal_types_and_data(
+        target_journal_id,
+        repos.calendar_info_repo,
+        repos.mood_data_repo,
+        repos.plan_data_repo,
+        repos.travel_data_repo,
+        repos.photo_album_data_repo,
+        repos.fitness_data_repo,
+        repos.outdoor_activity_data_repo,
+        repos.bushwalking_data_repo,
+        repos.jogging_data_repo,
+        repos.abseiling_data_repo,
+        repos.canyoning_data_repo,
+        repos.climbing_data_repo,
+        repos.kayaking_data_repo,
+        repos.cross_country_skiing_data_repo,
+    )
+
+    contacts = await _fetch_contact_relationships_with_names(
+        target_journal_id,
+        repos.contact_relationship_repo,
+        repos.contact_repo,
+    )
+
+    journal_tags = await repos.tag_repo.get_tags_for_journal(target_journal_id)
+
+    response = JournalConverter.to_response(
+        journal=merged_journal,
+        types=types,
+        type_data=type_data,
+        contacts=contacts,
+        tags=journal_tags,
+    )
+
+    return MCPResponseBuilder.success_response(response)
+
+
+@mcp_unified_error_handler("get_merge_candidates", "journal")
+async def get_merge_candidates(
+    journal_id: Annotated[
+        int,
+        Field(description="The ID of the journal to find merge candidates for"),
+    ],
+    limit: Annotated[
+        int,
+        Field(
+            default=10,
+            description="Maximum number of candidates to return (default: 10)",
+        ),
+    ] = 10,
+    db_connection: AsyncConnection = mcp_depends(get_async_connection),
+) -> str:
+    """
+    Find journals that could be merged with a given journal.
+
+    Returns journals with overlapping date ranges belonging to the same
+    user, ordered by start date. Use this before merge_journals
+    to identify suitable merge targets.
+
+    Args:
+        journal_id: The journal to find candidates for
+        limit: Maximum number of candidates to return
+
+    Returns:
+        JSON string with merge candidate summaries and AI recommendations
+    """
+    repos = _create_journal_tool_repositories(db_connection)
+
+    target = await repos.journal_repo.find_by_id(journal_id)
+    if not target:
+        raise JournalNotFoundError(journal_id)
+
+    # Find journals with overlapping date ranges for the same user
+    query = text("""
+        SELECT j.id, j.title, j.content,
+               j.event_date_range_start, j.event_date_range_end
+        FROM journals j
+        WHERE j.user_id = :user_id
+          AND j.id != :journal_id
+          AND j.event_date_range_start <= :end_date
+          AND j.event_date_range_end >= :start_date
+        ORDER BY j.event_date_range_start
+        LIMIT :limit
+    """)
+
+    result = await db_connection.execute(
+        query,
+        {
+            "user_id": target.user_id,
+            "journal_id": journal_id,
+            "start_date": target.event_date_range.start,
+            "end_date": target.event_date_range.end,
+            "limit": max(1, min(limit, 50)),
+        },
+    )
+    rows = result.fetchall()
+
+    candidates: list[MergeCandidateResult] = []
+    for row in rows:
+        candidate_id = int(row[0])
+        candidate_title = str(row[1])
+        candidate_content = str(row[2]) if row[2] else ""
+        candidate_start = row[3]
+        candidate_end = row[4]
+
+        # Fetch types and tags for each candidate
+        c_types, _ = await _fetch_journal_types_and_data(
+            candidate_id,
             repos.calendar_info_repo,
             repos.mood_data_repo,
             repos.plan_data_repo,
@@ -3211,404 +3298,322 @@ def register_journal_tools(mcp: FastMCP[None]) -> None:
             repos.kayaking_data_repo,
             repos.cross_country_skiing_data_repo,
         )
+        c_tags = await repos.tag_repo.get_tags_for_journal(candidate_id)
+        tag_names = [t.name for t in c_tags]
 
-        contacts = await _fetch_contact_relationships_with_names(
-            target_journal_id,
-            repos.contact_relationship_repo,
-            repos.contact_repo,
-        )
-
-        journal_tags = await repos.tag_repo.get_tags_for_journal(target_journal_id)
-
-        response = JournalConverter.to_response(
-            journal=merged_journal,
-            types=types,
-            type_data=type_data,
-            contacts=contacts,
-            tags=journal_tags,
-        )
-
-        return MCPResponseBuilder.success_response(response)
-
-    @mcp.tool
-    @mcp_unified_error_handler("get_merge_candidates", "journal")
-    async def get_merge_candidates(
-        journal_id: Annotated[
-            int,
-            Field(description="The ID of the journal to find merge candidates for"),
-        ],
-        limit: Annotated[
-            int,
-            Field(
-                default=10,
-                description="Maximum number of candidates to return (default: 10)",
-            ),
-        ] = 10,
-        db_connection: AsyncConnection = mcp_depends(get_async_connection),
-    ) -> str:
-        """
-        Find journals that could be merged with a given journal.
-
-        Returns journals with overlapping date ranges belonging to the same
-        user, ordered by start date. Use this before merge_journals
-        to identify suitable merge targets.
-
-        Args:
-            journal_id: The journal to find candidates for
-            limit: Maximum number of candidates to return
-
-        Returns:
-            JSON string with merge candidate summaries and AI recommendations
-        """
-        repos = _create_journal_tool_repositories(db_connection)
-
-        target = await repos.journal_repo.find_by_id(journal_id)
-        if not target:
-            raise JournalNotFoundError(journal_id)
-
-        # Find journals with overlapping date ranges for the same user
-        query = text("""
-            SELECT j.id, j.title, j.content,
-                   j.event_date_range_start, j.event_date_range_end
-            FROM journals j
-            WHERE j.user_id = :user_id
-              AND j.id != :journal_id
-              AND j.event_date_range_start <= :end_date
-              AND j.event_date_range_end >= :start_date
-            ORDER BY j.event_date_range_start
-            LIMIT :limit
-        """)
-
-        result = await db_connection.execute(
-            query,
-            {
-                "user_id": target.user_id,
-                "journal_id": journal_id,
-                "start_date": target.event_date_range.start,
-                "end_date": target.event_date_range.end,
-                "limit": max(1, min(limit, 50)),
-            },
-        )
-        rows = result.fetchall()
-
-        candidates: list[MergeCandidateResult] = []
-        for row in rows:
-            candidate_id = int(row[0])
-            candidate_title = str(row[1])
-            candidate_content = str(row[2]) if row[2] else ""
-            candidate_start = row[3]
-            candidate_end = row[4]
-
-            # Fetch types and tags for each candidate
-            c_types, _ = await _fetch_journal_types_and_data(
-                candidate_id,
-                repos.calendar_info_repo,
-                repos.mood_data_repo,
-                repos.plan_data_repo,
-                repos.travel_data_repo,
-                repos.photo_album_data_repo,
-                repos.fitness_data_repo,
-                repos.outdoor_activity_data_repo,
-                repos.bushwalking_data_repo,
-                repos.jogging_data_repo,
-                repos.abseiling_data_repo,
-                repos.canyoning_data_repo,
-                repos.climbing_data_repo,
-                repos.kayaking_data_repo,
-                repos.cross_country_skiing_data_repo,
-            )
-            c_tags = await repos.tag_repo.get_tags_for_journal(candidate_id)
-            tag_names = [t.name for t in c_tags]
-
-            content_excerpt = candidate_content[:200]
-            candidates.append(
-                MergeCandidateResult(
-                    id=candidate_id,
-                    title=candidate_title,
-                    content_excerpt=content_excerpt,
-                    event_date_range=EventDateRangeSchema(
-                        start=candidate_start,
-                        end=candidate_end,
-                    ),
-                    types=c_types,
-                    tags=tag_names,
-                    summary=(
-                        f"'{candidate_title}' ({', '.join(c_types)}) "
-                        f"overlaps with target date range"
-                    ),
-                )
-            )
-
-        summary_text = (
-            f"Found {len(candidates)} merge candidate(s) for "
-            f"'{target.title}' (ID: {journal_id})"
-        )
-        if candidates:
-            summary_text += ". Review each candidate and use merge_journals to combine."
-        else:
-            summary_text += ". No journals with overlapping date ranges found."
-
-        response = MergeCandidatesResponse(
-            target_journal_id=journal_id,
-            target_title=target.title,
-            candidates=candidates,
-            summary=summary_text,
-        )
-
-        return MCPResponseBuilder.success_response(response)
-
-    @mcp.tool
-    @mcp_unified_error_handler("browse_journals_by_date_window", "journal")
-    async def browse_journals_by_date_window(
-        anchor_date: Annotated[
-            str | None,
-            Field(
-                default=None,
-                description=(
-                    "Optional ISO date to anchor the window on (defaults to today). "
-                    "Example: '2026-04-02'"
+        content_excerpt = candidate_content[:200]
+        candidates.append(
+            MergeCandidateResult(
+                id=candidate_id,
+                title=candidate_title,
+                content_excerpt=content_excerpt,
+                event_date_range=EventDateRangeSchema(
+                    start=candidate_start,
+                    end=candidate_end,
                 ),
-            ),
-        ] = None,
-        days_back: Annotated[
-            int,
-            Field(
-                default=2,
-                ge=0,
-                description="Number of days before the anchor date to include (default: 2)",
-            ),
-        ] = 2,
-        days_forward: Annotated[
-            int,
-            Field(
-                default=4,
-                ge=0,
-                description="Number of days after the anchor date to include (default: 4)",
-            ),
-        ] = 4,
-        types: Annotated[
-            str | None,
-            Field(
-                default=None,
-                description="Optional comma-separated journal types to filter by",
-            ),
-        ] = None,
-        search: Annotated[
-            str | None,
-            Field(
-                default=None,
-                description="Optional text search query within the window",
-            ),
-        ] = None,
-        limit: Annotated[
-            int,
-            Field(
-                default=50,
-                ge=1,
-                description="Maximum results to return per page (default: 50)",
-            ),
-        ] = 50,
-        offset: Annotated[
-            int,
-            Field(
-                default=0,
-                ge=0,
-                description="Number of results to skip for pagination (default: 0)",
-            ),
-        ] = 0,
-        db_connection: AsyncConnection = mcp_depends(get_async_connection),
-    ) -> str:
-        """
-        Browse journals within a date window anchored on a given date.
-
-        Returns journals falling within [anchor - days_back, anchor + days_forward].
-        Defaults to a 7-day window (2 days back, 4 days forward from today).
-        Supports pagination via offset/limit and optional type/search filters.
-
-        Use this tool for time-oriented journal browsing, such as seeing
-        what happened recently or what is coming up.
-
-        Args:
-            anchor_date: ISO date string to centre the window on (defaults to today)
-            days_back: Days before the anchor to include
-            days_forward: Days after the anchor to include
-            types: Comma-separated journal types to filter by
-            search: Text search query
-            limit: Page size
-            offset: Pagination offset
-
-        Returns:
-            JSON with journals in the window, window boundaries, and pagination info
-        """
-        user_id = await get_current_user_id()
-        repos = _create_journal_tool_repositories(db_connection)
-
-        # Resolve anchor date
-        if anchor_date is not None:
-            try:
-                resolved_anchor = date.fromisoformat(anchor_date.strip())
-            except ValueError as exc:
-                raise ValueError(
-                    f"Invalid anchor_date '{anchor_date}'. Must be ISO format (YYYY-MM-DD)."
-                ) from exc
-        else:
-            resolved_anchor = datetime.now(UTC).date()
-
-        window_start, window_end = compute_date_window(
-            resolved_anchor, days_back, days_forward
-        )
-
-        start_iso = window_start.isoformat()
-        # Use end-of-day for window_end so journals occurring later on that
-        # day are included (the repo compares event_date_range_start <= end_date,
-        # and date.isoformat() alone yields midnight which would exclude them).
-        end_iso = datetime.combine(
-            window_end, dt_time(23, 59, 59), tzinfo=UTC
-        ).isoformat()
-
-        type_filters = _parse_type_filters(types)
-        journal_type = type_filters[0] if len(type_filters) == 1 else None
-
-        total_count = await repos.journal_repo.count_all(
-            user_id=user_id,
-            journal_type=journal_type,
-            start_date=start_iso,
-            end_date=end_iso,
-            search=search,
-        )
-
-        journals = await repos.journal_repo.get_all(
-            user_id=user_id,
-            limit=limit,
-            offset=offset,
-            journal_type=journal_type,
-            start_date=start_iso,
-            end_date=end_iso,
-            search=search,
-        )
-
-        results = await _build_search_results(journals, repos)
-
-        has_more = (offset + limit) < total_count
-
-        response = JournalDateWindowResponse(
-            results=results,
-            window_start=start_iso,
-            window_end=window_end.isoformat(),
-            anchor_date=resolved_anchor.isoformat(),
-            total_count=total_count,
-            has_more=has_more,
-            summary=(
-                f"Found {total_count} journal(s) between "
-                f"{start_iso} and {window_end.isoformat()} "
-                f"(anchored on {resolved_anchor.isoformat()})"
-            ),
-        )
-
-        return MCPResponseBuilder.success_response(response)
-
-    @mcp.tool
-    @mcp_unified_error_handler("list_review_items", "journal")
-    async def list_review_items(
-        limit: Annotated[
-            int,
-            Field(
-                default=20,
-                description="Maximum number of results to return (default: 20)",
-            ),
-        ] = 20,
-        offset: Annotated[
-            int,
-            Field(
-                default=0,
-                description="Number of results to skip (default: 0)",
-            ),
-        ] = 0,
-        status: Annotated[
-            str,
-            Field(
-                default="pending",
-                description="Filter by items status, must be 'pending' for now",
-            ),
-        ] = "pending",
-        user_id_override: Annotated[
-            str | None,
-            Field(
-                default=None,
-                description="Optional: Only for use in tests. Override the user_id.",
-            ),
-        ] = None,
-        db_connection: AsyncConnection = mcp_depends(get_async_connection),
-    ) -> str:
-        """
-        List pending journal review items for the user.
-
-        Retrieves a list of journals that might need merging, deduplication,
-        or review. Used typically to show pending tasks in a queue/sidebar.
-
-        Returns AI-friendly response containing reason, confidence score, and
-        candidate journal ids for review.
-        """
-        # Determine the user ID using similar logic to other tools
-        # The user ID is usually extracted from the context, or we can use a helper if we have it
-        # Actually tools usually take the test_user_id from context if provided.
-        user_id = user_id_override or "dev-system-user"
-
-        if status != "pending":
-            return json.dumps({"error": "Only 'pending' status is currently supported"})
-
-        review_item_repo = SqlReviewItemRepository(db_connection)
-
-        items = await review_item_repo.find_pending_by_user(
-            user_id, limit=limit, offset=offset
-        )
-        total_count = await review_item_repo.count_pending_by_user(user_id)
-
-        # Batch-fetch journal summaries for context
-        journal_ids = set()
-        for item in items:
-            journal_ids.add(item.source_journal_id)
-            journal_ids.add(item.candidate_journal_id)
-
-        journal_repo = SqlJournalRepository(db_connection)
-
-        journals = await journal_repo.find_by_ids_for_user(user_id, list(journal_ids))
-        journal_map = {j.id: j for j in journals if j.id is not None}
-
-        # Build response payload
-        results = []
-        for item in items:
-            source_journal = journal_map.get(item.source_journal_id)
-            candidate_journal = journal_map.get(item.candidate_journal_id)
-
-            results.append(
-                {
-                    "id": item.id,
-                    "status": item.status,
-                    "reason": item.reason.value
-                    if hasattr(item.reason, "value")
-                    else item.reason,
-                    "confidence_score": item.confidence_score,
-                    "details": item.details,
-                    "source_journal": {
-                        "id": item.source_journal_id,
-                        "title": source_journal.title
-                        if source_journal
-                        else f"Journal {item.source_journal_id}",
-                    },
-                    "candidate_journal": {
-                        "id": item.candidate_journal_id,
-                        "title": candidate_journal.title
-                        if candidate_journal
-                        else f"Journal {item.candidate_journal_id}",
-                    },
-                }
+                types=c_types,
+                tags=tag_names,
+                summary=(
+                    f"'{candidate_title}' ({', '.join(c_types)}) "
+                    f"overlaps with target date range"
+                ),
             )
+        )
 
-        response_data = {
-            "meta": {"total_count": total_count, "offset": offset, "limit": limit},
-            "data": results,
-            "summary": f"Found {total_count} pending review item(s).",
-        }
+    summary_text = (
+        f"Found {len(candidates)} merge candidate(s) for "
+        f"'{target.title}' (ID: {journal_id})"
+    )
+    if candidates:
+        summary_text += ". Review each candidate and use merge_journals to combine."
+    else:
+        summary_text += ". No journals with overlapping date ranges found."
 
-        return json.dumps(response_data, indent=2)
+    response = MergeCandidatesResponse(
+        target_journal_id=journal_id,
+        target_title=target.title,
+        candidates=candidates,
+        summary=summary_text,
+    )
+
+    return MCPResponseBuilder.success_response(response)
+
+
+@mcp_unified_error_handler("browse_journals_by_date_window", "journal")
+async def browse_journals_by_date_window(
+    anchor_date: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description=(
+                "Optional ISO date to anchor the window on (defaults to today). "
+                "Example: '2026-04-02'"
+            ),
+        ),
+    ] = None,
+    days_back: Annotated[
+        int,
+        Field(
+            default=2,
+            ge=0,
+            description="Number of days before the anchor date to include (default: 2)",
+        ),
+    ] = 2,
+    days_forward: Annotated[
+        int,
+        Field(
+            default=4,
+            ge=0,
+            description="Number of days after the anchor date to include (default: 4)",
+        ),
+    ] = 4,
+    types: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="Optional comma-separated journal types to filter by",
+        ),
+    ] = None,
+    search: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="Optional text search query within the window",
+        ),
+    ] = None,
+    limit: Annotated[
+        int,
+        Field(
+            default=50,
+            ge=1,
+            description="Maximum results to return per page (default: 50)",
+        ),
+    ] = 50,
+    offset: Annotated[
+        int,
+        Field(
+            default=0,
+            ge=0,
+            description="Number of results to skip for pagination (default: 0)",
+        ),
+    ] = 0,
+    db_connection: AsyncConnection = mcp_depends(get_async_connection),
+) -> str:
+    """
+    Browse journals within a date window anchored on a given date.
+
+    Returns journals falling within [anchor - days_back, anchor + days_forward].
+    Defaults to a 7-day window (2 days back, 4 days forward from today).
+    Supports pagination via offset/limit and optional type/search filters.
+
+    Use this tool for time-oriented journal browsing, such as seeing
+    what happened recently or what is coming up.
+
+    Args:
+        anchor_date: ISO date string to centre the window on (defaults to today)
+        days_back: Days before the anchor to include
+        days_forward: Days after the anchor to include
+        types: Comma-separated journal types to filter by
+        search: Text search query
+        limit: Page size
+        offset: Pagination offset
+
+    Returns:
+        JSON with journals in the window, window boundaries, and pagination info
+    """
+    user_id = await get_current_user_id()
+    repos = _create_journal_tool_repositories(db_connection)
+
+    # Resolve anchor date
+    if anchor_date is not None:
+        try:
+            resolved_anchor = date.fromisoformat(anchor_date.strip())
+        except ValueError as exc:
+            raise ValueError(
+                f"Invalid anchor_date '{anchor_date}'. Must be ISO format (YYYY-MM-DD)."
+            ) from exc
+    else:
+        resolved_anchor = datetime.now(UTC).date()
+
+    window_start, window_end = compute_date_window(
+        resolved_anchor, days_back, days_forward
+    )
+
+    start_iso = window_start.isoformat()
+    # Use end-of-day for window_end so journals occurring later on that
+    # day are included (the repo compares event_date_range_start <= end_date,
+    # and date.isoformat() alone yields midnight which would exclude them).
+    end_iso = datetime.combine(window_end, dt_time(23, 59, 59), tzinfo=UTC).isoformat()
+
+    type_filters = _parse_type_filters(types)
+    journal_type = type_filters[0] if len(type_filters) == 1 else None
+
+    total_count = await repos.journal_repo.count_all(
+        user_id=user_id,
+        journal_type=journal_type,
+        start_date=start_iso,
+        end_date=end_iso,
+        search=search,
+    )
+
+    journals = await repos.journal_repo.get_all(
+        user_id=user_id,
+        limit=limit,
+        offset=offset,
+        journal_type=journal_type,
+        start_date=start_iso,
+        end_date=end_iso,
+        search=search,
+    )
+
+    results = await _build_search_results(journals, repos)
+
+    has_more = (offset + limit) < total_count
+
+    response = JournalDateWindowResponse(
+        results=results,
+        window_start=start_iso,
+        window_end=window_end.isoformat(),
+        anchor_date=resolved_anchor.isoformat(),
+        total_count=total_count,
+        has_more=has_more,
+        summary=(
+            f"Found {total_count} journal(s) between "
+            f"{start_iso} and {window_end.isoformat()} "
+            f"(anchored on {resolved_anchor.isoformat()})"
+        ),
+    )
+
+    return MCPResponseBuilder.success_response(response)
+
+
+@mcp_unified_error_handler("list_review_items", "journal")
+async def list_review_items(
+    limit: Annotated[
+        int,
+        Field(
+            default=20,
+            description="Maximum number of results to return (default: 20)",
+        ),
+    ] = 20,
+    offset: Annotated[
+        int,
+        Field(
+            default=0,
+            description="Number of results to skip (default: 0)",
+        ),
+    ] = 0,
+    status: Annotated[
+        str,
+        Field(
+            default="pending",
+            description="Filter by items status, must be 'pending' for now",
+        ),
+    ] = "pending",
+    user_id_override: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="Optional: Only for use in tests. Override the user_id.",
+        ),
+    ] = None,
+    db_connection: AsyncConnection = mcp_depends(get_async_connection),
+) -> str:
+    """
+    List pending journal review items for the user.
+
+    Retrieves a list of journals that might need merging, deduplication,
+    or review. Used typically to show pending tasks in a queue/sidebar.
+
+    Returns AI-friendly response containing reason, confidence score, and
+    candidate journal ids for review.
+    """
+    # Determine the user ID using similar logic to other tools
+    # The user ID is usually extracted from the context, or we can use a helper if we have it
+    # Actually tools usually take the test_user_id from context if provided.
+    user_id = user_id_override or "dev-system-user"
+
+    if status != "pending":
+        return json.dumps({"error": "Only 'pending' status is currently supported"})
+
+    review_item_repo = SqlReviewItemRepository(db_connection)
+
+    items = await review_item_repo.find_pending_by_user(
+        user_id, limit=limit, offset=offset
+    )
+    total_count = await review_item_repo.count_pending_by_user(user_id)
+
+    # Batch-fetch journal summaries for context
+    journal_ids = set()
+    for item in items:
+        journal_ids.add(item.source_journal_id)
+        journal_ids.add(item.candidate_journal_id)
+
+    journal_repo = SqlJournalRepository(db_connection)
+
+    journals = await journal_repo.find_by_ids_for_user(user_id, list(journal_ids))
+    journal_map = {j.id: j for j in journals if j.id is not None}
+
+    # Build response payload
+    results = []
+    for item in items:
+        source_journal = journal_map.get(item.source_journal_id)
+        candidate_journal = journal_map.get(item.candidate_journal_id)
+
+        results.append(
+            {
+                "id": item.id,
+                "status": item.status,
+                "reason": item.reason.value
+                if hasattr(item.reason, "value")
+                else item.reason,
+                "confidence_score": item.confidence_score,
+                "details": item.details,
+                "source_journal": {
+                    "id": item.source_journal_id,
+                    "title": source_journal.title
+                    if source_journal
+                    else f"Journal {item.source_journal_id}",
+                },
+                "candidate_journal": {
+                    "id": item.candidate_journal_id,
+                    "title": candidate_journal.title
+                    if candidate_journal
+                    else f"Journal {item.candidate_journal_id}",
+                },
+            }
+        )
+
+    response_data = {
+        "meta": {"total_count": total_count, "offset": offset, "limit": limit},
+        "data": results,
+        "summary": f"Found {total_count} pending review item(s).",
+    }
+
+    return json.dumps(response_data, indent=2)
+
+
+def register_journal_tools(mcp: FastMCP[None]) -> None:
+    """
+    Register journal-related MCP tools with the FastMCP server.
+    """
+    mcp.add_tool(create_journal_entry)
+    mcp.add_tool(update_journal_entry)
+    mcp.add_tool(get_journal)
+    mcp.add_tool(get_journal_hierarchy)
+    mcp.add_tool(search_journals)
+    mcp.add_tool(search_activities)
+    mcp.add_tool(get_activity_stats)
+    mcp.add_tool(analyze_activity_trends)
+    mcp.add_tool(get_route_history)
+    mcp.add_tool(delete_journal)
+    mcp.add_tool(get_contact_journals)
+    mcp.add_tool(link_journal_to_contact)
+    mcp.add_tool(list_calendars)
+    mcp.add_tool(create_calendar)
+    mcp.add_tool(update_calendar)
+    mcp.add_tool(delete_calendar)
+    mcp.add_tool(merge_journals)
+    mcp.add_tool(get_merge_candidates)
+    mcp.add_tool(browse_journals_by_date_window)
+    mcp.add_tool(list_review_items)
