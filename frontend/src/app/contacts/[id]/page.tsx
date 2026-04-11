@@ -114,7 +114,10 @@ function ContactDetailPageContent() {
   );
 
   return (
-    <div className='container mx-auto px-4 py-8'>
+    <section
+      className='container mx-auto px-4 py-8'
+      aria-label='Contact Detail'
+    >
       {/* Header */}
       <div className='mb-6 flex items-center gap-4'>
         <Button
@@ -161,17 +164,19 @@ function ContactDetailPageContent() {
             </div>
           </div>
 
-          {/* Contact Methods */}
-          <ContactMethodsList
-            contactId={contact.id}
-            methods={contact.attributes.contact_methods || []}
-          />
+          <div className='grid grid-cols-1 gap-6 xl:grid-cols-2'>
+            {/* Contact Methods */}
+            <ContactMethodsList
+              contactId={contact.id}
+              methods={contact.attributes.contact_methods || []}
+            />
 
-          {/* Addresses */}
-          <ContactAddressesList
-            contactId={contact.id}
-            addresses={contact.attributes.addresses || []}
-          />
+            {/* Addresses */}
+            <ContactAddressesList
+              contactId={contact.id}
+              addresses={contact.attributes.addresses || []}
+            />
+          </div>
 
           {/* Journals */}
           <ContactJournals contactId={contact.id} />
@@ -280,6 +285,6 @@ function ContactDetailPageContent() {
           </Card>
         </div>
       )}
-    </div>
+    </section>
   );
 }
