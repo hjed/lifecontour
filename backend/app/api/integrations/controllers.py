@@ -49,6 +49,7 @@ from app.core.integrations.task_queue_service import TaskQueueService
 from app.infrastructure.auth.google_token_service import GoogleTokenService
 from app.infrastructure.auth.models import SessionUser
 from app.infrastructure.auth.oauth_service import OAuthService
+from app.infrastructure.config import Settings
 
 router = APIRouter(prefix="/integrations", tags=["integrations"])
 logger = structlog.get_logger()
@@ -592,6 +593,7 @@ async def google_oauth_authorize(
     request: Request,
     user: FromDishka[SessionUser],
     oauth_service: FromDishka[OAuthService],
+    settings: FromDishka[Settings],
 ) -> OAuthAuthorizeResponse:
     """
     Initiate OAuth authorization flow for Google Contacts integration.
@@ -604,9 +606,9 @@ async def google_oauth_authorize(
         request.session["integration_redirect_url"] = request_data.redirect_url
 
         # Generate OAuth authorization URL for Google Contacts
-        # Use frontend callback URL for OAuth redirect
-        base_url = str(request.base_url).rstrip("/")
-        callback_url = f"{base_url}/auth/callback"
+        # Use configured frontend URL for OAuth redirect (not request.base_url,
+        # which may reflect the internal HTTP scheme behind a reverse proxy)
+        callback_url = f"{settings.frontend_url}/auth/callback"
 
         authorization_url = await oauth_service.get_google_authorization_url(
             request, callback_url
@@ -674,6 +676,7 @@ async def google_oauth_callback(
     oauth_service: FromDishka[OAuthService],
     google_token_service: FromDishka[GoogleTokenService],
     task_queue_service: FromDishka[TaskQueueService],
+    settings: FromDishka[Settings],
 ) -> OAuthCallbackResponse:
     """
     Handle OAuth callback for Google Contacts integration.
@@ -683,9 +686,9 @@ async def google_oauth_callback(
     """
     try:
         # Handle the OAuth callback and store tokens
-        # Use the frontend callback URL for OAuth redirect
-        base_url = str(request.base_url).rstrip("/")
-        callback_url = f"{base_url}/auth/callback"
+        # Use configured frontend URL for OAuth redirect (not request.base_url,
+        # which may reflect the internal HTTP scheme behind a reverse proxy)
+        callback_url = f"{settings.frontend_url}/auth/callback"
 
         token_data = await oauth_service.handle_google_callback(
             request, callback_data.code, callback_data.state, callback_url
