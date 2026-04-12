@@ -8,6 +8,7 @@ from core_shared.models.contacts.entities import (
     ContactAddress,
     ContactMethod,
     ContactNote,
+    ImportantDate,
     MethodType,
     Tag,
 )
@@ -24,6 +25,8 @@ from app.core.contacts.models.events import (
     ContactMethodDeleted,
     ContactNoteAdded,
     ContactUpdated,
+    ImportantDateAdded,
+    ImportantDateDeleted,
     TagAssigned,
     TagRemoved,
 )
@@ -767,6 +770,14 @@ class ContactService:
                 f"count:{len(updated_contact.notes)}",
             )
 
+        if updated_contact.important_dates is not None and len(
+            current_contact.important_dates or []
+        ) != len(updated_contact.important_dates):
+            changed_fields["important_dates"] = (
+                f"count:{len(current_contact.important_dates or [])}",
+                f"count:{len(updated_contact.important_dates)}",
+            )
+
         # Check tag changes by comparing tag IDs
         if updated_contact.tags is not None:
             current_tag_ids = {
@@ -835,12 +846,16 @@ class ContactService:
         saved_tags = await self._save_contact_tags(
             contact_id, contact.tags, transaction
         )
+        saved_dates = await self._save_contact_important_dates(
+            contact_id, contact.important_dates, transaction
+        )
 
         return {
             "methods": saved_methods,
             "addresses": saved_addresses,
             "notes": saved_notes,
             "tags": saved_tags,
+            "important_dates": saved_dates,
         }
 
     def _build_complete_contact(
@@ -851,6 +866,7 @@ class ContactService:
         saved_contact.addresses = saved_entities["addresses"]
         saved_contact.notes = saved_entities["notes"]
         saved_contact.tags = saved_entities["tags"]
+        saved_contact.important_dates = saved_entities["important_dates"]
         return saved_contact
 
     async def _publish_contact_created_event(
@@ -923,6 +939,13 @@ class ContactService:
                 contact_id, contact.tags, transaction
             )
 
+        if contact.important_dates is not None:
+            saved_entities[
+                "important_dates"
+            ] = await self._save_contact_important_dates(
+                contact_id, contact.important_dates, transaction
+            )
+
         return saved_entities
 
     def _build_complete_contact_for_update(
@@ -952,6 +975,11 @@ class ContactService:
         )
         saved_contact.tags = (
             saved_entities["tags"] if contact.tags is not None else current_contact.tags
+        )
+        saved_contact.important_dates = (
+            saved_entities["important_dates"]
+            if contact.important_dates is not None
+            else current_contact.important_dates
         )
         return saved_contact
 
@@ -1130,6 +1158,35 @@ class ContactService:
 
         return saved_tags
 
+    async def _save_contact_important_dates(
+        self,
+        contact_id: int,
+        dates: list[ImportantDate] | None,
+        transaction: AsyncConnection,
+    ) -> list[ImportantDate]:
+        """Save contact important dates and publish events."""
+        saved_dates = []
+        if dates is None:
+            dates = []
+        for date in dates:
+            # Update contact_id
+            date.contact_id = contact_id
+
+            saved_date = await self.contact_repo.add_important_date(contact_id, date)
+            saved_dates.append(saved_date)
+
+            # Ensure date has ID after save
+            if saved_date.id is None:
+                raise ContactValidationError("id", "Date ID is required after save")
+
+            # Publish date added event
+            date_event = ImportantDateAdded(
+                contact_id, saved_date.id, date.date_type.value, transaction=transaction
+            )
+            await self.event_publisher.publish(date_event)
+
+        return saved_dates
+
     async def _remove_existing_relations(
         self, contact_id: int, contact: Contact, current_contact: Contact
     ) -> None:
@@ -1152,6 +1209,10 @@ class ContactService:
             for current_tag in current_contact.tags or []:
                 if current_tag.id is not None:
                     await self.contact_repo.remove_tag(contact_id, current_tag.id)
+
+        # Only replace dates if new dates are provided
+        if contact.important_dates is not None:
+            await self.contact_repo.delete_all_important_dates(contact_id)
 
     async def delete_contact(
         self, contact_id: int, transaction: AsyncConnection
@@ -1455,6 +1516,42 @@ class ContactService:
             await self._execute_with_retry(_add_note_operation, transaction),
         )
 
+    async def add_contact_important_date(
+        self, contact_id: int, date: ImportantDate, transaction: AsyncConnection
+    ) -> ImportantDate:
+        """
+        Add an important date to an EXISTING contact with transaction management.
+        """
+
+        async def _add_date_operation() -> ImportantDate:
+            # Validate contact exists
+            await self.contact_validation.validate_contact_exists(
+                contact_id, transaction
+            )
+
+            # Ensure type constraints are satisfied by running python validation
+            date.__post_init__()
+
+            # Add date
+            saved_date = await self.contact_repo.add_important_date(contact_id, date)
+
+            # Ensure ID
+            if saved_date.id is None:
+                raise ContactValidationError("id", "Date ID required after save")
+
+            # Publish event
+            event = ImportantDateAdded(
+                contact_id, saved_date.id, date.date_type.value, transaction=transaction
+            )
+            await self.event_publisher.publish(event)
+
+            return saved_date
+
+        return cast(
+            ImportantDate,
+            await self._execute_with_retry(_add_date_operation, transaction),
+        )
+
     async def delete_contact_method(
         self, contact_id: int, method_id: int, transaction: AsyncConnection
     ) -> None:
@@ -1535,6 +1632,38 @@ class ContactService:
 
         return cast(
             None, await self._execute_with_retry(_delete_address_operation, transaction)
+        )
+
+    async def delete_contact_important_date(
+        self, contact_id: int, date_id: int, transaction: AsyncConnection
+    ) -> None:
+        """
+        Delete an important date with transaction management.
+        """
+
+        async def _delete_date_operation() -> None:
+            # Validate contact exists
+            await self.contact_validation.validate_contact_exists(
+                contact_id, transaction
+            )
+
+            # Get the date to validate it exists and belongs to the contact
+            dates = await self.contact_repo.get_important_dates(contact_id)
+            date = next((d for d in dates if d.id == date_id), None)
+            if not date:
+                raise ContactValidationError("date_id", "Date not found")
+
+            # Delete date
+            await self.contact_repo.delete_important_date(date_id)
+
+            # Publish event
+            event = ImportantDateDeleted(
+                contact_id, date_id, date.date_type.value, transaction=transaction
+            )
+            await self.event_publisher.publish(event)
+
+        return cast(
+            None, await self._execute_with_retry(_delete_date_operation, transaction)
         )
 
     # Read operations (no transaction management needed)

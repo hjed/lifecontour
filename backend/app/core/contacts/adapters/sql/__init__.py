@@ -5,6 +5,7 @@ from .contact_event_publisher import SqlContactEventPublisher
 from .contact_field_history_repository import SqlContactFieldHistoryRepository
 from .contact_relationship_repository import SqlContactRelationshipRepository
 from .contact_repository import SqlContactRepository
+from .custom_date_type_repository import SqlCustomDateTypeRepository
 from .tag_repository import SqlTagRepository
 
 __all__ = [
@@ -14,4 +15,5 @@ __all__ = [
     "SqlContactEditEventRepository",
     "SqlContactEventPublisher",
     "SqlContactRelationshipRepository",
+    "SqlCustomDateTypeRepository",
 ]

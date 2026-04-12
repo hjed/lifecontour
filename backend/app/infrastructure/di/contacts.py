@@ -12,6 +12,7 @@ from app.core.contacts.adapters.sql import (
     SqlContactFieldHistoryRepository,
     SqlContactRelationshipRepository,
     SqlContactRepository,
+    SqlCustomDateTypeRepository,
     SqlTagRepository,
 )
 from app.core.contacts.models.repositories import (
@@ -19,6 +20,7 @@ from app.core.contacts.models.repositories import (
     ContactFieldHistoryRepository,
     ContactRelationshipRepository,
     ContactRepository,
+    CustomDateTypeRepository,
     TagRepository,
 )
 from app.core.contacts.services import (
@@ -49,6 +51,13 @@ class ContactProvider(Provider):
     @provide(provides=TagRepository)
     def get_tag_repository(self, connection: AsyncConnection) -> SqlTagRepository:
         return SqlTagRepository(connection)
+
+    @provide(provides=CustomDateTypeRepository, scope=Scope.REQUEST)
+    def custom_date_type_repository(
+        self, connection: AsyncConnection
+    ) -> SqlCustomDateTypeRepository:
+        """Provide custom date type repository."""
+        return SqlCustomDateTypeRepository(connection=connection)
 
     @provide(provides=ContactFieldHistoryRepository)
     def get_contact_field_history_repository(

@@ -290,10 +290,10 @@ This phase fills two product-specification gaps discovered during Phase 3 comple
 **PR Size:** ~5-7 files
 
 **Acceptance Criteria:**
-- [ ] The user can confirm an external match/link, dismiss a suggestion, or escalate the case into the merge flow.
-- [ ] Accepting or dismissing review items updates the queue and journal indicators immediately.
-- [ ] Review actions reuse the same domain rules and audit/provenance paths as later merge actions.
-- [ ] No review action silently discards external references or journal meaning.
+- [x] The user can confirm an external match/link, dismiss a suggestion, or escalate the case into the merge flow.
+- [x] Accepting or dismissing review items updates the queue and journal indicators immediately.
+- [x] Review actions reuse the same domain rules and audit/provenance paths as later merge actions.
+- [x] No review action silently discards external references or journal meaning.
 
 **Required Test Coverage:**
 - **Unit:** review-action state transitions and command-mapping helpers.

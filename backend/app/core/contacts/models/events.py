@@ -311,3 +311,53 @@ class ContactNoteAdded(DomainEvent):
             },
             transaction=transaction,
         )
+
+
+@dataclass(frozen=True)
+class ImportantDateAdded(DomainEvent):
+    """Event raised when an important date is added to a contact."""
+
+    def __init__(
+        self,
+        contact_id: int,
+        date_id: int,
+        date_type: str,
+        transaction: AsyncConnection | None = None,
+    ):
+        super().__init__(
+            event_id=f"contact_important_date_added_{contact_id}_{date_id}_{datetime.now().isoformat()}",
+            occurred_at=datetime.now(),
+            aggregate_id=contact_id,
+            event_type="ImportantDateAdded",
+            event_data={
+                "contact_id": contact_id,
+                "date_id": date_id,
+                "date_type": date_type,
+            },
+            transaction=transaction,
+        )
+
+
+@dataclass(frozen=True)
+class ImportantDateDeleted(DomainEvent):
+    """Event raised when an important date is deleted from a contact."""
+
+    def __init__(
+        self,
+        contact_id: int,
+        date_id: int,
+        date_type: str,
+        transaction: AsyncConnection | None = None,
+    ):
+        super().__init__(
+            event_id=f"contact_important_date_deleted_{contact_id}_{date_id}_{datetime.now().isoformat()}",
+            occurred_at=datetime.now(),
+            aggregate_id=contact_id,
+            event_type="ImportantDateDeleted",
+            event_data={
+                "contact_id": contact_id,
+                "date_id": date_id,
+                "date_type": date_type,
+            },
+            transaction=transaction,
+        )

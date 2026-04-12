@@ -19,6 +19,51 @@ class TagNotFoundError(ContactDomainError):
         self.tag_id = tag_id
 
 
+class ImportantDateNotFoundError(ContactDomainError):
+    """Important date not found for contact."""
+
+    def __init__(self, date_id: int):
+        super().__init__(f"Important date with ID {date_id} not found", 404)
+        self.date_id = date_id
+
+
+class CustomDateTypeNotFoundError(ContactDomainError):
+    """Custom date type not found."""
+
+    def __init__(self, type_id: int):
+        super().__init__(f"Custom date type with ID {type_id} not found", 404)
+        self.type_id = type_id
+
+
+class DuplicateCustomDateTypeNameError(ContactDomainError):
+    """Custom date type name already exists."""
+
+    def __init__(self, type_name: str):
+        super().__init__(f"Custom date type name '{type_name}' already exists", 409)
+        self.type_name = type_name
+
+
+class CustomDateTypeInUseError(ContactDomainError):
+    """Custom date type cannot be deleted because it is in use."""
+
+    def __init__(self, type_id: int):
+        super().__init__(
+            f"Custom date type with ID {type_id} cannot be deleted because it is referenced by one or more contacts",
+            409,
+        )
+        self.type_id = type_id
+
+
+class DuplicateBirthdayError(ContactDomainError):
+    """Contact already has a birthday."""
+
+    def __init__(self, contact_id: int):
+        super().__init__(
+            f"Contact {contact_id} already has a birthday date defined", 409
+        )
+        self.contact_id = contact_id
+
+
 class DuplicateEmailError(ContactDomainError):
     """Email address already exists for another contact."""
 

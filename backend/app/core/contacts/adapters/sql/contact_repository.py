@@ -6,9 +6,14 @@ from core_shared.models.contacts.entities import (
     ContactMethod,
     ContactNote,
     ContactRelationship,
+    ImportantDate,
     MethodType,
     RelationshipType,
     Tag,
+)
+from core_shared.models.contacts.important_date_types import (
+    DatePrecision,
+    ImportantDateType,
 )
 from core_shared.models.contacts.value_objects import TagName
 from sqlalchemy import text
@@ -17,7 +22,10 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core.contacts.models.exceptions import (
     ContactNotFoundError,
+    CustomDateTypeNotFoundError,
+    DuplicateBirthdayError,
     DuplicateEmailError,
+    ImportantDateNotFoundError,
     PrimaryAddressConflictError,
     PrimaryMethodConflictError,
 )
@@ -70,6 +78,7 @@ class SqlContactRepository(ContactRepository):
             notes=[],
             tags=[],
             relationships=[],
+            important_dates=[],
         )
 
         # Load contact methods
@@ -197,6 +206,36 @@ class SqlContactRepository(ContactRepository):
             )
             assert contact.relationships is not None
             contact.relationships.append(relationship)
+
+        # Load important dates
+        dates_query = text(
+            """
+            SELECT d.id, d.contact_id, d.date_type, d.precision, d.year, d.month, d.day,
+                   d.custom_date_type_id, cdt.name as custom_date_type_name,
+                   d.created_at, d.updated_at
+            FROM contact_important_dates d
+            LEFT JOIN custom_date_types cdt ON d.custom_date_type_id = cdt.id
+            WHERE d.contact_id = :contact_id
+            ORDER BY d.created_at ASC
+        """
+        )
+        dates_result = await self.conn.execute(dates_query, {"contact_id": contact_id})
+        for date_row in dates_result.fetchall():
+            important_date = ImportantDate(
+                id=date_row.id,
+                contact_id=date_row.contact_id,
+                date_type=ImportantDateType(date_row.date_type),
+                precision=DatePrecision(date_row.precision),
+                year=date_row.year,
+                month=date_row.month,
+                day=date_row.day,
+                custom_date_type_id=date_row.custom_date_type_id,
+                custom_date_type_name=date_row.custom_date_type_name,
+                created_at=date_row.created_at,
+                updated_at=date_row.updated_at,
+            )
+            assert contact.important_dates is not None
+            contact.important_dates.append(important_date)
 
         return contact
 
@@ -772,6 +811,96 @@ class SqlContactRepository(ContactRepository):
         """
         )
         await self.conn.execute(query, {"contact_id": contact_id, "tag_id": tag_id})
+
+    async def add_important_date(
+        self, contact_id: int, date: ImportantDate
+    ) -> ImportantDate:
+        """Add an important date to a contact."""
+        query = text(
+            """
+            INSERT INTO contact_important_dates
+            (contact_id, date_type, precision, year, month, day, custom_date_type_id)
+            VALUES (:contact_id, :date_type, :precision, :year, :month, :day, :custom_date_type_id)
+            RETURNING id, created_at, updated_at
+        """
+        )
+        try:
+            result = await self.conn.execute(
+                query,
+                {
+                    "contact_id": contact_id,
+                    "date_type": date.date_type.value,
+                    "precision": date.precision.value,
+                    "year": date.year,
+                    "month": date.month,
+                    "day": date.day,
+                    "custom_date_type_id": date.custom_date_type_id,
+                },
+            )
+        except IntegrityError as e:
+            error_msg = str(e).lower()
+            if "uq_contact_birthday" in error_msg:
+                raise DuplicateBirthdayError(contact_id) from e
+            if "fk" in error_msg and "custom_date_types" in error_msg:
+                raise CustomDateTypeNotFoundError(date.custom_date_type_id) from e  # type: ignore
+            raise
+
+        row = result.fetchone()
+        if row is None:
+            raise RuntimeError("Failed to insert contact important date")
+
+        date.id = row.id
+        date.contact_id = contact_id
+        date.created_at = row.created_at
+        date.updated_at = row.updated_at
+        return date
+
+    async def get_important_dates(self, contact_id: int) -> list[ImportantDate]:
+        """Get all important dates for a contact."""
+        query = text(
+            """
+            SELECT d.id, d.contact_id, d.date_type, d.precision, d.year, d.month, d.day,
+                   d.custom_date_type_id, cdt.name as custom_date_type_name,
+                   d.created_at, d.updated_at
+            FROM contact_important_dates d
+            LEFT JOIN custom_date_types cdt ON d.custom_date_type_id = cdt.id
+            WHERE d.contact_id = :contact_id
+            ORDER BY d.created_at ASC
+        """
+        )
+        result = await self.conn.execute(query, {"contact_id": contact_id})
+
+        return [
+            ImportantDate(
+                id=row.id,
+                contact_id=row.contact_id,
+                date_type=ImportantDateType(row.date_type),
+                precision=DatePrecision(row.precision),
+                year=row.year,
+                month=row.month,
+                day=row.day,
+                custom_date_type_id=row.custom_date_type_id,
+                custom_date_type_name=row.custom_date_type_name,
+                created_at=row.created_at,
+                updated_at=row.updated_at,
+            )
+            for row in result.fetchall()
+        ]
+
+    async def delete_important_date(self, date_id: int) -> None:
+        """Delete an important date."""
+        query = text("DELETE FROM contact_important_dates WHERE id = :date_id")
+        result = await self.conn.execute(query, {"date_id": date_id})
+
+        if result.rowcount == 0:
+            raise ImportantDateNotFoundError(date_id)
+
+    async def delete_all_important_dates(self, contact_id: int) -> None:
+        """Delete all important dates for a contact."""
+        query = text(
+            "DELETE FROM contact_important_dates WHERE contact_id = :contact_id"
+        )
+        await self.conn.execute(query, {"contact_id": contact_id})
 
     async def get_favourite_contacts(
         self, limit: int = 100, offset: int = 0

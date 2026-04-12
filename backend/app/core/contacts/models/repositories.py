@@ -10,8 +10,10 @@ from core_shared.models.contacts.entities import (
     ContactMethod,
     ContactNote,
     ContactRelationship,
+    ImportantDate,
     Tag,
 )
+from core_shared.models.contacts.important_date_types import CustomDateType
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 
@@ -221,6 +223,28 @@ class ContactRepository(ABC):
         """Remove a tag from a contact."""
         pass
 
+    @abstractmethod
+    async def add_important_date(
+        self, contact_id: int, date: ImportantDate
+    ) -> ImportantDate:
+        """Add an important date to a contact."""
+        pass
+
+    @abstractmethod
+    async def get_important_dates(self, contact_id: int) -> list[ImportantDate]:
+        """Get all important dates for a contact."""
+        pass
+
+    @abstractmethod
+    async def delete_important_date(self, date_id: int) -> None:
+        """Delete an important date."""
+        pass
+
+    @abstractmethod
+    async def delete_all_important_dates(self, contact_id: int) -> None:
+        """Delete all important dates for a contact."""
+        pass
+
 
 class TagRepository(ABC):
     """Repository interface for tag operations."""
@@ -268,6 +292,35 @@ class TagRepository(ABC):
     @abstractmethod
     async def delete(self, tag_id: int) -> None:
         """Delete a tag."""
+        pass
+
+
+class CustomDateTypeRepository(ABC):
+    """Repository interface for custom date type operations."""
+
+    @abstractmethod
+    async def create(self, name: str) -> CustomDateType:
+        """Create a new custom date type."""
+        pass
+
+    @abstractmethod
+    async def get_by_id(self, type_id: int) -> CustomDateType | None:
+        """Find a custom date type by ID."""
+        pass
+
+    @abstractmethod
+    async def get_by_name(self, name: str) -> CustomDateType | None:
+        """Find a custom date type by name."""
+        pass
+
+    @abstractmethod
+    async def list_all(self) -> list[CustomDateType]:
+        """Get all custom date types."""
+        pass
+
+    @abstractmethod
+    async def delete(self, type_id: int) -> None:
+        """Delete a custom date type."""
         pass
 
 
