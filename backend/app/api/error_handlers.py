@@ -49,8 +49,11 @@ from app.api.common.schemas import (
 )
 from app.core.contacts.models.exceptions import (
     ContactNotFoundError,
+    CustomDateTypeNotFoundError,
+    DuplicateCustomDateTypeNameError,
     DuplicateEmailError,
     DuplicateTagNameError,
+    ImportantDateNotFoundError,
     InvalidAddressError,
     InvalidCountryCodeError,
     InvalidEmailError,
@@ -125,6 +128,9 @@ def create_domain_error_response(domain_error: DomainError) -> JsonApiErrorRespo
         TooManyTagsError: "TOO_MANY_TAGS",
         PrimaryMethodConflictError: "PRIMARY_METHOD_CONFLICT",
         PrimaryAddressConflictError: "PRIMARY_ADDRESS_CONFLICT",
+        CustomDateTypeNotFoundError: "CUSTOM_DATE_TYPE_NOT_FOUND",
+        ImportantDateNotFoundError: "IMPORTANT_DATE_NOT_FOUND",
+        DuplicateCustomDateTypeNameError: "DUPLICATE_CUSTOM_DATE_TYPE_NAME",
         # Journal errors
         JournalNotFoundError: "JOURNAL_NOT_FOUND",
         JournalValidationError: "JOURNAL_VALIDATION_ERROR",

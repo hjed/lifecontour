@@ -50,8 +50,8 @@ def upgrade() -> None:
             CHECK (day IS NULL OR (day >= 1 AND day <= 31)),
             -- Precision consistency checks
             CHECK (precision != 'full' OR (year IS NOT NULL AND month IS NOT NULL AND day IS NOT NULL)),
-            CHECK (precision != 'day_month' OR (month IS NOT NULL AND day IS NOT NULL)),
-            CHECK (precision != 'year' OR year IS NOT NULL),
+            CHECK (precision != 'day_month' OR (year IS NULL AND month IS NOT NULL AND day IS NOT NULL)),
+            CHECK (precision != 'year' OR (year IS NOT NULL AND month IS NULL AND day IS NULL)),
             -- Custom label rule
             CHECK (date_type != 'custom' OR custom_date_type_id IS NOT NULL),
             CHECK (date_type = 'custom' OR custom_date_type_id IS NULL)

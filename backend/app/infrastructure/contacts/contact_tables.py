@@ -11,6 +11,7 @@ from sqlalchemy import (
     Column,
     DateTime,
     ForeignKey,
+    Index,
     Integer,
     String,
     Table,
@@ -352,11 +353,11 @@ contact_important_dates_table = Table(
         name="ck_important_dates_full_precision",
     ),
     CheckConstraint(
-        "precision != 'day_month' OR (month IS NOT NULL AND day IS NOT NULL)",
+        "precision != 'day_month' OR (year IS NULL AND month IS NOT NULL AND day IS NOT NULL)",
         name="ck_important_dates_day_month_precision",
     ),
     CheckConstraint(
-        "precision != 'year' OR year IS NOT NULL",
+        "precision != 'year' OR (year IS NOT NULL AND month IS NULL AND day IS NULL)",
         name="ck_important_dates_year_precision",
     ),
     CheckConstraint(
@@ -367,4 +368,11 @@ contact_important_dates_table = Table(
         "date_type = 'custom' OR custom_date_type_id IS NULL",
         name="ck_important_dates_non_custom_type_id",
     ),
+)
+
+Index(
+    "uq_contact_birthday",
+    contact_important_dates_table.c.contact_id,
+    unique=True,
+    postgresql_where=(contact_important_dates_table.c.date_type == "birthday"),
 )

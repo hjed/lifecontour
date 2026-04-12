@@ -23,6 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 from app.core.contacts.models.exceptions import (
     ContactNotFoundError,
     DuplicateEmailError,
+    ImportantDateNotFoundError,
     PrimaryAddressConflictError,
     PrimaryMethodConflictError,
 )
@@ -881,7 +882,7 @@ class SqlContactRepository(ContactRepository):
         result = await self.conn.execute(query, {"date_id": date_id})
 
         if result.rowcount == 0:
-            raise ContactNotFoundError(date_id)
+            raise ImportantDateNotFoundError(date_id)
 
     async def delete_all_important_dates(self, contact_id: int) -> None:
         """Delete all important dates for a contact."""

@@ -2,13 +2,18 @@
 
 from core_shared.models.contacts.important_date_types import CustomDateType
 from sqlalchemy import delete, insert, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncConnection
 
+from app.core.contacts.models.exceptions import (
+    CustomDateTypeNotFoundError,
+    DuplicateCustomDateTypeNameError,
+)
 from app.core.contacts.models.repositories import CustomDateTypeRepository
 from app.infrastructure.contacts.contact_tables import custom_date_types_table
 
 
-class SQLCustomDateTypeRepository(CustomDateTypeRepository):
+class SqlCustomDateTypeRepository(CustomDateTypeRepository):
     """SQL Implementation of the CustomDateTypeRepository."""
 
     def __init__(self, connection: AsyncConnection):
@@ -27,10 +32,15 @@ class SQLCustomDateTypeRepository(CustomDateTypeRepository):
                 custom_date_types_table.c.updated_at,
             )
         )
-        result = await self.connection.execute(stmt)
-        row = result.first()
-        if not row:
-            raise RuntimeError("Failed to create custom date type")
+        try:
+            result = await self.connection.execute(stmt)
+            row = result.first()
+            if not row:
+                raise RuntimeError("Failed to create custom date type")
+        except IntegrityError as e:
+            if "unique" in str(e).lower() and "name" in str(e).lower():
+                raise DuplicateCustomDateTypeNameError(name) from e
+            raise
 
         return CustomDateType(
             id=row.id,
@@ -93,4 +103,6 @@ class SQLCustomDateTypeRepository(CustomDateTypeRepository):
         stmt = delete(custom_date_types_table).where(
             custom_date_types_table.c.id == type_id
         )
-        await self.connection.execute(stmt)
+        result = await self.connection.execute(stmt)
+        if result.rowcount == 0:
+            raise CustomDateTypeNotFoundError(type_id)

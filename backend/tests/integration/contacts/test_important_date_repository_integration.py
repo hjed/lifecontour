@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core.contacts.adapters.sql.contact_repository import SqlContactRepository
 from app.core.contacts.adapters.sql.custom_date_type_repository import (
-    SQLCustomDateTypeRepository,
+    SqlCustomDateTypeRepository,
 )
 
 
@@ -21,9 +21,9 @@ def contact_repo(async_connection: AsyncConnection) -> SqlContactRepository:
 
 
 @pytest.fixture
-def custom_date_repo(async_connection: AsyncConnection) -> SQLCustomDateTypeRepository:
+def custom_date_repo(async_connection: AsyncConnection) -> SqlCustomDateTypeRepository:
     """Fixture providing a CustomDateTypeRepository connected to the test database."""
-    return SQLCustomDateTypeRepository(connection=async_connection)
+    return SqlCustomDateTypeRepository(connection=async_connection)
 
 
 @pytest.fixture
@@ -78,7 +78,7 @@ async def test_add_and_get_important_dates(
 @pytest.mark.asyncio
 async def test_important_dates_custom_type(
     contact_repo: SqlContactRepository,
-    custom_date_repo: SQLCustomDateTypeRepository,
+    custom_date_repo: SqlCustomDateTypeRepository,
     sample_contact: Contact,
 ) -> None:
     """Test adding custom types."""
@@ -157,7 +157,7 @@ async def test_delete_all_important_dates(
 
 @pytest.mark.asyncio
 async def test_custom_date_type_repository_crud(
-    custom_date_repo: SQLCustomDateTypeRepository,
+    custom_date_repo: SqlCustomDateTypeRepository,
 ) -> None:
     """Test CRUD operations for custom date types."""
     # Create
